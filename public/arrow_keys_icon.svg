@@ -1,0 +1,25 @@
+<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Up Arrow Key -->
+  <g transform="translate(60, 10)">
+    <rect x="-12" y="0" width="24" height="20" rx="3" fill="#f8f9fa" stroke="#6c757d" stroke-width="1"/>
+    <polygon points="0,-8 -6,0 6,0" fill="#495057" transform="translate(0, 10)"/>
+  </g>
+  
+  <!-- Left Arrow Key -->
+  <g transform="translate(25, 45)">
+    <rect x="-12" y="0" width="24" height="20" rx="3" fill="#f8f9fa" stroke="#6c757d" stroke-width="1"/>
+    <polygon points="-8,0 0,-6 0,6" fill="#495057" transform="translate(0, 10)"/>
+  </g>
+  
+  <!-- Down Arrow Key -->
+  <g transform="translate(60, 45)">
+    <rect x="-12" y="0" width="24" height="20" rx="3" fill="#f8f9fa" stroke="#6c757d" stroke-width="1"/>
+    <polygon points="0,8 -6,0 6,0" fill="#495057" transform="translate(0, 10)"/>
+  </g>
+  
+  <!-- Right Arrow Key -->
+  <g transform="translate(95, 45)">
+    <rect x="-12" y="0" width="24" height="20" rx="3" fill="#f8f9fa" stroke="#6c757d" stroke-width="1"/>
+    <polygon points="8,0 0,-6 0,6" fill="#495057" transform="translate(0, 10)"/>
+  </g>
+</svg>
