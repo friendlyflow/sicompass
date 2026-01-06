@@ -62,12 +62,6 @@ void freeSwapChainSupportDetails(SwapChainSupportDetails* details) {
     if (details->presentModes) free(details->presentModes);
 }
 
-// typedef struct {
-//     vec3 pos;
-//     vec3 color;
-//     vec2 texCoord;
-// } Vertex;
-
 VkVertexInputBindingDescription getBindingDescription(void) {
     VkVertexInputBindingDescription bindingDescription = {0};
     bindingDescription.binding = 0;
@@ -125,7 +119,6 @@ void siCompassApplicationInit(SiCompassApplication* app) {
     app->debugMessenger = VK_NULL_HANDLE;
     app->surface = VK_NULL_HANDLE;
     app->physicalDevice = VK_NULL_HANDLE;
-    // app->msaaSamples = VK_SAMPLE_COUNT_1_BIT;
     app->device = VK_NULL_HANDLE;
     app->graphicsQueue = VK_NULL_HANDLE;
     app->presentQueue = VK_NULL_HANDLE;
@@ -144,24 +137,14 @@ void siCompassApplicationInit(SiCompassApplication* app) {
     app->graphicsPipeline = VK_NULL_HANDLE;
     app->commandPool = VK_NULL_HANDLE;
     
-    // app->colorImage = VK_NULL_HANDLE;
-    // app->colorImageMemory = VK_NULL_HANDLE;
-    // app->colorImageView = VK_NULL_HANDLE;
-    
     app->depthImage = VK_NULL_HANDLE;
     app->depthImageMemory = VK_NULL_HANDLE;
     app->depthImageView = VK_NULL_HANDLE;
     
-    // app->mipLevels = 0;
     app->textureImage = VK_NULL_HANDLE;
     app->textureImageMemory = VK_NULL_HANDLE;
     app->textureImageView = VK_NULL_HANDLE;
     app->textureSampler = VK_NULL_HANDLE;
-    
-    // app->vertices = NULL;
-    // app->vertexCount = 0;
-    // app->indices = NULL;
-    // app->indexCount = 0;
     
     app->vertexBuffer = VK_NULL_HANDLE;
     app->vertexBufferMemory = VK_NULL_HANDLE;
@@ -183,10 +166,10 @@ void siCompassApplicationInit(SiCompassApplication* app) {
     memset(app->imageAvailableSemaphores, 0, sizeof(app->imageAvailableSemaphores));
     memset(app->renderFinishedSemaphores, 0, sizeof(app->renderFinishedSemaphores));
     memset(app->inFlightFences, 0, sizeof(app->inFlightFences));
-    // app->syncObjectCount = 0;
     
     app->currentFrame = 0;
     app->framebufferResized = false;
+    app->running = true;
 
     app->startTime = clock();
 
@@ -194,8 +177,6 @@ void siCompassApplicationInit(SiCompassApplication* app) {
 }
 
 // Forward declarations
-static void framebufferResizeCallback(GLFWwindow* window, int width, int height);
-bool checkValidationLayerSupport(void);
 char** getRequiredExtensions(uint32_t* extensionCount);
 char* readFile(const char* filename, size_t* fileSize);
 VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
@@ -204,16 +185,17 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBits
                                               void* pUserData);
 
 void initWindow(SiCompassApplication* app) {
-    glfwInit();
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    app->window = glfwCreateWindow(WIDTH, HEIGHT, "sicompass", NULL, NULL);
-    glfwSetWindowUserPointer(app->window, app);
-    glfwSetFramebufferSizeCallback(app->window, framebufferResizeCallback);
-}
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        fprintf(stderr, "Failed to initialize SDL: %s\n", SDL_GetError());
+        exit(EXIT_FAILURE);
+    }
 
-static void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
-    SiCompassApplication* app = (SiCompassApplication*)glfwGetWindowUserPointer(window);
-    app->framebufferResized = true;
+    app->window = SDL_CreateWindow("sicompass", WIDTH, HEIGHT, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
+    if (!app->window) {
+        fprintf(stderr, "Failed to create window: %s\n", SDL_GetError());
+        SDL_Quit();
+        exit(EXIT_FAILURE);
+    }
 }
 
 void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT* createInfo) {
@@ -228,6 +210,33 @@ void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT* create
     createInfo->pfnUserCallback = debugCallback;
 }
 
+bool checkValidationLayerSupport(void) {
+    uint32_t layerCount;
+    vkEnumerateInstanceLayerProperties(&layerCount, NULL);
+
+    VkLayerProperties* availableLayers = malloc(sizeof(VkLayerProperties) * layerCount);
+    vkEnumerateInstanceLayerProperties(&layerCount, availableLayers);
+
+    for (uint32_t i = 0; i < validationLayerCount; i++) {
+        bool layerFound = false;
+
+        for (uint32_t j = 0; j < layerCount; j++) {
+            if (strcmp(validationLayers[i], availableLayers[j].layerName) == 0) {
+                layerFound = true;
+                break;
+            }
+        }
+
+        if (!layerFound) {
+            free(availableLayers);
+            return false;
+        }
+    }
+
+    free(availableLayers);
+    return true;
+}
+
 void createInstance(SiCompassApplication* app) {
     if (enableValidationLayers && !checkValidationLayerSupport()) {
         fprintf(stderr, "Validation layers requested, but not available!\n");
@@ -236,7 +245,7 @@ void createInstance(SiCompassApplication* app) {
 
     VkApplicationInfo appInfo = {0};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    appInfo.pApplicationName = "Hello Triangle";
+    appInfo.pApplicationName = "sicompass";
     appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
     appInfo.pEngineName = "No Engine";
     appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
@@ -283,10 +292,66 @@ void setupDebugMessenger(SiCompassApplication* app) {
 }
 
 void createSurface(SiCompassApplication* app) {
-    if (glfwCreateWindowSurface(app->instance, app->window, NULL, &app->surface) != VK_SUCCESS) {
-        fprintf(stderr, "Failed to create window surface!\n");
+    if (!SDL_Vulkan_CreateSurface(app->window, app->instance, NULL, &app->surface)) {
+        fprintf(stderr, "Failed to create window surface: %s\n", SDL_GetError());
         exit(EXIT_FAILURE);
     }
+}
+
+char** getRequiredExtensions(uint32_t* extensionCount) {
+    // Get SDL required extensions
+    uint32_t sdlExtensionCount = 0;
+    const char* const* sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&sdlExtensionCount);
+    
+    if (!sdlExtensions) {
+        fprintf(stderr, "Failed to get SDL Vulkan extensions: %s\n", SDL_GetError());
+        exit(EXIT_FAILURE);
+    }
+
+    uint32_t totalExtensionCount = sdlExtensionCount;
+    if (enableValidationLayers) {
+        totalExtensionCount++;
+    }
+
+    char** extensions = malloc(sizeof(char*) * totalExtensionCount);
+    for (uint32_t i = 0; i < sdlExtensionCount; i++) {
+        extensions[i] = (char*)sdlExtensions[i];
+    }
+
+    if (enableValidationLayers) {
+        extensions[sdlExtensionCount] = (char*)VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
+    }
+
+    *extensionCount = totalExtensionCount;
+    return extensions;
+}
+
+char* readFile(const char* filename, size_t* fileSize) {
+    FILE* file = fopen(filename, "rb");
+
+    if (!file) {
+        fprintf(stderr, "Failed to open file: %s\n", filename);
+        exit(EXIT_FAILURE);
+    }
+
+    fseek(file, 0, SEEK_END);
+    *fileSize = ftell(file);
+    fseek(file, 0, SEEK_SET);
+
+    char* buffer = malloc(*fileSize);
+    fread(buffer, 1, *fileSize, file);
+
+    fclose(file);
+
+    return buffer;
+}
+
+VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
+                                              VkDebugUtilsMessageTypeFlagsEXT messageType,
+                                              const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
+                                              void* pUserData) {
+    fprintf(stderr, "validation layer: %s\n", pCallbackData->pMessage);
+    return VK_FALSE;
 }
 
 QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface) {
@@ -486,12 +551,12 @@ uint32_t clamp_uint32(uint32_t value, uint32_t min, uint32_t max) {
     return value;
 }
 
-VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR* capabilities, GLFWwindow* window) {
+VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR* capabilities, SDL_Window* window) {
     if (capabilities->currentExtent.width != UINT32_MAX) {
         return capabilities->currentExtent;
     } else {
         int width, height;
-        glfwGetFramebufferSize(window, &width, &height);
+        SDL_GetWindowSizeInPixels(window, &width, &height);
 
         VkExtent2D actualExtent = {(uint32_t)width, (uint32_t)height};
 
@@ -568,7 +633,7 @@ VkImageView createImageView(SiCompassApplication* app, VkImage image, VkFormat f
     viewInfo.image = image;
     viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
     viewInfo.format = format;
-    viewInfo.subresourceRange.aspectMask = aspectFlags; // VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.aspectMask = aspectFlags;
     viewInfo.subresourceRange.baseMipLevel = 0;
     viewInfo.subresourceRange.levelCount = 1;
     viewInfo.subresourceRange.baseArrayLayer = 0;
@@ -1322,9 +1387,7 @@ void recordCommandBuffer(SiCompassApplication* app, VkCommandBuffer commandBuffe
 
     vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-    // ======================================================================
-    // COMMENT OUT THIS SECTION TO HIDE 3D RENDERING
-    // ======================================================================
+    // 3D rendering section is commented out in original
     /*
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, app->graphicsPipeline);
 
@@ -1353,11 +1416,8 @@ void recordCommandBuffer(SiCompassApplication* app, VkCommandBuffer commandBuffe
 
     vkCmdDrawIndexed(commandBuffer, (uint32_t)indexCount, 1, 0, 0, 0);
     */
-    // ======================================================================
-    // END OF COMMENTED SECTION
-    // ======================================================================
 
-    // Draw text (keep this part)
+    // Draw text
     VkViewport viewport = {0};
     viewport.x = 0.0f;
     viewport.y = 0.0f;
@@ -1447,7 +1507,6 @@ void cleanupSwapChain(SiCompassApplication* app) {
     vkDestroyImage(app->device, app->depthImage, NULL);
     vkFreeMemory(app->device, app->depthImageMemory, NULL);
 
-    
     for (uint32_t i = 0; i < app->swapChainImageCount; i++) {
         vkDestroyFramebuffer(app->device, app->swapChainFramebuffers[i], NULL);
     }
@@ -1465,10 +1524,10 @@ void cleanupSwapChain(SiCompassApplication* app) {
 
 void recreateSwapChain(SiCompassApplication* app) {
     int width = 0, height = 0;
-    glfwGetFramebufferSize(app->window, &width, &height);
+    SDL_GetWindowSizeInPixels(app->window, &width, &height);
     while (width == 0 || height == 0) {
-        glfwGetFramebufferSize(app->window, &width, &height);
-        glfwWaitEvents();
+        SDL_GetWindowSizeInPixels(app->window, &width, &height);
+        SDL_WaitEvent(NULL);
     }
 
     vkDeviceWaitIdle(app->device);
@@ -1515,7 +1574,7 @@ void drawFrame(SiCompassApplication* app) {
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &app->commandBuffers[app->currentFrame];
 
-    VkSemaphore signalSemaphores[] = {app->renderFinishedSemaphores[app->currentFrame]}; // TODO improvement: app->currentFrame to (imageIndex + 1) % MAX_FRAMES_IN_FLIGHT
+    VkSemaphore signalSemaphores[] = {app->renderFinishedSemaphores[app->currentFrame]};
     submitInfo.signalSemaphoreCount = 1;
     submitInfo.pSignalSemaphores = signalSemaphores;
 
@@ -1548,8 +1607,9 @@ void drawFrame(SiCompassApplication* app) {
 }
 
 // ============================================================================
-// 1. INITIALIZE FREETYPE LIBRARY
+// FONT RENDERING FUNCTIONS
 // ============================================================================
+
 void initFreeType(SiCompassApplication* app) {
     FontRenderer* fr = app->fontRenderer;
     
@@ -1568,9 +1628,6 @@ void initFreeType(SiCompassApplication* app) {
     FT_Set_Pixel_Sizes(fr->ftFace, 0, 48);
 }
 
-// ============================================================================
-// 2. CREATE FONT ATLAS TEXTURE
-// ============================================================================
 void createFontAtlas(SiCompassApplication* app) {
     FontRenderer* fr = app->fontRenderer;
     
@@ -1578,20 +1635,17 @@ void createFontAtlas(SiCompassApplication* app) {
     
     int penX = 0, penY = 0, rowHeight = 0;
     
-    // Render ASCII characters 32-127
     for (unsigned char c = 32; c < 128; c++) {
         if (FT_Load_Char(fr->ftFace, c, FT_LOAD_RENDER)) continue;
         
         FT_GlyphSlot g = fr->ftFace->glyph;
         
-        // New row if needed
         if (penX + g->bitmap.width >= FONT_ATLAS_SIZE) {
             penX = 0;
             penY += rowHeight;
             rowHeight = 0;
         }
         
-        // Copy glyph bitmap to atlas
         for (uint32_t row = 0; row < g->bitmap.rows; row++) {
             for (uint32_t col = 0; col < g->bitmap.width; col++) {
                 int x = penX + col;
@@ -1603,7 +1657,6 @@ void createFontAtlas(SiCompassApplication* app) {
             }
         }
         
-        // Store glyph metrics
         fr->glyphs[c].size[0] = (float)g->bitmap.width;
         fr->glyphs[c].size[1] = (float)g->bitmap.rows;
         fr->glyphs[c].bearing[0] = (float)g->bitmap_left;
@@ -1618,7 +1671,6 @@ void createFontAtlas(SiCompassApplication* app) {
         rowHeight = (g->bitmap.rows > rowHeight) ? g->bitmap.rows : rowHeight;
     }
     
-    // Upload to GPU
     VkDeviceSize imageSize = FONT_ATLAS_SIZE * FONT_ATLAS_SIZE;
     
     VkBuffer stagingBuffer;
@@ -1651,9 +1703,6 @@ void createFontAtlas(SiCompassApplication* app) {
     vkFreeMemory(app->device, stagingBufferMemory, NULL);
 }
 
-// ============================================================================
-// 3. CREATE IMAGE VIEW AND SAMPLER
-// ============================================================================
 void createFontAtlasView(SiCompassApplication* app) {
     FontRenderer* fr = app->fontRenderer;
     
@@ -1696,9 +1745,6 @@ void createFontAtlasSampler(SiCompassApplication* app) {
     }
 }
 
-// ============================================================================
-// 4. CREATE TEXT VERTEX BUFFER
-// ============================================================================
 void createTextVertexBuffer(SiCompassApplication* app) {
     FontRenderer* fr = app->fontRenderer;
     VkDeviceSize bufferSize = sizeof(TextVertex) * MAX_TEXT_VERTICES;
@@ -1708,9 +1754,6 @@ void createTextVertexBuffer(SiCompassApplication* app) {
                  &fr->textVertexBuffer, &fr->textVertexBufferMemory);
 }
 
-// ============================================================================
-// 5. CREATE TEXT DESCRIPTOR SET LAYOUT
-// ============================================================================
 void createTextDescriptorSetLayout(SiCompassApplication* app) {
     FontRenderer* fr = app->fontRenderer;
     
@@ -1732,9 +1775,6 @@ void createTextDescriptorSetLayout(SiCompassApplication* app) {
     }
 }
 
-// ============================================================================
-// 6. CREATE TEXT DESCRIPTOR POOL AND SETS
-// ============================================================================
 void createTextDescriptorPool(SiCompassApplication* app) {
     FontRenderer* fr = app->fontRenderer;
     
@@ -1793,13 +1833,9 @@ void createTextDescriptorSets(SiCompassApplication* app) {
     }
 }
 
-// ============================================================================
-// 7. CREATE TEXT RENDERING PIPELINE (SHORTENED)
-// ============================================================================
 void createTextPipeline(SiCompassApplication* app) {
     FontRenderer* fr = app->fontRenderer;
     
-    // Load shaders
     size_t vertSize, fragSize;
     char* vertCode = readFile("shaders/text_vert.spv", &vertSize);
     char* fragCode = readFile("shaders/text_frag.spv", &fragSize);
@@ -1807,7 +1843,6 @@ void createTextPipeline(SiCompassApplication* app) {
     VkShaderModule vertModule = createShaderModule(app->device, vertCode, vertSize);
     VkShaderModule fragModule = createShaderModule(app->device, fragCode, fragSize);
     
-    // Shader stages
     VkPipelineShaderStageCreateInfo stages[2] = {0};
     stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
@@ -1818,7 +1853,6 @@ void createTextPipeline(SiCompassApplication* app) {
     stages[1].module = fragModule;
     stages[1].pName = "main";
     
-    // Vertex input
     VkVertexInputBindingDescription binding = {0};
     binding.binding = 0;
     binding.stride = sizeof(TextVertex);
@@ -1835,7 +1869,7 @@ void createTextPipeline(SiCompassApplication* app) {
     attrs[1].format = VK_FORMAT_R32G32_SFLOAT;
     attrs[1].offset = offsetof(TextVertex, texCoord);
 
-    attrs[2].location = 2;  // ADD THIS
+    attrs[2].location = 2;
     attrs[2].binding = 0;
     attrs[2].format = VK_FORMAT_R32G32B32_SFLOAT;
     attrs[2].offset = offsetof(TextVertex, color);
@@ -1847,7 +1881,6 @@ void createTextPipeline(SiCompassApplication* app) {
     vertexInput.vertexAttributeDescriptionCount = 3;
     vertexInput.pVertexAttributeDescriptions = attrs;
     
-    // Input assembly, viewport, rasterizer, multisampling (same as 3D pipeline)
     VkPipelineInputAssemblyStateCreateInfo inputAssembly = {0};
     inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
     inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -1868,7 +1901,6 @@ void createTextPipeline(SiCompassApplication* app) {
     multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
     
-    // IMPORTANT: Enable alpha blending
     VkPipelineColorBlendAttachmentState blendAttachment = {0};
     blendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                                      VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
@@ -1891,11 +1923,10 @@ void createTextPipeline(SiCompassApplication* app) {
     dynamicState.dynamicStateCount = 2;
     dynamicState.pDynamicStates = dynamicStates;
     
-    // Pipeline layout with push constants
     VkPushConstantRange pushConstantRange = {0};
     pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(float) * 2; // screenWidth, screenHeight
+    pushConstantRange.size = sizeof(float) * 2;
     
     VkPipelineLayoutCreateInfo layoutInfo = {0};
     layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -1906,7 +1937,6 @@ void createTextPipeline(SiCompassApplication* app) {
     
     vkCreatePipelineLayout(app->device, &layoutInfo, NULL, &fr->textPipelineLayout);
     
-    // Create pipeline
     VkGraphicsPipelineCreateInfo pipelineInfo = {0};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
     pipelineInfo.stageCount = 2;
@@ -1930,15 +1960,12 @@ void createTextPipeline(SiCompassApplication* app) {
     free(fragCode);
 }
 
-// ============================================================================
-// 8. PREPARE TEXT FOR RENDERING (converts string to vertices)
-// ============================================================================
 void prepareTextForRendering(SiCompassApplication* app, const char* text, 
                              float x, float y, float scale, vec3 color) {
     FontRenderer* fr = app->fontRenderer;
     
     TextVertex vertices[MAX_TEXT_VERTICES];
-    uint32_t vi = 0;  // vertex index
+    uint32_t vi = 0;
     
     float cursorX = x;
     float cursorY = y;
@@ -1950,15 +1977,12 @@ void prepareTextForRendering(SiCompassApplication* app, const char* text,
         GlyphInfo* g = &fr->glyphs[(int)c];
         
         float xpos = cursorX + g->bearing[0] * scale;
-        // FIX: Correct Y positioning - bearing[1] is from baseline to top
-        // We want to draw from the baseline (cursorY)
-        float ypos = cursorY - g->bearing[1] * scale;  // CHANGED: Removed the (g->size[1] - g->bearing[1]) calculation
+        float ypos = cursorY - g->bearing[1] * scale;
         float w = g->size[0] * scale;
         float h = g->size[1] * scale;
         
         if (vi + 6 > MAX_TEXT_VERTICES) break;
         
-        // Two triangles per character
         vertices[vi++] = (TextVertex){{xpos, ypos + h}, {g->uvMin[0], g->uvMax[1]}, {color[0], color[1], color[2]}};
         vertices[vi++] = (TextVertex){{xpos, ypos}, {g->uvMin[0], g->uvMin[1]}, {color[0], color[1], color[2]}};
         vertices[vi++] = (TextVertex){{xpos + w, ypos}, {g->uvMax[0], g->uvMin[1]}, {color[0], color[1], color[2]}};
@@ -1972,16 +1996,12 @@ void prepareTextForRendering(SiCompassApplication* app, const char* text,
     
     fr->textVertexCount = vi;
     
-    // Upload to GPU
     void* data;
     vkMapMemory(app->device, fr->textVertexBufferMemory, 0, sizeof(TextVertex) * vi, 0, &data);
     memcpy(data, vertices, sizeof(TextVertex) * vi);
     vkUnmapMemory(app->device, fr->textVertexBufferMemory);
 }
 
-// ============================================================================
-// 9. CLEANUP
-// ============================================================================
 void cleanupFontRenderer(SiCompassApplication* app) {
     FontRenderer* fr = app->fontRenderer;
     
@@ -2025,7 +2045,6 @@ void initVulkan(SiCompassApplication* app) {
     createCommandBuffers(app);
     createSyncObjects(app);
 
-    // Font rendering
     initFreeType(app);
     createFontAtlas(app);
     createFontAtlasView(app);
@@ -2038,9 +2057,18 @@ void initVulkan(SiCompassApplication* app) {
 }
 
 void mainLoop(SiCompassApplication* app) {
-    while (!glfwWindowShouldClose(app->window)) {
-        glfwPollEvents();
-        prepareTextForRendering(app, "Hello Vulkan!", 50.0f, 50.0f, 1.0f, (vec3){1.0f, 1.0f, 0.0f});
+    while (app->running) {
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_EVENT_QUIT) {
+                app->running = false;
+            }
+            else if (event.type == SDL_EVENT_WINDOW_RESIZED) {
+                app->framebufferResized = true;
+            }
+        }
+        
+        prepareTextForRendering(app, "Hello Vulkan SDL3!", 50.0f, 50.0f, 1.0f, (vec3){1.0f, 1.0f, 0.0f});
         drawFrame(app);
     }
 
@@ -2092,11 +2120,11 @@ void cleanup(SiCompassApplication* app) {
     vkDestroySurfaceKHR(app->instance, app->surface, NULL);
     vkDestroyInstance(app->instance, NULL);
 
-    glfwDestroyWindow(app->window);
-
-    glfwTerminate();
+    SDL_DestroyWindow(app->window);
+    SDL_Quit();
 
     cleanupFontRenderer(app);
+    free(app->fontRenderer);
 }
 
 void run(SiCompassApplication* app) {
@@ -2104,85 +2132,6 @@ void run(SiCompassApplication* app) {
     initVulkan(app);
     mainLoop(app);
     cleanup(app);
-}
-
-// Helper function implementations
-bool checkValidationLayerSupport(void) {
-    uint32_t layerCount;
-    vkEnumerateInstanceLayerProperties(&layerCount, NULL);
-
-    VkLayerProperties* availableLayers = malloc(sizeof(VkLayerProperties) * layerCount);
-    vkEnumerateInstanceLayerProperties(&layerCount, availableLayers);
-
-    for (uint32_t i = 0; i < validationLayerCount; i++) {
-        bool layerFound = false;
-
-        for (uint32_t j = 0; j < layerCount; j++) {
-            if (strcmp(validationLayers[i], availableLayers[j].layerName) == 0) {
-                layerFound = true;
-                break;
-            }
-        }
-
-        if (!layerFound) {
-            free(availableLayers);
-            return false;
-        }
-    }
-
-    free(availableLayers);
-    return true;
-}
-
-char** getRequiredExtensions(uint32_t* extensionCount) {
-    uint32_t glfwExtensionCount = 0;
-    const char** glfwExtensions;
-    glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-
-    uint32_t totalExtensionCount = glfwExtensionCount;
-    if (enableValidationLayers) {
-        totalExtensionCount++;
-    }
-
-    char** extensions = malloc(sizeof(char*) * totalExtensionCount);
-    for (uint32_t i = 0; i < glfwExtensionCount; i++) {
-        extensions[i] = (char*)glfwExtensions[i];
-    }
-
-    if (enableValidationLayers) {
-        extensions[glfwExtensionCount] = (char*)VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
-    }
-
-    *extensionCount = totalExtensionCount;
-    return extensions;
-}
-
-char* readFile(const char* filename, size_t* fileSize) {
-    FILE* file = fopen(filename, "rb");
-
-    if (!file) {
-        fprintf(stderr, "Failed to open file: %s\n", filename);
-        exit(EXIT_FAILURE);
-    }
-
-    fseek(file, 0, SEEK_END);
-    *fileSize = ftell(file);
-    fseek(file, 0, SEEK_SET);
-
-    char* buffer = malloc(*fileSize);
-    fread(buffer, 1, *fileSize, file);
-
-    fclose(file);
-
-    return buffer;
-}
-
-VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
-                                              VkDebugUtilsMessageTypeFlagsEXT messageType,
-                                              const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
-                                              void* pUserData) {
-    fprintf(stderr, "validation layer: %s\n", pCallbackData->pMessage);
-    return VK_FALSE;
 }
 
 int main(void) {

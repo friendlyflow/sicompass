@@ -46,6 +46,7 @@
               uthash
               json_c
               xorg.libxcb
+              sdl3
             ];
 
             enableParallelBuilding = true;
@@ -87,6 +88,7 @@
               uthash
               json_c
               xorg.libxcb
+              sdl3
             ];
 
             # shellHooks = ''
