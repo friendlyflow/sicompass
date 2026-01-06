@@ -68,6 +68,13 @@ typedef struct {
     vec2 texCoord;
 } Vertex;
 
+// if it doesn't work:
+// typedef struct {
+//     vec3 pos;
+//     vec3 color;
+//     vec2 texCoord;
+// } Vertex;
+
 typedef struct SiCompassApplication {
     SDL_Window* window;
 
@@ -76,6 +83,7 @@ typedef struct SiCompassApplication {
     VkSurfaceKHR surface;
 
     VkPhysicalDevice physicalDevice;
+    // VkSampleCountFlagBits msaaSamples;
     VkDevice device;
 
     VkQueue graphicsQueue;
@@ -98,15 +106,26 @@ typedef struct SiCompassApplication {
 
     VkCommandPool commandPool;
 
+    // VkImage colorImage;
+    // VkDeviceMemory colorImageMemory;
+    // VkImageView colorImageView;
+
     VkImage depthImage;
     VkDeviceMemory depthImageMemory;
     VkImageView depthImageView;
 
+    // uint32_t mipLevels;
     VkImage textureImage;
     VkDeviceMemory textureImageMemory;
     VkImageView textureImageView;
     VkSampler textureSampler;
 
+    // Vertex* vertices;
+    // size_t vertexCount;
+    // size_t vertexCapacity;
+    // uint32_t* indices;
+    // size_t indexCount;
+    // size_t indexCapacity;
     VkBuffer vertexBuffer;
     VkDeviceMemory vertexBufferMemory;
     VkBuffer indexBuffer;
@@ -127,6 +146,7 @@ typedef struct SiCompassApplication {
     VkSemaphore imageAvailableSemaphores[MAX_FRAMES_IN_FLIGHT];
     VkSemaphore renderFinishedSemaphores[MAX_FRAMES_IN_FLIGHT];
     VkFence inFlightFences[MAX_FRAMES_IN_FLIGHT];
+    // uint32_t syncObjectCount;
     uint32_t currentFrame;
 
     bool framebufferResized;
