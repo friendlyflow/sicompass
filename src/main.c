@@ -1637,7 +1637,14 @@ void initFreeType(SiCompassApplication* app) {
         exit(EXIT_FAILURE);
     }
     
-    FT_Set_Pixel_Sizes(fr->ftFace, 0, 48);
+    // SDL3: Use display content scale and assume 96 DPI base
+    SDL_DisplayID displayID = SDL_GetDisplayForWindow(app->window);
+    float contentScale = SDL_GetDisplayContentScale(displayID);
+
+    // Base DPI of 96, scaled by content scale
+    int scaledDPI = (int)(96.0f * contentScale);
+    FT_Set_Char_Size(fr->ftFace, 0, 12*64, scaledDPI, scaledDPI);
+
 }
 
 void createFontAtlas(SiCompassApplication* app) {
