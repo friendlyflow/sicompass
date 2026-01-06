@@ -119,6 +119,7 @@ void siCompassApplicationInit(SiCompassApplication* app) {
     app->debugMessenger = VK_NULL_HANDLE;
     app->surface = VK_NULL_HANDLE;
     app->physicalDevice = VK_NULL_HANDLE;
+    // app->msaaSamples = VK_SAMPLE_COUNT_1_BIT;
     app->device = VK_NULL_HANDLE;
     app->graphicsQueue = VK_NULL_HANDLE;
     app->presentQueue = VK_NULL_HANDLE;
@@ -136,15 +137,25 @@ void siCompassApplicationInit(SiCompassApplication* app) {
     app->pipelineLayout = VK_NULL_HANDLE;
     app->graphicsPipeline = VK_NULL_HANDLE;
     app->commandPool = VK_NULL_HANDLE;
+
+    // app->colorImage = VK_NULL_HANDLE;
+    // app->colorImageMemory = VK_NULL_HANDLE;
+    // app->colorImageView = VK_NULL_HANDLE;
     
     app->depthImage = VK_NULL_HANDLE;
     app->depthImageMemory = VK_NULL_HANDLE;
     app->depthImageView = VK_NULL_HANDLE;
     
+    // app->mipLevels = 0;
     app->textureImage = VK_NULL_HANDLE;
     app->textureImageMemory = VK_NULL_HANDLE;
     app->textureImageView = VK_NULL_HANDLE;
     app->textureSampler = VK_NULL_HANDLE;
+
+    // app->vertices = NULL;
+    // app->vertexCount = 0;
+    // app->indices = NULL;
+    // app->indexCount = 0;
     
     app->vertexBuffer = VK_NULL_HANDLE;
     app->vertexBufferMemory = VK_NULL_HANDLE;
@@ -166,6 +177,7 @@ void siCompassApplicationInit(SiCompassApplication* app) {
     memset(app->imageAvailableSemaphores, 0, sizeof(app->imageAvailableSemaphores));
     memset(app->renderFinishedSemaphores, 0, sizeof(app->renderFinishedSemaphores));
     memset(app->inFlightFences, 0, sizeof(app->inFlightFences));
+    // app->syncObjectCount = 0;
     
     app->currentFrame = 0;
     app->framebufferResized = false;
@@ -1387,7 +1399,7 @@ void recordCommandBuffer(SiCompassApplication* app, VkCommandBuffer commandBuffe
 
     vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-    // 3D rendering section is commented out in original
+    // 3D rendering section is commented out
     /*
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, app->graphicsPipeline);
 
