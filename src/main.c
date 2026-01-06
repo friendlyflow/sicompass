@@ -1618,7 +1618,7 @@ void initFreeType(SiCompassApplication* app) {
         exit(EXIT_FAILURE);
     }
     
-    const char* fontPath = "fonts/DejaVuSansMono.ttf";
+    const char* fontPath = "fonts/Consolas-Regular.ttf";
     FT_Error error = FT_New_Face(fr->ftLibrary, fontPath, 0, &fr->ftFace);
     if (error) {
         fprintf(stderr, "Failed to load font: %s (error code: %d)\n", fontPath, error);
@@ -2068,7 +2068,7 @@ void mainLoop(SiCompassApplication* app) {
             }
         }
         
-        prepareTextForRendering(app, "Hello Vulkan SDL3!", 50.0f, 50.0f, 1.0f, (vec3){1.0f, 1.0f, 0.0f});
+        prepareTextForRendering(app, "Hello Vulkan!", 50.0f, 50.0f, 1.0f, (vec3){1.0f, 1.0f, 0.0f});
         drawFrame(app);
     }
 
