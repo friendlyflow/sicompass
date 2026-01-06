@@ -1,7 +1,8 @@
 #pragma once
 
-#define GLFW_INCLUDE_VULKAN
-#include <GLFW/glfw3.h>
+#include <vulkan/vulkan.h>
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -10,9 +11,6 @@
 #include <cglm/mat4.h>
 #include <cglm/cam.h>
 #include <cglm/affine.h>
-
-// #define TINYOBJ_LOADER_C_IMPLEMENTATION
-// #include "tinyobj_loader_c.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -71,14 +69,13 @@ typedef struct {
 } Vertex;
 
 typedef struct SiCompassApplication {
-    GLFWwindow* window;
+    SDL_Window* window;
 
     VkInstance instance;
     VkDebugUtilsMessengerEXT debugMessenger;
     VkSurfaceKHR surface;
 
     VkPhysicalDevice physicalDevice;
-    // VkSampleCountFlagBits msaaSamples;
     VkDevice device;
 
     VkQueue graphicsQueue;
@@ -101,26 +98,15 @@ typedef struct SiCompassApplication {
 
     VkCommandPool commandPool;
 
-    // VkImage colorImage;
-    // VkDeviceMemory colorImageMemory;
-    // VkImageView colorImageView;
-
     VkImage depthImage;
     VkDeviceMemory depthImageMemory;
     VkImageView depthImageView;
 
-    // uint32_t mipLevels;
     VkImage textureImage;
     VkDeviceMemory textureImageMemory;
     VkImageView textureImageView;
     VkSampler textureSampler;
 
-    // Vertex* vertices;
-    // size_t vertexCount;
-    // size_t vertexCapacity;
-    // uint32_t* indices;
-    // size_t indexCount;
-    // size_t indexCapacity;
     VkBuffer vertexBuffer;
     VkDeviceMemory vertexBufferMemory;
     VkBuffer indexBuffer;
@@ -141,14 +127,11 @@ typedef struct SiCompassApplication {
     VkSemaphore imageAvailableSemaphores[MAX_FRAMES_IN_FLIGHT];
     VkSemaphore renderFinishedSemaphores[MAX_FRAMES_IN_FLIGHT];
     VkFence inFlightFences[MAX_FRAMES_IN_FLIGHT];
-    // uint32_t syncObjectCount;
     uint32_t currentFrame;
 
     bool framebufferResized;
+    bool running;
     clock_t startTime;
 
     FontRenderer* fontRenderer;
 } SiCompassApplication;
-
-//#include "glyb.h"
-//#include "Font.h"

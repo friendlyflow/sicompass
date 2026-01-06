@@ -3,7 +3,7 @@ project('sicompass', 'c',
   default_options : ['warning_level=3'])
 
 vulkan_dep = dependency('vulkan')
-glfw_dep = dependency('glfw3')
+sdl3_dep = dependency('sdl3')
 stb_dep = dependency('stb')
 hb_dep = dependency('harfbuzz')
 cc = meson.get_compiler('c')
@@ -30,7 +30,7 @@ subdir('src')
 
 add_project_arguments('-DVK_USE_PLATFORM_XCB_KHR', language: 'c')
 
-exe_sc = executable('sc', [sources_sc], dependencies: [vulkan_dep, glfw_dep, m_dep, ft_dep, stb_dep],
+exe_sc = executable('sc', [sources_sc], dependencies: [vulkan_dep, sdl3_dep, m_dep, ft_dep, stb_dep],
                     include_directories: [], install : false)
 
 #test('basic', exe)
