@@ -1880,7 +1880,7 @@ void createTextPipeline(SiCompassApplication* app) {
     VkVertexInputAttributeDescription attrs[3] = {0};
     attrs[0].location = 0;
     attrs[0].binding = 0;
-    attrs[0].format = VK_FORMAT_R32G32_SFLOAT;
+    attrs[0].format = VK_FORMAT_R32G32B32_SFLOAT;
     attrs[0].offset = offsetof(TextVertex, pos);
 
     attrs[1].location = 1;
@@ -2002,13 +2002,13 @@ void prepareTextForRendering(SiCompassApplication* app, const char* text,
         
         if (vi + 6 > MAX_TEXT_VERTICES) break;
         
-        vertices[vi++] = (TextVertex){{xpos, ypos + h}, {g->uvMin[0], g->uvMax[1]}, {color[0], color[1], color[2]}};
-        vertices[vi++] = (TextVertex){{xpos, ypos}, {g->uvMin[0], g->uvMin[1]}, {color[0], color[1], color[2]}};
-        vertices[vi++] = (TextVertex){{xpos + w, ypos}, {g->uvMax[0], g->uvMin[1]}, {color[0], color[1], color[2]}};
-        
-        vertices[vi++] = (TextVertex){{xpos, ypos + h}, {g->uvMin[0], g->uvMax[1]}, {color[0], color[1], color[2]}};
-        vertices[vi++] = (TextVertex){{xpos + w, ypos}, {g->uvMax[0], g->uvMin[1]}, {color[0], color[1], color[2]}};
-        vertices[vi++] = (TextVertex){{xpos + w, ypos + h}, {g->uvMax[0], g->uvMax[1]}, {color[0], color[1], color[2]}};
+        vertices[vi++] = (TextVertex){{xpos, ypos + h, 0.0f}, {g->uvMin[0], g->uvMax[1]}, {color[0], color[1], color[2]}};
+        vertices[vi++] = (TextVertex){{xpos, ypos, 0.0f}, {g->uvMin[0], g->uvMin[1]}, {color[0], color[1], color[2]}};
+        vertices[vi++] = (TextVertex){{xpos + w, ypos, 0.0f}, {g->uvMax[0], g->uvMin[1]}, {color[0], color[1], color[2]}};
+
+        vertices[vi++] = (TextVertex){{xpos, ypos + h, 0.0f}, {g->uvMin[0], g->uvMax[1]}, {color[0], color[1], color[2]}};
+        vertices[vi++] = (TextVertex){{xpos + w, ypos, 0.0f}, {g->uvMax[0], g->uvMin[1]}, {color[0], color[1], color[2]}};
+        vertices[vi++] = (TextVertex){{xpos + w, ypos + h, 0.0f}, {g->uvMax[0], g->uvMax[1]}, {color[0], color[1], color[2]}};
         
         cursorX += g->advance * scale;
     }

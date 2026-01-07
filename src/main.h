@@ -33,7 +33,7 @@ typedef struct GlyphInfo {
 } GlyphInfo;
 
 typedef struct TextVertex {
-    vec2 pos;
+    vec3 pos;
     vec2 texCoord;
     vec3 color;
 } TextVertex;
