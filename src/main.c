@@ -2249,29 +2249,33 @@ void prepareBackgroundForText(SiCompassApplication* app, const char* text,
     vkUnmapMemory(app->device, fr->backgroundVertexBufferMemory);
 }
 
+void beginTextRendering(SiCompassApplication* app) {
+    app->fontRenderer->textVertexCount = 0;
+}
+
 void prepareTextForRendering(SiCompassApplication* app, const char* text,
                              float x, float y, float scale, vec3 color) {
     FontRenderer* fr = app->fontRenderer;
-    
+
     TextVertex vertices[MAX_TEXT_VERTICES];
     uint32_t vi = 0;
-    
+
     float cursorX = x;
     float cursorY = y;
-    
+
     for (const char* p = text; *p; p++) {
         char c = *p;
         if (c < 32 || c >= 128) continue;
-        
+
         GlyphInfo* g = &fr->glyphs[(int)c];
-        
+
         float xpos = cursorX + g->bearing[0] * scale;
         float ypos = cursorY - g->bearing[1] * scale;
         float w = g->size[0] * scale;
         float h = g->size[1] * scale;
-        
+
         if (vi + 6 > MAX_TEXT_VERTICES) break;
-        
+
         vertices[vi++] = (TextVertex){{xpos, ypos + h, 0.0f}, {g->uvMin[0], g->uvMax[1]}, {color[0], color[1], color[2]}};
         vertices[vi++] = (TextVertex){{xpos, ypos, 0.0f}, {g->uvMin[0], g->uvMin[1]}, {color[0], color[1], color[2]}};
         vertices[vi++] = (TextVertex){{xpos + w, ypos, 0.0f}, {g->uvMax[0], g->uvMin[1]}, {color[0], color[1], color[2]}};
@@ -2279,16 +2283,25 @@ void prepareTextForRendering(SiCompassApplication* app, const char* text,
         vertices[vi++] = (TextVertex){{xpos, ypos + h, 0.0f}, {g->uvMin[0], g->uvMax[1]}, {color[0], color[1], color[2]}};
         vertices[vi++] = (TextVertex){{xpos + w, ypos, 0.0f}, {g->uvMax[0], g->uvMin[1]}, {color[0], color[1], color[2]}};
         vertices[vi++] = (TextVertex){{xpos + w, ypos + h, 0.0f}, {g->uvMax[0], g->uvMax[1]}, {color[0], color[1], color[2]}};
-        
+
         cursorX += g->advance * scale;
     }
-    
-    fr->textVertexCount = vi;
-    
+
+    // Check if adding these vertices would exceed the buffer size
+    if (fr->textVertexCount + vi > MAX_TEXT_VERTICES) {
+        return; // Skip this text if it doesn't fit
+    }
+
+    // Append vertices to the buffer at the current offset
     void* data;
-    vkMapMemory(app->device, fr->textVertexBufferMemory, 0, sizeof(TextVertex) * vi, 0, &data);
+    vkMapMemory(app->device, fr->textVertexBufferMemory,
+                sizeof(TextVertex) * fr->textVertexCount,
+                sizeof(TextVertex) * vi, 0, &data);
     memcpy(data, vertices, sizeof(TextVertex) * vi);
     vkUnmapMemory(app->device, fr->textVertexBufferMemory);
+
+    // Increment the vertex count
+    fr->textVertexCount += vi;
 }
 
 void cleanupFontRenderer(SiCompassApplication* app) {
@@ -2368,12 +2381,17 @@ void mainLoop(SiCompassApplication* app) {
 
         char* text = "Hello Vulkan!";
         
+        // Reset text rendering for this frame
+        beginTextRendering(app);
+
         // Prepare background with rounded corners
         vec4 bgColor = {0.110f, 0.267f, 0.078f, 1.0f};
         prepareBackgroundForText(app, text, 50.0f, 50.0f, 1.0f, bgColor, 5.0f, 10.0f);
 
         // Prepare text on top
         prepareTextForRendering(app, text, 50.0f, 50.0f, 1.0f, (vec3){0.753f, 0.925f, 0.722f});
+        prepareTextForRendering(app, "Small Text", 200.0f, 50.0f, 0.5f, (vec3){0.753f, 0.925f, 0.722f});
+        prepareTextForRendering(app, "Large Text", 200.0f, 100.0f, 2.0f, (vec3){0.753f, 0.925f, 0.722f});
         drawFrame(app);
     }
 
