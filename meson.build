@@ -26,6 +26,14 @@ r = run_command('glslangValidator', '--quiet', '-V', 'shaders/text.frag', '-o', 
 output = r.stdout().strip()
 errortxt = r.stderr().strip()
 
+r = run_command('glslangValidator', '--quiet', '-V', 'shaders/background.vert', '-o', 'shaders/background_vert.spv', check: true)
+output = r.stdout().strip()
+errortxt = r.stderr().strip()
+
+r = run_command('glslangValidator', '--quiet', '-V', 'shaders/background.frag', '-o', 'shaders/background_frag.spv', check: true)
+output = r.stdout().strip()
+errortxt = r.stderr().strip()
+
 subdir('src')
 
 add_project_arguments('-DVK_USE_PLATFORM_XCB_KHR', language: 'c')
