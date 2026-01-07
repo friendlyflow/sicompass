@@ -1661,7 +1661,8 @@ void initFreeType(SiCompassApplication* app) {
 
     // Base DPI of 96, scaled by content scale
     int scaledDPI = (int)(96.0f * contentScale);
-    FT_Set_Char_Size(fr->ftFace, 0, 12*64, scaledDPI, scaledDPI);
+    // Use larger base size (48pt) for better quality when scaling
+    FT_Set_Char_Size(fr->ftFace, 0, 48*64, scaledDPI, scaledDPI);
 
     // Store font metrics for consistent line height
     fr->ascender = fr->ftFace->size->metrics.ascender / 64.0f;
@@ -1767,7 +1768,7 @@ void createFontAtlasView(SiCompassApplication* app) {
 
 void createFontAtlasSampler(SiCompassApplication* app) {
     FontRenderer* fr = app->fontRenderer;
-    
+
     VkSamplerCreateInfo samplerInfo = {0};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     samplerInfo.magFilter = VK_FILTER_LINEAR;
@@ -2386,12 +2387,12 @@ void mainLoop(SiCompassApplication* app) {
 
         // Prepare background with rounded corners
         vec4 bgColor = {0.110f, 0.267f, 0.078f, 1.0f};
-        prepareBackgroundForText(app, text, 50.0f, 50.0f, 1.0f, bgColor, 5.0f, 10.0f);
+        prepareBackgroundForText(app, text, 50.0f, 50.0f, 0.25f, bgColor, 5.0f, 10.0f);
 
-        // Prepare text on top
-        prepareTextForRendering(app, text, 50.0f, 50.0f, 1.0f, (vec3){0.753f, 0.925f, 0.722f});
-        prepareTextForRendering(app, "Small Text", 200.0f, 50.0f, 0.5f, (vec3){0.753f, 0.925f, 0.722f});
-        prepareTextForRendering(app, "Large Text", 200.0f, 100.0f, 2.0f, (vec3){0.753f, 0.925f, 0.722f});
+        // Prepare text on top (scales adjusted for 48pt base size)
+        prepareTextForRendering(app, text, 50.0f, 50.0f, 0.25f, (vec3){0.753f, 0.925f, 0.722f});
+        prepareTextForRendering(app, "Small Text", 200.0f, 50.0f, 0.125f, (vec3){0.753f, 0.925f, 0.722f});
+        prepareTextForRendering(app, "Large Text", 200.0f, 100.0f, 0.5f, (vec3){0.753f, 0.925f, 0.722f});
         drawFrame(app);
     }
 
