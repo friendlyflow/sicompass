@@ -713,8 +713,8 @@ VkShaderModule createShaderModule(VkDevice device, const char* code, size_t code
 
 void createGraphicsPipeline(SiCompassApplication* app) {
     size_t vertShaderSize, fragShaderSize;
-    char* vertShaderCode = readFile("shaders/vert.spv", &vertShaderSize);
-    char* fragShaderCode = readFile("shaders/frag.spv", &fragShaderSize);
+    char* vertShaderCode = readFile("shaders/image_vert.spv", &vertShaderSize);
+    char* fragShaderCode = readFile("shaders/image_frag.spv", &fragShaderSize);
 
     VkShaderModule vertShaderModule = createShaderModule(app->device, vertShaderCode, vertShaderSize);
     VkShaderModule fragShaderModule = createShaderModule(app->device, fragShaderCode, fragShaderSize);
