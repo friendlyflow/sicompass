@@ -19,6 +19,8 @@
 #include <stdbool.h>
 #include <time.h>
 
+#include "view.h"
+
 #define MAX_FRAMES_IN_FLIGHT 2
 
 #define FONT_ATLAS_SIZE 512
@@ -175,3 +177,8 @@ typedef struct SiCompassApplication {
 
     FontRenderer* fontRenderer;
 } SiCompassApplication;
+
+void beginTextRendering(SiCompassApplication* app);
+void prepareBackgroundForText(SiCompassApplication* app, const char* text, float x, float y, float scale, vec4 bgColor, float cornerRadius, float padding);
+void prepareTextForRendering(SiCompassApplication* app, const char* text, float x, float y, float scale, vec3 color);
+void drawFrame(SiCompassApplication* app);
