@@ -10,11 +10,11 @@ cc = meson.get_compiler('c')
 m_dep = cc.find_library('m', required : false)
 ft_dep = cc.find_library('freetype', required : false)
 
-r = run_command('glslangValidator', '--quiet', '-V', 'shaders/shader_depth.vert', '-o', 'shaders/vert.spv', check: true)
+r = run_command('glslangValidator', '--quiet', '-V', 'shaders/image.vert', '-o', 'shaders/image_vert.spv', check: true)
 output = r.stdout().strip()
 errortxt = r.stderr().strip()
 
-r = run_command('glslangValidator', '--quiet', '-V', 'shaders/shader_depth.frag', '-o', 'shaders/frag.spv', check: true)
+r = run_command('glslangValidator', '--quiet', '-V', 'shaders/image.frag', '-o', 'shaders/image_frag.spv', check: true)
 output = r.stdout().strip()
 errortxt = r.stderr().strip()
 
