@@ -2312,6 +2312,8 @@ void cleanupFontRenderer(SiCompassApplication* app) {
 
     FT_Done_Face(fr->ftFace);
     FT_Done_FreeType(fr->ftLibrary);
+
+    free(app->fontRenderer);
 }
 
 void initVulkan(SiCompassApplication* app) {
@@ -2427,7 +2429,6 @@ void cleanup(SiCompassApplication* app) {
     SDL_Quit();
 
     cleanupFontRenderer(app);
-    free(app->fontRenderer);
 }
 
 void run(SiCompassApplication* app) {
