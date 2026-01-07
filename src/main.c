@@ -2373,6 +2373,7 @@ void mainLoop(SiCompassApplication* app) {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             updateView(app, &event);
+            drawFrame(app);
         }
     }
 

@@ -181,4 +181,3 @@ typedef struct SiCompassApplication {
 void beginTextRendering(SiCompassApplication* app);
 void prepareBackgroundForText(SiCompassApplication* app, const char* text, float x, float y, float scale, vec4 bgColor, float cornerRadius, float padding);
 void prepareTextForRendering(SiCompassApplication* app, const char* text, float x, float y, float scale, vec3 color);
-void drawFrame(SiCompassApplication* app);
