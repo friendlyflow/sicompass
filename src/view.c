@@ -21,5 +21,4 @@ void updateView(SiCompassApplication* app, SDL_Event* event) {
     prepareTextForRendering(app, text, 50.0f, 50.0f, 0.25f, (vec3){0.753f, 0.925f, 0.722f});
     prepareTextForRendering(app, "Small Text", 200.0f, 50.0f, 0.125f, (vec3){0.753f, 0.925f, 0.722f});
     prepareTextForRendering(app, "Large Text", 200.0f, 100.0f, 0.5f, (vec3){0.753f, 0.925f, 0.722f});
-    drawFrame(app);
 }
