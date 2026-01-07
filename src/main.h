@@ -38,28 +38,48 @@ typedef struct TextVertex {
     vec3 color;
 } TextVertex;
 
+typedef struct BackgroundVertex {
+    vec2 pos;
+    vec4 color;
+    vec2 cornerRadius;  // x = radius, y = unused (for alignment)
+    vec2 rectSize;      // width and height of the rectangle
+    vec2 rectOrigin;    // top-left corner (minX, minY) of the rectangle
+} BackgroundVertex;
+
 typedef struct FontRenderer {
     FT_Library ftLibrary;
     FT_Face ftFace;
-    
+
     VkImage fontAtlasImage;
     VkDeviceMemory fontAtlasMemory;
     VkImageView fontAtlasView;
     VkSampler fontAtlasSampler;
-    
+
     GlyphInfo glyphs[128];
-    
+
+    float lineHeight;  // Font line height (ascender - descender)
+    float ascender;    // Distance from baseline to top
+    float descender;   // Distance from baseline to bottom (negative)
+
     VkBuffer textVertexBuffer;
     VkDeviceMemory textVertexBufferMemory;
-    
+
     VkDescriptorSetLayout textDescriptorSetLayout;
     VkDescriptorPool textDescriptorPool;
     VkDescriptorSet textDescriptorSets[MAX_FRAMES_IN_FLIGHT];
-    
+
     VkPipelineLayout textPipelineLayout;
     VkPipeline textPipeline;
-    
+
     uint32_t textVertexCount;
+
+    VkBuffer backgroundVertexBuffer;
+    VkDeviceMemory backgroundVertexBufferMemory;
+
+    VkPipelineLayout backgroundPipelineLayout;
+    VkPipeline backgroundPipeline;
+
+    uint32_t backgroundVertexCount;
 } FontRenderer;
 
 typedef struct {
