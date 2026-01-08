@@ -1527,13 +1527,7 @@ void initVulkan(SiCompassApplication* app) {
 }
 
 void mainLoop(SiCompassApplication* app) {
-    while (app->running) {
-        SDL_Event event;
-        while (SDL_PollEvent(&event)) {
-            updateView(app, &event);
-            drawFrame(app);
-        }
-    }
+    updateView(app);
 
     vkDeviceWaitIdle(app->device);
 }
