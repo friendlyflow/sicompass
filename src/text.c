@@ -711,3 +711,60 @@ void cleanupFontRenderer(SiCompassApplication* app) {
 
     free(app->fontRenderer);
 }
+
+void drawBackground(SiCompassApplication* app, VkCommandBuffer commandBuffer) {
+    FontRenderer* fr = app->fontRenderer;
+
+    // Push screen dimensions for background pipeline
+    float screenDimensions[2] = {
+        (float)app->swapChainExtent.width,
+        (float)app->swapChainExtent.height
+    };
+
+    // Draw background
+    if (fr->backgroundVertexCount > 0) {
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                         fr->backgroundPipeline);
+
+        vkCmdPushConstants(commandBuffer, fr->backgroundPipelineLayout,
+                          VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(screenDimensions),
+                          screenDimensions);
+
+        VkBuffer backgroundBuffers[] = {fr->backgroundVertexBuffer};
+        VkDeviceSize offsets[] = {0};
+        vkCmdBindVertexBuffers(commandBuffer, 0, 1, backgroundBuffers, offsets);
+
+        vkCmdDraw(commandBuffer, fr->backgroundVertexCount, 1, 0, 0);
+    }
+}
+
+void drawText(SiCompassApplication* app, VkCommandBuffer commandBuffer) {
+    FontRenderer* fr = app->fontRenderer;
+
+    // Push screen dimensions for text pipeline
+    float screenDimensions[2] = {
+        (float)app->swapChainExtent.width,
+        (float)app->swapChainExtent.height
+    };
+
+    // Draw text
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                     fr->textPipeline);
+
+    vkCmdPushConstants(commandBuffer, fr->textPipelineLayout,
+                      VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(screenDimensions),
+                      screenDimensions);
+
+    VkBuffer textBuffers[] = {fr->textVertexBuffer};
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(commandBuffer, 0, 1, textBuffers, offsets);
+
+    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                           fr->textPipelineLayout, 0, 1,
+                           &fr->textDescriptorSets[app->currentFrame],
+                           0, NULL);
+
+    if (fr->textVertexCount > 0) {
+        vkCmdDraw(commandBuffer, fr->textVertexCount, 1, 0, 0);
+    }
+}

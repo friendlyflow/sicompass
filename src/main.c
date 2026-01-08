@@ -1334,92 +1334,9 @@ void recordCommandBuffer(SiCompassApplication* app, VkCommandBuffer commandBuffe
 
     vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-    // Image
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, app->graphicsPipeline);
-
-    VkViewport viewport = {0};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = (float)app->swapChainExtent.width;
-    viewport.height = (float)app->swapChainExtent.height;
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-
-    VkRect2D scissor = {0};
-    scissor.offset = (VkOffset2D){0, 0};
-    scissor.extent = app->swapChainExtent;
-    vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
-
-    VkBuffer vertexBuffers[] = {app->vertexBuffer};
-    VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-
-    vkCmdBindIndexBuffer(commandBuffer, app->indexBuffer, 0, VK_INDEX_TYPE_UINT16);
-
-    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, app->pipelineLayout, 
-                           0, 1, &app->descriptorSets[app->currentFrame], 0, NULL);
-
-    vkCmdDrawIndexed(commandBuffer, (uint32_t)indexCount, 1, 0, 0, 0);
-
-    // // Setup viewport and scissor for 2D rendering
-    // VkViewport viewport = {0};
-    // viewport.x = 0.0f;
-    // viewport.y = 0.0f;
-    // viewport.width = (float)app->swapChainExtent.width;
-    // viewport.height = (float)app->swapChainExtent.height;
-    // viewport.minDepth = 0.0f;
-    // viewport.maxDepth = 1.0f;
-    // vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-
-    // VkRect2D scissor = {0};
-    // scissor.offset = (VkOffset2D){0, 0};
-    // scissor.extent = app->swapChainExtent;
-    // vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
-
-    // Push screen dimensions for both pipelines
-    float screenDimensions[2] = {
-        (float)app->swapChainExtent.width,
-        (float)app->swapChainExtent.height
-    };
-
-    // Draw background
-    if (app->fontRenderer->backgroundVertexCount > 0) {
-        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                         app->fontRenderer->backgroundPipeline);
-
-        vkCmdPushConstants(commandBuffer, app->fontRenderer->backgroundPipelineLayout,
-                          VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(screenDimensions),
-                          screenDimensions);
-
-        VkBuffer backgroundBuffers[] = {app->fontRenderer->backgroundVertexBuffer};
-        VkDeviceSize offsets[] = {0};
-        vkCmdBindVertexBuffers(commandBuffer, 0, 1, backgroundBuffers, offsets);
-
-        vkCmdDraw(commandBuffer, app->fontRenderer->backgroundVertexCount, 1, 0, 0);
-    }
-
-    // Draw text
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                     app->fontRenderer->textPipeline);
-
-    vkCmdPushConstants(commandBuffer, app->fontRenderer->textPipelineLayout,
-                      VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(screenDimensions),
-                      screenDimensions);
-    
-    VkBuffer textBuffers[] = {app->fontRenderer->textVertexBuffer};
-    // VkDeviceSize offsets[] = {0};
-    memset(offsets, 0, sizeof(offsets));
-    vkCmdBindVertexBuffers(commandBuffer, 0, 1, textBuffers, offsets);
-    
-    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                           app->fontRenderer->textPipelineLayout, 0, 1,
-                           &app->fontRenderer->textDescriptorSets[app->currentFrame],
-                           0, NULL);
-    
-    if (app->fontRenderer->textVertexCount > 0) {
-        vkCmdDraw(commandBuffer, app->fontRenderer->textVertexCount, 1, 0, 0);
-    }
+    drawImage(app, commandBuffer);
+    drawBackground(app, commandBuffer);
+    drawText(app, commandBuffer);
 
     vkCmdEndRenderPass(commandBuffer);
 
