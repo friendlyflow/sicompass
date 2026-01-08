@@ -1,6 +1,12 @@
-#pragma once
+#ifndef SFON_EDITOR_H
+#define SFON_EDITOR_H
 
-#include "main.h"
+#include <SDL3/SDL.h>
+#include <SDL3_ttf/SDL_ttf.h>
+#include <json-c/json.h>
+#include <cglm/cglm.h>
+#include <stdbool.h>
+#include <time.h>
 
 // Constants
 #define MAX_ID_DEPTH 32
@@ -61,7 +67,6 @@ typedef enum {
 } Command;
 
 // Forward declarations
-typedef struct SiCompassApplication SiCompassApplication;
 typedef struct SfonElement SfonElement;
 typedef struct SfonObject SfonObject;
 
@@ -102,7 +107,14 @@ typedef struct {
 } ListItem;
 
 // Main application state
-typedef struct AppRenderer {
+typedef struct {
+    // SDL components
+    SDL_Window *window;
+    SDL_Renderer *renderer;
+    TTF_Font *font;
+    int fontHeight;
+    int charWidth;
+
     // SFON data
     SfonElement **sfon;
     int sfonCount;
@@ -148,12 +160,9 @@ typedef struct AppRenderer {
 
     // Error message
     char errorMessage[256];
-} AppRenderer;
+} EditorState;
 
 // Function declarations
-
-// Main entry point 
-void updateView(SiCompassApplication* app);
 
 // Initialization and cleanup
 EditorState* editorStateCreate(void);
@@ -233,3 +242,5 @@ const char* taskToString(Task task);
 bool isLineKey(const char *line);
 char* escapeHtmlToText(const char *html);
 void setErrorMessage(EditorState *state, const char *message);
+
+#endif // SFON_EDITOR_H
