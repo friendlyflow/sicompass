@@ -1,1 +1,1 @@
-sources_sc = files('main.c', 'view.c')
+sources_sc = files('main.c', 'view.c', 'text.c', 'image.c')

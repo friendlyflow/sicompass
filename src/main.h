@@ -20,69 +20,10 @@
 #include <time.h>
 
 #include "view.h"
+#include "text.h"
+#include "image.h"
 
 #define MAX_FRAMES_IN_FLIGHT 2
-
-#define FONT_ATLAS_SIZE 512
-#define MAX_TEXT_VERTICES 1024
-
-typedef struct GlyphInfo {
-    vec2 size;
-    vec2 bearing;
-    uint32_t advance;
-    vec2 uvMin;
-    vec2 uvMax;
-} GlyphInfo;
-
-typedef struct TextVertex {
-    vec3 pos;
-    vec2 texCoord;
-    vec3 color;
-} TextVertex;
-
-typedef struct BackgroundVertex {
-    vec2 pos;
-    vec4 color;
-    vec2 cornerRadius;  // x = radius, y = unused (for alignment)
-    vec2 rectSize;      // width and height of the rectangle
-    vec2 rectOrigin;    // top-left corner (minX, minY) of the rectangle
-} BackgroundVertex;
-
-typedef struct FontRenderer {
-    FT_Library ftLibrary;
-    FT_Face ftFace;
-
-    VkImage fontAtlasImage;
-    VkDeviceMemory fontAtlasMemory;
-    VkImageView fontAtlasView;
-    VkSampler fontAtlasSampler;
-
-    GlyphInfo glyphs[128];
-
-    float lineHeight;  // Font line height (ascender - descender)
-    float ascender;    // Distance from baseline to top
-    float descender;   // Distance from baseline to bottom (negative)
-
-    VkBuffer textVertexBuffer;
-    VkDeviceMemory textVertexBufferMemory;
-
-    VkDescriptorSetLayout textDescriptorSetLayout;
-    VkDescriptorPool textDescriptorPool;
-    VkDescriptorSet textDescriptorSets[MAX_FRAMES_IN_FLIGHT];
-
-    VkPipelineLayout textPipelineLayout;
-    VkPipeline textPipeline;
-
-    uint32_t textVertexCount;
-
-    VkBuffer backgroundVertexBuffer;
-    VkDeviceMemory backgroundVertexBufferMemory;
-
-    VkPipelineLayout backgroundPipelineLayout;
-    VkPipeline backgroundPipeline;
-
-    uint32_t backgroundVertexCount;
-} FontRenderer;
 
 typedef struct {
     vec3 pos;
@@ -177,7 +118,3 @@ typedef struct SiCompassApplication {
 
     FontRenderer* fontRenderer;
 } SiCompassApplication;
-
-void beginTextRendering(SiCompassApplication* app);
-void prepareBackgroundForText(SiCompassApplication* app, const char* text, float x, float y, float scale, vec4 bgColor, float cornerRadius, float padding);
-void prepareTextForRendering(SiCompassApplication* app, const char* text, float x, float y, float scale, vec3 color);
