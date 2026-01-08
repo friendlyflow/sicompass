@@ -89,3 +89,34 @@ void cleanupTextureResources(SiCompassApplication* app) {
     vkDestroyImage(app->device, app->textureImage, NULL);
     vkFreeMemory(app->device, app->textureImageMemory, NULL);
 }
+
+void drawImage(SiCompassApplication* app, VkCommandBuffer commandBuffer) {
+    // Draw image
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, app->graphicsPipeline);
+
+    VkViewport viewport = {0};
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = (float)app->swapChainExtent.width;
+    viewport.height = (float)app->swapChainExtent.height;
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+    vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+
+    VkRect2D scissor = {0};
+    scissor.offset = (VkOffset2D){0, 0};
+    scissor.extent = app->swapChainExtent;
+    vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
+    VkBuffer vertexBuffers[] = {app->vertexBuffer};
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+
+    vkCmdBindIndexBuffer(commandBuffer, app->indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+
+    extern const uint32_t indexCount;
+    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, app->pipelineLayout,
+                           0, 1, &app->descriptorSets[app->currentFrame], 0, NULL);
+
+    vkCmdDrawIndexed(commandBuffer, (uint32_t)indexCount, 1, 0, 0, 0);
+}

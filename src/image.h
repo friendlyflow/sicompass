@@ -10,3 +10,6 @@ void createTextureImage(SiCompassApplication* app);
 void createTextureImageView(SiCompassApplication* app);
 void createTextureSampler(SiCompassApplication* app);
 void cleanupTextureResources(SiCompassApplication* app);
+
+// Drawing
+void drawImage(SiCompassApplication* app, VkCommandBuffer commandBuffer);
