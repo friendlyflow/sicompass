@@ -6,10 +6,10 @@ EditorState* editorStateCreate(void) {
     EditorState *state = calloc(1, sizeof(EditorState));
     if (!state) return NULL;
 
-    // Initialize SFON array
-    state->sfonCapacity = 100;
-    state->sfon = calloc(state->sfonCapacity, sizeof(SfonElement*));
-    if (!state->sfon) {
+    // Initialize FFON array
+    state->ffonCapacity = 100;
+    state->ffon = calloc(state->ffonCapacity, sizeof(FfonElement*));
+    if (!state->ffon) {
         free(state);
         return NULL;
     }
@@ -18,7 +18,7 @@ EditorState* editorStateCreate(void) {
     state->inputBufferCapacity = 1024;
     state->inputBuffer = calloc(state->inputBufferCapacity, sizeof(char));
     if (!state->inputBuffer) {
-        free(state->sfon);
+        free(state->ffon);
         free(state);
         return NULL;
     }
@@ -27,7 +27,7 @@ EditorState* editorStateCreate(void) {
     state->undoHistory = calloc(UNDO_HISTORY_SIZE, sizeof(UndoEntry));
     if (!state->undoHistory) {
         free(state->inputBuffer);
-        free(state->sfon);
+        free(state->ffon);
         free(state);
         return NULL;
     }
@@ -46,11 +46,11 @@ EditorState* editorStateCreate(void) {
 void editorStateDestroy(EditorState *state) {
     if (!state) return;
 
-    // Free SFON elements
-    for (int i = 0; i < state->sfonCount; i++) {
-        sfonElementDestroy(state->sfon[i]);
+    // Free FFON elements
+    for (int i = 0; i < state->ffonCount; i++) {
+        ffonElementDestroy(state->ffon[i]);
     }
-    free(state->sfon);
+    free(state->ffon);
 
     // Free input buffer
     free(state->inputBuffer);
@@ -63,7 +63,7 @@ void editorStateDestroy(EditorState *state) {
 
     // Free clipboard
     if (state->clipboard) {
-        sfonElementDestroy(state->clipboard);
+        ffonElementDestroy(state->clipboard);
     }
 
     // Free list items
@@ -86,7 +86,7 @@ bool initSdl(EditorState *state) {
 
     // Create window
     state->window = SDL_CreateWindow(
-        "SFON Editor",
+        "FFON Editor",
         1280, 720,
         SDL_WINDOW_RESIZABLE
     );

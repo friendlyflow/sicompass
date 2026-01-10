@@ -2,11 +2,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-SfonElement* sfonElementCreateString(const char *str) {
-    SfonElement *elem = malloc(sizeof(SfonElement));
+FfonElement* ffonElementCreateString(const char *str) {
+    FfonElement *elem = malloc(sizeof(FfonElement));
     if (!elem) return NULL;
 
-    elem->type = SFON_STRING;
+    elem->type = FFON_STRING;
     elem->data.string = strdup(str ? str : "");
     if (!elem->data.string) {
         free(elem);
@@ -16,12 +16,12 @@ SfonElement* sfonElementCreateString(const char *str) {
     return elem;
 }
 
-SfonElement* sfonElementCreateObject(const char *key) {
-    SfonElement *elem = malloc(sizeof(SfonElement));
+FfonElement* ffonElementCreateObject(const char *key) {
+    FfonElement *elem = malloc(sizeof(FfonElement));
     if (!elem) return NULL;
 
-    elem->type = SFON_OBJECT;
-    elem->data.object = sfonObjectCreate(key);
+    elem->type = FFON_OBJECT;
+    elem->data.object = ffonObjectCreate(key);
     if (!elem->data.object) {
         free(elem);
         return NULL;
@@ -30,32 +30,32 @@ SfonElement* sfonElementCreateObject(const char *key) {
     return elem;
 }
 
-void sfonElementDestroy(SfonElement *elem) {
+void ffonElementDestroy(FfonElement *elem) {
     if (!elem) return;
 
-    if (elem->type == SFON_STRING) {
+    if (elem->type == FFON_STRING) {
         free(elem->data.string);
-    } else if (elem->type == SFON_OBJECT) {
-        sfonObjectDestroy(elem->data.object);
+    } else if (elem->type == FFON_OBJECT) {
+        ffonObjectDestroy(elem->data.object);
     }
 
     free(elem);
 }
 
-SfonElement* sfonElementClone(SfonElement *elem) {
+FfonElement* ffonElementClone(FfonElement *elem) {
     if (!elem) return NULL;
 
-    if (elem->type == SFON_STRING) {
-        return sfonElementCreateString(elem->data.string);
+    if (elem->type == FFON_STRING) {
+        return ffonElementCreateString(elem->data.string);
     } else {
-        SfonElement *newElem = sfonElementCreateObject(elem->data.object->key);
+        FfonElement *newElem = ffonElementCreateObject(elem->data.object->key);
         if (!newElem) return NULL;
 
         // Clone all child elements
         for (int i = 0; i < elem->data.object->count; i++) {
-            SfonElement *child = sfonElementClone(elem->data.object->elements[i]);
+            FfonElement *child = ffonElementClone(elem->data.object->elements[i]);
             if (child) {
-                sfonObjectAddElement(newElem->data.object, child);
+                ffonObjectAddElement(newElem->data.object, child);
             }
         }
 
@@ -63,8 +63,8 @@ SfonElement* sfonElementClone(SfonElement *elem) {
     }
 }
 
-SfonObject* sfonObjectCreate(const char *key) {
-    SfonObject *obj = malloc(sizeof(SfonObject));
+FfonObject* ffonObjectCreate(const char *key) {
+    FfonObject *obj = malloc(sizeof(FfonObject));
     if (!obj) return NULL;
 
     obj->key = strdup(key ? key : "");
@@ -75,7 +75,7 @@ SfonObject* sfonObjectCreate(const char *key) {
 
     obj->capacity = 10;
     obj->count = 0;
-    obj->elements = calloc(obj->capacity, sizeof(SfonElement*));
+    obj->elements = calloc(obj->capacity, sizeof(FfonElement*));
     if (!obj->elements) {
         free(obj->key);
         free(obj);
@@ -85,27 +85,27 @@ SfonObject* sfonObjectCreate(const char *key) {
     return obj;
 }
 
-void sfonObjectDestroy(SfonObject *obj) {
+void ffonObjectDestroy(FfonObject *obj) {
     if (!obj) return;
 
     free(obj->key);
 
     for (int i = 0; i < obj->count; i++) {
-        sfonElementDestroy(obj->elements[i]);
+        ffonElementDestroy(obj->elements[i]);
     }
     free(obj->elements);
 
     free(obj);
 }
 
-void sfonObjectAddElement(SfonObject *obj, SfonElement *elem) {
+void ffonObjectAddElement(FfonObject *obj, FfonElement *elem) {
     if (!obj || !elem) return;
 
     // Resize if needed
     if (obj->count >= obj->capacity) {
         int newCapacity = obj->capacity * 2;
-        SfonElement **newElements = realloc(obj->elements,
-                                             newCapacity * sizeof(SfonElement*));
+        FfonElement **newElements = realloc(obj->elements,
+                                             newCapacity * sizeof(FfonElement*));
         if (!newElements) return;
 
         obj->elements = newElements;
@@ -115,15 +115,15 @@ void sfonObjectAddElement(SfonObject *obj, SfonElement *elem) {
     obj->elements[obj->count++] = elem;
 }
 
-// Get SFON element(s) at a given ID path
-SfonElement** getSfonAtId(EditorState *state, const IdArray *id, int *outCount) {
+// Get FFON element(s) at a given ID path
+FfonElement** getFfonAtId(EditorState *state, const IdArray *id, int *outCount) {
     if (id->depth == 0) {
-        *outCount = state->sfonCount;
-        return state->sfon;
+        *outCount = state->ffonCount;
+        return state->ffon;
     }
 
-    SfonElement **current = state->sfon;
-    int currentCount = state->sfonCount;
+    FfonElement **current = state->ffon;
+    int currentCount = state->ffonCount;
 
     for (int i = 0; i < id->depth - 1; i++) {
         int idx = id->ids[i];
@@ -132,8 +132,8 @@ SfonElement** getSfonAtId(EditorState *state, const IdArray *id, int *outCount) 
             return NULL;
         }
 
-        SfonElement *elem = current[idx];
-        if (elem->type != SFON_OBJECT) {
+        FfonElement *elem = current[idx];
+        if (elem->type != FFON_OBJECT) {
             *outCount = 0;
             return NULL;
         }
@@ -150,18 +150,18 @@ bool nextLayerExists(EditorState *state) {
     if (state->previousId.depth == 0) return false;
 
     int count;
-    SfonElement **arr = getSfonAtId(state, &state->previousId, &count);
+    FfonElement **arr = getFfonAtId(state, &state->previousId, &count);
     if (!arr || count == 0) return false;
 
     int lastIdx = state->previousId.ids[state->previousId.depth - 1];
     if (lastIdx < 0 || lastIdx >= count) return false;
 
-    return arr[lastIdx]->type == SFON_OBJECT;
+    return arr[lastIdx]->type == FFON_OBJECT;
 }
 
 int getMaxIdInCurrent(EditorState *state) {
     int count;
-    SfonElement **arr = getSfonAtId(state, &state->currentId, &count);
+    FfonElement **arr = getFfonAtId(state, &state->currentId, &count);
     if (!arr || count == 0) return 0;
 
     return count - 1;

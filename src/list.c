@@ -28,7 +28,7 @@ void createListRight(EditorState *state) {
     if (state->currentCoordinate == COORDINATE_RIGHT_INFO) {
         // List all elements in current layer
         int count;
-        SfonElement **arr = getSfonAtId(state, &state->currentId, &count);
+        FfonElement **arr = getFfonAtId(state, &state->currentId, &count);
         if (!arr) return;
 
         state->totalListRight = calloc(count, sizeof(ListItem));
@@ -39,11 +39,11 @@ void createListRight(EditorState *state) {
         thisId.ids[thisId.depth - 1] = 0;
 
         for (int i = 0; i < count; i++) {
-            SfonElement *elem = arr[i];
+            FfonElement *elem = arr[i];
 
             idArrayCopy(&state->totalListRight[state->totalListCount].id, &thisId);
 
-            if (elem->type == SFON_STRING) {
+            if (elem->type == FFON_STRING) {
                 state->totalListRight[state->totalListCount].value =
                     strdup(elem->data.string);
             } else {
