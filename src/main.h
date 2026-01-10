@@ -27,6 +27,13 @@
 // Forward declarations
 typedef struct AppRenderer AppRenderer;
 
+typedef struct {
+    uint32_t graphicsFamily;
+    uint32_t presentFamily;
+    bool hasGraphicsFamily;
+    bool hasPresentFamily;
+} QueueFamilyIndices;
+
 typedef struct SiCompassApplication {
     SDL_Window* window;
 
