@@ -155,7 +155,7 @@ typedef struct AppRenderer {
 // Function declarations
 
 // Main entry point
-void startApp(SiCompassApplication* app);
+void mainLoop(SiCompassApplication* app);
 
 // Initialization and cleanup
 SiCompassApplication* appRendererCreate(SiCompassApplication* app);

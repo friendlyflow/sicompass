@@ -1003,8 +1003,8 @@ void initVulkan(SiCompassApplication* app) {
     createBackgroundPipeline(app);
 }
 
-void mainLoop(SiCompassApplication* app) {
-    startApp(app);
+void startApp(SiCompassApplication* app) {
+    mainLoop(app);
 
     vkDeviceWaitIdle(app->device);
 }
@@ -1059,7 +1059,7 @@ void cleanup(SiCompassApplication* app) {
 void run(SiCompassApplication* app) {
     initWindow(app);
     initVulkan(app);
-    mainLoop(app);
+    startApp(app);
     cleanup(app);
 }
 
