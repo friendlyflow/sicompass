@@ -1,6 +1,6 @@
 #include "view.h"
 
-void startApp(SiCompassApplication* app) {
+void mainLoop(SiCompassApplication* app) {
     // Initialize app renderer
     app = appRendererCreate(app);
     if (!app->appRenderer) {

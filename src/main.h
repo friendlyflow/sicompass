@@ -118,4 +118,5 @@ typedef struct SiCompassApplication {
 } SiCompassApplication;
 
 // Core application functions
+void startApp(SiCompassApplication* app);
 void drawFrame(SiCompassApplication* app);
