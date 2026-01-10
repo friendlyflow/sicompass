@@ -147,12 +147,12 @@ void handleI(EditorState *state) {
 
         // Get current line content
         int count;
-        SfonElement **arr = getSfonAtId(state, &state->currentId, &count);
+        FfonElement **arr = getFfonAtId(state, &state->currentId, &count);
         if (arr && count > 0) {
             int idx = state->currentId.ids[state->currentId.depth - 1];
             if (idx >= 0 && idx < count) {
-                SfonElement *elem = arr[idx];
-                if (elem->type == SFON_STRING) {
+                FfonElement *elem = arr[idx];
+                if (elem->type == FFON_STRING) {
                     strncpy(state->inputBuffer, elem->data.string,
                            state->inputBufferCapacity - 1);
                     state->inputBufferSize = strlen(state->inputBuffer);
@@ -178,12 +178,12 @@ void handleA(EditorState *state) {
 
         // Get current line content
         int count;
-        SfonElement **arr = getSfonAtId(state, &state->currentId, &count);
+        FfonElement **arr = getFfonAtId(state, &state->currentId, &count);
         if (arr && count > 0) {
             int idx = state->currentId.ids[state->currentId.depth - 1];
             if (idx >= 0 && idx < count) {
-                SfonElement *elem = arr[idx];
-                if (elem->type == SFON_STRING) {
+                FfonElement *elem = arr[idx];
+                if (elem->type == FFON_STRING) {
                     strncpy(state->inputBuffer, elem->data.string,
                            state->inputBufferCapacity - 1);
                     state->inputBufferSize = strlen(state->inputBuffer);

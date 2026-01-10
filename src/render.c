@@ -49,7 +49,7 @@ void renderText(EditorState *state, const char *text, int x, int y,
     SDL_DestroyTexture(texture);
 }
 
-void renderLine(EditorState *state, SfonElement *elem, const IdArray *id,
+void renderLine(EditorState *state, FfonElement *elem, const IdArray *id,
                 int indent, int *yPos) {
     if (*yPos < -state->fontHeight || *yPos > 720) {
         // Skip off-screen lines
@@ -60,7 +60,7 @@ void renderLine(EditorState *state, SfonElement *elem, const IdArray *id,
     int x = 50 + indent * INDENT_CHARS * state->charWidth;
     bool isCurrent = idArrayEqual(id, &state->currentId);
 
-    if (elem->type == SFON_STRING) {
+    if (elem->type == FFON_STRING) {
         uint32_t color = COLOR_TEXT;
         renderText(state, elem->data.string, x, *yPos, color, isCurrent);
     } else {
@@ -75,7 +75,7 @@ void renderLine(EditorState *state, SfonElement *elem, const IdArray *id,
     *yPos += state->fontHeight;
 
     // Recursively render children if object
-    if (elem->type == SFON_OBJECT) {
+    if (elem->type == FFON_OBJECT) {
         IdArray childId;
         idArrayCopy(&childId, id);
         idArrayPush(&childId, 0);
@@ -91,7 +91,7 @@ void renderLine(EditorState *state, SfonElement *elem, const IdArray *id,
 void renderLeftPanel(EditorState *state) {
     int yPos = 40; // Start below header
 
-    if (state->sfonCount == 0) {
+    if (state->ffonCount == 0) {
         renderText(state, "", 50, yPos, COLOR_TEXT, true);
         return;
     }
@@ -100,9 +100,9 @@ void renderLeftPanel(EditorState *state) {
     idArrayInit(&id);
     idArrayPush(&id, 0);
 
-    for (int i = 0; i < state->sfonCount; i++) {
+    for (int i = 0; i < state->ffonCount; i++) {
         id.ids[0] = i;
-        renderLine(state, state->sfon[i], &id, 0, &yPos);
+        renderLine(state, state->ffon[i], &id, 0, &yPos);
     }
 }
 

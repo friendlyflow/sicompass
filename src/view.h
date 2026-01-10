@@ -7,7 +7,7 @@
 // Constants
 #define MAX_ID_DEPTH 32
 #define MAX_LINE_LENGTH 4096
-#define MAX_SFON_ELEMENTS 10000
+#define MAX_FFON_ELEMENTS 10000
 #define UNDO_HISTORY_SIZE 500
 #define DELTA_MS 400
 #define INDENT_CHARS 4
@@ -64,21 +64,21 @@ typedef enum {
 
 // Forward declarations
 typedef struct SiCompassApplication SiCompassApplication;
-typedef struct SfonElement SfonElement;
-typedef struct SfonObject SfonObject;
+typedef struct FfonElement FfonElement;
+typedef struct FfonObject FfonObject;
 
-// SFON data structures
-struct SfonElement {
-    enum { SFON_STRING, SFON_OBJECT } type;
+// FFON data structures
+struct FfonElement {
+    enum { FFON_STRING, FFON_OBJECT } type;
     union {
         char *string;
-        SfonObject *object;
+        FfonObject *object;
     } data;
 };
 
-struct SfonObject {
+struct FfonObject {
     char *key;
-    SfonElement **elements;
+    FfonElement **elements;
     int count;
     int capacity;
 };
@@ -105,10 +105,10 @@ typedef struct {
 
 // Main application state
 typedef struct AppRenderer {
-    // SFON data
-    SfonElement **sfon;
-    int sfonCount;
-    int sfonCapacity;
+    // FFON data
+    FfonElement **ffon;
+    int ffonCount;
+    int ffonCapacity;
 
     // Current state
     IdArray currentId;
@@ -141,7 +141,7 @@ typedef struct AppRenderer {
     uint64_t lastKeypressTime;
 
     // Cut/copy/paste buffer
-    SfonElement *clipboard;
+    FfonElement *clipboard;
 
     // Flags
     bool running;
@@ -163,18 +163,18 @@ void editorStateDestroy(SiCompassApplication *state);
 bool initSdl(SiCompassApplication *state);
 void cleanupSdl(SiCompassApplication *state);
 
-// SFON operations
-SfonElement* sfonElementCreateString(const char *str);
-SfonElement* sfonElementCreateObject(const char *key);
-void sfonElementDestroy(SfonElement *elem);
-SfonElement* sfonElementClone(SfonElement *elem);
-SfonObject* sfonObjectCreate(const char *key);
-void sfonObjectDestroy(SfonObject *obj);
-void sfonObjectAddElement(SfonObject *obj, SfonElement *elem);
+// FFON operations
+FfonElement* ffonElementCreateString(const char *str);
+FfonElement* ffonElementCreateObject(const char *key);
+void ffonElementDestroy(FfonElement *elem);
+FfonElement* ffonElementClone(FfonElement *elem);
+FfonObject* ffonObjectCreate(const char *key);
+void ffonObjectDestroy(FfonObject *obj);
+void ffonObjectAddElement(FfonObject *obj, FfonElement *elem);
 
 // JSON loading
 bool loadJsonFile(SiCompassApplication *state, const char *filename);
-SfonElement* parseJsonValue(json_object *jobj);
+FfonElement* parseJsonValue(json_object *jobj);
 
 // ID array operations
 void idArrayInit(IdArray *arr);
@@ -187,13 +187,13 @@ char* idArrayToString(const IdArray *arr);
 // Navigation and state updates
 void updateState(SiCompassApplication *state, Task task, History history);
 void updateIds(SiCompassApplication *state, bool isKey, Task task, History history);
-void updateSfon(SiCompassApplication *state, const char *line, bool isKey, Task task, History history);
+void updateFfon(SiCompassApplication *state, const char *line, bool isKey, Task task, History history);
 void updateHistory(SiCompassApplication *state, Task task, bool isKey, const char *line, History history);
 
 // Navigation helpers
 bool nextLayerExists(SiCompassApplication *state);
 int getMaxIdInCurrent(SiCompassApplication *state);
-SfonElement** getSfonAtId(SiCompassApplication *state, const IdArray *id, int *outCount);
+FfonElement** getFfonAtId(SiCompassApplication *state, const IdArray *id, int *outCount);
 
 // Event handling
 void handleKeys(SiCompassApplication *state, SDL_Event *event);
@@ -226,7 +226,7 @@ void clearListRight(SiCompassApplication *state);
 void updateView(SiCompassApplication *state);
 void renderLeftPanel(SiCompassApplication *state);
 void renderRightPanel(SiCompassApplication *state);
-void renderLine(SiCompassApplication *state, SfonElement *elem, const IdArray *id, int indent, int *yPos);
+void renderLine(SiCompassApplication *state, FfonElement *elem, const IdArray *id, int indent, int *yPos);
 void renderText(SiCompassApplication *state, const char *text, int x, int y, uint32_t color, bool highlight);
 
 // Utility functions

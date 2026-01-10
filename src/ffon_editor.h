@@ -1,5 +1,5 @@
-#ifndef SFON_EDITOR_H
-#define SFON_EDITOR_H
+#ifndef FFON_EDITOR_H
+#define FFON_EDITOR_H
 
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
@@ -11,7 +11,7 @@
 // Constants
 #define MAX_ID_DEPTH 32
 #define MAX_LINE_LENGTH 4096
-#define MAX_SFON_ELEMENTS 10000
+#define MAX_FFON_ELEMENTS 10000
 #define UNDO_HISTORY_SIZE 500
 #define DELTA_MS 400
 #define INDENT_CHARS 4
@@ -67,21 +67,21 @@ typedef enum {
 } Command;
 
 // Forward declarations
-typedef struct SfonElement SfonElement;
-typedef struct SfonObject SfonObject;
+typedef struct FfonElement FfonElement;
+typedef struct FfonObject FfonObject;
 
-// SFON data structures
-struct SfonElement {
-    enum { SFON_STRING, SFON_OBJECT } type;
+// FFON data structures
+struct FfonElement {
+    enum { FFON_STRING, FFON_OBJECT } type;
     union {
         char *string;
-        SfonObject *object;
+        FfonObject *object;
     } data;
 };
 
-struct SfonObject {
+struct FfonObject {
     char *key;
-    SfonElement **elements;
+    FfonElement **elements;
     int count;
     int capacity;
 };
@@ -115,10 +115,10 @@ typedef struct {
     int fontHeight;
     int charWidth;
 
-    // SFON data
-    SfonElement **sfon;
-    int sfonCount;
-    int sfonCapacity;
+    // FFON data
+    FfonElement **ffon;
+    int ffonCount;
+    int ffonCapacity;
 
     // Current state
     IdArray currentId;
@@ -151,7 +151,7 @@ typedef struct {
     uint64_t lastKeypressTime;
 
     // Cut/copy/paste buffer
-    SfonElement *clipboard;
+    FfonElement *clipboard;
 
     // Flags
     bool running;
@@ -170,18 +170,18 @@ void editorStateDestroy(EditorState *state);
 bool initSdl(EditorState *state);
 void cleanupSdl(EditorState *state);
 
-// SFON operations
-SfonElement* sfonElementCreateString(const char *str);
-SfonElement* sfonElementCreateObject(const char *key);
-void sfonElementDestroy(SfonElement *elem);
-SfonElement* sfonElementClone(SfonElement *elem);
-SfonObject* sfonObjectCreate(const char *key);
-void sfonObjectDestroy(SfonObject *obj);
-void sfonObjectAddElement(SfonObject *obj, SfonElement *elem);
+// FFON operations
+FfonElement* ffonElementCreateString(const char *str);
+FfonElement* ffonElementCreateObject(const char *key);
+void ffonElementDestroy(FfonElement *elem);
+FfonElement* ffonElementClone(FfonElement *elem);
+FfonObject* ffonObjectCreate(const char *key);
+void ffonObjectDestroy(FfonObject *obj);
+void ffonObjectAddElement(FfonObject *obj, FfonElement *elem);
 
 // JSON loading
 bool loadJsonFile(EditorState *state, const char *filename);
-SfonElement* parseJsonValue(json_object *jobj);
+FfonElement* parseJsonValue(json_object *jobj);
 
 // ID array operations
 void idArrayInit(IdArray *arr);
@@ -194,13 +194,13 @@ char* idArrayToString(const IdArray *arr);
 // Navigation and state updates
 void updateState(EditorState *state, Task task, History history);
 void updateIds(EditorState *state, bool isKey, Task task, History history);
-void updateSfon(EditorState *state, const char *line, bool isKey, Task task, History history);
+void updateFfon(EditorState *state, const char *line, bool isKey, Task task, History history);
 void updateHistory(EditorState *state, Task task, bool isKey, const char *line, History history);
 
 // Navigation helpers
 bool nextLayerExists(EditorState *state);
 int getMaxIdInCurrent(EditorState *state);
-SfonElement** getSfonAtId(EditorState *state, const IdArray *id, int *outCount);
+FfonElement** getFfonAtId(EditorState *state, const IdArray *id, int *outCount);
 
 // Event handling
 void handleKeys(EditorState *state, SDL_Event *event);
@@ -233,7 +233,7 @@ void clearListRight(EditorState *state);
 void updateView(EditorState *state);
 void renderLeftPanel(EditorState *state);
 void renderRightPanel(EditorState *state);
-void renderLine(EditorState *state, SfonElement *elem, const IdArray *id, int indent, int *yPos);
+void renderLine(EditorState *state, FfonElement *elem, const IdArray *id, int indent, int *yPos);
 void renderText(EditorState *state, const char *text, int x, int y, uint32_t color, bool highlight);
 
 // Utility functions
@@ -243,4 +243,4 @@ bool isLineKey(const char *line);
 char* escapeHtmlToText(const char *html);
 void setErrorMessage(EditorState *state, const char *message);
 
-#endif // SFON_EDITOR_H
+#endif // FFON_EDITOR_H

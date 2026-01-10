@@ -18,12 +18,12 @@ void updateState(EditorState *state, Task task, History history) {
             strncpy(line, state->inputBuffer, MAX_LINE_LENGTH - 1);
         } else {
             int count;
-            SfonElement **arr = getSfonAtId(state, &state->currentId, &count);
+            FfonElement **arr = getFfonAtId(state, &state->currentId, &count);
             if (arr && count > 0) {
                 int idx = state->currentId.ids[state->currentId.depth - 1];
                 if (idx >= 0 && idx < count) {
-                    SfonElement *elem = arr[idx];
-                    if (elem->type == SFON_STRING) {
+                    FfonElement *elem = arr[idx];
+                    if (elem->type == FFON_STRING) {
                         strncpy(line, elem->data.string, MAX_LINE_LENGTH - 1);
                     } else {
                         strncpy(line, elem->data.object->key, MAX_LINE_LENGTH - 1);
@@ -35,7 +35,7 @@ void updateState(EditorState *state, Task task, History history) {
 
     bool isKey = isLineKey(line);
     updateIds(state, isKey, task, history);
-    updateSfon(state, line, isKey, task, history);
+    updateFfon(state, line, isKey, task, history);
     updateHistory(state, task, isKey, line, history);
 }
 
@@ -108,7 +108,7 @@ void updateIds(EditorState *state, bool isKey, Task task, History history) {
             break;
 
         case TASK_DELETE:
-            // Position handled in updateSfon
+            // Position handled in updateFfon
             break;
 
         case TASK_INPUT:
@@ -120,25 +120,25 @@ void updateIds(EditorState *state, bool isKey, Task task, History history) {
     }
 }
 
-void updateSfon(EditorState *state, const char *line, bool isKey, Task task, History history) {
+void updateFfon(EditorState *state, const char *line, bool isKey, Task task, History history) {
     if (state->currentId.depth == 0) return;
 
     // Navigate to parent array
     int count;
-    SfonElement **arr = getSfonAtId(state, &state->currentId, &count);
+    FfonElement **arr = getFfonAtId(state, &state->currentId, &count);
     if (!arr) return;
 
     int idx = state->currentId.ids[state->currentId.depth - 1];
 
     // Get parent object if we're nested
-    SfonObject *parentObj = NULL;
+    FfonObject *parentObj = NULL;
     if (state->currentId.depth > 1) {
-        SfonElement **parentArr = getSfonAtId(state, &state->currentId, &count);
+        FfonElement **parentArr = getFfonAtId(state, &state->currentId, &count);
         if (parentArr) {
             int parentIdx = state->currentId.ids[state->currentId.depth - 2];
             if (parentIdx >= 0 && parentIdx < count) {
-                SfonElement *parentElem = parentArr[parentIdx];
-                if (parentElem && parentElem->type == SFON_OBJECT) {
+                FfonElement *parentElem = parentArr[parentIdx];
+                if (parentElem && parentElem->type == FFON_OBJECT) {
                     parentObj = parentElem->data.object;
                 }
             }
@@ -152,24 +152,24 @@ void updateSfon(EditorState *state, const char *line, bool isKey, Task task, His
         case TASK_INSERT_INSERT: {
             if (isKey) {
                 // Convert to object or update key
-                if (idx >= 0 && idx < count && arr[idx]->type == SFON_OBJECT) {
+                if (idx >= 0 && idx < count && arr[idx]->type == FFON_OBJECT) {
                     // Update key
                     free(arr[idx]->data.object->key);
                     arr[idx]->data.object->key = strdup(line);
                 } else {
                     // Convert string to object
-                    SfonElement *newElem = sfonElementCreateObject(line);
+                    FfonElement *newElem = ffonElementCreateObject(line);
                     if (newElem) {
-                        sfonObjectAddElement(newElem->data.object,
-                                               sfonElementCreateString(""));
+                        ffonObjectAddElement(newElem->data.object,
+                                               ffonElementCreateString(""));
 
                         if (parentObj) {
                             // Insert in parent object
                             if (history != HISTORY_REDO) {
-                                sfonObjectAddElement(parentObj, sfonElementCreateString(""));
+                                ffonObjectAddElement(parentObj, ffonElementCreateString(""));
                             }
                             if (idx >= 0 && idx < parentObj->count) {
-                                sfonElementDestroy(parentObj->elements[idx]);
+                                ffonElementDestroy(parentObj->elements[idx]);
                                 parentObj->elements[idx] = newElem;
                             }
                         }
@@ -179,11 +179,11 @@ void updateSfon(EditorState *state, const char *line, bool isKey, Task task, His
                 // Update or insert string element
                 if (parentObj) {
                     if (idx >= 0 && idx < parentObj->count) {
-                        sfonElementDestroy(parentObj->elements[idx]);
-                        parentObj->elements[idx] = sfonElementCreateString(line);
+                        ffonElementDestroy(parentObj->elements[idx]);
+                        parentObj->elements[idx] = ffonElementCreateString(line);
                     }
                     if (history != HISTORY_REDO) {
-                        sfonObjectAddElement(parentObj, sfonElementCreateString(""));
+                        ffonObjectAddElement(parentObj, ffonElementCreateString(""));
                     }
                 }
             }
@@ -193,7 +193,7 @@ void updateSfon(EditorState *state, const char *line, bool isKey, Task task, His
         case TASK_DELETE: {
             if (parentObj && idx >= 0 && idx < parentObj->count) {
                 // Remove element
-                sfonElementDestroy(parentObj->elements[idx]);
+                ffonElementDestroy(parentObj->elements[idx]);
 
                 // Shift elements down
                 for (int i = idx; i < parentObj->count - 1; i++) {
@@ -208,7 +208,7 @@ void updateSfon(EditorState *state, const char *line, bool isKey, Task task, His
 
                 // If empty, add one empty element
                 if (parentObj->count == 0) {
-                    sfonObjectAddElement(parentObj, sfonElementCreateString(""));
+                    ffonObjectAddElement(parentObj, ffonElementCreateString(""));
                 }
             }
             break;
@@ -221,10 +221,10 @@ void updateSfon(EditorState *state, const char *line, bool isKey, Task task, His
         case TASK_J_ARROW_DOWN: {
             // Update current element with line content
             if (idx >= 0 && idx < count) {
-                if (arr[idx]->type == SFON_STRING) {
+                if (arr[idx]->type == FFON_STRING) {
                     free(arr[idx]->data.string);
                     arr[idx]->data.string = strdup(line);
-                } else if (arr[idx]->type == SFON_OBJECT) {
+                } else if (arr[idx]->type == FFON_OBJECT) {
                     free(arr[idx]->data.object->key);
                     arr[idx]->data.object->key = strdup(line);
                 }
@@ -271,13 +271,13 @@ void handleHistoryAction(EditorState *state, History history) {
     if (history == HISTORY_UNDO) {
         // Save current state before undo
         int count;
-        SfonElement **arr = getSfonAtId(state, &state->currentId, &count);
+        FfonElement **arr = getFfonAtId(state, &state->currentId, &count);
         if (arr && count > 0) {
             int idx = state->currentId.ids[state->currentId.depth - 1];
             if (idx >= 0 && idx < count) {
-                SfonElement *elem = arr[idx];
+                FfonElement *elem = arr[idx];
                 char line[MAX_LINE_LENGTH] = "";
-                if (elem->type == SFON_STRING) {
+                if (elem->type == FFON_STRING) {
                     strncpy(line, elem->data.string, MAX_LINE_LENGTH - 1);
                 } else {
                     strncpy(line, elem->data.object->key, MAX_LINE_LENGTH - 1);
@@ -285,7 +285,7 @@ void handleHistoryAction(EditorState *state, History history) {
 
                 bool isKey = isLineKey(line);
                 updateIds(state, isKey, TASK_NONE, HISTORY_NONE);
-                updateSfon(state, line, isKey, TASK_NONE, HISTORY_NONE);
+                updateFfon(state, line, isKey, TASK_NONE, HISTORY_NONE);
             }
         }
 
@@ -350,7 +350,7 @@ void handleHistoryAction(EditorState *state, History history) {
 
 void handleCcp(EditorState *state, Task task) {
     int count;
-    SfonElement **arr = getSfonAtId(state, &state->currentId, &count);
+    FfonElement **arr = getFfonAtId(state, &state->currentId, &count);
     if (!arr || count == 0) return;
 
     int idx = state->currentId.ids[state->currentId.depth - 1];
@@ -359,41 +359,41 @@ void handleCcp(EditorState *state, Task task) {
     if (task == TASK_PASTE) {
         if (state->clipboard) {
             // Insert clipboard content
-            SfonElement *newElem = sfonElementClone(state->clipboard);
+            FfonElement *newElem = ffonElementClone(state->clipboard);
             if (newElem) {
                 // Add to parent
-                SfonObject *parentObj = NULL;
+                FfonObject *parentObj = NULL;
                 if (state->currentId.depth > 1) {
                     int parentCount;
-                    SfonElement **parentArr = getSfonAtId(state, &state->currentId, &parentCount);
+                    FfonElement **parentArr = getFfonAtId(state, &state->currentId, &parentCount);
                     if (parentArr) {
                         int parentIdx = state->currentId.ids[state->currentId.depth - 2];
                         if (parentIdx >= 0 && parentIdx < parentCount &&
-                            parentArr[parentIdx]->type == SFON_OBJECT) {
+                            parentArr[parentIdx]->type == FFON_OBJECT) {
                             parentObj = parentArr[parentIdx]->data.object;
                         }
                     }
                 }
 
                 if (parentObj) {
-                    sfonObjectAddElement(parentObj, newElem);
+                    ffonObjectAddElement(parentObj, newElem);
                     updateHistory(state, TASK_PASTE, false, "", HISTORY_NONE);
                 }
             }
         }
     } else {
         // Copy or cut
-        SfonElement *elem = arr[idx];
+        FfonElement *elem = arr[idx];
 
         if (state->clipboard) {
-            sfonElementDestroy(state->clipboard);
+            ffonElementDestroy(state->clipboard);
         }
 
-        if (elem->type == SFON_OBJECT && !nextLayerExists(state)) {
+        if (elem->type == FFON_OBJECT && !nextLayerExists(state)) {
             // Copy the object's contents
-            state->clipboard = sfonElementClone(elem);
+            state->clipboard = ffonElementClone(elem);
         } else {
-            state->clipboard = sfonElementClone(elem);
+            state->clipboard = ffonElementClone(elem);
         }
 
         if (task == TASK_CUT) {
