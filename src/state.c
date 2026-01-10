@@ -2,45 +2,46 @@
 #include <stdlib.h>
 #include <string.h>
 
-AppRenderer* appRendererCreate(void) {
-    AppRenderer *appRenderer = calloc(1, sizeof(AppRenderer));
-    if (!appRenderer) return NULL;
+SiCompassApplication* appRendererCreate(void) {
+    // TODO dat was hier AppRenderer!!! misschien niet goed nu!
+    SiCompassApplication *app = calloc(1, sizeof(SiCompassApplication));
+    if (!app) return NULL;
 
     // Initialize FFON array
-    appRenderer->ffonCapacity = 100;
-    appRenderer->ffon = calloc(appRenderer->ffonCapacity, sizeof(FfonElement*));
-    if (!appRenderer->ffon) {
-        free(appRenderer);
+    app->appRenderer->ffonCapacity = 100;
+    app->appRenderer->ffon = calloc(app->appRenderer->ffonCapacity, sizeof(FfonElement*));
+    if (!app->appRenderer->ffon) {
+        free(app->appRenderer);
         return NULL;
     }
 
     // Initialize input buffer
-    appRenderer->inputBufferCapacity = 1024;
-    appRenderer->inputBuffer = calloc(appRenderer->inputBufferCapacity, sizeof(char));
-    if (!appRenderer->inputBuffer) {
-        free(appRenderer->ffon);
-        free(appRenderer);
+    app->appRenderer->inputBufferCapacity = 1024;
+    app->appRenderer->inputBuffer = calloc(app->appRenderer->inputBufferCapacity, sizeof(char));
+    if (!app->appRenderer->inputBuffer) {
+        free(app->appRenderer->ffon);
+        free(app->appRenderer);
         return NULL;
     }
 
     // Initialize undo history
-    appRenderer->undoHistory = calloc(UNDO_HISTORY_SIZE, sizeof(UndoEntry));
-    if (!appRenderer->undoHistory) {
-        free(appRenderer->inputBuffer);
-        free(appRenderer->ffon);
-        free(appRenderer);
+    app->appRenderer->undoHistory = calloc(UNDO_HISTORY_SIZE, sizeof(UndoEntry));
+    if (!app->appRenderer->undoHistory) {
+        free(app->appRenderer->inputBuffer);
+        free(app->appRenderer->ffon);
+        free(app->appRenderer);
         return NULL;
     }
 
     // Initialize ID arrays
-    idArrayInit(&appRenderer->currentId);
-    idArrayInit(&appRenderer->previousId);
-    idArrayInit(&appRenderer->currentInsertId);
+    idArrayInit(&app->appRenderer->currentId);
+    idArrayInit(&app->appRenderer->previousId);
+    idArrayInit(&app->appRenderer->currentInsertId);
 
-    appRenderer->running = true;
-    appRenderer->needsRedraw = true;
+    app->appRenderer->running = true;
+    app->appRenderer->needsRedraw = true;
 
-    return appRenderer;
+    return app;
 }
 
 void appRendererDestroy(AppRenderer *appRenderer) {
@@ -70,103 +71,6 @@ void appRendererDestroy(AppRenderer *appRenderer) {
     clearListRight(appRenderer);
 
     free(appRenderer);
-}
-
-bool initSdl(AppRenderer *appRenderer) {
-    if (!SDL_Init(SDL_INIT_VIDEO)) {
-        fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
-        return false;
-    }
-
-    if (!TTF_Init()) {
-        fprintf(stderr, "TTF_Init failed: %s\n", SDL_GetError());
-        SDL_Quit();
-        return false;
-    }
-
-    // Create window
-    appRenderer->window = SDL_CreateWindow(
-        "FFON Editor",
-        1280, 720,
-        SDL_WINDOW_RESIZABLE
-    );
-    if (!appRenderer->window) {
-        fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
-        TTF_Quit();
-        SDL_Quit();
-        return false;
-    }
-
-    // Create renderer
-    appRenderer->renderer = SDL_CreateRenderer(appRenderer->window, NULL);
-    if (!appRenderer->renderer) {
-        fprintf(stderr, "SDL_CreateRenderer failed: %s\n", SDL_GetError());
-        SDL_DestroyWindow(appRenderer->window);
-        TTF_Quit();
-        SDL_Quit();
-        return false;
-    }
-
-    // Load font (try common monospace fonts)
-    const char *fontPaths[] = {
-        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-        "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
-        "/System/Library/Fonts/Monaco.dfont",
-        "C:\\Windows\\Fonts\\consola.ttf",
-        NULL
-    };
-
-    int fontSize = 16;
-    for (int i = 0; fontPaths[i] != NULL; i++) {
-        appRenderer->font = TTF_OpenFont(fontPaths[i], fontSize);
-        if (appRenderer->font) break;
-    }
-
-    if (!appRenderer->font) {
-        fprintf(stderr, "Failed to load font\n");
-        SDL_DestroyRenderer(appRenderer->renderer);
-        SDL_DestroyWindow(appRenderer->window);
-        TTF_Quit();
-        SDL_Quit();
-        return false;
-    }
-
-    // Get font metrics
-    appRenderer->fontHeight = TTF_GetFontHeight(appRenderer->font);
-
-    // Measure character width (use 'M' as it's typically the widest)
-    int w, h;
-    if (TTF_GetStringSize(appRenderer->font, "M", 0, &w, &h)) {
-        appRenderer->charWidth = w;
-    } else {
-        appRenderer->charWidth = fontSize / 2; // fallback
-    }
-
-    // Enable text input
-    SDL_StartTextInput(appRenderer->window);
-
-    return true;
-}
-
-void cleanupSdl(AppRenderer *appRenderer) {
-    if (!appRenderer) return;
-
-    SDL_StopTextInput(appRenderer->window);
-
-    if (appRenderer->font) {
-        TTF_CloseFont(appRenderer->font);
-    }
-
-    if (appRenderer->renderer) {
-        SDL_DestroyRenderer(appRenderer->renderer);
-    }
-
-    if (appRenderer->window) {
-        SDL_DestroyWindow(appRenderer->window);
-    }
-
-    TTF_Quit();
-    SDL_Quit();
 }
 
 void idArrayInit(IdArray *arr) {
