@@ -25,18 +25,6 @@
 
 #define MAX_FRAMES_IN_FLIGHT 2
 
-typedef struct {
-    vec3 pos;
-    vec3 color;
-    vec2 texCoord;
-} Vertex;
-
-// if it doesn't work:
-// typedef struct {
-//     vec3 pos;
-//     vec3 color;
-//     vec2 texCoord;
-// } Vertex;
 
 typedef struct SiCompassApplication {
     SDL_Window* window;
@@ -118,3 +106,6 @@ typedef struct SiCompassApplication {
 
     FontRenderer* fontRenderer;
 } SiCompassApplication;
+
+// Core application functions
+void drawFrame(SiCompassApplication* app);

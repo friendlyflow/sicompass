@@ -152,7 +152,7 @@ typedef struct AppRenderer {
 
 // Function declarations
 
-// Main entry point 
+// Main entry point
 void updateView(SiCompassApplication* app);
 
 // Initialization and cleanup

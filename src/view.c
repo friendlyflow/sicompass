@@ -4,10 +4,10 @@ void updateView(SiCompassApplication* app) {
     while (app->running) {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
-            if (event->type == SDL_EVENT_QUIT) {
+            if (event.type == SDL_EVENT_QUIT) {
                 app->running = false;
             }
-            else if (event->type == SDL_EVENT_WINDOW_RESIZED) {
+            else if (event.type == SDL_EVENT_WINDOW_RESIZED) {
                 app->framebufferResized = true;
             }
 
