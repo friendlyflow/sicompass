@@ -2,77 +2,77 @@
 #include <stdlib.h>
 #include <string.h>
 
-EditorState* editorStateCreate(void) {
-    EditorState *state = calloc(1, sizeof(EditorState));
-    if (!state) return NULL;
+AppRenderer* appRendererCreate(void) {
+    AppRenderer *appRenderer = calloc(1, sizeof(AppRenderer));
+    if (!appRenderer) return NULL;
 
     // Initialize FFON array
-    state->ffonCapacity = 100;
-    state->ffon = calloc(state->ffonCapacity, sizeof(FfonElement*));
-    if (!state->ffon) {
-        free(state);
+    appRenderer->ffonCapacity = 100;
+    appRenderer->ffon = calloc(appRenderer->ffonCapacity, sizeof(FfonElement*));
+    if (!appRenderer->ffon) {
+        free(appRenderer);
         return NULL;
     }
 
     // Initialize input buffer
-    state->inputBufferCapacity = 1024;
-    state->inputBuffer = calloc(state->inputBufferCapacity, sizeof(char));
-    if (!state->inputBuffer) {
-        free(state->ffon);
-        free(state);
+    appRenderer->inputBufferCapacity = 1024;
+    appRenderer->inputBuffer = calloc(appRenderer->inputBufferCapacity, sizeof(char));
+    if (!appRenderer->inputBuffer) {
+        free(appRenderer->ffon);
+        free(appRenderer);
         return NULL;
     }
 
     // Initialize undo history
-    state->undoHistory = calloc(UNDO_HISTORY_SIZE, sizeof(UndoEntry));
-    if (!state->undoHistory) {
-        free(state->inputBuffer);
-        free(state->ffon);
-        free(state);
+    appRenderer->undoHistory = calloc(UNDO_HISTORY_SIZE, sizeof(UndoEntry));
+    if (!appRenderer->undoHistory) {
+        free(appRenderer->inputBuffer);
+        free(appRenderer->ffon);
+        free(appRenderer);
         return NULL;
     }
 
     // Initialize ID arrays
-    idArrayInit(&state->currentId);
-    idArrayInit(&state->previousId);
-    idArrayInit(&state->currentInsertId);
+    idArrayInit(&appRenderer->currentId);
+    idArrayInit(&appRenderer->previousId);
+    idArrayInit(&appRenderer->currentInsertId);
 
-    state->running = true;
-    state->needsRedraw = true;
+    appRenderer->running = true;
+    appRenderer->needsRedraw = true;
 
-    return state;
+    return appRenderer;
 }
 
-void editorStateDestroy(EditorState *state) {
-    if (!state) return;
+void appRendererDestroy(AppRenderer *appRenderer) {
+    if (!appRenderer) return;
 
     // Free FFON elements
-    for (int i = 0; i < state->ffonCount; i++) {
-        ffonElementDestroy(state->ffon[i]);
+    for (int i = 0; i < appRenderer->ffonCount; i++) {
+        ffonElementDestroy(appRenderer->ffon[i]);
     }
-    free(state->ffon);
+    free(appRenderer->ffon);
 
     // Free input buffer
-    free(state->inputBuffer);
+    free(appRenderer->inputBuffer);
 
     // Free undo history
-    for (int i = 0; i < state->undoHistoryCount; i++) {
-        free(state->undoHistory[i].line);
+    for (int i = 0; i < appRenderer->undoHistoryCount; i++) {
+        free(appRenderer->undoHistory[i].line);
     }
-    free(state->undoHistory);
+    free(appRenderer->undoHistory);
 
     // Free clipboard
-    if (state->clipboard) {
-        ffonElementDestroy(state->clipboard);
+    if (appRenderer->clipboard) {
+        ffonElementDestroy(appRenderer->clipboard);
     }
 
     // Free list items
-    clearListRight(state);
+    clearListRight(appRenderer);
 
-    free(state);
+    free(appRenderer);
 }
 
-bool initSdl(EditorState *state) {
+bool initSdl(AppRenderer *appRenderer) {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
         return false;
@@ -85,12 +85,12 @@ bool initSdl(EditorState *state) {
     }
 
     // Create window
-    state->window = SDL_CreateWindow(
+    appRenderer->window = SDL_CreateWindow(
         "FFON Editor",
         1280, 720,
         SDL_WINDOW_RESIZABLE
     );
-    if (!state->window) {
+    if (!appRenderer->window) {
         fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
         TTF_Quit();
         SDL_Quit();
@@ -98,10 +98,10 @@ bool initSdl(EditorState *state) {
     }
 
     // Create renderer
-    state->renderer = SDL_CreateRenderer(state->window, NULL);
-    if (!state->renderer) {
+    appRenderer->renderer = SDL_CreateRenderer(appRenderer->window, NULL);
+    if (!appRenderer->renderer) {
         fprintf(stderr, "SDL_CreateRenderer failed: %s\n", SDL_GetError());
-        SDL_DestroyWindow(state->window);
+        SDL_DestroyWindow(appRenderer->window);
         TTF_Quit();
         SDL_Quit();
         return false;
@@ -118,51 +118,51 @@ bool initSdl(EditorState *state) {
 
     int fontSize = 16;
     for (int i = 0; fontPaths[i] != NULL; i++) {
-        state->font = TTF_OpenFont(fontPaths[i], fontSize);
-        if (state->font) break;
+        appRenderer->font = TTF_OpenFont(fontPaths[i], fontSize);
+        if (appRenderer->font) break;
     }
 
-    if (!state->font) {
+    if (!appRenderer->font) {
         fprintf(stderr, "Failed to load font\n");
-        SDL_DestroyRenderer(state->renderer);
-        SDL_DestroyWindow(state->window);
+        SDL_DestroyRenderer(appRenderer->renderer);
+        SDL_DestroyWindow(appRenderer->window);
         TTF_Quit();
         SDL_Quit();
         return false;
     }
 
     // Get font metrics
-    state->fontHeight = TTF_GetFontHeight(state->font);
+    appRenderer->fontHeight = TTF_GetFontHeight(appRenderer->font);
 
     // Measure character width (use 'M' as it's typically the widest)
     int w, h;
-    if (TTF_GetStringSize(state->font, "M", 0, &w, &h)) {
-        state->charWidth = w;
+    if (TTF_GetStringSize(appRenderer->font, "M", 0, &w, &h)) {
+        appRenderer->charWidth = w;
     } else {
-        state->charWidth = fontSize / 2; // fallback
+        appRenderer->charWidth = fontSize / 2; // fallback
     }
 
     // Enable text input
-    SDL_StartTextInput(state->window);
+    SDL_StartTextInput(appRenderer->window);
 
     return true;
 }
 
-void cleanupSdl(EditorState *state) {
-    if (!state) return;
+void cleanupSdl(AppRenderer *appRenderer) {
+    if (!appRenderer) return;
 
-    SDL_StopTextInput(state->window);
+    SDL_StopTextInput(appRenderer->window);
 
-    if (state->font) {
-        TTF_CloseFont(state->font);
+    if (appRenderer->font) {
+        TTF_CloseFont(appRenderer->font);
     }
 
-    if (state->renderer) {
-        SDL_DestroyRenderer(state->renderer);
+    if (appRenderer->renderer) {
+        SDL_DestroyRenderer(appRenderer->renderer);
     }
 
-    if (state->window) {
-        SDL_DestroyWindow(state->window);
+    if (appRenderer->window) {
+        SDL_DestroyWindow(appRenderer->window);
     }
 
     TTF_Quit();
@@ -252,6 +252,6 @@ bool isLineKey(const char *line) {
     return len > 0 && line[len - 1] == ':';
 }
 
-void setErrorMessage(EditorState *state, const char *message) {
-    snprintf(state->errorMessage, sizeof(state->errorMessage), "%s", message);
+void setErrorMessage(AppRenderer *appRenderer, const char *message) {
+    snprintf(appRenderer->errorMessage, sizeof(appRenderer->errorMessage), "%s", message);
 }

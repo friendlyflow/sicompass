@@ -116,14 +116,14 @@ void ffonObjectAddElement(FfonObject *obj, FfonElement *elem) {
 }
 
 // Get FFON element(s) at a given ID path
-FfonElement** getFfonAtId(EditorState *state, const IdArray *id, int *outCount) {
+FfonElement** getFfonAtId(AppRenderer *appRenderer, const IdArray *id, int *outCount) {
     if (id->depth == 0) {
-        *outCount = state->ffonCount;
-        return state->ffon;
+        *outCount = appRenderer->ffonCount;
+        return appRenderer->ffon;
     }
 
-    FfonElement **current = state->ffon;
-    int currentCount = state->ffonCount;
+    FfonElement **current = appRenderer->ffon;
+    int currentCount = appRenderer->ffonCount;
 
     for (int i = 0; i < id->depth - 1; i++) {
         int idx = id->ids[i];
@@ -146,22 +146,22 @@ FfonElement** getFfonAtId(EditorState *state, const IdArray *id, int *outCount) 
     return current;
 }
 
-bool nextLayerExists(EditorState *state) {
-    if (state->previousId.depth == 0) return false;
+bool nextLayerExists(AppRenderer *appRenderer) {
+    if (appRenderer->previousId.depth == 0) return false;
 
     int count;
-    FfonElement **arr = getFfonAtId(state, &state->previousId, &count);
+    FfonElement **arr = getFfonAtId(appRenderer, &appRenderer->previousId, &count);
     if (!arr || count == 0) return false;
 
-    int lastIdx = state->previousId.ids[state->previousId.depth - 1];
+    int lastIdx = appRenderer->previousId.ids[appRenderer->previousId.depth - 1];
     if (lastIdx < 0 || lastIdx >= count) return false;
 
     return arr[lastIdx]->type == FFON_OBJECT;
 }
 
-int getMaxIdInCurrent(EditorState *state) {
+int getMaxIdInCurrent(AppRenderer *appRenderer) {
     int count;
-    FfonElement **arr = getFfonAtId(state, &state->currentId, &count);
+    FfonElement **arr = getFfonAtId(appRenderer, &appRenderer->currentId, &count);
     if (!arr || count == 0) return 0;
 
     return count - 1;

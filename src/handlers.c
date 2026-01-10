@@ -2,244 +2,244 @@
 #include <string.h>
 #include <SDL3/SDL.h>
 
-void handleTab(EditorState *state) {
-    state->previousCoordinate = state->currentCoordinate;
-    state->currentCoordinate = COORDINATE_RIGHT_INFO;
+void handleTab(AppRenderer *appRenderer) {
+    appRenderer->previousCoordinate = appRenderer->currentCoordinate;
+    appRenderer->currentCoordinate = COORDINATE_RIGHT_INFO;
 
-    createListRight(state);
-    state->needsRedraw = true;
+    createListRight(appRenderer);
+    appRenderer->needsRedraw = true;
 }
 
-void handleCtrlA(EditorState *state, History history) {
+void handleCtrlA(AppRenderer *appRenderer, History history) {
     uint64_t now = SDL_GetTicks();
 
-    if (now - state->lastKeypressTime <= DELTA_MS) {
-        state->lastKeypressTime = 0;
-        handleHistoryAction(state, HISTORY_UNDO);
-        updateState(state, TASK_APPEND_APPEND, HISTORY_NONE);
+    if (now - appRenderer->lastKeypressTime <= DELTA_MS) {
+        appRenderer->lastKeypressTime = 0;
+        handleHistoryAction(appRenderer, HISTORY_UNDO);
+        updateState(appRenderer, TASK_APPEND_APPEND, HISTORY_NONE);
     } else {
-        updateState(state, TASK_APPEND, history);
+        updateState(appRenderer, TASK_APPEND, history);
     }
 
-    state->lastKeypressTime = now;
-    state->needsRedraw = true;
+    appRenderer->lastKeypressTime = now;
+    appRenderer->needsRedraw = true;
 }
 
-void handleEnter(EditorState *state, History history) {
+void handleEnter(AppRenderer *appRenderer, History history) {
     uint64_t now = SDL_GetTicks();
 
-    if (state->currentCoordinate == COORDINATE_RIGHT_INFO) {
+    if (appRenderer->currentCoordinate == COORDINATE_RIGHT_INFO) {
         // Get selected item from list
-        if (state->listIndex >= 0 && state->listIndex < state->filteredListCount) {
-            idArrayCopy(&state->currentId, &state->filteredListRight[state->listIndex].id);
+        if (appRenderer->listIndex >= 0 && appRenderer->listIndex < appRenderer->filteredListCount) {
+            idArrayCopy(&appRenderer->currentId, &appRenderer->filteredListRight[appRenderer->listIndex].id);
         }
-        state->currentCoordinate = state->previousCoordinate;
-        state->needsRedraw = true;
-    } else if (state->currentCoordinate == COORDINATE_RIGHT_COMMAND) {
+        appRenderer->currentCoordinate = appRenderer->previousCoordinate;
+        appRenderer->needsRedraw = true;
+    } else if (appRenderer->currentCoordinate == COORDINATE_RIGHT_COMMAND) {
         // Execute selected command
-        if (state->listIndex >= 0 && state->listIndex < state->filteredListCount) {
-            const char *cmd = state->filteredListRight[state->listIndex].value;
+        if (appRenderer->listIndex >= 0 && appRenderer->listIndex < appRenderer->filteredListCount) {
+            const char *cmd = appRenderer->filteredListRight[appRenderer->listIndex].value;
             if (strcmp(cmd, "editor mode") == 0) {
-                state->currentCommand = COMMAND_EDITOR_MODE;
+                appRenderer->currentCommand = COMMAND_EDITOR_MODE;
             } else if (strcmp(cmd, "visitor mode") == 0) {
-                state->currentCommand = COMMAND_VISITOR_MODE;
+                appRenderer->currentCommand = COMMAND_VISITOR_MODE;
             }
-            handleCommand(state);
+            handleCommand(appRenderer);
         }
     }
 
-    state->lastKeypressTime = now;
+    appRenderer->lastKeypressTime = now;
 }
 
-void handleCtrlEnter(EditorState *state, History history) {
-    if (state->currentCoordinate == COORDINATE_LEFT_EDITOR_INSERT) {
-        updateState(state, TASK_INPUT, HISTORY_NONE);
-        state->currentCoordinate = COORDINATE_LEFT_EDITOR_GENERAL;
-        handleRight(state);
-        handleA(state);
+void handleCtrlEnter(AppRenderer *appRenderer, History history) {
+    if (appRenderer->currentCoordinate == COORDINATE_LEFT_EDITOR_INSERT) {
+        updateState(appRenderer, TASK_INPUT, HISTORY_NONE);
+        appRenderer->currentCoordinate = COORDINATE_LEFT_EDITOR_GENERAL;
+        handleRight(appRenderer);
+        handleA(appRenderer);
     }
 }
 
-void handleCtrlI(EditorState *state, History history) {
+void handleCtrlI(AppRenderer *appRenderer, History history) {
     uint64_t now = SDL_GetTicks();
 
-    if (now - state->lastKeypressTime <= DELTA_MS) {
-        state->lastKeypressTime = 0;
-        handleHistoryAction(state, HISTORY_UNDO);
-        updateState(state, TASK_INSERT_INSERT, HISTORY_NONE);
+    if (now - appRenderer->lastKeypressTime <= DELTA_MS) {
+        appRenderer->lastKeypressTime = 0;
+        handleHistoryAction(appRenderer, HISTORY_UNDO);
+        updateState(appRenderer, TASK_INSERT_INSERT, HISTORY_NONE);
     } else {
-        updateState(state, TASK_INSERT, history);
+        updateState(appRenderer, TASK_INSERT, history);
     }
 
-    state->lastKeypressTime = now;
-    state->needsRedraw = true;
+    appRenderer->lastKeypressTime = now;
+    appRenderer->needsRedraw = true;
 }
 
-void handleDelete(EditorState *state, History history) {
-    updateState(state, TASK_DELETE, history);
-    state->needsRedraw = true;
+void handleDelete(AppRenderer *appRenderer, History history) {
+    updateState(appRenderer, TASK_DELETE, history);
+    appRenderer->needsRedraw = true;
 }
 
-void handleColon(EditorState *state) {
-    state->previousCoordinate = state->currentCoordinate;
-    state->currentCoordinate = COORDINATE_RIGHT_COMMAND;
+void handleColon(AppRenderer *appRenderer) {
+    appRenderer->previousCoordinate = appRenderer->currentCoordinate;
+    appRenderer->currentCoordinate = COORDINATE_RIGHT_COMMAND;
 
-    createListRight(state);
-    state->needsRedraw = true;
+    createListRight(appRenderer);
+    appRenderer->needsRedraw = true;
 }
 
-void handleUp(EditorState *state) {
-    if (state->currentCoordinate == COORDINATE_RIGHT_INFO ||
-        state->currentCoordinate == COORDINATE_RIGHT_COMMAND ||
-        state->currentCoordinate == COORDINATE_RIGHT_FIND) {
-        if (state->listIndex > 0) {
-            state->listIndex--;
+void handleUp(AppRenderer *appRenderer) {
+    if (appRenderer->currentCoordinate == COORDINATE_RIGHT_INFO ||
+        appRenderer->currentCoordinate == COORDINATE_RIGHT_COMMAND ||
+        appRenderer->currentCoordinate == COORDINATE_RIGHT_FIND) {
+        if (appRenderer->listIndex > 0) {
+            appRenderer->listIndex--;
         }
-    } else if (state->currentCoordinate != COORDINATE_LEFT_EDITOR_INSERT) {
-        updateState(state, TASK_K_ARROW_UP, HISTORY_NONE);
+    } else if (appRenderer->currentCoordinate != COORDINATE_LEFT_EDITOR_INSERT) {
+        updateState(appRenderer, TASK_K_ARROW_UP, HISTORY_NONE);
     }
-    state->needsRedraw = true;
+    appRenderer->needsRedraw = true;
 }
 
-void handleDown(EditorState *state) {
-    if (state->currentCoordinate == COORDINATE_RIGHT_INFO ||
-        state->currentCoordinate == COORDINATE_RIGHT_COMMAND ||
-        state->currentCoordinate == COORDINATE_RIGHT_FIND) {
-        int maxIndex = (state->filteredListCount > 0) ?
-                        state->filteredListCount - 1 :
-                        state->totalListCount - 1;
-        if (state->listIndex < maxIndex) {
-            state->listIndex++;
+void handleDown(AppRenderer *appRenderer) {
+    if (appRenderer->currentCoordinate == COORDINATE_RIGHT_INFO ||
+        appRenderer->currentCoordinate == COORDINATE_RIGHT_COMMAND ||
+        appRenderer->currentCoordinate == COORDINATE_RIGHT_FIND) {
+        int maxIndex = (appRenderer->filteredListCount > 0) ?
+                        appRenderer->filteredListCount - 1 :
+                        appRenderer->totalListCount - 1;
+        if (appRenderer->listIndex < maxIndex) {
+            appRenderer->listIndex++;
         }
-    } else if (state->currentCoordinate != COORDINATE_LEFT_EDITOR_INSERT) {
-        updateState(state, TASK_J_ARROW_DOWN, HISTORY_NONE);
+    } else if (appRenderer->currentCoordinate != COORDINATE_LEFT_EDITOR_INSERT) {
+        updateState(appRenderer, TASK_J_ARROW_DOWN, HISTORY_NONE);
     }
-    state->needsRedraw = true;
+    appRenderer->needsRedraw = true;
 }
 
-void handleLeft(EditorState *state) {
-    if (state->currentCoordinate == COORDINATE_RIGHT_INFO ||
-        state->currentCoordinate == COORDINATE_RIGHT_COMMAND ||
-        state->currentCoordinate == COORDINATE_RIGHT_FIND) {
+void handleLeft(AppRenderer *appRenderer) {
+    if (appRenderer->currentCoordinate == COORDINATE_RIGHT_INFO ||
+        appRenderer->currentCoordinate == COORDINATE_RIGHT_COMMAND ||
+        appRenderer->currentCoordinate == COORDINATE_RIGHT_FIND) {
         // Nothing to do
-    } else if (state->currentCoordinate != COORDINATE_LEFT_EDITOR_INSERT) {
-        updateState(state, TASK_H_ARROW_LEFT, HISTORY_NONE);
-        state->needsRedraw = true;
+    } else if (appRenderer->currentCoordinate != COORDINATE_LEFT_EDITOR_INSERT) {
+        updateState(appRenderer, TASK_H_ARROW_LEFT, HISTORY_NONE);
+        appRenderer->needsRedraw = true;
     }
 }
 
-void handleRight(EditorState *state) {
-    if (state->currentCoordinate == COORDINATE_RIGHT_INFO ||
-        state->currentCoordinate == COORDINATE_RIGHT_COMMAND ||
-        state->currentCoordinate == COORDINATE_RIGHT_FIND) {
+void handleRight(AppRenderer *appRenderer) {
+    if (appRenderer->currentCoordinate == COORDINATE_RIGHT_INFO ||
+        appRenderer->currentCoordinate == COORDINATE_RIGHT_COMMAND ||
+        appRenderer->currentCoordinate == COORDINATE_RIGHT_FIND) {
         // Nothing to do
-    } else if (state->currentCoordinate != COORDINATE_LEFT_EDITOR_INSERT) {
-        updateState(state, TASK_L_ARROW_RIGHT, HISTORY_NONE);
-        state->needsRedraw = true;
+    } else if (appRenderer->currentCoordinate != COORDINATE_LEFT_EDITOR_INSERT) {
+        updateState(appRenderer, TASK_L_ARROW_RIGHT, HISTORY_NONE);
+        appRenderer->needsRedraw = true;
     }
 }
 
-void handleI(EditorState *state) {
-    if (state->currentCoordinate == COORDINATE_LEFT_EDITOR_GENERAL) {
-        idArrayCopy(&state->currentInsertId, &state->currentId);
-        state->previousCoordinate = state->currentCoordinate;
-        state->currentCoordinate = COORDINATE_LEFT_EDITOR_INSERT;
+void handleI(AppRenderer *appRenderer) {
+    if (appRenderer->currentCoordinate == COORDINATE_LEFT_EDITOR_GENERAL) {
+        idArrayCopy(&appRenderer->currentInsertId, &appRenderer->currentId);
+        appRenderer->previousCoordinate = appRenderer->currentCoordinate;
+        appRenderer->currentCoordinate = COORDINATE_LEFT_EDITOR_INSERT;
 
         // Get current line content
         int count;
-        FfonElement **arr = getFfonAtId(state, &state->currentId, &count);
+        FfonElement **arr = getFfonAtId(appRenderer, &appRenderer->currentId, &count);
         if (arr && count > 0) {
-            int idx = state->currentId.ids[state->currentId.depth - 1];
+            int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
             if (idx >= 0 && idx < count) {
                 FfonElement *elem = arr[idx];
                 if (elem->type == FFON_STRING) {
-                    strncpy(state->inputBuffer, elem->data.string,
-                           state->inputBufferCapacity - 1);
-                    state->inputBufferSize = strlen(state->inputBuffer);
+                    strncpy(appRenderer->inputBuffer, elem->data.string,
+                           appRenderer->inputBufferCapacity - 1);
+                    appRenderer->inputBufferSize = strlen(appRenderer->inputBuffer);
                 } else {
-                    strncpy(state->inputBuffer, elem->data.object->key,
-                           state->inputBufferCapacity - 1);
-                    state->inputBufferSize = strlen(state->inputBuffer);
+                    strncpy(appRenderer->inputBuffer, elem->data.object->key,
+                           appRenderer->inputBufferCapacity - 1);
+                    appRenderer->inputBufferSize = strlen(appRenderer->inputBuffer);
                 }
             }
         }
 
-        state->cursorPosition = 0;
-        idArrayInit(&state->currentInsertId);
-        state->needsRedraw = true;
+        appRenderer->cursorPosition = 0;
+        idArrayInit(&appRenderer->currentInsertId);
+        appRenderer->needsRedraw = true;
     }
 }
 
-void handleA(EditorState *state) {
-    if (state->currentCoordinate == COORDINATE_LEFT_EDITOR_GENERAL) {
-        idArrayCopy(&state->currentInsertId, &state->currentId);
-        state->previousCoordinate = state->currentCoordinate;
-        state->currentCoordinate = COORDINATE_LEFT_EDITOR_INSERT;
+void handleA(AppRenderer *appRenderer) {
+    if (appRenderer->currentCoordinate == COORDINATE_LEFT_EDITOR_GENERAL) {
+        idArrayCopy(&appRenderer->currentInsertId, &appRenderer->currentId);
+        appRenderer->previousCoordinate = appRenderer->currentCoordinate;
+        appRenderer->currentCoordinate = COORDINATE_LEFT_EDITOR_INSERT;
 
         // Get current line content
         int count;
-        FfonElement **arr = getFfonAtId(state, &state->currentId, &count);
+        FfonElement **arr = getFfonAtId(appRenderer, &appRenderer->currentId, &count);
         if (arr && count > 0) {
-            int idx = state->currentId.ids[state->currentId.depth - 1];
+            int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
             if (idx >= 0 && idx < count) {
                 FfonElement *elem = arr[idx];
                 if (elem->type == FFON_STRING) {
-                    strncpy(state->inputBuffer, elem->data.string,
-                           state->inputBufferCapacity - 1);
-                    state->inputBufferSize = strlen(state->inputBuffer);
+                    strncpy(appRenderer->inputBuffer, elem->data.string,
+                           appRenderer->inputBufferCapacity - 1);
+                    appRenderer->inputBufferSize = strlen(appRenderer->inputBuffer);
                 } else {
-                    strncpy(state->inputBuffer, elem->data.object->key,
-                           state->inputBufferCapacity - 1);
-                    state->inputBufferSize = strlen(state->inputBuffer);
+                    strncpy(appRenderer->inputBuffer, elem->data.object->key,
+                           appRenderer->inputBufferCapacity - 1);
+                    appRenderer->inputBufferSize = strlen(appRenderer->inputBuffer);
                 }
             }
         }
 
-        state->cursorPosition = state->inputBufferSize;
-        idArrayInit(&state->currentInsertId);
-        state->needsRedraw = true;
+        appRenderer->cursorPosition = appRenderer->inputBufferSize;
+        idArrayInit(&appRenderer->currentInsertId);
+        appRenderer->needsRedraw = true;
     }
 }
 
-void handleFind(EditorState *state) {
-    if (state->currentCoordinate != COORDINATE_RIGHT_INFO &&
-        state->currentCoordinate != COORDINATE_RIGHT_COMMAND) {
-        state->previousCoordinate = state->currentCoordinate;
-        state->currentCoordinate = COORDINATE_RIGHT_FIND;
-        state->needsRedraw = true;
+void handleFind(AppRenderer *appRenderer) {
+    if (appRenderer->currentCoordinate != COORDINATE_RIGHT_INFO &&
+        appRenderer->currentCoordinate != COORDINATE_RIGHT_COMMAND) {
+        appRenderer->previousCoordinate = appRenderer->currentCoordinate;
+        appRenderer->currentCoordinate = COORDINATE_RIGHT_FIND;
+        appRenderer->needsRedraw = true;
     }
 }
 
-void handleEscape(EditorState *state) {
-    if (state->previousCoordinate == COORDINATE_LEFT_VISITOR_GENERAL ||
-        state->previousCoordinate == COORDINATE_LEFT_VISITOR_INSERT) {
-        if (state->currentCoordinate == COORDINATE_LEFT_VISITOR_INSERT) {
-            updateState(state, TASK_INPUT, HISTORY_NONE);
+void handleEscape(AppRenderer *appRenderer) {
+    if (appRenderer->previousCoordinate == COORDINATE_LEFT_VISITOR_GENERAL ||
+        appRenderer->previousCoordinate == COORDINATE_LEFT_VISITOR_INSERT) {
+        if (appRenderer->currentCoordinate == COORDINATE_LEFT_VISITOR_INSERT) {
+            updateState(appRenderer, TASK_INPUT, HISTORY_NONE);
         }
-        state->currentCoordinate = COORDINATE_LEFT_VISITOR_GENERAL;
+        appRenderer->currentCoordinate = COORDINATE_LEFT_VISITOR_GENERAL;
     } else {
-        if (state->currentCoordinate == COORDINATE_LEFT_EDITOR_INSERT) {
-            updateState(state, TASK_INPUT, HISTORY_NONE);
+        if (appRenderer->currentCoordinate == COORDINATE_LEFT_EDITOR_INSERT) {
+            updateState(appRenderer, TASK_INPUT, HISTORY_NONE);
         }
-        state->currentCoordinate = COORDINATE_LEFT_EDITOR_GENERAL;
+        appRenderer->currentCoordinate = COORDINATE_LEFT_EDITOR_GENERAL;
     }
 
-    state->previousCoordinate = state->currentCoordinate;
-    state->needsRedraw = true;
+    appRenderer->previousCoordinate = appRenderer->currentCoordinate;
+    appRenderer->needsRedraw = true;
 }
 
-void handleCommand(EditorState *state) {
-    switch (state->currentCommand) {
+void handleCommand(AppRenderer *appRenderer) {
+    switch (appRenderer->currentCommand) {
         case COMMAND_EDITOR_MODE:
-            state->previousCoordinate = state->currentCoordinate;
-            state->currentCoordinate = COORDINATE_LEFT_EDITOR_GENERAL;
+            appRenderer->previousCoordinate = appRenderer->currentCoordinate;
+            appRenderer->currentCoordinate = COORDINATE_LEFT_EDITOR_GENERAL;
             break;
 
         case COMMAND_VISITOR_MODE:
-            state->previousCoordinate = state->currentCoordinate;
-            state->currentCoordinate = COORDINATE_LEFT_VISITOR_GENERAL;
+            appRenderer->previousCoordinate = appRenderer->currentCoordinate;
+            appRenderer->currentCoordinate = COORDINATE_LEFT_VISITOR_GENERAL;
             break;
     }
 
-    state->needsRedraw = true;
+    appRenderer->needsRedraw = true;
 }

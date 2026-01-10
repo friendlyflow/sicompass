@@ -2,60 +2,60 @@
 #include <stdlib.h>
 #include <string.h>
 
-void clearListRight(EditorState *state) {
-    if (state->totalListRight) {
-        for (int i = 0; i < state->totalListCount; i++) {
-            free(state->totalListRight[i].value);
+void clearListRight(AppRenderer *appRenderer) {
+    if (appRenderer->totalListRight) {
+        for (int i = 0; i < appRenderer->totalListCount; i++) {
+            free(appRenderer->totalListRight[i].value);
         }
-        free(state->totalListRight);
-        state->totalListRight = NULL;
-        state->totalListCount = 0;
+        free(appRenderer->totalListRight);
+        appRenderer->totalListRight = NULL;
+        appRenderer->totalListCount = 0;
     }
 
-    if (state->filteredListRight) {
+    if (appRenderer->filteredListRight) {
         // Don't free values, they're shared with totalListRight
-        free(state->filteredListRight);
-        state->filteredListRight = NULL;
-        state->filteredListCount = 0;
+        free(appRenderer->filteredListRight);
+        appRenderer->filteredListRight = NULL;
+        appRenderer->filteredListCount = 0;
     }
 
-    state->listIndex = 0;
+    appRenderer->listIndex = 0;
 }
 
-void createListRight(EditorState *state) {
-    clearListRight(state);
+void createListRight(AppRenderer *appRenderer) {
+    clearListRight(appRenderer);
 
-    if (state->currentCoordinate == COORDINATE_RIGHT_INFO) {
+    if (appRenderer->currentCoordinate == COORDINATE_RIGHT_INFO) {
         // List all elements in current layer
         int count;
-        FfonElement **arr = getFfonAtId(state, &state->currentId, &count);
+        FfonElement **arr = getFfonAtId(appRenderer, &appRenderer->currentId, &count);
         if (!arr) return;
 
-        state->totalListRight = calloc(count, sizeof(ListItem));
-        if (!state->totalListRight) return;
+        appRenderer->totalListRight = calloc(count, sizeof(ListItem));
+        if (!appRenderer->totalListRight) return;
 
         IdArray thisId;
-        idArrayCopy(&thisId, &state->currentId);
+        idArrayCopy(&thisId, &appRenderer->currentId);
         thisId.ids[thisId.depth - 1] = 0;
 
         for (int i = 0; i < count; i++) {
             FfonElement *elem = arr[i];
 
-            idArrayCopy(&state->totalListRight[state->totalListCount].id, &thisId);
+            idArrayCopy(&appRenderer->totalListRight[appRenderer->totalListCount].id, &thisId);
 
             if (elem->type == FFON_STRING) {
-                state->totalListRight[state->totalListCount].value =
+                appRenderer->totalListRight[appRenderer->totalListCount].value =
                     strdup(elem->data.string);
             } else {
-                state->totalListRight[state->totalListCount].value =
+                appRenderer->totalListRight[appRenderer->totalListCount].value =
                     strdup(elem->data.object->key);
             }
 
-            state->totalListCount++;
+            appRenderer->totalListCount++;
             thisId.ids[thisId.depth - 1]++;
         }
 
-    } else if (state->currentCoordinate == COORDINATE_RIGHT_COMMAND) {
+    } else if (appRenderer->currentCoordinate == COORDINATE_RIGHT_COMMAND) {
         // List available commands
         const char *commands[] = {
             "editor mode",
@@ -63,52 +63,52 @@ void createListRight(EditorState *state) {
         };
         int numCommands = sizeof(commands) / sizeof(commands[0]);
 
-        state->totalListRight = calloc(numCommands, sizeof(ListItem));
-        if (!state->totalListRight) return;
+        appRenderer->totalListRight = calloc(numCommands, sizeof(ListItem));
+        if (!appRenderer->totalListRight) return;
 
         for (int i = 0; i < numCommands; i++) {
-            state->totalListRight[i].id.depth = 1;
-            state->totalListRight[i].id.ids[0] = i;
-            state->totalListRight[i].value = strdup(commands[i]);
-            state->totalListCount++;
+            appRenderer->totalListRight[i].id.depth = 1;
+            appRenderer->totalListRight[i].id.ids[0] = i;
+            appRenderer->totalListRight[i].value = strdup(commands[i]);
+            appRenderer->totalListCount++;
         }
     }
 }
 
-void populateListRight(EditorState *state, const char *searchString) {
+void populateListRight(AppRenderer *appRenderer, const char *searchString) {
     if (!searchString || strlen(searchString) == 0) {
         // No filter, use all items
-        if (state->filteredListRight) {
-            free(state->filteredListRight);
+        if (appRenderer->filteredListRight) {
+            free(appRenderer->filteredListRight);
         }
-        state->filteredListRight = NULL;
-        state->filteredListCount = 0;
-        state->listIndex = 0;
+        appRenderer->filteredListRight = NULL;
+        appRenderer->filteredListCount = 0;
+        appRenderer->listIndex = 0;
         return;
     }
 
     // Simple substring search
-    if (state->filteredListRight) {
-        free(state->filteredListRight);
+    if (appRenderer->filteredListRight) {
+        free(appRenderer->filteredListRight);
     }
 
-    state->filteredListRight = calloc(state->totalListCount, sizeof(ListItem));
-    if (!state->filteredListRight) return;
+    appRenderer->filteredListRight = calloc(appRenderer->totalListCount, sizeof(ListItem));
+    if (!appRenderer->filteredListRight) return;
 
-    state->filteredListCount = 0;
+    appRenderer->filteredListCount = 0;
 
-    for (int i = 0; i < state->totalListCount; i++) {
-        if (strstr(state->totalListRight[i].value, searchString) != NULL) {
-            idArrayCopy(&state->filteredListRight[state->filteredListCount].id,
-                         &state->totalListRight[i].id);
-            state->filteredListRight[state->filteredListCount].value =
-                state->totalListRight[i].value; // Share pointer
-            state->filteredListCount++;
+    for (int i = 0; i < appRenderer->totalListCount; i++) {
+        if (strstr(appRenderer->totalListRight[i].value, searchString) != NULL) {
+            idArrayCopy(&appRenderer->filteredListRight[appRenderer->filteredListCount].id,
+                         &appRenderer->totalListRight[i].id);
+            appRenderer->filteredListRight[appRenderer->filteredListCount].value =
+                appRenderer->totalListRight[i].value; // Share pointer
+            appRenderer->filteredListCount++;
         }
     }
 
     // Reset list index
-    if (state->listIndex >= state->filteredListCount) {
-        state->listIndex = state->filteredListCount > 0 ? state->filteredListCount - 1 : 0;
+    if (appRenderer->listIndex >= appRenderer->filteredListCount) {
+        appRenderer->listIndex = appRenderer->filteredListCount > 0 ? appRenderer->filteredListCount - 1 : 0;
     }
 }

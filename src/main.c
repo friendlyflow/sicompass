@@ -1183,7 +1183,7 @@ void initVulkan(SiCompassApplication* app) {
 }
 
 void mainLoop(SiCompassApplication* app) {
-    updateView(app);
+    startApp(app);
 
     vkDeviceWaitIdle(app->device);
 }
