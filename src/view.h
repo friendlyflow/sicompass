@@ -1,5 +1,7 @@
 #pragma once
 
+#include <json-c/json.h>
+
 #include "main.h"
 
 // Constants
@@ -156,10 +158,10 @@ typedef struct AppRenderer {
 void updateView(SiCompassApplication* app);
 
 // Initialization and cleanup
-EditorState* editorStateCreate(void);
-void editorStateDestroy(EditorState *state);
-bool initSdl(EditorState *state);
-void cleanupSdl(EditorState *state);
+SiCompassApplication* editorStateCreate(void);
+void editorStateDestroy(SiCompassApplication *state);
+bool initSdl(SiCompassApplication *state);
+void cleanupSdl(SiCompassApplication *state);
 
 // SFON operations
 SfonElement* sfonElementCreateString(const char *str);
@@ -171,7 +173,7 @@ void sfonObjectDestroy(SfonObject *obj);
 void sfonObjectAddElement(SfonObject *obj, SfonElement *elem);
 
 // JSON loading
-bool loadJsonFile(EditorState *state, const char *filename);
+bool loadJsonFile(SiCompassApplication *state, const char *filename);
 SfonElement* parseJsonValue(json_object *jobj);
 
 // ID array operations
@@ -183,53 +185,53 @@ int idArrayPop(IdArray *arr);
 char* idArrayToString(const IdArray *arr);
 
 // Navigation and state updates
-void updateState(EditorState *state, Task task, History history);
-void updateIds(EditorState *state, bool isKey, Task task, History history);
-void updateSfon(EditorState *state, const char *line, bool isKey, Task task, History history);
-void updateHistory(EditorState *state, Task task, bool isKey, const char *line, History history);
+void updateState(SiCompassApplication *state, Task task, History history);
+void updateIds(SiCompassApplication *state, bool isKey, Task task, History history);
+void updateSfon(SiCompassApplication *state, const char *line, bool isKey, Task task, History history);
+void updateHistory(SiCompassApplication *state, Task task, bool isKey, const char *line, History history);
 
 // Navigation helpers
-bool nextLayerExists(EditorState *state);
-int getMaxIdInCurrent(EditorState *state);
-SfonElement** getSfonAtId(EditorState *state, const IdArray *id, int *outCount);
+bool nextLayerExists(SiCompassApplication *state);
+int getMaxIdInCurrent(SiCompassApplication *state);
+SfonElement** getSfonAtId(SiCompassApplication *state, const IdArray *id, int *outCount);
 
 // Event handling
-void handleKeys(EditorState *state, SDL_Event *event);
-void handleTab(EditorState *state);
-void handleInput(EditorState *state, const char *text);
-void handleCtrlA(EditorState *state, History history);
-void handleEnter(EditorState *state, History history);
-void handleCtrlEnter(EditorState *state, History history);
-void handleCtrlI(EditorState *state, History history);
-void handleDelete(EditorState *state, History history);
-void handleColon(EditorState *state);
-void handleUp(EditorState *state);
-void handleDown(EditorState *state);
-void handleLeft(EditorState *state);
-void handleRight(EditorState *state);
-void handleI(EditorState *state);
-void handleA(EditorState *state);
-void handleHistoryAction(EditorState *state, History history);
-void handleCcp(EditorState *state, Task task);
-void handleFind(EditorState *state);
-void handleEscape(EditorState *state);
-void handleCommand(EditorState *state);
+void handleKeys(SiCompassApplication *state, SDL_Event *event);
+void handleTab(SiCompassApplication *state);
+void handleInput(SiCompassApplication *state, const char *text);
+void handleCtrlA(SiCompassApplication *state, History history);
+void handleEnter(SiCompassApplication *state, History history);
+void handleCtrlEnter(SiCompassApplication *state, History history);
+void handleCtrlI(SiCompassApplication *state, History history);
+void handleDelete(SiCompassApplication *state, History history);
+void handleColon(SiCompassApplication *state);
+void handleUp(SiCompassApplication *state);
+void handleDown(SiCompassApplication *state);
+void handleLeft(SiCompassApplication *state);
+void handleRight(SiCompassApplication *state);
+void handleI(SiCompassApplication *state);
+void handleA(SiCompassApplication *state);
+void handleHistoryAction(SiCompassApplication *state, History history);
+void handleCcp(SiCompassApplication *state, Task task);
+void handleFind(SiCompassApplication *state);
+void handleEscape(SiCompassApplication *state);
+void handleCommand(SiCompassApplication *state);
 
 // Right panel
-void createListRight(EditorState *state);
-void populateListRight(EditorState *state, const char *searchString);
-void clearListRight(EditorState *state);
+void createListRight(SiCompassApplication *state);
+void populateListRight(SiCompassApplication *state, const char *searchString);
+void clearListRight(SiCompassApplication *state);
 
 // Rendering
-void updateView(EditorState *state);
-void renderLeftPanel(EditorState *state);
-void renderRightPanel(EditorState *state);
-void renderLine(EditorState *state, SfonElement *elem, const IdArray *id, int indent, int *yPos);
-void renderText(EditorState *state, const char *text, int x, int y, uint32_t color, bool highlight);
+void updateView(SiCompassApplication *state);
+void renderLeftPanel(SiCompassApplication *state);
+void renderRightPanel(SiCompassApplication *state);
+void renderLine(SiCompassApplication *state, SfonElement *elem, const IdArray *id, int indent, int *yPos);
+void renderText(SiCompassApplication *state, const char *text, int x, int y, uint32_t color, bool highlight);
 
 // Utility functions
 const char* coordinateToString(Coordinate coord);
 const char* taskToString(Task task);
 bool isLineKey(const char *line);
 char* escapeHtmlToText(const char *html);
-void setErrorMessage(EditorState *state, const char *message);
+void setErrorMessage(SiCompassApplication *state, const char *message);

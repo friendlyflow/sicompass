@@ -19,11 +19,13 @@
 #include <stdbool.h>
 #include <time.h>
 
-#include "view.h"
 #include "text.h"
 #include "image.h"
 
 #define MAX_FRAMES_IN_FLIGHT 2
+
+// Forward declarations
+typedef struct AppRenderer AppRenderer;
 
 
 typedef struct SiCompassApplication {
@@ -105,6 +107,8 @@ typedef struct SiCompassApplication {
     clock_t startTime;
 
     FontRenderer* fontRenderer;
+
+    AppRenderer* appRenderer;
 } SiCompassApplication;
 
 // Core application functions
