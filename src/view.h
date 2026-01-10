@@ -158,7 +158,7 @@ typedef struct AppRenderer {
 void startApp(SiCompassApplication* app);
 
 // Initialization and cleanup
-SiCompassApplication* appRendererCreate(void);
+SiCompassApplication* appRendererCreate(SiCompassApplication* app);
 void appRendererDestroy(AppRenderer *appRenderer);
 
 // FFON operations

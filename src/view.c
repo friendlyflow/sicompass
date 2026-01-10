@@ -1,6 +1,13 @@
 #include "view.h"
 
 void startApp(SiCompassApplication* app) {
+    // Initialize app renderer
+    app = appRendererCreate(app);
+    if (!app->appRenderer) {
+        fprintf(stderr, "Failed to create editor state\n");
+        return;
+    }
+
     // Initialize current_id
     idArrayInit(&app->appRenderer->currentId);
     idArrayPush(&app->appRenderer->currentId, 0);

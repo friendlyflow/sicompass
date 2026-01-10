@@ -2,44 +2,46 @@
 #include <stdlib.h>
 #include <string.h>
 
-SiCompassApplication* appRendererCreate(void) {
+SiCompassApplication* appRendererCreate(SiCompassApplication* app) {
     // TODO dat was hier AppRenderer!!! misschien niet goed nu!
-    SiCompassApplication *app = calloc(1, sizeof(SiCompassApplication));
-    if (!app) return NULL;
+    AppRenderer *appRenderer = calloc(1, sizeof(AppRenderer));
+    if (!appRenderer) return NULL;
 
     // Initialize FFON array
-    app->appRenderer->ffonCapacity = 100;
-    app->appRenderer->ffon = calloc(app->appRenderer->ffonCapacity, sizeof(FfonElement*));
-    if (!app->appRenderer->ffon) {
-        free(app->appRenderer);
+    appRenderer->ffonCapacity = 100;
+    appRenderer->ffon = calloc(appRenderer->ffonCapacity, sizeof(FfonElement*));
+    if (!appRenderer->ffon) {
+        free(appRenderer);
         return NULL;
     }
 
     // Initialize input buffer
-    app->appRenderer->inputBufferCapacity = 1024;
-    app->appRenderer->inputBuffer = calloc(app->appRenderer->inputBufferCapacity, sizeof(char));
-    if (!app->appRenderer->inputBuffer) {
-        free(app->appRenderer->ffon);
-        free(app->appRenderer);
+    appRenderer->inputBufferCapacity = 1024;
+    appRenderer->inputBuffer = calloc(appRenderer->inputBufferCapacity, sizeof(char));
+    if (!appRenderer->inputBuffer) {
+        free(appRenderer->ffon);
+        free(appRenderer);
         return NULL;
     }
 
     // Initialize undo history
-    app->appRenderer->undoHistory = calloc(UNDO_HISTORY_SIZE, sizeof(UndoEntry));
-    if (!app->appRenderer->undoHistory) {
-        free(app->appRenderer->inputBuffer);
-        free(app->appRenderer->ffon);
-        free(app->appRenderer);
+    appRenderer->undoHistory = calloc(UNDO_HISTORY_SIZE, sizeof(UndoEntry));
+    if (!appRenderer->undoHistory) {
+        free(appRenderer->inputBuffer);
+        free(appRenderer->ffon);
+        free(appRenderer);
         return NULL;
     }
 
     // Initialize ID arrays
-    idArrayInit(&app->appRenderer->currentId);
-    idArrayInit(&app->appRenderer->previousId);
-    idArrayInit(&app->appRenderer->currentInsertId);
+    idArrayInit(&appRenderer->currentId);
+    idArrayInit(&appRenderer->previousId);
+    idArrayInit(&appRenderer->currentInsertId);
 
-    app->appRenderer->running = true;
-    app->appRenderer->needsRedraw = true;
+    appRenderer->running = true;
+    appRenderer->needsRedraw = true;
+
+    app->appRenderer = appRenderer;
 
     return app;
 }
