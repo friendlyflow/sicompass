@@ -31,5 +31,22 @@ void createImageDescriptorSets(SiCompassApplication* app);
 // Image pipeline
 void createImagePipeline(SiCompassApplication* app);
 
+// Render pass and framebuffers
+void createRenderPass(SiCompassApplication* app);
+void createFramebuffers(SiCompassApplication* app);
+
+// Command pool and buffers
+void createCommandPool(SiCompassApplication* app);
+void createCommandBuffers(SiCompassApplication* app);
+
+// Depth resources
+void createDepthResources(SiCompassApplication* app);
+VkFormat findSupportedFormat(SiCompassApplication* app, const VkFormat* candidates, size_t candidateCount,
+                             VkImageTiling tiling, VkFormatFeatureFlags features);
+VkFormat findDepthFormat(SiCompassApplication* app);
+
+// Synchronization
+void createSyncObjects(SiCompassApplication* app);
+
 // Drawing
 void drawImage(SiCompassApplication* app, VkCommandBuffer commandBuffer);
