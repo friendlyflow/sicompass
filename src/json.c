@@ -48,27 +48,30 @@ FfonElement* parseJsonValue(json_object *jobj) {
         }
 
         case json_type_object: {
-            // Get the first (and should be only) key-value pair
-            json_object_iterator it = json_object_iter_begin(jobj);
-            json_object_iterator itEnd = json_object_iter_end(jobj);
+            // Iterate over object entries to get the first key-value pair
+            const char *first_key = NULL;
+            json_object *first_val = NULL;
 
-            if (json_object_iter_equal(&it, &itEnd)) {
+            json_object_object_foreach(jobj, key, val) {
+                first_key = key;
+                first_val = val;
+                break; // Only get the first entry
+            }
+
+            if (!first_key) {
                 // Empty object
                 return ffonElementCreateString("");
             }
 
-            const char *key = json_object_iter_peek_name(&it);
-            json_object *val = json_object_iter_peek_value(&it);
-
             // Create object element with the key
-            FfonElement *elem = ffonElementCreateObject(key);
+            FfonElement *elem = ffonElementCreateObject(first_key);
             if (!elem) return NULL;
 
             // Parse the value (should be an array)
-            if (json_object_is_type(val, json_type_array)) {
-                int arrayLen = json_object_array_length(val);
+            if (json_object_is_type(first_val, json_type_array)) {
+                int arrayLen = json_object_array_length(first_val);
                 for (int i = 0; i < arrayLen; i++) {
-                    json_object *item = json_object_array_get_idx(val, i);
+                    json_object *item = json_object_array_get_idx(first_val, i);
                     FfonElement *child = parseJsonValue(item);
                     if (child) {
                         ffonObjectAddElement(elem->data.object, child);
@@ -84,7 +87,7 @@ FfonElement* parseJsonValue(json_object *jobj) {
     }
 }
 
-bool loadJsonFile(EditorState *state, const char *filename) {
+bool loadJsonFile(AppRenderer *appRenderer, const char *filename) {
     // Read file
     FILE *fp = fopen(filename, "r");
     if (!fp) {
@@ -123,10 +126,10 @@ bool loadJsonFile(EditorState *state, const char *filename) {
     }
 
     // Clear existing FFON data
-    for (int i = 0; i < state->ffonCount; i++) {
-        ffonElementDestroy(state->ffon[i]);
+    for (int i = 0; i < appRenderer->ffonCount; i++) {
+        ffonElementDestroy(appRenderer->ffon[i]);
     }
-    state->ffonCount = 0;
+    appRenderer->ffonCount = 0;
 
     // Parse array elements
     int arrayLen = json_object_array_length(root);
@@ -136,29 +139,29 @@ bool loadJsonFile(EditorState *state, const char *filename) {
 
         if (elem) {
             // Resize if needed
-            if (state->ffonCount >= state->ffonCapacity) {
-                int newCapacity = state->ffonCapacity * 2;
-                FfonElement **newFfon = realloc(state->ffon,
+            if (appRenderer->ffonCount >= appRenderer->ffonCapacity) {
+                int newCapacity = appRenderer->ffonCapacity * 2;
+                FfonElement **newFfon = realloc(appRenderer->ffon,
                                                  newCapacity * sizeof(FfonElement*));
                 if (!newFfon) {
                     ffonElementDestroy(elem);
                     json_object_put(root);
                     return false;
                 }
-                state->ffon = newFfon;
-                state->ffonCapacity = newCapacity;
+                appRenderer->ffon = newFfon;
+                appRenderer->ffonCapacity = newCapacity;
             }
 
-            state->ffon[state->ffonCount++] = elem;
+            appRenderer->ffon[appRenderer->ffonCount++] = elem;
         }
     }
 
     json_object_put(root);
 
     // If empty, add one empty element
-    if (state->ffonCount == 0) {
-        state->ffon[0] = ffonElementCreateString("");
-        state->ffonCount = 1;
+    if (appRenderer->ffonCount == 0) {
+        appRenderer->ffon[0] = ffonElementCreateString("");
+        appRenderer->ffonCount = 1;
     }
 
     return true;

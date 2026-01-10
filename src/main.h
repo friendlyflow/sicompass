@@ -27,7 +27,6 @@
 // Forward declarations
 typedef struct AppRenderer AppRenderer;
 
-
 typedef struct SiCompassApplication {
     SDL_Window* window;
 

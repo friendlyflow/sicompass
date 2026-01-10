@@ -155,13 +155,11 @@ typedef struct AppRenderer {
 // Function declarations
 
 // Main entry point
-void updateView(SiCompassApplication* app);
+void startApp(SiCompassApplication* app);
 
 // Initialization and cleanup
-SiCompassApplication* editorStateCreate(void);
-void editorStateDestroy(SiCompassApplication *state);
-bool initSdl(SiCompassApplication *state);
-void cleanupSdl(SiCompassApplication *state);
+SiCompassApplication* appRendererCreate(void);
+void appRendererDestroy(AppRenderer *appRenderer);
 
 // FFON operations
 FfonElement* ffonElementCreateString(const char *str);
@@ -173,7 +171,7 @@ void ffonObjectDestroy(FfonObject *obj);
 void ffonObjectAddElement(FfonObject *obj, FfonElement *elem);
 
 // JSON loading
-bool loadJsonFile(SiCompassApplication *state, const char *filename);
+bool loadJsonFile(AppRenderer *appRenderer, const char *filename);
 FfonElement* parseJsonValue(json_object *jobj);
 
 // ID array operations
@@ -185,53 +183,53 @@ int idArrayPop(IdArray *arr);
 char* idArrayToString(const IdArray *arr);
 
 // Navigation and state updates
-void updateState(SiCompassApplication *state, Task task, History history);
-void updateIds(SiCompassApplication *state, bool isKey, Task task, History history);
-void updateFfon(SiCompassApplication *state, const char *line, bool isKey, Task task, History history);
-void updateHistory(SiCompassApplication *state, Task task, bool isKey, const char *line, History history);
+void updateState(AppRenderer *appRenderer, Task task, History history);
+void updateIds(AppRenderer *appRenderer, bool isKey, Task task, History history);
+void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task task, History history);
+void updateHistory(AppRenderer *appRenderer, Task task, bool isKey, const char *line, History history);
 
 // Navigation helpers
-bool nextLayerExists(SiCompassApplication *state);
-int getMaxIdInCurrent(SiCompassApplication *state);
-FfonElement** getFfonAtId(SiCompassApplication *state, const IdArray *id, int *outCount);
+bool nextLayerExists(AppRenderer *appRenderer);
+int getMaxIdInCurrent(AppRenderer *appRenderer);
+FfonElement** getFfonAtId(AppRenderer *appRenderer, const IdArray *id, int *outCount);
 
 // Event handling
-void handleKeys(SiCompassApplication *state, SDL_Event *event);
-void handleTab(SiCompassApplication *state);
-void handleInput(SiCompassApplication *state, const char *text);
-void handleCtrlA(SiCompassApplication *state, History history);
-void handleEnter(SiCompassApplication *state, History history);
-void handleCtrlEnter(SiCompassApplication *state, History history);
-void handleCtrlI(SiCompassApplication *state, History history);
-void handleDelete(SiCompassApplication *state, History history);
-void handleColon(SiCompassApplication *state);
-void handleUp(SiCompassApplication *state);
-void handleDown(SiCompassApplication *state);
-void handleLeft(SiCompassApplication *state);
-void handleRight(SiCompassApplication *state);
-void handleI(SiCompassApplication *state);
-void handleA(SiCompassApplication *state);
-void handleHistoryAction(SiCompassApplication *state, History history);
-void handleCcp(SiCompassApplication *state, Task task);
-void handleFind(SiCompassApplication *state);
-void handleEscape(SiCompassApplication *state);
-void handleCommand(SiCompassApplication *state);
+void handleKeys(AppRenderer *appRenderer, SDL_Event *event);
+void handleTab(AppRenderer *appRenderer);
+void handleInput(AppRenderer *appRenderer, const char *text);
+void handleCtrlA(AppRenderer *appRenderer, History history);
+void handleEnter(AppRenderer *appRenderer, History history);
+void handleCtrlEnter(AppRenderer *appRenderer, History history);
+void handleCtrlI(AppRenderer *appRenderer, History history);
+void handleDelete(AppRenderer *appRenderer, History history);
+void handleColon(AppRenderer *appRenderer);
+void handleUp(AppRenderer *appRenderer);
+void handleDown(AppRenderer *appRenderer);
+void handleLeft(AppRenderer *appRenderer);
+void handleRight(AppRenderer *appRenderer);
+void handleI(AppRenderer *appRenderer);
+void handleA(AppRenderer *appRenderer);
+void handleHistoryAction(AppRenderer *appRenderer, History history);
+void handleCcp(AppRenderer *appRenderer, Task task);
+void handleFind(AppRenderer *appRenderer);
+void handleEscape(AppRenderer *appRenderer);
+void handleCommand(AppRenderer *appRenderer);
 
 // Right panel
-void createListRight(SiCompassApplication *state);
-void populateListRight(SiCompassApplication *state, const char *searchString);
-void clearListRight(SiCompassApplication *state);
+void createListRight(AppRenderer *appRenderer);
+void populateListRight(AppRenderer *appRenderer, const char *searchString);
+void clearListRight(AppRenderer *appRenderer);
 
 // Rendering
-void updateView(SiCompassApplication *state);
-void renderLeftPanel(SiCompassApplication *state);
-void renderRightPanel(SiCompassApplication *state);
-void renderLine(SiCompassApplication *state, FfonElement *elem, const IdArray *id, int indent, int *yPos);
-void renderText(SiCompassApplication *state, const char *text, int x, int y, uint32_t color, bool highlight);
+void updateView(AppRenderer *appRenderer);
+void renderLeftPanel(AppRenderer *appRenderer);
+void renderRightPanel(AppRenderer *appRenderer);
+void renderLine(AppRenderer *appRenderer, FfonElement *elem, const IdArray *id, int indent, int *yPos);
+void renderText(AppRenderer *appRenderer, const char *text, int x, int y, uint32_t color, bool highlight);
 
 // Utility functions
 const char* coordinateToString(Coordinate coord);
 const char* taskToString(Task task);
 bool isLineKey(const char *line);
 char* escapeHtmlToText(const char *html);
-void setErrorMessage(SiCompassApplication *state, const char *message);
+void setErrorMessage(AppRenderer *appRenderer, const char *message);
