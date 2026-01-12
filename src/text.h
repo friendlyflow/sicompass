@@ -3,6 +3,8 @@
 #include <vulkan/vulkan.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#include <hb.h>
+#include <hb-ft.h>
 #include <cglm/cglm.h>
 
 #define FONT_ATLAS_SIZE 1024
@@ -29,13 +31,15 @@ typedef struct TextVertex {
 typedef struct FontRenderer {
     FT_Library ftLibrary;
     FT_Face ftFace;
+    hb_font_t* hbFont;        // HarfBuzz font for text shaping
+    hb_buffer_t* hbBuffer;    // HarfBuzz buffer for shaping operations
 
     VkImage fontAtlasImage;
     VkDeviceMemory fontAtlasMemory;
     VkImageView fontAtlasView;
     VkSampler fontAtlasSampler;
 
-    GlyphInfo glyphs[128];
+    GlyphInfo glyphs[256];  // Extended to support Latin-1 Supplement (includes é, à, ñ, etc.)
 
     float lineHeight;  // Font line height (ascender - descender)
     float ascender;    // Distance from baseline to top
