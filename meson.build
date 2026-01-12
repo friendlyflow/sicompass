@@ -27,11 +27,11 @@ r = run_command('glslangValidator', '--quiet', '-V', 'shaders/text.frag', '-o', 
 output = r.stdout().strip()
 errortxt = r.stderr().strip()
 
-r = run_command('glslangValidator', '--quiet', '-V', 'shaders/background.vert', '-o', 'shaders/background_vert.spv', check: true)
+r = run_command('glslangValidator', '--quiet', '-V', 'shaders/rectangle.vert', '-o', 'shaders/rectangle_vert.spv', check: true)
 output = r.stdout().strip()
 errortxt = r.stderr().strip()
 
-r = run_command('glslangValidator', '--quiet', '-V', 'shaders/background.frag', '-o', 'shaders/background_frag.spv', check: true)
+r = run_command('glslangValidator', '--quiet', '-V', 'shaders/rectangle.frag', '-o', 'shaders/rectangle_frag.spv', check: true)
 output = r.stdout().strip()
 errortxt = r.stderr().strip()
 
