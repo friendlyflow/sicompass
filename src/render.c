@@ -25,7 +25,7 @@ void renderText(SiCompassApplication *app, const char *text, int x, int y,
     // Render highlight background if needed
     if (highlight) {
         vec4 bgColor;
-        colorToVec4(COLOR_GREEN, bgColor);
+        colorToVec4(COLOR_DARK_GREEN, bgColor);
 
         // Use a reasonable corner radius and padding
         float cornerRadius = 5.0f;
