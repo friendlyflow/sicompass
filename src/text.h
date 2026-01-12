@@ -107,6 +107,8 @@ void calculateTextBounds(SiCompassApplication* app, const char* text,
                         float x, float y, float scale,
                         float* outMinX, float* outMinY,
                         float* outMaxX, float* outMaxY);
+float getWidthEM(SiCompassApplication* app, float scale);
+float getLineHeight(SiCompassApplication* app, float scale, float padding);
 
 // Drawing
 void drawBackground(SiCompassApplication* app, VkCommandBuffer commandBuffer);
