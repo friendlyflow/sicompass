@@ -3,7 +3,6 @@
 #include <string.h>
 
 SiCompassApplication* appRendererCreate(SiCompassApplication* app) {
-    // TODO dat was hier AppRenderer!!! misschien niet goed nu!
     AppRenderer *appRenderer = calloc(1, sizeof(AppRenderer));
     if (!appRenderer) return NULL;
 

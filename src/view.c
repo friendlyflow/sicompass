@@ -8,6 +8,15 @@ void mainLoop(SiCompassApplication* app) {
         return;
     }
 
+    // Load JSON file
+    const char *jsonFile = "src/json/sf.json";
+    
+    if (!loadJsonFile(app->appRenderer, jsonFile)) {
+        fprintf(stderr, "Failed to load JSON file: %s\n", jsonFile);
+        appRendererDestroy(app->appRenderer);
+        return;
+    }
+
     // Initialize current_id
     idArrayInit(&app->appRenderer->currentId);
     idArrayPush(&app->appRenderer->currentId, 0);
@@ -76,4 +85,7 @@ void mainLoop(SiCompassApplication* app) {
 
         SDL_Delay(16); // ~60 FPS
     }
+
+    // Cleanup
+    appRendererDestroy(app->appRenderer);
 }
