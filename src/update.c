@@ -219,14 +219,19 @@ void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task tas
         case TASK_L_ARROW_RIGHT:
         case TASK_K_ARROW_UP:
         case TASK_J_ARROW_DOWN: {
-            // Update current element with line content
-            if (idx >= 0 && idx < count) {
-                if (arr[idx]->type == FFON_STRING) {
-                    free(arr[idx]->data.string);
-                    arr[idx]->data.string = strdup(line);
-                } else if (arr[idx]->type == FFON_OBJECT) {
-                    free(arr[idx]->data.object->key);
-                    arr[idx]->data.object->key = strdup(line);
+            // For navigation, save current content at the PREVIOUS position (before the move)
+            int prevCount;
+            FfonElement **prevArr = getFfonAtId(appRenderer, &appRenderer->previousId, &prevCount);
+            if (prevArr && prevCount > 0) {
+                int prevIdx = appRenderer->previousId.ids[appRenderer->previousId.depth - 1];
+                if (prevIdx >= 0 && prevIdx < prevCount) {
+                    if (prevArr[prevIdx]->type == FFON_STRING) {
+                        free(prevArr[prevIdx]->data.string);
+                        prevArr[prevIdx]->data.string = strdup(line);
+                    } else if (prevArr[prevIdx]->type == FFON_OBJECT) {
+                        free(prevArr[prevIdx]->data.object->key);
+                        prevArr[prevIdx]->data.object->key = strdup(line);
+                    }
                 }
             }
             break;
