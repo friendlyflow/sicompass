@@ -27,7 +27,7 @@ void mainLoop(SiCompassApplication* app) {
     
     // Initial render
     app->appRenderer->needsRedraw = true;
-    updateView(app->appRenderer);
+    updateView(app);
 
     // Main event loop
     SDL_Event event;
@@ -62,7 +62,7 @@ void mainLoop(SiCompassApplication* app) {
 
         // Render if needed
         if (app->appRenderer->needsRedraw) {
-            updateView(app->appRenderer);
+            updateView(app);
             app->appRenderer->needsRedraw = false;
             
             // char* text = "Hello Vulkan!";
