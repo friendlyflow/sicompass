@@ -221,11 +221,11 @@ void populateListRight(AppRenderer *appRenderer, const char *searchString);
 void clearListRight(AppRenderer *appRenderer);
 
 // Rendering
-void updateView(AppRenderer *appRenderer);
-void renderLeftPanel(AppRenderer *appRenderer);
-void renderRightPanel(AppRenderer *appRenderer);
-void renderLine(AppRenderer *appRenderer, FfonElement *elem, const IdArray *id, int indent, int *yPos);
-void renderText(AppRenderer *appRenderer, const char *text, int x, int y, uint32_t color, bool highlight);
+void updateView(SiCompassApplication *app);
+void renderLeftPanel(SiCompassApplication *app);
+void renderRightPanel(SiCompassApplication *app);
+void renderLine(SiCompassApplication *app, FfonElement *elem, const IdArray *id, int indent, int *yPos);
+void renderText(SiCompassApplication *app, const char *text, int x, int y, uint32_t color, bool highlight);
 
 // Utility functions
 const char* coordinateToString(Coordinate coord);
