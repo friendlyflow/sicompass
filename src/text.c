@@ -49,6 +49,20 @@ void initFreeType(SiCompassApplication* app) {
     fr->descender = fr->ftFace->size->metrics.descender / 64.0f;
     fr->lineHeight = fr->ascender - fr->descender;
 
+    // Initialize HarfBuzz
+    fr->hbFont = hb_ft_font_create(fr->ftFace, NULL);
+    if (!fr->hbFont) {
+        fprintf(stderr, "Failed to create HarfBuzz font\n");
+        exit(EXIT_FAILURE);
+    }
+
+    // Create HarfBuzz buffer for text shaping
+    fr->hbBuffer = hb_buffer_create();
+    if (!fr->hbBuffer) {
+        fprintf(stderr, "Failed to create HarfBuzz buffer\n");
+        exit(EXIT_FAILURE);
+    }
+
 }
 
 void createFontAtlas(SiCompassApplication* app) {
@@ -58,7 +72,8 @@ void createFontAtlas(SiCompassApplication* app) {
 
     int penX = 0, penY = 0, rowHeight = 0;
 
-    for (unsigned char c = 32; c < 128; c++) {
+    // Include ASCII (32-127) and Latin-1 Supplement (128-255) for accented characters
+    for (unsigned int c = 32; c < 256; c++) {
         // Use FT_LOAD_TARGET_LIGHT for better antialiasing quality
         if (FT_Load_Char(fr->ftFace, c, FT_LOAD_RENDER | FT_LOAD_TARGET_LIGHT)) continue;
 
@@ -467,17 +482,69 @@ void prepareTextForRendering(SiCompassApplication* app, const char* text,
     TextVertex vertices[MAX_TEXT_VERTICES];
     uint32_t vi = 0;
 
+    // Clear HarfBuzz buffer and add text
+    hb_buffer_clear_contents(fr->hbBuffer);
+    hb_buffer_set_direction(fr->hbBuffer, HB_DIRECTION_LTR);
+    hb_buffer_set_script(fr->hbBuffer, HB_SCRIPT_LATIN);
+    hb_buffer_set_language(fr->hbBuffer, hb_language_from_string("en", -1));
+
+    // Add UTF-8 text to buffer
+    hb_buffer_add_utf8(fr->hbBuffer, text, -1, 0, -1);
+
+    // Shape the text
+    hb_shape(fr->hbFont, fr->hbBuffer, NULL, 0);
+
+    // Get shaped glyph information
+    unsigned int glyphCount;
+    hb_glyph_info_t* glyphInfo = hb_buffer_get_glyph_infos(fr->hbBuffer, &glyphCount);
+    hb_glyph_position_t* glyphPos = hb_buffer_get_glyph_positions(fr->hbBuffer, &glyphCount);
+
     float cursorX = x;
     float cursorY = y;
 
-    for (const char* p = text; *p; p++) {
-        char c = *p;
-        if (c < 32 || c >= 128) continue;
+    for (unsigned int i = 0; i < glyphCount; i++) {
+        hb_codepoint_t glyphIndex = glyphInfo[i].codepoint;
 
-        GlyphInfo* g = &fr->glyphs[(int)c];
+        // Get the Unicode codepoint from the glyph info
+        // HarfBuzz provides us with the shaped glyph, we need to find the original character
+        unsigned int cluster = glyphInfo[i].cluster;
 
-        float xpos = cursorX + g->bearing[0] * scale;
-        float ypos = cursorY - g->bearing[1] * scale;
+        // Decode UTF-8 character at cluster position
+        unsigned int charCode = 0;
+        const unsigned char* utf8 = (const unsigned char*)&text[cluster];
+
+        if (utf8[0] < 0x80) {
+            // Single-byte ASCII character (0xxxxxxx)
+            charCode = utf8[0];
+        } else if ((utf8[0] & 0xE0) == 0xC0) {
+            // Two-byte character (110xxxxx 10xxxxxx)
+            charCode = ((utf8[0] & 0x1F) << 6) | (utf8[1] & 0x3F);
+        } else if ((utf8[0] & 0xF0) == 0xE0) {
+            // Three-byte character (1110xxxx 10xxxxxx 10xxxxxx)
+            charCode = ((utf8[0] & 0x0F) << 12) | ((utf8[1] & 0x3F) << 6) | (utf8[2] & 0x3F);
+        } else if ((utf8[0] & 0xF8) == 0xF0) {
+            // Four-byte character (11110xxx 10xxxxxx 10xxxxxx 10xxxxxx)
+            charCode = ((utf8[0] & 0x07) << 18) | ((utf8[1] & 0x3F) << 12) |
+                      ((utf8[2] & 0x3F) << 6) | (utf8[3] & 0x3F);
+        }
+
+        // Check if character is in our atlas (32-255)
+        GlyphInfo* g = NULL;
+        if (charCode >= 32 && charCode < 256) {
+            g = &fr->glyphs[charCode];
+        } else {
+            // Skip characters outside our atlas range
+            cursorX += (glyphPos[i].x_advance / 64.0f) * scale;
+            cursorY += (glyphPos[i].y_advance / 64.0f) * scale;
+            continue;
+        }
+
+        // Apply HarfBuzz positioning
+        float xOffset = (glyphPos[i].x_offset / 64.0f) * scale;
+        float yOffset = (glyphPos[i].y_offset / 64.0f) * scale;
+
+        float xpos = cursorX + xOffset + g->bearing[0] * scale;
+        float ypos = cursorY + yOffset - g->bearing[1] * scale;
         float w = g->size[0] * scale;
         float h = g->size[1] * scale;
 
@@ -491,7 +558,8 @@ void prepareTextForRendering(SiCompassApplication* app, const char* text,
         vertices[vi++] = (TextVertex){{xpos + w, ypos, 0.0f}, {g->uvMax[0], g->uvMin[1]}, {color[0], color[1], color[2]}};
         vertices[vi++] = (TextVertex){{xpos + w, ypos + h, 0.0f}, {g->uvMax[0], g->uvMax[1]}, {color[0], color[1], color[2]}};
 
-        cursorX += g->advance * scale;
+        cursorX += (glyphPos[i].x_advance / 64.0f) * scale;
+        cursorY += (glyphPos[i].y_advance / 64.0f) * scale;
     }
 
     // Check if adding these vertices would exceed the buffer size
@@ -524,6 +592,14 @@ void cleanupFontRenderer(SiCompassApplication* app) {
     vkDestroyImageView(app->device, fr->fontAtlasView, NULL);
     vkDestroyImage(app->device, fr->fontAtlasImage, NULL);
     vkFreeMemory(app->device, fr->fontAtlasMemory, NULL);
+
+    // Cleanup HarfBuzz resources
+    if (fr->hbBuffer) {
+        hb_buffer_destroy(fr->hbBuffer);
+    }
+    if (fr->hbFont) {
+        hb_font_destroy(fr->hbFont);
+    }
 
     FT_Done_Face(fr->ftFace);
     FT_Done_FreeType(fr->ftLibrary);

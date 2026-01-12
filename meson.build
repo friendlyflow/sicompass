@@ -39,7 +39,7 @@ subdir('src')
 
 add_project_arguments('-DVK_USE_PLATFORM_XCB_KHR', language: 'c')
 
-exe_sc = executable('sc', [sources_sc], dependencies: [vulkan_dep, sdl3_dep, m_dep, ft_dep, stb_dep, jsonc_dep],
+exe_sc = executable('sc', [sources_sc], dependencies: [vulkan_dep, sdl3_dep, m_dep, ft_dep, hb_dep, stb_dep, jsonc_dep],
                     include_directories: [], install : false)
 
 #test('basic', exe)
