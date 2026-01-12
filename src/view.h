@@ -11,6 +11,8 @@
 #define UNDO_HISTORY_SIZE 500
 #define DELTA_MS 400
 #define INDENT_CHARS 4
+#define FONT_SIZE_PT 12.0f
+#define TEXT_PADDING 4.0f
 
 // Colors
 #define COLOR_BG 0x1E1E1EFF
