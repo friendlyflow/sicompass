@@ -573,6 +573,24 @@ void calculateTextBounds(SiCompassApplication* app, const char* text,
     *outMaxY = maxY;
 }
 
+float getWidthEM(SiCompassApplication* app, float scale) {
+    FontRenderer* fr = app->fontRenderer;
+
+    // Get the 'M' character glyph info
+    GlyphInfo* g = &fr->glyphs[(int)'M'];
+
+    // Return the advance width (horizontal spacing) scaled
+    return g->advance * scale;
+}
+
+float getLineHeight(SiCompassApplication* app, float scale, float padding) {
+    FontRenderer* fr = app->fontRenderer;
+
+    // Calculate line height from font metrics (ascender - descender)
+    // Add padding for top and bottom margins
+    return fr->lineHeight * scale + (padding * 2.0f);
+}
+
 void prepareBackgroundForText(SiCompassApplication* app, const char* text,
                               float x, float y, float scale,
                               vec4 bgColor, float cornerRadius, float padding) {
