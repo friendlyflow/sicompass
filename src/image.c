@@ -1,9 +1,6 @@
 #include "image.h"
 #include "main.h"
 #include <stb_image.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <cglm/cglm.h>
 
 typedef struct {

@@ -846,7 +846,7 @@ void recordCommandBuffer(SiCompassApplication* app, VkCommandBuffer commandBuffe
     vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
     drawImage(app, commandBuffer);
-    drawBackground(app, commandBuffer);
+    drawRectangle(app, commandBuffer);
     drawText(app, commandBuffer);
 
     vkCmdEndRenderPass(commandBuffer);
@@ -995,12 +995,16 @@ void initVulkan(SiCompassApplication* app) {
     createFontAtlasView(app);
     createFontAtlasSampler(app);
     createTextVertexBuffer(app);
-    createBackgroundVertexBuffer(app);
     createTextDescriptorSetLayout(app);
     createTextDescriptorPool(app);
     createTextDescriptorSets(app);
     createTextPipeline(app);
-    createBackgroundPipeline(app);
+
+    // Initialize rectangle renderer
+    app->rectangleRenderer = (RectangleRenderer*)malloc(sizeof(RectangleRenderer));
+    app->rectangleRenderer->vertexCount = 0;
+    createRectangleVertexBuffer(app);
+    createRectanglePipeline(app);
 }
 
 void startApp(SiCompassApplication* app) {
@@ -1053,6 +1057,7 @@ void cleanup(SiCompassApplication* app) {
     SDL_DestroyWindow(app->window);
     SDL_Quit();
 
+    cleanupRectangleRenderer(app);
     cleanupFontRenderer(app);
 }
 

@@ -4,8 +4,6 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include <cglm/cglm.h>
-#include <stdint.h>
-#include <stdbool.h>
 
 #define FONT_ATLAS_SIZE 1024
 #define MAX_TEXT_VERTICES 1024
@@ -27,14 +25,6 @@ typedef struct TextVertex {
     vec2 texCoord;
     vec3 color;
 } TextVertex;
-
-typedef struct BackgroundVertex {
-    vec2 pos;
-    vec4 color;
-    vec2 cornerRadius;  // x = radius, y = unused (for alignment)
-    vec2 rectSize;      // width and height of the rectangle
-    vec2 rectOrigin;    // top-left corner (minX, minY) of the rectangle
-} BackgroundVertex;
 
 typedef struct FontRenderer {
     FT_Library ftLibrary;
@@ -63,14 +53,6 @@ typedef struct FontRenderer {
     VkPipeline textPipeline;
 
     uint32_t textVertexCount;
-
-    VkBuffer backgroundVertexBuffer;
-    VkDeviceMemory backgroundVertexBufferMemory;
-
-    VkPipelineLayout backgroundPipelineLayout;
-    VkPipeline backgroundPipeline;
-
-    uint32_t backgroundVertexCount;
 } FontRenderer;
 
 // Initialization and cleanup
@@ -84,7 +66,6 @@ void createFontAtlasSampler(SiCompassApplication* app);
 
 // Buffer creation
 void createTextVertexBuffer(SiCompassApplication* app);
-void createBackgroundVertexBuffer(SiCompassApplication* app);
 
 // Descriptor sets
 void createTextDescriptorSetLayout(SiCompassApplication* app);
@@ -93,15 +74,11 @@ void createTextDescriptorSets(SiCompassApplication* app);
 
 // Pipeline creation
 void createTextPipeline(SiCompassApplication* app);
-void createBackgroundPipeline(SiCompassApplication* app);
 
 // Text rendering
 void beginTextRendering(SiCompassApplication* app);
 void prepareTextForRendering(SiCompassApplication* app, const char* text,
                              float x, float y, float scale, vec3 color);
-void prepareBackgroundForText(SiCompassApplication* app, const char* text,
-                              float x, float y, float scale,
-                              vec4 bgColor, float cornerRadius, float padding);
 
 // Helper functions
 void calculateTextBounds(SiCompassApplication* app, const char* text,
@@ -113,5 +90,4 @@ float getWidthEM(SiCompassApplication* app, float scale);
 float getLineHeight(SiCompassApplication* app, float scale, float padding);
 
 // Drawing
-void drawBackground(SiCompassApplication* app, VkCommandBuffer commandBuffer);
 void drawText(SiCompassApplication* app, VkCommandBuffer commandBuffer);

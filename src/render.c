@@ -29,10 +29,23 @@ void renderText(SiCompassApplication *app, const char *text, int x, int y,
         vec4 bgColor;
         colorToVec4(COLOR_DARK_GREEN, bgColor);
 
-        // Use a reasonable corner radius and padding
+        // Calculate text bounds
+        float minX, minY, maxX, maxY;
+        calculateTextBounds(app, text, (float)x, (float)y, scale, &minX, &minY, &maxX, &maxY);
+
+        // Add padding
+        minX -= TEXT_PADDING;
+        minY -= TEXT_PADDING;
+        maxX += TEXT_PADDING;
+        maxY += TEXT_PADDING;
+
+        float width = maxX - minX;
+        float height = maxY - minY;
+
+        // Use a reasonable corner radius
         float cornerRadius = 5.0f;
 
-        prepareBackgroundForText(app, text, (float)x, (float)y, scale, bgColor, cornerRadius, TEXT_PADDING);
+        prepareRectangle(app, minX, minY, width, height, bgColor, cornerRadius);
     }
 
     // Prepare text for rendering

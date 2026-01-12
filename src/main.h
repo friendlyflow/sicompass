@@ -20,6 +20,7 @@
 #include <time.h>
 
 #include "text.h"
+#include "rectangle.h"
 #include "image.h"
 
 #define MAX_FRAMES_IN_FLIGHT 2
@@ -113,6 +114,7 @@ typedef struct SiCompassApplication {
     clock_t startTime;
 
     FontRenderer* fontRenderer;
+    RectangleRenderer* rectangleRenderer;
 
     AppRenderer* appRenderer;
 } SiCompassApplication;
