@@ -43,8 +43,10 @@ void initFreeType(SiCompassApplication* app) {
 
     // Base DPI of 96, scaled by content scale
     int scaledDPI = (int)(96.0f * contentScale);
-    // Use larger base size (48pt) for better quality when scaling
-    FT_Set_Char_Size(fr->ftFace, 0, 48*64, scaledDPI, scaledDPI);
+    fr->dpi = (float)scaledDPI;
+
+    // Use larger base size (64pt) for better quality when scaling down
+    FT_Set_Char_Size(fr->ftFace, 0, 64*64, scaledDPI, scaledDPI);
 
     // Store font metrics for consistent line height
     fr->ascender = fr->ftFace->size->metrics.ascender / 64.0f;
@@ -61,7 +63,8 @@ void createFontAtlas(SiCompassApplication* app) {
     int penX = 0, penY = 0, rowHeight = 0;
 
     for (unsigned char c = 32; c < 128; c++) {
-        if (FT_Load_Char(fr->ftFace, c, FT_LOAD_RENDER)) continue;
+        // Use FT_LOAD_TARGET_LIGHT for better antialiasing quality
+        if (FT_Load_Char(fr->ftFace, c, FT_LOAD_RENDER | FT_LOAD_TARGET_LIGHT)) continue;
 
         FT_GlyphSlot g = fr->ftFace->glyph;
 
@@ -571,6 +574,18 @@ void calculateTextBounds(SiCompassApplication* app, const char* text,
     *outMinY = minY;
     *outMaxX = maxX;
     *outMaxY = maxY;
+}
+
+float getTextScale(SiCompassApplication* app, float desiredSizePt) {
+    FontRenderer* fr = app->fontRenderer;
+
+    // Convert points to pixels: pixels = points * DPI / 72
+    float desiredHeightPx = desiredSizePt * fr->dpi / 72.0f;
+
+    // Calculate scale factor to achieve desired pixel height
+    // desiredHeightPx = lineHeight * scale
+    // scale = desiredHeightPx / lineHeight
+    return desiredHeightPx / fr->lineHeight;
 }
 
 float getWidthEM(SiCompassApplication* app, float scale) {

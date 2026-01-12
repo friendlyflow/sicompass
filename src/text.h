@@ -7,7 +7,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define FONT_ATLAS_SIZE 512
+#define FONT_ATLAS_SIZE 1024
 #define MAX_TEXT_VERTICES 1024
 #define MAX_FRAMES_IN_FLIGHT 2
 
@@ -50,6 +50,7 @@ typedef struct FontRenderer {
     float lineHeight;  // Font line height (ascender - descender)
     float ascender;    // Distance from baseline to top
     float descender;   // Distance from baseline to bottom (negative)
+    float dpi;         // Screen DPI (96 * content scale)
 
     VkBuffer textVertexBuffer;
     VkDeviceMemory textVertexBufferMemory;
@@ -107,6 +108,7 @@ void calculateTextBounds(SiCompassApplication* app, const char* text,
                         float x, float y, float scale,
                         float* outMinX, float* outMinY,
                         float* outMaxX, float* outMaxY);
+float getTextScale(SiCompassApplication* app, float desiredSizePt);
 float getWidthEM(SiCompassApplication* app, float scale);
 float getLineHeight(SiCompassApplication* app, float scale, float padding);
 

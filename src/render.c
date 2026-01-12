@@ -22,6 +22,8 @@ void renderText(SiCompassApplication *app, const char *text, int x, int y,
         text = " "; // Render at least a space for empty lines
     }
 
+    float scale = getTextScale(app, FONT_SIZE_PT);
+
     // Render highlight background if needed
     if (highlight) {
         vec4 bgColor;
@@ -29,22 +31,21 @@ void renderText(SiCompassApplication *app, const char *text, int x, int y,
 
         // Use a reasonable corner radius and padding
         float cornerRadius = 5.0f;
-        float padding = 4.0f;
 
-        prepareBackgroundForText(app, text, (float)x, (float)y, 0.25f, bgColor, cornerRadius, padding);
+        prepareBackgroundForText(app, text, (float)x, (float)y, scale, bgColor, cornerRadius, TEXT_PADDING);
     }
 
     // Prepare text for rendering
     vec3 textColor;
     colorToVec3(color, textColor);
-    prepareTextForRendering(app, text, (float)x, (float)y, 0.25f, textColor);
+    prepareTextForRendering(app, text, (float)x, (float)y, scale, textColor);
 }
 
 void renderLine(SiCompassApplication *app, FfonElement *elem, const IdArray *id,
                 int indent, int *yPos) {
-    // Calculate line height from font metrics with padding/margin
-    float padding = 4.0f;
-    int lineHeight = (int)getLineHeight(app, 0.25f, padding);
+    // Calculate scale and dimensions from font metrics
+    float scale = getTextScale(app, FONT_SIZE_PT);
+    int lineHeight = (int)getLineHeight(app, scale, TEXT_PADDING);
 
     if (*yPos < -lineHeight || *yPos > 720) {
         // Skip off-screen lines
@@ -53,7 +54,7 @@ void renderLine(SiCompassApplication *app, FfonElement *elem, const IdArray *id,
     }
 
     // Get character width from font (using 'M' as em-width, monospace assumption)
-    int charWidth = (int)getWidthEM(app, 0.25f);
+    int charWidth = (int)getWidthEM(app, scale);
     int x = 50 + indent * INDENT_CHARS * charWidth;
     bool isCurrent = idArrayEqual(id, &app->appRenderer->currentId);
 
@@ -86,7 +87,8 @@ void renderLine(SiCompassApplication *app, FfonElement *elem, const IdArray *id,
 }
 
 void renderLeftPanel(SiCompassApplication *app) {
-    int yPos = 40; // Start below header
+    float scale = getTextScale(app, FONT_SIZE_PT);
+    int yPos = 2 * getLineHeight(app, scale, TEXT_PADDING);
 
     if (app->appRenderer->ffonCount == 0) {
         renderText(app, "", 50, yPos, COLOR_TEXT, true);
@@ -105,8 +107,8 @@ void renderLeftPanel(SiCompassApplication *app) {
 
 void renderRightPanel(SiCompassApplication *app) {
     int yPos = 40;
-    float padding = 4.0f;
-    int lineHeight = (int)getLineHeight(app, 0.25f, padding);
+    float scale = getTextScale(app, FONT_SIZE_PT);
+    int lineHeight = (int)getLineHeight(app, scale, TEXT_PADDING);
 
     // Render filter input
     char filterText[MAX_LINE_LENGTH];
@@ -141,9 +143,10 @@ void updateView(SiCompassApplication *app) {
     beginTextRendering(app);
 
     // Render header
+    float scale = getTextScale(app, FONT_SIZE_PT);
     char header[256];
     snprintf(header, sizeof(header), "%s", coordinateToString(app->appRenderer->currentCoordinate));
-    renderText(app, header, 50, 10, COLOR_TEXT, false);
+    renderText(app, header, 50, getLineHeight(app, scale, TEXT_PADDING), COLOR_TEXT, false);
 
     // Render error message if any
     if (app->appRenderer->errorMessage[0] != '\0') {
