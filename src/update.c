@@ -13,8 +13,8 @@ void updateState(AppRenderer *appRenderer, Task task, History history) {
         }
     } else {
         // Get line from current element or input buffer
-        if (appRenderer->currentCoordinate == COORDINATE_LEFT_EDITOR_INSERT ||
-            appRenderer->currentCoordinate == COORDINATE_LEFT_VISITOR_INSERT) {
+        if (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+            appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT) {
             strncpy(line, appRenderer->inputBuffer, MAX_LINE_LENGTH - 1);
         } else {
             int count;
@@ -75,8 +75,8 @@ void updateIds(AppRenderer *appRenderer, bool isKey, Task task, History history)
             break;
 
         case TASK_APPEND:
-            if (appRenderer->currentCoordinate == COORDINATE_LEFT_EDITOR_GENERAL ||
-                appRenderer->currentCoordinate == COORDINATE_LEFT_VISITOR_GENERAL) {
+            if (appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL ||
+                appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
                 if (!isKey) {
                     appRenderer->currentId.ids[appRenderer->currentId.depth - 1]++;
                 } else {
@@ -90,8 +90,8 @@ void updateIds(AppRenderer *appRenderer, bool isKey, Task task, History history)
             break;
 
         case TASK_APPEND_APPEND:
-            if (appRenderer->currentCoordinate == COORDINATE_LEFT_EDITOR_GENERAL ||
-                appRenderer->currentCoordinate == COORDINATE_LEFT_VISITOR_GENERAL) {
+            if (appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL ||
+                appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
                 appRenderer->currentId.ids[appRenderer->currentId.depth - 1] = maxId + 1;
             }
             break;
@@ -101,8 +101,8 @@ void updateIds(AppRenderer *appRenderer, bool isKey, Task task, History history)
             break;
 
         case TASK_INSERT_INSERT:
-            if (appRenderer->currentCoordinate == COORDINATE_LEFT_EDITOR_GENERAL ||
-                appRenderer->currentCoordinate == COORDINATE_LEFT_VISITOR_GENERAL) {
+            if (appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL ||
+                appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
                 appRenderer->currentId.ids[appRenderer->currentId.depth - 1] = 0;
             }
             break;

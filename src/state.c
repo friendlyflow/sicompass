@@ -69,7 +69,7 @@ void appRendererDestroy(AppRenderer *appRenderer) {
     }
 
     // Free list items
-    clearListRight(appRenderer);
+    clearListAuxilaries(appRenderer);
 
     free(appRenderer);
 }
@@ -118,15 +118,15 @@ char* idArrayToString(const IdArray *arr) {
 
 const char* coordinateToString(Coordinate coord) {
     switch (coord) {
-        case COORDINATE_LEFT_VISITOR_GENERAL: return "visitor mode";
-        case COORDINATE_LEFT_VISITOR_INSERT: return "visitor insert mode";
-        case COORDINATE_LEFT_EDITOR_GENERAL: return "editor mode";
-        case COORDINATE_LEFT_EDITOR_INSERT: return "editor insert mode";
-        case COORDINATE_LEFT_EDITOR_NORMAL: return "normal mode";
-        case COORDINATE_LEFT_EDITOR_VISUAL: return "visual mode";
-        case COORDINATE_RIGHT_INFO: return "info mode";
-        case COORDINATE_RIGHT_COMMAND: return "command mode";
-        case COORDINATE_RIGHT_FIND: return "find mode";
+        case COORDINATE_OPERATOR_GENERAL: return "op";
+        case COORDINATE_OPERATOR_INSERT: return "op i";
+        case COORDINATE_EDITOR_GENERAL: return "edit";
+        case COORDINATE_EDITOR_INSERT: return "edit i";
+        case COORDINATE_EDITOR_NORMAL: return "edit n";
+        case COORDINATE_EDITOR_VISUAL: return "edit v";
+        case COORDINATE_LIST: return "list";
+        case COORDINATE_COMMAND: return "command";
+        case COORDINATE_FIND: return "find";
         default: return "unknown";
     }
 }

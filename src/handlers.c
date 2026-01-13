@@ -4,14 +4,14 @@
 
 void handleTab(AppRenderer *appRenderer) {
     appRenderer->previousCoordinate = appRenderer->currentCoordinate;
-    appRenderer->currentCoordinate = COORDINATE_RIGHT_INFO;
+    appRenderer->currentCoordinate = COORDINATE_LIST;
 
-    // Clear input buffer for filtering
+    // Clear input buffer for searching
     appRenderer->inputBuffer[0] = '\0';
     appRenderer->inputBufferSize = 0;
     appRenderer->cursorPosition = 0;
 
-    createListRight(appRenderer);
+    createListAuxilaries(appRenderer);
     appRenderer->needsRedraw = true;
 }
 
@@ -33,21 +33,31 @@ void handleCtrlA(AppRenderer *appRenderer, History history) {
 void handleEnter(AppRenderer *appRenderer, History history) {
     uint64_t now = SDL_GetTicks();
 
-    if (appRenderer->currentCoordinate == COORDINATE_RIGHT_INFO) {
+    if (appRenderer->currentCoordinate == COORDINATE_LIST) {
         // Get selected item from list
-        if (appRenderer->listIndex >= 0 && appRenderer->listIndex < appRenderer->filteredListCount) {
-            idArrayCopy(&appRenderer->currentId, &appRenderer->filteredListRight[appRenderer->listIndex].id);
+        ListItem *list = appRenderer->filteredListCount > 0 ?
+                         appRenderer->filteredListAuxilaries : appRenderer->totalListAuxilaries;
+        int count = appRenderer->filteredListCount > 0 ?
+                    appRenderer->filteredListCount : appRenderer->totalListCount;
+
+        if (appRenderer->listIndex >= 0 && appRenderer->listIndex < count) {
+            idArrayCopy(&appRenderer->currentId, &list[appRenderer->listIndex].id);
         }
         appRenderer->currentCoordinate = appRenderer->previousCoordinate;
         appRenderer->needsRedraw = true;
-    } else if (appRenderer->currentCoordinate == COORDINATE_RIGHT_COMMAND) {
+    } else if (appRenderer->currentCoordinate == COORDINATE_COMMAND) {
         // Execute selected command
-        if (appRenderer->listIndex >= 0 && appRenderer->listIndex < appRenderer->filteredListCount) {
-            const char *cmd = appRenderer->filteredListRight[appRenderer->listIndex].value;
+        ListItem *list = appRenderer->filteredListCount > 0 ?
+                         appRenderer->filteredListAuxilaries : appRenderer->totalListAuxilaries;
+        int count = appRenderer->filteredListCount > 0 ?
+                    appRenderer->filteredListCount : appRenderer->totalListCount;
+
+        if (appRenderer->listIndex >= 0 && appRenderer->listIndex < count) {
+            const char *cmd = list[appRenderer->listIndex].value;
             if (strcmp(cmd, "editor mode") == 0) {
                 appRenderer->currentCommand = COMMAND_EDITOR_MODE;
-            } else if (strcmp(cmd, "visitor mode") == 0) {
-                appRenderer->currentCommand = COMMAND_VISITOR_MODE;
+            } else if (strcmp(cmd, "operator mode") == 0) {
+                appRenderer->currentCommand = COMMAND_OPERATOR_MODE;
             }
             handleCommand(appRenderer);
         }
@@ -57,9 +67,9 @@ void handleEnter(AppRenderer *appRenderer, History history) {
 }
 
 void handleCtrlEnter(AppRenderer *appRenderer, History history) {
-    if (appRenderer->currentCoordinate == COORDINATE_LEFT_EDITOR_INSERT) {
+    if (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT) {
         updateState(appRenderer, TASK_INPUT, HISTORY_NONE);
-        appRenderer->currentCoordinate = COORDINATE_LEFT_EDITOR_GENERAL;
+        appRenderer->currentCoordinate = COORDINATE_EDITOR_GENERAL;
         handleRight(appRenderer);
         handleA(appRenderer);
     }
@@ -87,73 +97,73 @@ void handleDelete(AppRenderer *appRenderer, History history) {
 
 void handleColon(AppRenderer *appRenderer) {
     appRenderer->previousCoordinate = appRenderer->currentCoordinate;
-    appRenderer->currentCoordinate = COORDINATE_RIGHT_COMMAND;
+    appRenderer->currentCoordinate = COORDINATE_COMMAND;
 
-    // Clear input buffer for filtering
+    // Clear input buffer for searching
     appRenderer->inputBuffer[0] = '\0';
     appRenderer->inputBufferSize = 0;
     appRenderer->cursorPosition = 0;
 
-    createListRight(appRenderer);
+    createListAuxilaries(appRenderer);
     appRenderer->needsRedraw = true;
 }
 
 void handleUp(AppRenderer *appRenderer) {
-    if (appRenderer->currentCoordinate == COORDINATE_RIGHT_INFO ||
-        appRenderer->currentCoordinate == COORDINATE_RIGHT_COMMAND ||
-        appRenderer->currentCoordinate == COORDINATE_RIGHT_FIND) {
+    if (appRenderer->currentCoordinate == COORDINATE_LIST ||
+        appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+        appRenderer->currentCoordinate == COORDINATE_FIND) {
         if (appRenderer->listIndex > 0) {
             appRenderer->listIndex--;
         }
-    } else if (appRenderer->currentCoordinate != COORDINATE_LEFT_EDITOR_INSERT) {
+    } else if (appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT) {
         updateState(appRenderer, TASK_K_ARROW_UP, HISTORY_NONE);
     }
     appRenderer->needsRedraw = true;
 }
 
 void handleDown(AppRenderer *appRenderer) {
-    if (appRenderer->currentCoordinate == COORDINATE_RIGHT_INFO ||
-        appRenderer->currentCoordinate == COORDINATE_RIGHT_COMMAND ||
-        appRenderer->currentCoordinate == COORDINATE_RIGHT_FIND) {
+    if (appRenderer->currentCoordinate == COORDINATE_LIST ||
+        appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+        appRenderer->currentCoordinate == COORDINATE_FIND) {
         int maxIndex = (appRenderer->filteredListCount > 0) ?
                         appRenderer->filteredListCount - 1 :
                         appRenderer->totalListCount - 1;
         if (appRenderer->listIndex < maxIndex) {
             appRenderer->listIndex++;
         }
-    } else if (appRenderer->currentCoordinate != COORDINATE_LEFT_EDITOR_INSERT) {
+    } else if (appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT) {
         updateState(appRenderer, TASK_J_ARROW_DOWN, HISTORY_NONE);
     }
     appRenderer->needsRedraw = true;
 }
 
 void handleLeft(AppRenderer *appRenderer) {
-    if (appRenderer->currentCoordinate == COORDINATE_RIGHT_INFO ||
-        appRenderer->currentCoordinate == COORDINATE_RIGHT_COMMAND ||
-        appRenderer->currentCoordinate == COORDINATE_RIGHT_FIND) {
+    if (appRenderer->currentCoordinate == COORDINATE_LIST ||
+        appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+        appRenderer->currentCoordinate == COORDINATE_FIND) {
         // Nothing to do
-    } else if (appRenderer->currentCoordinate != COORDINATE_LEFT_EDITOR_INSERT) {
+    } else if (appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT) {
         updateState(appRenderer, TASK_H_ARROW_LEFT, HISTORY_NONE);
         appRenderer->needsRedraw = true;
     }
 }
 
 void handleRight(AppRenderer *appRenderer) {
-    if (appRenderer->currentCoordinate == COORDINATE_RIGHT_INFO ||
-        appRenderer->currentCoordinate == COORDINATE_RIGHT_COMMAND ||
-        appRenderer->currentCoordinate == COORDINATE_RIGHT_FIND) {
+    if (appRenderer->currentCoordinate == COORDINATE_LIST ||
+        appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+        appRenderer->currentCoordinate == COORDINATE_FIND) {
         // Nothing to do
-    } else if (appRenderer->currentCoordinate != COORDINATE_LEFT_EDITOR_INSERT) {
+    } else if (appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT) {
         updateState(appRenderer, TASK_L_ARROW_RIGHT, HISTORY_NONE);
         appRenderer->needsRedraw = true;
     }
 }
 
 void handleI(AppRenderer *appRenderer) {
-    if (appRenderer->currentCoordinate == COORDINATE_LEFT_EDITOR_GENERAL) {
+    if (appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL) {
         idArrayCopy(&appRenderer->currentInsertId, &appRenderer->currentId);
         appRenderer->previousCoordinate = appRenderer->currentCoordinate;
-        appRenderer->currentCoordinate = COORDINATE_LEFT_EDITOR_INSERT;
+        appRenderer->currentCoordinate = COORDINATE_EDITOR_INSERT;
 
         // Get current line content
         int count;
@@ -181,10 +191,10 @@ void handleI(AppRenderer *appRenderer) {
 }
 
 void handleA(AppRenderer *appRenderer) {
-    if (appRenderer->currentCoordinate == COORDINATE_LEFT_EDITOR_GENERAL) {
+    if (appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL) {
         idArrayCopy(&appRenderer->currentInsertId, &appRenderer->currentId);
         appRenderer->previousCoordinate = appRenderer->currentCoordinate;
-        appRenderer->currentCoordinate = COORDINATE_LEFT_EDITOR_INSERT;
+        appRenderer->currentCoordinate = COORDINATE_EDITOR_INSERT;
 
         // Get current line content
         int count;
@@ -212,12 +222,12 @@ void handleA(AppRenderer *appRenderer) {
 }
 
 void handleFind(AppRenderer *appRenderer) {
-    if (appRenderer->currentCoordinate != COORDINATE_RIGHT_INFO &&
-        appRenderer->currentCoordinate != COORDINATE_RIGHT_COMMAND) {
+    if (appRenderer->currentCoordinate != COORDINATE_LIST &&
+        appRenderer->currentCoordinate != COORDINATE_COMMAND) {
         appRenderer->previousCoordinate = appRenderer->currentCoordinate;
-        appRenderer->currentCoordinate = COORDINATE_RIGHT_FIND;
+        appRenderer->currentCoordinate = COORDINATE_FIND;
 
-        // Clear input buffer for filtering
+        // Clear input buffer for searching
         appRenderer->inputBuffer[0] = '\0';
         appRenderer->inputBufferSize = 0;
         appRenderer->cursorPosition = 0;
@@ -227,17 +237,17 @@ void handleFind(AppRenderer *appRenderer) {
 }
 
 void handleEscape(AppRenderer *appRenderer) {
-    if (appRenderer->previousCoordinate == COORDINATE_LEFT_VISITOR_GENERAL ||
-        appRenderer->previousCoordinate == COORDINATE_LEFT_VISITOR_INSERT) {
-        if (appRenderer->currentCoordinate == COORDINATE_LEFT_VISITOR_INSERT) {
+    if (appRenderer->previousCoordinate == COORDINATE_OPERATOR_GENERAL ||
+        appRenderer->previousCoordinate == COORDINATE_OPERATOR_INSERT) {
+        if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT) {
             updateState(appRenderer, TASK_INPUT, HISTORY_NONE);
         }
-        appRenderer->currentCoordinate = COORDINATE_LEFT_VISITOR_GENERAL;
+        appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
     } else {
-        if (appRenderer->currentCoordinate == COORDINATE_LEFT_EDITOR_INSERT) {
+        if (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT) {
             updateState(appRenderer, TASK_INPUT, HISTORY_NONE);
         }
-        appRenderer->currentCoordinate = COORDINATE_LEFT_EDITOR_GENERAL;
+        appRenderer->currentCoordinate = COORDINATE_EDITOR_GENERAL;
     }
 
     appRenderer->previousCoordinate = appRenderer->currentCoordinate;
@@ -248,12 +258,12 @@ void handleCommand(AppRenderer *appRenderer) {
     switch (appRenderer->currentCommand) {
         case COMMAND_EDITOR_MODE:
             appRenderer->previousCoordinate = appRenderer->currentCoordinate;
-            appRenderer->currentCoordinate = COORDINATE_LEFT_EDITOR_GENERAL;
+            appRenderer->currentCoordinate = COORDINATE_EDITOR_GENERAL;
             break;
 
-        case COMMAND_VISITOR_MODE:
+        case COMMAND_OPERATOR_MODE:
             appRenderer->previousCoordinate = appRenderer->currentCoordinate;
-            appRenderer->currentCoordinate = COORDINATE_LEFT_VISITOR_GENERAL;
+            appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
             break;
     }
 

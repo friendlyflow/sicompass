@@ -16,12 +16,12 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
     // Ctrl+A or Enter in editor general mode
     else if (((ctrl && !shift && !alt && key == SDLK_A) ||
               (!ctrl && !shift && !alt && key == SDLK_RETURN)) &&
-             appRenderer->currentCoordinate == COORDINATE_LEFT_EDITOR_GENERAL) {
+             appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL) {
         handleCtrlA(appRenderer, HISTORY_NONE);
     }
     // Ctrl+Shift+A in editor insert mode
     else if (ctrl && shift && !alt && key == SDLK_A &&
-             appRenderer->currentCoordinate == COORDINATE_LEFT_EDITOR_INSERT) {
+             appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT) {
         handleEscape(appRenderer);
         handleCtrlA(appRenderer, HISTORY_NONE);
         handleA(appRenderer);
@@ -36,57 +36,56 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
     }
     // Ctrl+I in editor general mode
     else if (ctrl && !shift && !alt && key == SDLK_I &&
-             appRenderer->currentCoordinate == COORDINATE_LEFT_EDITOR_GENERAL) {
+             appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL) {
         handleCtrlI(appRenderer, HISTORY_NONE);
     }
     // Ctrl+Shift+I in editor insert mode
     else if (ctrl && shift && !alt && key == SDLK_I &&
-             appRenderer->currentCoordinate == COORDINATE_LEFT_EDITOR_INSERT) {
+             appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT) {
         handleEscape(appRenderer);
         handleCtrlI(appRenderer, HISTORY_NONE);
         handleI(appRenderer);
     }
     // Ctrl+D (delete)
     else if (ctrl && !shift && !alt && key == SDLK_D &&
-             appRenderer->currentCoordinate == COORDINATE_LEFT_EDITOR_GENERAL) {
+             appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL) {
         handleDelete(appRenderer, HISTORY_NONE);
     }
     // Colon (command mode)
-    else if (!ctrl && !shift && !alt && key == SDLK_SEMICOLON &&
-             (shift || event->key.key == SDLK_COLON) &&
-             appRenderer->currentCoordinate != COORDINATE_LEFT_VISITOR_INSERT &&
-             appRenderer->currentCoordinate != COORDINATE_LEFT_EDITOR_INSERT) {
+    else if (!ctrl && !shift && !alt && key == SDLK_COLON &&
+             appRenderer->currentCoordinate != COORDINATE_OPERATOR_INSERT &&
+             appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT) {
         handleColon(appRenderer);
     }
     // K or Up arrow
     else if (!ctrl && !shift && !alt &&
-             ((key == SDLK_K && (appRenderer->currentCoordinate == COORDINATE_LEFT_VISITOR_GENERAL ||
-                                 appRenderer->currentCoordinate == COORDINATE_LEFT_EDITOR_GENERAL)) ||
+             ((key == SDLK_K && (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL ||
+                                 appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL)) ||
               (key == SDLK_UP &&
-               appRenderer->currentCoordinate != COORDINATE_LEFT_VISITOR_INSERT &&
-               appRenderer->currentCoordinate != COORDINATE_LEFT_EDITOR_INSERT))) {
+               appRenderer->currentCoordinate != COORDINATE_OPERATOR_INSERT &&
+               appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT))) {
         handleUp(appRenderer);
     }
     // J or Down arrow
     else if (!ctrl && !shift && !alt &&
-             ((key == SDLK_J && (appRenderer->currentCoordinate == COORDINATE_LEFT_VISITOR_GENERAL ||
-                                 appRenderer->currentCoordinate == COORDINATE_LEFT_EDITOR_GENERAL)) ||
+             ((key == SDLK_J && (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL ||
+                                 appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL)) ||
               (key == SDLK_DOWN &&
-               appRenderer->currentCoordinate != COORDINATE_LEFT_VISITOR_INSERT &&
-               appRenderer->currentCoordinate != COORDINATE_LEFT_EDITOR_INSERT))) {
+               appRenderer->currentCoordinate != COORDINATE_OPERATOR_INSERT &&
+               appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT))) {
         handleDown(appRenderer);
     }
     // H or Left arrow
     else if (!ctrl && !shift && !alt &&
-             ((key == SDLK_H && (appRenderer->currentCoordinate == COORDINATE_LEFT_VISITOR_GENERAL ||
-                                 appRenderer->currentCoordinate == COORDINATE_LEFT_EDITOR_GENERAL)) ||
+             ((key == SDLK_H && (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL ||
+                                 appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL)) ||
               key == SDLK_LEFT)) {
         handleLeft(appRenderer);
     }
     // L or Right arrow
     else if (!ctrl && !shift && !alt &&
-             ((key == SDLK_L && (appRenderer->currentCoordinate == COORDINATE_LEFT_VISITOR_GENERAL ||
-                                 appRenderer->currentCoordinate == COORDINATE_LEFT_EDITOR_GENERAL)) ||
+             ((key == SDLK_L && (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL ||
+                                 appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL)) ||
               key == SDLK_RIGHT)) {
         handleRight(appRenderer);
     }
@@ -108,23 +107,23 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
     }
     // Ctrl+X (cut)
     else if (ctrl && !shift && !alt && key == SDLK_X &&
-             appRenderer->currentCoordinate != COORDINATE_LEFT_EDITOR_INSERT &&
-             appRenderer->currentCoordinate != COORDINATE_LEFT_VISITOR_INSERT &&
-             appRenderer->currentCoordinate != COORDINATE_LEFT_VISITOR_GENERAL) {
+             appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT &&
+             appRenderer->currentCoordinate != COORDINATE_OPERATOR_INSERT &&
+             appRenderer->currentCoordinate != COORDINATE_OPERATOR_GENERAL) {
         handleCcp(appRenderer, TASK_CUT);
     }
     // Ctrl+C (copy)
     else if (ctrl && !shift && !alt && key == SDLK_C &&
-             appRenderer->currentCoordinate != COORDINATE_LEFT_EDITOR_INSERT &&
-             appRenderer->currentCoordinate != COORDINATE_LEFT_VISITOR_INSERT &&
-             appRenderer->currentCoordinate != COORDINATE_LEFT_VISITOR_GENERAL) {
+             appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT &&
+             appRenderer->currentCoordinate != COORDINATE_OPERATOR_INSERT &&
+             appRenderer->currentCoordinate != COORDINATE_OPERATOR_GENERAL) {
         handleCcp(appRenderer, TASK_COPY);
     }
     // Ctrl+V (paste)
     else if (ctrl && !shift && !alt && key == SDLK_V &&
-             appRenderer->currentCoordinate != COORDINATE_LEFT_EDITOR_INSERT &&
-             appRenderer->currentCoordinate != COORDINATE_LEFT_VISITOR_INSERT &&
-             appRenderer->currentCoordinate != COORDINATE_LEFT_VISITOR_GENERAL) {
+             appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT &&
+             appRenderer->currentCoordinate != COORDINATE_OPERATOR_INSERT &&
+             appRenderer->currentCoordinate != COORDINATE_OPERATOR_GENERAL) {
         handleCcp(appRenderer, TASK_PASTE);
     }
     // Ctrl+F (find)
@@ -137,34 +136,34 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
     }
     // E (editor mode)
     else if (!ctrl && !shift && !alt && key == SDLK_E &&
-             (appRenderer->currentCoordinate == COORDINATE_LEFT_VISITOR_GENERAL ||
-              appRenderer->currentCoordinate == COORDINATE_LEFT_EDITOR_GENERAL)) {
+             (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL ||
+              appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL)) {
         appRenderer->currentCommand = COMMAND_EDITOR_MODE;
         handleCommand(appRenderer);
     }
-    // V (visitor mode)
-    else if (!ctrl && !shift && !alt && key == SDLK_V &&
-             (appRenderer->currentCoordinate == COORDINATE_LEFT_VISITOR_GENERAL ||
-              appRenderer->currentCoordinate == COORDINATE_LEFT_EDITOR_GENERAL)) {
-        appRenderer->currentCommand = COMMAND_VISITOR_MODE;
+    // O (operator mode)
+    else if (!ctrl && !shift && !alt && key == SDLK_O &&
+             (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL ||
+              appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL)) {
+        appRenderer->currentCommand = COMMAND_OPERATOR_MODE;
         handleCommand(appRenderer);
     }
     // Backspace in insert modes
     else if (!ctrl && !shift && !alt && key == SDLK_BACKSPACE &&
-             (appRenderer->currentCoordinate == COORDINATE_LEFT_EDITOR_INSERT ||
-              appRenderer->currentCoordinate == COORDINATE_LEFT_VISITOR_INSERT ||
-              appRenderer->currentCoordinate == COORDINATE_RIGHT_INFO ||
-              appRenderer->currentCoordinate == COORDINATE_RIGHT_COMMAND ||
-              appRenderer->currentCoordinate == COORDINATE_RIGHT_FIND)) {
+             (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+              appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
+              appRenderer->currentCoordinate == COORDINATE_LIST ||
+              appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+              appRenderer->currentCoordinate == COORDINATE_FIND)) {
         if (appRenderer->inputBufferSize > 0) {
             appRenderer->inputBuffer[--appRenderer->inputBufferSize] = '\0';
             if (appRenderer->cursorPosition > 0) appRenderer->cursorPosition--;
 
-            // Update filter when backspacing in right panel modes
-            if (appRenderer->currentCoordinate == COORDINATE_RIGHT_INFO ||
-                appRenderer->currentCoordinate == COORDINATE_RIGHT_COMMAND ||
-                appRenderer->currentCoordinate == COORDINATE_RIGHT_FIND) {
-                populateListRight(appRenderer, appRenderer->inputBuffer);
+            // Update search when backspacing in right panel modes
+            if (appRenderer->currentCoordinate == COORDINATE_LIST ||
+                appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+                appRenderer->currentCoordinate == COORDINATE_FIND) {
+                populateListAuxilaries(appRenderer, appRenderer->inputBuffer);
             }
 
             appRenderer->needsRedraw = true;
@@ -174,6 +173,13 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
 
 void handleInput(AppRenderer *appRenderer, const char *text) {
     if (!text) return;
+
+    // Ignore colon when entering COORDINATE_COMMAND mode (buffer is empty)
+    if (appRenderer->currentCoordinate == COORDINATE_COMMAND &&
+        appRenderer->inputBufferSize == 0 &&
+        strcmp(text, ":") == 0) {
+        return;
+    }
 
     int len = strlen(text);
     if (appRenderer->inputBufferSize + len >= appRenderer->inputBufferCapacity) {
@@ -190,11 +196,11 @@ void handleInput(AppRenderer *appRenderer, const char *text) {
     appRenderer->inputBufferSize += len;
     appRenderer->cursorPosition += len;
 
-    // Filter the list when in right panel modes
-    if (appRenderer->currentCoordinate == COORDINATE_RIGHT_INFO ||
-        appRenderer->currentCoordinate == COORDINATE_RIGHT_COMMAND ||
-        appRenderer->currentCoordinate == COORDINATE_RIGHT_FIND) {
-        populateListRight(appRenderer, appRenderer->inputBuffer);
+    // Search the list when in right panel modes
+    if (appRenderer->currentCoordinate == COORDINATE_LIST ||
+        appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+        appRenderer->currentCoordinate == COORDINATE_FIND) {
+        populateListAuxilaries(appRenderer, appRenderer->inputBuffer);
     }
 
     appRenderer->needsRedraw = true;

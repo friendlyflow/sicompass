@@ -22,8 +22,8 @@ void mainLoop(SiCompassApplication* app) {
     idArrayPush(&app->appRenderer->currentId, 0);
     
     // Set initial coordinate
-    app->appRenderer->currentCoordinate = COORDINATE_LEFT_VISITOR_GENERAL;
-    app->appRenderer->previousCoordinate = COORDINATE_LEFT_VISITOR_GENERAL;
+    app->appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
+    app->appRenderer->previousCoordinate = COORDINATE_OPERATOR_GENERAL;
     
     // Initial render
     app->appRenderer->needsRedraw = true;
@@ -41,19 +41,19 @@ void mainLoop(SiCompassApplication* app) {
                 case SDL_EVENT_KEY_DOWN:
                     handleKeys(app->appRenderer, &event);
                     // Enable text input when entering right panel modes
-                    if (app->appRenderer->currentCoordinate == COORDINATE_RIGHT_INFO ||
-                        app->appRenderer->currentCoordinate == COORDINATE_RIGHT_COMMAND ||
-                        app->appRenderer->currentCoordinate == COORDINATE_RIGHT_FIND) {
+                    if (app->appRenderer->currentCoordinate == COORDINATE_LIST ||
+                        app->appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+                        app->appRenderer->currentCoordinate == COORDINATE_FIND) {
                         SDL_StartTextInput(app->window);
                     }
                     break;
 
                 case SDL_EVENT_TEXT_INPUT:
-                    if (app->appRenderer->currentCoordinate == COORDINATE_LEFT_EDITOR_INSERT ||
-                        app->appRenderer->currentCoordinate == COORDINATE_LEFT_VISITOR_INSERT ||
-                        app->appRenderer->currentCoordinate == COORDINATE_RIGHT_INFO ||
-                        app->appRenderer->currentCoordinate == COORDINATE_RIGHT_COMMAND ||
-                        app->appRenderer->currentCoordinate == COORDINATE_RIGHT_FIND) {
+                    if (app->appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+                        app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
+                        app->appRenderer->currentCoordinate == COORDINATE_LIST ||
+                        app->appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+                        app->appRenderer->currentCoordinate == COORDINATE_FIND) {
                         handleInput(app->appRenderer, event.text.text);
                     }
                     break;
