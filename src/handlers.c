@@ -2,6 +2,67 @@
 #include <string.h>
 #include <SDL3/SDL.h>
 
+// UTF-8 helper functions
+
+// Get the length in bytes of a UTF-8 character starting at the given position
+static int utf8_char_length(const char *str, int pos) {
+    unsigned char c = (unsigned char)str[pos];
+
+    if ((c & 0x80) == 0) {
+        // Single-byte character (0xxxxxxx)
+        return 1;
+    } else if ((c & 0xE0) == 0xC0) {
+        // Two-byte character (110xxxxx)
+        return 2;
+    } else if ((c & 0xF0) == 0xE0) {
+        // Three-byte character (1110xxxx)
+        return 3;
+    } else if ((c & 0xF8) == 0xF0) {
+        // Four-byte character (11110xxx)
+        return 4;
+    }
+
+    // Invalid UTF-8, treat as single byte
+    return 1;
+}
+
+// Move cursor position backward by one UTF-8 character
+// Returns the new cursor position
+static int utf8_move_backward(const char *str, int cursorPos) {
+    if (cursorPos <= 0) {
+        return 0;
+    }
+
+    // Move back one byte
+    int newPos = cursorPos - 1;
+
+    // Keep moving back while we're in the middle of a multi-byte character
+    // A continuation byte has the form 10xxxxxx
+    while (newPos > 0 && ((unsigned char)str[newPos] & 0xC0) == 0x80) {
+        newPos--;
+    }
+
+    return newPos;
+}
+
+// Move cursor position forward by one UTF-8 character
+// Returns the new cursor position
+static int utf8_move_forward(const char *str, int cursorPos, int bufferSize) {
+    if (cursorPos >= bufferSize) {
+        return bufferSize;
+    }
+
+    int charLen = utf8_char_length(str, cursorPos);
+    int newPos = cursorPos + charLen;
+
+    // Make sure we don't go past the buffer size
+    if (newPos > bufferSize) {
+        newPos = bufferSize;
+    }
+
+    return newPos;
+}
+
 void handleTab(AppRenderer *appRenderer) {
     appRenderer->previousCoordinate = appRenderer->currentCoordinate;
     appRenderer->currentCoordinate = COORDINATE_LIST;
@@ -144,7 +205,16 @@ void handleLeft(AppRenderer *appRenderer) {
         appRenderer->currentCoordinate == COORDINATE_COMMAND ||
         appRenderer->currentCoordinate == COORDINATE_FIND) {
         if (appRenderer->cursorPosition > 0) {
-            appRenderer->cursorPosition--;
+            // Move backward by one UTF-8 character
+            appRenderer->cursorPosition = utf8_move_backward(
+                appRenderer->inputBuffer,
+                appRenderer->cursorPosition
+            );
+
+            // Reset caret to visible when user presses left arrow
+            uint64_t currentTime = SDL_GetTicks();
+            caretReset(appRenderer->caretState, currentTime);
+
             appRenderer->needsRedraw = true;
         }
     } else {
@@ -160,7 +230,17 @@ void handleRight(AppRenderer *appRenderer) {
         appRenderer->currentCoordinate == COORDINATE_COMMAND ||
         appRenderer->currentCoordinate == COORDINATE_FIND) {
         if (appRenderer->cursorPosition < appRenderer->inputBufferSize) {
-            appRenderer->cursorPosition++;
+            // Move forward by one UTF-8 character
+            appRenderer->cursorPosition = utf8_move_forward(
+                appRenderer->inputBuffer,
+                appRenderer->cursorPosition,
+                appRenderer->inputBufferSize
+            );
+
+            // Reset caret to visible when user presses right arrow
+            uint64_t currentTime = SDL_GetTicks();
+            caretReset(appRenderer->caretState, currentTime);
+
             appRenderer->needsRedraw = true;
         }
     } else {
