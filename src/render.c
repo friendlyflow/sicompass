@@ -187,7 +187,21 @@ void updateView(SiCompassApplication *app) {
     char header[256];
     snprintf(header, sizeof(header), "%s", coordinateToString(app->appRenderer->currentCoordinate));
     int lineHeight = (int)getLineHeight(app, scale, TEXT_PADDING);
-    renderText(app, header, 50, lineHeight, COLOR_TEXT, false);
+
+    // Calculate text bounds for vertical centering
+    float minX, minY, maxX, maxY;
+    calculateTextBounds(app, header, 50.0f, (float)lineHeight, scale,
+                          &minX, &minY, &maxX, &maxY);
+    int headerHeight = (int)(maxY - minY);
+
+    // Render line under header
+    vec4 lineColor;
+    colorToVec4(COLOR_DARK_GREY, lineColor);
+    float headerWidth = (float)app->swapChainExtent.width;
+    float lineThickness = 1.0f;
+    prepareRectangle(app, 0.0f, (float)lineHeight, headerWidth, lineThickness, lineColor, 0.0f);
+
+    renderText(app, header, (float)50, (float)headerHeight, COLOR_TEXT, false);
 
     // Render error message if any
     if (app->appRenderer->errorMessage[0] != '\0') {
