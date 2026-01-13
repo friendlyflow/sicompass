@@ -170,8 +170,15 @@ void beginRectangleRendering(SiCompassApplication* app) {
 
 void prepareRectangle(SiCompassApplication* app,
                      float x, float y, float width, float height,
-                     vec4 color, float cornerRadius) {
+                     uint32_t color, float cornerRadius) {
     RectangleRenderer* rr = app->rectangleRenderer;
+
+    // Convert uint32_t color to vec4
+    vec4 colorVec;
+    colorVec[0] = ((color >> 24) & 0xFF) / 255.0f;
+    colorVec[1] = ((color >> 16) & 0xFF) / 255.0f;
+    colorVec[2] = ((color >> 8) & 0xFF) / 255.0f;
+    colorVec[3] = (color & 0xFF) / 255.0f;
 
     // Check if we've hit the limit
     if (rr->vertexCount >= 6 * MAX_RECTANGLES) {
@@ -193,10 +200,10 @@ void prepareRectangle(SiCompassApplication* app,
 
     // Bottom-left corner is our reference point
     for (int i = 0; i < 6; i++) {
-        vertices[i].color[0] = color[0];
-        vertices[i].color[1] = color[1];
-        vertices[i].color[2] = color[2];
-        vertices[i].color[3] = color[3];
+        vertices[i].color[0] = colorVec[0];
+        vertices[i].color[1] = colorVec[1];
+        vertices[i].color[2] = colorVec[2];
+        vertices[i].color[3] = colorVec[3];
         vertices[i].cornerRadius[0] = actualCornerRadius;
         vertices[i].cornerRadius[1] = 0.0f;
         vertices[i].rectSize[0] = width;

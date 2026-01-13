@@ -1,21 +1,6 @@
 #include "view.h"
 #include <string.h>
 
-// Helper function to convert COLOR_ format to vec3
-static void colorToVec3(uint32_t color, vec3 outVec) {
-    outVec[0] = ((color >> 24) & 0xFF) / 255.0f;
-    outVec[1] = ((color >> 16) & 0xFF) / 255.0f;
-    outVec[2] = ((color >> 8) & 0xFF) / 255.0f;
-}
-
-// Helper function to convert COLOR_ format to vec4
-static void colorToVec4(uint32_t color, vec4 outVec) {
-    outVec[0] = ((color >> 24) & 0xFF) / 255.0f;
-    outVec[1] = ((color >> 16) & 0xFF) / 255.0f;
-    outVec[2] = ((color >> 8) & 0xFF) / 255.0f;
-    outVec[3] = (color & 0xFF) / 255.0f;
-}
-
 void renderText(SiCompassApplication *app, const char *text, int x, int y,
                 uint32_t color, bool highlight) {
     if (!text || strlen(text) == 0) {
@@ -26,9 +11,6 @@ void renderText(SiCompassApplication *app, const char *text, int x, int y,
 
     // Render highlight background if needed
     if (highlight) {
-        vec4 bgColor;
-        colorToVec4(COLOR_DARK_GREEN, bgColor);
-
         // Calculate text bounds
         float minX, minY, maxX, maxY;
         calculateTextBounds(app, text, (float)x, (float)y, scale, &minX, &minY, &maxX, &maxY);
@@ -45,13 +27,11 @@ void renderText(SiCompassApplication *app, const char *text, int x, int y,
         // Use a reasonable corner radius
         float cornerRadius = 5.0f;
 
-        prepareRectangle(app, minX, minY, width, height, bgColor, cornerRadius);
+        prepareRectangle(app, minX, minY, width, height, COLOR_DARK_GREEN, cornerRadius);
     }
 
     // Prepare text for rendering
-    vec3 textColor;
-    colorToVec3(color, textColor);
-    prepareTextForRendering(app, text, (float)x, (float)y, scale, textColor);
+    prepareTextForRendering(app, text, (float)x, (float)y, scale, color);
 }
 
 void renderLine(SiCompassApplication *app, FfonElement *elem, const IdArray *id,
@@ -195,11 +175,9 @@ void updateView(SiCompassApplication *app) {
     int headerHeight = (int)(maxY - minY);
 
     // Render line under header
-    vec4 lineColor;
-    colorToVec4(COLOR_DARK_GREY, lineColor);
     float headerWidth = (float)app->swapChainExtent.width;
     float lineThickness = 1.0f;
-    prepareRectangle(app, 0.0f, (float)lineHeight, headerWidth, lineThickness, lineColor, 0.0f);
+    prepareRectangle(app, 0.0f, (float)lineHeight, headerWidth, lineThickness, COLOR_DARK_GREY, 0.0f);
 
     renderText(app, header, (float)50, (float)headerHeight, COLOR_TEXT, false);
 

@@ -479,8 +479,14 @@ void beginTextRendering(SiCompassApplication* app) {
 }
 
 void prepareTextForRendering(SiCompassApplication* app, const char* text,
-                             float x, float y, float scale, vec3 color) {
+                             float x, float y, float scale, uint32_t color) {
     FontRenderer* fr = app->fontRenderer;
+
+    // Convert uint32_t color to vec3
+    vec3 colorVec;
+    colorVec[0] = ((color >> 24) & 0xFF) / 255.0f;
+    colorVec[1] = ((color >> 16) & 0xFF) / 255.0f;
+    colorVec[2] = ((color >> 8) & 0xFF) / 255.0f;
 
     TextVertex vertices[MAX_TEXT_VERTICES];
     uint32_t vi = 0;
@@ -553,13 +559,13 @@ void prepareTextForRendering(SiCompassApplication* app, const char* text,
 
         if (vi + 6 > MAX_TEXT_VERTICES) break;
 
-        vertices[vi++] = (TextVertex){{xpos, ypos + h, 0.0f}, {g->uvMin[0], g->uvMax[1]}, {color[0], color[1], color[2]}};
-        vertices[vi++] = (TextVertex){{xpos, ypos, 0.0f}, {g->uvMin[0], g->uvMin[1]}, {color[0], color[1], color[2]}};
-        vertices[vi++] = (TextVertex){{xpos + w, ypos, 0.0f}, {g->uvMax[0], g->uvMin[1]}, {color[0], color[1], color[2]}};
+        vertices[vi++] = (TextVertex){{xpos, ypos + h, 0.0f}, {g->uvMin[0], g->uvMax[1]}, {colorVec[0], colorVec[1], colorVec[2]}};
+        vertices[vi++] = (TextVertex){{xpos, ypos, 0.0f}, {g->uvMin[0], g->uvMin[1]}, {colorVec[0], colorVec[1], colorVec[2]}};
+        vertices[vi++] = (TextVertex){{xpos + w, ypos, 0.0f}, {g->uvMax[0], g->uvMin[1]}, {colorVec[0], colorVec[1], colorVec[2]}};
 
-        vertices[vi++] = (TextVertex){{xpos, ypos + h, 0.0f}, {g->uvMin[0], g->uvMax[1]}, {color[0], color[1], color[2]}};
-        vertices[vi++] = (TextVertex){{xpos + w, ypos, 0.0f}, {g->uvMax[0], g->uvMin[1]}, {color[0], color[1], color[2]}};
-        vertices[vi++] = (TextVertex){{xpos + w, ypos + h, 0.0f}, {g->uvMax[0], g->uvMax[1]}, {color[0], color[1], color[2]}};
+        vertices[vi++] = (TextVertex){{xpos, ypos + h, 0.0f}, {g->uvMin[0], g->uvMax[1]}, {colorVec[0], colorVec[1], colorVec[2]}};
+        vertices[vi++] = (TextVertex){{xpos + w, ypos, 0.0f}, {g->uvMax[0], g->uvMin[1]}, {colorVec[0], colorVec[1], colorVec[2]}};
+        vertices[vi++] = (TextVertex){{xpos + w, ypos + h, 0.0f}, {g->uvMax[0], g->uvMax[1]}, {colorVec[0], colorVec[1], colorVec[2]}};
 
         cursorX += (glyphPos[i].x_advance / 64.0f) * scale;
         cursorY += (glyphPos[i].y_advance / 64.0f) * scale;

@@ -35,7 +35,7 @@ void cleanupRectangleRenderer(SiCompassApplication* app);
 void beginRectangleRendering(SiCompassApplication* app);  // Call at start of frame
 void prepareRectangle(SiCompassApplication* app,
                      float x, float y, float width, float height,
-                     vec4 color, float cornerRadius);
+                     uint32_t color, float cornerRadius);
 
 // Drawing
 void drawRectangle(SiCompassApplication* app, VkCommandBuffer commandBuffer);

@@ -93,14 +93,7 @@ void caretRender(SiCompassApplication* app, CaretState* caret,
     float caretHeight = lineHeight - (2.0f * TEXT_PADDING);
     float caretY = (float)y;
 
-    // Convert color from uint32_t to vec4
-    vec4 caretColor;
-    caretColor[0] = ((color >> 24) & 0xFF) / 255.0f;  // Red
-    caretColor[1] = ((color >> 16) & 0xFF) / 255.0f;  // Green
-    caretColor[2] = ((color >> 8) & 0xFF) / 255.0f;   // Blue
-    caretColor[3] = (color & 0xFF) / 255.0f;          // Alpha
-
     // Render caret as a thin rectangle with no corner radius
     prepareRectangle(app, caretX, caretY, caretWidth, caretHeight,
-                    caretColor, 0.0f);
+                    color, 0.0f);
 }
