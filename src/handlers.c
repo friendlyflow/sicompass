@@ -6,6 +6,11 @@ void handleTab(AppRenderer *appRenderer) {
     appRenderer->previousCoordinate = appRenderer->currentCoordinate;
     appRenderer->currentCoordinate = COORDINATE_RIGHT_INFO;
 
+    // Clear input buffer for filtering
+    appRenderer->inputBuffer[0] = '\0';
+    appRenderer->inputBufferSize = 0;
+    appRenderer->cursorPosition = 0;
+
     createListRight(appRenderer);
     appRenderer->needsRedraw = true;
 }
@@ -83,6 +88,11 @@ void handleDelete(AppRenderer *appRenderer, History history) {
 void handleColon(AppRenderer *appRenderer) {
     appRenderer->previousCoordinate = appRenderer->currentCoordinate;
     appRenderer->currentCoordinate = COORDINATE_RIGHT_COMMAND;
+
+    // Clear input buffer for filtering
+    appRenderer->inputBuffer[0] = '\0';
+    appRenderer->inputBufferSize = 0;
+    appRenderer->cursorPosition = 0;
 
     createListRight(appRenderer);
     appRenderer->needsRedraw = true;
@@ -206,6 +216,12 @@ void handleFind(AppRenderer *appRenderer) {
         appRenderer->currentCoordinate != COORDINATE_RIGHT_COMMAND) {
         appRenderer->previousCoordinate = appRenderer->currentCoordinate;
         appRenderer->currentCoordinate = COORDINATE_RIGHT_FIND;
+
+        // Clear input buffer for filtering
+        appRenderer->inputBuffer[0] = '\0';
+        appRenderer->inputBufferSize = 0;
+        appRenderer->cursorPosition = 0;
+
         appRenderer->needsRedraw = true;
     }
 }

@@ -119,15 +119,15 @@ void renderLeftPanel(SiCompassApplication *app) {
 }
 
 void renderRightPanel(SiCompassApplication *app) {
-    int yPos = 40;
     float scale = getTextScale(app, FONT_SIZE_PT);
     int lineHeight = (int)getLineHeight(app, scale, TEXT_PADDING);
+    int yPos = lineHeight * 2;
 
     // Render filter input
     char filterText[MAX_LINE_LENGTH];
     snprintf(filterText, sizeof(filterText), "filter: %s", app->appRenderer->inputBuffer);
     renderText(app, filterText, 50, yPos, COLOR_TEXT, false);
-    yPos += lineHeight * 2;
+    yPos += lineHeight;
 
     // Render list items
     ListItem *list = app->appRenderer->filteredListCount > 0 ?

@@ -40,6 +40,12 @@ void mainLoop(SiCompassApplication* app) {
 
                 case SDL_EVENT_KEY_DOWN:
                     handleKeys(app->appRenderer, &event);
+                    // Enable text input when entering right panel modes
+                    if (app->appRenderer->currentCoordinate == COORDINATE_RIGHT_INFO ||
+                        app->appRenderer->currentCoordinate == COORDINATE_RIGHT_COMMAND ||
+                        app->appRenderer->currentCoordinate == COORDINATE_RIGHT_FIND) {
+                        SDL_StartTextInput(app->window);
+                    }
                     break;
 
                 case SDL_EVENT_TEXT_INPUT:
