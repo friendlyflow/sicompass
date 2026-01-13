@@ -90,6 +90,7 @@
               xorg.libxcb
               sdl3
               cppcheck
+              flawfinder
             ];
 
             # shellHooks = ''
