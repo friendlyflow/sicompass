@@ -123,7 +123,7 @@ void renderLine(SiCompassApplication *app, FfonElement *elem, const IdArray *id,
     }
 }
 
-void renderAuxiliaries(SiCompassApplication *app) {
+void renderHierarchy(SiCompassApplication *app) {
     float scale = getTextScale(app, FONT_SIZE_PT);
     int yPos = 2 * getLineHeight(app, scale, TEXT_PADDING);
 
@@ -142,7 +142,7 @@ void renderAuxiliaries(SiCompassApplication *app) {
     }
 }
 
-void renderHierarchy(SiCompassApplication *app) {
+void renderAuxiliaries(SiCompassApplication *app) {
     float scale = getTextScale(app, FONT_SIZE_PT);
     int lineHeight = (int)getLineHeight(app, scale, TEXT_PADDING);
     int yPos = lineHeight * 2;
@@ -200,9 +200,9 @@ void updateView(SiCompassApplication *app) {
     if (app->appRenderer->currentCoordinate == COORDINATE_LIST ||
         app->appRenderer->currentCoordinate == COORDINATE_COMMAND ||
         app->appRenderer->currentCoordinate == COORDINATE_FIND) {
-        renderHierarchy(app);
-    } else {
         renderAuxiliaries(app);
+    } else {
+        renderHierarchy(app);
     }
 
     // Render caret for all modes at end of frame
