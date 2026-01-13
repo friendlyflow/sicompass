@@ -138,22 +138,32 @@ void handleDown(AppRenderer *appRenderer) {
 }
 
 void handleLeft(AppRenderer *appRenderer) {
-    if (appRenderer->currentCoordinate == COORDINATE_LIST ||
+    if (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+        appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
+        appRenderer->currentCoordinate == COORDINATE_LIST ||
         appRenderer->currentCoordinate == COORDINATE_COMMAND ||
         appRenderer->currentCoordinate == COORDINATE_FIND) {
-        // Nothing to do
-    } else if (appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT) {
+        if (appRenderer->cursorPosition > 0) {
+            appRenderer->cursorPosition--;
+            appRenderer->needsRedraw = true;
+        }
+    } else {
         updateState(appRenderer, TASK_H_ARROW_LEFT, HISTORY_NONE);
         appRenderer->needsRedraw = true;
     }
 }
 
 void handleRight(AppRenderer *appRenderer) {
-    if (appRenderer->currentCoordinate == COORDINATE_LIST ||
+    if (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+        appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
+        appRenderer->currentCoordinate == COORDINATE_LIST ||
         appRenderer->currentCoordinate == COORDINATE_COMMAND ||
         appRenderer->currentCoordinate == COORDINATE_FIND) {
-        // Nothing to do
-    } else if (appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT) {
+        if (appRenderer->cursorPosition < appRenderer->inputBufferSize) {
+            appRenderer->cursorPosition++;
+            appRenderer->needsRedraw = true;
+        }
+    } else {
         updateState(appRenderer, TASK_L_ARROW_RIGHT, HISTORY_NONE);
         appRenderer->needsRedraw = true;
     }
