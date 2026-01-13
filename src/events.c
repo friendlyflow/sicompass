@@ -159,6 +159,14 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
         if (appRenderer->inputBufferSize > 0) {
             appRenderer->inputBuffer[--appRenderer->inputBufferSize] = '\0';
             if (appRenderer->cursorPosition > 0) appRenderer->cursorPosition--;
+
+            // Update filter when backspacing in right panel modes
+            if (appRenderer->currentCoordinate == COORDINATE_RIGHT_INFO ||
+                appRenderer->currentCoordinate == COORDINATE_RIGHT_COMMAND ||
+                appRenderer->currentCoordinate == COORDINATE_RIGHT_FIND) {
+                populateListRight(appRenderer, appRenderer->inputBuffer);
+            }
+
             appRenderer->needsRedraw = true;
         }
     }
@@ -181,5 +189,13 @@ void handleInput(AppRenderer *appRenderer, const char *text) {
     strcat(appRenderer->inputBuffer, text);
     appRenderer->inputBufferSize += len;
     appRenderer->cursorPosition += len;
+
+    // Filter the list when in right panel modes
+    if (appRenderer->currentCoordinate == COORDINATE_RIGHT_INFO ||
+        appRenderer->currentCoordinate == COORDINATE_RIGHT_COMMAND ||
+        appRenderer->currentCoordinate == COORDINATE_RIGHT_FIND) {
+        populateListRight(appRenderer, appRenderer->inputBuffer);
+    }
+
     appRenderer->needsRedraw = true;
 }
