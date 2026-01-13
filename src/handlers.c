@@ -187,8 +187,9 @@ void handleI(AppRenderer *appRenderer) {
                            appRenderer->inputBufferCapacity - 1);
                     appRenderer->inputBufferSize = strlen(appRenderer->inputBuffer);
                 } else {
-                    strncpy(appRenderer->inputBuffer, elem->data.object->key,
-                           appRenderer->inputBufferCapacity - 1);
+                    // For objects, include the colon in the editable text
+                    snprintf(appRenderer->inputBuffer, appRenderer->inputBufferCapacity,
+                            "%s:", elem->data.object->key);
                     appRenderer->inputBufferSize = strlen(appRenderer->inputBuffer);
                 }
             }
@@ -218,8 +219,9 @@ void handleA(AppRenderer *appRenderer) {
                            appRenderer->inputBufferCapacity - 1);
                     appRenderer->inputBufferSize = strlen(appRenderer->inputBuffer);
                 } else {
-                    strncpy(appRenderer->inputBuffer, elem->data.object->key,
-                           appRenderer->inputBufferCapacity - 1);
+                    // For objects, include the colon in the editable text
+                    snprintf(appRenderer->inputBuffer, appRenderer->inputBufferCapacity,
+                            "%s:", elem->data.object->key);
                     appRenderer->inputBufferSize = strlen(appRenderer->inputBuffer);
                 }
             }

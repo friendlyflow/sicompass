@@ -40,13 +40,15 @@ void mainLoop(SiCompassApplication* app) {
 
                 case SDL_EVENT_KEY_DOWN:
                     handleKeys(app->appRenderer, &event);
-                    // Enable text input when entering insert or search modes
+                    // Enable/disable text input based on current mode
                     if (app->appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
                         app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
                         app->appRenderer->currentCoordinate == COORDINATE_LIST ||
                         app->appRenderer->currentCoordinate == COORDINATE_COMMAND ||
                         app->appRenderer->currentCoordinate == COORDINATE_FIND) {
                         SDL_StartTextInput(app->window);
+                    } else {
+                        SDL_StopTextInput(app->window);
                     }
                     break;
 
