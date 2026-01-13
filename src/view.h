@@ -26,15 +26,15 @@
 
 // Enums
 typedef enum {
-    COORDINATE_LEFT_VISITOR_GENERAL,
-    COORDINATE_LEFT_VISITOR_INSERT,
-    COORDINATE_LEFT_EDITOR_GENERAL,
-    COORDINATE_LEFT_EDITOR_INSERT,
-    COORDINATE_LEFT_EDITOR_NORMAL,
-    COORDINATE_LEFT_EDITOR_VISUAL,
-    COORDINATE_RIGHT_INFO,
-    COORDINATE_RIGHT_COMMAND,
-    COORDINATE_RIGHT_FIND
+    COORDINATE_OPERATOR_GENERAL,
+    COORDINATE_OPERATOR_INSERT,
+    COORDINATE_EDITOR_GENERAL,
+    COORDINATE_EDITOR_INSERT,
+    COORDINATE_EDITOR_NORMAL,
+    COORDINATE_EDITOR_VISUAL,
+    COORDINATE_LIST,
+    COORDINATE_COMMAND,
+    COORDINATE_FIND
 } Coordinate;
 
 typedef enum {
@@ -62,7 +62,7 @@ typedef enum {
 
 typedef enum {
     COMMAND_EDITOR_MODE,
-    COMMAND_VISITOR_MODE
+    COMMAND_OPERATOR_MODE
 } Command;
 
 // Forward declarations
@@ -129,9 +129,9 @@ typedef struct AppRenderer {
     int scrollOffset;
 
     // Right panel
-    ListItem *totalListRight;
+    ListItem *totalListAuxilaries;
     int totalListCount;
-    ListItem *filteredListRight;
+    ListItem *filteredListAuxilaries;
     int filteredListCount;
     int listIndex;
 
@@ -219,14 +219,14 @@ void handleEscape(AppRenderer *appRenderer);
 void handleCommand(AppRenderer *appRenderer);
 
 // Right panel
-void createListRight(AppRenderer *appRenderer);
-void populateListRight(AppRenderer *appRenderer, const char *searchString);
-void clearListRight(AppRenderer *appRenderer);
+void createListAuxilaries(AppRenderer *appRenderer);
+void populateListAuxilaries(AppRenderer *appRenderer, const char *searchString);
+void clearListAuxilaries(AppRenderer *appRenderer);
 
 // Rendering
 void updateView(SiCompassApplication *app);
-void renderLeftPanel(SiCompassApplication *app);
-void renderRightPanel(SiCompassApplication *app);
+void renderAuxiliaries(SiCompassApplication *app);
+void renderHierarchy(SiCompassApplication *app);
 void renderLine(SiCompassApplication *app, FfonElement *elem, const IdArray *id, int indent, int *yPos);
 void renderText(SiCompassApplication *app, const char *text, int x, int y, uint32_t color, bool highlight);
 

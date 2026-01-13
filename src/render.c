@@ -99,7 +99,7 @@ void renderLine(SiCompassApplication *app, FfonElement *elem, const IdArray *id,
     }
 }
 
-void renderLeftPanel(SiCompassApplication *app) {
+void renderAuxiliaries(SiCompassApplication *app) {
     float scale = getTextScale(app, FONT_SIZE_PT);
     int yPos = 2 * getLineHeight(app, scale, TEXT_PADDING);
 
@@ -118,20 +118,20 @@ void renderLeftPanel(SiCompassApplication *app) {
     }
 }
 
-void renderRightPanel(SiCompassApplication *app) {
+void renderHierarchy(SiCompassApplication *app) {
     float scale = getTextScale(app, FONT_SIZE_PT);
     int lineHeight = (int)getLineHeight(app, scale, TEXT_PADDING);
     int yPos = lineHeight * 2;
 
-    // Render filter input
-    char filterText[MAX_LINE_LENGTH];
-    snprintf(filterText, sizeof(filterText), "filter: %s", app->appRenderer->inputBuffer);
-    renderText(app, filterText, 50, yPos, COLOR_TEXT, false);
+    // Render search input
+    char searchText[MAX_LINE_LENGTH];
+    snprintf(searchText, sizeof(searchText), "search: %s", app->appRenderer->inputBuffer);
+    renderText(app, searchText, 50, yPos, COLOR_TEXT, false);
     yPos += lineHeight;
 
     // Render list items
     ListItem *list = app->appRenderer->filteredListCount > 0 ?
-                     app->appRenderer->filteredListRight : app->appRenderer->totalListRight;
+                     app->appRenderer->filteredListAuxilaries : app->appRenderer->totalListAuxilaries;
     int count = app->appRenderer->filteredListCount > 0 ?
                 app->appRenderer->filteredListCount : app->appRenderer->totalListCount;
 
@@ -169,12 +169,12 @@ void updateView(SiCompassApplication *app) {
     // TODO: Add line rendering support for header separator at y=35
 
     // Render appropriate panel
-    if (app->appRenderer->currentCoordinate == COORDINATE_RIGHT_INFO ||
-        app->appRenderer->currentCoordinate == COORDINATE_RIGHT_COMMAND ||
-        app->appRenderer->currentCoordinate == COORDINATE_RIGHT_FIND) {
-        renderRightPanel(app);
+    if (app->appRenderer->currentCoordinate == COORDINATE_LIST ||
+        app->appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+        app->appRenderer->currentCoordinate == COORDINATE_FIND) {
+        renderHierarchy(app);
     } else {
-        renderLeftPanel(app);
+        renderAuxiliaries(app);
     }
 
     // The actual drawing to the screen happens in drawFrame() which calls
