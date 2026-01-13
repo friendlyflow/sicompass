@@ -94,11 +94,11 @@ void renderLine(SiCompassApplication *app, FfonElement *elem, const IdArray *id,
         char keyWithColon[MAX_LINE_LENGTH];
         const char *keyToRender = elem->data.object->key;
 
-        // In insert mode, show originalKey:inputBuffer
+        // In insert mode, inputBuffer already contains the colon
         if (isCurrent && (app->appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
                          app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT)) {
-            snprintf(keyWithColon, sizeof(keyWithColon), "%s:%s",
-                    app->appRenderer->originalKey, app->appRenderer->inputBuffer);
+            strncpy(keyWithColon, app->appRenderer->inputBuffer, MAX_LINE_LENGTH - 1);
+            keyWithColon[MAX_LINE_LENGTH - 1] = '\0';
         } else {
             snprintf(keyWithColon, sizeof(keyWithColon), "%s:", keyToRender);
         }
@@ -226,7 +226,25 @@ void updateView(SiCompassApplication *app) {
                    COLOR_TEXT);
     } else if (app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
                app->appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT) {
+        // Caret in hierarchy editor
+        int caretX = app->appRenderer->currentElementX;
+        int caretY = app->appRenderer->currentElementY;
 
+        // For objects, we render "inputBuffer:" so the caret needs to account for the colon
+        // but the cursor position is within inputBuffer only
+        const char *textForCaret = app->appRenderer->inputBuffer;
+
+        // Get proper Y alignment from text bounds
+        float minX, minY, maxX, maxY;
+        calculateTextBounds(app, " ", (float)caretX, (float)caretY, scale,
+                          &minX, &minY, &maxX, &maxY);
+        caretY = (int)minY;
+
+        caretRender(app, app->appRenderer->caretState,
+                   textForCaret,
+                   caretX, caretY,
+                   app->appRenderer->cursorPosition,
+                   COLOR_TEXT);
     }
 
     // The actual drawing to the screen happens in drawFrame() which calls

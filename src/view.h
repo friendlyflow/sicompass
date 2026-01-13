@@ -6,7 +6,7 @@
 
 // Constants
 #define MAX_ID_DEPTH 32
-#define MAX_LINE_LENGTH 4096
+#define MAX_LINE_LENGTH 65536
 #define MAX_FFON_ELEMENTS 10000
 #define UNDO_HISTORY_SIZE 500
 #define DELTA_MS 400

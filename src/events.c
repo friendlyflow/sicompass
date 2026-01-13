@@ -228,7 +228,11 @@ void handleInput(AppRenderer *appRenderer, const char *text) {
         appRenderer->inputBufferCapacity = newCapacity;
     }
 
-    strcat(appRenderer->inputBuffer, text);
+    // Insert text at cursor position instead of appending
+    memmove(&appRenderer->inputBuffer[appRenderer->cursorPosition + len],
+           &appRenderer->inputBuffer[appRenderer->cursorPosition],
+           appRenderer->inputBufferSize - appRenderer->cursorPosition + 1);
+    memcpy(&appRenderer->inputBuffer[appRenderer->cursorPosition], text, len);
     appRenderer->inputBufferSize += len;
     appRenderer->cursorPosition += len;
 

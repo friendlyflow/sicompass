@@ -2,6 +2,23 @@
 #include <string.h>
 #include <stdlib.h>
 
+// Helper function to strip trailing colon from a key
+static char* stripTrailingColon(const char *line) {
+    if (!line) return strdup("");
+
+    size_t len = strlen(line);
+    if (len > 0 && line[len - 1] == ':') {
+        // Create a copy without the trailing colon
+        char *result = malloc(len);
+        if (result) {
+            strncpy(result, line, len - 1);
+            result[len - 1] = '\0';
+        }
+        return result;
+    }
+    return strdup(line);
+}
+
 void updateState(AppRenderer *appRenderer, Task task, History history) {
     // Get current line
     char line[MAX_LINE_LENGTH] = "";
@@ -153,12 +170,14 @@ void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task tas
             if (isKey) {
                 // Convert to object or update key
                 if (idx >= 0 && idx < count && arr[idx]->type == FFON_OBJECT) {
-                    // Update key
+                    // Update key (strip trailing colon)
                     free(arr[idx]->data.object->key);
-                    arr[idx]->data.object->key = strdup(line);
+                    arr[idx]->data.object->key = stripTrailingColon(line);
                 } else {
-                    // Convert string to object
-                    FfonElement *newElem = ffonElementCreateObject(line);
+                    // Convert string to object (strip trailing colon)
+                    char *keyWithoutColon = stripTrailingColon(line);
+                    FfonElement *newElem = ffonElementCreateObject(keyWithoutColon);
+                    free(keyWithoutColon);
                     if (newElem) {
                         ffonObjectAddElement(newElem->data.object,
                                                ffonElementCreateString(""));
@@ -229,8 +248,9 @@ void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task tas
                         free(prevArr[prevIdx]->data.string);
                         prevArr[prevIdx]->data.string = strdup(line);
                     } else if (prevArr[prevIdx]->type == FFON_OBJECT) {
+                        // Strip trailing colon when saving object key
                         free(prevArr[prevIdx]->data.object->key);
-                        prevArr[prevIdx]->data.object->key = strdup(line);
+                        prevArr[prevIdx]->data.object->key = stripTrailingColon(line);
                     }
                 }
             }
