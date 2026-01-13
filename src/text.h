@@ -82,7 +82,7 @@ void createTextPipeline(SiCompassApplication* app);
 // Text rendering
 void beginTextRendering(SiCompassApplication* app);
 void prepareTextForRendering(SiCompassApplication* app, const char* text,
-                             float x, float y, float scale, vec3 color);
+                             float x, float y, float scale, uint32_t color);
 
 // Helper functions
 void calculateTextBounds(SiCompassApplication* app, const char* text,
