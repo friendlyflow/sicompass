@@ -159,6 +159,10 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
             appRenderer->inputBuffer[--appRenderer->inputBufferSize] = '\0';
             if (appRenderer->cursorPosition > 0) appRenderer->cursorPosition--;
 
+            // Reset caret to visible when user presses backspace
+            uint64_t currentTime = SDL_GetTicks();
+            caretReset(appRenderer->caretState, currentTime);
+
             // Update search when backspacing in right panel modes
             if (appRenderer->currentCoordinate == COORDINATE_LIST ||
                 appRenderer->currentCoordinate == COORDINATE_COMMAND ||
@@ -195,6 +199,10 @@ void handleInput(AppRenderer *appRenderer, const char *text) {
     strcat(appRenderer->inputBuffer, text);
     appRenderer->inputBufferSize += len;
     appRenderer->cursorPosition += len;
+
+    // Reset caret to visible when user types
+    uint64_t currentTime = SDL_GetTicks();
+    caretReset(appRenderer->caretState, currentTime);
 
     // Search the list when in right panel modes
     if (appRenderer->currentCoordinate == COORDINATE_LIST ||

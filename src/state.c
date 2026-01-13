@@ -37,6 +37,16 @@ SiCompassApplication* appRendererCreate(SiCompassApplication* app) {
     idArrayInit(&appRenderer->previousId);
     idArrayInit(&appRenderer->currentInsertId);
 
+    // Initialize caret
+    appRenderer->caretState = caretCreate();
+    if (!appRenderer->caretState) {
+        free(appRenderer->undoHistory);
+        free(appRenderer->inputBuffer);
+        free(appRenderer->ffon);
+        free(appRenderer);
+        return NULL;
+    }
+
     appRenderer->running = true;
     appRenderer->needsRedraw = true;
 
@@ -67,6 +77,9 @@ void appRendererDestroy(AppRenderer *appRenderer) {
     if (appRenderer->clipboard) {
         ffonElementDestroy(appRenderer->clipboard);
     }
+
+    // Free caret
+    caretDestroy(appRenderer->caretState);
 
     // Free list items
     clearListAuxilaries(appRenderer);

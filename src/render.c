@@ -71,13 +71,37 @@ void renderLine(SiCompassApplication *app, FfonElement *elem, const IdArray *id,
     int x = 50 + indent * INDENT_CHARS * charWidth;
     bool isCurrent = idArrayEqual(id, &app->appRenderer->currentId);
 
+    // Store position of current element for caret rendering
+    if (isCurrent) {
+        app->appRenderer->currentElementX = x;
+        app->appRenderer->currentElementY = *yPos;
+        app->appRenderer->currentElementIsObject = (elem->type == FFON_OBJECT);
+    }
+
     if (elem->type == FFON_STRING) {
         uint32_t color = COLOR_TEXT;
-        renderText(app, elem->data.string, x, *yPos, color, isCurrent);
+        const char *displayText = elem->data.string;
+
+        // In insert mode, show inputBuffer for current element
+        if (isCurrent && (app->appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+                         app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT)) {
+            displayText = app->appRenderer->inputBuffer;
+        }
+
+        renderText(app, displayText, x, *yPos, color, isCurrent);
     } else {
         // Render key with colon
         char keyWithColon[MAX_LINE_LENGTH];
-        snprintf(keyWithColon, sizeof(keyWithColon), "%s:", elem->data.object->key);
+        const char *keyToRender = elem->data.object->key;
+
+        // In insert mode, show originalKey:inputBuffer
+        if (isCurrent && (app->appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+                         app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT)) {
+            snprintf(keyWithColon, sizeof(keyWithColon), "%s:%s",
+                    app->appRenderer->originalKey, app->appRenderer->inputBuffer);
+        } else {
+            snprintf(keyWithColon, sizeof(keyWithColon), "%s:", keyToRender);
+        }
 
         uint32_t color = COLOR_TEXT;
         renderText(app, keyWithColon, x, *yPos, color, isCurrent);
@@ -155,11 +179,15 @@ void updateView(SiCompassApplication *app) {
     // Begin text rendering for this frame
     beginTextRendering(app);
 
+    // Begin rectangle rendering for this frame (resets rectangle count)
+    beginRectangleRendering(app);
+
     // Render header
     float scale = getTextScale(app, FONT_SIZE_PT);
     char header[256];
     snprintf(header, sizeof(header), "%s", coordinateToString(app->appRenderer->currentCoordinate));
-    renderText(app, header, 50, getLineHeight(app, scale, TEXT_PADDING), COLOR_TEXT, false);
+    int lineHeight = (int)getLineHeight(app, scale, TEXT_PADDING);
+    renderText(app, header, 50, lineHeight, COLOR_TEXT, false);
 
     // Render error message if any
     if (app->appRenderer->errorMessage[0] != '\0') {
@@ -175,6 +203,30 @@ void updateView(SiCompassApplication *app) {
         renderHierarchy(app);
     } else {
         renderAuxiliaries(app);
+    }
+
+    // Render caret for all modes at end of frame
+    if (app->appRenderer->currentCoordinate == COORDINATE_LIST ||
+        app->appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+        app->appRenderer->currentCoordinate == COORDINATE_FIND) {
+        // Caret in search field
+        int searchTextYPos = lineHeight * 2;
+
+        // Calculate X offset for "search: " prefix and get actual text Y position
+        float minX, minY, maxX, maxY;
+        calculateTextBounds(app, "search: ", 50.0f, (float)searchTextYPos, scale,
+                          &minX, &minY, &maxX, &maxY);
+        int searchPrefixWidth = (int)(maxX - minX);
+
+        // Use minY from text bounds for proper vertical alignment
+        caretRender(app, app->appRenderer->caretState,
+                   app->appRenderer->inputBuffer,
+                   50 + searchPrefixWidth, (int)minY,
+                   app->appRenderer->cursorPosition,
+                   COLOR_TEXT);
+    } else if (app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
+               app->appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT) {
+
     }
 
     // The actual drawing to the screen happens in drawFrame() which calls

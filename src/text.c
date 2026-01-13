@@ -405,6 +405,18 @@ void calculateTextBounds(SiCompassApplication* app, const char* text,
                         float* outMaxX, float* outMaxY) {
     FontRenderer* fr = app->fontRenderer;
 
+    // Use HarfBuzz for proper text shaping (same as rendering)
+    hb_buffer_clear_contents(fr->hbBuffer);
+    hb_buffer_set_direction(fr->hbBuffer, HB_DIRECTION_LTR);
+    hb_buffer_set_script(fr->hbBuffer, HB_SCRIPT_LATIN);
+    hb_buffer_set_language(fr->hbBuffer, hb_language_from_string("en", -1));
+    hb_buffer_add_utf8(fr->hbBuffer, text, -1, 0, -1);
+    hb_shape(fr->hbFont, fr->hbBuffer, NULL, 0);
+
+    unsigned int glyphCount;
+    hb_glyph_info_t* glyphInfo = hb_buffer_get_glyph_infos(fr->hbBuffer, &glyphCount);
+    hb_glyph_position_t* glyphPos = hb_buffer_get_glyph_positions(fr->hbBuffer, &glyphCount);
+
     float cursorX = x;
     float minX = x;
     float maxX = x;
@@ -414,25 +426,16 @@ void calculateTextBounds(SiCompassApplication* app, const char* text,
     float minY = y - fr->ascender * scale;
     float maxY = y - fr->descender * scale;
 
-    for (const char* p = text; *p; p++) {
-        char c = *p;
-        if (c < 32 || c >= 128) continue;
+    // Calculate bounds using HarfBuzz advance values
+    // This correctly handles all glyphs including those with indices >= 256
+    for (unsigned int i = 0; i < glyphCount; i++) {
+        cursorX += (glyphPos[i].x_advance / 64.0f) * scale;
+    }
 
-        GlyphInfo* g = &fr->glyphs[(int)c];
-
-        float xpos = cursorX + g->bearing[0] * scale;
-        float w = g->size[0] * scale;
-
-        if (first) {
-            minX = xpos;
-            maxX = xpos + w;
-            first = false;
-        } else {
-            if (xpos < minX) minX = xpos;
-            if (xpos + w > maxX) maxX = xpos + w;
-        }
-
-        cursorX += g->advance * scale;
+    // Use simple bounds from start to end
+    if (glyphCount > 0) {
+        minX = x;
+        maxX = cursorX;
     }
 
     *outMinX = minX;
