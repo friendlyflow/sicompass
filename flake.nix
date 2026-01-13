@@ -52,7 +52,7 @@
             enableParallelBuilding = true;
 
             meta = with pkgs.lib; {
-              homepage = "https://github.com/friendlyflow/ff";
+              homepage = "https://github.com/friendlyflow/sicompass";
               license = with licenses; [ MIT ];
               maintainers = [ "Nico Verrijdt" ];
             };
@@ -89,6 +89,7 @@
               json_c
               xorg.libxcb
               sdl3
+              cppcheck
             ];
 
             # shellHooks = ''
