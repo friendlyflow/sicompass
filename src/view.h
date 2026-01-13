@@ -69,6 +69,7 @@ typedef enum {
 typedef struct SiCompassApplication SiCompassApplication;
 typedef struct FfonElement FfonElement;
 typedef struct FfonObject FfonObject;
+typedef struct CaretState CaretState;
 
 // FFON data structures
 struct FfonElement {
@@ -142,6 +143,13 @@ typedef struct AppRenderer {
 
     // Timing
     uint64_t lastKeypressTime;
+
+    // Caret state
+    CaretState *caretState;
+    int currentElementX;  // X position of current element during rendering
+    int currentElementY;  // Y position of current element during rendering
+    bool currentElementIsObject;  // Whether current element is an object (needs colon)
+    char originalKey[MAX_LINE_LENGTH];  // Original key when editing an object in insert mode
 
     // Cut/copy/paste buffer
     FfonElement *clipboard;
@@ -229,6 +237,15 @@ void renderAuxiliaries(SiCompassApplication *app);
 void renderHierarchy(SiCompassApplication *app);
 void renderLine(SiCompassApplication *app, FfonElement *elem, const IdArray *id, int indent, int *yPos);
 void renderText(SiCompassApplication *app, const char *text, int x, int y, uint32_t color, bool highlight);
+
+// Caret functions
+CaretState* caretCreate();
+void caretDestroy(CaretState* caret);
+void caretUpdate(CaretState* caret, uint64_t currentTime);
+void caretReset(CaretState* caret, uint64_t currentTime);
+void caretRender(SiCompassApplication* app, CaretState* caret,
+                 const char* text, int x, int y, int cursorPosition,
+                 uint32_t color);
 
 // Utility functions
 const char* coordinateToString(Coordinate coord);

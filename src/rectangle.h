@@ -4,6 +4,7 @@
 #include <cglm/cglm.h>
 
 #define MAX_FRAMES_IN_FLIGHT 2
+#define MAX_RECTANGLES 100  // Maximum number of rectangles per frame
 
 // Forward declaration
 typedef struct SiCompassApplication SiCompassApplication;
@@ -22,6 +23,7 @@ typedef struct RectangleRenderer {
     VkPipelineLayout pipelineLayout;
     VkPipeline pipeline;
     uint32_t vertexCount;
+    RectangleVertex* mappedVertexData;  // Persistently mapped vertex buffer
 } RectangleRenderer;
 
 // Initialization and cleanup
@@ -30,6 +32,7 @@ void createRectanglePipeline(SiCompassApplication* app);
 void cleanupRectangleRenderer(SiCompassApplication* app);
 
 // Rectangle rendering
+void beginRectangleRendering(SiCompassApplication* app);  // Call at start of frame
 void prepareRectangle(SiCompassApplication* app,
                      float x, float y, float width, float height,
                      vec4 color, float cornerRadius);

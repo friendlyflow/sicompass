@@ -40,8 +40,10 @@ void mainLoop(SiCompassApplication* app) {
 
                 case SDL_EVENT_KEY_DOWN:
                     handleKeys(app->appRenderer, &event);
-                    // Enable text input when entering right panel modes
-                    if (app->appRenderer->currentCoordinate == COORDINATE_LIST ||
+                    // Enable text input when entering insert or search modes
+                    if (app->appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+                        app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
+                        app->appRenderer->currentCoordinate == COORDINATE_LIST ||
                         app->appRenderer->currentCoordinate == COORDINATE_COMMAND ||
                         app->appRenderer->currentCoordinate == COORDINATE_FIND) {
                         SDL_StartTextInput(app->window);
@@ -64,6 +66,19 @@ void mainLoop(SiCompassApplication* app) {
                     app->appRenderer->needsRedraw = true;
                     break;
             }
+        }
+
+        // Update caret blink state
+        uint64_t currentTime = SDL_GetTicks();
+        caretUpdate(app->appRenderer->caretState, currentTime);
+
+        // Caret blinking requires continuous redraw
+        if (app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
+            app->appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+            app->appRenderer->currentCoordinate == COORDINATE_LIST ||
+            app->appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+            app->appRenderer->currentCoordinate == COORDINATE_FIND) {
+            app->appRenderer->needsRedraw = true;
         }
 
         // Render if needed

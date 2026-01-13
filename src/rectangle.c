@@ -13,11 +13,17 @@ extern char* readFile(const char* filename, size_t* outSize);
 
 void createRectangleVertexBuffer(SiCompassApplication* app) {
     RectangleRenderer* rr = app->rectangleRenderer;
-    VkDeviceSize bufferSize = sizeof(RectangleVertex) * 6;
+    VkDeviceSize bufferSize = sizeof(RectangleVertex) * 6 * MAX_RECTANGLES;
 
     createBuffer(app, bufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                  &rr->vertexBuffer, &rr->vertexBufferMemory);
+
+    // Persistently map the vertex buffer for efficient updates
+    vkMapMemory(app->device, rr->vertexBufferMemory, 0, bufferSize, 0,
+                (void**)&rr->mappedVertexData);
+
+    rr->vertexCount = 0;
 }
 
 void createRectanglePipeline(SiCompassApplication* app) {
@@ -157,10 +163,21 @@ void createRectanglePipeline(SiCompassApplication* app) {
     free(fragCode);
 }
 
+void beginRectangleRendering(SiCompassApplication* app) {
+    RectangleRenderer* rr = app->rectangleRenderer;
+    rr->vertexCount = 0;  // Reset rectangle count for new frame
+}
+
 void prepareRectangle(SiCompassApplication* app,
                      float x, float y, float width, float height,
                      vec4 color, float cornerRadius) {
     RectangleRenderer* rr = app->rectangleRenderer;
+
+    // Check if we've hit the limit
+    if (rr->vertexCount >= 6 * MAX_RECTANGLES) {
+        fprintf(stderr, "Warning: Maximum rectangle count (%d) exceeded\n", MAX_RECTANGLES);
+        return;
+    }
 
     float minX = x;
     float minY = y;
@@ -171,8 +188,8 @@ void prepareRectangle(SiCompassApplication* app,
     float maxRadius = fminf(width, height) * 0.5f;
     float actualCornerRadius = fminf(cornerRadius, maxRadius);
 
-    // Create 6 vertices for 2 triangles (a quad)
-    RectangleVertex vertices[6];
+    // Write directly to mapped buffer at current offset
+    RectangleVertex* vertices = &rr->mappedVertexData[rr->vertexCount];
 
     // Bottom-left corner is our reference point
     for (int i = 0; i < 6; i++) {
@@ -198,14 +215,7 @@ void prepareRectangle(SiCompassApplication* app,
     vertices[4].pos[0] = maxX; vertices[4].pos[1] = maxY;
     vertices[5].pos[0] = minX; vertices[5].pos[1] = maxY;
 
-    rr->vertexCount = 6;
-
-    // Upload to GPU
-    void* data;
-    vkMapMemory(app->device, rr->vertexBufferMemory, 0,
-                sizeof(RectangleVertex) * 6, 0, &data);
-    memcpy(data, vertices, sizeof(RectangleVertex) * 6);
-    vkUnmapMemory(app->device, rr->vertexBufferMemory);
+    rr->vertexCount += 6;  // Increment by 6 vertices (one rectangle)
 }
 
 void drawRectangle(SiCompassApplication* app, VkCommandBuffer commandBuffer) {
