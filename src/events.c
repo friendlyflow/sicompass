@@ -155,15 +155,47 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
               appRenderer->currentCoordinate == COORDINATE_LIST ||
               appRenderer->currentCoordinate == COORDINATE_COMMAND ||
               appRenderer->currentCoordinate == COORDINATE_FIND)) {
-        if (appRenderer->inputBufferSize > 0) {
-            appRenderer->inputBuffer[--appRenderer->inputBufferSize] = '\0';
-            if (appRenderer->cursorPosition > 0) appRenderer->cursorPosition--;
+        if (appRenderer->inputBufferSize > 0 && appRenderer->cursorPosition > 0) {
+            // Delete character before cursor
+            memmove(&appRenderer->inputBuffer[appRenderer->cursorPosition - 1],
+                   &appRenderer->inputBuffer[appRenderer->cursorPosition],
+                   appRenderer->inputBufferSize - appRenderer->cursorPosition + 1);
+            appRenderer->inputBufferSize--;
+            appRenderer->cursorPosition--;
 
             // Reset caret to visible when user presses backspace
             uint64_t currentTime = SDL_GetTicks();
             caretReset(appRenderer->caretState, currentTime);
 
             // Update search when backspacing in right panel modes
+            if (appRenderer->currentCoordinate == COORDINATE_LIST ||
+                appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+                appRenderer->currentCoordinate == COORDINATE_FIND) {
+                populateListAuxilaries(appRenderer, appRenderer->inputBuffer);
+            }
+
+            appRenderer->needsRedraw = true;
+        }
+    }
+    // Delete key in insert modes
+    else if (!ctrl && !shift && !alt && key == SDLK_DELETE &&
+             (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+              appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
+              appRenderer->currentCoordinate == COORDINATE_LIST ||
+              appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+              appRenderer->currentCoordinate == COORDINATE_FIND)) {
+        if (appRenderer->cursorPosition < appRenderer->inputBufferSize) {
+            // Delete character at cursor
+            memmove(&appRenderer->inputBuffer[appRenderer->cursorPosition],
+                   &appRenderer->inputBuffer[appRenderer->cursorPosition + 1],
+                   appRenderer->inputBufferSize - appRenderer->cursorPosition);
+            appRenderer->inputBufferSize--;
+
+            // Reset caret to visible when user presses delete
+            uint64_t currentTime = SDL_GetTicks();
+            caretReset(appRenderer->caretState, currentTime);
+
+            // Update search when deleting in right panel modes
             if (appRenderer->currentCoordinate == COORDINATE_LIST ||
                 appRenderer->currentCoordinate == COORDINATE_COMMAND ||
                 appRenderer->currentCoordinate == COORDINATE_FIND) {
