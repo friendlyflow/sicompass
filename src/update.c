@@ -39,7 +39,7 @@ void updateState(AppRenderer *appRenderer, Task task, History history) {
             if (arr && count > 0) {
                 int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
                 if (idx >= 0 && idx < count) {
-                    FfonElement *elem = arr[idx];
+                    const FfonElement *elem = arr[idx];
                     if (elem->type == FFON_STRING) {
                         strncpy(line, elem->data.string, MAX_LINE_LENGTH - 1);
                     } else {
