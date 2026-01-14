@@ -319,8 +319,6 @@ void updateView(SiCompassApplication *app) {
         renderText(app, app->appRenderer->errorMessage, 400, 10, COLOR_RED, false);
     }
 
-    // TODO: Add line rendering support for header separator at y=35
-
     // Render appropriate panel
     if (app->appRenderer->currentCoordinate == COORDINATE_LIST ||
         app->appRenderer->currentCoordinate == COORDINATE_COMMAND ||
