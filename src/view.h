@@ -239,7 +239,7 @@ void updateView(SiCompassApplication *app);
 void renderAuxiliaries(SiCompassApplication *app);
 void renderHierarchy(SiCompassApplication *app);
 void renderLine(SiCompassApplication *app, FfonElement *elem, const IdArray *id, int indent, int *yPos);
-void renderText(SiCompassApplication *app, const char *text, int x, int y, uint32_t color, bool highlight);
+int renderText(SiCompassApplication *app, const char *text, int x, int y, uint32_t color, bool highlight);
 
 // Caret functions
 CaretState* caretCreate();
