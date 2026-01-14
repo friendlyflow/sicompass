@@ -11,8 +11,8 @@
       },
       {
         "0, 2": [
-          "0, 2, 0",
-          "0, 2, 1"
+          "0, 2, 0: let's make it longer than 120 lines and see if it text wraps, so any length is good, perferably longer than 240 characters tha will do, so let me right some bits more, ok, let's test it. Ok just a little bi tmore to see a third line, which will be there soon enought. Let's see.",
+          "0, 2, 1: ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss"
         ]
       },
       "0, 3: sicompass"

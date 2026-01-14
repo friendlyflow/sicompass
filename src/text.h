@@ -8,7 +8,7 @@
 #include <cglm/cglm.h>
 
 #define FONT_ATLAS_SIZE 1024
-#define MAX_TEXT_VERTICES 1024
+#define MAX_TEXT_VERTICES 65536
 #define MAX_FRAMES_IN_FLIGHT 2
 
 // Forward declaration

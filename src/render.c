@@ -1,37 +1,134 @@
 #include "view.h"
 #include <string.h>
 
-void renderText(SiCompassApplication *app, const char *text, int x, int y,
-                uint32_t color, bool highlight) {
+int renderText(SiCompassApplication *app, const char *text, int x, int y,
+               uint32_t color, bool highlight) {
     if (!text || strlen(text) == 0) {
         text = " "; // Render at least a space for empty lines
     }
 
     float scale = getTextScale(app, FONT_SIZE_PT);
+    float charWidth = getWidthEM(app, scale);
+    float maxWidth = 120.0f * charWidth;
+    int lineHeight = (int)getLineHeight(app, scale, TEXT_PADDING);
 
-    // Render highlight background if needed
-    if (highlight) {
-        // Calculate text bounds
-        float minX, minY, maxX, maxY;
-        calculateTextBounds(app, text, (float)x, (float)y, scale, &minX, &minY, &maxX, &maxY);
+    // Split text into lines based on width
+    const char *lineStart = text;
+    int currentY = y;
+    int linesRendered = 0;
 
-        // Add padding
-        minX -= TEXT_PADDING;
-        minY -= TEXT_PADDING;
-        maxX += TEXT_PADDING;
-        maxY += TEXT_PADDING;
+    while (*lineStart != '\0') {
+        const char *lineEnd = lineStart;
+        const char *lastSpace = NULL;
 
-        float width = maxX - minX;
-        float height = maxY - minY;
+        // Find where to break this line
+        const char *lastFit = lineStart;
+        while (*lineEnd != '\0') {
+            // Build substring from lineStart to lineEnd (inclusive)
+            size_t testLen = lineEnd - lineStart + 1;
+            if (testLen >= MAX_LINE_LENGTH) {
+                testLen = MAX_LINE_LENGTH - 1;
+            }
 
-        // Use a reasonable corner radius
-        float cornerRadius = 5.0f;
+            char testText[MAX_LINE_LENGTH];
+            strncpy(testText, lineStart, testLen);
+            testText[testLen] = '\0';
 
-        prepareRectangle(app, minX, minY, width, height, COLOR_DARK_GREEN, cornerRadius);
+            // Measure width
+            float minX, minY, maxX, maxY;
+            calculateTextBounds(app, testText, (float)x, (float)currentY, scale,
+                              &minX, &minY, &maxX, &maxY);
+            float width = maxX - minX;
+
+            // DEBUG: Log when we first exceed for strings starting with "0, 2, 1:"
+            static int debugOnce = 0;
+            if (debugOnce < 5 && strlen(text) > 200 && text[0] == '0' && text[4] == '2') {
+                FILE *f = fopen("/tmp/sicompass_wrap_debug.txt", "a");
+                if (f && width > maxWidth) {
+                    fprintf(f, "EXCEED at char %zu: width=%.1f > maxWidth=%.1f, testText='%.20s'\n",
+                            lineEnd - text, width, maxWidth, testText);
+                    debugOnce++;
+                    fclose(f);
+                }
+                if (f) fclose(f);
+            }
+
+            // If adding this character exceeds the limit
+            if (width > maxWidth) {
+                // Break at last space if we have one AND it's not too close to the start
+                // (avoid breaking at a space that would give us a very short line)
+                size_t spaceOffset = lastSpace ? (lastSpace - lineStart) : 0;
+                if (lastSpace != NULL && lastSpace > lineStart && spaceOffset > 20) {
+                    lineEnd = lastSpace;
+                } else {
+                    // No suitable space - use last position that fit
+                    lineEnd = lastFit;
+                }
+                break;
+            }
+
+            // Remember where spaces are
+            if (*lineEnd == ' ') {
+                lastSpace = lineEnd;
+            }
+
+            // Move to next character
+            lineEnd++;
+
+            // This character fit, so the next line would start here if we need to break
+            lastFit = lineEnd;
+        }
+
+        // Extract line to render
+        size_t lineLen = lineEnd - lineStart;
+        if (lineLen == 0 && *lineStart != '\0') {
+            lineLen = 1; // Take at least one character
+            lineEnd = lineStart + 1;
+        }
+
+        if (lineLen >= MAX_LINE_LENGTH) {
+            lineLen = MAX_LINE_LENGTH - 1;
+        }
+
+        char lineText[MAX_LINE_LENGTH];
+        strncpy(lineText, lineStart, lineLen);
+        lineText[lineLen] = '\0';
+
+        // Render highlight background if needed
+        if (highlight && lineLen > 0) {
+            float minX, minY, maxX, maxY;
+            calculateTextBounds(app, lineText, (float)x, (float)currentY, scale,
+                              &minX, &minY, &maxX, &maxY);
+
+            minX -= TEXT_PADDING;
+            minY -= TEXT_PADDING;
+            maxX += TEXT_PADDING;
+            maxY += TEXT_PADDING;
+
+            float width = maxX - minX;
+            float height = maxY - minY;
+            float cornerRadius = 5.0f;
+
+            prepareRectangle(app, minX, minY, width, height, COLOR_DARK_GREEN, cornerRadius);
+        }
+
+        // Render the line
+        if (lineLen > 0) {
+            prepareTextForRendering(app, lineText, (float)x, (float)currentY, scale, color);
+            currentY += lineHeight;
+            linesRendered++;
+        }
+
+        // Move to next line
+        lineStart = lineEnd;
+
+        // Skip trailing space if we broke at one
+        if (*lineStart == ' ') {
+            lineStart++;
+        }
     }
 
-    // Prepare text for rendering
-    prepareTextForRendering(app, text, (float)x, (float)y, scale, color);
+    return linesRendered;
 }
 
 void renderLine(SiCompassApplication *app, FfonElement *elem, const IdArray *id,
@@ -58,6 +155,8 @@ void renderLine(SiCompassApplication *app, FfonElement *elem, const IdArray *id,
         app->appRenderer->currentElementIsObject = (elem->type == FFON_OBJECT);
     }
 
+    int linesRendered = 0;
+
     if (elem->type == FFON_STRING) {
         uint32_t color = COLOR_TEXT;
         const char *displayText = elem->data.string;
@@ -68,7 +167,7 @@ void renderLine(SiCompassApplication *app, FfonElement *elem, const IdArray *id,
             displayText = app->appRenderer->inputBuffer;
         }
 
-        renderText(app, displayText, x, *yPos, color, isCurrent);
+        linesRendered = renderText(app, displayText, x, *yPos, color, isCurrent);
     } else {
         // Render key with colon
         char keyWithColon[MAX_LINE_LENGTH];
@@ -84,10 +183,10 @@ void renderLine(SiCompassApplication *app, FfonElement *elem, const IdArray *id,
         }
 
         uint32_t color = COLOR_TEXT;
-        renderText(app, keyWithColon, x, *yPos, color, isCurrent);
+        linesRendered = renderText(app, keyWithColon, x, *yPos, color, isCurrent);
     }
 
-    *yPos += lineHeight;
+    *yPos += lineHeight * linesRendered;
 
     // Recursively render children if object
     if (elem->type == FFON_OBJECT) {
@@ -130,8 +229,8 @@ void renderAuxiliaries(SiCompassApplication *app) {
     // Render search input
     char searchText[MAX_LINE_LENGTH];
     snprintf(searchText, sizeof(searchText), "search: %s", app->appRenderer->inputBuffer);
-    renderText(app, searchText, 50, yPos, COLOR_TEXT, false);
-    yPos += lineHeight;
+    int linesRendered = renderText(app, searchText, 50, yPos, COLOR_TEXT, false);
+    yPos += lineHeight * linesRendered;
 
     // Render list items
     ListItem *list = app->appRenderer->filteredListCount > 0 ?
@@ -141,15 +240,16 @@ void renderAuxiliaries(SiCompassApplication *app) {
 
     for (int i = 0; i < count; i++) {
         bool isSelected = (i == app->appRenderer->listIndex);
+        int itemYPos = yPos;
 
         // Render radio button indicator
         const char *indicator = isSelected ? "●" : "○";
-        renderText(app, indicator, 50, yPos, COLOR_ORANGE, false);
+        renderText(app, indicator, 50, itemYPos, COLOR_ORANGE, false);
 
-        // Render text
-        renderText(app, list[i].value, 80, yPos, COLOR_TEXT, isSelected);
+        // Render text (may be multiple lines)
+        int textLines = renderText(app, list[i].value, 80, itemYPos, COLOR_TEXT, isSelected);
 
-        yPos += lineHeight;
+        yPos += lineHeight * textLines;
     }
 }
 
