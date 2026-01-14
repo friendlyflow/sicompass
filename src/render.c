@@ -12,17 +12,25 @@ int renderText(SiCompassApplication *app, const char *text, int x, int y,
     float maxWidth = 120.0f * charWidth;
     int lineHeight = (int)getLineHeight(app, scale, TEXT_PADDING);
 
-    // Split text into lines based on width
-    const char *lineStart = text;
-    int currentY = y;
-    int linesRendered = 0;
+    // First pass: split text into lines and store them
+    typedef struct {
+        const char *start;
+        size_t len;
+    } LineInfo;
 
-    while (*lineStart != '\0') {
+    LineInfo lines[1000]; // Support up to 1000 lines
+    int lineCount = 0;
+
+    const char *lineStart = text;
+
+    while (*lineStart != '\0' && lineCount < 1000) {
         const char *lineEnd = lineStart;
         const char *lastSpace = NULL;
 
         // Find where to break this line
         const char *lastFit = lineStart;
+        int currentY = y + lineCount * lineHeight;
+
         while (*lineEnd != '\0') {
             // Build substring from lineStart to lineEnd (inclusive)
             size_t testLen = lineEnd - lineStart + 1;
@@ -90,34 +98,10 @@ int renderText(SiCompassApplication *app, const char *text, int x, int y,
             lineLen = MAX_LINE_LENGTH - 1;
         }
 
-        char lineText[MAX_LINE_LENGTH];
-        strncpy(lineText, lineStart, lineLen);
-        lineText[lineLen] = '\0';
-
-        // Render highlight background if needed
-        if (highlight && lineLen > 0) {
-            float minX, minY, maxX, maxY;
-            calculateTextBounds(app, lineText, (float)x, (float)currentY, scale,
-                              &minX, &minY, &maxX, &maxY);
-
-            minX -= TEXT_PADDING;
-            minY -= TEXT_PADDING;
-            maxX += TEXT_PADDING;
-            maxY += TEXT_PADDING;
-
-            float width = maxX - minX;
-            float height = maxY - minY;
-            float cornerRadius = 5.0f;
-
-            prepareRectangle(app, minX, minY, width, height, COLOR_DARK_GREEN, cornerRadius);
-        }
-
-        // Render the line
-        if (lineLen > 0) {
-            prepareTextForRendering(app, lineText, (float)x, (float)currentY, scale, color);
-            currentY += lineHeight;
-            linesRendered++;
-        }
+        // Store line info
+        lines[lineCount].start = lineStart;
+        lines[lineCount].len = lineLen;
+        lineCount++;
 
         // Move to next line
         lineStart = lineEnd;
@@ -128,7 +112,56 @@ int renderText(SiCompassApplication *app, const char *text, int x, int y,
         }
     }
 
-    return linesRendered;
+    // Second pass: calculate overall bounding box and render highlight if needed
+    if (highlight && lineCount > 0) {
+        float overallMinX = INFINITY;
+        float overallMinY = INFINITY;
+        float overallMaxX = -INFINITY;
+        float overallMaxY = -INFINITY;
+
+        for (int i = 0; i < lineCount; i++) {
+            char lineText[MAX_LINE_LENGTH];
+            strncpy(lineText, lines[i].start, lines[i].len);
+            lineText[lines[i].len] = '\0';
+
+            int currentY = y + i * lineHeight;
+            float minX, minY, maxX, maxY;
+            calculateTextBounds(app, lineText, (float)x, (float)currentY, scale,
+                              &minX, &minY, &maxX, &maxY);
+
+            if (minX < overallMinX) overallMinX = minX;
+            if (minY < overallMinY) overallMinY = minY;
+            if (maxX > overallMaxX) overallMaxX = maxX;
+            if (maxY > overallMaxY) overallMaxY = maxY;
+        }
+
+        // Add padding and render single rectangle
+        overallMinX -= TEXT_PADDING;
+        overallMinY -= TEXT_PADDING;
+        overallMaxX += TEXT_PADDING;
+        overallMaxY += TEXT_PADDING;
+
+        float width = overallMaxX - overallMinX;
+        float height = overallMaxY - overallMinY;
+        float cornerRadius = 5.0f;
+
+        prepareRectangle(app, overallMinX, overallMinY, width, height, COLOR_DARK_GREEN, cornerRadius);
+    }
+
+    // Third pass: render all text lines
+    int currentY = y;
+    for (int i = 0; i < lineCount; i++) {
+        char lineText[MAX_LINE_LENGTH];
+        strncpy(lineText, lines[i].start, lines[i].len);
+        lineText[lines[i].len] = '\0';
+
+        if (lines[i].len > 0) {
+            prepareTextForRendering(app, lineText, (float)x, (float)currentY, scale, color);
+            currentY += lineHeight;
+        }
+    }
+
+    return lineCount;
 }
 
 void renderLine(SiCompassApplication *app, FfonElement *elem, const IdArray *id,
