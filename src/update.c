@@ -214,6 +214,7 @@ void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task tas
                 // Remove element at previous_id[i]
                 int removeIdx = appRenderer->previousId.ids[i];
                 if (removeIdx >= 0 && removeIdx < _ffon_count) {
+                    int originalCount = _ffon_count;
                     ffonElementDestroy(_ffon[removeIdx]);
                     for (int j = removeIdx; j < _ffon_count - 1; j++) {
                         _ffon[j] = _ffon[j + 1];
@@ -227,11 +228,17 @@ void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task tas
                         // Update root level count
                         appRenderer->ffonCount = _ffon_count;
                     }
-                }
 
-                // Insert empty string if not at root
-                if (i != 0 && removeIdx >= 0 && removeIdx <= _ffon_count && _parentObj) {
-                    ffonObjectInsertElement(_parentObj, ffonElementCreateString(""), removeIdx);
+                    // Only insert empty string if this was the only element and not at root
+                    if (i != 0 && _parentObj && originalCount == 1) {
+                        ffonObjectInsertElement(_parentObj, ffonElementCreateString(""), 0);
+                    } else if (_ffon_count > 0) {
+                        // Move cursor to previous element if it exists, otherwise stay at same index (which is now next element)
+                        if (removeIdx > 0) {
+                            appRenderer->currentId.ids[i]--;
+                        }
+                        // else: removeIdx == 0, so currentId already points to what was the next element
+                    }
                 }
                 break;  // Don't continue to check other branches after delete
             }
