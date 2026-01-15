@@ -48,19 +48,6 @@ int renderText(SiCompassApplication *app, const char *text, int x, int y,
                               &minX, &minY, &maxX, &maxY);
             float width = maxX - minX;
 
-            // DEBUG: Log when we first exceed for strings starting with "0, 2, 1:"
-            static int debugOnce = 0;
-            if (debugOnce < 5 && strlen(text) > 200 && text[0] == '0' && text[4] == '2') {
-                FILE *f = fopen("/tmp/sicompass_wrap_debug.txt", "a");
-                if (f && width > maxWidth) {
-                    fprintf(f, "EXCEED at char %zu: width=%.1f > maxWidth=%.1f, testText='%.20s'\n",
-                            lineEnd - text, width, maxWidth, testText);
-                    debugOnce++;
-                    fclose(f);
-                }
-                if (f) fclose(f);
-            }
-
             // If adding this character exceeds the limit
             if (width > maxWidth) {
                 // Break at last space if we have one
