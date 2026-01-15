@@ -131,8 +131,8 @@ void handleCtrlEnter(AppRenderer *appRenderer, History history) {
     if (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT) {
         updateState(appRenderer, TASK_INPUT, HISTORY_NONE);
         appRenderer->currentCoordinate = COORDINATE_EDITOR_GENERAL;
-        handleRight(appRenderer);
-        handleA(appRenderer);
+        handleEscape(appRenderer);
+        handleCtrlA(appRenderer, HISTORY_NONE);
     }
 }
 
