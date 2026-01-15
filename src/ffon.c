@@ -115,6 +115,33 @@ void ffonObjectAddElement(FfonObject *obj, FfonElement *elem) {
     obj->elements[obj->count++] = elem;
 }
 
+void ffonObjectInsertElement(FfonObject *obj, FfonElement *elem, int index) {
+    if (!obj || !elem) return;
+
+    // Resize if needed
+    if (obj->count >= obj->capacity) {
+        int newCapacity = obj->capacity * 2;
+        FfonElement **newElements = realloc(obj->elements,
+                                             newCapacity * sizeof(FfonElement*));
+        if (!newElements) return;
+
+        obj->elements = newElements;
+        obj->capacity = newCapacity;
+    }
+
+    // Clamp index to valid range [0, count]
+    if (index < 0) index = 0;
+    if (index > obj->count) index = obj->count;
+
+    // Shift elements to make room
+    for (int i = obj->count; i > index; i--) {
+        obj->elements[i] = obj->elements[i - 1];
+    }
+
+    obj->elements[index] = elem;
+    obj->count++;
+}
+
 // Get FFON element(s) at a given ID path
 FfonElement** getFfonAtId(AppRenderer *appRenderer, const IdArray *id, int *outCount) {
     if (id->depth == 0) {
