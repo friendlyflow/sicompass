@@ -150,7 +150,12 @@ void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task tas
     // Get parent object if we're nested
     FfonObject *parentObj = NULL;
     if (appRenderer->currentId.depth > 1) {
-        FfonElement **parentArr = getFfonAtId(appRenderer, &appRenderer->currentId, &count);
+        // Create parent ID by reducing depth by 1
+        IdArray parentId;
+        idArrayCopy(&parentId, &appRenderer->currentId);
+        parentId.depth--;
+
+        FfonElement **parentArr = getFfonAtId(appRenderer, &parentId, &count);
         if (parentArr) {
             int parentIdx = appRenderer->currentId.ids[appRenderer->currentId.depth - 2];
             if (parentIdx >= 0 && parentIdx < count) {
