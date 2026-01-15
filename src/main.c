@@ -845,7 +845,22 @@ void recordCommandBuffer(SiCompassApplication* app, VkCommandBuffer commandBuffe
 
     vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-    drawImage(app, commandBuffer);
+    // Set viewport and scissor for dynamic state pipelines
+    VkViewport viewport = {0};
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = (float)app->swapChainExtent.width;
+    viewport.height = (float)app->swapChainExtent.height;
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+    vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+
+    VkRect2D scissor = {0};
+    scissor.offset = (VkOffset2D){0, 0};
+    scissor.extent = app->swapChainExtent;
+    vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
+    // drawImage(app, commandBuffer);
     drawRectangle(app, commandBuffer);
     drawText(app, commandBuffer);
 
@@ -910,7 +925,7 @@ void drawFrame(SiCompassApplication* app) {
         exit(EXIT_FAILURE);
     }
 
-    updateUniformBuffer(app, app->currentFrame);
+    // updateUniformBuffer(app, app->currentFrame);
 
     vkResetFences(app->device, 1, &app->inFlightFences[app->currentFrame]);
 
@@ -973,19 +988,19 @@ void initVulkan(SiCompassApplication* app) {
 
     // Image
     createRenderPass(app);
-    createImageDescriptorSetLayout(app);
-    createImagePipeline(app);
+    // createImageDescriptorSetLayout(app);
+    // createImagePipeline(app);
     createCommandPool(app);
     createDepthResources(app);
     createFramebuffers(app);
-    createTextureImage(app);
-    createTextureImageView(app);
-    createTextureSampler(app);
-    createImageVertexBuffer(app);
-    createImageIndexBuffer(app);
-    createUniformBuffers(app);
-    createImageDescriptorPool(app);
-    createImageDescriptorSets(app);
+    // createTextureImage(app);
+    // createTextureImageView(app);
+    // createTextureSampler(app);
+    // createImageVertexBuffer(app);
+    // createImageIndexBuffer(app);
+    // createUniformBuffers(app);
+    // createImageDescriptorPool(app);
+    // createImageDescriptorSets(app);
     createCommandBuffers(app);
     createSyncObjects(app);
 
