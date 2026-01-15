@@ -255,6 +255,10 @@ void handleI(AppRenderer *appRenderer) {
         appRenderer->previousCoordinate = appRenderer->currentCoordinate;
         appRenderer->currentCoordinate = COORDINATE_EDITOR_INSERT;
 
+        // Clear the input buffer first
+        appRenderer->inputBuffer[0] = '\0';
+        appRenderer->inputBufferSize = 0;
+
         // Get current line content
         int count;
         FfonElement **arr = getFfonAtId(appRenderer, &appRenderer->currentId, &count);
@@ -286,6 +290,10 @@ void handleA(AppRenderer *appRenderer) {
         idArrayCopy(&appRenderer->currentInsertId, &appRenderer->currentId);
         appRenderer->previousCoordinate = appRenderer->currentCoordinate;
         appRenderer->currentCoordinate = COORDINATE_EDITOR_INSERT;
+
+        // Clear the input buffer first
+        appRenderer->inputBuffer[0] = '\0';
+        appRenderer->inputBufferSize = 0;
 
         // Get current line content
         int count;

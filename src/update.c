@@ -181,6 +181,30 @@ void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task tas
     printf("\n");
     printf("update, isKey=%d, task=%d\n", isKey, task);
 
+    // Handle special case: empty root structure
+    if (appRenderer->ffonCount == 0 && appRenderer->previousId.depth == 1) {
+        if (task == TASK_APPEND || task == TASK_APPEND_APPEND ||
+            task == TASK_INSERT || task == TASK_INSERT_INSERT ||
+            task == TASK_INPUT) {
+            // Create a new root element
+            FfonElement *newElem;
+            if (isKey) {
+                newElem = ffonElementCreateObject(line);
+                ffonObjectAddElement(newElem->data.object, ffonElementCreateString(""));
+            } else {
+                newElem = ffonElementCreateString(line);
+            }
+
+            // Add to root
+            appRenderer->ffon = realloc(appRenderer->ffon, sizeof(FfonElement *));
+            if (appRenderer->ffon) {
+                appRenderer->ffon[0] = newElem;
+                appRenderer->ffonCount = 1;
+            }
+            return;
+        }
+    }
+
     for (int i = 0; i < appRenderer->previousId.depth; i++) {
         // Re-navigate to current level on each iteration to avoid stale pointers
         FfonElement **_ffon;
@@ -285,8 +309,27 @@ void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task tas
 
                         // Insert new sibling element
                         if (_parentObj && history != HISTORY_REDO) {
-                            int insertIdx = appRenderer->previousId.ids[i];
+                            int insertIdx = appRenderer->currentId.ids[i];
                             ffonObjectInsertElement(_parentObj, ffonElementCreateString(""), insertIdx);
+                        } else if (!_parentObj && i == 0 && history != HISTORY_REDO) {
+                            // At root level, insert a new empty string sibling
+                            int insertIdx = appRenderer->currentId.ids[i];
+
+                            // Expand root array
+                            FfonElement **newArray = realloc(appRenderer->ffon,
+                                                            sizeof(FfonElement *) * (appRenderer->ffonCount + 1));
+                            if (newArray) {
+                                appRenderer->ffon = newArray;
+
+                                // Shift elements to make room
+                                for (int k = appRenderer->ffonCount; k > insertIdx; k--) {
+                                    appRenderer->ffon[k] = appRenderer->ffon[k - 1];
+                                }
+
+                                // Insert new empty string
+                                appRenderer->ffon[insertIdx] = ffonElementCreateString("");
+                                appRenderer->ffonCount++;
+                            }
                         }
                     } else if (task == TASK_H_ARROW_LEFT || task == TASK_L_ARROW_RIGHT ||
                                task == TASK_K_ARROW_UP || task == TASK_J_ARROW_DOWN ||
@@ -341,6 +384,27 @@ void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task tas
                     if (prevIdx >= 0 && prevIdx < _ffon_count) {
                         ffonElementDestroy(_ffon[prevIdx]);
                         _ffon[prevIdx] = newElem;
+                    }
+
+                    // Insert a new sibling at root level
+                    if (!_parentObj && i == 0 && history != HISTORY_REDO) {
+                        int insertIdx = appRenderer->currentId.ids[i];
+
+                        // Expand root array
+                        FfonElement **newArray = realloc(appRenderer->ffon,
+                                                        sizeof(FfonElement *) * (appRenderer->ffonCount + 1));
+                        if (newArray) {
+                            appRenderer->ffon = newArray;
+
+                            // Shift elements to make room
+                            for (int k = appRenderer->ffonCount; k > insertIdx; k--) {
+                                appRenderer->ffon[k] = appRenderer->ffon[k - 1];
+                            }
+
+                            // Insert new empty string
+                            appRenderer->ffon[insertIdx] = ffonElementCreateString("");
+                            appRenderer->ffonCount++;
+                        }
                     }
                 } else if (task == TASK_DELETE) {
                     printf("beestje122, previous_id=");
@@ -428,9 +492,28 @@ void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task tas
                     }
 
                     if (_parentObj && history != HISTORY_REDO) {
-                        // Insert empty string at previous_id[i] position (like splice in JS)
-                        int insertIdx = appRenderer->previousId.ids[i];
+                        // Insert empty string at current position (updateIds already moved the cursor)
+                        int insertIdx = appRenderer->currentId.ids[i];
                         ffonObjectInsertElement(_parentObj, ffonElementCreateString(""), insertIdx);
+                    } else if (!_parentObj && i == 0 && history != HISTORY_REDO) {
+                        // At root level, insert a new empty string sibling
+                        int insertIdx = appRenderer->currentId.ids[i];
+
+                        // Expand root array
+                        FfonElement **newArray = realloc(appRenderer->ffon,
+                                                        sizeof(FfonElement *) * (appRenderer->ffonCount + 1));
+                        if (newArray) {
+                            appRenderer->ffon = newArray;
+
+                            // Shift elements to make room
+                            for (int k = appRenderer->ffonCount; k > insertIdx; k--) {
+                                appRenderer->ffon[k] = appRenderer->ffon[k - 1];
+                            }
+
+                            // Insert new empty string
+                            appRenderer->ffon[insertIdx] = ffonElementCreateString("");
+                            appRenderer->ffonCount++;
+                        }
                     }
                 } else if (task == TASK_DELETE) {
                     printf("beestje222, previous_id=");
