@@ -183,6 +183,7 @@ FfonElement* ffonElementClone(FfonElement *elem);
 FfonObject* ffonObjectCreate(const char *key);
 void ffonObjectDestroy(FfonObject *obj);
 void ffonObjectAddElement(FfonObject *obj, FfonElement *elem);
+void ffonObjectInsertElement(FfonObject *obj, FfonElement *elem, int index);
 
 // JSON loading
 bool loadJsonFile(AppRenderer *appRenderer, const char *filename);
