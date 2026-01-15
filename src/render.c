@@ -63,10 +63,8 @@ int renderText(SiCompassApplication *app, const char *text, int x, int y,
 
             // If adding this character exceeds the limit
             if (width > maxWidth) {
-                // Break at last space if we have one AND it's not too close to the start
-                // (avoid breaking at a space that would give us a very short line)
-                size_t spaceOffset = lastSpace ? (lastSpace - lineStart) : 0;
-                if (lastSpace != NULL && lastSpace > lineStart && spaceOffset > 20) {
+                // Break at last space if we have one
+                if (lastSpace != NULL && lastSpace > lineStart) {
                     lineEnd = lastSpace;
                 } else {
                     // No suitable space - use last position that fit
