@@ -189,7 +189,9 @@ void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task tas
             // Create a new root element
             FfonElement *newElem;
             if (isKey) {
-                newElem = ffonElementCreateObject(line);
+                char *strippedKey = stripTrailingColon(line);
+                newElem = ffonElementCreateObject(strippedKey);
+                free(strippedKey);
                 ffonObjectAddElement(newElem->data.object, ffonElementCreateString(""));
             } else {
                 newElem = ffonElementCreateString(line);
@@ -295,7 +297,9 @@ void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task tas
                         int oldCount = _ffon[prevIdx]->data.object->count;
 
                         // Create new object with new key
-                        FfonElement *newElem = ffonElementCreateObject(line);
+                        char *strippedKey = stripTrailingColon(line);
+                        FfonElement *newElem = ffonElementCreateObject(strippedKey);
+                        free(strippedKey);
 
                         // Transfer children to new object
                         for (int j = 0; j < oldCount; j++) {
@@ -341,7 +345,9 @@ void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task tas
                         int oldCount = _ffon[prevIdx]->data.object->count;
 
                         // Create new object with new key
-                        FfonElement *newElem = ffonElementCreateObject(line);
+                        char *strippedKey = stripTrailingColon(line);
+                        FfonElement *newElem = ffonElementCreateObject(strippedKey);
+                        free(strippedKey);
 
                         // Transfer children to new object
                         for (int j = 0; j < oldCount; j++) {
@@ -378,7 +384,9 @@ void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task tas
                     printf("\n");
 
                     // Create object with line as key and an empty string as its child
-                    FfonElement *newElem = ffonElementCreateObject(line);
+                    char *strippedKey = stripTrailingColon(line);
+                    FfonElement *newElem = ffonElementCreateObject(strippedKey);
+                    free(strippedKey);
                     ffonObjectAddElement(newElem->data.object, ffonElementCreateString(""));
 
                     if (prevIdx >= 0 && prevIdx < _ffon_count) {
@@ -438,9 +446,10 @@ void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task tas
                            task == TASK_INPUT) {
                     printf("beestje123\n");
 
+                    char *strippedKey = stripTrailingColon(line);
                     FfonElement *newElem;
                     if (nextLayerExists(appRenderer)) {
-                        newElem = ffonElementCreateObject(line);
+                        newElem = ffonElementCreateObject(strippedKey);
                         // Copy existing values if they exist
                         if (prevIdx >= 0 && prevIdx < _ffon_count && _ffon[prevIdx]->type == FFON_OBJECT) {
                             for (int j = 0; j < _ffon[prevIdx]->data.object->count; j++) {
@@ -449,9 +458,10 @@ void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task tas
                             }
                         }
                     } else {
-                        newElem = ffonElementCreateObject(line);
+                        newElem = ffonElementCreateObject(strippedKey);
                         ffonObjectAddElement(newElem->data.object, ffonElementCreateString(""));
                     }
+                    free(strippedKey);
 
                     if (prevIdx >= 0 && prevIdx < _ffon_count) {
                         ffonElementDestroy(_ffon[prevIdx]);
