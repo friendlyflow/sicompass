@@ -147,6 +147,32 @@ void updateIds(AppRenderer *appRenderer, bool isKey, Task task, History history)
     }
 }
 
+// Helper function to navigate to a specific level in the tree
+static void navigateToLevel(AppRenderer *appRenderer, int depth,
+                            FfonElement ***out_ffon, int *out_count, FfonObject **out_parent) {
+    FfonElement **ffon = appRenderer->ffon;
+    int count = appRenderer->ffonCount;
+    FfonObject *parent = NULL;
+
+    for (int i = 0; i < depth; i++) {
+        int idx = appRenderer->previousId.ids[i];
+        if (idx < 0 || idx >= count || ffon[idx]->type != FFON_OBJECT) {
+            *out_ffon = ffon;
+            *out_count = count;
+            *out_parent = parent;
+            return;
+        }
+
+        parent = ffon[idx]->data.object;
+        ffon = parent->elements;
+        count = parent->count;
+    }
+
+    *out_ffon = ffon;
+    *out_count = count;
+    *out_parent = parent;
+}
+
 void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task task, History history) {
     printf("update ffon struct, line='%s', previous_id=", line);
     for (int i = 0; i < appRenderer->previousId.depth; i++) printf("%d ", appRenderer->previousId.ids[i]);
@@ -155,12 +181,20 @@ void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task tas
     printf("\n");
     printf("update, isKey=%d, task=%d\n", isKey, task);
 
-    FfonElement **_ffon = appRenderer->ffon;
-    int _ffon_count = appRenderer->ffonCount;
-    FfonObject *_parentObj = NULL;  // Track parent object for insertions
-
     for (int i = 0; i < appRenderer->previousId.depth; i++) {
-        printf("beestje, _ffon_count=%d\n", _ffon_count);
+        // Re-navigate to current level on each iteration to avoid stale pointers
+        FfonElement **_ffon;
+        int _ffon_count;
+        FfonObject *_parentObj;
+        navigateToLevel(appRenderer, i, &_ffon, &_ffon_count, &_parentObj);
+        printf("beestje, _ffon_count=%d, i=%d, depth=%d\n", _ffon_count, i, appRenderer->previousId.depth);
+
+        // Sanity check: if _ffon_count is unreasonably large, we have memory corruption
+        if (_ffon_count < 0 || _ffon_count > 1000) {
+            printf("ERROR: Invalid _ffon_count=%d, _ffon=%p, _parentObj=%p\n",
+                   _ffon_count, (void*)_ffon, (void*)_parentObj);
+            break;
+        }
 
         bool isEditorCoordinate = (appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL ||
                                    appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
@@ -177,20 +211,29 @@ void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task tas
                 for (int j = 0; j < appRenderer->currentId.depth; j++) printf("%d ", appRenderer->currentId.ids[j]);
                 printf("\n");
 
-                // Remove element at current_id[i]
-                int removeIdx = appRenderer->currentId.ids[i];
+                // Remove element at previous_id[i]
+                int removeIdx = appRenderer->previousId.ids[i];
                 if (removeIdx >= 0 && removeIdx < _ffon_count) {
                     ffonElementDestroy(_ffon[removeIdx]);
                     for (int j = removeIdx; j < _ffon_count - 1; j++) {
                         _ffon[j] = _ffon[j + 1];
                     }
                     _ffon_count--;
+
+                    // Update the parent object's count to match
+                    if (_parentObj) {
+                        _parentObj->count = _ffon_count;
+                    } else if (i == 0) {
+                        // Update root level count
+                        appRenderer->ffonCount = _ffon_count;
+                    }
                 }
 
                 // Insert empty string if not at root
                 if (i != 0 && removeIdx >= 0 && removeIdx <= _ffon_count && _parentObj) {
                     ffonObjectInsertElement(_parentObj, ffonElementCreateString(""), removeIdx);
                 }
+                break;  // Don't continue to check other branches after delete
             }
 
             int prevIdx = appRenderer->previousId.ids[i];
@@ -203,9 +246,9 @@ void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task tas
 
                 if (i < appRenderer->previousId.depth - 1) {
                     printf("beestje111\n");
-                    _parentObj = _ffon[prevIdx]->data.object;
-                    _ffon = _ffon[prevIdx]->data.object->elements;
-                    _ffon_count = _ffon[prevIdx]->data.object->count;
+                    // Navigation is now handled by navigateToLevel at the start of each iteration
+                    // Just continue to next iteration
+                    continue;
                 } else {
                     printf("beestje112\n");
                     if (task == TASK_APPEND || task == TASK_APPEND_APPEND ||
@@ -235,7 +278,7 @@ void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task tas
 
                         // Insert new sibling element
                         if (_parentObj && history != HISTORY_REDO) {
-                            int insertIdx = appRenderer->currentId.ids[i];
+                            int insertIdx = appRenderer->previousId.ids[i];
                             ffonObjectInsertElement(_parentObj, ffonElementCreateString(""), insertIdx);
                         }
                     } else if (task == TASK_H_ARROW_LEFT || task == TASK_L_ARROW_RIGHT ||
@@ -259,6 +302,12 @@ void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task tas
                         _ffon[prevIdx]->data.object->count = 0;
                         ffonElementDestroy(_ffon[prevIdx]);
                         _ffon[prevIdx] = newElem;
+
+                        // If we previously navigated into this object, update our pointers
+                        if (_parentObj && _parentObj == _ffon[prevIdx]->data.object) {
+                            _ffon = _parentObj->elements;
+                            _ffon_count = _parentObj->count;
+                        }
 
                         break;
                     }
@@ -294,13 +343,22 @@ void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task tas
                     printf("\n");
 
                     if (appRenderer->currentId.ids[appRenderer->currentId.depth - 1] > 0) {
-                        int removeIdx = appRenderer->currentId.ids[i];
+                        int removeIdx = appRenderer->previousId.ids[i];
                         if (removeIdx >= 0 && removeIdx < _ffon_count) {
                             ffonElementDestroy(_ffon[removeIdx]);
                             for (int j = removeIdx; j < _ffon_count - 1; j++) {
                                 _ffon[j] = _ffon[j + 1];
                             }
                             _ffon_count--;
+
+                            // Update the parent object's count to match
+                            if (_parentObj) {
+                                _parentObj->count = _ffon_count;
+                            } else if (i == 0) {
+                                // Update root level count
+                                appRenderer->ffonCount = _ffon_count;
+                            }
+
                             appRenderer->currentId.ids[appRenderer->currentId.depth - 1]--;
                         }
                     }
@@ -342,11 +400,9 @@ void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task tas
                 for (int j = 0; j < appRenderer->previousId.depth; j++) printf("%d ", appRenderer->previousId.ids[j]);
                 printf(", current_id=");
                 for (int j = 0; j < appRenderer->currentId.depth; j++) printf("%d ", appRenderer->currentId.ids[j]);
-                printf("\n");
-
-                _parentObj = _ffon[prevIdx]->data.object;
-                _ffon = _ffon[prevIdx]->data.object->elements;
-                _ffon_count = _ffon[prevIdx]->data.object->count;
+                printf(", prevIdx=%d\n", prevIdx);
+                // Navigation is now handled by navigateToLevel at the start of each iteration
+                // Just continue to next iteration
                 continue;
             } else {
                 printf("beestje22\n");
@@ -365,8 +421,8 @@ void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task tas
                     }
 
                     if (_parentObj && history != HISTORY_REDO) {
-                        // Insert empty string at current_id[i] position (like splice in JS)
-                        int insertIdx = appRenderer->currentId.ids[i];
+                        // Insert empty string at previous_id[i] position (like splice in JS)
+                        int insertIdx = appRenderer->previousId.ids[i];
                         ffonObjectInsertElement(_parentObj, ffonElementCreateString(""), insertIdx);
                     }
                 } else if (task == TASK_DELETE) {
@@ -376,19 +432,27 @@ void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task tas
                     for (int j = 0; j < appRenderer->currentId.depth; j++) printf("%d ", appRenderer->currentId.ids[j]);
                     printf("\n");
 
-                    int removeIdx = appRenderer->currentId.ids[i];
+                    int removeIdx = appRenderer->previousId.ids[i];
                     if (removeIdx >= 0 && removeIdx < _ffon_count) {
                         ffonElementDestroy(_ffon[removeIdx]);
                         for (int j = removeIdx; j < _ffon_count - 1; j++) {
                             _ffon[j] = _ffon[j + 1];
                         }
                         _ffon_count--;
+
+                        // Update the parent object's count to match
+                        if (_parentObj) {
+                            _parentObj->count = _ffon_count;
+                        } else if (i == 0) {
+                            // Update root level count
+                            appRenderer->ffonCount = _ffon_count;
+                        }
                     }
 
                     if (appRenderer->currentId.ids[appRenderer->currentId.depth - 1] == 0 &&
                         _ffon_count == 0 && _parentObj) {
                         printf("beestje2221\n");
-                        ffonObjectInsertElement(_parentObj, ffonElementCreateString(""), appRenderer->currentId.ids[i]);
+                        ffonObjectInsertElement(_parentObj, ffonElementCreateString(""), appRenderer->previousId.ids[i]);
                     }
 
                     if (appRenderer->currentId.ids[appRenderer->currentId.depth - 1] > 0) {
