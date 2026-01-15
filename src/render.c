@@ -225,7 +225,18 @@ void renderHierarchy(SiCompassApplication *app) {
     int yPos = 2 * getLineHeight(app, scale, TEXT_PADDING);
 
     if (app->appRenderer->ffonCount == 0) {
-        renderText(app, "", 50, yPos, COLOR_TEXT, true);
+        // When there are no elements, but we're in insert mode, show the input buffer
+        const char *displayText = "";
+        if (app->appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+            app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT) {
+            displayText = app->appRenderer->inputBuffer;
+
+            // Store position for caret rendering
+            app->appRenderer->currentElementX = 50;
+            app->appRenderer->currentElementY = yPos;
+            app->appRenderer->currentElementIsObject = false;
+        }
+        renderText(app, displayText, 50, yPos, COLOR_TEXT, true);
         return;
     }
 
