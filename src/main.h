@@ -122,3 +122,4 @@ typedef struct SiCompassApplication {
 // Core application functions
 void startApp(SiCompassApplication* app);
 void drawFrame(SiCompassApplication* app);
+void recreateSwapChain(SiCompassApplication* app);
