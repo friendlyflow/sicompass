@@ -9,7 +9,7 @@ int renderText(SiCompassApplication *app, const char *text, int x, int y,
 
     float scale = getTextScale(app, FONT_SIZE_PT);
     float charWidth = getWidthEM(app, scale);
-    float maxWidth = 120.0f * charWidth;
+    float maxWidth = (float)app->swapChainExtent.width - (float)x - 50.0f; // Use window width minus margins
     int lineHeight = (int)getLineHeight(app, scale, TEXT_PADDING);
 
     // First pass: split text into lines and store them
