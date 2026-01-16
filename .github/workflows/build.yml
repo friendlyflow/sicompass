@@ -235,19 +235,17 @@ jobs:
       - name: Create accesskit pkg-config
         run: |
           New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\accesskit-install\lib\pkgconfig"
-          $content = @"
-prefix=$env:GITHUB_WORKSPACE/accesskit-install
-exec_prefix=`${prefix}
-libdir=`${exec_prefix}/lib/shared
-includedir=`${prefix}/include
-
-Name: accesskit
-Description: AccessKit C bindings
-Version: 0.1
-Libs: -L`${libdir} -laccesskit
-Cflags: -I`${includedir}
-"@
-          $content | Out-File -FilePath "$env:GITHUB_WORKSPACE\accesskit-install\lib\pkgconfig\accesskit.pc" -Encoding ASCII
+          $pcFile = "$env:GITHUB_WORKSPACE\accesskit-install\lib\pkgconfig\accesskit.pc"
+          "prefix=$env:GITHUB_WORKSPACE/accesskit-install" | Out-File -FilePath $pcFile -Encoding ASCII
+          'exec_prefix=${prefix}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'libdir=${exec_prefix}/lib/shared' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'includedir=${prefix}/include' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          '' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'Name: accesskit' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'Description: AccessKit C bindings' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'Version: 0.1' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'Libs: -L${libdir} -laccesskit' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'Cflags: -I${includedir}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
 
       - name: Setup Meson
         env:
