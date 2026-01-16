@@ -60,7 +60,8 @@ jobs:
             libudev-dev \
             libpipewire-0.3-dev \
             libwayland-dev \
-            libdecor-0-dev
+            libdecor-0-dev \
+            libcglm-dev
 
       - name: Install SDL3
         run: |
@@ -83,18 +84,18 @@ jobs:
           sudo ldconfig
           # Create pkg-config file for accesskit
           sudo mkdir -p /usr/local/lib/pkgconfig
-          sudo tee /usr/local/lib/pkgconfig/accesskit.pc > /dev/null << 'EOF'
-          prefix=/usr/local
-          exec_prefix=${prefix}
-          libdir=${exec_prefix}/lib/shared
-          includedir=${prefix}/include
+          cat << 'EOF' | sudo tee /usr/local/lib/pkgconfig/accesskit.pc > /dev/null
+prefix=/usr/local
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib/shared
+includedir=${prefix}/include
 
-          Name: accesskit
-          Description: AccessKit C bindings
-          Version: 0.1
-          Libs: -L${libdir} -laccesskit
-          Cflags: -I${includedir}
-          EOF
+Name: accesskit
+Description: AccessKit C bindings
+Version: 0.1
+Libs: -L${libdir} -laccesskit
+Cflags: -I${includedir}
+EOF
 
       - name: Setup Meson
         run: meson setup build
@@ -118,22 +119,23 @@ jobs:
             glslang \
             freetype \
             harfbuzz \
-            json-c
+            json-c \
+            cglm
           # stb is header-only, install via git
           git clone --depth 1 https://github.com/nothings/stb.git /tmp/stb
           sudo mkdir -p /usr/local/include/stb
           sudo cp /tmp/stb/*.h /usr/local/include/stb/
           # Create pkg-config file for stb
           sudo mkdir -p /usr/local/lib/pkgconfig
-          sudo tee /usr/local/lib/pkgconfig/stb.pc > /dev/null << 'EOF'
-          prefix=/usr/local
-          includedir=${prefix}/include
+          cat << 'EOF' | sudo tee /usr/local/lib/pkgconfig/stb.pc > /dev/null
+prefix=/usr/local
+includedir=${prefix}/include
 
-          Name: stb
-          Description: stb single-file public domain libraries
-          Version: 1.0
-          Cflags: -I${includedir}
-          EOF
+Name: stb
+Description: stb single-file public domain libraries
+Version: 1.0
+Cflags: -I${includedir}
+EOF
 
       - name: Install SDL3
         run: |
@@ -155,18 +157,18 @@ jobs:
           sudo cmake --install build
           # Create pkg-config file for accesskit
           sudo mkdir -p /usr/local/lib/pkgconfig
-          sudo tee /usr/local/lib/pkgconfig/accesskit.pc > /dev/null << 'EOF'
-          prefix=/usr/local
-          exec_prefix=${prefix}
-          libdir=${exec_prefix}/lib/shared
-          includedir=${prefix}/include
+          cat << 'EOF' | sudo tee /usr/local/lib/pkgconfig/accesskit.pc > /dev/null
+prefix=/usr/local
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib/shared
+includedir=${prefix}/include
 
-          Name: accesskit
-          Description: AccessKit C bindings
-          Version: 0.1
-          Libs: -L${libdir} -laccesskit
-          Cflags: -I${includedir}
-          EOF
+Name: accesskit
+Description: AccessKit C bindings
+Version: 0.1
+Libs: -L${libdir} -laccesskit
+Cflags: -I${includedir}
+EOF
 
       - name: Setup Meson
         run: meson setup build
@@ -198,7 +200,7 @@ jobs:
 
       - name: Install vcpkg dependencies
         run: |
-          vcpkg install freetype harfbuzz json-c stb --triplet x64-windows
+          vcpkg install freetype harfbuzz json-c stb cglm --triplet x64-windows
 
       - name: Install SDL3
         run: |
