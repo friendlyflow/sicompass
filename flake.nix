@@ -109,7 +109,6 @@
               vulkan-loader
               vulkan-headers
               vulkan-validation-layers
-              vulkan-tools-lunarg
               vulkan-extension-layer
               freetype
               cglm
@@ -117,10 +116,12 @@
               harfbuzz
               uthash
               json_c
-              xorg.libxcb
               sdl3
               # AccessKit for accessibility
               accesskit-c
+            ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+              vulkan-tools-lunarg
+              xorg.libxcb
               at-spi2-core
             ];
 
@@ -155,7 +156,6 @@
               vulkan-loader
               vulkan-headers
               vulkan-validation-layers
-              vulkan-tools-lunarg
               vulkan-extension-layer
               freetype
               cglm
@@ -163,12 +163,14 @@
               harfbuzz
               uthash
               json_c
-              xorg.libxcb
               sdl3
               cppcheck
               flawfinder
               # AccessKit for accessibility
               accesskit-c
+            ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+              vulkan-tools-lunarg
+              xorg.libxcb
               at-spi2-core
             ];
 
