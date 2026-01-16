@@ -21,169 +21,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            meson \
-            ninja-build \
-            libvulkan-dev \
-            vulkan-validationlayers \
-            glslang-tools \
-            libfreetype6-dev \
-            libharfbuzz-dev \
-            libjson-c-dev \
-            libstb-dev \
-            build-essential \
-            cmake \
-            pkg-config \
-            libasound2-dev \
-            libpulse-dev \
-            libjack-dev \
-            libsndio-dev \
-            libx11-dev \
-            libxext-dev \
-            libxrandr-dev \
-            libxcursor-dev \
-            libxfixes-dev \
-            libxi-dev \
-            libxss-dev \
-            libxtst-dev \
-            libxkbcommon-dev \
-            libdrm-dev \
-            libgbm-dev \
-            libgl1-mesa-dev \
-            libgles2-mesa-dev \
-            libegl1-mesa-dev \
-            libdbus-1-dev \
-            libibus-1.0-dev \
-            libudev-dev \
-            libpipewire-0.3-dev \
-            libwayland-dev \
-            libdecor-0-dev \
-            libcglm-dev
+      - name: Install Nix
+        uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
 
-      - name: Install SDL3
-        run: |
-          git clone --depth 1 https://github.com/libsdl-org/SDL.git -b main
-          cd SDL
-          cmake -B build -DCMAKE_BUILD_TYPE=Release
-          cmake --build build -j$(nproc)
-          sudo cmake --install build
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install cbindgen
-        run: cargo install cbindgen
-
-      - name: Install accesskit
-        run: |
-          git clone --depth 1 https://github.com/AccessKit/accesskit-c.git
-          cd accesskit-c
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local -DACCESSKIT_BUILD_HEADERS=ON
-          cmake --build build
-          sudo cmake --install build
-          ls -la /usr/local/include/accesskit.h
-          sudo ldconfig
-
-      - name: Create accesskit pkg-config
-        run: |
-          sudo mkdir -p /usr/local/lib/pkgconfig
-          echo 'prefix=/usr/local' | sudo tee /usr/local/lib/pkgconfig/accesskit.pc
-          echo 'exec_prefix=${prefix}' | sudo tee -a /usr/local/lib/pkgconfig/accesskit.pc
-          echo 'libdir=${exec_prefix}/lib/shared' | sudo tee -a /usr/local/lib/pkgconfig/accesskit.pc
-          echo 'includedir=${prefix}/include' | sudo tee -a /usr/local/lib/pkgconfig/accesskit.pc
-          echo '' | sudo tee -a /usr/local/lib/pkgconfig/accesskit.pc
-          echo 'Name: accesskit' | sudo tee -a /usr/local/lib/pkgconfig/accesskit.pc
-          echo 'Description: AccessKit C bindings' | sudo tee -a /usr/local/lib/pkgconfig/accesskit.pc
-          echo 'Version: 0.1' | sudo tee -a /usr/local/lib/pkgconfig/accesskit.pc
-          echo 'Libs: -L${libdir} -laccesskit' | sudo tee -a /usr/local/lib/pkgconfig/accesskit.pc
-          echo 'Cflags: -I${includedir}' | sudo tee -a /usr/local/lib/pkgconfig/accesskit.pc
-
-      - name: Setup Meson
-        run: meson setup build
-
-      - name: Build
-        run: ninja -C build
+      - name: Build with Nix
+        run: nix build .#default
 
   build-macos:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: |
-          brew install \
-            meson \
-            ninja \
-            vulkan-loader \
-            vulkan-headers \
-            molten-vk \
-            glslang \
-            freetype \
-            harfbuzz \
-            json-c \
-            cglm
-      - name: Install stb
-        run: |
-          git clone --depth 1 https://github.com/nothings/stb.git /tmp/stb
-          sudo mkdir -p /usr/local/include/stb
-          sudo cp /tmp/stb/*.h /usr/local/include/stb/
+      - name: Install Nix
+        uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
 
-      - name: Create stb pkg-config
-        run: |
-          sudo mkdir -p /usr/local/lib/pkgconfig
-          echo 'prefix=/usr/local' | sudo tee /usr/local/lib/pkgconfig/stb.pc
-          echo 'includedir=${prefix}/include' | sudo tee -a /usr/local/lib/pkgconfig/stb.pc
-          echo '' | sudo tee -a /usr/local/lib/pkgconfig/stb.pc
-          echo 'Name: stb' | sudo tee -a /usr/local/lib/pkgconfig/stb.pc
-          echo 'Description: stb single-file public domain libraries' | sudo tee -a /usr/local/lib/pkgconfig/stb.pc
-          echo 'Version: 1.0' | sudo tee -a /usr/local/lib/pkgconfig/stb.pc
-          echo 'Cflags: -I${includedir}' | sudo tee -a /usr/local/lib/pkgconfig/stb.pc
-
-      - name: Install SDL3
-        run: |
-          git clone --depth 1 https://github.com/libsdl-org/SDL.git -b main
-          cd SDL
-          cmake -B build -DCMAKE_BUILD_TYPE=Release
-          cmake --build build -j$(sysctl -n hw.ncpu)
-          sudo cmake --install build
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install cbindgen
-        run: cargo install cbindgen
-
-      - name: Install accesskit
-        run: |
-          git clone --depth 1 https://github.com/AccessKit/accesskit-c.git
-          cd accesskit-c
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local -DACCESSKIT_BUILD_HEADERS=ON
-          cmake --build build
-          sudo cmake --install build
-          ls -la /usr/local/include/accesskit.h
-
-      - name: Create accesskit pkg-config
-        run: |
-          sudo mkdir -p /usr/local/lib/pkgconfig
-          echo 'prefix=/usr/local' | sudo tee /usr/local/lib/pkgconfig/accesskit.pc
-          echo 'exec_prefix=${prefix}' | sudo tee -a /usr/local/lib/pkgconfig/accesskit.pc
-          echo 'libdir=${exec_prefix}/lib/shared' | sudo tee -a /usr/local/lib/pkgconfig/accesskit.pc
-          echo 'includedir=${prefix}/include' | sudo tee -a /usr/local/lib/pkgconfig/accesskit.pc
-          echo '' | sudo tee -a /usr/local/lib/pkgconfig/accesskit.pc
-          echo 'Name: accesskit' | sudo tee -a /usr/local/lib/pkgconfig/accesskit.pc
-          echo 'Description: AccessKit C bindings' | sudo tee -a /usr/local/lib/pkgconfig/accesskit.pc
-          echo 'Version: 0.1' | sudo tee -a /usr/local/lib/pkgconfig/accesskit.pc
-          echo 'Libs: -L${libdir} -laccesskit' | sudo tee -a /usr/local/lib/pkgconfig/accesskit.pc
-          echo 'Cflags: -I${includedir}' | sudo tee -a /usr/local/lib/pkgconfig/accesskit.pc
-
-      - name: Setup Meson
-        run: meson setup build
-
-      - name: Build
-        run: ninja -C build
+      - name: Build with Nix
+        run: nix build .#default
 
   build-windows:
     runs-on: windows-latest
