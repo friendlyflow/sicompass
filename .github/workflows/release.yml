@@ -344,10 +344,6 @@ jobs:
         run: |
           vcpkg install freetype harfbuzz json-c stb cglm sdl3 vulkan glslang --triplet x64-windows
 
-      - name: Add glslangValidator to PATH
-        run: |
-          echo "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\tools\glslang" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
-
       - name: Create stb pkg-config file
         run: |
           # stb is header-only and vcpkg doesn't provide a pkg-config file
@@ -416,6 +412,7 @@ jobs:
       - name: Setup Meson
         run: |
           $env:PKG_CONFIG_PATH = "$env:GITHUB_WORKSPACE\stb-stub\lib\pkgconfig;$env:GITHUB_WORKSPACE\accesskit-stub\lib\pkgconfig;$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\lib\pkgconfig"
+          $env:PATH = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\tools\glslang;$env:PATH"
           meson setup build
 
       - name: Build
