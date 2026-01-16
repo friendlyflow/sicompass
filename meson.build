@@ -8,6 +8,7 @@ stb_dep = dependency('stb')
 hb_dep = dependency('harfbuzz')
 jsonc_dep = dependency('json-c')
 accesskit_dep = dependency('accesskit')
+cglm_dep = dependency('cglm')
 cc = meson.get_compiler('c')
 m_dep = cc.find_library('m', required : false)
 ft_dep = cc.find_library('freetype', required : false)
@@ -46,7 +47,7 @@ elif host_machine.system() == 'windows'
   add_project_arguments('-DVK_USE_PLATFORM_WIN32_KHR', language: 'c')
 endif
 
-exe_sc = executable('sicompass', [sources_sc], dependencies: [vulkan_dep, sdl3_dep, m_dep, ft_dep, hb_dep, stb_dep, jsonc_dep, accesskit_dep],
+exe_sc = executable('sicompass', [sources_sc], dependencies: [vulkan_dep, sdl3_dep, m_dep, ft_dep, hb_dep, stb_dep, jsonc_dep, accesskit_dep, cglm_dep],
                     include_directories: [], install : false)
 
 #test('basic', exe)
