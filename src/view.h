@@ -166,8 +166,14 @@ typedef struct AppRenderer {
     // Error message
     char errorMessage[256];
 
-    // AccessKit accessibility adapter
+    // AccessKit accessibility adapter (platform-specific)
+#if defined(__APPLE__)
+    struct accesskit_macos_adapter *accesskitAdapter;
+#elif defined(_WIN32)
+    struct accesskit_windows_adapter *accesskitAdapter;
+#else
     struct accesskit_unix_adapter *accesskitAdapter;
+#endif
     accesskit_node_id accesskitRootId;
     accesskit_node_id accesskitLiveRegionId;
 } AppRenderer;
