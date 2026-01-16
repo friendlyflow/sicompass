@@ -340,80 +340,65 @@ jobs:
         run: |
           choco install pkgconfiglite -y
 
-      - name: Install Vulkan SDK
-        uses: humbletim/install-vulkan-sdk@v1.2
-        with:
-          version: latest
-          cache: true
-
       - name: Install vcpkg dependencies
         run: |
-          vcpkg install freetype harfbuzz json-c stb cglm --triplet x64-windows
+          vcpkg install freetype harfbuzz json-c stb cglm sdl3 vulkan --triplet x64-windows
 
-      - name: Install SDL3
+      - name: Create accesskit stub header
         run: |
-          git clone --depth 1 https://github.com/libsdl-org/SDL.git -b main
-          cd SDL
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$env:GITHUB_WORKSPACE\SDL3-install"
-          cmake --build build --config Release
-          cmake --install build --config Release
+          # AccessKit is disabled on Windows for now (set to NULL in code)
+          # Create a minimal stub so meson can find it
+          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\accesskit-stub\include"
+          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\accesskit-stub\lib\pkgconfig"
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+          # Create stub header with minimal definitions needed for compilation
+          $header = @"
+          #ifndef ACCESSKIT_H
+          #define ACCESSKIT_H
+          typedef unsigned long long accesskit_node_id;
+          #define ACCESSKIT_ROLE_WINDOW 0
+          #define ACCESSKIT_ROLE_LABEL 1
+          #define ACCESSKIT_LIVE_POLITE 0
+          struct accesskit_tree_update;
+          struct accesskit_node;
+          struct accesskit_tree;
+          struct accesskit_windows_adapter;
+          typedef struct { int action; } accesskit_action_request;
+          static inline struct accesskit_tree_update* accesskit_tree_update_with_capacity_and_focus(int c, accesskit_node_id f) { (void)c; (void)f; return 0; }
+          static inline struct accesskit_tree_update* accesskit_tree_update_with_focus(accesskit_node_id f) { (void)f; return 0; }
+          static inline struct accesskit_node* accesskit_node_new(int role) { (void)role; return 0; }
+          static inline void accesskit_node_set_label(struct accesskit_node* n, const char* l) { (void)n; (void)l; }
+          static inline void accesskit_node_set_live(struct accesskit_node* n, int l) { (void)n; (void)l; }
+          static inline void accesskit_node_set_children(struct accesskit_node* n, int c, accesskit_node_id* ids) { (void)n; (void)c; (void)ids; }
+          static inline void accesskit_tree_update_push_node(struct accesskit_tree_update* u, accesskit_node_id id, struct accesskit_node* n) { (void)u; (void)id; (void)n; }
+          static inline struct accesskit_tree* accesskit_tree_new(accesskit_node_id r) { (void)r; return 0; }
+          static inline void accesskit_tree_set_toolkit_name(struct accesskit_tree* t, const char* n) { (void)t; (void)n; }
+          static inline void accesskit_tree_set_toolkit_version(struct accesskit_tree* t, const char* v) { (void)t; (void)v; }
+          static inline void accesskit_tree_update_set_tree(struct accesskit_tree_update* u, struct accesskit_tree* t) { (void)u; (void)t; }
+          static inline void accesskit_action_request_free(accesskit_action_request* r) { (void)r; }
+          static inline void accesskit_windows_adapter_free(struct accesskit_windows_adapter* a) { (void)a; }
+          static inline void accesskit_windows_adapter_update_if_active(struct accesskit_windows_adapter* a, void* f, void* d) { (void)a; (void)f; (void)d; }
+          #endif
+          "@
+          $header | Out-File -FilePath "$env:GITHUB_WORKSPACE\accesskit-stub\include\accesskit.h" -Encoding ASCII
 
-      - name: Install Rust nightly for cbindgen
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          toolchain: nightly-2025-03-27
-
-      - name: Install cbindgen
-        run: cargo install cbindgen
-
-      - name: Install accesskit
-        run: |
-          git clone --depth 1 https://github.com/AccessKit/accesskit-c.git
-          cd accesskit-c
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$env:GITHUB_WORKSPACE\accesskit-install" -DACCESSKIT_BUILD_HEADERS=ON
-          cmake --build build --config Release
-          cmake --install build --config Release
-
-      - name: Create accesskit pkg-config
-        run: |
-          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\accesskit-install\lib\pkgconfig"
-          $pcFile = "$env:GITHUB_WORKSPACE\accesskit-install\lib\pkgconfig\accesskit.pc"
-          "prefix=$env:GITHUB_WORKSPACE/accesskit-install" | Out-File -FilePath $pcFile -Encoding ASCII
+          $pcFile = "$env:GITHUB_WORKSPACE\accesskit-stub\lib\pkgconfig\accesskit.pc"
+          "prefix=$env:GITHUB_WORKSPACE/accesskit-stub" | Out-File -FilePath $pcFile -Encoding ASCII
           'exec_prefix=${prefix}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'libdir=${exec_prefix}/lib/shared' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'libdir=${exec_prefix}/lib' | Out-File -FilePath $pcFile -Append -Encoding ASCII
           'includedir=${prefix}/include' | Out-File -FilePath $pcFile -Append -Encoding ASCII
           '' | Out-File -FilePath $pcFile -Append -Encoding ASCII
           'Name: accesskit' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'Description: AccessKit C bindings' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'Description: AccessKit stub' | Out-File -FilePath $pcFile -Append -Encoding ASCII
           'Version: 0.1' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'Libs: -L${libdir} -laccesskit' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'Cflags: -I${includedir}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-
-      - name: Create Vulkan pkg-config
-        run: |
-          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\vulkan-pkgconfig"
-          $pcFile = "$env:GITHUB_WORKSPACE\vulkan-pkgconfig\vulkan.pc"
-          "prefix=$env:VULKAN_SDK" | Out-File -FilePath $pcFile -Encoding ASCII
-          'exec_prefix=${prefix}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'libdir=${exec_prefix}/Lib' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'includedir=${prefix}/Include' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          '' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'Name: vulkan' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'Description: Vulkan Loader' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'Version: 1.0' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'Libs: -L${libdir} -lvulkan-1' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'Libs:' | Out-File -FilePath $pcFile -Append -Encoding ASCII
           'Cflags: -I${includedir}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
 
       - name: Setup Meson
         env:
-          PKG_CONFIG_PATH: "${{ github.workspace }}/vulkan-pkgconfig;${{ github.workspace }}/SDL3-install/lib/pkgconfig;${{ github.workspace }}/accesskit-install/lib/pkgconfig;${{ env.VCPKG_INSTALLATION_ROOT }}/installed/x64-windows/lib/pkgconfig"
-          CMAKE_PREFIX_PATH: "${{ github.workspace }}/SDL3-install;${{ github.workspace }}/accesskit-install"
+          PKG_CONFIG_PATH: "${{ github.workspace }}/accesskit-stub/lib/pkgconfig;${{ env.VCPKG_INSTALLATION_ROOT }}/installed/x64-windows/lib/pkgconfig"
         run: |
-          meson setup build `
-            --cmake-prefix-path="$env:GITHUB_WORKSPACE\SDL3-install;$env:GITHUB_WORKSPACE\accesskit-install;$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows"
+          meson setup build
 
       - name: Build
         run: ninja -C build
@@ -421,7 +406,12 @@ jobs:
       - name: Get version
         id: version
         shell: bash
-        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
 
       - name: Create Windows package
         run: |
@@ -430,14 +420,8 @@ jobs:
           New-Item -ItemType Directory -Force -Path "dist"
           Copy-Item "build\sicompass.exe" "dist\"
 
-          # Copy DLLs from vcpkg
+          # Copy DLLs from vcpkg (includes SDL3, freetype, harfbuzz, etc.)
           Copy-Item "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin\*.dll" "dist\" -ErrorAction SilentlyContinue
-
-          # Copy SDL3 DLL
-          Copy-Item "$env:GITHUB_WORKSPACE\SDL3-install\bin\*.dll" "dist\" -ErrorAction SilentlyContinue
-
-          # Copy AccessKit DLL
-          Copy-Item "$env:GITHUB_WORKSPACE\accesskit-install\lib\shared\*.dll" "dist\" -ErrorAction SilentlyContinue
 
           # Create ZIP
           Compress-Archive -Path "dist\*" -DestinationPath "sicompass-${VERSION}-windows-x64.zip"
