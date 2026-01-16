@@ -1,0 +1,150 @@
+name: Build
+
+on:
+  push:
+    tags:
+      - 'v*'  # Triggers on tags like v1.0, v2.1.3, etc.
+  workflow_dispatch:  # Allows manual triggering from GitHub UI
+    inputs:
+      build_type:
+        description: 'Build type'
+        required: false
+        default: 'release'
+        type: choice
+        options:
+          - release
+          - debug
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            meson \
+            ninja-build \
+            libvulkan-dev \
+            vulkan-validationlayers \
+            glslang-tools \
+            libfreetype6-dev \
+            libharfbuzz-dev \
+            libjson-c-dev \
+            libstb-dev
+
+      - name: Install SDL3
+        run: |
+          git clone --depth 1 https://github.com/libsdl-org/SDL.git -b main
+          cd SDL
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j$(nproc)
+          sudo cmake --install build
+
+      - name: Install accesskit
+        run: |
+          # Download and install accesskit_c
+          # You may need to adjust this based on how accesskit is packaged
+          git clone --depth 1 https://github.com/AccessKit/accesskit.git
+          cd accesskit/bindings/c
+          cargo build --release
+          sudo cp target/release/libaccesskit*.so /usr/local/lib/
+          sudo cp accesskit.h /usr/local/include/
+          sudo ldconfig
+
+      - name: Setup Meson
+        run: meson setup build
+
+      - name: Build
+        run: ninja -C build
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew install \
+            meson \
+            ninja \
+            vulkan-loader \
+            vulkan-headers \
+            molten-vk \
+            glslang \
+            freetype \
+            harfbuzz \
+            json-c \
+            stb
+
+      - name: Install SDL3
+        run: |
+          git clone --depth 1 https://github.com/libsdl-org/SDL.git -b main
+          cd SDL
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j$(sysctl -n hw.ncpu)
+          sudo cmake --install build
+
+      - name: Install accesskit
+        run: |
+          git clone --depth 1 https://github.com/AccessKit/accesskit.git
+          cd accesskit/bindings/c
+          cargo build --release
+          sudo cp target/release/libaccesskit*.dylib /usr/local/lib/
+          sudo cp accesskit.h /usr/local/include/
+
+      - name: Setup Meson
+        run: meson setup build
+
+      - name: Build
+        run: ninja -C build
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Meson and Ninja
+        run: pip install meson ninja
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Vulkan SDK
+        uses: humbletim/install-vulkan-sdk@v1.1.1
+        with:
+          version: latest
+          cache: true
+
+      - name: Install vcpkg dependencies
+        run: |
+          vcpkg install freetype harfbuzz json-c stb --triplet x64-windows
+
+      - name: Install SDL3
+        run: |
+          git clone --depth 1 https://github.com/libsdl-org/SDL.git -b main
+          cd SDL
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release
+          cmake --install build --prefix "$env:GITHUB_WORKSPACE/SDL3-install"
+
+      - name: Install accesskit
+        run: |
+          git clone --depth 1 https://github.com/AccessKit/accesskit.git
+          cd accesskit/bindings/c
+          cargo build --release
+
+      - name: Setup Meson
+        run: |
+          meson setup build `
+            --pkg-config-path="$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/lib/pkgconfig;$env:GITHUB_WORKSPACE/SDL3-install/lib/pkgconfig"
+
+      - name: Build
+        run: ninja -C build
