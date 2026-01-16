@@ -48,7 +48,7 @@ elif host_machine.system() == 'windows'
 endif
 
 exe_sc = executable('sicompass', [sources_sc], dependencies: [vulkan_dep, sdl3_dep, m_dep, ft_dep, hb_dep, stb_dep, jsonc_dep, accesskit_dep, cglm_dep],
-                    include_directories: [], install : false)
+                    include_directories: [], install : true)
 
 #test('basic', exe)
 
