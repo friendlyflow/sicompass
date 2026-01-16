@@ -1,6 +1,7 @@
 #pragma once
 
 #include <json-c/json.h>
+#include <accesskit.h>
 
 #include "main.h"
 
@@ -164,6 +165,11 @@ typedef struct AppRenderer {
 
     // Error message
     char errorMessage[256];
+
+    // AccessKit accessibility adapter
+    struct accesskit_unix_adapter *accesskitAdapter;
+    accesskit_node_id accesskitRootId;
+    accesskit_node_id accesskitLiveRegionId;
 } AppRenderer;
 
 // Function declarations
@@ -257,3 +263,8 @@ const char* taskToString(Task task);
 bool isLineKey(const char *line);
 char* escapeHtmlToText(const char *html);
 void setErrorMessage(AppRenderer *appRenderer, const char *message);
+
+// AccessKit accessibility functions
+void accesskitInit(SiCompassApplication *app);
+void accesskitDestroy(AppRenderer *appRenderer);
+void accesskitSpeak(AppRenderer *appRenderer, const char *text);

@@ -7,6 +7,7 @@ sdl3_dep = dependency('sdl3')
 stb_dep = dependency('stb')
 hb_dep = dependency('harfbuzz')
 jsonc_dep = dependency('json-c')
+accesskit_dep = dependency('accesskit')
 cc = meson.get_compiler('c')
 m_dep = cc.find_library('m', required : false)
 ft_dep = cc.find_library('freetype', required : false)
@@ -39,7 +40,7 @@ subdir('src')
 
 add_project_arguments('-DVK_USE_PLATFORM_XCB_KHR', language: 'c')
 
-exe_sc = executable('sc', [sources_sc], dependencies: [vulkan_dep, sdl3_dep, m_dep, ft_dep, hb_dep, stb_dep, jsonc_dep],
+exe_sc = executable('sc', [sources_sc], dependencies: [vulkan_dep, sdl3_dep, m_dep, ft_dep, hb_dep, stb_dep, jsonc_dep, accesskit_dep],
                     include_directories: [], install : false)
 
 #test('basic', exe)
