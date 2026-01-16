@@ -68,14 +68,11 @@ jobs:
 
       - name: Install vcpkg dependencies
         run: |
-          vcpkg install freetype harfbuzz json-c stb cglm sdl3 vulkan --triplet x64-windows
+          vcpkg install freetype harfbuzz json-c stb cglm sdl3 vulkan glslang --triplet x64-windows
 
-      - name: Install Vulkan SDK (for glslangValidator)
-        uses: humbletim/setup-vulkan-sdk@v1.2.0
-        with:
-          vulkan-query-version: 1.3.290.0
-          vulkan-components: Glslang
-          vulkan-use-cache: true
+      - name: Add glslangValidator to PATH
+        run: |
+          echo "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\tools\glslang" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
       - name: Create stb pkg-config file
         run: |
