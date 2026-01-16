@@ -62,6 +62,10 @@ jobs:
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
 
+      - name: Install pkg-config
+        run: |
+          choco install pkgconfiglite -y
+
       - name: Install Vulkan SDK
         uses: humbletim/install-vulkan-sdk@v1.2
         with:
@@ -115,9 +119,24 @@ jobs:
           'Libs: -L${libdir} -laccesskit' | Out-File -FilePath $pcFile -Append -Encoding ASCII
           'Cflags: -I${includedir}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
 
+      - name: Create Vulkan pkg-config
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\vulkan-pkgconfig"
+          $pcFile = "$env:GITHUB_WORKSPACE\vulkan-pkgconfig\vulkan.pc"
+          "prefix=$env:VULKAN_SDK" | Out-File -FilePath $pcFile -Encoding ASCII
+          'exec_prefix=${prefix}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'libdir=${exec_prefix}/Lib' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'includedir=${prefix}/Include' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          '' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'Name: vulkan' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'Description: Vulkan Loader' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'Version: 1.0' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'Libs: -L${libdir} -lvulkan-1' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'Cflags: -I${includedir}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+
       - name: Setup Meson
         env:
-          PKG_CONFIG_PATH: "${{ github.workspace }}/SDL3-install/lib/pkgconfig;${{ github.workspace }}/accesskit-install/lib/pkgconfig;${{ env.VCPKG_INSTALLATION_ROOT }}/installed/x64-windows/lib/pkgconfig"
+          PKG_CONFIG_PATH: "${{ github.workspace }}/vulkan-pkgconfig;${{ github.workspace }}/SDL3-install/lib/pkgconfig;${{ github.workspace }}/accesskit-install/lib/pkgconfig;${{ env.VCPKG_INSTALLATION_ROOT }}/installed/x64-windows/lib/pkgconfig"
           CMAKE_PREFIX_PATH: "${{ github.workspace }}/SDL3-install;${{ github.workspace }}/accesskit-install"
         run: |
           meson setup build `
