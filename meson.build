@@ -38,9 +38,15 @@ errortxt = r.stderr().strip()
 
 subdir('src')
 
-add_project_arguments('-DVK_USE_PLATFORM_XCB_KHR', language: 'c')
+if host_machine.system() == 'linux'
+  add_project_arguments('-DVK_USE_PLATFORM_XCB_KHR', language: 'c')
+elif host_machine.system() == 'darwin'
+  add_project_arguments('-DVK_USE_PLATFORM_MACOS_MVK', language: 'c')
+elif host_machine.system() == 'windows'
+  add_project_arguments('-DVK_USE_PLATFORM_WIN32_KHR', language: 'c')
+endif
 
-exe_sc = executable('sc', [sources_sc], dependencies: [vulkan_dep, sdl3_dep, m_dep, ft_dep, hb_dep, stb_dep, jsonc_dep, accesskit_dep],
+exe_sc = executable('sicompass', [sources_sc], dependencies: [vulkan_dep, sdl3_dep, m_dep, ft_dep, hb_dep, stb_dep, jsonc_dep, accesskit_dep],
                     include_directories: [], install : false)
 
 #test('basic', exe)
