@@ -81,6 +81,20 @@ jobs:
           cmake --build build
           sudo cmake --install build
           sudo ldconfig
+          # Create pkg-config file for accesskit
+          sudo mkdir -p /usr/local/lib/pkgconfig
+          sudo tee /usr/local/lib/pkgconfig/accesskit.pc > /dev/null << 'EOF'
+          prefix=/usr/local
+          exec_prefix=${prefix}
+          libdir=${exec_prefix}/lib/shared
+          includedir=${prefix}/include
+
+          Name: accesskit
+          Description: AccessKit C bindings
+          Version: 0.1
+          Libs: -L${libdir} -laccesskit
+          Cflags: -I${includedir}
+          EOF
 
       - name: Setup Meson
         run: meson setup build
@@ -125,6 +139,20 @@ jobs:
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
           cmake --build build
           sudo cmake --install build
+          # Create pkg-config file for accesskit
+          sudo mkdir -p /usr/local/lib/pkgconfig
+          sudo tee /usr/local/lib/pkgconfig/accesskit.pc > /dev/null << 'EOF'
+          prefix=/usr/local
+          exec_prefix=${prefix}
+          libdir=${exec_prefix}/lib/shared
+          includedir=${prefix}/include
+
+          Name: accesskit
+          Description: AccessKit C bindings
+          Version: 0.1
+          Libs: -L${libdir} -laccesskit
+          Cflags: -I${includedir}
+          EOF
 
       - name: Setup Meson
         run: meson setup build
@@ -176,6 +204,20 @@ jobs:
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$env:GITHUB_WORKSPACE\accesskit-install"
           cmake --build build --config Release
           cmake --install build --config Release
+          # Create pkg-config file for accesskit
+          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\accesskit-install\lib\pkgconfig"
+          @"
+          prefix=$env:GITHUB_WORKSPACE/accesskit-install
+          exec_prefix=`${prefix}
+          libdir=`${exec_prefix}/lib/shared
+          includedir=`${prefix}/include
+
+          Name: accesskit
+          Description: AccessKit C bindings
+          Version: 0.1
+          Libs: -L`${libdir} -laccesskit
+          Cflags: -I`${includedir}
+          "@ | Out-File -FilePath "$env:GITHUB_WORKSPACE\accesskit-install\lib\pkgconfig\accesskit.pc" -Encoding ASCII
 
       - name: Setup Meson
         env:
