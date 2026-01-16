@@ -74,20 +74,16 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install cbindgen
+        run: cargo install cbindgen
+
       - name: Install accesskit
         run: |
           git clone --depth 1 https://github.com/AccessKit/accesskit-c.git
           cd accesskit-c
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local -DACCESSKIT_BUILD_HEADERS=ON
           cmake --build build
           sudo cmake --install build
-          # Find and copy header manually
-          echo "Looking for accesskit.h..."
-          find . -name "accesskit.h" -type f
-          sudo cp build/accesskit.h /usr/local/include/ 2>/dev/null || \
-          sudo cp accesskit.h /usr/local/include/ 2>/dev/null || \
-          sudo cp include/accesskit.h /usr/local/include/ 2>/dev/null || \
-          (find . -name "accesskit.h" -type f -exec sudo cp {} /usr/local/include/ \;)
           ls -la /usr/local/include/accesskit.h
           sudo ldconfig
 
@@ -157,20 +153,16 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install cbindgen
+        run: cargo install cbindgen
+
       - name: Install accesskit
         run: |
           git clone --depth 1 https://github.com/AccessKit/accesskit-c.git
           cd accesskit-c
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local -DACCESSKIT_BUILD_HEADERS=ON
           cmake --build build
           sudo cmake --install build
-          # Find and copy header manually
-          echo "Looking for accesskit.h..."
-          find . -name "accesskit.h" -type f
-          sudo cp build/accesskit.h /usr/local/include/ 2>/dev/null || \
-          sudo cp accesskit.h /usr/local/include/ 2>/dev/null || \
-          sudo cp include/accesskit.h /usr/local/include/ 2>/dev/null || \
-          (find . -name "accesskit.h" -type f -exec sudo cp {} /usr/local/include/ \;)
           ls -la /usr/local/include/accesskit.h
 
       - name: Create accesskit pkg-config
@@ -230,16 +222,17 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install cbindgen
+        run: cargo install cbindgen
+
       - name: Install accesskit
         run: |
           git clone --depth 1 https://github.com/AccessKit/accesskit-c.git
           cd accesskit-c
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$env:GITHUB_WORKSPACE\accesskit-install"
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$env:GITHUB_WORKSPACE\accesskit-install" -DACCESSKIT_BUILD_HEADERS=ON
           cmake --build build --config Release
           cmake --install build --config Release
-          # Copy header manually if not installed
-          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\accesskit-install\include"
-          Copy-Item -Path "build\accesskit.h" -Destination "$env:GITHUB_WORKSPACE\accesskit-install\include\" -ErrorAction SilentlyContinue
+          Get-ChildItem -Path "$env:GITHUB_WORKSPACE\accesskit-install\include" -ErrorAction SilentlyContinue
 
       - name: Create accesskit pkg-config
         run: |
