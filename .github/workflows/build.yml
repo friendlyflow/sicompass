@@ -71,7 +71,7 @@ jobs:
           sudo cmake --install build
 
       - name: Install Rust
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Install accesskit
         run: |
@@ -116,7 +116,7 @@ jobs:
           sudo cmake --install build
 
       - name: Install Rust
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Install accesskit
         run: |
@@ -167,7 +167,7 @@ jobs:
           cmake --install build --config Release
 
       - name: Install Rust
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Install accesskit
         run: |
