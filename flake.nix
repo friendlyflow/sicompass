@@ -49,7 +49,7 @@
             at-spi2-core
             dbus
           ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
-            darwin.apple_sdk.frameworks.AppKit
+            apple-sdk_15
           ];
 
           # Build as cdylib (C-compatible shared library)
