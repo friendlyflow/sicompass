@@ -1,0 +1,524 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 0.1.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux-deb:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build with Nix
+        run: nix build .#default -L
+
+      - name: Get version
+        id: version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create .deb package
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          PKG_DIR=sicompass_${VERSION}_amd64
+
+          mkdir -p ${PKG_DIR}/DEBIAN
+          mkdir -p ${PKG_DIR}/usr/bin
+          mkdir -p ${PKG_DIR}/usr/share/applications
+
+          cp result/bin/sicompass ${PKG_DIR}/usr/bin/
+
+          cat > ${PKG_DIR}/DEBIAN/control << 'CTRL'
+          Package: sicompass
+          Version: VERSION_PLACEHOLDER
+          Section: utils
+          Priority: optional
+          Architecture: amd64
+          Depends: libvulkan1, libfreetype6, libharfbuzz0b, libjson-c5, libat-spi2-core-0
+          Maintainer: Nico Verrijdt <nico@friendlyflow.com>
+          Description: Silicon's Compass - Accessible document editor
+           A Vulkan-based accessible document editor with vim-like keybindings.
+          CTRL
+          sed -i "s/VERSION_PLACEHOLDER/${VERSION}/" ${PKG_DIR}/DEBIAN/control
+
+          cat > ${PKG_DIR}/usr/share/applications/sicompass.desktop << 'DESKTOP'
+          [Desktop Entry]
+          Name=Silicon's Compass
+          Comment=Accessible document editor
+          Exec=sicompass
+          Icon=sicompass
+          Terminal=false
+          Type=Application
+          Categories=Office;TextEditor;
+          DESKTOP
+
+          dpkg-deb --build ${PKG_DIR}
+          mv ${PKG_DIR}.deb sicompass_${VERSION}_amd64.deb
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-package
+          path: "*.deb"
+
+  build-linux-rpm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build with Nix
+        run: nix build .#default -L
+
+      - name: Install RPM tools
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
+      - name: Get version
+        id: version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create .rpm package
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+
+          mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+          cp result/bin/sicompass ~/rpmbuild/SOURCES/
+
+          cat > ~/rpmbuild/SPECS/sicompass.spec << SPEC
+          Name:           sicompass
+          Version:        ${VERSION}
+          Release:        1
+          Summary:        Accessible document editor
+          License:        MIT
+          URL:            https://github.com/friendlyflow/sicompass
+
+          %description
+          A Vulkan-based accessible document editor with vim-like keybindings.
+
+          %install
+          mkdir -p %{buildroot}/usr/bin
+          install -m 755 %{_sourcedir}/sicompass %{buildroot}/usr/bin/sicompass
+
+          %files
+          /usr/bin/sicompass
+          SPEC
+
+          rpmbuild -bb ~/rpmbuild/SPECS/sicompass.spec --define "_topdir $HOME/rpmbuild"
+          cp ~/rpmbuild/RPMS/x86_64/*.rpm sicompass-${VERSION}-1.x86_64.rpm
+
+      - name: Upload .rpm artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpm-package
+          path: "*.rpm"
+
+  build-linux-arch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build with Nix
+        run: nix build .#default -L
+
+      - name: Get version
+        id: version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Arch package tarball
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+
+          # Create package structure
+          mkdir -p pkg/usr/bin
+          cp result/bin/sicompass pkg/usr/bin/
+
+          # Create .PKGINFO
+          cat > pkg/.PKGINFO << PKGINFO
+          pkgname = sicompass
+          pkgver = ${VERSION}-1
+          pkgdesc = Accessible document editor
+          url = https://github.com/friendlyflow/sicompass
+          builddate = $(date +%s)
+          packager = GitHub Actions
+          size = $(du -sb pkg/usr | cut -f1)
+          arch = x86_64
+          license = MIT
+          depend = vulkan-icd-loader
+          depend = freetype2
+          depend = harfbuzz
+          depend = json-c
+          depend = at-spi2-core
+          PKGINFO
+
+          # Create package
+          cd pkg
+          tar -cJf ../sicompass-${VERSION}-1-x86_64.pkg.tar.xz .PKGINFO usr
+          cd ..
+
+      - name: Upload Arch artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: arch-package
+          path: "*.pkg.tar.xz"
+
+  build-nix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build with Nix
+        run: nix build .#default -L
+
+      - name: Get version
+        id: version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Nix bundle
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+
+          # Create a tarball of the flake for easy distribution
+          git archive --format=tar.gz --prefix=sicompass-${VERSION}/ HEAD > sicompass-${VERSION}-nix-source.tar.gz
+
+          # Also create a closure for offline installation
+          nix copy --to file://nix-closure ./result
+          tar -czf sicompass-${VERSION}-nix-closure.tar.gz nix-closure
+
+      - name: Upload Nix artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nix-package
+          path: |
+            *-nix-source.tar.gz
+            *-nix-closure.tar.gz
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build with Nix
+        run: nix build .#default -L --show-trace
+
+      - name: Get version
+        id: version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create macOS app bundle
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          APP_NAME="Silicon's Compass"
+          BUNDLE_DIR="SiCompass.app"
+
+          mkdir -p "${BUNDLE_DIR}/Contents/MacOS"
+          mkdir -p "${BUNDLE_DIR}/Contents/Resources"
+
+          cp result/bin/sicompass "${BUNDLE_DIR}/Contents/MacOS/"
+
+          cat > "${BUNDLE_DIR}/Contents/Info.plist" << PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleName</key>
+              <string>${APP_NAME}</string>
+              <key>CFBundleDisplayName</key>
+              <string>${APP_NAME}</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.friendlyflow.sicompass</string>
+              <key>CFBundleVersion</key>
+              <string>${VERSION}</string>
+              <key>CFBundleShortVersionString</key>
+              <string>${VERSION}</string>
+              <key>CFBundleExecutable</key>
+              <string>sicompass</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>11.0</string>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+          </dict>
+          </plist>
+          PLIST
+
+          # Create DMG
+          hdiutil create -volname "SiCompass" -srcfolder "${BUNDLE_DIR}" -ov -format UDZO "sicompass-${VERSION}-macos.dmg"
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-package
+          path: "*.dmg"
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Meson and Ninja
+        run: pip install meson ninja
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Vulkan SDK
+        uses: humbletim/install-vulkan-sdk@v1.2
+        with:
+          version: latest
+          cache: true
+
+      - name: Install vcpkg dependencies
+        run: |
+          vcpkg install freetype harfbuzz json-c stb cglm --triplet x64-windows
+
+      - name: Install SDL3
+        run: |
+          git clone --depth 1 https://github.com/libsdl-org/SDL.git -b main
+          cd SDL
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$env:GITHUB_WORKSPACE\SDL3-install"
+          cmake --build build --config Release
+          cmake --install build --config Release
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Rust nightly for cbindgen
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2025-03-27
+
+      - name: Install cbindgen
+        run: cargo install cbindgen
+
+      - name: Install accesskit
+        run: |
+          git clone --depth 1 https://github.com/AccessKit/accesskit-c.git
+          cd accesskit-c
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$env:GITHUB_WORKSPACE\accesskit-install" -DACCESSKIT_BUILD_HEADERS=ON
+          cmake --build build --config Release
+          cmake --install build --config Release
+
+      - name: Create accesskit pkg-config
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\accesskit-install\lib\pkgconfig"
+          $pcFile = "$env:GITHUB_WORKSPACE\accesskit-install\lib\pkgconfig\accesskit.pc"
+          "prefix=$env:GITHUB_WORKSPACE/accesskit-install" | Out-File -FilePath $pcFile -Encoding ASCII
+          'exec_prefix=${prefix}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'libdir=${exec_prefix}/lib/shared' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'includedir=${prefix}/include' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          '' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'Name: accesskit' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'Description: AccessKit C bindings' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'Version: 0.1' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'Libs: -L${libdir} -laccesskit' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'Cflags: -I${includedir}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+
+      - name: Setup Meson
+        env:
+          PKG_CONFIG_PATH: "${{ github.workspace }}/SDL3-install/lib/pkgconfig;${{ github.workspace }}/accesskit-install/lib/pkgconfig;${{ env.VCPKG_INSTALLATION_ROOT }}/installed/x64-windows/lib/pkgconfig"
+          CMAKE_PREFIX_PATH: "${{ github.workspace }}/SDL3-install;${{ github.workspace }}/accesskit-install"
+        run: |
+          meson setup build `
+            --cmake-prefix-path="$env:GITHUB_WORKSPACE\SDL3-install;$env:GITHUB_WORKSPACE\accesskit-install;$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows"
+
+      - name: Build
+        run: ninja -C build
+
+      - name: Get version
+        id: version
+        shell: bash
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Create Windows package
+        run: |
+          $VERSION = "${{ steps.version.outputs.version }}"
+
+          New-Item -ItemType Directory -Force -Path "dist"
+          Copy-Item "build\sicompass.exe" "dist\"
+
+          # Copy DLLs from vcpkg
+          Copy-Item "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin\*.dll" "dist\" -ErrorAction SilentlyContinue
+
+          # Copy SDL3 DLL
+          Copy-Item "$env:GITHUB_WORKSPACE\SDL3-install\bin\*.dll" "dist\" -ErrorAction SilentlyContinue
+
+          # Copy AccessKit DLL
+          Copy-Item "$env:GITHUB_WORKSPACE\accesskit-install\lib\shared\*.dll" "dist\" -ErrorAction SilentlyContinue
+
+          # Create ZIP
+          Compress-Archive -Path "dist\*" -DestinationPath "sicompass-${VERSION}-windows-x64.zip"
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-package
+          path: "*.zip"
+
+  publish-release:
+    needs: [build-linux-deb, build-linux-rpm, build-linux-arch, build-nix, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Get version
+        id: version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: List artifacts
+        run: find artifacts -type f
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "v${{ steps.version.outputs.version }}"
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/**/*.deb
+            artifacts/**/*.rpm
+            artifacts/**/*.pkg.tar.xz
+            artifacts/**/*.tar.gz
+            artifacts/**/*.dmg
+            artifacts/**/*.zip
+          body: |
+            ## Downloads
+
+            ### Linux
+            | Distribution | Package |
+            |--------------|---------|
+            | Debian/Ubuntu | `sicompass_${{ steps.version.outputs.version }}_amd64.deb` |
+            | Fedora/RHEL | `sicompass-${{ steps.version.outputs.version }}-1.x86_64.rpm` |
+            | Arch Linux | `sicompass-${{ steps.version.outputs.version }}-1-x86_64.pkg.tar.xz` |
+
+            ### macOS
+            - **macOS**: `sicompass-${{ steps.version.outputs.version }}-macos.dmg`
+
+            ### Windows
+            - **Windows x64**: `sicompass-${{ steps.version.outputs.version }}-windows-x64.zip`
+
+            ### Nix
+            - **Source tarball**: `sicompass-${{ steps.version.outputs.version }}-nix-source.tar.gz`
+            - **Nix closure**: `sicompass-${{ steps.version.outputs.version }}-nix-closure.tar.gz`
+
+            Or run directly:
+            ```bash
+            nix run github:friendlyflow/sicompass/v${{ steps.version.outputs.version }}
+            ```
+
+            ## Installation
+
+            ### Debian/Ubuntu
+            ```bash
+            sudo dpkg -i sicompass_${{ steps.version.outputs.version }}_amd64.deb
+            sudo apt-get install -f  # Install dependencies if needed
+            ```
+
+            ### Fedora/RHEL
+            ```bash
+            sudo dnf install sicompass-${{ steps.version.outputs.version }}-1.x86_64.rpm
+            ```
+
+            ### Arch Linux
+            ```bash
+            sudo pacman -U sicompass-${{ steps.version.outputs.version }}-1-x86_64.pkg.tar.xz
+            ```
+
+            ### Nix
+            ```bash
+            # Run directly
+            nix run github:friendlyflow/sicompass/v${{ steps.version.outputs.version }}
+
+            # Or install
+            nix profile install github:friendlyflow/sicompass/v${{ steps.version.outputs.version }}
+            ```
+
+            ### macOS
+            1. Download the DMG file
+            2. Open and drag to Applications
+
+            ### Windows
+            1. Download and extract the ZIP
+            2. Run `sicompass.exe`
