@@ -83,6 +83,11 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install Rust nightly for cbindgen
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2025-03-27
+
       - name: Install cbindgen
         run: cargo install cbindgen
 
