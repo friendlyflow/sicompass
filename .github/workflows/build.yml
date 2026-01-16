@@ -77,9 +77,9 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/AccessKit/accesskit-c.git
           cd accesskit-c
-          cargo build --release
-          sudo cp target/release/libaccesskit*.so /usr/local/lib/
-          sudo cp accesskit.h /usr/local/include/
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+          sudo cmake --install build
           sudo ldconfig
 
       - name: Setup Meson
@@ -122,9 +122,9 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/AccessKit/accesskit-c.git
           cd accesskit-c
-          cargo build --release
-          sudo cp target/release/libaccesskit*.dylib /usr/local/lib/
-          sudo cp accesskit.h /usr/local/include/
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+          sudo cmake --install build
 
       - name: Setup Meson
         run: meson setup build
@@ -173,15 +173,17 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/AccessKit/accesskit-c.git
           cd accesskit-c
-          cargo build --release
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$env:GITHUB_WORKSPACE\accesskit-install"
+          cmake --build build --config Release
+          cmake --install build --config Release
 
       - name: Setup Meson
         env:
-          PKG_CONFIG_PATH: "${{ github.workspace }}/SDL3-install/lib/pkgconfig;${{ env.VCPKG_INSTALLATION_ROOT }}/installed/x64-windows/lib/pkgconfig"
-          CMAKE_PREFIX_PATH: "${{ github.workspace }}/SDL3-install"
+          PKG_CONFIG_PATH: "${{ github.workspace }}/SDL3-install/lib/pkgconfig;${{ github.workspace }}/accesskit-install/lib/pkgconfig;${{ env.VCPKG_INSTALLATION_ROOT }}/installed/x64-windows/lib/pkgconfig"
+          CMAKE_PREFIX_PATH: "${{ github.workspace }}/SDL3-install;${{ github.workspace }}/accesskit-install"
         run: |
           meson setup build `
-            --cmake-prefix-path="$env:GITHUB_WORKSPACE\SDL3-install;$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows"
+            --cmake-prefix-path="$env:GITHUB_WORKSPACE\SDL3-install;$env:GITHUB_WORKSPACE\accesskit-install;$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows"
 
       - name: Build
         run: ninja -C build
