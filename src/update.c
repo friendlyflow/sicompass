@@ -616,26 +616,11 @@ void handleHistoryAction(AppRenderer *appRenderer, History history) {
         return;
     }
 
+    fprintf(stderr, "undoPosition: %d", appRenderer->undoPosition);
+
     if (history == HISTORY_UNDO) {
         // Save current state before undo
-        int count;
-        FfonElement **arr = getFfonAtId(appRenderer, &appRenderer->currentId, &count);
-        if (arr && count > 0) {
-            int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
-            if (idx >= 0 && idx < count) {
-                FfonElement *elem = arr[idx];
-                char line[MAX_LINE_LENGTH] = "";
-                if (elem->type == FFON_STRING) {
-                    strncpy(line, elem->data.string, MAX_LINE_LENGTH - 1);
-                } else {
-                    strncpy(line, elem->data.object->key, MAX_LINE_LENGTH - 1);
-                }
-
-                bool isKey = isLineKey(line);
-                updateIds(appRenderer, isKey, TASK_NONE, HISTORY_NONE);
-                updateFfon(appRenderer, line, isKey, TASK_NONE, HISTORY_NONE);
-            }
-        }
+        handleEscape(appRenderer);
 
         if (appRenderer->undoPosition < appRenderer->undoHistoryCount) {
             appRenderer->undoPosition++;
@@ -666,6 +651,8 @@ void handleHistoryAction(AppRenderer *appRenderer, History history) {
         }
     } else if (history == HISTORY_REDO) {
         if (appRenderer->undoPosition > 0) {
+            // appRenderer->undoPosition--;
+
             UndoEntry *entry = &appRenderer->undoHistory[appRenderer->undoHistoryCount - appRenderer->undoPosition];
             idArrayCopy(&appRenderer->currentId, &entry->id);
 
@@ -689,7 +676,7 @@ void handleHistoryAction(AppRenderer *appRenderer, History history) {
                     break;
             }
 
-            appRenderer->undoPosition--;
+            // appRenderer->undoPosition--;
         }
     }
 
