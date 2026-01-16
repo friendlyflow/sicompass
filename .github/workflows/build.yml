@@ -81,11 +81,14 @@ jobs:
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
           cmake --build build
           sudo cmake --install build
-          # Verify installation
-          ls -la /usr/local/include/ | grep -i access || true
-          ls -la /usr/local/lib/ | grep -i access || true
-          # Copy header manually if not installed
-          sudo cp build/accesskit.h /usr/local/include/ || true
+          # Find and copy header manually
+          echo "Looking for accesskit.h..."
+          find . -name "accesskit.h" -type f
+          sudo cp build/accesskit.h /usr/local/include/ 2>/dev/null || \
+          sudo cp accesskit.h /usr/local/include/ 2>/dev/null || \
+          sudo cp include/accesskit.h /usr/local/include/ 2>/dev/null || \
+          (find . -name "accesskit.h" -type f -exec sudo cp {} /usr/local/include/ \;)
+          ls -la /usr/local/include/accesskit.h
           sudo ldconfig
 
       - name: Create accesskit pkg-config
@@ -161,8 +164,14 @@ jobs:
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
           cmake --build build
           sudo cmake --install build
-          # Copy header manually if not installed
-          sudo cp build/accesskit.h /usr/local/include/ || true
+          # Find and copy header manually
+          echo "Looking for accesskit.h..."
+          find . -name "accesskit.h" -type f
+          sudo cp build/accesskit.h /usr/local/include/ 2>/dev/null || \
+          sudo cp accesskit.h /usr/local/include/ 2>/dev/null || \
+          sudo cp include/accesskit.h /usr/local/include/ 2>/dev/null || \
+          (find . -name "accesskit.h" -type f -exec sudo cp {} /usr/local/include/ \;)
+          ls -la /usr/local/include/accesskit.h
 
       - name: Create accesskit pkg-config
         run: |
