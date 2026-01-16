@@ -118,8 +118,22 @@ jobs:
             glslang \
             freetype \
             harfbuzz \
-            json-c \
-            stb
+            json-c
+          # stb is header-only, install via git
+          git clone --depth 1 https://github.com/nothings/stb.git /tmp/stb
+          sudo mkdir -p /usr/local/include/stb
+          sudo cp /tmp/stb/*.h /usr/local/include/stb/
+          # Create pkg-config file for stb
+          sudo mkdir -p /usr/local/lib/pkgconfig
+          sudo tee /usr/local/lib/pkgconfig/stb.pc > /dev/null << 'EOF'
+          prefix=/usr/local
+          includedir=${prefix}/include
+
+          Name: stb
+          Description: stb single-file public domain libraries
+          Version: 1.0
+          Cflags: -I${includedir}
+          EOF
 
       - name: Install SDL3
         run: |
