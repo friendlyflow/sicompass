@@ -651,6 +651,9 @@ void handleHistoryAction(AppRenderer *appRenderer, History history) {
         }
     } else if (history == HISTORY_REDO) {
         if (appRenderer->undoPosition > 0) {
+            // Save current state before undo
+            handleEscape(appRenderer);
+                
             // appRenderer->undoPosition--;
 
             UndoEntry *entry = &appRenderer->undoHistory[appRenderer->undoHistoryCount - appRenderer->undoPosition];
