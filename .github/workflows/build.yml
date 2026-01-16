@@ -70,6 +70,21 @@ jobs:
         run: |
           vcpkg install freetype harfbuzz json-c stb cglm sdl3 vulkan --triplet x64-windows
 
+      - name: Create stb pkg-config file
+        run: |
+          # stb is header-only and vcpkg doesn't provide a pkg-config file
+          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\stb-stub\lib\pkgconfig"
+
+          $pcFile = "$env:GITHUB_WORKSPACE\stb-stub\lib\pkgconfig\stb.pc"
+          "prefix=$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows" | Out-File -FilePath $pcFile -Encoding ASCII
+          'exec_prefix=${prefix}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'includedir=${prefix}/include' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          '' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'Name: stb' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'Description: stb single-file public domain libraries' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'Version: 0.0.1' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'Cflags: -I${includedir}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+
       - name: Create accesskit stub header
         run: |
           # AccessKit is disabled on Windows for now (set to NULL in code)
@@ -122,7 +137,7 @@ jobs:
 
       - name: Setup Meson
         env:
-          PKG_CONFIG_PATH: "${{ github.workspace }}/accesskit-stub/lib/pkgconfig;${{ env.VCPKG_INSTALLATION_ROOT }}/installed/x64-windows/lib/pkgconfig"
+          PKG_CONFIG_PATH: "${{ github.workspace }}/stb-stub/lib/pkgconfig;${{ github.workspace }}/accesskit-stub/lib/pkgconfig;${{ env.VCPKG_INSTALLATION_ROOT }}/installed/x64-windows/lib/pkgconfig"
         run: |
           meson setup build
 
