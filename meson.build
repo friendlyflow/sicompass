@@ -11,7 +11,7 @@ accesskit_dep = dependency('accesskit')
 cglm_dep = dependency('cglm')
 cc = meson.get_compiler('c')
 m_dep = cc.find_library('m', required : false)
-ft_dep = cc.find_library('freetype', required : false)
+ft_dep = dependency('freetype2')
 
 r = run_command('glslangValidator', '--quiet', '-V', 'shaders/image.vert', '-o', 'shaders/image_vert.spv', check: true)
 output = r.stdout().strip()
