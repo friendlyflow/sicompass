@@ -1,6 +1,100 @@
 #include "view.h"
 #include <string.h>
 
+// AccessKit node IDs
+#define ACCESSKIT_ROOT_ID 1
+#define ACCESSKIT_LIVE_REGION_ID 2
+
+// Callback for AccessKit activation - returns initial tree
+static struct accesskit_tree_update* accesskitActivationHandler(void *userdata) {
+    // Create initial tree with root window and live region
+    struct accesskit_tree_update *update = accesskit_tree_update_with_capacity_and_focus(2, ACCESSKIT_ROOT_ID);
+
+    // Create root node (window)
+    struct accesskit_node *root = accesskit_node_new(ACCESSKIT_ROLE_WINDOW);
+    accesskit_node_set_label(root, "Silicon's Compass");
+    accesskit_node_id children[] = {ACCESSKIT_LIVE_REGION_ID};
+    accesskit_node_set_children(root, 1, children);
+    accesskit_tree_update_push_node(update, ACCESSKIT_ROOT_ID, root);
+
+    // Create live region for announcements
+    struct accesskit_node *liveRegion = accesskit_node_new(ACCESSKIT_ROLE_LABEL);
+    accesskit_node_set_live(liveRegion, ACCESSKIT_LIVE_POLITE);
+    accesskit_node_set_label(liveRegion, "");
+    accesskit_tree_update_push_node(update, ACCESSKIT_LIVE_REGION_ID, liveRegion);
+
+    // Set tree info
+    struct accesskit_tree *tree = accesskit_tree_new(ACCESSKIT_ROOT_ID);
+    accesskit_tree_set_toolkit_name(tree, "sicompass");
+    accesskit_tree_set_toolkit_version(tree, "0.1");
+    accesskit_tree_update_set_tree(update, tree);
+
+    return update;
+}
+
+// Callback for AccessKit action requests
+static void accesskitActionHandler(accesskit_action_request *request, void *userdata) {
+    // Handle accessibility actions (click, focus, etc.)
+    // For now, we just free the request
+    accesskit_action_request_free(request);
+}
+
+// Callback for AccessKit deactivation
+static void accesskitDeactivationHandler(void *userdata) {
+    // Called when assistive technology disconnects
+    // Nothing to do here for now
+}
+
+void accesskitInit(SiCompassApplication *app) {
+    app->appRenderer->accesskitRootId = ACCESSKIT_ROOT_ID;
+    app->appRenderer->accesskitLiveRegionId = ACCESSKIT_LIVE_REGION_ID;
+
+    // Create Unix adapter
+    app->appRenderer->accesskitAdapter = accesskit_unix_adapter_new(
+        accesskitActivationHandler,
+        NULL,  // userdata for activation handler
+        accesskitActionHandler,
+        NULL,  // userdata for action handler
+        accesskitDeactivationHandler,
+        NULL   // userdata for deactivation handler
+    );
+}
+
+void accesskitDestroy(AppRenderer *appRenderer) {
+    if (appRenderer->accesskitAdapter) {
+        accesskit_unix_adapter_free(appRenderer->accesskitAdapter);
+        appRenderer->accesskitAdapter = NULL;
+    }
+}
+
+// Factory function for tree updates when speaking
+static struct accesskit_tree_update* accesskitSpeakUpdateFactory(void *userdata) {
+    const char *text = (const char *)userdata;
+
+    struct accesskit_tree_update *update = accesskit_tree_update_with_focus(ACCESSKIT_ROOT_ID);
+
+    // Update live region with new text
+    struct accesskit_node *liveRegion = accesskit_node_new(ACCESSKIT_ROLE_LABEL);
+    accesskit_node_set_live(liveRegion, ACCESSKIT_LIVE_POLITE);
+    accesskit_node_set_label(liveRegion, text);
+    accesskit_tree_update_push_node(update, ACCESSKIT_LIVE_REGION_ID, liveRegion);
+
+    return update;
+}
+
+void accesskitSpeak(AppRenderer *appRenderer, const char *text) {
+    if (!appRenderer->accesskitAdapter || !text) {
+        return;
+    }
+
+    // Update the tree with new live region content
+    accesskit_unix_adapter_update_if_active(
+        appRenderer->accesskitAdapter,
+        accesskitSpeakUpdateFactory,
+        (void *)text
+    );
+}
+
 int renderText(SiCompassApplication *app, const char *text, int x, int y,
                uint32_t color, bool highlight) {
     if (!text || strlen(text) == 0) {
@@ -186,6 +280,11 @@ void renderLine(SiCompassApplication *app, FfonElement *elem, const IdArray *id,
         }
 
         linesRendered = renderText(app, displayText, x, *yPos, color, isCurrent);
+
+        // Speak current element for accessibility
+        if (isCurrent) {
+            accesskitSpeak(app->appRenderer, displayText);
+        }
     } else {
         // Render key with colon
         char keyWithColon[MAX_LINE_LENGTH];
@@ -202,6 +301,11 @@ void renderLine(SiCompassApplication *app, FfonElement *elem, const IdArray *id,
 
         uint32_t color = COLOR_TEXT;
         linesRendered = renderText(app, keyWithColon, x, *yPos, color, isCurrent);
+
+        // Speak current element for accessibility
+        if (isCurrent) {
+            accesskitSpeak(app->appRenderer, keyWithColon);
+        }
     }
 
     *yPos += lineHeight * linesRendered;

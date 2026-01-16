@@ -50,7 +50,13 @@ SiCompassApplication* appRendererCreate(SiCompassApplication* app) {
     appRenderer->running = true;
     appRenderer->needsRedraw = true;
 
+    // Initialize AccessKit adapter to NULL (will be initialized later with window)
+    appRenderer->accesskitAdapter = NULL;
+
     app->appRenderer = appRenderer;
+
+    // Initialize AccessKit
+    accesskitInit(app);
 
     return app;
 }
@@ -83,6 +89,9 @@ void appRendererDestroy(AppRenderer *appRenderer) {
 
     // Free list items
     clearListAuxilaries(appRenderer);
+
+    // Free AccessKit adapter
+    accesskitDestroy(appRenderer);
 
     free(appRenderer);
 }

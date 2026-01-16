@@ -1,6 +1,15 @@
 {
   description = "Sicompass Dev Flake";
-  outputs = { self, nixpkgs }:
+
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    accesskit-c-src = {
+      url = "github:AccessKit/accesskit-c";
+      flake = false;
+    };
+  };
+
+  outputs = { self, nixpkgs, accesskit-c-src }:
     let
       supportedSystems = [
         "aarch64-linux"
@@ -14,13 +23,76 @@
       ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
       nixpkgsFor = forAllSystems (system: import nixpkgs { inherit system; });
+
+      # AccessKit C bindings derivation
+      # Uses rustPlatform.buildRustPackage to build the Rust library,
+      # then installs C headers and shared library
+      accesskit-c-for = system:
+        let
+          pkgs = nixpkgsFor.${system};
+        in
+        pkgs.rustPlatform.buildRustPackage rec {
+          pname = "accesskit-c";
+          version = accesskit-c-src.shortRev or "dev";
+
+          src = accesskit-c-src;
+
+          cargoHash = "sha256-5/GYojP6zCOH5M5Ifs5zvlkDXi6d8QsSHvPrgP/WdM8=";
+
+          nativeBuildInputs = with pkgs; [
+            pkg-config
+          ];
+
+          buildInputs = with pkgs; [
+            # Linux accessibility backend (AT-SPI over D-Bus)
+          ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+            at-spi2-core
+            dbus
+          ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
+            darwin.apple_sdk.frameworks.AppKit
+          ];
+
+          # Build as cdylib (C-compatible shared library)
+          buildType = "release";
+
+          postInstall = ''
+            # Install the C header
+            mkdir -p $out/include
+            cp include/accesskit.h $out/include/
+
+            # The cdylib is already installed by cargo, but ensure it's findable
+            # Create pkg-config file
+            mkdir -p $out/lib/pkgconfig
+            cat > $out/lib/pkgconfig/accesskit.pc << EOF
+            prefix=$out
+            libdir=\''${prefix}/lib
+            includedir=\''${prefix}/include
+
+            Name: accesskit
+            Description: C bindings for AccessKit accessibility infrastructure
+            Version: ${version}
+            Libs: -L\''${libdir} -laccesskit
+            Cflags: -I\''${includedir}
+            EOF
+          '';
+
+          meta = with pkgs.lib; {
+            description = "C bindings for AccessKit accessibility infrastructure";
+            homepage = "https://github.com/AccessKit/accesskit-c";
+            license = with licenses; [ asl20 mit ];
+            maintainers = [];
+          };
+        };
     in
     {
       packages = forAllSystems (system:
         let
           pkgs = nixpkgsFor.${system};
+          accesskit-c = accesskit-c-for system;
         in
         {
+          inherit accesskit-c;
+
           default = pkgs.stdenv.mkDerivation rec {
             name = "sicompass";
             src = self;
@@ -47,13 +119,16 @@
               json_c
               xorg.libxcb
               sdl3
+              # AccessKit for accessibility
+              accesskit-c
+              at-spi2-core
             ];
 
             enableParallelBuilding = true;
 
             meta = with pkgs.lib; {
               homepage = "https://github.com/friendlyflow/sicompass";
-              license = with licenses; [ MIT ];
+              license = with licenses; [ mit ];
               maintainers = [ "Nico Verrijdt" ];
             };
           };
@@ -62,6 +137,7 @@
       devShells = forAllSystems (system:
         let
           pkgs = nixpkgsFor.${system};
+          accesskit-c = accesskit-c-for system;
         in
         {
           default = pkgs.mkShell {
@@ -91,6 +167,9 @@
               sdl3
               cppcheck
               flawfinder
+              # AccessKit for accessibility
+              accesskit-c
+              at-spi2-core
             ];
 
             # shellHooks = ''
