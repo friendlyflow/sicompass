@@ -103,12 +103,8 @@
               glfw
               #renderdoc
               spirv-tools
-              vulkan-volk
-              vulkan-tools
               vulkan-loader
               vulkan-headers
-              vulkan-validation-layers
-              vulkan-extension-layer
               freetype
               cglm
               stb
@@ -119,6 +115,10 @@
               # AccessKit for accessibility
               accesskit-c
             ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+              vulkan-volk
+              vulkan-tools
+              vulkan-validation-layers
+              vulkan-extension-layer
               vulkan-tools-lunarg
               xorg.libxcb
               at-spi2-core
@@ -145,17 +145,12 @@
               meson
               ninja
               pkg-config
-              gcc
               glfw
               glslang
               #renderdoc
               spirv-tools
-              vulkan-volk
-              vulkan-tools
               vulkan-loader
               vulkan-headers
-              vulkan-validation-layers
-              vulkan-extension-layer
               freetype
               cglm
               stb
@@ -168,6 +163,11 @@
               # AccessKit for accessibility
               accesskit-c
             ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+              gcc
+              vulkan-volk
+              vulkan-tools
+              vulkan-validation-layers
+              vulkan-extension-layer
               vulkan-tools-lunarg
               xorg.libxcb
               at-spi2-core
