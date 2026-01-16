@@ -94,14 +94,13 @@
           inherit accesskit-c;
 
           default = pkgs.stdenv.mkDerivation rec {
-            name = "sicompass";
+            pname = "sicompass";
+            version = "0.1";
             src = self;
-            outputs = [ "out" "dev" ];
 
-            nativebuildInputs = with pkgs; [ meson ninja pkg-config gcc glibc ];
+            nativeBuildInputs = with pkgs; [ meson ninja pkg-config glslang ];
             buildInputs = with pkgs; [
               glfw
-              glslang
               #renderdoc
               spirv-tools
               vulkan-volk
