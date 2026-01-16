@@ -78,10 +78,16 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/AccessKit/accesskit-c.git
           cd accesskit-c
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
           cmake --build build
           sudo cmake --install build
+          # Verify installation
+          ls -la /usr/local/include/ | grep -i access || true
+          ls -la /usr/local/lib/ | grep -i access || true
+          # Copy header manually if not installed
+          sudo cp build/accesskit.h /usr/local/include/ || true
           sudo ldconfig
+
       - name: Create accesskit pkg-config
         run: |
           sudo mkdir -p /usr/local/lib/pkgconfig
@@ -152,9 +158,11 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/AccessKit/accesskit-c.git
           cd accesskit-c
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
           cmake --build build
           sudo cmake --install build
+          # Copy header manually if not installed
+          sudo cp build/accesskit.h /usr/local/include/ || true
 
       - name: Create accesskit pkg-config
         run: |
@@ -220,20 +228,26 @@ jobs:
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$env:GITHUB_WORKSPACE\accesskit-install"
           cmake --build build --config Release
           cmake --install build --config Release
-          # Create pkg-config file for accesskit
-          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\accesskit-install\lib\pkgconfig"
-          @"
-          prefix=$env:GITHUB_WORKSPACE/accesskit-install
-          exec_prefix=`${prefix}
-          libdir=`${exec_prefix}/lib/shared
-          includedir=`${prefix}/include
+          # Copy header manually if not installed
+          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\accesskit-install\include"
+          Copy-Item -Path "build\accesskit.h" -Destination "$env:GITHUB_WORKSPACE\accesskit-install\include\" -ErrorAction SilentlyContinue
 
-          Name: accesskit
-          Description: AccessKit C bindings
-          Version: 0.1
-          Libs: -L`${libdir} -laccesskit
-          Cflags: -I`${includedir}
-          "@ | Out-File -FilePath "$env:GITHUB_WORKSPACE\accesskit-install\lib\pkgconfig\accesskit.pc" -Encoding ASCII
+      - name: Create accesskit pkg-config
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\accesskit-install\lib\pkgconfig"
+          $content = @"
+prefix=$env:GITHUB_WORKSPACE/accesskit-install
+exec_prefix=`${prefix}
+libdir=`${exec_prefix}/lib/shared
+includedir=`${prefix}/include
+
+Name: accesskit
+Description: AccessKit C bindings
+Version: 0.1
+Libs: -L`${libdir} -laccesskit
+Cflags: -I`${includedir}
+"@
+          $content | Out-File -FilePath "$env:GITHUB_WORKSPACE\accesskit-install\lib\pkgconfig\accesskit.pc" -Encoding ASCII
 
       - name: Setup Meson
         env:
