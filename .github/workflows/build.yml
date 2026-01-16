@@ -70,12 +70,13 @@ jobs:
           cmake --build build -j$(nproc)
           sudo cmake --install build
 
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+
       - name: Install accesskit
         run: |
-          # Download and install accesskit_c
-          # You may need to adjust this based on how accesskit is packaged
-          git clone --depth 1 https://github.com/AccessKit/accesskit.git
-          cd accesskit/bindings/c
+          git clone --depth 1 https://github.com/AccessKit/accesskit-c.git
+          cd accesskit-c
           cargo build --release
           sudo cp target/release/libaccesskit*.so /usr/local/lib/
           sudo cp accesskit.h /usr/local/include/
@@ -114,10 +115,13 @@ jobs:
           cmake --build build -j$(sysctl -n hw.ncpu)
           sudo cmake --install build
 
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+
       - name: Install accesskit
         run: |
-          git clone --depth 1 https://github.com/AccessKit/accesskit.git
-          cd accesskit/bindings/c
+          git clone --depth 1 https://github.com/AccessKit/accesskit-c.git
+          cd accesskit-c
           cargo build --release
           sudo cp target/release/libaccesskit*.dylib /usr/local/lib/
           sudo cp accesskit.h /usr/local/include/
@@ -162,10 +166,13 @@ jobs:
           cmake --build build --config Release
           cmake --install build --config Release
 
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+
       - name: Install accesskit
         run: |
-          git clone --depth 1 https://github.com/AccessKit/accesskit.git
-          cd accesskit/bindings/c
+          git clone --depth 1 https://github.com/AccessKit/accesskit-c.git
+          cd accesskit-c
           cargo build --release
 
       - name: Setup Meson
