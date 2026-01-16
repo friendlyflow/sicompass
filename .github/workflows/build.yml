@@ -136,9 +136,8 @@ jobs:
           'Cflags: -I${includedir}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
 
       - name: Setup Meson
-        env:
-          PKG_CONFIG_PATH: "${{ github.workspace }}/stb-stub/lib/pkgconfig;${{ github.workspace }}/accesskit-stub/lib/pkgconfig;${{ env.VCPKG_INSTALLATION_ROOT }}/installed/x64-windows/lib/pkgconfig"
         run: |
+          $env:PKG_CONFIG_PATH = "$env:GITHUB_WORKSPACE\stb-stub\lib\pkgconfig;$env:GITHUB_WORKSPACE\accesskit-stub\lib\pkgconfig;$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\lib\pkgconfig"
           meson setup build
 
       - name: Build
