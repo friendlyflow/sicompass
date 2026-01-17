@@ -342,7 +342,7 @@ jobs:
 
       - name: Install vcpkg dependencies
         run: |
-          vcpkg install freetype harfbuzz json-c stb cglm sdl3 vulkan --triplet x64-windows
+          vcpkg install freetype harfbuzz json-c stb cglm sdl3 vulkan --triplet x64-windows --binarysource=clear;default,readwrite
 
       - name: Install Vulkan SDK (for glslangValidator)
         run: |
