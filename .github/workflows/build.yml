@@ -72,10 +72,13 @@ jobs:
 
       - name: Install Vulkan SDK (for glslangValidator)
         run: |
-          $vulkanVersion = "1.4.335.0"
-          $installerUrl = "https://sdk.lunarg.com/sdk/download/$vulkanVersion/windows/VulkanSDK-$vulkanVersion-Installer.exe"
-          Invoke-WebRequest -Uri $installerUrl -OutFile VulkanSDK-Installer.exe
-          Start-Process -FilePath .\VulkanSDK-Installer.exe -ArgumentList "--accept-licenses --default-answer --confirm-command install" -Wait
+          # Download latest Vulkan SDK
+          Invoke-WebRequest -Uri "https://sdk.lunarg.com/sdk/download/latest/windows/vulkan_sdk.exe" -OutFile vulkan_sdk.exe
+          # Get the version that was downloaded
+          $versionJson = Invoke-RestMethod -Uri "https://vulkan.lunarg.com/sdk/latest/windows.json"
+          $vulkanVersion = $versionJson
+          Write-Host "Installing Vulkan SDK version: $vulkanVersion"
+          Start-Process -FilePath .\vulkan_sdk.exe -ArgumentList "--accept-licenses --default-answer --confirm-command install" -Wait
           echo "VULKAN_SDK=C:\VulkanSDK\$vulkanVersion" >> $env:GITHUB_ENV
 
       - name: Create stb pkg-config file
