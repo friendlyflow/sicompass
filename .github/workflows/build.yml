@@ -150,7 +150,10 @@ jobs:
       - name: Setup Meson
         run: |
           $env:PKG_CONFIG_PATH = "$env:GITHUB_WORKSPACE\stb-stub\lib\pkgconfig;$env:GITHUB_WORKSPACE\accesskit-stub\lib\pkgconfig;$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\lib\pkgconfig"
-          $env:PATH = "$env:VULKAN_SDK\Bin;$env:PATH"
+          # Find Vulkan SDK directory (installed in C:\VulkanSDK\<version>)
+          $vulkanDir = Get-ChildItem -Path "C:\VulkanSDK" -Directory | Select-Object -First 1
+          $env:PATH = "$($vulkanDir.FullName)\Bin;$env:PATH"
+          Write-Host "Using Vulkan SDK at: $($vulkanDir.FullName)"
           meson setup build
 
       - name: Build
