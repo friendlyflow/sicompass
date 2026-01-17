@@ -354,6 +354,7 @@ jobs:
           Write-Host "Installing Vulkan SDK version: $vulkanVersion"
           Start-Process -FilePath .\vulkan_sdk.exe -ArgumentList "--accept-licenses --default-answer --confirm-command install" -Wait
           echo "VULKAN_SDK=C:\VulkanSDK\$vulkanVersion" >> $env:GITHUB_ENV
+          echo "C:\VulkanSDK\$vulkanVersion\Bin" >> $env:GITHUB_PATH
 
       - name: Create stb pkg-config file
         run: |
