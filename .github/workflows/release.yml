@@ -346,7 +346,7 @@ jobs:
 
       - name: Install Vulkan SDK (for glslangValidator)
         run: |
-          $vulkanVersion = "1.3.296.0"
+          $vulkanVersion = "1.4.335.0"
           $installerUrl = "https://sdk.lunarg.com/sdk/download/$vulkanVersion/windows/VulkanSDK-$vulkanVersion-Installer.exe"
           Invoke-WebRequest -Uri $installerUrl -OutFile VulkanSDK-Installer.exe
           Start-Process -FilePath .\VulkanSDK-Installer.exe -ArgumentList "--accept-licenses --default-answer --confirm-command install" -Wait
