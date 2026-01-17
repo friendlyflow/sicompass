@@ -68,7 +68,11 @@ jobs:
 
       - name: Install vcpkg dependencies
         run: |
-          vcpkg install freetype harfbuzz json-c stb cglm sdl3 vulkan glslang --triplet x64-windows
+          vcpkg install freetype harfbuzz json-c stb cglm sdl3 vulkan --triplet x64-windows
+
+      - name: Install Vulkan SDK (for glslangValidator)
+        run: |
+          choco install vulkan-sdk -y
 
       - name: Create stb pkg-config file
         run: |
@@ -138,7 +142,7 @@ jobs:
       - name: Setup Meson
         run: |
           $env:PKG_CONFIG_PATH = "$env:GITHUB_WORKSPACE\stb-stub\lib\pkgconfig;$env:GITHUB_WORKSPACE\accesskit-stub\lib\pkgconfig;$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\lib\pkgconfig"
-          $env:PATH = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\tools\glslang;$env:PATH"
+          $env:PATH = "$env:VULKAN_SDK\Bin;$env:PATH"
           meson setup build
 
       - name: Build
