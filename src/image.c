@@ -3,11 +3,20 @@
 #include <stb_image.h>
 #include <cglm/cglm.h>
 
+#ifdef _MSC_VER
+#define ALIGNED(x) __declspec(align(x))
+typedef struct {
+    ALIGNED(16) mat4 model;
+    ALIGNED(16) mat4 view;
+    ALIGNED(16) mat4 proj;
+} UniformBufferObject;
+#else
 typedef struct {
     mat4 model __attribute__((aligned(16)));
     mat4 view __attribute__((aligned(16)));
     mat4 proj __attribute__((aligned(16)));
 } UniformBufferObject;
+#endif
 
 typedef struct {
     vec3 pos;
