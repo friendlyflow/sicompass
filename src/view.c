@@ -10,12 +10,18 @@ void mainLoop(SiCompassApplication* app) {
 
     // Load JSON file
     const char *jsonFile = "src/json/sf.json";
-    
-    if (!loadJsonFile(app->appRenderer, jsonFile)) {
+    int count;
+    FfonElement **elements = loadJsonFileToElements(jsonFile, &count);
+    if (!elements) {
         fprintf(stderr, "Failed to load JSON file: %s\n", jsonFile);
         appRendererDestroy(app->appRenderer);
         return;
     }
+
+    // Assign to app renderer
+    app->appRenderer->ffon = elements;
+    app->appRenderer->ffonCount = count;
+    app->appRenderer->ffonCapacity = count > 0 ? count : 1;
 
     // Initialize current_id
     idArrayInit(&app->appRenderer->currentId);

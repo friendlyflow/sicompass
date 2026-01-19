@@ -261,7 +261,7 @@ void handleI(AppRenderer *appRenderer) {
 
         // Get current line content
         int count;
-        FfonElement **arr = getFfonAtId(appRenderer, &appRenderer->currentId, &count);
+        FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId, &count);
         if (arr && count > 0) {
             int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
             if (idx >= 0 && idx < count) {
@@ -297,7 +297,7 @@ void handleA(AppRenderer *appRenderer) {
 
         // Get current line content
         int count;
-        FfonElement **arr = getFfonAtId(appRenderer, &appRenderer->currentId, &count);
+        FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId, &count);
         if (arr && count > 0) {
             int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
             if (idx >= 0 && idx < count) {

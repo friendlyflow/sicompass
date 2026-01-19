@@ -42,7 +42,7 @@ void updateState(AppRenderer *appRenderer, Task task, History history) {
             strncpy(line, appRenderer->inputBuffer, MAX_LINE_LENGTH - 1);
         } else {
             int count;
-            FfonElement **arr = getFfonAtId(appRenderer, &appRenderer->currentId, &count);
+            FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId, &count);
             if (arr && count > 0) {
                 int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
                 if (idx >= 0 && idx < count) {
@@ -73,7 +73,7 @@ void updateIds(AppRenderer *appRenderer, bool isKey, Task task, History history)
         return;
     }
 
-    int maxId = getMaxIdInCurrent(appRenderer);
+    int maxId = getFfonMaxIdAtPath(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId);
     int currentIdx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
 
     switch (task) {
@@ -96,7 +96,7 @@ void updateIds(AppRenderer *appRenderer, bool isKey, Task task, History history)
             break;
 
         case TASK_L_ARROW_RIGHT:
-            if (nextLayerExists(appRenderer)) {
+            if (nextFfonLayerExists(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->previousId)) {
                 idArrayPush(&appRenderer->currentId, 0);
             }
             break;
@@ -107,7 +107,7 @@ void updateIds(AppRenderer *appRenderer, bool isKey, Task task, History history)
                 if (!isKey) {
                     appRenderer->currentId.ids[appRenderer->currentId.depth - 1]++;
                 } else {
-                    if (nextLayerExists(appRenderer)) {
+                    if (nextFfonLayerExists(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->previousId)) {
                         appRenderer->currentId.ids[appRenderer->currentId.depth - 1]++;
                     } else {
                         idArrayPush(&appRenderer->currentId, 0);
@@ -448,7 +448,7 @@ void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task tas
 
                     char *strippedKey = stripTrailingColon(line);
                     FfonElement *newElem;
-                    if (nextLayerExists(appRenderer)) {
+                    if (nextFfonLayerExists(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->previousId)) {
                         newElem = ffonElementCreateObject(strippedKey);
                         // Copy existing values if they exist
                         if (prevIdx >= 0 && prevIdx < _ffon_count && _ffon[prevIdx]->type == FFON_OBJECT) {
