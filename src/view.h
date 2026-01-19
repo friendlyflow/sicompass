@@ -7,7 +7,7 @@
 #include "main.h"
 
 // Constants
-#define MAX_LINE_LENGTH 65536
+#define MAX_LINE_LENGTH 4294967296UL
 #define MAX_FFON_ELEMENTS 10000
 #define UNDO_HISTORY_SIZE 500
 #define DELTA_MS 400
