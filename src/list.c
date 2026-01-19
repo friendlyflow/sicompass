@@ -28,7 +28,7 @@ void createListAuxilaries(AppRenderer *appRenderer) {
     if (appRenderer->currentCoordinate == COORDINATE_LIST) {
         // List all elements in current layer
         int count;
-        FfonElement **arr = getFfonAtId(appRenderer, &appRenderer->currentId, &count);
+        FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId, &count);
         if (!arr) return;
 
         appRenderer->totalListAuxilaries = calloc(count, sizeof(ListItem));

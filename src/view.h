@@ -2,11 +2,11 @@
 
 #include <json-c/json.h>
 #include <accesskit.h>
+#include <ffon.h>
 
 #include "main.h"
 
 // Constants
-#define MAX_ID_DEPTH 32
 #define MAX_LINE_LENGTH 65536
 #define MAX_FFON_ELEMENTS 10000
 #define UNDO_HISTORY_SIZE 500
@@ -71,31 +71,7 @@ typedef enum {
 
 // Forward declarations
 typedef struct SiCompassApplication SiCompassApplication;
-typedef struct FfonElement FfonElement;
-typedef struct FfonObject FfonObject;
 typedef struct CaretState CaretState;
-
-// FFON data structures
-struct FfonElement {
-    enum { FFON_STRING, FFON_OBJECT } type;
-    union {
-        char *string;
-        FfonObject *object;
-    } data;
-};
-
-struct FfonObject {
-    char *key;
-    FfonElement **elements;
-    int count;
-    int capacity;
-};
-
-// ID array structure
-typedef struct {
-    int ids[MAX_ID_DEPTH];
-    int depth;
-} IdArray;
 
 // Undo history entry
 typedef struct {
@@ -201,24 +177,11 @@ void ffonObjectInsertElement(FfonObject *obj, FfonElement *elem, int index);
 bool loadJsonFile(AppRenderer *appRenderer, const char *filename);
 FfonElement* parseJsonValue(json_object *jobj);
 
-// ID array operations
-void idArrayInit(IdArray *arr);
-void idArrayCopy(IdArray *dst, const IdArray *src);
-bool idArrayEqual(const IdArray *a, const IdArray *b);
-void idArrayPush(IdArray *arr, int val);
-int idArrayPop(IdArray *arr);
-char* idArrayToString(const IdArray *arr);
-
 // Navigation and state updates
 void updateState(AppRenderer *appRenderer, Task task, History history);
 void updateIds(AppRenderer *appRenderer, bool isKey, Task task, History history);
 void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task task, History history);
 void updateHistory(AppRenderer *appRenderer, Task task, bool isKey, const char *line, History history);
-
-// Navigation helpers
-bool nextLayerExists(AppRenderer *appRenderer);
-int getMaxIdInCurrent(AppRenderer *appRenderer);
-FfonElement** getFfonAtId(AppRenderer *appRenderer, const IdArray *id, int *outCount);
 
 // Event handling
 void handleKeys(AppRenderer *appRenderer, SDL_Event *event);

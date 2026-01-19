@@ -96,48 +96,6 @@ void appRendererDestroy(AppRenderer *appRenderer) {
     free(appRenderer);
 }
 
-void idArrayInit(IdArray *arr) {
-    arr->depth = 0;
-    memset(arr->ids, 0, sizeof(arr->ids));
-}
-
-void idArrayCopy(IdArray *dst, const IdArray *src) {
-    dst->depth = src->depth;
-    memcpy(dst->ids, src->ids, sizeof(int) * src->depth);
-}
-
-bool idArrayEqual(const IdArray *a, const IdArray *b) {
-    if (a->depth != b->depth) return false;
-    return memcmp(a->ids, b->ids, sizeof(int) * a->depth) == 0;
-}
-
-void idArrayPush(IdArray *arr, int val) {
-    if (arr->depth < MAX_ID_DEPTH) {
-        arr->ids[arr->depth++] = val;
-    }
-}
-
-int idArrayPop(IdArray *arr) {
-    if (arr->depth > 0) {
-        return arr->ids[--arr->depth];
-    }
-    return -1;
-}
-
-char* idArrayToString(const IdArray *arr) {
-    static char buffer[MAX_ID_DEPTH * 16];
-    buffer[0] = '\0';
-
-    for (int i = 0; i < arr->depth; i++) {
-        if (i > 0) strcat(buffer, ",");
-        char num[16];
-        snprintf(num, sizeof(num), "%d", arr->ids[i]);
-        strcat(buffer, num);
-    }
-
-    return buffer;
-}
-
 const char* coordinateToString(Coordinate coord) {
     switch (coord) {
         case COORDINATE_OPERATOR_GENERAL: return "op";
