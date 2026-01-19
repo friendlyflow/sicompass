@@ -37,8 +37,6 @@ r = run_command('glslangValidator', '--quiet', '-V', 'shaders/rectangle.frag', '
 output = r.stdout().strip()
 errortxt = r.stderr().strip()
 
-subdir('src')
-
 if host_machine.system() == 'linux'
   add_project_arguments('-DVK_USE_PLATFORM_XCB_KHR', language: 'c')
 elif host_machine.system() == 'darwin'
@@ -47,8 +45,11 @@ elif host_machine.system() == 'windows'
   add_project_arguments('-DVK_USE_PLATFORM_WIN32_KHR', language: 'c')
 endif
 
+subdir('src')
+
 exe_sc = executable('sicompass', [sources_sc], dependencies: [vulkan_dep, sdl3_dep, m_dep, ft_dep, hb_dep, stb_dep, jsonc_dep, accesskit_dep, cglm_dep],
                     include_directories: [], install : true)
 
-#test('basic', exe)
+subdir('tests')
+
 
