@@ -110,21 +110,21 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
              appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT &&
              appRenderer->currentCoordinate != COORDINATE_OPERATOR_INSERT &&
              appRenderer->currentCoordinate != COORDINATE_OPERATOR_GENERAL) {
-        handleCcp(appRenderer, TASK_CUT);
+        handleCtrlX(appRenderer);
     }
     // Ctrl+C (copy)
     else if (ctrl && !shift && !alt && key == SDLK_C &&
              appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT &&
              appRenderer->currentCoordinate != COORDINATE_OPERATOR_INSERT &&
              appRenderer->currentCoordinate != COORDINATE_OPERATOR_GENERAL) {
-        handleCcp(appRenderer, TASK_COPY);
+        handleCtrlC(appRenderer);
     }
     // Ctrl+V (paste)
     else if (ctrl && !shift && !alt && key == SDLK_V &&
              appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT &&
              appRenderer->currentCoordinate != COORDINATE_OPERATOR_INSERT &&
              appRenderer->currentCoordinate != COORDINATE_OPERATOR_GENERAL) {
-        handleCcp(appRenderer, TASK_PASTE);
+        handleCtrlV(appRenderer);
     }
     // Ctrl+F (find)
     else if (ctrl && !shift && !alt && key == SDLK_F) {

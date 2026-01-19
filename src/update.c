@@ -686,8 +686,8 @@ void handleHistoryAction(AppRenderer *appRenderer, History history) {
     appRenderer->needsRedraw = true;
 }
 
-void handleCcp(AppRenderer *appRenderer, Task task) {
-    printf("handle ccp cut copy paste, previous_id=");
+void handleCtrlX(AppRenderer *appRenderer) {
+    printf("handle cut, previous_id=");
     for (int i = 0; i < appRenderer->previousId.depth; i++) printf("%d ", appRenderer->previousId.ids[i]);
     printf(", current_id=");
     for (int i = 0; i < appRenderer->currentId.depth; i++) printf("%d ", appRenderer->currentId.ids[i]);
@@ -711,71 +711,124 @@ void handleCcp(AppRenderer *appRenderer, Task task) {
     int currentIdx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
     if (currentIdx < 0 || currentIdx >= _ffon_count) return;
 
-    if (task == TASK_PASTE) {
-        if (appRenderer->clipboard) {
-            // Replace element at current position with clipboard content
-            FfonElement *newElem = ffonElementClone(appRenderer->clipboard);
-            if (newElem) {
-                ffonElementDestroy(_ffon[currentIdx]);
-                _ffon[currentIdx] = newElem;
-
-                // Get line for history
-                const char *line = "";
-                if (newElem->type == FFON_STRING) {
-                    line = newElem->data.string;
-                } else if (newElem->type == FFON_OBJECT) {
-                    line = newElem->data.object->key;
-                }
-                updateHistory(appRenderer, TASK_PASTE, false, line, HISTORY_NONE);
-            }
-        }
-        appRenderer->needsRedraw = true;
-        return;
-    }
-
-    // Copy or cut - store in clipboard
+    // Store in clipboard
     FfonElement *elem = _ffon[currentIdx];
 
     if (appRenderer->clipboard) {
         ffonElementDestroy(appRenderer->clipboard);
     }
 
-    if (elem->type == FFON_OBJECT && !nextLayerExists(appRenderer)) {
-        appRenderer->clipboard = ffonElementClone(elem);
+    appRenderer->clipboard = ffonElementClone(elem);
+
+    // Remove element at current position
+    ffonElementDestroy(_ffon[currentIdx]);
+    for (int j = currentIdx; j < _ffon_count - 1; j++) {
+        _ffon[j] = _ffon[j + 1];
+    }
+    _ffon_count--;
+
+    // Update parent count
+    if (parentObj) {
+        parentObj->count = _ffon_count;
     } else {
-        appRenderer->clipboard = ffonElementClone(elem);
+        appRenderer->ffonCount = _ffon_count;
     }
 
-    if (task == TASK_CUT) {
-        // Remove element at current position
+    // Adjust cursor position if needed
+    if (currentIdx > 0) {
+        appRenderer->currentId.ids[appRenderer->currentId.depth - 1]--;
+    }
+
+    // Get line for history from clipboard
+    const char *line = "";
+    if (appRenderer->clipboard) {
+        if (appRenderer->clipboard->type == FFON_STRING) {
+            line = appRenderer->clipboard->data.string;
+        } else if (appRenderer->clipboard->type == FFON_OBJECT) {
+            line = appRenderer->clipboard->data.object->key;
+        }
+    }
+    updateHistory(appRenderer, TASK_CUT, false, line, HISTORY_NONE);
+
+    appRenderer->needsRedraw = true;
+}
+
+void handleCtrlC(AppRenderer *appRenderer) {
+    printf("handle copy, previous_id=");
+    for (int i = 0; i < appRenderer->previousId.depth; i++) printf("%d ", appRenderer->previousId.ids[i]);
+    printf(", current_id=");
+    for (int i = 0; i < appRenderer->currentId.depth; i++) printf("%d ", appRenderer->currentId.ids[i]);
+    printf("\n");
+
+    // Navigate to the parent level using current_id
+    FfonElement **_ffon = appRenderer->ffon;
+    int _ffon_count = appRenderer->ffonCount;
+
+    for (int i = 0; i < appRenderer->currentId.depth - 1; i++) {
+        int idx = appRenderer->currentId.ids[i];
+        if (idx < 0 || idx >= _ffon_count || _ffon[idx]->type != FFON_OBJECT) {
+            return;
+        }
+        FfonObject *obj = _ffon[idx]->data.object;
+        _ffon = obj->elements;
+        _ffon_count = obj->count;
+    }
+
+    int currentIdx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+    if (currentIdx < 0 || currentIdx >= _ffon_count) return;
+
+    // Store in clipboard
+    FfonElement *elem = _ffon[currentIdx];
+
+    if (appRenderer->clipboard) {
+        ffonElementDestroy(appRenderer->clipboard);
+    }
+
+    appRenderer->clipboard = ffonElementClone(elem);
+
+    appRenderer->needsRedraw = true;
+}
+
+void handleCtrlV(AppRenderer *appRenderer) {
+    printf("handle paste, previous_id=");
+    for (int i = 0; i < appRenderer->previousId.depth; i++) printf("%d ", appRenderer->previousId.ids[i]);
+    printf(", current_id=");
+    for (int i = 0; i < appRenderer->currentId.depth; i++) printf("%d ", appRenderer->currentId.ids[i]);
+    printf("\n");
+
+    if (!appRenderer->clipboard) return;
+
+    // Navigate to the parent level using current_id
+    FfonElement **_ffon = appRenderer->ffon;
+    int _ffon_count = appRenderer->ffonCount;
+
+    for (int i = 0; i < appRenderer->currentId.depth - 1; i++) {
+        int idx = appRenderer->currentId.ids[i];
+        if (idx < 0 || idx >= _ffon_count || _ffon[idx]->type != FFON_OBJECT) {
+            return;
+        }
+        FfonObject *obj = _ffon[idx]->data.object;
+        _ffon = obj->elements;
+        _ffon_count = obj->count;
+    }
+
+    int currentIdx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+    if (currentIdx < 0 || currentIdx >= _ffon_count) return;
+
+    // Replace element at current position with clipboard content
+    FfonElement *newElem = ffonElementClone(appRenderer->clipboard);
+    if (newElem) {
         ffonElementDestroy(_ffon[currentIdx]);
-        for (int j = currentIdx; j < _ffon_count - 1; j++) {
-            _ffon[j] = _ffon[j + 1];
-        }
-        _ffon_count--;
+        _ffon[currentIdx] = newElem;
 
-        // Update parent count
-        if (parentObj) {
-            parentObj->count = _ffon_count;
-        } else {
-            appRenderer->ffonCount = _ffon_count;
-        }
-
-        // Adjust cursor position if needed
-        if (currentIdx > 0) {
-            appRenderer->currentId.ids[appRenderer->currentId.depth - 1]--;
-        }
-
-        // Get line for history from clipboard
+        // Get line for history
         const char *line = "";
-        if (appRenderer->clipboard) {
-            if (appRenderer->clipboard->type == FFON_STRING) {
-                line = appRenderer->clipboard->data.string;
-            } else if (appRenderer->clipboard->type == FFON_OBJECT) {
-                line = appRenderer->clipboard->data.object->key;
-            }
+        if (newElem->type == FFON_STRING) {
+            line = newElem->data.string;
+        } else if (newElem->type == FFON_OBJECT) {
+            line = newElem->data.object->key;
         }
-        updateHistory(appRenderer, TASK_CUT, false, line, HISTORY_NONE);
+        updateHistory(appRenderer, TASK_PASTE, false, line, HISTORY_NONE);
     }
 
     appRenderer->needsRedraw = true;
