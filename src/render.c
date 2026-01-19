@@ -282,7 +282,7 @@ void renderLine(SiCompassApplication *app, FfonElement *elem, const IdArray *id,
     float scale = getTextScale(app, FONT_SIZE_PT);
     int lineHeight = (int)getLineHeight(app, scale, TEXT_PADDING);
 
-    if (*yPos < -lineHeight || *yPos > 720) {
+    if (*yPos < -lineHeight || *yPos > (int)app->swapChainExtent.height) {
         // Skip off-screen lines
         *yPos += lineHeight;
         return;

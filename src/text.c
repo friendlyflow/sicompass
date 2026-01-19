@@ -497,7 +497,7 @@ void prepareTextForRendering(SiCompassApplication* app, const char* text,
     colorVec[1] = ((color >> 16) & 0xFF) / 255.0f;
     colorVec[2] = ((color >> 8) & 0xFF) / 255.0f;
 
-    TextVertex vertices[MAX_TEXT_VERTICES];
+    TextVertex vertices[MAX_TEXT_VERTICES_PER_CALL];
     uint32_t vi = 0;
 
     // Clear HarfBuzz buffer and add text
@@ -566,7 +566,7 @@ void prepareTextForRendering(SiCompassApplication* app, const char* text,
         float w = g->size[0] * scale;
         float h = g->size[1] * scale;
 
-        if (vi + 6 > MAX_TEXT_VERTICES) break;
+        if (vi + 6 > MAX_TEXT_VERTICES_PER_CALL) break;
 
         vertices[vi++] = (TextVertex){{xpos, ypos + h, 0.0f}, {g->uvMin[0], g->uvMax[1]}, {colorVec[0], colorVec[1], colorVec[2]}};
         vertices[vi++] = (TextVertex){{xpos, ypos, 0.0f}, {g->uvMin[0], g->uvMin[1]}, {colorVec[0], colorVec[1], colorVec[2]}};
