@@ -45,9 +45,17 @@ elif host_machine.system() == 'windows'
   add_project_arguments('-DVK_USE_PLATFORM_WIN32_KHR', language: 'c')
 endif
 
+subdir('lib/lib_ffon')
+subdir('lib/lib_chatclient')
+subdir('lib/lib_emailclient')
+subdir('lib/lib_filebrowser')
+subdir('lib/lib_friendlystore')
+subdir('lib/lib_notebook')
+subdir('lib/lib_webbrowser')
+
 subdir('src')
 
-exe_sc = executable('sicompass', [sources_sc], dependencies: [vulkan_dep, sdl3_dep, m_dep, ft_dep, hb_dep, stb_dep, jsonc_dep, accesskit_dep, cglm_dep],
+exe_sc = executable('sicompass', [sources_sc], dependencies: [vulkan_dep, sdl3_dep, m_dep, ft_dep, hb_dep, stb_dep, jsonc_dep, accesskit_dep, cglm_dep, lib_ffon_dep, lib_filebrowser_dep],
                     include_directories: [], install : true)
 
 subdir('tests')
