@@ -5,9 +5,11 @@
 #include <ffon.h>
 
 #include "main.h"
+#include "provider.h"
 
 // Constants
 #define MAX_LINE_LENGTH 4096
+#define MAX_URI_LENGTH 4096
 #define MAX_FFON_ELEMENTS 10000
 #define UNDO_HISTORY_SIZE 500
 #define DELTA_MS 400
@@ -141,6 +143,9 @@ typedef struct AppRenderer {
 
     // Error message
     char errorMessage[256];
+
+    // Current URI for provider-based navigation
+    char currentUri[MAX_URI_LENGTH];
 
     // AccessKit accessibility adapter (platform-specific)
 #if defined(__APPLE__)

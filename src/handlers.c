@@ -227,10 +227,14 @@ void handleLeft(AppRenderer *appRenderer) {
             appRenderer->needsRedraw = true;
         }
     } else {
-        updateState(appRenderer, TASK_H_ARROW_LEFT, HISTORY_NONE);
-        // Sync listIndex with current position in hierarchy
-        appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
-        appRenderer->needsRedraw = true;
+        // Use provider for navigation
+        if (providerNavigateLeft(appRenderer)) {
+            // Rebuild list for new location
+            createListCurrentLayer(appRenderer);
+            // Sync listIndex with current position in hierarchy
+            appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+            appRenderer->needsRedraw = true;
+        }
     }
 }
 
@@ -255,9 +259,10 @@ void handleRight(AppRenderer *appRenderer) {
             appRenderer->needsRedraw = true;
         }
     } else {
-        // Only navigate into children if the current element is an object
-        if (nextFfonLayerExists(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId)) {
-            updateState(appRenderer, TASK_L_ARROW_RIGHT, HISTORY_NONE);
+        // Use provider for navigation (fetches children dynamically)
+        if (providerNavigateRight(appRenderer)) {
+            // Rebuild list for new location
+            createListCurrentLayer(appRenderer);
             // When entering a child, start at the first item
             appRenderer->listIndex = 0;
             appRenderer->needsRedraw = true;
