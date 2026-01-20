@@ -171,7 +171,7 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
             if (appRenderer->currentCoordinate == COORDINATE_LIST ||
                 appRenderer->currentCoordinate == COORDINATE_COMMAND ||
                 appRenderer->currentCoordinate == COORDINATE_FIND) {
-                populateListAuxilaries(appRenderer, appRenderer->inputBuffer);
+                populateListCurrentLayer(appRenderer, appRenderer->inputBuffer);
             }
 
             appRenderer->needsRedraw = true;
@@ -199,7 +199,7 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
             if (appRenderer->currentCoordinate == COORDINATE_LIST ||
                 appRenderer->currentCoordinate == COORDINATE_COMMAND ||
                 appRenderer->currentCoordinate == COORDINATE_FIND) {
-                populateListAuxilaries(appRenderer, appRenderer->inputBuffer);
+                populateListCurrentLayer(appRenderer, appRenderer->inputBuffer);
             }
 
             appRenderer->needsRedraw = true;
@@ -244,7 +244,7 @@ void handleInput(AppRenderer *appRenderer, const char *text) {
     if (appRenderer->currentCoordinate == COORDINATE_LIST ||
         appRenderer->currentCoordinate == COORDINATE_COMMAND ||
         appRenderer->currentCoordinate == COORDINATE_FIND) {
-        populateListAuxilaries(appRenderer, appRenderer->inputBuffer);
+        populateListCurrentLayer(appRenderer, appRenderer->inputBuffer);
     }
 
     appRenderer->needsRedraw = true;

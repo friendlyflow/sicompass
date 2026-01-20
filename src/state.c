@@ -88,7 +88,7 @@ void appRendererDestroy(AppRenderer *appRenderer) {
     caretDestroy(appRenderer->caretState);
 
     // Free list items
-    clearListAuxilaries(appRenderer);
+    clearListCurrentLayer(appRenderer);
 
     // Free AccessKit adapter
     accesskitDestroy(appRenderer);

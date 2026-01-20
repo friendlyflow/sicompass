@@ -7,7 +7,7 @@
 #include "main.h"
 
 // Constants
-#define MAX_LINE_LENGTH 4294967296UL
+#define MAX_LINE_LENGTH 4096
 #define MAX_FFON_ELEMENTS 10000
 #define UNDO_HISTORY_SIZE 500
 #define DELTA_MS 400
@@ -110,9 +110,9 @@ typedef struct AppRenderer {
     int scrollOffset;
 
     // Right panel
-    ListItem *totalListAuxilaries;
+    ListItem *totalListCurrentLayer;
     int totalListCount;
-    ListItem *filteredListAuxilaries;
+    ListItem *filteredListCurrentLayer;
     int filteredListCount;
     int listIndex;
 
@@ -208,14 +208,15 @@ void handleEscape(AppRenderer *appRenderer);
 void handleCommand(AppRenderer *appRenderer);
 
 // Right panel
-void createListAuxilaries(AppRenderer *appRenderer);
-void populateListAuxilaries(AppRenderer *appRenderer, const char *searchString);
-void clearListAuxilaries(AppRenderer *appRenderer);
+void createListCurrentLayer(AppRenderer *appRenderer);
+void populateListCurrentLayer(AppRenderer *appRenderer, const char *searchString);
+void clearListCurrentLayer(AppRenderer *appRenderer);
 
 // Rendering
 void updateView(SiCompassApplication *app);
-void renderAuxiliaries(SiCompassApplication *app);
-void renderHierarchy(SiCompassApplication *app);
+void renderSimpleSearch(SiCompassApplication *app);
+// void renderHierarchy(SiCompassApplication *app);
+void renderInteraction(SiCompassApplication *app);
 void renderLine(SiCompassApplication *app, FfonElement *elem, const IdArray *id, int indent, int *yPos);
 int renderText(SiCompassApplication *app, const char *text, int x, int y, uint32_t color, bool highlight);
 
