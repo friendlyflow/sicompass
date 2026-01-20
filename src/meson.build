@@ -1,1 +1,1 @@
-sources_sc = files('main.c', 'view.c', 'text.c', 'rectangle.c', 'image.c', 'state.c', 'handlers.c', 'list.c', 'render.c', 'update.c', 'events.c', 'caret.c')
+sources_sc = files('main.c', 'view.c', 'text.c', 'rectangle.c', 'image.c', 'state.c', 'handlers.c', 'list.c', 'render.c', 'update.c', 'events.c', 'caret.c', 'provider.c')

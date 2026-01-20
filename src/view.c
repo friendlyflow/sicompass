@@ -1,4 +1,13 @@
 #include "view.h"
+#include <filebrowser.h>
+#include <string.h>
+
+// Filebrowser provider callback
+static FfonElement** filebrowserFetchCallback(AppRenderer *appRenderer, const char *parent_key, int *out_count) {
+    (void)parent_key;  // We use currentUri instead
+    // currentUri already has the full path built by providerUriAppend
+    return filebrowserListDirectory(appRenderer->currentUri, false, out_count);
+}
 
 void mainLoop(SiCompassApplication* app) {
     // Initialize app renderer
@@ -8,12 +17,16 @@ void mainLoop(SiCompassApplication* app) {
         return;
     }
 
-    // Load JSON file
-    const char *jsonFile = "src/json/sf.json";
-    int count;
-    FfonElement **elements = loadJsonFileToElements(jsonFile, &count);
-    if (!elements) {
-        fprintf(stderr, "Failed to load JSON file: %s\n", jsonFile);
+    // Set up filebrowser provider
+    providerSetFetchCallback(filebrowserFetchCallback);
+
+    // Initialize URI to root and load initial directory listing
+    strncpy(app->appRenderer->currentUri, "/", MAX_URI_LENGTH);
+    int count = 0;
+    FfonElement **elements = filebrowserListDirectory("/", false, &count);
+    if (!elements || count == 0) {
+        fprintf(stderr, "Failed to load directory listing for /\n");
+        if (elements) free(elements);
         appRendererDestroy(app->appRenderer);
         return;
     }
@@ -26,7 +39,7 @@ void mainLoop(SiCompassApplication* app) {
     // Initialize current_id
     idArrayInit(&app->appRenderer->currentId);
     idArrayPush(&app->appRenderer->currentId, 0);
-    
+
     // Set initial coordinate
     app->appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
     app->appRenderer->previousCoordinate = COORDINATE_OPERATOR_GENERAL;
