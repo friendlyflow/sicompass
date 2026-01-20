@@ -25,7 +25,7 @@ void clearListCurrentLayer(AppRenderer *appRenderer) {
 void createListCurrentLayer(AppRenderer *appRenderer) {
     clearListCurrentLayer(appRenderer);
 
-    if (appRenderer->currentCoordinate == COORDINATE_LIST ||
+    if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
         appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL ||
         appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
         appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL ||
