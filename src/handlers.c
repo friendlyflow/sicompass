@@ -105,6 +105,9 @@ void handleEnter(AppRenderer *appRenderer, History history) {
             idArrayCopy(&appRenderer->currentId, &list[appRenderer->listIndex].id);
         }
         appRenderer->currentCoordinate = appRenderer->previousCoordinate;
+        createListCurrentLayer(appRenderer);
+        // Sync listIndex with current position (after createListCurrentLayer which resets it)
+        appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
         appRenderer->needsRedraw = true;
     } else if (appRenderer->currentCoordinate == COORDINATE_COMMAND) {
         // Execute selected command
