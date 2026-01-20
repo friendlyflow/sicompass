@@ -104,9 +104,9 @@ const char* coordinateToString(Coordinate coord) {
         case COORDINATE_EDITOR_INSERT: return "edit i";
         case COORDINATE_EDITOR_NORMAL: return "edit n";
         case COORDINATE_EDITOR_VISUAL: return "edit v";
-        case COORDINATE_LIST: return "list";
+        case COORDINATE_SIMPLE_SEARCH: return "search";
         case COORDINATE_COMMAND: return "command";
-        case COORDINATE_FIND: return "find";
+        case COORDINATE_EXTENDED_SEARCH: return "ext search";
         default: return "unknown";
     }
 }

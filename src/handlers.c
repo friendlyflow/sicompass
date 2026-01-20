@@ -65,7 +65,7 @@ static int utf8_move_forward(const char *str, int cursorPos, int bufferSize) {
 
 void handleTab(AppRenderer *appRenderer) {
     appRenderer->previousCoordinate = appRenderer->currentCoordinate;
-    appRenderer->currentCoordinate = COORDINATE_LIST;
+    appRenderer->currentCoordinate = COORDINATE_SIMPLE_SEARCH;
 
     // Clear input buffer for searching
     appRenderer->inputBuffer[0] = '\0';
@@ -94,7 +94,7 @@ void handleCtrlA(AppRenderer *appRenderer, History history) {
 void handleEnter(AppRenderer *appRenderer, History history) {
     uint64_t now = SDL_GetTicks();
 
-    if (appRenderer->currentCoordinate == COORDINATE_LIST) {
+    if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH) {
         // Get selected item from list
         ListItem *list = appRenderer->filteredListCount > 0 ?
                          appRenderer->filteredListCurrentLayer : appRenderer->totalListCurrentLayer;
@@ -170,9 +170,9 @@ void handleColon(AppRenderer *appRenderer) {
 }
 
 void handleUp(AppRenderer *appRenderer) {
-    if (appRenderer->currentCoordinate == COORDINATE_LIST ||
+    if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
         appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-        appRenderer->currentCoordinate == COORDINATE_FIND) {
+        appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
         if (appRenderer->listIndex > 0) {
             appRenderer->listIndex--;
         }
@@ -183,9 +183,9 @@ void handleUp(AppRenderer *appRenderer) {
 }
 
 void handleDown(AppRenderer *appRenderer) {
-    if (appRenderer->currentCoordinate == COORDINATE_LIST ||
+    if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
         appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-        appRenderer->currentCoordinate == COORDINATE_FIND) {
+        appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
         int maxIndex = (appRenderer->filteredListCount > 0) ?
                         appRenderer->filteredListCount - 1 :
                         appRenderer->totalListCount - 1;
@@ -201,9 +201,9 @@ void handleDown(AppRenderer *appRenderer) {
 void handleLeft(AppRenderer *appRenderer) {
     if (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
         appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
-        appRenderer->currentCoordinate == COORDINATE_LIST ||
+        appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
         appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-        appRenderer->currentCoordinate == COORDINATE_FIND) {
+        appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
         if (appRenderer->cursorPosition > 0) {
             // Move backward by one UTF-8 character
             appRenderer->cursorPosition = utf8_move_backward(
@@ -226,9 +226,9 @@ void handleLeft(AppRenderer *appRenderer) {
 void handleRight(AppRenderer *appRenderer) {
     if (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
         appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
-        appRenderer->currentCoordinate == COORDINATE_LIST ||
+        appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
         appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-        appRenderer->currentCoordinate == COORDINATE_FIND) {
+        appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
         if (appRenderer->cursorPosition < appRenderer->inputBufferSize) {
             // Move forward by one UTF-8 character
             appRenderer->cursorPosition = utf8_move_forward(
@@ -322,10 +322,10 @@ void handleA(AppRenderer *appRenderer) {
 }
 
 void handleFind(AppRenderer *appRenderer) {
-    if (appRenderer->currentCoordinate != COORDINATE_LIST &&
+    if (appRenderer->currentCoordinate != COORDINATE_SIMPLE_SEARCH &&
         appRenderer->currentCoordinate != COORDINATE_COMMAND) {
         appRenderer->previousCoordinate = appRenderer->currentCoordinate;
-        appRenderer->currentCoordinate = COORDINATE_FIND;
+        appRenderer->currentCoordinate = COORDINATE_EXTENDED_SEARCH;
 
         // Clear input buffer for searching
         appRenderer->inputBuffer[0] = '\0';

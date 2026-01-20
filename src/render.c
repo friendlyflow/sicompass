@@ -483,18 +483,18 @@ void updateView(SiCompassApplication *app) {
     }
 
     // Render appropriate panel
-    if (app->appRenderer->currentCoordinate == COORDINATE_LIST ||
+    if (app->appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
         app->appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-        app->appRenderer->currentCoordinate == COORDINATE_FIND) {
+        app->appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
         renderSimpleSearch(app);
     } else {
         renderInteraction(app);
     }
 
     // Render caret for all modes at end of frame
-    if (app->appRenderer->currentCoordinate == COORDINATE_LIST ||
+    if (app->appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
         app->appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-        app->appRenderer->currentCoordinate == COORDINATE_FIND) {
+        app->appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
         // Caret in search field
         int searchTextYPos = lineHeight * 2;
 

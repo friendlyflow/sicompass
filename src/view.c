@@ -52,9 +52,9 @@ void mainLoop(SiCompassApplication* app) {
                     // Enable/disable text input based on current mode
                     if (app->appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
                         app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
-                        app->appRenderer->currentCoordinate == COORDINATE_LIST ||
+                        app->appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
                         app->appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-                        app->appRenderer->currentCoordinate == COORDINATE_FIND) {
+                        app->appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
                         SDL_StartTextInput(app->window);
                     } else {
                         SDL_StopTextInput(app->window);
@@ -64,9 +64,9 @@ void mainLoop(SiCompassApplication* app) {
                 case SDL_EVENT_TEXT_INPUT:
                     if (app->appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
                         app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
-                        app->appRenderer->currentCoordinate == COORDINATE_LIST ||
+                        app->appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
                         app->appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-                        app->appRenderer->currentCoordinate == COORDINATE_FIND) {
+                        app->appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
                         handleInput(app->appRenderer, event.text.text);
                     }
                     break;
@@ -87,9 +87,9 @@ void mainLoop(SiCompassApplication* app) {
         // Caret blinking requires continuous redraw
         if (app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
             app->appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
-            app->appRenderer->currentCoordinate == COORDINATE_LIST ||
+            app->appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
             app->appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-            app->appRenderer->currentCoordinate == COORDINATE_FIND) {
+            app->appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
             app->appRenderer->needsRedraw = true;
         }
 

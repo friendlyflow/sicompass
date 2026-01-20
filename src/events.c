@@ -152,9 +152,9 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
     else if (!ctrl && !shift && !alt && key == SDLK_BACKSPACE &&
              (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
               appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
-              appRenderer->currentCoordinate == COORDINATE_LIST ||
+              appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
               appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-              appRenderer->currentCoordinate == COORDINATE_FIND)) {
+              appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH)) {
         if (appRenderer->inputBufferSize > 0 && appRenderer->cursorPosition > 0) {
             // Delete character before cursor
             memmove(&appRenderer->inputBuffer[appRenderer->cursorPosition - 1],
@@ -168,9 +168,9 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
             caretReset(appRenderer->caretState, currentTime);
 
             // Update search when backspacing in right panel modes
-            if (appRenderer->currentCoordinate == COORDINATE_LIST ||
+            if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
                 appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-                appRenderer->currentCoordinate == COORDINATE_FIND) {
+                appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
                 populateListCurrentLayer(appRenderer, appRenderer->inputBuffer);
             }
 
@@ -181,9 +181,9 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
     else if (!ctrl && !shift && !alt && key == SDLK_DELETE &&
              (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
               appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
-              appRenderer->currentCoordinate == COORDINATE_LIST ||
+              appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
               appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-              appRenderer->currentCoordinate == COORDINATE_FIND)) {
+              appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH)) {
         if (appRenderer->cursorPosition < appRenderer->inputBufferSize) {
             // Delete character at cursor
             memmove(&appRenderer->inputBuffer[appRenderer->cursorPosition],
@@ -196,9 +196,9 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
             caretReset(appRenderer->caretState, currentTime);
 
             // Update search when deleting in right panel modes
-            if (appRenderer->currentCoordinate == COORDINATE_LIST ||
+            if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
                 appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-                appRenderer->currentCoordinate == COORDINATE_FIND) {
+                appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
                 populateListCurrentLayer(appRenderer, appRenderer->inputBuffer);
             }
 
@@ -241,9 +241,9 @@ void handleInput(AppRenderer *appRenderer, const char *text) {
     caretReset(appRenderer->caretState, currentTime);
 
     // Search the list when in right panel modes
-    if (appRenderer->currentCoordinate == COORDINATE_LIST ||
+    if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
         appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-        appRenderer->currentCoordinate == COORDINATE_FIND) {
+        appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
         populateListCurrentLayer(appRenderer, appRenderer->inputBuffer);
     }
 
