@@ -2,6 +2,9 @@ project('sicompass', 'c',
   version : '0.1',
   default_options : ['warning_level=3'])
 
+add_project_arguments('-fsanitize=address', language: 'c')
+add_project_link_arguments('-fsanitize=address', language: 'c')
+
 vulkan_dep = dependency('vulkan')
 sdl3_dep = dependency('sdl3')
 stb_dep = dependency('stb')

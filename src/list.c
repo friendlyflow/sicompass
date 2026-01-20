@@ -2,37 +2,42 @@
 #include <stdlib.h>
 #include <string.h>
 
-void clearListAuxilaries(AppRenderer *appRenderer) {
-    if (appRenderer->totalListAuxilaries) {
+void clearListCurrentLayer(AppRenderer *appRenderer) {
+    if (appRenderer->totalListCurrentLayer) {
         for (int i = 0; i < appRenderer->totalListCount; i++) {
-            free(appRenderer->totalListAuxilaries[i].value);
+            free(appRenderer->totalListCurrentLayer[i].value);
         }
-        free(appRenderer->totalListAuxilaries);
-        appRenderer->totalListAuxilaries = NULL;
+        free(appRenderer->totalListCurrentLayer);
+        appRenderer->totalListCurrentLayer = NULL;
         appRenderer->totalListCount = 0;
     }
 
-    if (appRenderer->filteredListAuxilaries) {
-        // Don't free values, they're shared with totalListAuxilaries
-        free(appRenderer->filteredListAuxilaries);
-        appRenderer->filteredListAuxilaries = NULL;
+    if (appRenderer->filteredListCurrentLayer) {
+        // Don't free values, they're shared with totalListCurrentLayer
+        free(appRenderer->filteredListCurrentLayer);
+        appRenderer->filteredListCurrentLayer = NULL;
         appRenderer->filteredListCount = 0;
     }
 
     appRenderer->listIndex = 0;
 }
 
-void createListAuxilaries(AppRenderer *appRenderer) {
-    clearListAuxilaries(appRenderer);
+void createListCurrentLayer(AppRenderer *appRenderer) {
+    clearListCurrentLayer(appRenderer);
 
-    if (appRenderer->currentCoordinate == COORDINATE_LIST) {
+    if (appRenderer->currentCoordinate == COORDINATE_LIST ||
+        appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL ||
+        appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
+        appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL ||
+        appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT
+    ) {
         // List all elements in current layer
         int count;
         FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId, &count);
         if (!arr) return;
 
-        appRenderer->totalListAuxilaries = calloc(count, sizeof(ListItem));
-        if (!appRenderer->totalListAuxilaries) return;
+        appRenderer->totalListCurrentLayer = calloc(count, sizeof(ListItem));
+        if (!appRenderer->totalListCurrentLayer) return;
 
         IdArray thisId;
         idArrayCopy(&thisId, &appRenderer->currentId);
@@ -41,13 +46,13 @@ void createListAuxilaries(AppRenderer *appRenderer) {
         for (int i = 0; i < count; i++) {
             FfonElement *elem = arr[i];
 
-            idArrayCopy(&appRenderer->totalListAuxilaries[appRenderer->totalListCount].id, &thisId);
+            idArrayCopy(&appRenderer->totalListCurrentLayer[appRenderer->totalListCount].id, &thisId);
 
             if (elem->type == FFON_STRING) {
-                appRenderer->totalListAuxilaries[appRenderer->totalListCount].value =
+                appRenderer->totalListCurrentLayer[appRenderer->totalListCount].value =
                     strdup(elem->data.string);
             } else {
-                appRenderer->totalListAuxilaries[appRenderer->totalListCount].value =
+                appRenderer->totalListCurrentLayer[appRenderer->totalListCount].value =
                     strdup(elem->data.object->key);
             }
 
@@ -63,46 +68,46 @@ void createListAuxilaries(AppRenderer *appRenderer) {
         };
         int numCommands = sizeof(commands) / sizeof(commands[0]);
 
-        appRenderer->totalListAuxilaries = calloc(numCommands, sizeof(ListItem));
-        if (!appRenderer->totalListAuxilaries) return;
+        appRenderer->totalListCurrentLayer = calloc(numCommands, sizeof(ListItem));
+        if (!appRenderer->totalListCurrentLayer) return;
 
         for (int i = 0; i < numCommands; i++) {
-            appRenderer->totalListAuxilaries[i].id.depth = 1;
-            appRenderer->totalListAuxilaries[i].id.ids[0] = i;
-            appRenderer->totalListAuxilaries[i].value = strdup(commands[i]);
+            appRenderer->totalListCurrentLayer[i].id.depth = 1;
+            appRenderer->totalListCurrentLayer[i].id.ids[0] = i;
+            appRenderer->totalListCurrentLayer[i].value = strdup(commands[i]);
             appRenderer->totalListCount++;
         }
     }
 }
 
-void populateListAuxilaries(AppRenderer *appRenderer, const char *searchString) {
+void populateListCurrentLayer(AppRenderer *appRenderer, const char *searchString) {
     if (!searchString || strlen(searchString) == 0) {
         // No search, use all items
-        if (appRenderer->filteredListAuxilaries) {
-            free(appRenderer->filteredListAuxilaries);
+        if (appRenderer->filteredListCurrentLayer) {
+            free(appRenderer->filteredListCurrentLayer);
         }
-        appRenderer->filteredListAuxilaries = NULL;
+        appRenderer->filteredListCurrentLayer = NULL;
         appRenderer->filteredListCount = 0;
         appRenderer->listIndex = 0;
         return;
     }
 
     // Simple substring search
-    if (appRenderer->filteredListAuxilaries) {
-        free(appRenderer->filteredListAuxilaries);
+    if (appRenderer->filteredListCurrentLayer) {
+        free(appRenderer->filteredListCurrentLayer);
     }
 
-    appRenderer->filteredListAuxilaries = calloc(appRenderer->totalListCount, sizeof(ListItem));
-    if (!appRenderer->filteredListAuxilaries) return;
+    appRenderer->filteredListCurrentLayer = calloc(appRenderer->totalListCount, sizeof(ListItem));
+    if (!appRenderer->filteredListCurrentLayer) return;
 
     appRenderer->filteredListCount = 0;
 
     for (int i = 0; i < appRenderer->totalListCount; i++) {
-        if (strstr(appRenderer->totalListAuxilaries[i].value, searchString) != NULL) {
-            idArrayCopy(&appRenderer->filteredListAuxilaries[appRenderer->filteredListCount].id,
-                         &appRenderer->totalListAuxilaries[i].id);
-            appRenderer->filteredListAuxilaries[appRenderer->filteredListCount].value =
-                appRenderer->totalListAuxilaries[i].value; // Share pointer
+        if (strstr(appRenderer->totalListCurrentLayer[i].value, searchString) != NULL) {
+            idArrayCopy(&appRenderer->filteredListCurrentLayer[appRenderer->filteredListCount].id,
+                         &appRenderer->totalListCurrentLayer[i].id);
+            appRenderer->filteredListCurrentLayer[appRenderer->filteredListCount].value =
+                appRenderer->totalListCurrentLayer[i].value; // Share pointer
             appRenderer->filteredListCount++;
         }
     }

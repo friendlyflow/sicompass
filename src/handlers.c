@@ -72,7 +72,7 @@ void handleTab(AppRenderer *appRenderer) {
     appRenderer->inputBufferSize = 0;
     appRenderer->cursorPosition = 0;
 
-    createListAuxilaries(appRenderer);
+    createListCurrentLayer(appRenderer);
     appRenderer->needsRedraw = true;
 }
 
@@ -97,7 +97,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
     if (appRenderer->currentCoordinate == COORDINATE_LIST) {
         // Get selected item from list
         ListItem *list = appRenderer->filteredListCount > 0 ?
-                         appRenderer->filteredListAuxilaries : appRenderer->totalListAuxilaries;
+                         appRenderer->filteredListCurrentLayer : appRenderer->totalListCurrentLayer;
         int count = appRenderer->filteredListCount > 0 ?
                     appRenderer->filteredListCount : appRenderer->totalListCount;
 
@@ -109,7 +109,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
     } else if (appRenderer->currentCoordinate == COORDINATE_COMMAND) {
         // Execute selected command
         ListItem *list = appRenderer->filteredListCount > 0 ?
-                         appRenderer->filteredListAuxilaries : appRenderer->totalListAuxilaries;
+                         appRenderer->filteredListCurrentLayer : appRenderer->totalListCurrentLayer;
         int count = appRenderer->filteredListCount > 0 ?
                     appRenderer->filteredListCount : appRenderer->totalListCount;
 
@@ -165,7 +165,7 @@ void handleColon(AppRenderer *appRenderer) {
     appRenderer->inputBufferSize = 0;
     appRenderer->cursorPosition = 0;
 
-    createListAuxilaries(appRenderer);
+    createListCurrentLayer(appRenderer);
     appRenderer->needsRedraw = true;
 }
 

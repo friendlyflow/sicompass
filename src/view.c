@@ -30,7 +30,10 @@ void mainLoop(SiCompassApplication* app) {
     // Set initial coordinate
     app->appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
     app->appRenderer->previousCoordinate = COORDINATE_OPERATOR_GENERAL;
-    
+
+    // Initialize list for initial coordinate
+    createListCurrentLayer(app->appRenderer);
+
     // Initial render
     app->appRenderer->needsRedraw = true;
     updateView(app);

@@ -357,37 +357,67 @@ void renderLine(SiCompassApplication *app, FfonElement *elem, const IdArray *id,
     }
 }
 
-void renderHierarchy(SiCompassApplication *app) {
+// void renderHierarchy(SiCompassApplication *app) {
+//     float scale = getTextScale(app, FONT_SIZE_PT);
+//     int yPos = 2 * getLineHeight(app, scale, TEXT_PADDING);
+
+//     if (app->appRenderer->ffonCount == 0) {
+//         // When there are no elements, but we're in insert mode, show the input buffer
+//         const char *displayText = "";
+//         if (app->appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+//             app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT) {
+//             displayText = app->appRenderer->inputBuffer;
+
+//             // Store position for caret rendering
+//             app->appRenderer->currentElementX = 50;
+//             app->appRenderer->currentElementY = yPos;
+//             app->appRenderer->currentElementIsObject = false;
+//         }
+//         renderText(app, displayText, 50, yPos, COLOR_TEXT, true);
+//         return;
+//     }
+
+//     IdArray id;
+//     idArrayInit(&id);
+//     idArrayPush(&id, 0);
+
+//     for (int i = 0; i < app->appRenderer->ffonCount; i++) {
+//         id.ids[0] = i;
+//         renderLine(app, app->appRenderer->ffon[i], &id, 0, &yPos);
+//     }
+// }
+
+void renderInteraction(SiCompassApplication *app) {
     float scale = getTextScale(app, FONT_SIZE_PT);
-    int yPos = 2 * getLineHeight(app, scale, TEXT_PADDING);
+    int lineHeight = (int)getLineHeight(app, scale, TEXT_PADDING);
+    int yPos = lineHeight * 2;
 
-    if (app->appRenderer->ffonCount == 0) {
-        // When there are no elements, but we're in insert mode, show the input buffer
-        const char *displayText = "";
-        if (app->appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
-            app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT) {
-            displayText = app->appRenderer->inputBuffer;
+    // Render list items
+    ListItem *list = app->appRenderer->filteredListCount > 0 ?
+                     app->appRenderer->filteredListCurrentLayer : app->appRenderer->totalListCurrentLayer;
+    int count = app->appRenderer->filteredListCount > 0 ?
+                app->appRenderer->filteredListCount : app->appRenderer->totalListCount;
 
-            // Store position for caret rendering
-            app->appRenderer->currentElementX = 50;
-            app->appRenderer->currentElementY = yPos;
-            app->appRenderer->currentElementIsObject = false;
-        }
-        renderText(app, displayText, 50, yPos, COLOR_TEXT, true);
+    if (!list || count == 0) {
         return;
     }
 
-    IdArray id;
-    idArrayInit(&id);
-    idArrayPush(&id, 0);
+    for (int i = 0; i < count; i++) {
+        bool isSelected = (i == app->appRenderer->listIndex);
+        int itemYPos = yPos;
 
-    for (int i = 0; i < app->appRenderer->ffonCount; i++) {
-        id.ids[0] = i;
-        renderLine(app, app->appRenderer->ffon[i], &id, 0, &yPos);
+        // Render radio button indicator
+        const char *indicator = isSelected ? "●" : "○";
+        renderText(app, indicator, 50, itemYPos, COLOR_ORANGE, false);
+
+        // Render text (may be multiple lines)
+        int textLines = renderText(app, list[i].value, 80, itemYPos, COLOR_TEXT, isSelected);
+
+        yPos += lineHeight * textLines;
     }
 }
 
-void renderAuxiliaries(SiCompassApplication *app) {
+void renderSimpleSearch(SiCompassApplication *app) {
     float scale = getTextScale(app, FONT_SIZE_PT);
     int lineHeight = (int)getLineHeight(app, scale, TEXT_PADDING);
     int yPos = lineHeight * 2;
@@ -400,7 +430,7 @@ void renderAuxiliaries(SiCompassApplication *app) {
 
     // Render list items
     ListItem *list = app->appRenderer->filteredListCount > 0 ?
-                     app->appRenderer->filteredListAuxilaries : app->appRenderer->totalListAuxilaries;
+                     app->appRenderer->filteredListCurrentLayer : app->appRenderer->totalListCurrentLayer;
     int count = app->appRenderer->filteredListCount > 0 ?
                 app->appRenderer->filteredListCount : app->appRenderer->totalListCount;
 
@@ -456,9 +486,9 @@ void updateView(SiCompassApplication *app) {
     if (app->appRenderer->currentCoordinate == COORDINATE_LIST ||
         app->appRenderer->currentCoordinate == COORDINATE_COMMAND ||
         app->appRenderer->currentCoordinate == COORDINATE_FIND) {
-        renderAuxiliaries(app);
+        renderSimpleSearch(app);
     } else {
-        renderHierarchy(app);
+        renderInteraction(app);
     }
 
     // Render caret for all modes at end of frame
