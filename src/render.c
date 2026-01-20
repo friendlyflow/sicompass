@@ -390,9 +390,31 @@ void renderLine(SiCompassApplication *app, FfonElement *elem, const IdArray *id,
 void renderInteraction(SiCompassApplication *app) {
     float scale = getTextScale(app, FONT_SIZE_PT);
     int lineHeight = (int)getLineHeight(app, scale, TEXT_PADDING);
+    int charWidth = (int)getWidthEM(app, scale);
     int yPos = lineHeight * 2;
 
-    // Render list items
+    // Render parent element if we're not at root
+    if (app->appRenderer->currentId.depth > 1) {
+        IdArray parentId;
+        idArrayCopy(&parentId, &app->appRenderer->currentId);
+        idArrayPop(&parentId);
+
+        int parentCount;
+        FfonElement **parentArr = getFfonAtId(app->appRenderer->ffon, app->appRenderer->ffonCount, &parentId, &parentCount);
+        if (parentArr && parentCount > 0) {
+            int parentIdx = parentId.ids[parentId.depth - 1];
+            if (parentIdx >= 0 && parentIdx < parentCount) {
+                FfonElement *parentElem = parentArr[parentIdx];
+                const char *parentText = (parentElem->type == FFON_OBJECT) ?
+                    parentElem->data.object->key : parentElem->data.string;
+                renderText(app, parentText, 50, yPos, COLOR_TEXT, false);
+                yPos += lineHeight;
+            }
+        }
+    }
+
+    // Render list items indented by 4 character widths
+    int indent = charWidth * 4;
     ListItem *list = app->appRenderer->filteredListCount > 0 ?
                      app->appRenderer->filteredListCurrentLayer : app->appRenderer->totalListCurrentLayer;
     int count = app->appRenderer->filteredListCount > 0 ?
@@ -408,10 +430,10 @@ void renderInteraction(SiCompassApplication *app) {
 
         // Render radio button indicator
         const char *indicator = isSelected ? "●" : "○";
-        renderText(app, indicator, 50, itemYPos, COLOR_ORANGE, false);
+        renderText(app, indicator, 50 + indent, itemYPos, COLOR_ORANGE, false);
 
         // Render text (may be multiple lines)
-        int textLines = renderText(app, list[i].value, 80, itemYPos, COLOR_TEXT, isSelected);
+        int textLines = renderText(app, list[i].value, 80 + indent, itemYPos, COLOR_TEXT, isSelected);
 
         yPos += lineHeight * textLines;
     }
