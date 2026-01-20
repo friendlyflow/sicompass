@@ -435,6 +435,11 @@ void renderInteraction(SiCompassApplication *app) {
         // Render text (may be multiple lines)
         int textLines = renderText(app, list[i].value, 80 + indent, itemYPos, COLOR_TEXT, isSelected);
 
+        // Speak selected item for accessibility
+        if (isSelected) {
+            accesskitSpeak(app->appRenderer, list[i].value);
+        }
+
         yPos += lineHeight * textLines;
     }
 }
@@ -466,6 +471,11 @@ void renderSimpleSearch(SiCompassApplication *app) {
 
         // Render text (may be multiple lines)
         int textLines = renderText(app, list[i].value, 80, itemYPos, COLOR_TEXT, isSelected);
+
+        // Speak selected item for accessibility
+        if (isSelected) {
+            accesskitSpeak(app->appRenderer, list[i].value);
+        }
 
         yPos += lineHeight * textLines;
     }
