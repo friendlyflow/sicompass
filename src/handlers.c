@@ -176,8 +176,11 @@ void handleUp(AppRenderer *appRenderer) {
         if (appRenderer->listIndex > 0) {
             appRenderer->listIndex--;
         }
-    } else if (appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT) {
+    } else if (appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT &&
+               appRenderer->currentCoordinate != COORDINATE_OPERATOR_INSERT) {
         updateState(appRenderer, TASK_K_ARROW_UP, HISTORY_NONE);
+        // Sync listIndex with current position in hierarchy
+        appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
     }
     appRenderer->needsRedraw = true;
 }
@@ -192,8 +195,11 @@ void handleDown(AppRenderer *appRenderer) {
         if (appRenderer->listIndex < maxIndex) {
             appRenderer->listIndex++;
         }
-    } else if (appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT) {
+    } else if (appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT &&
+               appRenderer->currentCoordinate != COORDINATE_OPERATOR_INSERT) {
         updateState(appRenderer, TASK_J_ARROW_DOWN, HISTORY_NONE);
+        // Sync listIndex with current position in hierarchy
+        appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
     }
     appRenderer->needsRedraw = true;
 }
@@ -219,6 +225,8 @@ void handleLeft(AppRenderer *appRenderer) {
         }
     } else {
         updateState(appRenderer, TASK_H_ARROW_LEFT, HISTORY_NONE);
+        // Sync listIndex with current position in hierarchy
+        appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
         appRenderer->needsRedraw = true;
     }
 }
@@ -244,8 +252,13 @@ void handleRight(AppRenderer *appRenderer) {
             appRenderer->needsRedraw = true;
         }
     } else {
-        updateState(appRenderer, TASK_L_ARROW_RIGHT, HISTORY_NONE);
-        appRenderer->needsRedraw = true;
+        // Only navigate into children if the current element is an object
+        if (nextFfonLayerExists(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId)) {
+            updateState(appRenderer, TASK_L_ARROW_RIGHT, HISTORY_NONE);
+            // When entering a child, start at the first item
+            appRenderer->listIndex = 0;
+            appRenderer->needsRedraw = true;
+        }
     }
 }
 

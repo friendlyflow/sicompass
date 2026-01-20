@@ -64,6 +64,7 @@ void updateState(AppRenderer *appRenderer, Task task, History history) {
     updateIds(appRenderer, isKey, task, history);
     updateFfon(appRenderer, line, isKey, task, history);
     updateHistory(appRenderer, task, isKey, line, history);
+    createListCurrentLayer(appRenderer);
 }
 
 void updateIds(AppRenderer *appRenderer, bool isKey, Task task, History history) {
