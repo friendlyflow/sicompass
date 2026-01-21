@@ -31,12 +31,21 @@ void mainLoop(SiCompassApplication* app) {
         return;
     }
 
-    // Assign to app renderer
-    app->appRenderer->ffon = elements;
-    app->appRenderer->ffonCount = count;
-    app->appRenderer->ffonCapacity = count > 0 ? count : 1;
+    // Create top-level "file browser" object containing the file system
+    FfonElement *fileBrowserElement = ffonElementCreateObject("file browser");
+    FfonObject *fileBrowserObj = fileBrowserElement->data.object;
+    for (int i = 0; i < count; i++) {
+        ffonObjectAddElement(fileBrowserObj, elements[i]);
+    }
+    free(elements);  // Free the array, elements are now owned by fileBrowserObj
 
-    // Initialize current_id
+    // Create root array with just the file browser object
+    app->appRenderer->ffon = malloc(sizeof(FfonElement*));
+    app->appRenderer->ffon[0] = fileBrowserElement;
+    app->appRenderer->ffonCount = 1;
+    app->appRenderer->ffonCapacity = 1;
+
+    // Initialize current_id - start at "file browser" object
     idArrayInit(&app->appRenderer->currentId);
     idArrayPush(&app->appRenderer->currentId, 0);
 

@@ -61,10 +61,6 @@ void providerUriPop(char *uri) {
 }
 
 bool providerNavigateRight(AppRenderer *appRenderer) {
-    if (!g_fetchCallback) {
-        return false;
-    }
-
     // Get current element
     int count;
     FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId, &count);
@@ -82,8 +78,21 @@ bool providerNavigateRight(AppRenderer *appRenderer) {
         return false;
     }
 
+    FfonObject *obj = elem->data.object;
+
+    // If the object already has children loaded, just navigate into it
+    if (obj->count > 0) {
+        idArrayPush(&appRenderer->currentId, 0);
+        return true;
+    }
+
+    // Otherwise, fetch children from the provider
+    if (!g_fetchCallback) {
+        return false;
+    }
+
     // Get the key of the object we're entering
-    const char *key = elem->data.object->key;
+    const char *key = obj->key;
 
     // Update URI before fetching
     providerUriAppend(appRenderer->currentUri, MAX_URI_LENGTH, key);
@@ -99,13 +108,6 @@ bool providerNavigateRight(AppRenderer *appRenderer) {
         if (children) free(children);
         return false;
     }
-
-    // Clear existing children and add new ones
-    FfonObject *obj = elem->data.object;
-    for (int i = 0; i < obj->count; i++) {
-        ffonElementDestroy(obj->elements[i]);
-    }
-    obj->count = 0;
 
     // Add fetched children
     for (int i = 0; i < childCount; i++) {
