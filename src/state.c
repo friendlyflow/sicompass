@@ -98,9 +98,9 @@ void appRendererDestroy(AppRenderer *appRenderer) {
 
 const char* coordinateToString(Coordinate coord) {
     switch (coord) {
-        case COORDINATE_OPERATOR_GENERAL: return "operator";
+        case COORDINATE_OPERATOR_GENERAL: return "operator mode";
         case COORDINATE_OPERATOR_INSERT: return "operator insert";
-        case COORDINATE_EDITOR_GENERAL: return "editor";
+        case COORDINATE_EDITOR_GENERAL: return "editor mode";
         case COORDINATE_EDITOR_INSERT: return "editor insert";
         case COORDINATE_EDITOR_NORMAL: return "editor normal";
         case COORDINATE_EDITOR_VISUAL: return "editor visual";
