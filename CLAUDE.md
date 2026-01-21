@@ -20,3 +20,9 @@ meson setup build
 ```
 
 Do not use `make` - this project uses Meson + Ninja, not CMake or Makefiles.
+
+## Code Style
+
+### Header Files
+
+Always use `#pragma once` as the include guard in header files. Do not use traditional `#ifndef`/`#define`/`#endif` include guards.

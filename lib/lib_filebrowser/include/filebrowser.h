@@ -1,5 +1,4 @@
-#ifndef FILEBROWSER_H
-#define FILEBROWSER_H
+#pragma once
 
 #include <stdbool.h>
 #include <ffon.h>
@@ -16,5 +15,3 @@
  *         Caller is responsible for freeing the returned array and its elements.
  */
 FfonElement** filebrowserListDirectory(const char *uri, bool commands, int *out_count);
-
-#endif /* FILEBROWSER_H */

@@ -1,4 +1,1 @@
-#ifndef FRIENDLYSTORE_H
-#define FRIENDLYSTORE_H
-
-#endif /* FRIENDLYSTORE_H */
+#pragma once
