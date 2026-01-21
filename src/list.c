@@ -49,11 +49,15 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
             idArrayCopy(&appRenderer->totalListCurrentLayer[appRenderer->totalListCount].id, &thisId);
 
             if (elem->type == FFON_STRING) {
+                char prefixed[MAX_LINE_LENGTH];
+                snprintf(prefixed, sizeof(prefixed), "s %s", elem->data.string);
                 appRenderer->totalListCurrentLayer[appRenderer->totalListCount].value =
-                    strdup(elem->data.string);
+                    strdup(prefixed);
             } else {
+                char prefixed[MAX_LINE_LENGTH];
+                snprintf(prefixed, sizeof(prefixed), "o %s", elem->data.object->key);
                 appRenderer->totalListCurrentLayer[appRenderer->totalListCount].value =
-                    strdup(elem->data.object->key);
+                    strdup(prefixed);
             }
 
             appRenderer->totalListCount++;
