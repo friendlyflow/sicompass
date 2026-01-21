@@ -98,14 +98,14 @@ void appRendererDestroy(AppRenderer *appRenderer) {
 
 const char* coordinateToString(Coordinate coord) {
     switch (coord) {
-        case COORDINATE_OPERATOR_GENERAL: return "op";
-        case COORDINATE_OPERATOR_INSERT: return "op i";
-        case COORDINATE_EDITOR_GENERAL: return "edit";
-        case COORDINATE_EDITOR_INSERT: return "edit i";
-        case COORDINATE_EDITOR_NORMAL: return "edit n";
-        case COORDINATE_EDITOR_VISUAL: return "edit v";
+        case COORDINATE_OPERATOR_GENERAL: return "operator";
+        case COORDINATE_OPERATOR_INSERT: return "operator insert";
+        case COORDINATE_EDITOR_GENERAL: return "editor";
+        case COORDINATE_EDITOR_INSERT: return "editor insert";
+        case COORDINATE_EDITOR_NORMAL: return "editor normal";
+        case COORDINATE_EDITOR_VISUAL: return "editor visual";
         case COORDINATE_SIMPLE_SEARCH: return "search";
-        case COORDINATE_COMMAND: return "command";
+        case COORDINATE_COMMAND: return "run command";
         case COORDINATE_EXTENDED_SEARCH: return "ext search";
         default: return "unknown";
     }
