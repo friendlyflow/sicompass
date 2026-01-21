@@ -390,7 +390,12 @@ void renderLine(SiCompassApplication *app, FfonElement *elem, const IdArray *id,
 void renderInteraction(SiCompassApplication *app) {
     float scale = getTextScale(app, FONT_SIZE_PT);
     int lineHeight = (int)getLineHeight(app, scale, TEXT_PADDING);
-    int charWidth = (int)getWidthEM(app, scale);
+
+    // Calculate indent as the actual width of 4 spaces using text bounds
+    float minX, minY, maxX, maxY;
+    calculateTextBounds(app, "    ", 0.0f, 0.0f, scale, &minX, &minY, &maxX, &maxY);
+    int indent = (int)(maxX - minX);
+
     int yPos = lineHeight * 2;
 
     // Render parent element if we're not at root
@@ -413,8 +418,6 @@ void renderInteraction(SiCompassApplication *app) {
         }
     }
 
-    // Render list items indented by 4 character widths
-    int indent = charWidth * 4;
     ListItem *list = app->appRenderer->filteredListCount > 0 ?
                      app->appRenderer->filteredListCurrentLayer : app->appRenderer->totalListCurrentLayer;
     int count = app->appRenderer->filteredListCount > 0 ?
@@ -429,11 +432,11 @@ void renderInteraction(SiCompassApplication *app) {
         int itemYPos = yPos;
 
         // Render radio button indicator
-        const char *indicator = isSelected ? "●" : "○";
-        renderText(app, indicator, 50 + indent, itemYPos, COLOR_ORANGE, false);
+        // const char *indicator = isSelected ? "●" : "○";
+        // renderText(app, indicator, 50 + indent, itemYPos, COLOR_ORANGE, false);
 
         // Render text (may be multiple lines)
-        int textLines = renderText(app, list[i].value, 80 + indent, itemYPos, COLOR_TEXT, isSelected);
+        int textLines = renderText(app, list[i].value, 50 + indent, itemYPos, COLOR_TEXT, isSelected);
 
         // Speak selected item for accessibility
         if (isSelected) {
@@ -447,6 +450,12 @@ void renderInteraction(SiCompassApplication *app) {
 void renderSimpleSearch(SiCompassApplication *app) {
     float scale = getTextScale(app, FONT_SIZE_PT);
     int lineHeight = (int)getLineHeight(app, scale, TEXT_PADDING);
+
+    // Calculate indent as the actual width of 4 spaces using text bounds
+    float minX, minY, maxX, maxY;
+    calculateTextBounds(app, "    ", 0.0f, 0.0f, scale, &minX, &minY, &maxX, &maxY);
+    int indent = (int)(maxX - minX);
+
     int yPos = lineHeight * 2;
 
     // Render search input
@@ -455,7 +464,6 @@ void renderSimpleSearch(SiCompassApplication *app) {
     int linesRendered = renderText(app, searchText, 50, yPos, COLOR_TEXT, false);
     yPos += lineHeight * linesRendered;
 
-    // Render list items
     ListItem *list = app->appRenderer->filteredListCount > 0 ?
                      app->appRenderer->filteredListCurrentLayer : app->appRenderer->totalListCurrentLayer;
     int count = app->appRenderer->filteredListCount > 0 ?
@@ -466,11 +474,11 @@ void renderSimpleSearch(SiCompassApplication *app) {
         int itemYPos = yPos;
 
         // Render radio button indicator
-        const char *indicator = isSelected ? "●" : "○";
-        renderText(app, indicator, 50, itemYPos, COLOR_ORANGE, false);
+        // const char *indicator = isSelected ? "●" : "○";
+        // renderText(app, indicator, 50 + indent, itemYPos, COLOR_ORANGE, false);
 
         // Render text (may be multiple lines)
-        int textLines = renderText(app, list[i].value, 80, itemYPos, COLOR_TEXT, isSelected);
+        int textLines = renderText(app, list[i].value, 50 + indent, itemYPos, COLOR_TEXT, isSelected);
 
         // Speak selected item for accessibility
         if (isSelected) {
