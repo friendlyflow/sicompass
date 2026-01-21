@@ -1,5 +1,4 @@
-#ifndef PROVIDER_H
-#define PROVIDER_H
+#pragma once
 
 #include <stdbool.h>
 #include <ffon.h>
@@ -27,5 +26,3 @@ bool providerNavigateLeft(AppRenderer *appRenderer);
 // URI helpers
 void providerUriAppend(char *uri, int max_len, const char *segment);
 void providerUriPop(char *uri);
-
-#endif /* PROVIDER_H */

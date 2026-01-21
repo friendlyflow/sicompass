@@ -1,5 +1,4 @@
-#ifndef FFON_H
-#define FFON_H
+#pragma once
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -73,5 +72,3 @@ char* idArrayToString(const IdArray *arr);
 FfonElement** getFfonAtId(FfonElement **ffon, int ffonCount, const IdArray *id, int *outCount);
 bool nextFfonLayerExists(FfonElement **ffon, int ffonCount, const IdArray *id);
 int getFfonMaxIdAtPath(FfonElement **ffon, int ffonCount, const IdArray *id);
-
-#endif /* FFON_H */
