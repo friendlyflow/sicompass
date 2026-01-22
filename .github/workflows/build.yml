@@ -55,7 +55,13 @@ jobs:
 
       - name: Install pkg-config
         run: |
-          choco install pkgconf -y
+          # Download pkgconf from GitHub releases
+          Invoke-WebRequest -Uri "https://github.com/pkgconf/pkgconf/releases/download/pkgconf-2.3.0/pkgconf-2.3.0-x86_64-w64-mingw32.zip" -OutFile pkgconf.zip
+          Expand-Archive -Path pkgconf.zip -DestinationPath pkgconf
+          # Add to PATH and create pkg-config alias
+          $pkgconfBin = "$env:GITHUB_WORKSPACE\pkgconf\pkgconf-2.3.0-x86_64-w64-mingw32\bin"
+          echo "$pkgconfBin" >> $env:GITHUB_PATH
+          Copy-Item "$pkgconfBin\pkgconf.exe" "$pkgconfBin\pkg-config.exe"
 
       - name: Install vcpkg dependencies
         run: |
