@@ -113,7 +113,11 @@ char* platformGetHomeDir(void) {
         return NULL;
     }
 
+#if defined(PLATFORM_WINDOWS)
+    return _strdup(home);
+#else
     return strdup(home);
+#endif
 }
 
 const char* platformGetPathSeparator(void) {
