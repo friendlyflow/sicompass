@@ -54,15 +54,14 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Install pkg-config
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          install: mingw-w64-ucrt-x86_64-pkgconf
+
+      - name: Add pkg-config to PATH
         run: |
-          # Install scoop and pkgconf
-          Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-          Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
-          scoop install pkgconf
-          # Create pkg-config alias for meson
-          $scoopShims = "$env:USERPROFILE\scoop\shims"
-          Copy-Item "$scoopShims\pkgconf.exe" "$scoopShims\pkg-config.exe"
-          echo "$scoopShims" >> $env:GITHUB_PATH
+          echo "C:\msys64\ucrt64\bin" >> $env:GITHUB_PATH
 
       - name: Install vcpkg dependencies
         run: |
