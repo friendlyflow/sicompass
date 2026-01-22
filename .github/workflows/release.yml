@@ -336,20 +336,15 @@ jobs:
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Install pkg-config
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: UCRT64
-          install: mingw-w64-ucrt-x86_64-pkg-config
-          path-type: inherit
+      - name: Install vcpkg dependencies
+        run: |
+          vcpkg install pkgconf freetype harfbuzz json-c stb cglm sdl3 vulkan --triplet x64-windows "--binarysource=clear;default,readwrite"
 
       - name: Add pkg-config to PATH
         run: |
-          echo "C:\msys64\ucrt64\bin" >> $env:GITHUB_PATH
-
-      - name: Install vcpkg dependencies
-        run: |
-          vcpkg install freetype harfbuzz json-c stb cglm sdl3 vulkan --triplet x64-windows "--binarysource=clear;default,readwrite"
+          # vcpkg installs pkgconf, create pkg-config alias
+          Copy-Item "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\tools\pkgconf\pkgconf.exe" "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\tools\pkgconf\pkg-config.exe"
+          echo "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\tools\pkgconf" >> $env:GITHUB_PATH
 
       - name: Install Vulkan SDK (for glslangValidator)
         run: |
