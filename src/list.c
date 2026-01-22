@@ -55,7 +55,7 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
                 char *stripped = filebrowserStripInputTags(elem->data.string);
                 char prefixed[MAX_LINE_LENGTH];
                 snprintf(prefixed, sizeof(prefixed), "%s %s",
-                         hasInput ? "si" : "s",
+                         hasInput ? "-i" : "-",
                          stripped ? stripped : elem->data.string);
                 appRenderer->totalListCurrentLayer[appRenderer->totalListCount].value =
                     strdup(prefixed);
@@ -66,7 +66,7 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
                 char *stripped = filebrowserStripInputTags(elem->data.object->key);
                 char prefixed[MAX_LINE_LENGTH];
                 snprintf(prefixed, sizeof(prefixed), "%s %s",
-                         hasInput ? "oi" : "o",
+                         hasInput ? "+i" : "+",
                          stripped ? stripped : elem->data.object->key);
                 appRenderer->totalListCurrentLayer[appRenderer->totalListCount].value =
                     strdup(prefixed);
