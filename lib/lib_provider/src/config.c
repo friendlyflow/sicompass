@@ -1,29 +1,25 @@
 #include "provider_interface.h"
+#include "platform.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 
 #define CONFIG_SUBDIR "sicompass/providers"
 
 char* providerGetConfigDir(void) {
-    const char *configHome = getenv("XDG_CONFIG_HOME");
-    char *result;
+    char *configHome = platformGetConfigHome();
+    if (!configHome) return NULL;
 
-    if (configHome && configHome[0] != '\0') {
-        size_t len = strlen(configHome) + 1 + strlen(CONFIG_SUBDIR) + 2;
-        result = malloc(len);
-        if (!result) return NULL;
-        snprintf(result, len, "%s/%s/", configHome, CONFIG_SUBDIR);
-    } else {
-        const char *home = getenv("HOME");
-        if (!home) return NULL;
-
-        size_t len = strlen(home) + strlen("/.config/") + strlen(CONFIG_SUBDIR) + 2;
-        result = malloc(len);
-        if (!result) return NULL;
-        snprintf(result, len, "%s/.config/%s/", home, CONFIG_SUBDIR);
+    const char *sep = platformGetPathSeparator();
+    size_t len = strlen(configHome) + strlen(CONFIG_SUBDIR) + strlen(sep) + 1;
+    char *result = malloc(len);
+    if (!result) {
+        free(configHome);
+        return NULL;
     }
+
+    snprintf(result, len, "%s%s%s", configHome, CONFIG_SUBDIR, sep);
+    free(configHome);
 
     return result;
 }

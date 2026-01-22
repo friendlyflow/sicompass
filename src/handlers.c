@@ -1,6 +1,7 @@
 #include "view.h"
 #include "provider.h"
 #include <filebrowser.h>
+#include <platform.h>
 #include <string.h>
 #include <stdlib.h>
 #include <SDL3/SDL.h>
@@ -158,9 +159,10 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                     char *filename = providerGetEditableContent(elem->data.string);
                     const char *path = providerGetCurrentPath(elem->data.string);
                     if (filename && path) {
-                        char command[MAX_URI_LENGTH * 2 + 20];
-                        snprintf(command, sizeof(command), "xdg-open \"%s/%s\" &", path, filename);
-                        system(command);
+                        const char *sep = platformGetPathSeparator();
+                        char fullPath[MAX_URI_LENGTH * 2 + 2];
+                        snprintf(fullPath, sizeof(fullPath), "%s%s%s", path, sep, filename);
+                        platformOpenWithDefault(fullPath);
                     }
                     free(filename);
                 } else if (elem->type == FFON_OBJECT) {
