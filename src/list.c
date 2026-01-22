@@ -51,17 +51,23 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
 
             if (elem->type == FFON_STRING) {
                 // Strip input tags from display
+                bool hasInput = filebrowserHasInputTags(elem->data.string);
                 char *stripped = filebrowserStripInputTags(elem->data.string);
                 char prefixed[MAX_LINE_LENGTH];
-                snprintf(prefixed, sizeof(prefixed), "s %s", stripped ? stripped : elem->data.string);
+                snprintf(prefixed, sizeof(prefixed), "%s %s",
+                         hasInput ? "si" : "s",
+                         stripped ? stripped : elem->data.string);
                 appRenderer->totalListCurrentLayer[appRenderer->totalListCount].value =
                     strdup(prefixed);
                 free(stripped);
             } else {
                 // Strip input tags from display
+                bool hasInput = filebrowserHasInputTags(elem->data.object->key);
                 char *stripped = filebrowserStripInputTags(elem->data.object->key);
                 char prefixed[MAX_LINE_LENGTH];
-                snprintf(prefixed, sizeof(prefixed), "o %s", stripped ? stripped : elem->data.object->key);
+                snprintf(prefixed, sizeof(prefixed), "%s %s",
+                         hasInput ? "oi" : "o",
+                         stripped ? stripped : elem->data.object->key);
                 appRenderer->totalListCurrentLayer[appRenderer->totalListCount].value =
                     strdup(prefixed);
                 free(stripped);
