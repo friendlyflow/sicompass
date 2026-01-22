@@ -1,4 +1,5 @@
 #include "view.h"
+#include "provider.h"
 #include <string.h>
 #include <SDL3/SDL.h>
 
@@ -271,10 +272,18 @@ void handleRight(AppRenderer *appRenderer) {
 }
 
 void handleI(AppRenderer *appRenderer) {
-    if (appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL) {
+    if (appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL ||
+        appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
+        // Try provider callback first
+        if (providerHandleI(appRenderer)) {
+            return;
+        }
+
+        // Default behavior
         idArrayCopy(&appRenderer->currentInsertId, &appRenderer->currentId);
         appRenderer->previousCoordinate = appRenderer->currentCoordinate;
-        appRenderer->currentCoordinate = COORDINATE_EDITOR_INSERT;
+        appRenderer->currentCoordinate = (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) ?
+            COORDINATE_OPERATOR_INSERT : COORDINATE_EDITOR_INSERT;
 
         // Clear the input buffer first
         appRenderer->inputBuffer[0] = '\0';
@@ -307,10 +316,18 @@ void handleI(AppRenderer *appRenderer) {
 }
 
 void handleA(AppRenderer *appRenderer) {
-    if (appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL) {
+    if (appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL ||
+        appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
+        // Try provider callback first
+        if (providerHandleA(appRenderer)) {
+            return;
+        }
+
+        // Default behavior
         idArrayCopy(&appRenderer->currentInsertId, &appRenderer->currentId);
         appRenderer->previousCoordinate = appRenderer->currentCoordinate;
-        appRenderer->currentCoordinate = COORDINATE_EDITOR_INSERT;
+        appRenderer->currentCoordinate = (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) ?
+            COORDINATE_OPERATOR_INSERT : COORDINATE_EDITOR_INSERT;
 
         // Clear the input buffer first
         appRenderer->inputBuffer[0] = '\0';
@@ -358,6 +375,15 @@ void handleFind(AppRenderer *appRenderer) {
 }
 
 void handleEscape(AppRenderer *appRenderer) {
+    // Try provider callback first (for handling special cases like file renaming)
+    if (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+        appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT) {
+        if (providerHandleEscape(appRenderer)) {
+            return;
+        }
+    }
+
+    // Default behavior
     if (appRenderer->previousCoordinate == COORDINATE_OPERATOR_GENERAL ||
         appRenderer->previousCoordinate == COORDINATE_OPERATOR_INSERT) {
         if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT) {
