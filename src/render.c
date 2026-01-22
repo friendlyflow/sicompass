@@ -519,7 +519,7 @@ void updateView(SiCompassApplication *app) {
     char header[256];
     int lastId = app->appRenderer->currentId.ids[app->appRenderer->currentId.depth - 1];
     int maxId = getFfonMaxIdAtPath(app->appRenderer->ffon, app->appRenderer->ffonCount, &app->appRenderer->currentId);
-    snprintf(header, sizeof(header), "%s layer: %d list: %d/%d",
+    snprintf(header, sizeof(header), "%s, layer: %d list: %d/%d",
              coordinateToString(app->appRenderer->currentCoordinate), app->appRenderer->currentId.depth - 1,
              lastId + 1, maxId + 1);
     int lineHeight = (int)getLineHeight(app, scale, TEXT_PADDING);
