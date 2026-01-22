@@ -60,10 +60,11 @@ jobs:
           install: mingw-w64-ucrt-x86_64-pkgconf
 
       - name: Add pkg-config to PATH
+        shell: msys2 {0}
         run: |
           # Create pkg-config alias for meson (it looks for pkg-config, not pkgconf)
-          Copy-Item "C:\msys64\ucrt64\bin\pkgconf.exe" "C:\msys64\ucrt64\bin\pkg-config.exe"
-          echo "C:\msys64\ucrt64\bin" >> $env:GITHUB_PATH
+          cp /ucrt64/bin/pkgconf.exe /ucrt64/bin/pkg-config.exe
+          echo "C:\msys64\ucrt64\bin" >> $GITHUB_PATH
 
       - name: Install vcpkg dependencies
         run: |
