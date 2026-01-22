@@ -1,6 +1,8 @@
 #include "view.h"
 #include "provider.h"
+#include <filebrowser.h>
 #include <string.h>
+#include <stdlib.h>
 #include <SDL3/SDL.h>
 
 // UTF-8 helper functions
@@ -95,7 +97,80 @@ void handleCtrlA(AppRenderer *appRenderer, History history) {
 void handleEnter(AppRenderer *appRenderer, History history) {
     uint64_t now = SDL_GetTicks();
 
-    if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH) {
+    if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT) {
+        // Get current element
+        int count;
+        FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId, &count);
+        if (arr && count > 0) {
+            int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+            if (idx >= 0 && idx < count) {
+                FfonElement *elem = arr[idx];
+                const char *elementKey = (elem->type == FFON_STRING) ?
+                    elem->data.string : elem->data.object->key;
+
+                // Check if provider handles this element
+                char *oldContent = providerGetEditableContent(elementKey);
+                if (oldContent) {
+                    const char *newContent = appRenderer->inputBuffer;
+                    // Only commit if changed
+                    if (strcmp(oldContent, newContent) != 0) {
+                        if (providerCommitEdit(elementKey, oldContent, newContent)) {
+                            // Update element with new key
+                            char *newKey = providerFormatUpdatedKey(elementKey, newContent);
+                            if (newKey) {
+                                if (elem->type == FFON_STRING) {
+                                    free(elem->data.string);
+                                    elem->data.string = newKey;
+                                } else {
+                                    free(elem->data.object->key);
+                                    elem->data.object->key = newKey;
+                                }
+                            }
+                        }
+                    }
+                    free(oldContent);
+                    // Return to operator general
+                    appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
+                    appRenderer->previousCoordinate = COORDINATE_OPERATOR_GENERAL;
+                    createListCurrentLayer(appRenderer);
+                    appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                    appRenderer->needsRedraw = true;
+                    appRenderer->lastKeypressTime = now;
+                    return;
+                }
+            }
+        }
+        // Default behavior: save contents and return to operator general
+        updateState(appRenderer, TASK_INPUT, HISTORY_NONE);
+        appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
+        appRenderer->previousCoordinate = COORDINATE_OPERATOR_GENERAL;
+        appRenderer->needsRedraw = true;
+    } else if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
+        // Get current element to check if it's a string (file) or object (directory)
+        int count;
+        FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId, &count);
+        if (arr && count > 0) {
+            int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+            if (idx >= 0 && idx < count) {
+                FfonElement *elem = arr[idx];
+                if (elem->type == FFON_STRING) {
+                    // Open file with default program
+                    char *filename = providerGetEditableContent(elem->data.string);
+                    const char *path = providerGetCurrentPath(elem->data.string);
+                    if (filename && path) {
+                        char command[MAX_URI_LENGTH * 2 + 20];
+                        snprintf(command, sizeof(command), "xdg-open \"%s/%s\" &", path, filename);
+                        system(command);
+                    }
+                    free(filename);
+                } else if (elem->type == FFON_OBJECT) {
+                    // Navigate into the object
+                    handleRight(appRenderer);
+                }
+            }
+        }
+        appRenderer->needsRedraw = true;
+    } else if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH) {
         // Get selected item from list
         ListItem *list = appRenderer->filteredListCount > 0 ?
                          appRenderer->filteredListCurrentLayer : appRenderer->totalListCurrentLayer;
@@ -274,12 +349,7 @@ void handleRight(AppRenderer *appRenderer) {
 void handleI(AppRenderer *appRenderer) {
     if (appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL ||
         appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
-        // Try provider callback first
-        if (providerHandleI(appRenderer)) {
-            return;
-        }
 
-        // Default behavior
         idArrayCopy(&appRenderer->currentInsertId, &appRenderer->currentId);
         appRenderer->previousCoordinate = appRenderer->currentCoordinate;
         appRenderer->currentCoordinate = (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) ?
@@ -289,19 +359,30 @@ void handleI(AppRenderer *appRenderer) {
         appRenderer->inputBuffer[0] = '\0';
         appRenderer->inputBufferSize = 0;
 
-        // Get current line content
+        // Get current element
         int count;
         FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId, &count);
         if (arr && count > 0) {
             int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
             if (idx >= 0 && idx < count) {
                 FfonElement *elem = arr[idx];
-                if (elem->type == FFON_STRING) {
+                const char *elementKey = (elem->type == FFON_STRING) ?
+                    elem->data.string : elem->data.object->key;
+
+                // Try provider first
+                char *content = providerGetEditableContent(elementKey);
+                if (content) {
+                    strncpy(appRenderer->inputBuffer, content,
+                           appRenderer->inputBufferCapacity - 1);
+                    appRenderer->inputBufferSize = strlen(appRenderer->inputBuffer);
+                    free(content);
+                } else if (elem->type == FFON_STRING) {
+                    // Default: use raw string
                     strncpy(appRenderer->inputBuffer, elem->data.string,
                            appRenderer->inputBufferCapacity - 1);
                     appRenderer->inputBufferSize = strlen(appRenderer->inputBuffer);
                 } else {
-                    // For objects, include the colon in the editable text
+                    // For objects, include the colon
                     snprintf(appRenderer->inputBuffer, appRenderer->inputBufferCapacity,
                             "%s:", elem->data.object->key);
                     appRenderer->inputBufferSize = strlen(appRenderer->inputBuffer);
@@ -318,12 +399,7 @@ void handleI(AppRenderer *appRenderer) {
 void handleA(AppRenderer *appRenderer) {
     if (appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL ||
         appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
-        // Try provider callback first
-        if (providerHandleA(appRenderer)) {
-            return;
-        }
 
-        // Default behavior
         idArrayCopy(&appRenderer->currentInsertId, &appRenderer->currentId);
         appRenderer->previousCoordinate = appRenderer->currentCoordinate;
         appRenderer->currentCoordinate = (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) ?
@@ -333,19 +409,30 @@ void handleA(AppRenderer *appRenderer) {
         appRenderer->inputBuffer[0] = '\0';
         appRenderer->inputBufferSize = 0;
 
-        // Get current line content
+        // Get current element
         int count;
         FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId, &count);
         if (arr && count > 0) {
             int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
             if (idx >= 0 && idx < count) {
                 FfonElement *elem = arr[idx];
-                if (elem->type == FFON_STRING) {
+                const char *elementKey = (elem->type == FFON_STRING) ?
+                    elem->data.string : elem->data.object->key;
+
+                // Try provider first
+                char *content = providerGetEditableContent(elementKey);
+                if (content) {
+                    strncpy(appRenderer->inputBuffer, content,
+                           appRenderer->inputBufferCapacity - 1);
+                    appRenderer->inputBufferSize = strlen(appRenderer->inputBuffer);
+                    free(content);
+                } else if (elem->type == FFON_STRING) {
+                    // Default: use raw string
                     strncpy(appRenderer->inputBuffer, elem->data.string,
                            appRenderer->inputBufferCapacity - 1);
                     appRenderer->inputBufferSize = strlen(appRenderer->inputBuffer);
                 } else {
-                    // For objects, include the colon in the editable text
+                    // For objects, include the colon
                     snprintf(appRenderer->inputBuffer, appRenderer->inputBufferCapacity,
                             "%s:", elem->data.object->key);
                     appRenderer->inputBufferSize = strlen(appRenderer->inputBuffer);
@@ -375,25 +462,55 @@ void handleFind(AppRenderer *appRenderer) {
 }
 
 void handleEscape(AppRenderer *appRenderer) {
-    // Try provider callback first (for handling special cases like file renaming)
-    if (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
-        appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT) {
-        if (providerHandleEscape(appRenderer)) {
-            return;
-        }
-    }
+    if (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT) {
+        // Editor mode: Escape saves changes
+        int count;
+        FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId, &count);
+        if (arr && count > 0) {
+            int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+            if (idx >= 0 && idx < count) {
+                FfonElement *elem = arr[idx];
+                const char *elementKey = (elem->type == FFON_STRING) ?
+                    elem->data.string : elem->data.object->key;
 
-    // Default behavior
-    if (appRenderer->previousCoordinate == COORDINATE_OPERATOR_GENERAL ||
-        appRenderer->previousCoordinate == COORDINATE_OPERATOR_INSERT) {
-        if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT) {
-            updateState(appRenderer, TASK_INPUT, HISTORY_NONE);
+                // Check if provider handles this element
+                char *oldContent = providerGetEditableContent(elementKey);
+                if (oldContent) {
+                    const char *newContent = appRenderer->inputBuffer;
+                    if (strcmp(oldContent, newContent) != 0) {
+                        if (providerCommitEdit(elementKey, oldContent, newContent)) {
+                            char *newKey = providerFormatUpdatedKey(elementKey, newContent);
+                            if (newKey) {
+                                if (elem->type == FFON_STRING) {
+                                    free(elem->data.string);
+                                    elem->data.string = newKey;
+                                } else {
+                                    free(elem->data.object->key);
+                                    elem->data.object->key = newKey;
+                                }
+                            }
+                        }
+                    }
+                    free(oldContent);
+                    appRenderer->currentCoordinate = COORDINATE_EDITOR_GENERAL;
+                    appRenderer->previousCoordinate = COORDINATE_EDITOR_GENERAL;
+                    createListCurrentLayer(appRenderer);
+                    appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                    appRenderer->needsRedraw = true;
+                    return;
+                }
+            }
         }
+        // Default: save via updateState
+        updateState(appRenderer, TASK_INPUT, HISTORY_NONE);
+        appRenderer->currentCoordinate = COORDINATE_EDITOR_GENERAL;
+    } else if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT) {
+        // Operator mode: Escape discards changes
+        appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
+    } else if (appRenderer->previousCoordinate == COORDINATE_OPERATOR_GENERAL ||
+               appRenderer->previousCoordinate == COORDINATE_OPERATOR_INSERT) {
         appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
     } else {
-        if (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT) {
-            updateState(appRenderer, TASK_INPUT, HISTORY_NONE);
-        }
         appRenderer->currentCoordinate = COORDINATE_EDITOR_GENERAL;
     }
 

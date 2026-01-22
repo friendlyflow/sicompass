@@ -5,105 +5,96 @@
 #include <stdlib.h>
 #include <string.h>
 
-static ProviderFetchCallback g_fetchCallback = NULL;
-static ProviderHandleICallback g_handleICallback = NULL;
-static ProviderHandleACallback g_handleACallback = NULL;
-static ProviderHandleEscapeCallback g_handleEscapeCallback = NULL;
+#define MAX_PROVIDERS 16
 
-void providerSetFetchCallback(ProviderFetchCallback callback) {
-    g_fetchCallback = callback;
-}
+// Provider registry
+static Provider *g_providers[MAX_PROVIDERS];
+static int g_providerCount = 0;
 
-ProviderFetchCallback providerGetFetchCallback(void) {
-    return g_fetchCallback;
-}
-
-void providerSetHandleICallback(ProviderHandleICallback callback) {
-    g_handleICallback = callback;
-}
-
-void providerSetHandleACallback(ProviderHandleACallback callback) {
-    g_handleACallback = callback;
-}
-
-void providerSetHandleEscapeCallback(ProviderHandleEscapeCallback callback) {
-    g_handleEscapeCallback = callback;
-}
-
-bool providerHandleI(AppRenderer *appRenderer) {
-    if (g_handleICallback) {
-        g_handleICallback(appRenderer);
-        return true;
+// Register a provider
+void providerRegister(Provider *provider) {
+    if (!provider || g_providerCount >= MAX_PROVIDERS) {
+        return;
     }
-    return false;
+    g_providers[g_providerCount++] = provider;
 }
 
-bool providerHandleA(AppRenderer *appRenderer) {
-    if (g_handleACallback) {
-        g_handleACallback(appRenderer);
-        return true;
-    }
-    return false;
-}
+// Find provider that can handle an element
+Provider* providerFindForElement(const char *elementKey) {
+    if (!elementKey) return NULL;
 
-bool providerHandleEscape(AppRenderer *appRenderer) {
-    if (g_handleEscapeCallback) {
-        g_handleEscapeCallback(appRenderer);
-        return true;
-    }
-    return false;
-}
-
-void providerUriAppend(char *uri, int max_len, const char *segment) {
-    if (!uri || !segment) return;
-
-    int uri_len = strlen(uri);
-    int seg_len = strlen(segment);
-
-    // Remove trailing slash from segment if present (directories have "name/")
-    if (seg_len > 0 && segment[seg_len - 1] == '/') {
-        seg_len--;
-    }
-
-    // Ensure we have a slash before appending (unless uri is empty or already ends with /)
-    if (uri_len > 0 && uri[uri_len - 1] != '/') {
-        if (uri_len + 1 < max_len) {
-            uri[uri_len++] = '/';
-            uri[uri_len] = '\0';
+    for (int i = 0; i < g_providerCount; i++) {
+        if (g_providers[i]->canHandle &&
+            g_providers[i]->canHandle(g_providers[i], elementKey)) {
+            return g_providers[i];
         }
     }
+    return NULL;
+}
 
-    // Append segment
-    if (uri_len + seg_len < max_len) {
-        strncat(uri, segment, seg_len);
+// Get provider by name
+Provider* providerFindByName(const char *name) {
+    if (!name) return NULL;
+
+    for (int i = 0; i < g_providerCount; i++) {
+        if (g_providers[i]->name && strcmp(g_providers[i]->name, name) == 0) {
+            return g_providers[i];
+        }
+    }
+    return NULL;
+}
+
+// Initialize all providers
+void providerInitAll(void) {
+    for (int i = 0; i < g_providerCount; i++) {
+        if (g_providers[i]->init) {
+            g_providers[i]->init(g_providers[i]);
+        }
     }
 }
 
-void providerUriPop(char *uri) {
-    if (!uri) return;
-
-    int len = strlen(uri);
-    if (len <= 1) return;  // Don't pop past root "/"
-
-    // Remove trailing slash if present
-    if (uri[len - 1] == '/') {
-        uri[--len] = '\0';
-    }
-
-    // Find last slash
-    char *last_slash = strrchr(uri, '/');
-    if (last_slash && last_slash != uri) {
-        *last_slash = '\0';
-    } else if (last_slash == uri) {
-        // Keep root "/"
-        uri[1] = '\0';
+// Cleanup all providers
+void providerCleanupAll(void) {
+    for (int i = 0; i < g_providerCount; i++) {
+        if (g_providers[i]->cleanup) {
+            g_providers[i]->cleanup(g_providers[i]);
+        }
     }
 }
 
+// Get current path for an element's provider
+const char* providerGetCurrentPath(const char *elementKey) {
+    Provider *provider = providerFindForElement(elementKey);
+    if (!provider || !provider->getCurrentPath) return NULL;
+    return provider->getCurrentPath(provider);
+}
+
+// Get editable content from element
+char* providerGetEditableContent(const char *elementKey) {
+    Provider *provider = providerFindForElement(elementKey);
+    if (!provider || !provider->getEditableContent) return NULL;
+    return provider->getEditableContent(provider, elementKey);
+}
+
+// Commit edit operation
+bool providerCommitEdit(const char *elementKey, const char *oldContent, const char *newContent) {
+    Provider *provider = providerFindForElement(elementKey);
+    if (!provider || !provider->commitEdit) return false;
+    return provider->commitEdit(provider, oldContent, newContent);
+}
+
+// Format updated key after edit
+char* providerFormatUpdatedKey(const char *elementKey, const char *newContent) {
+    Provider *provider = providerFindForElement(elementKey);
+    if (!provider || !provider->formatUpdatedKey) return NULL;
+    return provider->formatUpdatedKey(provider, newContent);
+}
+
+// Navigate right into an object
 bool providerNavigateRight(AppRenderer *appRenderer) {
-    // Get current element
     int count;
-    FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId, &count);
+    FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                     &appRenderer->currentId, &count);
     if (!arr || count == 0) {
         return false;
     }
@@ -119,82 +110,83 @@ bool providerNavigateRight(AppRenderer *appRenderer) {
     }
 
     FfonObject *obj = elem->data.object;
-
-    // Check if this is a filebrowser object (has input tags) - only those affect URI
     const char *key = obj->key;
-    bool isFilebrowserObject = filebrowserHasInputTags(key);
+
+    // Find provider for this element
+    Provider *provider = providerFindForElement(key);
     char *strippedKey = NULL;
 
-    if (isFilebrowserObject) {
-        strippedKey = filebrowserExtractInputContent(key);
+    if (provider && provider->getEditableContent) {
+        strippedKey = provider->getEditableContent(provider, key);
     }
 
-    // If the object already has children loaded, just navigate into it
+    // If object already has children, just navigate into it
     if (obj->count > 0) {
-        if (isFilebrowserObject && strippedKey) {
-            providerUriAppend(appRenderer->currentUri, MAX_URI_LENGTH, strippedKey);
+        if (provider && provider->pushPath && strippedKey) {
+            provider->pushPath(provider, strippedKey);
         }
         free(strippedKey);
         idArrayPush(&appRenderer->currentId, 0);
         return true;
     }
 
-    // Otherwise, fetch children from the provider
-    if (!g_fetchCallback) {
+    // Fetch children from provider
+    if (!provider || !provider->fetch) {
         free(strippedKey);
         return false;
     }
 
-    // Update URI before fetching (only for filebrowser objects)
-    if (isFilebrowserObject && strippedKey) {
-        providerUriAppend(appRenderer->currentUri, MAX_URI_LENGTH, strippedKey);
-        printf("providerNavigateRight: key='%s', uri='%s'\n", strippedKey, appRenderer->currentUri);
+    // Update path before fetching
+    if (provider->pushPath && strippedKey) {
+        provider->pushPath(provider, strippedKey);
+        printf("providerNavigateRight: key='%s', path='%s'\n",
+               strippedKey, provider->getCurrentPath ? provider->getCurrentPath(provider) : "?");
     }
     free(strippedKey);
 
-    // Fetch children from the provider
+    // Fetch children
     int childCount = 0;
-    FfonElement **children = g_fetchCallback(appRenderer, key, &childCount);
+    FfonElement **children = provider->fetch(provider, &childCount);
     printf("providerNavigateRight: fetched %d children\n", childCount);
+
     if (!children || childCount == 0) {
-        // Revert URI on failure
-        providerUriPop(appRenderer->currentUri);
+        if (provider->popPath) provider->popPath(provider);
         if (children) free(children);
         return false;
     }
 
-    // Add fetched children
     for (int i = 0; i < childCount; i++) {
         ffonObjectAddElement(obj, children[i]);
     }
     free(children);
 
-    // Navigate into the object
     idArrayPush(&appRenderer->currentId, 0);
-
     return true;
 }
 
+// Navigate left out of an object
 bool providerNavigateLeft(AppRenderer *appRenderer) {
     if (appRenderer->currentId.depth <= 1) {
         return false;
     }
 
-    // Get the parent object we're leaving (one level up)
+    // Get parent element
     IdArray parentId;
     idArrayCopy(&parentId, &appRenderer->currentId);
     idArrayPop(&parentId);
 
     int parentCount;
-    FfonElement **parentArr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &parentId, &parentCount);
+    FfonElement **parentArr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                           &parentId, &parentCount);
     if (parentArr && parentCount > 0) {
         int parentIdx = parentId.ids[parentId.depth - 1];
         if (parentIdx >= 0 && parentIdx < parentCount) {
             FfonElement *parentElem = parentArr[parentIdx];
             if (parentElem->type == FFON_OBJECT) {
-                // Only pop URI if leaving a filebrowser object (has input tags)
-                if (filebrowserHasInputTags(parentElem->data.object->key)) {
-                    providerUriPop(appRenderer->currentUri);
+                const char *key = parentElem->data.object->key;
+                Provider *provider = providerFindForElement(key);
+                if (provider && provider->popPath) {
+                    provider->popPath(provider);
                 }
             }
         }
