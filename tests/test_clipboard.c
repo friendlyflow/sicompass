@@ -4,6 +4,7 @@
 
 #include <tau/tau.h>
 #include <fff/fff.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
