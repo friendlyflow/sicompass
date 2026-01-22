@@ -1,9 +1,12 @@
 project('sicompass', 'c',
   version : '0.1',
-  default_options : ['warning_level=3'])
+  default_options : ['warning_level=3', 'default_library=static'])
 
-add_project_arguments('-fsanitize=address', language: 'c')
-add_project_link_arguments('-fsanitize=address', language: 'c')
+# Address sanitizer only on non-Windows (MSVC doesn't support it the same way)
+if host_machine.system() != 'windows'
+  add_project_arguments('-fsanitize=address', language: 'c')
+  add_project_link_arguments('-fsanitize=address', language: 'c')
+endif
 
 vulkan_dep = dependency('vulkan')
 sdl3_dep = dependency('sdl3')
