@@ -26,3 +26,18 @@ bool providerNavigateLeft(AppRenderer *appRenderer);
 // URI helpers
 void providerUriAppend(char *uri, int max_len, const char *segment);
 void providerUriPop(char *uri);
+
+// Input handling callbacks
+typedef void (*ProviderHandleICallback)(AppRenderer *appRenderer);
+typedef void (*ProviderHandleACallback)(AppRenderer *appRenderer);
+typedef void (*ProviderHandleEscapeCallback)(AppRenderer *appRenderer);
+
+// Input handler registration
+void providerSetHandleICallback(ProviderHandleICallback callback);
+void providerSetHandleACallback(ProviderHandleACallback callback);
+void providerSetHandleEscapeCallback(ProviderHandleEscapeCallback callback);
+
+// Input handler invocation (returns true if handled by provider)
+bool providerHandleI(AppRenderer *appRenderer);
+bool providerHandleA(AppRenderer *appRenderer);
+bool providerHandleEscape(AppRenderer *appRenderer);

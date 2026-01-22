@@ -1,10 +1,14 @@
 #include "provider.h"
 #include "view.h"
+#include <filebrowser.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 static ProviderFetchCallback g_fetchCallback = NULL;
+static ProviderHandleICallback g_handleICallback = NULL;
+static ProviderHandleACallback g_handleACallback = NULL;
+static ProviderHandleEscapeCallback g_handleEscapeCallback = NULL;
 
 void providerSetFetchCallback(ProviderFetchCallback callback) {
     g_fetchCallback = callback;
@@ -12,6 +16,42 @@ void providerSetFetchCallback(ProviderFetchCallback callback) {
 
 ProviderFetchCallback providerGetFetchCallback(void) {
     return g_fetchCallback;
+}
+
+void providerSetHandleICallback(ProviderHandleICallback callback) {
+    g_handleICallback = callback;
+}
+
+void providerSetHandleACallback(ProviderHandleACallback callback) {
+    g_handleACallback = callback;
+}
+
+void providerSetHandleEscapeCallback(ProviderHandleEscapeCallback callback) {
+    g_handleEscapeCallback = callback;
+}
+
+bool providerHandleI(AppRenderer *appRenderer) {
+    if (g_handleICallback) {
+        g_handleICallback(appRenderer);
+        return true;
+    }
+    return false;
+}
+
+bool providerHandleA(AppRenderer *appRenderer) {
+    if (g_handleACallback) {
+        g_handleACallback(appRenderer);
+        return true;
+    }
+    return false;
+}
+
+bool providerHandleEscape(AppRenderer *appRenderer) {
+    if (g_handleEscapeCallback) {
+        g_handleEscapeCallback(appRenderer);
+        return true;
+    }
+    return false;
 }
 
 void providerUriAppend(char *uri, int max_len, const char *segment) {
@@ -80,23 +120,37 @@ bool providerNavigateRight(AppRenderer *appRenderer) {
 
     FfonObject *obj = elem->data.object;
 
+    // Check if this is a filebrowser object (has input tags) - only those affect URI
+    const char *key = obj->key;
+    bool isFilebrowserObject = filebrowserHasInputTags(key);
+    char *strippedKey = NULL;
+
+    if (isFilebrowserObject) {
+        strippedKey = filebrowserExtractInputContent(key);
+    }
+
     // If the object already has children loaded, just navigate into it
     if (obj->count > 0) {
+        if (isFilebrowserObject && strippedKey) {
+            providerUriAppend(appRenderer->currentUri, MAX_URI_LENGTH, strippedKey);
+        }
+        free(strippedKey);
         idArrayPush(&appRenderer->currentId, 0);
         return true;
     }
 
     // Otherwise, fetch children from the provider
     if (!g_fetchCallback) {
+        free(strippedKey);
         return false;
     }
 
-    // Get the key of the object we're entering
-    const char *key = obj->key;
-
-    // Update URI before fetching
-    providerUriAppend(appRenderer->currentUri, MAX_URI_LENGTH, key);
-    printf("providerNavigateRight: key='%s', uri='%s'\n", key, appRenderer->currentUri);
+    // Update URI before fetching (only for filebrowser objects)
+    if (isFilebrowserObject && strippedKey) {
+        providerUriAppend(appRenderer->currentUri, MAX_URI_LENGTH, strippedKey);
+        printf("providerNavigateRight: key='%s', uri='%s'\n", strippedKey, appRenderer->currentUri);
+    }
+    free(strippedKey);
 
     // Fetch children from the provider
     int childCount = 0;
@@ -126,8 +180,25 @@ bool providerNavigateLeft(AppRenderer *appRenderer) {
         return false;
     }
 
-    // Pop URI segment
-    providerUriPop(appRenderer->currentUri);
+    // Get the parent object we're leaving (one level up)
+    IdArray parentId;
+    idArrayCopy(&parentId, &appRenderer->currentId);
+    idArrayPop(&parentId);
+
+    int parentCount;
+    FfonElement **parentArr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &parentId, &parentCount);
+    if (parentArr && parentCount > 0) {
+        int parentIdx = parentId.ids[parentId.depth - 1];
+        if (parentIdx >= 0 && parentIdx < parentCount) {
+            FfonElement *parentElem = parentArr[parentIdx];
+            if (parentElem->type == FFON_OBJECT) {
+                // Only pop URI if leaving a filebrowser object (has input tags)
+                if (filebrowserHasInputTags(parentElem->data.object->key)) {
+                    providerUriPop(appRenderer->currentUri);
+                }
+            }
+        }
+    }
 
     idArrayPop(&appRenderer->currentId);
     return true;

@@ -1,4 +1,5 @@
 #include "view.h"
+#include <filebrowser.h>
 #include <string.h>
 
 // AccessKit node IDs
@@ -276,86 +277,86 @@ int renderText(SiCompassApplication *app, const char *text, int x, int y,
     return lineCount;
 }
 
-void renderLine(SiCompassApplication *app, FfonElement *elem, const IdArray *id,
-                int indent, int *yPos) {
-    // Calculate scale and dimensions from font metrics
-    float scale = getTextScale(app, FONT_SIZE_PT);
-    int lineHeight = (int)getLineHeight(app, scale, TEXT_PADDING);
+// void renderLine(SiCompassApplication *app, FfonElement *elem, const IdArray *id,
+//                 int indent, int *yPos) {
+//     // Calculate scale and dimensions from font metrics
+//     float scale = getTextScale(app, FONT_SIZE_PT);
+//     int lineHeight = (int)getLineHeight(app, scale, TEXT_PADDING);
 
-    if (*yPos < -lineHeight || *yPos > (int)app->swapChainExtent.height) {
-        // Skip off-screen lines
-        *yPos += lineHeight;
-        return;
-    }
+//     if (*yPos < -lineHeight || *yPos > (int)app->swapChainExtent.height) {
+//         // Skip off-screen lines
+//         *yPos += lineHeight;
+//         return;
+//     }
 
-    // Get character width from font (using 'M' as em-width, monospace assumption)
-    int charWidth = (int)getWidthEM(app, scale);
-    int x = 50 + indent * INDENT_CHARS * charWidth;
-    bool isCurrent = idArrayEqual(id, &app->appRenderer->currentId);
+//     // Get character width from font (using 'M' as em-width, monospace assumption)
+//     int charWidth = (int)getWidthEM(app, scale);
+//     int x = 50 + indent * INDENT_CHARS * charWidth;
+//     bool isCurrent = idArrayEqual(id, &app->appRenderer->currentId);
 
-    // Store position of current element for caret rendering
-    if (isCurrent) {
-        app->appRenderer->currentElementX = x;
-        app->appRenderer->currentElementY = *yPos;
-        app->appRenderer->currentElementIsObject = (elem->type == FFON_OBJECT);
-    }
+//     // Store position of current element for caret rendering
+//     if (isCurrent) {
+//         app->appRenderer->currentElementX = x;
+//         app->appRenderer->currentElementY = *yPos;
+//         app->appRenderer->currentElementIsObject = (elem->type == FFON_OBJECT);
+//     }
 
-    int linesRendered = 0;
+//     int linesRendered = 0;
 
-    if (elem->type == FFON_STRING) {
-        uint32_t color = COLOR_TEXT;
-        const char *displayText = elem->data.string;
+//     if (elem->type == FFON_STRING) {
+//         uint32_t color = COLOR_TEXT;
+//         const char *displayText = elem->data.string;
 
-        // In insert mode, show inputBuffer for current element
-        if (isCurrent && (app->appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
-                         app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT)) {
-            displayText = app->appRenderer->inputBuffer;
-        }
+//         // In insert mode, show inputBuffer for current element
+//         if (isCurrent && (app->appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+//                          app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT)) {
+//             displayText = app->appRenderer->inputBuffer;
+//         }
 
-        linesRendered = renderText(app, displayText, x, *yPos, color, isCurrent);
+//         linesRendered = renderText(app, displayText, x, *yPos, color, isCurrent);
 
-        // Speak current element for accessibility
-        if (isCurrent) {
-            accesskitSpeak(app->appRenderer, displayText);
-        }
-    } else {
-        // Render key with colon
-        char keyWithColon[MAX_LINE_LENGTH];
-        const char *keyToRender = elem->data.object->key;
+//         // Speak current element for accessibility
+//         if (isCurrent) {
+//             accesskitSpeak(app->appRenderer, displayText);
+//         }
+//     } else {
+//         // Render key with colon
+//         char keyWithColon[MAX_LINE_LENGTH];
+//         const char *keyToRender = elem->data.object->key;
 
-        // In insert mode, inputBuffer already contains the colon
-        if (isCurrent && (app->appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
-                         app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT)) {
-            strncpy(keyWithColon, app->appRenderer->inputBuffer, MAX_LINE_LENGTH - 1);
-            keyWithColon[MAX_LINE_LENGTH - 1] = '\0';
-        } else {
-            snprintf(keyWithColon, sizeof(keyWithColon), "%s:", keyToRender);
-        }
+//         // In insert mode, inputBuffer already contains the colon
+//         if (isCurrent && (app->appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+//                          app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT)) {
+//             strncpy(keyWithColon, app->appRenderer->inputBuffer, MAX_LINE_LENGTH - 1);
+//             keyWithColon[MAX_LINE_LENGTH - 1] = '\0';
+//         } else {
+//             snprintf(keyWithColon, sizeof(keyWithColon), "%s:", keyToRender);
+//         }
 
-        uint32_t color = COLOR_TEXT;
-        linesRendered = renderText(app, keyWithColon, x, *yPos, color, isCurrent);
+//         uint32_t color = COLOR_TEXT;
+//         linesRendered = renderText(app, keyWithColon, x, *yPos, color, isCurrent);
 
-        // Speak current element for accessibility
-        if (isCurrent) {
-            accesskitSpeak(app->appRenderer, keyWithColon);
-        }
-    }
+//         // Speak current element for accessibility
+//         if (isCurrent) {
+//             accesskitSpeak(app->appRenderer, keyWithColon);
+//         }
+//     }
 
-    *yPos += lineHeight * linesRendered;
+//     *yPos += lineHeight * linesRendered;
 
-    // Recursively render children if object
-    if (elem->type == FFON_OBJECT) {
-        IdArray childId;
-        idArrayCopy(&childId, id);
-        idArrayPush(&childId, 0);
+//     // Recursively render children if object
+//     if (elem->type == FFON_OBJECT) {
+//         IdArray childId;
+//         idArrayCopy(&childId, id);
+//         idArrayPush(&childId, 0);
 
-        for (int i = 0; i < elem->data.object->count; i++) {
-            childId.ids[childId.depth - 1] = i;
-            renderLine(app, elem->data.object->elements[i], &childId,
-                       indent + 1, yPos);
-        }
-    }
-}
+//         for (int i = 0; i < elem->data.object->count; i++) {
+//             childId.ids[childId.depth - 1] = i;
+//             renderLine(app, elem->data.object->elements[i], &childId,
+//                        indent + 1, yPos);
+//         }
+//     }
+// }
 
 // void renderHierarchy(SiCompassApplication *app) {
 //     float scale = getTextScale(app, FONT_SIZE_PT);
@@ -412,7 +413,10 @@ void renderInteraction(SiCompassApplication *app) {
                 FfonElement *parentElem = parentArr[parentIdx];
                 const char *parentText = (parentElem->type == FFON_OBJECT) ?
                     parentElem->data.object->key : parentElem->data.string;
-                renderText(app, parentText, 50, yPos, COLOR_TEXT, false);
+                // Strip input tags from parent display
+                char *strippedParent = filebrowserStripInputTags(parentText);
+                renderText(app, strippedParent ? strippedParent : parentText, 50, yPos, COLOR_TEXT, false);
+                free(strippedParent);
                 yPos += lineHeight;
             }
         }
@@ -427,20 +431,32 @@ void renderInteraction(SiCompassApplication *app) {
         return;
     }
 
+    bool inInsertMode = (app->appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+                         app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT);
+
     for (int i = 0; i < count; i++) {
         bool isSelected = (i == app->appRenderer->listIndex);
         int itemYPos = yPos;
+        int itemX = 50 + indent;
 
-        // Render radio button indicator
-        // const char *indicator = isSelected ? "●" : "○";
-        // renderText(app, indicator, 50 + indent, itemYPos, COLOR_ORANGE, false);
+        // Determine what text to display
+        const char *displayText = list[i].value;
+
+        // In insert mode, show inputBuffer for selected item
+        if (isSelected && inInsertMode) {
+            displayText = app->appRenderer->inputBuffer;
+
+            // Store position for caret rendering
+            app->appRenderer->currentElementX = itemX;
+            app->appRenderer->currentElementY = itemYPos;
+        }
 
         // Render text (may be multiple lines)
-        int textLines = renderText(app, list[i].value, 50 + indent, itemYPos, COLOR_TEXT, isSelected);
+        int textLines = renderText(app, displayText, itemX, itemYPos, COLOR_TEXT, isSelected);
 
         // Speak selected item for accessibility
         if (isSelected) {
-            accesskitSpeak(app->appRenderer, list[i].value);
+            accesskitSpeak(app->appRenderer, displayText);
         }
 
         yPos += lineHeight * textLines;

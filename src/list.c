@@ -1,4 +1,5 @@
 #include "view.h"
+#include <filebrowser.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -49,15 +50,21 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
             idArrayCopy(&appRenderer->totalListCurrentLayer[appRenderer->totalListCount].id, &thisId);
 
             if (elem->type == FFON_STRING) {
+                // Strip input tags from display
+                char *stripped = filebrowserStripInputTags(elem->data.string);
                 char prefixed[MAX_LINE_LENGTH];
-                snprintf(prefixed, sizeof(prefixed), "s %s", elem->data.string);
+                snprintf(prefixed, sizeof(prefixed), "s %s", stripped ? stripped : elem->data.string);
                 appRenderer->totalListCurrentLayer[appRenderer->totalListCount].value =
                     strdup(prefixed);
+                free(stripped);
             } else {
+                // Strip input tags from display
+                char *stripped = filebrowserStripInputTags(elem->data.object->key);
                 char prefixed[MAX_LINE_LENGTH];
-                snprintf(prefixed, sizeof(prefixed), "o %s", elem->data.object->key);
+                snprintf(prefixed, sizeof(prefixed), "o %s", stripped ? stripped : elem->data.object->key);
                 appRenderer->totalListCurrentLayer[appRenderer->totalListCount].value =
                     strdup(prefixed);
+                free(stripped);
             }
 
             appRenderer->totalListCount++;
