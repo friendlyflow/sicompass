@@ -55,7 +55,7 @@ jobs:
 
       - name: Install pkg-config
         run: |
-          choco install pkgconfiglite -y
+          choco install pkgconf -y
 
       - name: Install vcpkg dependencies
         run: |

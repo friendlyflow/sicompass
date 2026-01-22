@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdbool.h>
+
 /**
  * Cross-platform utilities for file operations and paths.
  */
