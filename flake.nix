@@ -37,7 +37,7 @@
 
           src = accesskit-c-src;
 
-          cargoHash = "sha256-5/GYojP6zCOH5M5Ifs5zvlkDXi6d8QsSHvPrgP/WdM8=";
+          cargoHash = "sha256-KCZ4jpYoARRv7dg44ar228TJKmkz6hVRirkDPpKfsK8=";
 
           nativeBuildInputs = with pkgs; [
             pkg-config
