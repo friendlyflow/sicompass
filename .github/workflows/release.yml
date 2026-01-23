@@ -45,7 +45,7 @@ jobs:
             libasound2-dev \
             libpipewire-0.3-dev \
             libdbus-1-dev \
-            libat-spi2-core-dev \
+            libatspi2.0-dev \
             libdrm-dev \
             libgbm-dev \
             libegl-dev \
