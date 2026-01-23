@@ -125,8 +125,8 @@ jobs:
       - name: Fix binary rpath
         run: |
           sudo apt-get install -y patchelf
-          # Remove hardcoded /usr/local/lib rpath so system uses standard library paths
-          patchelf --remove-rpath build/sicompass
+          # Set rpath to /usr/lib where the .deb package installs bundled libraries
+          patchelf --set-rpath /usr/lib build/sicompass
 
       - name: Create .deb package
         run: |
