@@ -56,7 +56,7 @@ jobs:
           Section: utils
           Priority: optional
           Architecture: amd64
-          Depends: libvulkan1, libfreetype6, libharfbuzz0b, libjson-c5, libat-spi2-core-0
+          Depends: libvulkan1, libfreetype6, libharfbuzz0b, libjson-c5, at-spi2-core
           Maintainer: Nico Verrijdt <nico@friendlyflow.com>
           Description: Silicon's Compass - Accessible document editor
            A Vulkan-based accessible document editor with vim-like keybindings.
