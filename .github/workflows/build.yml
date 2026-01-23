@@ -49,7 +49,7 @@ jobs:
         run: pip3 install meson ninja
 
       - name: Install Rust
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Build SDL3 from source
         run: |
@@ -126,7 +126,7 @@ jobs:
             cmake
 
       - name: Install Rust
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Build SDL3 from source
         run: |
