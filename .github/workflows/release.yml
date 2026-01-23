@@ -237,9 +237,8 @@ jobs:
           # Create a tarball of the flake for easy distribution
           git archive --format=tar.gz --prefix=sicompass-${VERSION}/ HEAD > sicompass-${VERSION}-nix-source.tar.gz
 
-          # Also create a closure for offline installation
-          nix copy --to file://nix-closure ./result
-          tar -czf sicompass-${VERSION}-nix-closure.tar.gz nix-closure
+          # Export the closure for offline installation
+          nix-store --export $(nix-store -qR ./result) | gzip > sicompass-${VERSION}-nix-closure.nar.gz
 
       - name: Upload Nix artifacts
         uses: actions/upload-artifact@v4
@@ -247,7 +246,7 @@ jobs:
           name: nix-package
           path: |
             *-nix-source.tar.gz
-            *-nix-closure.tar.gz
+            *-nix-closure.nar.gz
 
   build-macos:
     runs-on: macos-latest
@@ -496,6 +495,7 @@ jobs:
             artifacts/**/*.rpm
             artifacts/**/*.pkg.tar.xz
             artifacts/**/*.tar.gz
+            artifacts/**/*.nar.gz
             artifacts/**/*.dmg
             artifacts/**/*.zip
           body: |
@@ -516,7 +516,7 @@ jobs:
 
             ### Nix
             - **Source tarball**: `sicompass-${{ steps.version.outputs.version }}-nix-source.tar.gz`
-            - **Nix closure**: `sicompass-${{ steps.version.outputs.version }}-nix-closure.tar.gz`
+            - **Nix closure**: `sicompass-${{ steps.version.outputs.version }}-nix-closure.nar.gz`
 
             Or run directly:
             ```bash
