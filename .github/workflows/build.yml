@@ -86,7 +86,7 @@ jobs:
           # Create pkg-config file
           sudo tee /usr/local/lib/pkgconfig/stb.pc << 'EOF'
           prefix=/usr/local
-          includedir=${prefix}/include
+          includedir=${prefix}/include/stb
 
           Name: stb
           Description: stb single-file public domain libraries
@@ -162,7 +162,7 @@ jobs:
           # Create pkg-config file
           sudo tee /usr/local/lib/pkgconfig/stb.pc << 'EOF'
           prefix=/usr/local
-          includedir=${prefix}/include
+          includedir=${prefix}/include/stb
 
           Name: stb
           Description: stb single-file public domain libraries
