@@ -28,4 +28,13 @@ if host_machine.system() != 'windows'
 
   test('clipboard', test_clipboard)
 
+  # AccessKit accessibility tests
+  test_accesskit = executable('test_accesskit',
+    'test_accesskit.c',
+    include_directories: test_inc,
+    dependencies: [unity_dep],
+  )
+
+  test('accesskit', test_accesskit)
+
 endif
