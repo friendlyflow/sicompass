@@ -122,6 +122,12 @@ jobs:
           meson setup build --buildtype=release -Db_sanitize=none
           ninja -C build
 
+      - name: Fix binary rpath
+        run: |
+          sudo apt-get install -y patchelf
+          # Remove hardcoded /usr/local/lib rpath so system uses standard library paths
+          patchelf --remove-rpath build/sicompass
+
       - name: Create .deb package
         run: |
           VERSION=${{ steps.version.outputs.version }}
@@ -133,8 +139,8 @@ jobs:
           mkdir -p ${PKG_DIR}/usr/share/applications
 
           cp build/sicompass ${PKG_DIR}/usr/bin/
-          # Bundle SDL3 and accesskit libraries
-          cp /usr/local/lib/libSDL3.so* ${PKG_DIR}/usr/lib/
+          # Bundle SDL3 and accesskit libraries (use -a to preserve symlinks)
+          cp -a /usr/local/lib/libSDL3.so* ${PKG_DIR}/usr/lib/
           cp /usr/local/lib/libaccesskit.so ${PKG_DIR}/usr/lib/
 
           cat > ${PKG_DIR}/DEBIAN/control << CTRL
@@ -179,7 +185,8 @@ jobs:
         run: |
           mkdir -p artifact-staging/lib
           cp build/sicompass artifact-staging/
-          cp /usr/local/lib/libSDL3.so* artifact-staging/lib/
+          # Use -a to preserve symlinks for SDL3
+          cp -a /usr/local/lib/libSDL3.so* artifact-staging/lib/
           cp /usr/local/lib/libaccesskit.so artifact-staging/lib/
 
       - name: Upload binary for other Linux packages
@@ -216,7 +223,7 @@ jobs:
 
           mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
           cp linux-binary/sicompass ~/rpmbuild/SOURCES/
-          cp linux-binary/lib/libSDL3.so* ~/rpmbuild/SOURCES/
+          cp -a linux-binary/lib/libSDL3.so* ~/rpmbuild/SOURCES/
           cp linux-binary/lib/libaccesskit.so ~/rpmbuild/SOURCES/
 
           cat > ~/rpmbuild/SPECS/sicompass.spec << SPEC
@@ -287,7 +294,7 @@ jobs:
           mkdir -p pkg/usr/bin
           mkdir -p pkg/usr/lib
           cp linux-binary/sicompass pkg/usr/bin/
-          cp linux-binary/lib/libSDL3.so* pkg/usr/lib/
+          cp -a linux-binary/lib/libSDL3.so* pkg/usr/lib/
           cp linux-binary/lib/libaccesskit.so pkg/usr/lib/
 
           # Create .PKGINFO
