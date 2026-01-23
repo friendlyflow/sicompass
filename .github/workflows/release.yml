@@ -175,14 +175,18 @@ jobs:
           name: deb-package
           path: "*.deb"
 
+      - name: Prepare binary artifact
+        run: |
+          mkdir -p artifact-staging/lib
+          cp build/sicompass artifact-staging/
+          cp /usr/local/lib/libSDL3.so* artifact-staging/lib/
+          cp /usr/local/lib/libaccesskit.so artifact-staging/lib/
+
       - name: Upload binary for other Linux packages
         uses: actions/upload-artifact@v4
         with:
           name: linux-binary
-          path: |
-            build/sicompass
-            /usr/local/lib/libSDL3.so*
-            /usr/local/lib/libaccesskit.so
+          path: artifact-staging/
 
   build-linux-rpm:
     runs-on: ubuntu-latest
@@ -211,9 +215,9 @@ jobs:
           VERSION=${{ steps.version.outputs.version }}
 
           mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-          cp linux-binary/build/sicompass ~/rpmbuild/SOURCES/
-          cp linux-binary/usr/local/lib/libSDL3.so* ~/rpmbuild/SOURCES/
-          cp linux-binary/usr/local/lib/libaccesskit.so ~/rpmbuild/SOURCES/
+          cp linux-binary/sicompass ~/rpmbuild/SOURCES/
+          cp linux-binary/lib/libSDL3.so* ~/rpmbuild/SOURCES/
+          cp linux-binary/lib/libaccesskit.so ~/rpmbuild/SOURCES/
 
           cat > ~/rpmbuild/SPECS/sicompass.spec << SPEC
           Name:           sicompass
@@ -282,9 +286,9 @@ jobs:
           # Create package structure
           mkdir -p pkg/usr/bin
           mkdir -p pkg/usr/lib
-          cp linux-binary/build/sicompass pkg/usr/bin/
-          cp linux-binary/usr/local/lib/libSDL3.so* pkg/usr/lib/
-          cp linux-binary/usr/local/lib/libaccesskit.so pkg/usr/lib/
+          cp linux-binary/sicompass pkg/usr/bin/
+          cp linux-binary/lib/libSDL3.so* pkg/usr/lib/
+          cp linux-binary/lib/libaccesskit.so pkg/usr/lib/
 
           # Create .PKGINFO
           cat > pkg/.PKGINFO << PKGINFO
