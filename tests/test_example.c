@@ -1,12 +1,13 @@
 /*
- * Example test file demonstrating tau + fff usage
+ * Example test file demonstrating unity + fff usage
  *
- * tau: Testing framework (assertions, test structure)
+ * unity: Testing framework (assertions, test structure)
  * fff: Fake Function Framework (mocking)
  */
 
-#include <tau/tau.h>
+#include <unity.h>
 #include <fff/fff.h>
+#include <stdlib.h>
 
 DEFINE_FFF_GLOBALS;
 
@@ -34,27 +35,36 @@ int load_config_value(const char *path) {
 }
 
 /* ============================================
- * tau Test Suite
+ * Unity Test Setup/Teardown
  * ============================================ */
 
-TAU_MAIN()
-
-TEST(example, basic_assertion) {
-    CHECK(1 + 1 == 2);
-    CHECK_EQ(42, 42);
-    CHECK_NE(1, 2);
-}
-
-TEST(example, string_assertions) {
-    const char *hello = "hello";
-    CHECK_STREQ(hello, "hello");
-    CHECK_STRNE(hello, "world");
-}
-
-TEST(fff_demo, mock_file_read_success) {
-    // Reset the fake before each test
+void setUp(void) {
+    // Reset all fakes before each test
     RESET_FAKE(file_read);
+    FFF_RESET_HISTORY();
+}
 
+void tearDown(void) {
+    // Cleanup after each test (if needed)
+}
+
+/* ============================================
+ * Test Cases
+ * ============================================ */
+
+void test_example_basic_assertion(void) {
+    TEST_ASSERT_TRUE(1 + 1 == 2);
+    TEST_ASSERT_EQUAL_INT(42, 42);
+    TEST_ASSERT_NOT_EQUAL(1, 2);
+}
+
+void test_example_string_assertions(void) {
+    const char *hello = "hello";
+    TEST_ASSERT_EQUAL_STRING("hello", hello);
+    TEST_ASSERT_TRUE(strcmp(hello, "world") != 0);
+}
+
+void test_fff_demo_mock_file_read_success(void) {
     // Configure the mock to return success and set buffer content
     file_read_fake.return_val = 5;
     file_read_fake.custom_fake = NULL;
@@ -64,25 +74,21 @@ TEST(fff_demo, mock_file_read_success) {
     int result = load_config_value("/fake/path");
 
     // Verify the mock was called
-    CHECK_EQ(file_read_fake.call_count, 1);
-    CHECK_STREQ(file_read_fake.arg0_val, "/fake/path");
+    TEST_ASSERT_EQUAL_INT(1, file_read_fake.call_count);
+    TEST_ASSERT_EQUAL_STRING("/fake/path", file_read_fake.arg0_val);
 }
 
-TEST(fff_demo, mock_file_read_failure) {
-    RESET_FAKE(file_read);
-
+void test_fff_demo_mock_file_read_failure(void) {
     // Configure the mock to return failure
     file_read_fake.return_val = -1;
 
     int result = load_config_value("/nonexistent");
 
-    CHECK_EQ(result, -1);
-    CHECK_EQ(file_read_fake.call_count, 1);
+    TEST_ASSERT_EQUAL_INT(-1, result);
+    TEST_ASSERT_EQUAL_INT(1, file_read_fake.call_count);
 }
 
-TEST(fff_demo, call_history) {
-    RESET_FAKE(file_read);
-
+void test_fff_demo_call_history(void) {
     file_read_fake.return_val = 0;
 
     // Make multiple calls
@@ -91,10 +97,26 @@ TEST(fff_demo, call_history) {
     load_config_value("/path/c");
 
     // Check call count
-    CHECK_EQ(file_read_fake.call_count, 3);
+    TEST_ASSERT_EQUAL_INT(3, file_read_fake.call_count);
 
     // Check argument history
-    CHECK_STREQ(file_read_fake.arg0_history[0], "/path/a");
-    CHECK_STREQ(file_read_fake.arg0_history[1], "/path/b");
-    CHECK_STREQ(file_read_fake.arg0_history[2], "/path/c");
+    TEST_ASSERT_EQUAL_STRING("/path/a", file_read_fake.arg0_history[0]);
+    TEST_ASSERT_EQUAL_STRING("/path/b", file_read_fake.arg0_history[1]);
+    TEST_ASSERT_EQUAL_STRING("/path/c", file_read_fake.arg0_history[2]);
+}
+
+/* ============================================
+ * Main - Run all tests
+ * ============================================ */
+
+int main(void) {
+    UNITY_BEGIN();
+
+    RUN_TEST(test_example_basic_assertion);
+    RUN_TEST(test_example_string_assertions);
+    RUN_TEST(test_fff_demo_mock_file_read_success);
+    RUN_TEST(test_fff_demo_mock_file_read_failure);
+    RUN_TEST(test_fff_demo_call_history);
+
+    return UNITY_END();
 }
