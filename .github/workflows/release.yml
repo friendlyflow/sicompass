@@ -20,15 +20,90 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Nix
-        uses: cachix/install-nix-action@v30
-        with:
-          nix_path: nixpkgs=channel:nixos-unstable
-          extra_nix_config: |
-            experimental-features = nix-command flakes
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            pkg-config \
+            python3-pip \
+            libvulkan-dev \
+            libfreetype-dev \
+            libharfbuzz-dev \
+            libjson-c-dev \
+            libcglm-dev \
+            glslang-tools \
+            libwayland-dev \
+            libxkbcommon-dev \
+            libx11-dev \
+            libxext-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxrandr-dev \
+            libxss-dev \
+            libpulse-dev \
+            libasound2-dev \
+            libpipewire-0.3-dev \
+            libdbus-1-dev \
+            libat-spi2-core-dev \
+            libdrm-dev \
+            libgbm-dev \
+            libegl-dev \
+            libdecor-0-dev \
+            cmake
 
-      - name: Build with Nix
-        run: nix build .#default -L
+      - name: Install Meson and Ninja
+        run: pip3 install meson ninja
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Build SDL3 from source
+        run: |
+          git clone --depth 1 --branch release-3.2.28 https://github.com/libsdl-org/SDL.git SDL3
+          cd SDL3
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
+          cmake --build build -j$(nproc)
+          sudo cmake --install build
+
+      - name: Build accesskit-c from source
+        run: |
+          git clone --depth 1 https://github.com/AccessKit/accesskit-c.git
+          cd accesskit-c
+          cargo build --release
+          sudo mkdir -p /usr/local/include /usr/local/lib/pkgconfig
+          sudo cp include/accesskit.h /usr/local/include/
+          sudo cp target/release/libaccesskit.so /usr/local/lib/
+          sudo ldconfig
+          # Create pkg-config file
+          sudo tee /usr/local/lib/pkgconfig/accesskit.pc << 'EOF'
+          prefix=/usr/local
+          libdir=${prefix}/lib
+          includedir=${prefix}/include
+
+          Name: accesskit
+          Description: C bindings for AccessKit accessibility infrastructure
+          Version: 0.1
+          Libs: -L${libdir} -laccesskit
+          Cflags: -I${includedir}
+          EOF
+
+      - name: Create stb pkg-config file
+        run: |
+          # Install stb headers
+          git clone --depth 1 https://github.com/nothings/stb.git
+          sudo mkdir -p /usr/local/include/stb
+          sudo cp stb/*.h /usr/local/include/stb/
+          # Create pkg-config file
+          sudo tee /usr/local/lib/pkgconfig/stb.pc << 'EOF'
+          prefix=/usr/local
+          includedir=${prefix}/include
+
+          Name: stb
+          Description: stb single-file public domain libraries
+          Version: 0.0.1
+          Cflags: -I${includedir}
+          EOF
 
       - name: Get version
         id: version
@@ -39,6 +114,14 @@ jobs:
             echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
           fi
 
+      - name: Build sicompass
+        run: |
+          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH"
+          export LD_LIBRARY_PATH="/usr/local/lib:$LD_LIBRARY_PATH"
+          # Disable address sanitizer for release build
+          meson setup build --buildtype=release -Db_sanitize=none
+          ninja -C build
+
       - name: Create .deb package
         run: |
           VERSION=${{ steps.version.outputs.version }}
@@ -46,13 +129,17 @@ jobs:
 
           mkdir -p ${PKG_DIR}/DEBIAN
           mkdir -p ${PKG_DIR}/usr/bin
+          mkdir -p ${PKG_DIR}/usr/lib
           mkdir -p ${PKG_DIR}/usr/share/applications
 
-          cp result/bin/sicompass ${PKG_DIR}/usr/bin/
+          cp build/sicompass ${PKG_DIR}/usr/bin/
+          # Bundle SDL3 and accesskit libraries
+          cp /usr/local/lib/libSDL3.so* ${PKG_DIR}/usr/lib/
+          cp /usr/local/lib/libaccesskit.so ${PKG_DIR}/usr/lib/
 
-          cat > ${PKG_DIR}/DEBIAN/control << 'CTRL'
+          cat > ${PKG_DIR}/DEBIAN/control << CTRL
           Package: sicompass
-          Version: VERSION_PLACEHOLDER
+          Version: ${VERSION}
           Section: utils
           Priority: optional
           Architecture: amd64
@@ -61,7 +148,6 @@ jobs:
           Description: Silicon's Compass - Accessible document editor
            A Vulkan-based accessible document editor with vim-like keybindings.
           CTRL
-          sed -i "s/VERSION_PLACEHOLDER/${VERSION}/" ${PKG_DIR}/DEBIAN/control
 
           cat > ${PKG_DIR}/usr/share/applications/sicompass.desktop << 'DESKTOP'
           [Desktop Entry]
@@ -74,6 +160,13 @@ jobs:
           Categories=Office;TextEditor;
           DESKTOP
 
+          # Post-install script to update library cache
+          cat > ${PKG_DIR}/DEBIAN/postinst << 'POSTINST'
+          #!/bin/sh
+          ldconfig
+          POSTINST
+          chmod 755 ${PKG_DIR}/DEBIAN/postinst
+
           dpkg-deb --build ${PKG_DIR}
 
       - name: Upload .deb artifact
@@ -82,20 +175,24 @@ jobs:
           name: deb-package
           path: "*.deb"
 
+      - name: Upload binary for other Linux packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-binary
+          path: |
+            build/sicompass
+            /usr/local/lib/libSDL3.so*
+            /usr/local/lib/libaccesskit.so
+
   build-linux-rpm:
     runs-on: ubuntu-latest
+    needs: build-linux-deb
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Nix
-        uses: cachix/install-nix-action@v30
+      - name: Download Linux binary
+        uses: actions/download-artifact@v4
         with:
-          nix_path: nixpkgs=channel:nixos-unstable
-          extra_nix_config: |
-            experimental-features = nix-command flakes
-
-      - name: Build with Nix
-        run: nix build .#default -L
+          name: linux-binary
+          path: linux-binary
 
       - name: Install RPM tools
         run: sudo apt-get update && sudo apt-get install -y rpm
@@ -114,7 +211,9 @@ jobs:
           VERSION=${{ steps.version.outputs.version }}
 
           mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-          cp result/bin/sicompass ~/rpmbuild/SOURCES/
+          cp linux-binary/build/sicompass ~/rpmbuild/SOURCES/
+          cp linux-binary/usr/local/lib/libSDL3.so* ~/rpmbuild/SOURCES/
+          cp linux-binary/usr/local/lib/libaccesskit.so ~/rpmbuild/SOURCES/
 
           cat > ~/rpmbuild/SPECS/sicompass.spec << SPEC
           Name:           sicompass
@@ -134,10 +233,18 @@ jobs:
 
           %install
           mkdir -p %{buildroot}/usr/bin
+          mkdir -p %{buildroot}/usr/lib64
           install -m 755 %{_sourcedir}/sicompass %{buildroot}/usr/bin/sicompass
+          install -m 755 %{_sourcedir}/libSDL3.so* %{buildroot}/usr/lib64/
+          install -m 755 %{_sourcedir}/libaccesskit.so %{buildroot}/usr/lib64/
+
+          %post
+          ldconfig
 
           %files
           /usr/bin/sicompass
+          /usr/lib64/libSDL3.so*
+          /usr/lib64/libaccesskit.so
           SPEC
 
           rpmbuild -bb ~/rpmbuild/SPECS/sicompass.spec --define "_topdir $HOME/rpmbuild"
@@ -151,18 +258,13 @@ jobs:
 
   build-linux-arch:
     runs-on: ubuntu-latest
+    needs: build-linux-deb
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Nix
-        uses: cachix/install-nix-action@v30
+      - name: Download Linux binary
+        uses: actions/download-artifact@v4
         with:
-          nix_path: nixpkgs=channel:nixos-unstable
-          extra_nix_config: |
-            experimental-features = nix-command flakes
-
-      - name: Build with Nix
-        run: nix build .#default -L
+          name: linux-binary
+          path: linux-binary
 
       - name: Get version
         id: version
@@ -179,7 +281,10 @@ jobs:
 
           # Create package structure
           mkdir -p pkg/usr/bin
-          cp result/bin/sicompass pkg/usr/bin/
+          mkdir -p pkg/usr/lib
+          cp linux-binary/build/sicompass pkg/usr/bin/
+          cp linux-binary/usr/local/lib/libSDL3.so* pkg/usr/lib/
+          cp linux-binary/usr/local/lib/libaccesskit.so pkg/usr/lib/
 
           # Create .PKGINFO
           cat > pkg/.PKGINFO << PKGINFO
@@ -257,15 +362,69 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Nix
-        uses: cachix/install-nix-action@v30
-        with:
-          nix_path: nixpkgs=channel:nixos-unstable
-          extra_nix_config: |
-            experimental-features = nix-command flakes
+      - name: Install Homebrew dependencies
+        run: |
+          brew install \
+            meson \
+            ninja \
+            pkg-config \
+            vulkan-loader \
+            vulkan-headers \
+            freetype \
+            harfbuzz \
+            json-c \
+            cglm \
+            glslang \
+            cmake
 
-      - name: Build with Nix
-        run: nix build .#default -L --show-trace
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Build SDL3 from source
+        run: |
+          git clone --depth 1 --branch release-3.2.28 https://github.com/libsdl-org/SDL.git SDL3
+          cd SDL3
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
+          cmake --build build -j$(sysctl -n hw.ncpu)
+          sudo cmake --install build
+
+      - name: Build accesskit-c from source
+        run: |
+          git clone --depth 1 https://github.com/AccessKit/accesskit-c.git
+          cd accesskit-c
+          cargo build --release
+          sudo mkdir -p /usr/local/include /usr/local/lib/pkgconfig
+          sudo cp include/accesskit.h /usr/local/include/
+          sudo cp target/release/libaccesskit.dylib /usr/local/lib/
+          # Create pkg-config file
+          sudo tee /usr/local/lib/pkgconfig/accesskit.pc << 'EOF'
+          prefix=/usr/local
+          libdir=${prefix}/lib
+          includedir=${prefix}/include
+
+          Name: accesskit
+          Description: C bindings for AccessKit accessibility infrastructure
+          Version: 0.1
+          Libs: -L${libdir} -laccesskit
+          Cflags: -I${includedir}
+          EOF
+
+      - name: Create stb pkg-config file
+        run: |
+          # Install stb headers
+          git clone --depth 1 https://github.com/nothings/stb.git
+          sudo mkdir -p /usr/local/include/stb
+          sudo cp stb/*.h /usr/local/include/stb/
+          # Create pkg-config file
+          sudo tee /usr/local/lib/pkgconfig/stb.pc << 'EOF'
+          prefix=/usr/local
+          includedir=${prefix}/include
+
+          Name: stb
+          Description: stb single-file public domain libraries
+          Version: 0.0.1
+          Cflags: -I${includedir}
+          EOF
 
       - name: Get version
         id: version
@@ -276,6 +435,14 @@ jobs:
             echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
           fi
 
+      - name: Build sicompass
+        run: |
+          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:$(brew --prefix)/lib/pkgconfig:$PKG_CONFIG_PATH"
+          export DYLD_LIBRARY_PATH="/usr/local/lib:$DYLD_LIBRARY_PATH"
+          # Disable address sanitizer for release build
+          meson setup build --buildtype=release -Db_sanitize=none
+          ninja -C build
+
       - name: Create macOS app bundle
         run: |
           VERSION=${{ steps.version.outputs.version }}
@@ -283,9 +450,18 @@ jobs:
           BUNDLE_DIR="SiCompass.app"
 
           mkdir -p "${BUNDLE_DIR}/Contents/MacOS"
+          mkdir -p "${BUNDLE_DIR}/Contents/Frameworks"
           mkdir -p "${BUNDLE_DIR}/Contents/Resources"
 
-          cp result/bin/sicompass "${BUNDLE_DIR}/Contents/MacOS/"
+          cp build/sicompass "${BUNDLE_DIR}/Contents/MacOS/"
+
+          # Bundle dynamic libraries
+          cp /usr/local/lib/libSDL3.dylib "${BUNDLE_DIR}/Contents/Frameworks/"
+          cp /usr/local/lib/libaccesskit.dylib "${BUNDLE_DIR}/Contents/Frameworks/"
+
+          # Fix library paths to use @executable_path
+          install_name_tool -change /usr/local/lib/libSDL3.0.dylib @executable_path/../Frameworks/libSDL3.dylib "${BUNDLE_DIR}/Contents/MacOS/sicompass" || true
+          install_name_tool -change /usr/local/lib/libaccesskit.dylib @executable_path/../Frameworks/libaccesskit.dylib "${BUNDLE_DIR}/Contents/MacOS/sicompass" || true
 
           cat > "${BUNDLE_DIR}/Contents/Info.plist" << PLIST
           <?xml version="1.0" encoding="UTF-8"?>
@@ -469,6 +645,7 @@ jobs:
 
   publish-release:
     needs: [build-linux-deb, build-linux-rpm, build-linux-arch, build-nix, build-macos, build-windows]
+    if: always() && needs.build-linux-deb.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts

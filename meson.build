@@ -2,8 +2,8 @@ project('sicompass', 'c',
   version : '0.1',
   default_options : ['warning_level=3', 'default_library=static'])
 
-# Address sanitizer only on non-Windows (MSVC doesn't support it the same way)
-if host_machine.system() != 'windows'
+# Address sanitizer only on non-Windows debug builds (MSVC doesn't support it the same way)
+if host_machine.system() != 'windows' and get_option('buildtype') == 'debug'
   add_project_arguments('-fsanitize=address', language: 'c')
   add_project_link_arguments('-fsanitize=address', language: 'c')
 endif
