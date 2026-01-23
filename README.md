@@ -30,7 +30,7 @@ For power users, vim-style navigation (HJKL) is also supported.
 
 ## Getting Started
 
-Download the latest release for your platform from the [GitHub Releases](https://github.com/nicoverrijdt/sicompass/releases) page.
+Download the latest release for your platform from the [GitHub Releases](https://github.com/friendlyflow/sicompass/releases) page.
 
 ### Building from Source
 
