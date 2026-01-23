@@ -2,7 +2,7 @@
  * Tests for clipboard operations: handleCtrlX (cut), handleCtrlC (copy), handleCtrlV (paste)
  */
 
-#include <tau/tau.h>
+#include <unity.h>
 #include <fff/fff.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -272,13 +272,23 @@ static void destroyTestAppRenderer(AppRenderer *app) {
     free(app);
 }
 
-TAU_MAIN()
+/* ============================================
+ * Unity Test Setup/Teardown
+ * ============================================ */
 
-// ============================================
-// handleCtrlC (copy) tests
-// ============================================
+void setUp(void) {
+    RESET_FAKE(updateHistory);
+    FFF_RESET_HISTORY();
+}
 
-TEST(handleCtrlC, copy_string_element) {
+void tearDown(void) {
+}
+
+/* ============================================
+ * handleCtrlC (copy) tests
+ * ============================================ */
+
+void test_handleCtrlC_copy_string_element(void) {
     AppRenderer *app = createTestAppRenderer();
 
     // Create a simple list: ["hello", "world"]
@@ -291,16 +301,16 @@ TEST(handleCtrlC, copy_string_element) {
 
     handleCtrlC(app);
 
-    CHECK(app->clipboard != NULL);
-    CHECK_EQ(app->clipboard->type, FFON_STRING);
-    CHECK_STREQ(app->clipboard->data.string, "hello");
-    CHECK_EQ(app->ffonCount, 2);  // Original not modified
-    CHECK(app->needsRedraw);
+    TEST_ASSERT_NOT_NULL(app->clipboard);
+    TEST_ASSERT_EQUAL_INT(FFON_STRING, app->clipboard->type);
+    TEST_ASSERT_EQUAL_STRING("hello", app->clipboard->data.string);
+    TEST_ASSERT_EQUAL_INT(2, app->ffonCount);  // Original not modified
+    TEST_ASSERT_TRUE(app->needsRedraw);
 
     destroyTestAppRenderer(app);
 }
 
-TEST(handleCtrlC, copy_second_element) {
+void test_handleCtrlC_copy_second_element(void) {
     AppRenderer *app = createTestAppRenderer();
 
     app->ffon = malloc(sizeof(FfonElement*) * 2);
@@ -312,14 +322,14 @@ TEST(handleCtrlC, copy_second_element) {
 
     handleCtrlC(app);
 
-    CHECK(app->clipboard != NULL);
-    CHECK_STREQ(app->clipboard->data.string, "second");
-    CHECK_EQ(app->ffonCount, 2);
+    TEST_ASSERT_NOT_NULL(app->clipboard);
+    TEST_ASSERT_EQUAL_STRING("second", app->clipboard->data.string);
+    TEST_ASSERT_EQUAL_INT(2, app->ffonCount);
 
     destroyTestAppRenderer(app);
 }
 
-TEST(handleCtrlC, copy_object_element) {
+void test_handleCtrlC_copy_object_element(void) {
     AppRenderer *app = createTestAppRenderer();
 
     // Create: ["item", {key: ["child"]}]
@@ -333,16 +343,16 @@ TEST(handleCtrlC, copy_object_element) {
 
     handleCtrlC(app);
 
-    CHECK(app->clipboard != NULL);
-    CHECK_EQ(app->clipboard->type, FFON_OBJECT);
-    CHECK_STREQ(app->clipboard->data.object->key, "mykey");
-    CHECK_EQ(app->clipboard->data.object->count, 1);
-    CHECK_STREQ(app->clipboard->data.object->elements[0]->data.string, "child");
+    TEST_ASSERT_NOT_NULL(app->clipboard);
+    TEST_ASSERT_EQUAL_INT(FFON_OBJECT, app->clipboard->type);
+    TEST_ASSERT_EQUAL_STRING("mykey", app->clipboard->data.object->key);
+    TEST_ASSERT_EQUAL_INT(1, app->clipboard->data.object->count);
+    TEST_ASSERT_EQUAL_STRING("child", app->clipboard->data.object->elements[0]->data.string);
 
     destroyTestAppRenderer(app);
 }
 
-TEST(handleCtrlC, copy_nested_element) {
+void test_handleCtrlC_copy_nested_element(void) {
     AppRenderer *app = createTestAppRenderer();
 
     // Create: [{parent: ["child1", "child2"]}]
@@ -359,14 +369,14 @@ TEST(handleCtrlC, copy_nested_element) {
 
     handleCtrlC(app);
 
-    CHECK(app->clipboard != NULL);
-    CHECK_EQ(app->clipboard->type, FFON_STRING);
-    CHECK_STREQ(app->clipboard->data.string, "child2");
+    TEST_ASSERT_NOT_NULL(app->clipboard);
+    TEST_ASSERT_EQUAL_INT(FFON_STRING, app->clipboard->type);
+    TEST_ASSERT_EQUAL_STRING("child2", app->clipboard->data.string);
 
     destroyTestAppRenderer(app);
 }
 
-TEST(handleCtrlC, copy_replaces_previous_clipboard) {
+void test_handleCtrlC_copy_replaces_previous_clipboard(void) {
     AppRenderer *app = createTestAppRenderer();
 
     app->ffon = malloc(sizeof(FfonElement*) * 2);
@@ -377,17 +387,17 @@ TEST(handleCtrlC, copy_replaces_previous_clipboard) {
     // First copy
     app->currentId.ids[0] = 0;
     handleCtrlC(app);
-    CHECK_STREQ(app->clipboard->data.string, "first");
+    TEST_ASSERT_EQUAL_STRING("first", app->clipboard->data.string);
 
     // Second copy should replace
     app->currentId.ids[0] = 1;
     handleCtrlC(app);
-    CHECK_STREQ(app->clipboard->data.string, "second");
+    TEST_ASSERT_EQUAL_STRING("second", app->clipboard->data.string);
 
     destroyTestAppRenderer(app);
 }
 
-TEST(handleCtrlC, copy_invalid_index_does_nothing) {
+void test_handleCtrlC_copy_invalid_index_does_nothing(void) {
     AppRenderer *app = createTestAppRenderer();
 
     app->ffon = malloc(sizeof(FfonElement*));
@@ -399,17 +409,17 @@ TEST(handleCtrlC, copy_invalid_index_does_nothing) {
 
     handleCtrlC(app);
 
-    CHECK(app->clipboard == NULL);
-    CHECK(!app->needsRedraw);
+    TEST_ASSERT_NULL(app->clipboard);
+    TEST_ASSERT_FALSE(app->needsRedraw);
 
     destroyTestAppRenderer(app);
 }
 
-// ============================================
-// handleCtrlX (cut) tests
-// ============================================
+/* ============================================
+ * handleCtrlX (cut) tests
+ * ============================================ */
 
-TEST(handleCtrlX, cut_removes_element) {
+void test_handleCtrlX_cut_removes_element(void) {
     AppRenderer *app = createTestAppRenderer();
 
     app->ffon = malloc(sizeof(FfonElement*) * 3);
@@ -423,22 +433,22 @@ TEST(handleCtrlX, cut_removes_element) {
     handleCtrlX(app);
 
     // Check clipboard has the cut element
-    CHECK(app->clipboard != NULL);
-    CHECK_STREQ(app->clipboard->data.string, "second");
+    TEST_ASSERT_NOT_NULL(app->clipboard);
+    TEST_ASSERT_EQUAL_STRING("second", app->clipboard->data.string);
 
     // Check element was removed
-    CHECK_EQ(app->ffonCount, 2);
-    CHECK_STREQ(app->ffon[0]->data.string, "first");
-    CHECK_STREQ(app->ffon[1]->data.string, "third");
+    TEST_ASSERT_EQUAL_INT(2, app->ffonCount);
+    TEST_ASSERT_EQUAL_STRING("first", app->ffon[0]->data.string);
+    TEST_ASSERT_EQUAL_STRING("third", app->ffon[1]->data.string);
 
     // Cursor moved back
-    CHECK_EQ(app->currentId.ids[0], 0);
-    CHECK(app->needsRedraw);
+    TEST_ASSERT_EQUAL_INT(0, app->currentId.ids[0]);
+    TEST_ASSERT_TRUE(app->needsRedraw);
 
     destroyTestAppRenderer(app);
 }
 
-TEST(handleCtrlX, cut_first_element_cursor_stays) {
+void test_handleCtrlX_cut_first_element_cursor_stays(void) {
     AppRenderer *app = createTestAppRenderer();
 
     app->ffon = malloc(sizeof(FfonElement*) * 2);
@@ -450,15 +460,15 @@ TEST(handleCtrlX, cut_first_element_cursor_stays) {
 
     handleCtrlX(app);
 
-    CHECK_STREQ(app->clipboard->data.string, "first");
-    CHECK_EQ(app->ffonCount, 1);
-    CHECK_STREQ(app->ffon[0]->data.string, "second");
-    CHECK_EQ(app->currentId.ids[0], 0);  // Stays at 0
+    TEST_ASSERT_EQUAL_STRING("first", app->clipboard->data.string);
+    TEST_ASSERT_EQUAL_INT(1, app->ffonCount);
+    TEST_ASSERT_EQUAL_STRING("second", app->ffon[0]->data.string);
+    TEST_ASSERT_EQUAL_INT(0, app->currentId.ids[0]);  // Stays at 0
 
     destroyTestAppRenderer(app);
 }
 
-TEST(handleCtrlX, cut_last_element) {
+void test_handleCtrlX_cut_last_element(void) {
     AppRenderer *app = createTestAppRenderer();
 
     app->ffon = malloc(sizeof(FfonElement*) * 2);
@@ -470,15 +480,15 @@ TEST(handleCtrlX, cut_last_element) {
 
     handleCtrlX(app);
 
-    CHECK_STREQ(app->clipboard->data.string, "second");
-    CHECK_EQ(app->ffonCount, 1);
-    CHECK_STREQ(app->ffon[0]->data.string, "first");
-    CHECK_EQ(app->currentId.ids[0], 0);  // Moved back
+    TEST_ASSERT_EQUAL_STRING("second", app->clipboard->data.string);
+    TEST_ASSERT_EQUAL_INT(1, app->ffonCount);
+    TEST_ASSERT_EQUAL_STRING("first", app->ffon[0]->data.string);
+    TEST_ASSERT_EQUAL_INT(0, app->currentId.ids[0]);  // Moved back
 
     destroyTestAppRenderer(app);
 }
 
-TEST(handleCtrlX, cut_object_element) {
+void test_handleCtrlX_cut_object_element(void) {
     AppRenderer *app = createTestAppRenderer();
 
     app->ffon = malloc(sizeof(FfonElement*) * 2);
@@ -491,14 +501,14 @@ TEST(handleCtrlX, cut_object_element) {
 
     handleCtrlX(app);
 
-    CHECK_EQ(app->clipboard->type, FFON_OBJECT);
-    CHECK_STREQ(app->clipboard->data.object->key, "myobj");
-    CHECK_EQ(app->ffonCount, 1);
+    TEST_ASSERT_EQUAL_INT(FFON_OBJECT, app->clipboard->type);
+    TEST_ASSERT_EQUAL_STRING("myobj", app->clipboard->data.object->key);
+    TEST_ASSERT_EQUAL_INT(1, app->ffonCount);
 
     destroyTestAppRenderer(app);
 }
 
-TEST(handleCtrlX, cut_nested_element) {
+void test_handleCtrlX_cut_nested_element(void) {
     AppRenderer *app = createTestAppRenderer();
 
     // Create: [{parent: ["child1", "child2", "child3"]}]
@@ -516,16 +526,16 @@ TEST(handleCtrlX, cut_nested_element) {
 
     handleCtrlX(app);
 
-    CHECK_STREQ(app->clipboard->data.string, "child2");
-    CHECK_EQ(app->ffon[0]->data.object->count, 2);
-    CHECK_STREQ(app->ffon[0]->data.object->elements[0]->data.string, "child1");
-    CHECK_STREQ(app->ffon[0]->data.object->elements[1]->data.string, "child3");
-    CHECK_EQ(app->currentId.ids[1], 0);  // Cursor moved back
+    TEST_ASSERT_EQUAL_STRING("child2", app->clipboard->data.string);
+    TEST_ASSERT_EQUAL_INT(2, app->ffon[0]->data.object->count);
+    TEST_ASSERT_EQUAL_STRING("child1", app->ffon[0]->data.object->elements[0]->data.string);
+    TEST_ASSERT_EQUAL_STRING("child3", app->ffon[0]->data.object->elements[1]->data.string);
+    TEST_ASSERT_EQUAL_INT(0, app->currentId.ids[1]);  // Cursor moved back
 
     destroyTestAppRenderer(app);
 }
 
-TEST(handleCtrlX, cut_invalid_index_does_nothing) {
+void test_handleCtrlX_cut_invalid_index_does_nothing(void) {
     AppRenderer *app = createTestAppRenderer();
 
     app->ffon = malloc(sizeof(FfonElement*));
@@ -537,18 +547,18 @@ TEST(handleCtrlX, cut_invalid_index_does_nothing) {
 
     handleCtrlX(app);
 
-    CHECK(app->clipboard == NULL);
-    CHECK_EQ(app->ffonCount, 1);
-    CHECK(!app->needsRedraw);
+    TEST_ASSERT_NULL(app->clipboard);
+    TEST_ASSERT_EQUAL_INT(1, app->ffonCount);
+    TEST_ASSERT_FALSE(app->needsRedraw);
 
     destroyTestAppRenderer(app);
 }
 
-// ============================================
-// handleCtrlV (paste) tests
-// ============================================
+/* ============================================
+ * handleCtrlV (paste) tests
+ * ============================================ */
 
-TEST(handleCtrlV, paste_replaces_current_element) {
+void test_handleCtrlV_paste_replaces_current_element(void) {
     AppRenderer *app = createTestAppRenderer();
 
     app->ffon = malloc(sizeof(FfonElement*) * 2);
@@ -561,15 +571,15 @@ TEST(handleCtrlV, paste_replaces_current_element) {
 
     handleCtrlV(app);
 
-    CHECK_STREQ(app->ffon[0]->data.string, "pasted");
-    CHECK_STREQ(app->ffon[1]->data.string, "original2");
-    CHECK_EQ(app->ffonCount, 2);
-    CHECK(app->needsRedraw);
+    TEST_ASSERT_EQUAL_STRING("pasted", app->ffon[0]->data.string);
+    TEST_ASSERT_EQUAL_STRING("original2", app->ffon[1]->data.string);
+    TEST_ASSERT_EQUAL_INT(2, app->ffonCount);
+    TEST_ASSERT_TRUE(app->needsRedraw);
 
     destroyTestAppRenderer(app);
 }
 
-TEST(handleCtrlV, paste_object_element) {
+void test_handleCtrlV_paste_object_element(void) {
     AppRenderer *app = createTestAppRenderer();
 
     app->ffon = malloc(sizeof(FfonElement*));
@@ -581,14 +591,14 @@ TEST(handleCtrlV, paste_object_element) {
 
     handleCtrlV(app);
 
-    CHECK_EQ(app->ffon[0]->type, FFON_OBJECT);
-    CHECK_STREQ(app->ffon[0]->data.object->key, "pastedobj");
-    CHECK_EQ(app->ffon[0]->data.object->count, 1);
+    TEST_ASSERT_EQUAL_INT(FFON_OBJECT, app->ffon[0]->type);
+    TEST_ASSERT_EQUAL_STRING("pastedobj", app->ffon[0]->data.object->key);
+    TEST_ASSERT_EQUAL_INT(1, app->ffon[0]->data.object->count);
 
     destroyTestAppRenderer(app);
 }
 
-TEST(handleCtrlV, paste_without_clipboard_does_nothing) {
+void test_handleCtrlV_paste_without_clipboard_does_nothing(void) {
     AppRenderer *app = createTestAppRenderer();
 
     app->ffon = malloc(sizeof(FfonElement*));
@@ -599,13 +609,13 @@ TEST(handleCtrlV, paste_without_clipboard_does_nothing) {
 
     handleCtrlV(app);
 
-    CHECK_STREQ(app->ffon[0]->data.string, "original");
-    CHECK(!app->needsRedraw);
+    TEST_ASSERT_EQUAL_STRING("original", app->ffon[0]->data.string);
+    TEST_ASSERT_FALSE(app->needsRedraw);
 
     destroyTestAppRenderer(app);
 }
 
-TEST(handleCtrlV, paste_into_nested_position) {
+void test_handleCtrlV_paste_into_nested_position(void) {
     AppRenderer *app = createTestAppRenderer();
 
     // Create: [{parent: ["child1", "child2"]}]
@@ -624,13 +634,13 @@ TEST(handleCtrlV, paste_into_nested_position) {
 
     handleCtrlV(app);
 
-    CHECK_STREQ(app->ffon[0]->data.object->elements[0]->data.string, "child1");
-    CHECK_STREQ(app->ffon[0]->data.object->elements[1]->data.string, "pasted");
+    TEST_ASSERT_EQUAL_STRING("child1", app->ffon[0]->data.object->elements[0]->data.string);
+    TEST_ASSERT_EQUAL_STRING("pasted", app->ffon[0]->data.object->elements[1]->data.string);
 
     destroyTestAppRenderer(app);
 }
 
-TEST(handleCtrlV, paste_invalid_index_does_nothing) {
+void test_handleCtrlV_paste_invalid_index_does_nothing(void) {
     AppRenderer *app = createTestAppRenderer();
 
     app->ffon = malloc(sizeof(FfonElement*));
@@ -643,17 +653,17 @@ TEST(handleCtrlV, paste_invalid_index_does_nothing) {
 
     handleCtrlV(app);
 
-    CHECK_STREQ(app->ffon[0]->data.string, "original");
-    CHECK(!app->needsRedraw);
+    TEST_ASSERT_EQUAL_STRING("original", app->ffon[0]->data.string);
+    TEST_ASSERT_FALSE(app->needsRedraw);
 
     destroyTestAppRenderer(app);
 }
 
-// ============================================
-// Integration tests: copy + paste, cut + paste
-// ============================================
+/* ============================================
+ * Integration tests: copy + paste, cut + paste
+ * ============================================ */
 
-TEST(clipboard_integration, copy_then_paste) {
+void test_clipboard_integration_copy_then_paste(void) {
     AppRenderer *app = createTestAppRenderer();
 
     app->ffon = malloc(sizeof(FfonElement*) * 3);
@@ -670,15 +680,15 @@ TEST(clipboard_integration, copy_then_paste) {
     app->currentId.ids[0] = 1;
     handleCtrlV(app);
 
-    CHECK_STREQ(app->ffon[0]->data.string, "source");
-    CHECK_STREQ(app->ffon[1]->data.string, "source");  // Pasted
-    CHECK_STREQ(app->ffon[2]->data.string, "other");
-    CHECK_EQ(app->ffonCount, 3);
+    TEST_ASSERT_EQUAL_STRING("source", app->ffon[0]->data.string);
+    TEST_ASSERT_EQUAL_STRING("source", app->ffon[1]->data.string);  // Pasted
+    TEST_ASSERT_EQUAL_STRING("other", app->ffon[2]->data.string);
+    TEST_ASSERT_EQUAL_INT(3, app->ffonCount);
 
     destroyTestAppRenderer(app);
 }
 
-TEST(clipboard_integration, cut_then_paste) {
+void test_clipboard_integration_cut_then_paste(void) {
     AppRenderer *app = createTestAppRenderer();
 
     app->ffon = malloc(sizeof(FfonElement*) * 3);
@@ -692,21 +702,21 @@ TEST(clipboard_integration, cut_then_paste) {
     handleCtrlX(app);
 
     // Now we have ["middle", "target"], cursor at 0
-    CHECK_EQ(app->ffonCount, 2);
-    CHECK_EQ(app->currentId.ids[0], 0);
+    TEST_ASSERT_EQUAL_INT(2, app->ffonCount);
+    TEST_ASSERT_EQUAL_INT(0, app->currentId.ids[0]);
 
     // Paste to index 1
     app->currentId.ids[0] = 1;
     handleCtrlV(app);
 
-    CHECK_STREQ(app->ffon[0]->data.string, "middle");
-    CHECK_STREQ(app->ffon[1]->data.string, "to-cut");  // Pasted
-    CHECK_EQ(app->ffonCount, 2);
+    TEST_ASSERT_EQUAL_STRING("middle", app->ffon[0]->data.string);
+    TEST_ASSERT_EQUAL_STRING("to-cut", app->ffon[1]->data.string);  // Pasted
+    TEST_ASSERT_EQUAL_INT(2, app->ffonCount);
 
     destroyTestAppRenderer(app);
 }
 
-TEST(clipboard_integration, multiple_pastes) {
+void test_clipboard_integration_multiple_pastes(void) {
     AppRenderer *app = createTestAppRenderer();
 
     app->ffon = malloc(sizeof(FfonElement*) * 3);
@@ -727,9 +737,47 @@ TEST(clipboard_integration, multiple_pastes) {
     app->currentId.ids[0] = 2;
     handleCtrlV(app);
 
-    CHECK_STREQ(app->ffon[0]->data.string, "source");
-    CHECK_STREQ(app->ffon[1]->data.string, "source");
-    CHECK_STREQ(app->ffon[2]->data.string, "source");
+    TEST_ASSERT_EQUAL_STRING("source", app->ffon[0]->data.string);
+    TEST_ASSERT_EQUAL_STRING("source", app->ffon[1]->data.string);
+    TEST_ASSERT_EQUAL_STRING("source", app->ffon[2]->data.string);
 
     destroyTestAppRenderer(app);
+}
+
+/* ============================================
+ * Main - Run all tests
+ * ============================================ */
+
+int main(void) {
+    UNITY_BEGIN();
+
+    // handleCtrlC (copy) tests
+    RUN_TEST(test_handleCtrlC_copy_string_element);
+    RUN_TEST(test_handleCtrlC_copy_second_element);
+    RUN_TEST(test_handleCtrlC_copy_object_element);
+    RUN_TEST(test_handleCtrlC_copy_nested_element);
+    RUN_TEST(test_handleCtrlC_copy_replaces_previous_clipboard);
+    RUN_TEST(test_handleCtrlC_copy_invalid_index_does_nothing);
+
+    // handleCtrlX (cut) tests
+    RUN_TEST(test_handleCtrlX_cut_removes_element);
+    RUN_TEST(test_handleCtrlX_cut_first_element_cursor_stays);
+    RUN_TEST(test_handleCtrlX_cut_last_element);
+    RUN_TEST(test_handleCtrlX_cut_object_element);
+    RUN_TEST(test_handleCtrlX_cut_nested_element);
+    RUN_TEST(test_handleCtrlX_cut_invalid_index_does_nothing);
+
+    // handleCtrlV (paste) tests
+    RUN_TEST(test_handleCtrlV_paste_replaces_current_element);
+    RUN_TEST(test_handleCtrlV_paste_object_element);
+    RUN_TEST(test_handleCtrlV_paste_without_clipboard_does_nothing);
+    RUN_TEST(test_handleCtrlV_paste_into_nested_position);
+    RUN_TEST(test_handleCtrlV_paste_invalid_index_does_nothing);
+
+    // Integration tests
+    RUN_TEST(test_clipboard_integration_copy_then_paste);
+    RUN_TEST(test_clipboard_integration_cut_then_paste);
+    RUN_TEST(test_clipboard_integration_multiple_pastes);
+
+    return UNITY_END();
 }

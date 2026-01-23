@@ -114,6 +114,8 @@
               sdl3
               # AccessKit for accessibility
               accesskit-c
+              # Testing
+              unity-test
             ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
               vulkan-volk
               vulkan-tools
@@ -162,6 +164,8 @@
               flawfinder
               # AccessKit for accessibility
               accesskit-c
+              # Testing
+              unity-test
             ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
               gcc
               vulkan-volk
