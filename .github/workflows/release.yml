@@ -68,12 +68,15 @@ jobs:
 
       - name: Build accesskit-c from source
         run: |
+          sudo apt-get install -y patchelf
           git clone --depth 1 https://github.com/AccessKit/accesskit-c.git
           cd accesskit-c
           cargo build --release
           sudo mkdir -p /usr/local/include /usr/local/lib/pkgconfig
           sudo cp include/accesskit.h /usr/local/include/
           sudo cp target/release/libaccesskit.so /usr/local/lib/
+          # Set SONAME so linker uses library name instead of full path
+          sudo patchelf --set-soname libaccesskit.so /usr/local/lib/libaccesskit.so
           sudo ldconfig
           # Create pkg-config file
           sudo tee /usr/local/lib/pkgconfig/accesskit.pc << 'EOF'
