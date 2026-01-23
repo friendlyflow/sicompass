@@ -140,11 +140,13 @@ jobs:
           mkdir -p ${PKG_DIR}/usr/bin
           mkdir -p ${PKG_DIR}/usr/lib
           mkdir -p ${PKG_DIR}/usr/share/sicompass/fonts
+          mkdir -p ${PKG_DIR}/usr/share/sicompass/shaders
           mkdir -p ${PKG_DIR}/usr/share/applications
 
           # Install binary to share dir, wrapper script to bin
           cp build/sicompass ${PKG_DIR}/usr/share/sicompass/
           cp fonts/Consolas-Regular.ttf ${PKG_DIR}/usr/share/sicompass/fonts/
+          cp shaders/*.spv ${PKG_DIR}/usr/share/sicompass/shaders/
 
           # Create wrapper script that changes to app directory
           cat > ${PKG_DIR}/usr/bin/sicompass << 'WRAPPER'
@@ -199,8 +201,10 @@ jobs:
         run: |
           mkdir -p artifact-staging/lib
           mkdir -p artifact-staging/fonts
+          mkdir -p artifact-staging/shaders
           cp build/sicompass artifact-staging/
           cp fonts/Consolas-Regular.ttf artifact-staging/fonts/
+          cp shaders/*.spv artifact-staging/shaders/
           # Use -a to preserve symlinks for SDL3
           cp -a /usr/local/lib/libSDL3.so* artifact-staging/lib/
           cp /usr/local/lib/libaccesskit.so artifact-staging/lib/
@@ -242,6 +246,7 @@ jobs:
           cp -a linux-binary/lib/libSDL3.so* ~/rpmbuild/SOURCES/
           cp linux-binary/lib/libaccesskit.so ~/rpmbuild/SOURCES/
           cp linux-binary/fonts/Consolas-Regular.ttf ~/rpmbuild/SOURCES/
+          cp linux-binary/shaders/*.spv ~/rpmbuild/SOURCES/
 
           # Create wrapper script
           cat > ~/rpmbuild/SOURCES/sicompass-wrapper << 'WRAPPER'
@@ -270,9 +275,11 @@ jobs:
           mkdir -p %{buildroot}/usr/bin
           mkdir -p %{buildroot}/usr/lib64
           mkdir -p %{buildroot}/usr/share/sicompass/fonts
+          mkdir -p %{buildroot}/usr/share/sicompass/shaders
           install -m 755 %{_sourcedir}/sicompass %{buildroot}/usr/share/sicompass/sicompass
           install -m 755 %{_sourcedir}/sicompass-wrapper %{buildroot}/usr/bin/sicompass
           install -m 644 %{_sourcedir}/Consolas-Regular.ttf %{buildroot}/usr/share/sicompass/fonts/
+          install -m 644 %{_sourcedir}/*.spv %{buildroot}/usr/share/sicompass/shaders/
           install -m 755 %{_sourcedir}/libSDL3.so* %{buildroot}/usr/lib64/
           install -m 755 %{_sourcedir}/libaccesskit.so %{buildroot}/usr/lib64/
 
@@ -283,6 +290,7 @@ jobs:
           /usr/bin/sicompass
           /usr/share/sicompass/sicompass
           /usr/share/sicompass/fonts/Consolas-Regular.ttf
+          /usr/share/sicompass/shaders/*.spv
           /usr/lib64/libSDL3.so*
           /usr/lib64/libaccesskit.so
           SPEC
@@ -323,8 +331,10 @@ jobs:
           mkdir -p pkg/usr/bin
           mkdir -p pkg/usr/lib
           mkdir -p pkg/usr/share/sicompass/fonts
+          mkdir -p pkg/usr/share/sicompass/shaders
           cp linux-binary/sicompass pkg/usr/share/sicompass/
           cp linux-binary/fonts/Consolas-Regular.ttf pkg/usr/share/sicompass/fonts/
+          cp linux-binary/shaders/*.spv pkg/usr/share/sicompass/shaders/
           cp -a linux-binary/lib/libSDL3.so* pkg/usr/lib/
           cp linux-binary/lib/libaccesskit.so pkg/usr/lib/
 
@@ -501,11 +511,13 @@ jobs:
 
           mkdir -p "${BUNDLE_DIR}/Contents/MacOS"
           mkdir -p "${BUNDLE_DIR}/Contents/MacOS/fonts"
+          mkdir -p "${BUNDLE_DIR}/Contents/MacOS/shaders"
           mkdir -p "${BUNDLE_DIR}/Contents/Frameworks"
           mkdir -p "${BUNDLE_DIR}/Contents/Resources"
 
           cp build/sicompass "${BUNDLE_DIR}/Contents/MacOS/"
           cp fonts/Consolas-Regular.ttf "${BUNDLE_DIR}/Contents/MacOS/fonts/"
+          cp shaders/*.spv "${BUNDLE_DIR}/Contents/MacOS/shaders/"
 
           # Bundle dynamic libraries
           cp /usr/local/lib/libSDL3.dylib "${BUNDLE_DIR}/Contents/Frameworks/"
@@ -682,8 +694,10 @@ jobs:
 
           New-Item -ItemType Directory -Force -Path "dist"
           New-Item -ItemType Directory -Force -Path "dist\fonts"
+          New-Item -ItemType Directory -Force -Path "dist\shaders"
           Copy-Item "build\sicompass.exe" "dist\"
           Copy-Item "fonts\Consolas-Regular.ttf" "dist\fonts\"
+          Copy-Item "shaders\*.spv" "dist\shaders\"
 
           # Copy DLLs from vcpkg (includes SDL3, freetype, harfbuzz, etc.)
           Copy-Item "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin\*.dll" "dist\" -ErrorAction SilentlyContinue
