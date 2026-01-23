@@ -123,6 +123,11 @@ jobs:
           Summary:        Accessible document editor
           License:        MIT
           URL:            https://github.com/friendlyflow/sicompass
+          Requires:       vulkan-loader
+          Requires:       freetype
+          Requires:       harfbuzz
+          Requires:       json-c
+          Requires:       at-spi2-core
 
           %description
           A Vulkan-based accessible document editor with vim-like keybindings.
