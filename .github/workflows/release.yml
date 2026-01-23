@@ -125,6 +125,11 @@ jobs:
           meson setup build --buildtype=release -Db_sanitize=none -Db_ndebug=true
           ninja -C build
 
+      - name: Run tests
+        run: |
+          export LD_LIBRARY_PATH="/usr/local/lib:$LD_LIBRARY_PATH"
+          meson test -C build --print-errorlogs
+
       - name: Fix binary rpath
         run: |
           sudo apt-get install -y patchelf
@@ -503,6 +508,11 @@ jobs:
           meson setup build --buildtype=release -Db_sanitize=none -Db_ndebug=true
           ninja -C build
 
+      - name: Run tests
+        run: |
+          export DYLD_LIBRARY_PATH="/usr/local/lib:$DYLD_LIBRARY_PATH"
+          meson test -C build --print-errorlogs
+
       - name: Create macOS app bundle
         run: |
           VERSION=${{ steps.version.outputs.version }}
@@ -677,6 +687,9 @@ jobs:
 
       - name: Build
         run: ninja -C build
+
+      - name: Run tests
+        run: meson test -C build --print-errorlogs
 
       - name: Get version
         id: version
