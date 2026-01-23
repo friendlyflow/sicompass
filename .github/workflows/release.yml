@@ -528,7 +528,7 @@ jobs:
 
       - name: Install vcpkg dependencies
         run: |
-          vcpkg install pkgconf freetype harfbuzz json-c stb cglm sdl3 vulkan --triplet x64-windows "--binarysource=clear;default,readwrite"
+          vcpkg install pkgconf freetype harfbuzz json-c stb cglm sdl3 vulkan --triplet x64-windows --binarysource='clear;default,readwrite'
 
       - name: Add pkg-config to PATH
         run: |
