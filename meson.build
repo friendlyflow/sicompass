@@ -44,7 +44,7 @@ output = r.stdout().strip()
 errortxt = r.stderr().strip()
 
 if host_machine.system() == 'linux'
-  add_project_arguments('-DVK_USE_PLATFORM_XCB_KHR', language: 'c')
+  add_project_arguments('-DVK_USE_PLATFORM_WAYLAND_KHR', language: 'c')
 elif host_machine.system() == 'darwin'
   add_project_arguments('-DVK_USE_PLATFORM_MACOS_MVK', language: 'c')
 elif host_machine.system() == 'windows'
