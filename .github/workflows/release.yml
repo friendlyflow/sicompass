@@ -69,7 +69,7 @@ jobs:
       - name: Build accesskit-c from source
         run: |
           sudo apt-get install -y patchelf
-          git clone --depth 1 https://github.com/AccessKit/accesskit-c.git
+          git clone --depth 1 --branch 0.18.0 https://github.com/AccessKit/accesskit-c.git
           cd accesskit-c
           cargo build --release
           sudo mkdir -p /usr/local/include /usr/local/lib/pkgconfig
@@ -79,14 +79,14 @@ jobs:
           sudo patchelf --set-soname libaccesskit.so /usr/local/lib/libaccesskit.so
           sudo ldconfig
           # Create pkg-config file
-          sudo tee /usr/local/lib/pkgconfig/accesskit.pc << 'EOF'
+          sudo tee /usr/local/lib/pkgconfig/accesskit-c-0.18.pc << 'EOF'
           prefix=/usr/local
           libdir=${prefix}/lib
           includedir=${prefix}/include
 
-          Name: accesskit
+          Name: accesskit-c
           Description: C bindings for AccessKit accessibility infrastructure
-          Version: 0.1
+          Version: 0.18.0
           Libs: -L${libdir} -laccesskit
           Cflags: -I${includedir}
           EOF
@@ -475,21 +475,21 @@ jobs:
 
       - name: Build accesskit-c from source
         run: |
-          git clone --depth 1 https://github.com/AccessKit/accesskit-c.git
+          git clone --depth 1 --branch 0.18.0 https://github.com/AccessKit/accesskit-c.git
           cd accesskit-c
           cargo build --release
           sudo mkdir -p /usr/local/include /usr/local/lib/pkgconfig
           sudo cp include/accesskit.h /usr/local/include/
           sudo cp target/release/libaccesskit.dylib /usr/local/lib/
           # Create pkg-config file
-          sudo tee /usr/local/lib/pkgconfig/accesskit.pc << 'EOF'
+          sudo tee /usr/local/lib/pkgconfig/accesskit-c-0.18.pc << 'EOF'
           prefix=/usr/local
           libdir=${prefix}/lib
           includedir=${prefix}/include
 
-          Name: accesskit
+          Name: accesskit-c
           Description: C bindings for AccessKit accessibility infrastructure
-          Version: 0.1
+          Version: 0.18.0
           Libs: -L${libdir} -laccesskit
           Cflags: -I${includedir}
           EOF
@@ -728,15 +728,15 @@ jobs:
           "@
           $header | Out-File -FilePath "$env:GITHUB_WORKSPACE\accesskit-stub\include\accesskit.h" -Encoding ASCII
 
-          $pcFile = "$env:GITHUB_WORKSPACE\accesskit-stub\lib\pkgconfig\accesskit.pc"
+          $pcFile = "$env:GITHUB_WORKSPACE\accesskit-stub\lib\pkgconfig\accesskit-c-0.18.pc"
           "prefix=$env:GITHUB_WORKSPACE/accesskit-stub" | Out-File -FilePath $pcFile -Encoding ASCII
           'exec_prefix=${prefix}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
           'libdir=${exec_prefix}/lib' | Out-File -FilePath $pcFile -Append -Encoding ASCII
           'includedir=${prefix}/include' | Out-File -FilePath $pcFile -Append -Encoding ASCII
           '' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'Name: accesskit' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'Name: accesskit-c' | Out-File -FilePath $pcFile -Append -Encoding ASCII
           'Description: AccessKit stub' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'Version: 0.1' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'Version: 0.18.0' | Out-File -FilePath $pcFile -Append -Encoding ASCII
           'Libs:' | Out-File -FilePath $pcFile -Append -Encoding ASCII
           'Cflags: -I${includedir}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
 
