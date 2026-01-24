@@ -1,6 +1,7 @@
 #include "view.h"
 #include <filebrowser.h>
 #include <string.h>
+#include <stdio.h>
 
 // AccessKit node IDs
 #define ACCESSKIT_ROOT_ID 1
@@ -8,6 +9,10 @@
 
 // Callback for AccessKit activation - returns initial tree
 static struct accesskit_tree_update* accesskitActivationHandler(void *userdata) {
+    (void)userdata;
+
+    printf("[AccessKit] Activation handler called - building initial tree\n");
+
     // Create initial tree with root window and live region
     struct accesskit_tree_update *update = accesskit_tree_update_with_capacity_and_focus(2, ACCESSKIT_ROOT_ID);
 
@@ -18,11 +23,16 @@ static struct accesskit_tree_update* accesskitActivationHandler(void *userdata) 
     accesskit_node_set_children(root, 1, children);
     accesskit_tree_update_push_node(update, ACCESSKIT_ROOT_ID, root);
 
+    printf("[AccessKit] Tree structure:\n");
+    printf("[AccessKit]   Root (id=%d, role=WINDOW, label=\"Silicon's Compass\")\n", ACCESSKIT_ROOT_ID);
+
     // Create live region for announcements
     struct accesskit_node *liveRegion = accesskit_node_new(ACCESSKIT_ROLE_LABEL);
     accesskit_node_set_live(liveRegion, ACCESSKIT_LIVE_POLITE);
     accesskit_node_set_label(liveRegion, "");
     accesskit_tree_update_push_node(update, ACCESSKIT_LIVE_REGION_ID, liveRegion);
+
+    printf("[AccessKit]     LiveRegion (id=%d, role=LABEL, live=POLITE, label=\"\")\n", ACCESSKIT_LIVE_REGION_ID);
 
     // Set tree info
     struct accesskit_tree *tree = accesskit_tree_new(ACCESSKIT_ROOT_ID);
@@ -30,11 +40,14 @@ static struct accesskit_tree_update* accesskitActivationHandler(void *userdata) 
     accesskit_tree_set_toolkit_version(tree, "0.1");
     accesskit_tree_update_set_tree(update, tree);
 
+    printf("[AccessKit]   Toolkit: sicompass v0.1\n");
+
     return update;
 }
 
 // Callback for AccessKit action requests
 static void accesskitActionHandler(accesskit_action_request *request, void *userdata) {
+    (void)userdata;
     // Handle accessibility actions (click, focus, etc.)
     // For now, we just free the request
     accesskit_action_request_free(request);
@@ -42,13 +55,19 @@ static void accesskitActionHandler(accesskit_action_request *request, void *user
 
 // Callback for AccessKit deactivation
 static void accesskitDeactivationHandler(void *userdata) {
+    (void)userdata;
     // Called when assistive technology disconnects
     // Nothing to do here for now
 }
 
 void accesskitInit(SiCompassApplication *app) {
+    printf("[AccessKit] Initializing accessibility adapter\n");
+
     app->appRenderer->accesskitRootId = ACCESSKIT_ROOT_ID;
     app->appRenderer->accesskitLiveRegionId = ACCESSKIT_LIVE_REGION_ID;
+
+    printf("[AccessKit]   Root ID: %d\n", ACCESSKIT_ROOT_ID);
+    printf("[AccessKit]   Live Region ID: %d\n", ACCESSKIT_LIVE_REGION_ID);
 
     // Create platform-specific adapter
 #if defined(__APPLE__)
@@ -71,11 +90,16 @@ void accesskitInit(SiCompassApplication *app) {
         accesskitDeactivationHandler,
         NULL   // userdata for deactivation handler
     );
+    printf("[AccessKit]   Platform: Linux/Unix (AT-SPI)\n");
 #endif
+
+    printf("[AccessKit]   Adapter created: %s\n",
+           app->appRenderer->accesskitAdapter ? "success" : "failed/disabled");
 }
 
 void accesskitDestroy(AppRenderer *appRenderer) {
     if (appRenderer->accesskitAdapter) {
+        printf("[AccessKit] Destroying accessibility adapter\n");
 #if defined(__APPLE__)
         accesskit_macos_adapter_free(appRenderer->accesskitAdapter);
 #elif defined(_WIN32)
@@ -91,6 +115,8 @@ void accesskitDestroy(AppRenderer *appRenderer) {
 static struct accesskit_tree_update* accesskitSpeakUpdateFactory(void *userdata) {
     const char *text = (const char *)userdata;
 
+    printf("[AccessKit] Speak update - text: \"%s\"\n", text ? text : "(null)");
+
     struct accesskit_tree_update *update = accesskit_tree_update_with_focus(ACCESSKIT_ROOT_ID);
 
     // Update live region with new text
@@ -99,13 +125,20 @@ static struct accesskit_tree_update* accesskitSpeakUpdateFactory(void *userdata)
     accesskit_node_set_label(liveRegion, text);
     accesskit_tree_update_push_node(update, ACCESSKIT_LIVE_REGION_ID, liveRegion);
 
+    printf("[AccessKit]   LiveRegion (id=%d, role=LABEL, live=POLITE, label=\"%s\")\n",
+           ACCESSKIT_LIVE_REGION_ID, text ? text : "(null)");
+
     return update;
 }
 
 void accesskitSpeak(AppRenderer *appRenderer, const char *text) {
     if (!appRenderer->accesskitAdapter || !text) {
+        printf("[AccessKit] Speak skipped - adapter=%p, text=%s\n",
+               (void*)appRenderer->accesskitAdapter, text ? "present" : "null");
         return;
     }
+
+    printf("[AccessKit] Speak requested: \"%s\"\n", text);
 
     // Update the tree with new live region content (platform-specific)
 #if defined(__APPLE__)
