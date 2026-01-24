@@ -4,7 +4,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     accesskit-c-src = {
-      url = "github:AccessKit/accesskit-c";
+      url = "github:AccessKit/accesskit-c/0.18.0";
       flake = false;
     };
   };
@@ -33,11 +33,11 @@
         in
         pkgs.rustPlatform.buildRustPackage rec {
           pname = "accesskit-c";
-          version = accesskit-c-src.shortRev or "dev";
+          version = "0.18.0";
 
           src = accesskit-c-src;
 
-          cargoHash = "sha256-KCZ4jpYoARRv7dg44ar228TJKmkz6hVRirkDPpKfsK8=";
+          cargoHash = "sha256-P0MRRhVg13cmPJFSK+WA05sT0Mpy9Kzyyr/vxFjZTX0=";
 
           nativeBuildInputs = with pkgs; [
             pkg-config
@@ -61,8 +61,21 @@
             cp include/accesskit.h $out/include/
 
             # The cdylib is already installed by cargo, but ensure it's findable
-            # Create pkg-config file
+            # Create pkg-config file (named accesskit-c-0.18 to match GTK's expectation)
             mkdir -p $out/lib/pkgconfig
+            cat > $out/lib/pkgconfig/accesskit-c-0.18.pc << EOF
+            prefix=$out
+            libdir=\''${prefix}/lib
+            includedir=\''${prefix}/include
+
+            Name: accesskit-c
+            Description: C bindings for AccessKit accessibility infrastructure
+            Version: 0.18.0
+            Libs: -L\''${libdir} -laccesskit
+            Cflags: -I\''${includedir}
+            EOF
+
+            # Also create accesskit.pc for backwards compatibility
             cat > $out/lib/pkgconfig/accesskit.pc << EOF
             prefix=$out
             libdir=\''${prefix}/lib
@@ -70,7 +83,7 @@
 
             Name: accesskit
             Description: C bindings for AccessKit accessibility infrastructure
-            Version: ${version}
+            Version: 0.18.0
             Libs: -L\''${libdir} -laccesskit
             Cflags: -I\''${includedir}
             EOF

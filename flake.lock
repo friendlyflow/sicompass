@@ -3,15 +3,16 @@
     "accesskit-c-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1768771014,
-        "narHash": "sha256-CHgt0Wd3GuZg6pr7gHcmix1ZFGB+SOerrjTBid1UMLU=",
+        "lastModified": 1765397190,
+        "narHash": "sha256-fIzGY8PkQV0Xen0kdBHHNEEczBdLRY9TL5aOY7oz4V4=",
         "owner": "AccessKit",
         "repo": "accesskit-c",
-        "rev": "6e07e3df11f6fbd213fc8d5101c6fa5aeec4f349",
+        "rev": "0c52a8ce2357bbeb927f90dc9a1c19c8ec1bd2c3",
         "type": "github"
       },
       "original": {
         "owner": "AccessKit",
+        "ref": "0.18.0",
         "repo": "accesskit-c",
         "type": "github"
       }
