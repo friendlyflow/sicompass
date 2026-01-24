@@ -39,8 +39,7 @@ jobs:
             libgbm-dev \
             libegl-dev \
             libdecor-0-dev \
-            cmake \
-            libunity-dev
+            cmake
 
       - name: Install Meson and Ninja
         run: pip3 install meson ninja
@@ -95,6 +94,26 @@ jobs:
           Cflags: -I${includedir}
           EOF
 
+      - name: Build Unity test framework
+        run: |
+          git clone --depth 1 https://github.com/ThrowTheSwitch/Unity.git
+          cd Unity
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
+          cmake --build build -j$(nproc)
+          sudo cmake --install build
+          # Create pkg-config file
+          sudo tee /usr/local/lib/pkgconfig/unity.pc << 'EOF'
+          prefix=/usr/local
+          libdir=${prefix}/lib
+          includedir=${prefix}/include/unity
+
+          Name: unity
+          Description: Unity Test Framework
+          Version: 2.6.0
+          Libs: -L${libdir} -lunity
+          Cflags: -I${includedir}
+          EOF
+
       - name: Build sicompass
         run: |
           export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH"
@@ -145,8 +164,7 @@ jobs:
             json-c \
             cglm \
             glslang \
-            cmake \
-            unity
+            cmake
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -194,6 +212,26 @@ jobs:
           Name: stb
           Description: stb single-file public domain libraries
           Version: 0.0.1
+          Cflags: -I${includedir}
+          EOF
+
+      - name: Build Unity test framework
+        run: |
+          git clone --depth 1 https://github.com/ThrowTheSwitch/Unity.git
+          cd Unity
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
+          cmake --build build -j$(sysctl -n hw.ncpu)
+          sudo cmake --install build
+          # Create pkg-config file
+          sudo tee /usr/local/lib/pkgconfig/unity.pc << 'EOF'
+          prefix=/usr/local
+          libdir=${prefix}/lib
+          includedir=${prefix}/include/unity
+
+          Name: unity
+          Description: Unity Test Framework
+          Version: 2.6.0
+          Libs: -L${libdir} -lunity
           Cflags: -I${includedir}
           EOF
 
