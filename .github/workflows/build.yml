@@ -115,6 +115,11 @@ jobs:
           cp -a /usr/local/lib/libSDL3.so* artifact/lib/
           cp /usr/local/lib/libaccesskit.so artifact/lib/
 
+      - name: Smoke test (verify runtime files)
+        run: |
+          cd artifact
+          ./sicompass --check
+
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
@@ -210,6 +215,11 @@ jobs:
           cp shaders/*.spv artifact/shaders/
           cp /usr/local/lib/libSDL3.dylib artifact/lib/
           cp /usr/local/lib/libaccesskit.dylib artifact/lib/
+
+      - name: Smoke test (verify runtime files)
+        run: |
+          cd artifact
+          ./sicompass --check
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
@@ -343,6 +353,11 @@ jobs:
           Copy-Item "fonts\Consolas-Regular.ttf" "artifact\fonts\"
           Copy-Item "shaders\*.spv" "artifact\shaders\"
           Copy-Item "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin\*.dll" "artifact\" -ErrorAction SilentlyContinue
+
+      - name: Smoke test (verify runtime files)
+        run: |
+          cd artifact
+          .\sicompass.exe --check
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
