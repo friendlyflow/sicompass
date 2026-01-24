@@ -122,7 +122,9 @@
               vulkan-validation-layers
               vulkan-extension-layer
               vulkan-tools-lunarg
-              xorg.libxcb
+              wayland
+              wayland-protocols
+              libxkbcommon
               at-spi2-core
             ];
 
@@ -173,7 +175,9 @@
               vulkan-validation-layers
               vulkan-extension-layer
               vulkan-tools-lunarg
-              xorg.libxcb
+              wayland
+              wayland-protocols
+              libxkbcommon
               at-spi2-core
             ];
 
