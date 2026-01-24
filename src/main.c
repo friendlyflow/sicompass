@@ -1,6 +1,8 @@
 #include "main.h"
 #include "view.h"
 
+#include <string.h>
+
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
@@ -1083,7 +1085,45 @@ void run(SiCompassApplication* app) {
     cleanup(app);
 }
 
-int main(void) {
+// Check that all required runtime files exist
+int check_runtime_files(void) {
+    const char* required_files[] = {
+        "fonts/Consolas-Regular.ttf",
+        "shaders/text_vert.spv",
+        "shaders/text_frag.spv",
+        "shaders/rectangle_vert.spv",
+        "shaders/rectangle_frag.spv",
+        "shaders/image_vert.spv",
+        "shaders/image_frag.spv",
+    };
+    const int file_count = sizeof(required_files) / sizeof(required_files[0]);
+
+    int missing = 0;
+    for (int i = 0; i < file_count; i++) {
+        FILE* f = fopen(required_files[i], "rb");
+        if (f) {
+            fclose(f);
+            printf("OK: %s\n", required_files[i]);
+        } else {
+            fprintf(stderr, "MISSING: %s\n", required_files[i]);
+            missing++;
+        }
+    }
+
+    if (missing > 0) {
+        fprintf(stderr, "\n%d file(s) missing\n", missing);
+        return EXIT_FAILURE;
+    }
+
+    printf("\nAll runtime files present\n");
+    return EXIT_SUCCESS;
+}
+
+int main(int argc, char* argv[]) {
+    if (argc > 1 && strcmp(argv[1], "--check") == 0) {
+        return check_runtime_files();
+    }
+
     SiCompassApplication app = {0};
     siCompassApplicationInit(&app);
 
