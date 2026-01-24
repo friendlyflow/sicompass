@@ -593,7 +593,7 @@ jobs:
 
       - name: Install vcpkg dependencies
         run: |
-          vcpkg install pkgconf freetype harfbuzz json-c stb cglm sdl3 vulkan unity --triplet x64-windows --binarysource='clear;default,readwrite'
+          vcpkg install pkgconf freetype harfbuzz json-c stb cglm sdl3 vulkan --triplet x64-windows --binarysource='clear;default,readwrite'
 
       - name: Add pkg-config to PATH
         run: |
@@ -612,6 +612,30 @@ jobs:
           Start-Process -FilePath .\vulkan_sdk.exe -ArgumentList "--accept-licenses --default-answer --confirm-command install" -Wait
           echo "VULKAN_SDK=C:\VulkanSDK\$vulkanVersion" >> $env:GITHUB_ENV
           echo "C:\VulkanSDK\$vulkanVersion\Bin" >> $env:GITHUB_PATH
+
+      - name: Build Unity test framework
+        run: |
+          git clone --depth 1 https://github.com/ThrowTheSwitch/Unity.git
+          cd Unity
+          cmake -B build -DCMAKE_INSTALL_PREFIX="$env:GITHUB_WORKSPACE\unity-install"
+          cmake --build build --config Release
+          cmake --install build --config Release
+
+      - name: Create Unity pkg-config file
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\unity-install\lib\pkgconfig"
+          $pcFile = "$env:GITHUB_WORKSPACE\unity-install\lib\pkgconfig\unity.pc"
+          $prefix = "$env:GITHUB_WORKSPACE\unity-install" -replace '\\', '/'
+          "prefix=$prefix" | Out-File -FilePath $pcFile -Encoding ASCII
+          'exec_prefix=${prefix}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'libdir=${exec_prefix}/lib' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'includedir=${prefix}/include/unity' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          '' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'Name: unity' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'Description: Unity Test Framework' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'Version: 2.6.0' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'Libs: -L${libdir} -lunity' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+          'Cflags: -I${includedir}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
 
       - name: Create stb pkg-config file
         run: |
@@ -680,7 +704,7 @@ jobs:
 
       - name: Setup Meson
         run: |
-          $env:PKG_CONFIG_PATH = "$env:GITHUB_WORKSPACE\stb-stub\lib\pkgconfig;$env:GITHUB_WORKSPACE\accesskit-stub\lib\pkgconfig;$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\lib\pkgconfig"
+          $env:PKG_CONFIG_PATH = "$env:GITHUB_WORKSPACE\unity-install\lib\pkgconfig;$env:GITHUB_WORKSPACE\stb-stub\lib\pkgconfig;$env:GITHUB_WORKSPACE\accesskit-stub\lib\pkgconfig;$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\lib\pkgconfig"
           # Find Vulkan SDK directory (installed in C:\VulkanSDK\<version>)
           $vulkanDir = Get-ChildItem -Path "C:\VulkanSDK" -Directory | Select-Object -First 1
           $env:PATH = "$($vulkanDir.FullName)\Bin;$env:PATH"
