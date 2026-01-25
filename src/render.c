@@ -48,8 +48,8 @@ static struct accesskit_tree_update* accesskitBuildTreeUpdate(AppRenderer *appRe
     accesskit_node_set_label(liveRegion, "");
     accesskit_tree_update_push_node(update, ACCESSKIT_LIVE_REGION_ID, liveRegion);
 
-    // Create document container for structural navigation support
-    struct accesskit_node *listNode = accesskit_node_new(ACCESSKIT_ROLE_DOCUMENT);
+    // Create list container for structural navigation support
+    struct accesskit_node *listNode = accesskit_node_new(ACCESSKIT_ROLE_LIST);
     accesskit_node_set_label(listNode, "Items");
 
     // Build list item IDs array and add items
