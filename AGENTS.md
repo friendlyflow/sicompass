@@ -26,3 +26,7 @@ Do not use `make` - this project uses Meson + Ninja, not CMake or Makefiles.
 ### Header Files
 
 Always use `#pragma once` as the include guard in header files. Do not use traditional `#ifndef`/`#define`/`#endif` include guards.
+
+## GitHub Workflows
+
+The `.github/workflows/build.yml` and `.github/workflows/release.yml` files share common build logic (dependencies, SDL3, accesskit-c, stb, Unity test framework setup). When making changes to one file, apply the same changes to the other to keep them in sync.
