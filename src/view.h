@@ -248,3 +248,5 @@ void accesskitInit(SiCompassApplication *app);
 void accesskitDestroy(AppRenderer *appRenderer);
 void accesskitSpeak(AppRenderer *appRenderer, const char *text);
 void accesskitUpdateTree(AppRenderer *appRenderer);
+void accesskitUpdateWindowFocus(AppRenderer *appRenderer, bool isFocused);
+void accesskitUpdateWindowBounds(AppRenderer *appRenderer, int x, int y, int width, int height);

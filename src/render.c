@@ -310,6 +310,47 @@ void accesskitUpdateTree(AppRenderer *appRenderer) {
 #endif
 }
 
+void accesskitUpdateWindowFocus(AppRenderer *appRenderer, bool isFocused) {
+    if (!appRenderer || !appRenderer->accesskitAdapter) {
+        return;
+    }
+
+    printf("[AccessKit] Window focus: %s\n", isFocused ? "gained" : "lost");
+
+#if defined(__APPLE__)
+    // macOS handles focus differently
+#elif defined(_WIN32)
+    // Windows handles focus differently
+#else
+    accesskit_unix_adapter_update_window_focus_state(
+        appRenderer->accesskitAdapter,
+        isFocused
+    );
+#endif
+}
+
+void accesskitUpdateWindowBounds(AppRenderer *appRenderer, int x, int y, int width, int height) {
+    if (!appRenderer || !appRenderer->accesskitAdapter) {
+        return;
+    }
+
+    printf("[AccessKit] Window bounds: %d,%d %dx%d\n", x, y, width, height);
+
+#if defined(__APPLE__)
+    // macOS handles bounds differently
+#elif defined(_WIN32)
+    // Windows handles bounds differently
+#else
+    struct accesskit_rect outer = accesskit_rect_new(x, y, x + width, y + height);
+    struct accesskit_rect inner = outer; // For now, same as outer (no decorations)
+    accesskit_unix_adapter_set_root_window_bounds(
+        appRenderer->accesskitAdapter,
+        outer,
+        inner
+    );
+#endif
+}
+
 int renderText(SiCompassApplication *app, const char *text, int x, int y,
                uint32_t color, bool highlight) {
     if (!text || strlen(text) == 0) {

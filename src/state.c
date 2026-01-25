@@ -58,6 +58,15 @@ SiCompassApplication* appRendererCreate(SiCompassApplication* app) {
     // Initialize AccessKit
     accesskitInit(app);
 
+    // Set initial window bounds and focus for accessibility
+    if (app->window) {
+        int w, h, x, y;
+        SDL_GetWindowSize(app->window, &w, &h);
+        SDL_GetWindowPosition(app->window, &x, &y);
+        accesskitUpdateWindowBounds(appRenderer, x, y, w, h);
+        accesskitUpdateWindowFocus(appRenderer, true);  // Assume focused at start
+    }
+
     return app;
 }
 
