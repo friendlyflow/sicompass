@@ -379,6 +379,7 @@ jobs:
           static inline void accesskit_node_set_position_in_set(struct accesskit_node* n, int p) { (void)n; (void)p; }
           static inline void accesskit_node_set_size_of_set(struct accesskit_node* n, int s) { (void)n; (void)s; }
           static inline void accesskit_node_add_action(struct accesskit_node* n, accesskit_action a) { (void)n; (void)a; }
+          static inline void accesskit_node_set_active_descendant(struct accesskit_node* n, accesskit_node_id id) { (void)n; (void)id; }
           static inline void accesskit_tree_update_push_node(struct accesskit_tree_update* u, accesskit_node_id id, struct accesskit_node* n) { (void)u; (void)id; (void)n; }
           static inline struct accesskit_tree* accesskit_tree_new(accesskit_node_id r) { (void)r; return 0; }
           static inline void accesskit_tree_set_toolkit_name(struct accesskit_tree* t, const char* n) { (void)t; (void)n; }
