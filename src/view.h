@@ -157,6 +157,8 @@ typedef struct AppRenderer {
 #endif
     accesskit_node_id accesskitRootId;
     accesskit_node_id accesskitLiveRegionId;
+    accesskit_node_id accesskitListId;
+    int accesskitListItemCount;
 } AppRenderer;
 
 // Function declarations
@@ -245,3 +247,4 @@ void setErrorMessage(AppRenderer *appRenderer, const char *message);
 void accesskitInit(SiCompassApplication *app);
 void accesskitDestroy(AppRenderer *appRenderer);
 void accesskitSpeak(AppRenderer *appRenderer, const char *text);
+void accesskitUpdateTree(AppRenderer *appRenderer);

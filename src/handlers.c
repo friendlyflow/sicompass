@@ -78,6 +78,7 @@ void handleTab(AppRenderer *appRenderer) {
 
     createListCurrentLayer(appRenderer);
     appRenderer->needsRedraw = true;
+    accesskitUpdateTree(appRenderer);
 }
 
 void handleCtrlA(AppRenderer *appRenderer, History history) {
@@ -136,6 +137,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                     createListCurrentLayer(appRenderer);
                     appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
                     appRenderer->needsRedraw = true;
+                    accesskitUpdateTree(appRenderer);
                     appRenderer->lastKeypressTime = now;
                     return;
                 }
@@ -146,6 +148,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
         appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
         appRenderer->previousCoordinate = COORDINATE_OPERATOR_GENERAL;
         appRenderer->needsRedraw = true;
+        accesskitUpdateTree(appRenderer);
     } else if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
         // Get current element to check if it's a string (file) or object (directory)
         int count;
@@ -172,6 +175,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
             }
         }
         appRenderer->needsRedraw = true;
+        accesskitUpdateTree(appRenderer);
     } else if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH) {
         // Get selected item from list
         ListItem *list = appRenderer->filteredListCount > 0 ?
@@ -187,6 +191,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
         // Sync listIndex with current position (after createListCurrentLayer which resets it)
         appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
         appRenderer->needsRedraw = true;
+        accesskitUpdateTree(appRenderer);
     } else if (appRenderer->currentCoordinate == COORDINATE_COMMAND) {
         // Execute selected command
         ListItem *list = appRenderer->filteredListCount > 0 ?
@@ -264,6 +269,7 @@ void handleUp(AppRenderer *appRenderer) {
         appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
     }
     appRenderer->needsRedraw = true;
+    accesskitUpdateTree(appRenderer);
 }
 
 void handleDown(AppRenderer *appRenderer) {
@@ -283,6 +289,7 @@ void handleDown(AppRenderer *appRenderer) {
         appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
     }
     appRenderer->needsRedraw = true;
+    accesskitUpdateTree(appRenderer);
 }
 
 void handleLeft(AppRenderer *appRenderer) {
@@ -312,6 +319,7 @@ void handleLeft(AppRenderer *appRenderer) {
             // Sync listIndex with current position in hierarchy
             appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
             appRenderer->needsRedraw = true;
+            accesskitUpdateTree(appRenderer);
         }
     }
 }
@@ -344,6 +352,7 @@ void handleRight(AppRenderer *appRenderer) {
             // When entering a child, start at the first item
             appRenderer->listIndex = 0;
             appRenderer->needsRedraw = true;
+            accesskitUpdateTree(appRenderer);
         }
     }
 }
@@ -518,6 +527,7 @@ void handleEscape(AppRenderer *appRenderer) {
 
     appRenderer->previousCoordinate = appRenderer->currentCoordinate;
     appRenderer->needsRedraw = true;
+    accesskitUpdateTree(appRenderer);
 }
 
 void handleCommand(AppRenderer *appRenderer) {

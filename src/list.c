@@ -95,6 +95,8 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
             appRenderer->totalListCount++;
         }
     }
+
+    accesskitUpdateTree(appRenderer);
 }
 
 void populateListCurrentLayer(AppRenderer *appRenderer, const char *searchString) {
@@ -133,4 +135,6 @@ void populateListCurrentLayer(AppRenderer *appRenderer, const char *searchString
     if (appRenderer->listIndex >= appRenderer->filteredListCount) {
         appRenderer->listIndex = appRenderer->filteredListCount > 0 ? appRenderer->filteredListCount - 1 : 0;
     }
+
+    accesskitUpdateTree(appRenderer);
 }

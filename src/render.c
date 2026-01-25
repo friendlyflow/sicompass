@@ -6,25 +6,41 @@
 // AccessKit node IDs
 #define ACCESSKIT_ROOT_ID 1
 #define ACCESSKIT_LIVE_REGION_ID 2
+#define ACCESSKIT_LIST_ID 3
+#define ACCESSKIT_LIST_ITEM_BASE 100
 
-// Callback for AccessKit activation - returns initial tree
-static struct accesskit_tree_update* accesskitActivationHandler(void *userdata) {
-    (void)userdata;
+// Static reference for AccessKit callbacks
+static AppRenderer *g_accesskitAppRenderer = NULL;
 
-    printf("[AccessKit] Activation handler called - building initial tree\n");
+// Build accessibility tree update with list items
+static struct accesskit_tree_update* accesskitBuildTreeUpdate(AppRenderer *appRenderer, bool includeTree) {
+    // Determine which list to use and get item count
+    ListItem *list = NULL;
+    int count = 0;
 
-    // Create initial tree with root window and live region
-    struct accesskit_tree_update *update = accesskit_tree_update_with_capacity_and_focus(2, ACCESSKIT_ROOT_ID);
+    if (appRenderer) {
+        list = appRenderer->filteredListCount > 0 ?
+               appRenderer->filteredListCurrentLayer : appRenderer->totalListCurrentLayer;
+        count = appRenderer->filteredListCount > 0 ?
+                appRenderer->filteredListCount : appRenderer->totalListCount;
+    }
 
-    // Create root node (window)
+    // Calculate focus: selected list item or root
+    accesskit_node_id focusId = ACCESSKIT_ROOT_ID;
+    if (appRenderer && count > 0 && appRenderer->listIndex >= 0 && appRenderer->listIndex < count) {
+        focusId = ACCESSKIT_LIST_ITEM_BASE + appRenderer->listIndex;
+    }
+
+    // Capacity: root + live region + list container + list items
+    int capacity = 3 + count;
+    struct accesskit_tree_update *update = accesskit_tree_update_with_capacity_and_focus(capacity, focusId);
+
+    // Create root node (window) with children: live region + list
     struct accesskit_node *root = accesskit_node_new(ACCESSKIT_ROLE_WINDOW);
     accesskit_node_set_label(root, "Silicon's Compass");
-    accesskit_node_id children[] = {ACCESSKIT_LIVE_REGION_ID};
-    accesskit_node_set_children(root, 1, children);
+    accesskit_node_id rootChildren[] = {ACCESSKIT_LIVE_REGION_ID, ACCESSKIT_LIST_ID};
+    accesskit_node_set_children(root, 2, rootChildren);
     accesskit_tree_update_push_node(update, ACCESSKIT_ROOT_ID, root);
-
-    printf("[AccessKit] Tree structure:\n");
-    printf("[AccessKit]   Root (id=%d, role=WINDOW, label=\"Silicon's Compass\")\n", ACCESSKIT_ROOT_ID);
 
     // Create live region for announcements
     struct accesskit_node *liveRegion = accesskit_node_new(ACCESSKIT_ROLE_LABEL);
@@ -32,24 +48,111 @@ static struct accesskit_tree_update* accesskitActivationHandler(void *userdata) 
     accesskit_node_set_label(liveRegion, "");
     accesskit_tree_update_push_node(update, ACCESSKIT_LIVE_REGION_ID, liveRegion);
 
-    printf("[AccessKit]     LiveRegion (id=%d, role=LABEL, live=POLITE, label=\"\")\n", ACCESSKIT_LIVE_REGION_ID);
+    // Create list container
+    struct accesskit_node *listNode = accesskit_node_new(ACCESSKIT_ROLE_LIST);
+    accesskit_node_set_label(listNode, "Items");
 
-    // Set tree info
-    struct accesskit_tree *tree = accesskit_tree_new(ACCESSKIT_ROOT_ID);
-    accesskit_tree_set_toolkit_name(tree, "sicompass");
-    accesskit_tree_set_toolkit_version(tree, "0.1");
-    accesskit_tree_update_set_tree(update, tree);
+    // Build list item IDs array and add items
+    if (count > 0 && list) {
+        accesskit_node_id *itemIds = malloc(count * sizeof(accesskit_node_id));
+        for (int i = 0; i < count; i++) {
+            itemIds[i] = ACCESSKIT_LIST_ITEM_BASE + i;
+        }
+        accesskit_node_set_children(listNode, count, itemIds);
+        free(itemIds);
 
-    printf("[AccessKit]   Toolkit: sicompass v0.1\n");
+        // Create each list item node
+        for (int i = 0; i < count; i++) {
+            struct accesskit_node *itemNode = accesskit_node_new(ACCESSKIT_ROLE_LIST_ITEM);
+
+            // Strip prefix (-, +, -i, +i) from display text for accessibility
+            const char *text = list[i].value;
+            if (text && (text[0] == '-' || text[0] == '+')) {
+                // Skip prefix and following space
+                if (text[1] == 'i' && text[2] == ' ') {
+                    text = text + 3;
+                } else if (text[1] == ' ') {
+                    text = text + 2;
+                }
+            }
+
+            accesskit_node_set_label(itemNode, text ? text : "");
+            accesskit_node_set_position_in_set(itemNode, i + 1);
+            accesskit_node_set_size_of_set(itemNode, count);
+            accesskit_node_add_action(itemNode, ACCESSKIT_ACTION_FOCUS);
+            accesskit_node_add_action(itemNode, ACCESSKIT_ACTION_CLICK);
+
+            accesskit_tree_update_push_node(update, ACCESSKIT_LIST_ITEM_BASE + i, itemNode);
+        }
+    }
+
+    accesskit_tree_update_push_node(update, ACCESSKIT_LIST_ID, listNode);
+
+    // Set tree info only on initial activation
+    if (includeTree) {
+        struct accesskit_tree *tree = accesskit_tree_new(ACCESSKIT_ROOT_ID);
+        accesskit_tree_set_toolkit_name(tree, "sicompass");
+        accesskit_tree_set_toolkit_version(tree, "0.1");
+        accesskit_tree_update_set_tree(update, tree);
+    }
+
+    if (appRenderer) {
+        appRenderer->accesskitListItemCount = count;
+    }
+
+    printf("[AccessKit] Built tree: %d list items, focus=%d\n", count, (int)focusId);
 
     return update;
+}
+
+// Callback for AccessKit activation - returns initial tree
+static struct accesskit_tree_update* accesskitActivationHandler(void *userdata) {
+    AppRenderer *appRenderer = (AppRenderer *)userdata;
+
+    printf("[AccessKit] Activation handler called - building initial tree\n");
+
+    return accesskitBuildTreeUpdate(appRenderer, true);
 }
 
 // Callback for AccessKit action requests
 static void accesskitActionHandler(accesskit_action_request *request, void *userdata) {
     (void)userdata;
-    // Handle accessibility actions (click, focus, etc.)
-    // For now, we just free the request
+
+    if (!g_accesskitAppRenderer || !request) {
+        if (request) accesskit_action_request_free(request);
+        return;
+    }
+
+    accesskit_node_id nodeId = request->target;
+    accesskit_action action = request->action;
+
+    printf("[AccessKit] Action request: node=%d, action=%d\n", (int)nodeId, (int)action);
+
+    // Handle list item actions
+    if (nodeId >= ACCESSKIT_LIST_ITEM_BASE) {
+        int itemIndex = nodeId - ACCESSKIT_LIST_ITEM_BASE;
+        int count = g_accesskitAppRenderer->filteredListCount > 0 ?
+                    g_accesskitAppRenderer->filteredListCount : g_accesskitAppRenderer->totalListCount;
+
+        if (itemIndex >= 0 && itemIndex < count) {
+            if (action == ACCESSKIT_ACTION_FOCUS) {
+                // Navigate to the requested item
+                g_accesskitAppRenderer->listIndex = itemIndex;
+                g_accesskitAppRenderer->needsRedraw = true;
+                accesskitUpdateTree(g_accesskitAppRenderer);
+                printf("[AccessKit] Focus: navigated to item %d\n", itemIndex);
+            } else if (action == ACCESSKIT_ACTION_CLICK) {
+                // First ensure we're on the right item
+                if (g_accesskitAppRenderer->listIndex != itemIndex) {
+                    g_accesskitAppRenderer->listIndex = itemIndex;
+                }
+                // Activate the item (like pressing Enter/Right)
+                handleRight(g_accesskitAppRenderer);
+                printf("[AccessKit] Click action: activated item %d\n", itemIndex);
+            }
+        }
+    }
+
     accesskit_action_request_free(request);
 }
 
@@ -63,11 +166,17 @@ static void accesskitDeactivationHandler(void *userdata) {
 void accesskitInit(SiCompassApplication *app) {
     printf("[AccessKit] Initializing accessibility adapter\n");
 
+    // Store reference for callbacks
+    g_accesskitAppRenderer = app->appRenderer;
+
     app->appRenderer->accesskitRootId = ACCESSKIT_ROOT_ID;
     app->appRenderer->accesskitLiveRegionId = ACCESSKIT_LIVE_REGION_ID;
+    app->appRenderer->accesskitListId = ACCESSKIT_LIST_ID;
+    app->appRenderer->accesskitListItemCount = 0;
 
     printf("[AccessKit]   Root ID: %d\n", ACCESSKIT_ROOT_ID);
     printf("[AccessKit]   Live Region ID: %d\n", ACCESSKIT_LIVE_REGION_ID);
+    printf("[AccessKit]   List ID: %d\n", ACCESSKIT_LIST_ID);
 
     // Create platform-specific adapter
 #if defined(__APPLE__)
@@ -84,11 +193,11 @@ void accesskitInit(SiCompassApplication *app) {
     // Linux/Unix: AccessKit uses AT-SPI over D-Bus
     app->appRenderer->accesskitAdapter = accesskit_unix_adapter_new(
         accesskitActivationHandler,
-        NULL,  // userdata for activation handler
+        app->appRenderer,  // userdata for activation handler
         accesskitActionHandler,
-        NULL,  // userdata for action handler
+        app->appRenderer,  // userdata for action handler
         accesskitDeactivationHandler,
-        NULL   // userdata for deactivation handler
+        app->appRenderer   // userdata for deactivation handler
     );
     printf("[AccessKit]   Platform: Linux/Unix (AT-SPI)\n");
 #endif
@@ -158,6 +267,40 @@ void accesskitSpeak(AppRenderer *appRenderer, const char *text) {
         appRenderer->accesskitAdapter,
         accesskitSpeakUpdateFactory,
         (void *)text
+    );
+#endif
+}
+
+// Factory function for full tree updates
+static struct accesskit_tree_update* accesskitTreeUpdateFactory(void *userdata) {
+    AppRenderer *appRenderer = (AppRenderer *)userdata;
+    return accesskitBuildTreeUpdate(appRenderer, false);
+}
+
+void accesskitUpdateTree(AppRenderer *appRenderer) {
+    if (!appRenderer || !appRenderer->accesskitAdapter) {
+        return;
+    }
+
+    printf("[AccessKit] Updating tree\n");
+
+#if defined(__APPLE__)
+    accesskit_macos_adapter_update_if_active(
+        appRenderer->accesskitAdapter,
+        accesskitTreeUpdateFactory,
+        (void *)appRenderer
+    );
+#elif defined(_WIN32)
+    accesskit_windows_adapter_update_if_active(
+        appRenderer->accesskitAdapter,
+        accesskitTreeUpdateFactory,
+        (void *)appRenderer
+    );
+#else
+    accesskit_unix_adapter_update_if_active(
+        appRenderer->accesskitAdapter,
+        accesskitTreeUpdateFactory,
+        (void *)appRenderer
     );
 #endif
 }
