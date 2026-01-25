@@ -356,20 +356,28 @@ jobs:
           #ifndef ACCESSKIT_H
           #define ACCESSKIT_H
           typedef unsigned long long accesskit_node_id;
+          typedef int accesskit_action;
           #define ACCESSKIT_ROLE_WINDOW 0
           #define ACCESSKIT_ROLE_LABEL 1
+          #define ACCESSKIT_ROLE_LIST 2
+          #define ACCESSKIT_ROLE_LIST_ITEM 3
           #define ACCESSKIT_LIVE_POLITE 0
+          #define ACCESSKIT_ACTION_FOCUS 0
+          #define ACCESSKIT_ACTION_CLICK 1
           struct accesskit_tree_update;
           struct accesskit_node;
           struct accesskit_tree;
           struct accesskit_windows_adapter;
-          typedef struct { int action; } accesskit_action_request;
+          typedef struct { accesskit_node_id target; accesskit_action action; } accesskit_action_request;
           static inline struct accesskit_tree_update* accesskit_tree_update_with_capacity_and_focus(int c, accesskit_node_id f) { (void)c; (void)f; return 0; }
           static inline struct accesskit_tree_update* accesskit_tree_update_with_focus(accesskit_node_id f) { (void)f; return 0; }
           static inline struct accesskit_node* accesskit_node_new(int role) { (void)role; return 0; }
           static inline void accesskit_node_set_label(struct accesskit_node* n, const char* l) { (void)n; (void)l; }
           static inline void accesskit_node_set_live(struct accesskit_node* n, int l) { (void)n; (void)l; }
           static inline void accesskit_node_set_children(struct accesskit_node* n, int c, accesskit_node_id* ids) { (void)n; (void)c; (void)ids; }
+          static inline void accesskit_node_set_position_in_set(struct accesskit_node* n, int p) { (void)n; (void)p; }
+          static inline void accesskit_node_set_size_of_set(struct accesskit_node* n, int s) { (void)n; (void)s; }
+          static inline void accesskit_node_add_action(struct accesskit_node* n, accesskit_action a) { (void)n; (void)a; }
           static inline void accesskit_tree_update_push_node(struct accesskit_tree_update* u, accesskit_node_id id, struct accesskit_node* n) { (void)u; (void)id; (void)n; }
           static inline struct accesskit_tree* accesskit_tree_new(accesskit_node_id r) { (void)r; return 0; }
           static inline void accesskit_tree_set_toolkit_name(struct accesskit_tree* t, const char* n) { (void)t; (void)n; }
