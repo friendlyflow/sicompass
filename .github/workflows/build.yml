@@ -361,6 +361,7 @@ jobs:
           #define ACCESSKIT_ROLE_LABEL 1
           #define ACCESSKIT_ROLE_LIST 2
           #define ACCESSKIT_ROLE_LIST_ITEM 3
+          #define ACCESSKIT_ROLE_DOCUMENT 4
           #define ACCESSKIT_LIVE_POLITE 0
           #define ACCESSKIT_ACTION_FOCUS 0
           #define ACCESSKIT_ACTION_CLICK 1
