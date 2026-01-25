@@ -48,8 +48,8 @@ static struct accesskit_tree_update* accesskitBuildTreeUpdate(AppRenderer *appRe
     accesskit_node_set_label(liveRegion, "");
     accesskit_tree_update_push_node(update, ACCESSKIT_LIVE_REGION_ID, liveRegion);
 
-    // Create list container for structural navigation support
-    struct accesskit_node *listNode = accesskit_node_new(ACCESSKIT_ROLE_LIST);
+    // Create document container for structural navigation support
+    struct accesskit_node *listNode = accesskit_node_new(ACCESSKIT_ROLE_DOCUMENT);
     accesskit_node_set_label(listNode, "Items");
 
     // Build list item IDs array and add items
@@ -60,6 +60,11 @@ static struct accesskit_tree_update* accesskitBuildTreeUpdate(AppRenderer *appRe
         }
         accesskit_node_set_children(listNode, count, itemIds);
         free(itemIds);
+
+        // Set active descendant for screen reader focus tracking
+        if (appRenderer && appRenderer->listIndex >= 0 && appRenderer->listIndex < count) {
+            accesskit_node_set_active_descendant(listNode, ACCESSKIT_LIST_ITEM_BASE + appRenderer->listIndex);
+        }
 
         // Create each list item node
         for (int i = 0; i < count; i++) {
