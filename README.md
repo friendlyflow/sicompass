@@ -10,11 +10,12 @@ Built for users who prefer or require keyboard-driven interaction, Sicompass off
 
 ## Key Features
 
-- **Keyboard-First Design** — Navigate entirely with your keyboard
+- **Keyboard-First Design** — Faster and handier navigation because your hands never leave the keyboard
 - **Native Accessibility** — Built-in support for screen readers on Linux, macOS, and Windows
-- **Cross-Platform** — Runs on Linux, macOS, and Windows (x86_64 and ARM)
+- **Cross-Platform** — Currently developed and tested on NixOS and Ubuntu, with macOS and Windows releases planned for later
 - **High-Performance Rendering** — Vulkan-powered graphics with FreeType2/HarfBuzz text shaping
 - **Extensible Architecture** — Provider-based plugin system for different data sources
+- **Simpler UI Development** — Functionality over design means less complexity and faster development with minimal styling
 
 ## Usage
 
