@@ -43,15 +43,12 @@ jobs:
             libseat-dev \
             libpixman-1-dev \
             hwdata \
-            libdisplay-info-dev \
-            libliftoff-dev \
-            libxcb-dri3-dev \
-            libxcb-present-dev \
-            libxcb-composite-dev \
-            libxcb-render-util0-dev \
-            libxcb-ewmh-dev \
+            libxcb1-dev \
+            libxcb-render0-dev \
+            libxcb-xfixes0-dev \
             libxcb-icccm4-dev \
-            libxcb-xinput-dev \
+            libxcb-image0-dev \
+            libxcb-shm0-dev \
             cmake
 
       - name: Install Meson and Ninja
