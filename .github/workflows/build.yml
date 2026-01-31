@@ -65,8 +65,26 @@ jobs:
           cmake --build build -j$(nproc)
           sudo cmake --install build
 
+      - name: Build wayland from source
+        run: |
+          git clone --depth 1 --branch 1.23.1 https://gitlab.freedesktop.org/wayland/wayland.git
+          cd wayland
+          meson setup build --prefix=/usr/local -Ddocumentation=false -Dtests=false
+          ninja -C build
+          sudo ninja -C build install
+          sudo ldconfig
+
+      - name: Build wayland-protocols from source
+        run: |
+          git clone --depth 1 --branch 1.38 https://gitlab.freedesktop.org/wayland/wayland-protocols.git
+          cd wayland-protocols
+          meson setup build --prefix=/usr/local
+          ninja -C build
+          sudo ninja -C build install
+
       - name: Build wlroots from source
         run: |
+          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:/usr/local/share/pkgconfig:$PKG_CONFIG_PATH"
           git clone --depth 1 --branch 0.19.0 https://gitlab.freedesktop.org/wlroots/wlroots.git
           cd wlroots
           meson setup build --prefix=/usr/local -Dexamples=false
