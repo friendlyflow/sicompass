@@ -93,6 +93,15 @@ jobs:
           ninja -C build
           sudo ninja -C build install
 
+      - name: Build pixman from source
+        run: |
+          git clone --depth 1 --branch pixman-0.44.2 https://gitlab.freedesktop.org/pixman/pixman.git
+          cd pixman
+          meson setup build --prefix=/usr/local
+          ninja -C build
+          sudo ninja -C build install
+          sudo ldconfig
+
       - name: Build wlroots from source
         run: |
           export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:/usr/local/share/pkgconfig:$PKG_CONFIG_PATH"
