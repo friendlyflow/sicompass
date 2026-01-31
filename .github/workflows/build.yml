@@ -76,7 +76,7 @@ jobs:
 
       - name: Build wayland-protocols from source
         run: |
-          git clone --depth 1 --branch 1.38 https://gitlab.freedesktop.org/wayland/wayland-protocols.git
+          git clone --depth 1 --branch 1.41 https://gitlab.freedesktop.org/wayland/wayland-protocols.git
           cd wayland-protocols
           meson setup build --prefix=/usr/local
           ninja -C build
