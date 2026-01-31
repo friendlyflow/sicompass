@@ -63,7 +63,7 @@ jobs:
             cmake
 
       - name: Install Meson and Ninja
-        run: pip3 install meson ninja
+        run: sudo pip3 install meson ninja --break-system-packages
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
