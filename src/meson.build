@@ -1,1 +1,2 @@
 subdir('sicompass')
+subdir('desicompass')

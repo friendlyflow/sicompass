@@ -15,6 +15,25 @@ hb_dep = dependency('harfbuzz')
 jsonc_dep = dependency('json-c')
 accesskit_dep = dependency('accesskit')
 cglm_dep = dependency('cglm')
+wlroots_dep = dependency('wlroots-0.19')
+wayland_server_dep = dependency('wayland-server')
+wayland_protocols_dep = dependency('wayland-protocols')
+xkbcommon_dep = dependency('xkbcommon')
+pixman_dep = dependency('pixman-1')
+
+# Wayland protocol generation for desicompass
+wayland_scanner = find_program('wayland-scanner')
+wayland_protocols_dir = wayland_protocols_dep.get_variable('pkgdatadir')
+
+xdg_shell_xml = wayland_protocols_dir / 'stable/xdg-shell/xdg-shell.xml'
+xdg_shell_c = custom_target('xdg-shell-protocol.c',
+  input: xdg_shell_xml,
+  output: 'xdg-shell-protocol.c',
+  command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'])
+xdg_shell_h = custom_target('xdg-shell-protocol.h',
+  input: xdg_shell_xml,
+  output: 'xdg-shell-protocol.h',
+  command: [wayland_scanner, 'server-header', '@INPUT@', '@OUTPUT@'])
 cc = meson.get_compiler('c')
 m_dep = cc.find_library('m', required : false)
 ft_dep = dependency('freetype2')
@@ -63,6 +82,11 @@ subdir('lib/lib_webbrowser')
 subdir('src')
 
 exe_sc = executable('sicompass', [sources_sc], dependencies: [vulkan_dep, sdl3_dep, m_dep, ft_dep, hb_dep, stb_dep, jsonc_dep, accesskit_dep, cglm_dep, lib_ffon_dep, lib_provider_dep, lib_filebrowser_dep],
+                    include_directories: [], install : true)
+
+exe_dc = executable('desicompass', [sources_dc, xdg_shell_c, xdg_shell_h],
+                    dependencies: [wlroots_dep, wayland_server_dep, xkbcommon_dep, pixman_dep, m_dep],
+                    c_args: ['-DWLR_USE_UNSTABLE'],
                     include_directories: [], install : true)
 
 subdir('tests')

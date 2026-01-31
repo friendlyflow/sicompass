@@ -98,7 +98,7 @@
             version = "0.1";
             src = self;
 
-            nativeBuildInputs = with pkgs; [ meson ninja pkg-config glslang ];
+            nativeBuildInputs = with pkgs; [ meson ninja pkg-config glslang wayland-scanner ];
             buildInputs = with pkgs; [
               glfw
               #renderdoc
@@ -126,6 +126,9 @@
               wayland-protocols
               libxkbcommon
               at-spi2-core
+              # wlroots for desicompass
+              wlroots_0_19
+              pixman
             ];
 
             enableParallelBuilding = true;
@@ -176,9 +179,13 @@
               vulkan-extension-layer
               vulkan-tools-lunarg
               wayland
+              wayland-scanner
               wayland-protocols
               libxkbcommon
               at-spi2-core
+              # wlroots for desicompass
+              wlroots_0_19
+              pixman
             ];
 
             # shellHooks = ''
