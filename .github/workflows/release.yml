@@ -240,647 +240,644 @@ jobs:
           name: linux-binary
           path: artifact-staging/
 
-  build-linux-rpm:
-    runs-on: ubuntu-latest
-    needs: build-linux-deb
-    steps:
-      - name: Download Linux binary
-        uses: actions/download-artifact@v4
-        with:
-          name: linux-binary
-          path: linux-binary
-
-      - name: Install RPM tools
-        run: sudo apt-get update && sudo apt-get install -y rpm
-
-      - name: Get version
-        id: version
-        run: |
-          if [ -n "${{ inputs.version }}" ]; then
-            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
-          else
-            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Create .rpm package
-        run: |
-          VERSION=${{ steps.version.outputs.version }}
-
-          mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-          cp linux-binary/sicompass ~/rpmbuild/SOURCES/
-          cp -a linux-binary/lib/libSDL3.so* ~/rpmbuild/SOURCES/
-          cp linux-binary/lib/libaccesskit.so ~/rpmbuild/SOURCES/
-          cp linux-binary/fonts/Consolas-Regular.ttf ~/rpmbuild/SOURCES/
-          cp linux-binary/shaders/*.spv ~/rpmbuild/SOURCES/
-
-          # Create wrapper script
-          cat > ~/rpmbuild/SOURCES/sicompass-wrapper << 'WRAPPER'
-          #!/bin/sh
-          cd /usr/share/sicompass
-          exec ./sicompass "$@"
-          WRAPPER
-
-          cat > ~/rpmbuild/SPECS/sicompass.spec << SPEC
-          Name:           sicompass
-          Version:        ${VERSION}
-          Release:        1
-          Summary:        Accessible document editor
-          License:        MIT
-          URL:            https://github.com/friendlyflow/sicompass
-          Requires:       vulkan-loader
-          Requires:       freetype
-          Requires:       harfbuzz
-          Requires:       json-c
-          Requires:       at-spi2-core
-
-          %description
-          A Vulkan-based accessible document editor with vim-like keybindings.
-
-          %install
-          mkdir -p %{buildroot}/usr/bin
-          mkdir -p %{buildroot}/usr/lib64
-          mkdir -p %{buildroot}/usr/share/sicompass/fonts
-          mkdir -p %{buildroot}/usr/share/sicompass/shaders
-          install -m 755 %{_sourcedir}/sicompass %{buildroot}/usr/share/sicompass/sicompass
-          install -m 755 %{_sourcedir}/sicompass-wrapper %{buildroot}/usr/bin/sicompass
-          install -m 644 %{_sourcedir}/Consolas-Regular.ttf %{buildroot}/usr/share/sicompass/fonts/
-          install -m 644 %{_sourcedir}/*.spv %{buildroot}/usr/share/sicompass/shaders/
-          install -m 755 %{_sourcedir}/libSDL3.so* %{buildroot}/usr/lib64/
-          install -m 755 %{_sourcedir}/libaccesskit.so %{buildroot}/usr/lib64/
-
-          %post
-          ldconfig
-
-          %files
-          /usr/bin/sicompass
-          /usr/share/sicompass/sicompass
-          /usr/share/sicompass/fonts/Consolas-Regular.ttf
-          /usr/share/sicompass/shaders/*.spv
-          /usr/lib64/libSDL3.so*
-          /usr/lib64/libaccesskit.so
-          SPEC
-
-          rpmbuild -bb ~/rpmbuild/SPECS/sicompass.spec --define "_topdir $HOME/rpmbuild"
-          cp ~/rpmbuild/RPMS/x86_64/*.rpm sicompass-${VERSION}-1.x86_64.rpm
-
-      - name: Upload .rpm artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: rpm-package
-          path: "*.rpm"
-
-  build-linux-arch:
-    runs-on: ubuntu-latest
-    needs: build-linux-deb
-    steps:
-      - name: Download Linux binary
-        uses: actions/download-artifact@v4
-        with:
-          name: linux-binary
-          path: linux-binary
-
-      - name: Get version
-        id: version
-        run: |
-          if [ -n "${{ inputs.version }}" ]; then
-            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
-          else
-            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Create Arch package tarball
-        run: |
-          VERSION=${{ steps.version.outputs.version }}
-
-          # Create package structure
-          mkdir -p pkg/usr/bin
-          mkdir -p pkg/usr/lib
-          mkdir -p pkg/usr/share/sicompass/fonts
-          mkdir -p pkg/usr/share/sicompass/shaders
-          cp linux-binary/sicompass pkg/usr/share/sicompass/
-          cp linux-binary/fonts/Consolas-Regular.ttf pkg/usr/share/sicompass/fonts/
-          cp linux-binary/shaders/*.spv pkg/usr/share/sicompass/shaders/
-          cp -a linux-binary/lib/libSDL3.so* pkg/usr/lib/
-          cp linux-binary/lib/libaccesskit.so pkg/usr/lib/
-
-          # Create wrapper script
-          cat > pkg/usr/bin/sicompass << 'WRAPPER'
-          #!/bin/sh
-          cd /usr/share/sicompass
-          exec ./sicompass "$@"
-          WRAPPER
-          chmod +x pkg/usr/bin/sicompass
-
-          # Create .PKGINFO
-          cat > pkg/.PKGINFO << PKGINFO
-          pkgname = sicompass
-          pkgver = ${VERSION}-1
-          pkgdesc = Accessible document editor
-          url = https://github.com/friendlyflow/sicompass
-          builddate = $(date +%s)
-          packager = GitHub Actions
-          size = $(du -sb pkg/usr | cut -f1)
-          arch = x86_64
-          license = MIT
-          depend = vulkan-icd-loader
-          depend = freetype2
-          depend = harfbuzz
-          depend = json-c
-          depend = at-spi2-core
-          PKGINFO
-
-          # Create package
-          cd pkg
-          tar -cJf ../sicompass-${VERSION}-1-x86_64.pkg.tar.xz .PKGINFO usr
-          cd ..
-
-      - name: Upload Arch artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: arch-package
-          path: "*.pkg.tar.xz"
-
-  build-nix:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Nix
-        uses: cachix/install-nix-action@v30
-        with:
-          nix_path: nixpkgs=channel:nixos-unstable
-          extra_nix_config: |
-            experimental-features = nix-command flakes
-
-      - name: Build with Nix
-        run: nix build .#default -L
-
-      - name: Get version
-        id: version
-        run: |
-          if [ -n "${{ inputs.version }}" ]; then
-            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
-          else
-            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Create Nix bundle
-        run: |
-          VERSION=${{ steps.version.outputs.version }}
-
-          # Create a tarball of the flake for easy distribution
-          git archive --format=tar.gz --prefix=sicompass-${VERSION}/ HEAD > sicompass-${VERSION}-nix-source.tar.gz
-
-          # Export the closure for offline installation
-          nix-store --export $(nix-store -qR ./result) | gzip > sicompass-${VERSION}-nix-closure.nar.gz
-
-      - name: Upload Nix artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: nix-package
-          path: |
-            *-nix-source.tar.gz
-            *-nix-closure.nar.gz
-
-  build-macos:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Homebrew dependencies
-        run: |
-          brew install \
-            meson \
-            ninja \
-            pkg-config \
-            vulkan-loader \
-            vulkan-headers \
-            freetype \
-            harfbuzz \
-            json-c \
-            cglm \
-            glslang \
-            cmake
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build SDL3 from source
-        run: |
-          git clone --depth 1 --branch release-3.2.28 https://github.com/libsdl-org/SDL.git SDL3
-          cd SDL3
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
-          cmake --build build -j$(sysctl -n hw.ncpu)
-          sudo cmake --install build
-
-      - name: Build accesskit-c from source
-        run: |
-          git clone --depth 1 https://github.com/AccessKit/accesskit-c.git
-          cd accesskit-c
-          cargo build --release
-          sudo mkdir -p /usr/local/include /usr/local/lib/pkgconfig
-          sudo cp include/accesskit.h /usr/local/include/
-          sudo cp target/release/libaccesskit.dylib /usr/local/lib/
-          # Create pkg-config file
-          sudo tee /usr/local/lib/pkgconfig/accesskit.pc << 'EOF'
-          prefix=/usr/local
-          libdir=${prefix}/lib
-          includedir=${prefix}/include
-
-          Name: accesskit
-          Description: C bindings for AccessKit accessibility infrastructure
-          Version: 0.1
-          Libs: -L${libdir} -laccesskit
-          Cflags: -I${includedir}
-          EOF
-
-      - name: Create stb pkg-config file
-        run: |
-          # Install stb headers
-          git clone --depth 1 https://github.com/nothings/stb.git
-          sudo mkdir -p /usr/local/include/stb
-          sudo cp stb/*.h /usr/local/include/stb/
-          # Create pkg-config file
-          sudo tee /usr/local/lib/pkgconfig/stb.pc << 'EOF'
-          prefix=/usr/local
-          includedir=${prefix}/include/stb
-
-          Name: stb
-          Description: stb single-file public domain libraries
-          Version: 0.0.1
-          Cflags: -I${includedir}
-          EOF
-
-      - name: Build Unity test framework
-        run: |
-          git clone --depth 1 https://github.com/ThrowTheSwitch/Unity.git
-          cd Unity
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
-          cmake --build build -j$(sysctl -n hw.ncpu)
-          sudo cmake --install build
-          # Create pkg-config file
-          sudo tee /usr/local/lib/pkgconfig/unity.pc << 'EOF'
-          prefix=/usr/local
-          libdir=${prefix}/lib
-          includedir=${prefix}/include/unity
-
-          Name: unity
-          Description: Unity Test Framework
-          Version: 2.6.0
-          Libs: -L${libdir} -lunity
-          Cflags: -I${includedir}
-          EOF
-
-      - name: Get version
-        id: version
-        run: |
-          if [ -n "${{ inputs.version }}" ]; then
-            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
-          else
-            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Build sicompass
-        run: |
-          export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:$(brew --prefix)/lib/pkgconfig:$PKG_CONFIG_PATH"
-          export DYLD_LIBRARY_PATH="/usr/local/lib:$DYLD_LIBRARY_PATH"
-          # Disable address sanitizer for release build
-          meson setup build --buildtype=release -Db_sanitize=none -Db_ndebug=true
-          ninja -C build
-
-      - name: Run tests
-        run: |
-          export DYLD_LIBRARY_PATH="/usr/local/lib:$DYLD_LIBRARY_PATH"
-          meson test -C build --print-errorlogs
-
-      - name: Create macOS app bundle
-        run: |
-          VERSION=${{ steps.version.outputs.version }}
-          APP_NAME="Silicon's Compass"
-          BUNDLE_DIR="SiCompass.app"
-
-          mkdir -p "${BUNDLE_DIR}/Contents/MacOS"
-          mkdir -p "${BUNDLE_DIR}/Contents/MacOS/fonts"
-          mkdir -p "${BUNDLE_DIR}/Contents/MacOS/shaders"
-          mkdir -p "${BUNDLE_DIR}/Contents/Frameworks"
-          mkdir -p "${BUNDLE_DIR}/Contents/Resources"
-
-          cp build/sicompass "${BUNDLE_DIR}/Contents/MacOS/"
-          cp fonts/Consolas-Regular.ttf "${BUNDLE_DIR}/Contents/MacOS/fonts/"
-          cp shaders/*.spv "${BUNDLE_DIR}/Contents/MacOS/shaders/"
-
-          # Bundle dynamic libraries
-          cp /usr/local/lib/libSDL3.dylib "${BUNDLE_DIR}/Contents/Frameworks/"
-          cp /usr/local/lib/libaccesskit.dylib "${BUNDLE_DIR}/Contents/Frameworks/"
-
-          # Fix library paths to use @executable_path
-          install_name_tool -change /usr/local/lib/libSDL3.0.dylib @executable_path/../Frameworks/libSDL3.dylib "${BUNDLE_DIR}/Contents/MacOS/sicompass" || true
-          install_name_tool -change /usr/local/lib/libaccesskit.dylib @executable_path/../Frameworks/libaccesskit.dylib "${BUNDLE_DIR}/Contents/MacOS/sicompass" || true
-
-          cat > "${BUNDLE_DIR}/Contents/Info.plist" << PLIST
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>CFBundleName</key>
-              <string>${APP_NAME}</string>
-              <key>CFBundleDisplayName</key>
-              <string>${APP_NAME}</string>
-              <key>CFBundleIdentifier</key>
-              <string>com.friendlyflow.sicompass</string>
-              <key>CFBundleVersion</key>
-              <string>${VERSION}</string>
-              <key>CFBundleShortVersionString</key>
-              <string>${VERSION}</string>
-              <key>CFBundleExecutable</key>
-              <string>sicompass</string>
-              <key>CFBundlePackageType</key>
-              <string>APPL</string>
-              <key>LSMinimumSystemVersion</key>
-              <string>11.0</string>
-              <key>NSHighResolutionCapable</key>
-              <true/>
-          </dict>
-          </plist>
-          PLIST
-
-          # Create DMG
-          hdiutil create -volname "SiCompass" -srcfolder "${BUNDLE_DIR}" -ov -format UDZO "sicompass-${VERSION}-macos.dmg"
-
-      - name: Upload macOS artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-package
-          path: "*.dmg"
-
-  build-windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install Meson and Ninja
-        run: pip install meson ninja
-
-      - name: Setup MSVC
-        uses: ilammy/msvc-dev-cmd@v1
-
-      - name: Install vcpkg dependencies
-        run: |
-          vcpkg install pkgconf freetype harfbuzz json-c stb cglm sdl3 vulkan --triplet x64-windows --binarysource='clear;default,readwrite'
-
-      - name: Add pkg-config to PATH
-        run: |
-          # vcpkg installs pkgconf, create pkg-config alias
-          Copy-Item "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\tools\pkgconf\pkgconf.exe" "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\tools\pkgconf\pkg-config.exe"
-          echo "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\tools\pkgconf" >> $env:GITHUB_PATH
-
-      - name: Install Vulkan SDK (for glslangValidator)
-        run: |
-          # Download latest Vulkan SDK
-          Invoke-WebRequest -Uri "https://sdk.lunarg.com/sdk/download/latest/windows/vulkan_sdk.exe" -OutFile vulkan_sdk.exe
-          # Get the version that was downloaded
-          $versionJson = Invoke-RestMethod -Uri "https://vulkan.lunarg.com/sdk/latest/windows.json"
-          $vulkanVersion = $versionJson
-          Write-Host "Installing Vulkan SDK version: $vulkanVersion"
-          Start-Process -FilePath .\vulkan_sdk.exe -ArgumentList "--accept-licenses --default-answer --confirm-command install" -Wait
-          echo "VULKAN_SDK=C:\VulkanSDK\$vulkanVersion" >> $env:GITHUB_ENV
-          echo "C:\VulkanSDK\$vulkanVersion\Bin" >> $env:GITHUB_PATH
-
-      - name: Build Unity test framework
-        run: |
-          git clone --depth 1 https://github.com/ThrowTheSwitch/Unity.git
-          cd Unity
-          cmake -B build -DCMAKE_INSTALL_PREFIX="$env:GITHUB_WORKSPACE\unity-install"
-          cmake --build build --config Release
-          cmake --install build --config Release
-
-      - name: Create Unity pkg-config file
-        run: |
-          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\unity-install\lib\pkgconfig"
-          $pcFile = "$env:GITHUB_WORKSPACE\unity-install\lib\pkgconfig\unity.pc"
-          $prefix = "$env:GITHUB_WORKSPACE\unity-install" -replace '\\', '/'
-          "prefix=$prefix" | Out-File -FilePath $pcFile -Encoding ASCII
-          'exec_prefix=${prefix}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'libdir=${exec_prefix}/lib' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'includedir=${prefix}/include/unity' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          '' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'Name: unity' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'Description: Unity Test Framework' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'Version: 2.6.0' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'Libs: -L${libdir} -lunity' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'Cflags: -I${includedir}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-
-      - name: Create stb pkg-config file
-        run: |
-          # stb is header-only and vcpkg doesn't provide a pkg-config file
-          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\stb-stub\lib\pkgconfig"
-
-          $pcFile = "$env:GITHUB_WORKSPACE\stb-stub\lib\pkgconfig\stb.pc"
-          "prefix=$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows" | Out-File -FilePath $pcFile -Encoding ASCII
-          'exec_prefix=${prefix}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'includedir=${prefix}/include' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          '' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'Name: stb' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'Description: stb single-file public domain libraries' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'Version: 0.0.1' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'Cflags: -I${includedir}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-
-      - name: Create accesskit stub header
-        run: |
-          # AccessKit is disabled on Windows for now (set to NULL in code)
-          # Create a minimal stub so meson can find it
-          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\accesskit-stub\include"
-          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\accesskit-stub\lib\pkgconfig"
-
-          # Create stub header with minimal definitions needed for compilation
-          $header = @"
-          #ifndef ACCESSKIT_H
-          #define ACCESSKIT_H
-          typedef unsigned long long accesskit_node_id;
-          #define ACCESSKIT_ROLE_WINDOW 0
-          #define ACCESSKIT_ROLE_LABEL 1
-          #define ACCESSKIT_LIVE_POLITE 0
-          struct accesskit_tree_update;
-          struct accesskit_node;
-          struct accesskit_tree;
-          struct accesskit_windows_adapter;
-          typedef struct { int action; } accesskit_action_request;
-          static inline struct accesskit_tree_update* accesskit_tree_update_with_capacity_and_focus(int c, accesskit_node_id f) { (void)c; (void)f; return 0; }
-          static inline struct accesskit_tree_update* accesskit_tree_update_with_focus(accesskit_node_id f) { (void)f; return 0; }
-          static inline struct accesskit_node* accesskit_node_new(int role) { (void)role; return 0; }
-          static inline void accesskit_node_set_label(struct accesskit_node* n, const char* l) { (void)n; (void)l; }
-          static inline void accesskit_node_set_live(struct accesskit_node* n, int l) { (void)n; (void)l; }
-          static inline void accesskit_node_set_children(struct accesskit_node* n, int c, accesskit_node_id* ids) { (void)n; (void)c; (void)ids; }
-          static inline void accesskit_tree_update_push_node(struct accesskit_tree_update* u, accesskit_node_id id, struct accesskit_node* n) { (void)u; (void)id; (void)n; }
-          static inline struct accesskit_tree* accesskit_tree_new(accesskit_node_id r) { (void)r; return 0; }
-          static inline void accesskit_tree_set_toolkit_name(struct accesskit_tree* t, const char* n) { (void)t; (void)n; }
-          static inline void accesskit_tree_set_toolkit_version(struct accesskit_tree* t, const char* v) { (void)t; (void)v; }
-          static inline void accesskit_tree_update_set_tree(struct accesskit_tree_update* u, struct accesskit_tree* t) { (void)u; (void)t; }
-          static inline void accesskit_action_request_free(accesskit_action_request* r) { (void)r; }
-          static inline void accesskit_windows_adapter_free(struct accesskit_windows_adapter* a) { (void)a; }
-          static inline void accesskit_windows_adapter_update_if_active(struct accesskit_windows_adapter* a, void* f, void* d) { (void)a; (void)f; (void)d; }
-          #endif
-          "@
-          $header | Out-File -FilePath "$env:GITHUB_WORKSPACE\accesskit-stub\include\accesskit.h" -Encoding ASCII
-
-          $pcFile = "$env:GITHUB_WORKSPACE\accesskit-stub\lib\pkgconfig\accesskit.pc"
-          "prefix=$env:GITHUB_WORKSPACE/accesskit-stub" | Out-File -FilePath $pcFile -Encoding ASCII
-          'exec_prefix=${prefix}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'libdir=${exec_prefix}/lib' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'includedir=${prefix}/include' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          '' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'Name: accesskit' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'Description: AccessKit stub' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'Version: 0.1' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'Libs:' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-          'Cflags: -I${includedir}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
-
-      - name: Setup Meson
-        run: |
-          $env:PKG_CONFIG_PATH = "$env:GITHUB_WORKSPACE\unity-install\lib\pkgconfig;$env:GITHUB_WORKSPACE\stb-stub\lib\pkgconfig;$env:GITHUB_WORKSPACE\accesskit-stub\lib\pkgconfig;$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\lib\pkgconfig"
-          # Find Vulkan SDK directory (installed in C:\VulkanSDK\<version>)
-          $vulkanDir = Get-ChildItem -Path "C:\VulkanSDK" -Directory | Select-Object -First 1
-          $env:PATH = "$($vulkanDir.FullName)\Bin;$env:PATH"
-          Write-Host "Using Vulkan SDK at: $($vulkanDir.FullName)"
-          meson setup build
-
-      - name: Build
-        run: ninja -C build
-
-      - name: Run tests
-        run: meson test -C build --print-errorlogs
-
-      - name: Get version
-        id: version
-        shell: bash
-        run: |
-          if [ -n "${{ inputs.version }}" ]; then
-            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
-          else
-            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Create Windows package
-        run: |
-          $VERSION = "${{ steps.version.outputs.version }}"
-
-          New-Item -ItemType Directory -Force -Path "dist"
-          New-Item -ItemType Directory -Force -Path "dist\fonts"
-          New-Item -ItemType Directory -Force -Path "dist\shaders"
-          Copy-Item "build\sicompass.exe" "dist\"
-          Copy-Item "fonts\Consolas-Regular.ttf" "dist\fonts\"
-          Copy-Item "shaders\*.spv" "dist\shaders\"
-
-          # Copy DLLs from vcpkg (includes SDL3, freetype, harfbuzz, etc.)
-          Copy-Item "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin\*.dll" "dist\" -ErrorAction SilentlyContinue
-
-          # Create ZIP
-          Compress-Archive -Path "dist\*" -DestinationPath "sicompass-${VERSION}-windows-x64.zip"
-
-      - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-package
-          path: "*.zip"
-
-  publish-release:
-    needs: [build-linux-deb, build-linux-rpm, build-linux-arch, build-nix, build-macos, build-windows]
-    if: always() && needs.build-linux-deb.result == 'success'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Get version
-        id: version
-        run: |
-          if [ -n "${{ inputs.version }}" ]; then
-            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
-          else
-            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-          fi
-
-      - name: List artifacts
-        run: find artifacts -type f
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: "v${{ steps.version.outputs.version }}"
-          name: "v${{ steps.version.outputs.version }}"
-          draft: false
-          prerelease: false
-          files: |
-            artifacts/**/*.deb
-            artifacts/**/*.rpm
-            artifacts/**/*.pkg.tar.xz
-            artifacts/**/*.tar.gz
-            artifacts/**/*.nar.gz
-            artifacts/**/*.dmg
-            artifacts/**/*.zip
-          body: |
-            ## Downloads
-
-            ### Linux
-            | Distribution | Package |
-            |--------------|---------|
-            | Debian/Ubuntu | `sicompass_${{ steps.version.outputs.version }}_amd64.deb` |
-            | Fedora/RHEL | `sicompass-${{ steps.version.outputs.version }}-1.x86_64.rpm` |
-            | Arch Linux | `sicompass-${{ steps.version.outputs.version }}-1-x86_64.pkg.tar.xz` |
-
-            ### macOS
-            - **macOS**: `sicompass-${{ steps.version.outputs.version }}-macos.dmg`
-
-            ### Windows
-            - **Windows x64**: `sicompass-${{ steps.version.outputs.version }}-windows-x64.zip`
-
-            ### Nix
-            - **Source tarball**: `sicompass-${{ steps.version.outputs.version }}-nix-source.tar.gz`
-            - **Nix closure**: `sicompass-${{ steps.version.outputs.version }}-nix-closure.nar.gz`
-
-            Or run directly:
-            ```bash
-            nix run github:friendlyflow/sicompass/v${{ steps.version.outputs.version }}
-            ```
-
-            ## Installation
-
-            ### Debian/Ubuntu
-            ```bash
-            sudo dpkg -i sicompass_${{ steps.version.outputs.version }}_amd64.deb
-            sudo apt-get install -f  # Install dependencies if needed
-            ```
-
-            ### Fedora/RHEL
-            ```bash
-            sudo dnf install sicompass-${{ steps.version.outputs.version }}-1.x86_64.rpm
-            ```
-
-            ### Arch Linux
-            ```bash
-            sudo pacman -U sicompass-${{ steps.version.outputs.version }}-1-x86_64.pkg.tar.xz
-            ```
-
-            ### Nix
-            ```bash
-            # Run directly
-            nix run github:friendlyflow/sicompass/v${{ steps.version.outputs.version }}
-
-            # Or install
-            nix profile install github:friendlyflow/sicompass/v${{ steps.version.outputs.version }}
-            ```
-
-            ### macOS
-            1. Download the DMG file
-            2. Open and drag to Applications
-
-            ### Windows
-            1. Download and extract the ZIP
-            2. Run `sicompass.exe`
+  # build-linux-rpm:
+  #   runs-on: ubuntu-latest
+  #   needs: build-linux-deb
+  #   steps:
+  #     - name: Download Linux binary
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: linux-binary
+  #         path: linux-binary
+
+  #     - name: Install RPM tools
+  #       run: sudo apt-get update && sudo apt-get install -y rpm
+
+  #     - name: Get version
+  #       id: version
+  #       run: |
+  #         if [ -n "${{ inputs.version }}" ]; then
+  #           echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+  #         else
+  #           echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+  #         fi
+
+  #     - name: Create .rpm package
+  #       run: |
+  #         VERSION=${{ steps.version.outputs.version }}
+
+  #         mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+  #         cp linux-binary/sicompass ~/rpmbuild/SOURCES/
+  #         cp -a linux-binary/lib/libSDL3.so* ~/rpmbuild/SOURCES/
+  #         cp linux-binary/lib/libaccesskit.so ~/rpmbuild/SOURCES/
+  #         cp linux-binary/fonts/Consolas-Regular.ttf ~/rpmbuild/SOURCES/
+  #         cp linux-binary/shaders/*.spv ~/rpmbuild/SOURCES/
+
+  #         # Create wrapper script
+  #         cat > ~/rpmbuild/SOURCES/sicompass-wrapper << 'WRAPPER'
+  #         #!/bin/sh
+  #         cd /usr/share/sicompass
+  #         exec ./sicompass "$@"
+  #         WRAPPER
+
+  #         cat > ~/rpmbuild/SPECS/sicompass.spec << SPEC
+  #         Name:           sicompass
+  #         Version:        ${VERSION}
+  #         Release:        1
+  #         Summary:        Accessible document editor
+  #         License:        MIT
+  #         URL:            https://github.com/friendlyflow/sicompass
+  #         Requires:       vulkan-loader
+  #         Requires:       freetype
+  #         Requires:       harfbuzz
+  #         Requires:       json-c
+  #         Requires:       at-spi2-core
+
+  #         %description
+  #         A Vulkan-based accessible document editor with vim-like keybindings.
+
+  #         %install
+  #         mkdir -p %{buildroot}/usr/bin
+  #         mkdir -p %{buildroot}/usr/lib64
+  #         mkdir -p %{buildroot}/usr/share/sicompass/fonts
+  #         mkdir -p %{buildroot}/usr/share/sicompass/shaders
+  #         install -m 755 %{_sourcedir}/sicompass %{buildroot}/usr/share/sicompass/sicompass
+  #         install -m 755 %{_sourcedir}/sicompass-wrapper %{buildroot}/usr/bin/sicompass
+  #         install -m 644 %{_sourcedir}/Consolas-Regular.ttf %{buildroot}/usr/share/sicompass/fonts/
+  #         install -m 644 %{_sourcedir}/*.spv %{buildroot}/usr/share/sicompass/shaders/
+  #         install -m 755 %{_sourcedir}/libSDL3.so* %{buildroot}/usr/lib64/
+  #         install -m 755 %{_sourcedir}/libaccesskit.so %{buildroot}/usr/lib64/
+
+  #         %post
+  #         ldconfig
+
+  #         %files
+  #         /usr/bin/sicompass
+  #         /usr/share/sicompass/sicompass
+  #         /usr/share/sicompass/fonts/Consolas-Regular.ttf
+  #         /usr/share/sicompass/shaders/*.spv
+  #         /usr/lib64/libSDL3.so*
+  #         /usr/lib64/libaccesskit.so
+  #         SPEC
+
+  #         rpmbuild -bb ~/rpmbuild/SPECS/sicompass.spec --define "_topdir $HOME/rpmbuild"
+  #         cp ~/rpmbuild/RPMS/x86_64/*.rpm sicompass-${VERSION}-1.x86_64.rpm
+
+  #     - name: Upload .rpm artifact
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: rpm-package
+  #         path: "*.rpm"
+
+  # build-linux-arch:
+  #   runs-on: ubuntu-latest
+  #   needs: build-linux-deb
+  #   steps:
+  #     - name: Download Linux binary
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: linux-binary
+  #         path: linux-binary
+
+  #     - name: Get version
+  #       id: version
+  #       run: |
+  #         if [ -n "${{ inputs.version }}" ]; then
+  #           echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+  #         else
+  #           echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+  #         fi
+
+  #     - name: Create Arch package tarball
+  #       run: |
+  #         VERSION=${{ steps.version.outputs.version }}
+
+  #         # Create package structure
+  #         mkdir -p pkg/usr/bin
+  #         mkdir -p pkg/usr/lib
+  #         mkdir -p pkg/usr/share/sicompass/fonts
+  #         mkdir -p pkg/usr/share/sicompass/shaders
+  #         cp linux-binary/sicompass pkg/usr/share/sicompass/
+  #         cp linux-binary/fonts/Consolas-Regular.ttf pkg/usr/share/sicompass/fonts/
+  #         cp linux-binary/shaders/*.spv pkg/usr/share/sicompass/shaders/
+  #         cp -a linux-binary/lib/libSDL3.so* pkg/usr/lib/
+  #         cp linux-binary/lib/libaccesskit.so pkg/usr/lib/
+
+  #         # Create wrapper script
+  #         cat > pkg/usr/bin/sicompass << 'WRAPPER'
+  #         #!/bin/sh
+  #         cd /usr/share/sicompass
+  #         exec ./sicompass "$@"
+  #         WRAPPER
+  #         chmod +x pkg/usr/bin/sicompass
+
+  #         # Create .PKGINFO
+  #         cat > pkg/.PKGINFO << PKGINFO
+  #         pkgname = sicompass
+  #         pkgver = ${VERSION}-1
+  #         pkgdesc = Accessible document editor
+  #         url = https://github.com/friendlyflow/sicompass
+  #         builddate = $(date +%s)
+  #         packager = GitHub Actions
+  #         size = $(du -sb pkg/usr | cut -f1)
+  #         arch = x86_64
+  #         license = MIT
+  #         depend = vulkan-icd-loader
+  #         depend = freetype2
+  #         depend = harfbuzz
+  #         depend = json-c
+  #         depend = at-spi2-core
+  #         PKGINFO
+
+  #         # Create package
+  #         cd pkg
+  #         tar -cJf ../sicompass-${VERSION}-1-x86_64.pkg.tar.xz .PKGINFO usr
+  #         cd ..
+
+  #     - name: Upload Arch artifact
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: arch-package
+  #         path: "*.pkg.tar.xz"
+
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+
+  #     - name: Install Nix
+  #       uses: cachix/install-nix-action@v30
+  #       with:
+  #         nix_path: nixpkgs=channel:nixos-unstable
+  #         extra_nix_config: |
+  #           experimental-features = nix-command flakes
+
+  #     - name: Build with Nix
+  #       run: nix build .#default -L
+
+  #     - name: Get version
+  #       id: version
+  #       run: |
+  #         if [ -n "${{ inputs.version }}" ]; then
+  #           echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+  #         else
+  #           echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+  #         fi
+
+  #     - name: Create Nix bundle
+  #       run: |
+  #         VERSION=${{ steps.version.outputs.version }}
+
+  #         # Create a tarball of the flake for easy distribution
+  #         git archive --format=tar.gz --prefix=sicompass-${VERSION}/ HEAD > sicompass-${VERSION}-nix-source.tar.gz
+
+  #         # Export the closure for offline installation
+  #         nix-store --export $(nix-store -qR ./result) | gzip > sicompass-${VERSION}-nix-closure.nar.gz
+
+  #     - name: Upload Nix artifacts
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: nix-package
+  #         path: |
+  #           *-nix-source.tar.gz
+  #           *-nix-closure.nar.gz
+
+  #   runs-on: macos-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+
+  #     - name: Install Homebrew dependencies
+  #       run: |
+  #         brew install \
+  #           meson \
+  #           ninja \
+  #           pkg-config \
+  #           vulkan-loader \
+  #           vulkan-headers \
+  #           freetype \
+  #           harfbuzz \
+  #           json-c \
+  #           cglm \
+  #           glslang \
+  #           cmake
+
+  #     - name: Install Rust
+  #       uses: dtolnay/rust-toolchain@stable
+
+  #     - name: Build SDL3 from source
+  #       run: |
+  #         git clone --depth 1 --branch release-3.2.28 https://github.com/libsdl-org/SDL.git SDL3
+  #         cd SDL3
+  #         cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
+  #         cmake --build build -j$(sysctl -n hw.ncpu)
+  #         sudo cmake --install build
+
+  #     - name: Build accesskit-c from source
+  #       run: |
+  #         git clone --depth 1 https://github.com/AccessKit/accesskit-c.git
+  #         cd accesskit-c
+  #         cargo build --release
+  #         sudo mkdir -p /usr/local/include /usr/local/lib/pkgconfig
+  #         sudo cp include/accesskit.h /usr/local/include/
+  #         sudo cp target/release/libaccesskit.dylib /usr/local/lib/
+  #         # Create pkg-config file
+  #         sudo tee /usr/local/lib/pkgconfig/accesskit.pc << 'EOF'
+  #         prefix=/usr/local
+  #         libdir=${prefix}/lib
+  #         includedir=${prefix}/include
+
+  #         Name: accesskit
+  #         Description: C bindings for AccessKit accessibility infrastructure
+  #         Version: 0.1
+  #         Libs: -L${libdir} -laccesskit
+  #         Cflags: -I${includedir}
+  #         EOF
+
+  #     - name: Create stb pkg-config file
+  #       run: |
+  #         # Install stb headers
+  #         git clone --depth 1 https://github.com/nothings/stb.git
+  #         sudo mkdir -p /usr/local/include/stb
+  #         sudo cp stb/*.h /usr/local/include/stb/
+  #         # Create pkg-config file
+  #         sudo tee /usr/local/lib/pkgconfig/stb.pc << 'EOF'
+  #         prefix=/usr/local
+  #         includedir=${prefix}/include/stb
+
+  #         Name: stb
+  #         Description: stb single-file public domain libraries
+  #         Version: 0.0.1
+  #         Cflags: -I${includedir}
+  #         EOF
+
+  #     - name: Build Unity test framework
+  #       run: |
+  #         git clone --depth 1 https://github.com/ThrowTheSwitch/Unity.git
+  #         cd Unity
+  #         cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
+  #         cmake --build build -j$(sysctl -n hw.ncpu)
+  #         sudo cmake --install build
+  #         # Create pkg-config file
+  #         sudo tee /usr/local/lib/pkgconfig/unity.pc << 'EOF'
+  #         prefix=/usr/local
+  #         libdir=${prefix}/lib
+  #         includedir=${prefix}/include/unity
+
+  #         Name: unity
+  #         Description: Unity Test Framework
+  #         Version: 2.6.0
+  #         Libs: -L${libdir} -lunity
+  #         Cflags: -I${includedir}
+  #         EOF
+
+  #     - name: Get version
+  #       id: version
+  #       run: |
+  #         if [ -n "${{ inputs.version }}" ]; then
+  #           echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+  #         else
+  #           echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+  #         fi
+
+  #     - name: Build sicompass
+  #       run: |
+  #         export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:$(brew --prefix)/lib/pkgconfig:$PKG_CONFIG_PATH"
+  #         export DYLD_LIBRARY_PATH="/usr/local/lib:$DYLD_LIBRARY_PATH"
+  #         # Disable address sanitizer for release build
+  #         meson setup build --buildtype=release -Db_sanitize=none -Db_ndebug=true
+  #         ninja -C build
+
+  #     - name: Run tests
+  #       run: |
+  #         export DYLD_LIBRARY_PATH="/usr/local/lib:$DYLD_LIBRARY_PATH"
+  #         meson test -C build --print-errorlogs
+
+  #     - name: Create macOS app bundle
+  #       run: |
+  #         VERSION=${{ steps.version.outputs.version }}
+  #         APP_NAME="Silicon's Compass"
+  #         BUNDLE_DIR="SiCompass.app"
+
+  #         mkdir -p "${BUNDLE_DIR}/Contents/MacOS"
+  #         mkdir -p "${BUNDLE_DIR}/Contents/MacOS/fonts"
+  #         mkdir -p "${BUNDLE_DIR}/Contents/MacOS/shaders"
+  #         mkdir -p "${BUNDLE_DIR}/Contents/Frameworks"
+  #         mkdir -p "${BUNDLE_DIR}/Contents/Resources"
+
+  #         cp build/sicompass "${BUNDLE_DIR}/Contents/MacOS/"
+  #         cp fonts/Consolas-Regular.ttf "${BUNDLE_DIR}/Contents/MacOS/fonts/"
+  #         cp shaders/*.spv "${BUNDLE_DIR}/Contents/MacOS/shaders/"
+
+  #         # Bundle dynamic libraries
+  #         cp /usr/local/lib/libSDL3.dylib "${BUNDLE_DIR}/Contents/Frameworks/"
+  #         cp /usr/local/lib/libaccesskit.dylib "${BUNDLE_DIR}/Contents/Frameworks/"
+
+  #         # Fix library paths to use @executable_path
+  #         install_name_tool -change /usr/local/lib/libSDL3.0.dylib @executable_path/../Frameworks/libSDL3.dylib "${BUNDLE_DIR}/Contents/MacOS/sicompass" || true
+  #         install_name_tool -change /usr/local/lib/libaccesskit.dylib @executable_path/../Frameworks/libaccesskit.dylib "${BUNDLE_DIR}/Contents/MacOS/sicompass" || true
+
+  #         cat > "${BUNDLE_DIR}/Contents/Info.plist" << PLIST
+  #         <?xml version="1.0" encoding="UTF-8"?>
+  #         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+  #         <plist version="1.0">
+  #         <dict>
+  #             <key>CFBundleName</key>
+  #             <string>${APP_NAME}</string>
+  #             <key>CFBundleDisplayName</key>
+  #             <string>${APP_NAME}</string>
+  #             <key>CFBundleIdentifier</key>
+  #             <string>com.friendlyflow.sicompass</string>
+  #             <key>CFBundleVersion</key>
+  #             <string>${VERSION}</string>
+  #             <key>CFBundleShortVersionString</key>
+  #             <string>${VERSION}</string>
+  #             <key>CFBundleExecutable</key>
+  #             <string>sicompass</string>
+  #             <key>CFBundlePackageType</key>
+  #             <string>APPL</string>
+  #             <key>LSMinimumSystemVersion</key>
+  #             <string>11.0</string>
+  #             <key>NSHighResolutionCapable</key>
+  #             <true/>
+  #         </dict>
+  #         </plist>
+  #         PLIST
+
+  #         # Create DMG
+  #         hdiutil create -volname "SiCompass" -srcfolder "${BUNDLE_DIR}" -ov -format UDZO "sicompass-${VERSION}-macos.dmg"
+
+  #     - name: Upload macOS artifact
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: macos-package
+  #         path: "*.dmg"
+
+  #   runs-on: windows-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+
+  #     - name: Setup Python
+  #       uses: actions/setup-python@v5
+  #       with:
+  #         python-version: '3.12'
+
+  #     - name: Install Meson and Ninja
+  #       run: pip install meson ninja
+
+  #     - name: Setup MSVC
+  #       uses: ilammy/msvc-dev-cmd@v1
+
+  #     - name: Install vcpkg dependencies
+  #       run: |
+  #         vcpkg install pkgconf freetype harfbuzz json-c stb cglm sdl3 vulkan --triplet x64-windows --binarysource='clear;default,readwrite'
+
+  #     - name: Add pkg-config to PATH
+  #       run: |
+  #         # vcpkg installs pkgconf, create pkg-config alias
+  #         Copy-Item "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\tools\pkgconf\pkgconf.exe" "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\tools\pkgconf\pkg-config.exe"
+  #         echo "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\tools\pkgconf" >> $env:GITHUB_PATH
+
+  #     - name: Install Vulkan SDK (for glslangValidator)
+  #       run: |
+  #         # Download latest Vulkan SDK
+  #         Invoke-WebRequest -Uri "https://sdk.lunarg.com/sdk/download/latest/windows/vulkan_sdk.exe" -OutFile vulkan_sdk.exe
+  #         # Get the version that was downloaded
+  #         $versionJson = Invoke-RestMethod -Uri "https://vulkan.lunarg.com/sdk/latest/windows.json"
+  #         $vulkanVersion = $versionJson
+  #         Write-Host "Installing Vulkan SDK version: $vulkanVersion"
+  #         Start-Process -FilePath .\vulkan_sdk.exe -ArgumentList "--accept-licenses --default-answer --confirm-command install" -Wait
+  #         echo "VULKAN_SDK=C:\VulkanSDK\$vulkanVersion" >> $env:GITHUB_ENV
+  #         echo "C:\VulkanSDK\$vulkanVersion\Bin" >> $env:GITHUB_PATH
+
+  #     - name: Build Unity test framework
+  #       run: |
+  #         git clone --depth 1 https://github.com/ThrowTheSwitch/Unity.git
+  #         cd Unity
+  #         cmake -B build -DCMAKE_INSTALL_PREFIX="$env:GITHUB_WORKSPACE\unity-install"
+  #         cmake --build build --config Release
+  #         cmake --install build --config Release
+
+  #     - name: Create Unity pkg-config file
+  #       run: |
+  #         New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\unity-install\lib\pkgconfig"
+  #         $pcFile = "$env:GITHUB_WORKSPACE\unity-install\lib\pkgconfig\unity.pc"
+  #         $prefix = "$env:GITHUB_WORKSPACE\unity-install" -replace '\\', '/'
+  #         "prefix=$prefix" | Out-File -FilePath $pcFile -Encoding ASCII
+  #         'exec_prefix=${prefix}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+  #         'libdir=${exec_prefix}/lib' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+  #         'includedir=${prefix}/include/unity' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+  #         '' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+  #         'Name: unity' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+  #         'Description: Unity Test Framework' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+  #         'Version: 2.6.0' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+  #         'Libs: -L${libdir} -lunity' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+  #         'Cflags: -I${includedir}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+
+  #     - name: Create stb pkg-config file
+  #       run: |
+  #         # stb is header-only and vcpkg doesn't provide a pkg-config file
+  #         New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\stb-stub\lib\pkgconfig"
+
+  #         $pcFile = "$env:GITHUB_WORKSPACE\stb-stub\lib\pkgconfig\stb.pc"
+  #         "prefix=$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows" | Out-File -FilePath $pcFile -Encoding ASCII
+  #         'exec_prefix=${prefix}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+  #         'includedir=${prefix}/include' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+  #         '' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+  #         'Name: stb' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+  #         'Description: stb single-file public domain libraries' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+  #         'Version: 0.0.1' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+  #         'Cflags: -I${includedir}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+
+  #     - name: Create accesskit stub header
+  #       run: |
+  #         # AccessKit is disabled on Windows for now (set to NULL in code)
+  #         # Create a minimal stub so meson can find it
+  #         New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\accesskit-stub\include"
+  #         New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\accesskit-stub\lib\pkgconfig"
+
+  #         # Create stub header with minimal definitions needed for compilation
+  #         $header = @"
+  #         #ifndef ACCESSKIT_H
+  #         #define ACCESSKIT_H
+  #         typedef unsigned long long accesskit_node_id;
+  #         #define ACCESSKIT_ROLE_WINDOW 0
+  #         #define ACCESSKIT_ROLE_LABEL 1
+  #         #define ACCESSKIT_LIVE_POLITE 0
+  #         struct accesskit_tree_update;
+  #         struct accesskit_node;
+  #         struct accesskit_tree;
+  #         struct accesskit_windows_adapter;
+  #         typedef struct { int action; } accesskit_action_request;
+  #         static inline struct accesskit_tree_update* accesskit_tree_update_with_capacity_and_focus(int c, accesskit_node_id f) { (void)c; (void)f; return 0; }
+  #         static inline struct accesskit_tree_update* accesskit_tree_update_with_focus(accesskit_node_id f) { (void)f; return 0; }
+  #         static inline struct accesskit_node* accesskit_node_new(int role) { (void)role; return 0; }
+  #         static inline void accesskit_node_set_label(struct accesskit_node* n, const char* l) { (void)n; (void)l; }
+  #         static inline void accesskit_node_set_live(struct accesskit_node* n, int l) { (void)n; (void)l; }
+  #         static inline void accesskit_node_set_children(struct accesskit_node* n, int c, accesskit_node_id* ids) { (void)n; (void)c; (void)ids; }
+  #         static inline void accesskit_tree_update_push_node(struct accesskit_tree_update* u, accesskit_node_id id, struct accesskit_node* n) { (void)u; (void)id; (void)n; }
+  #         static inline struct accesskit_tree* accesskit_tree_new(accesskit_node_id r) { (void)r; return 0; }
+  #         static inline void accesskit_tree_set_toolkit_name(struct accesskit_tree* t, const char* n) { (void)t; (void)n; }
+  #         static inline void accesskit_tree_set_toolkit_version(struct accesskit_tree* t, const char* v) { (void)t; (void)v; }
+  #         static inline void accesskit_tree_update_set_tree(struct accesskit_tree_update* u, struct accesskit_tree* t) { (void)u; (void)t; }
+  #         static inline void accesskit_action_request_free(accesskit_action_request* r) { (void)r; }
+  #         static inline void accesskit_windows_adapter_free(struct accesskit_windows_adapter* a) { (void)a; }
+  #         static inline void accesskit_windows_adapter_update_if_active(struct accesskit_windows_adapter* a, void* f, void* d) { (void)a; (void)f; (void)d; }
+  #         #endif
+  #         "@
+  #         $header | Out-File -FilePath "$env:GITHUB_WORKSPACE\accesskit-stub\include\accesskit.h" -Encoding ASCII
+
+  #         $pcFile = "$env:GITHUB_WORKSPACE\accesskit-stub\lib\pkgconfig\accesskit.pc"
+  #         "prefix=$env:GITHUB_WORKSPACE/accesskit-stub" | Out-File -FilePath $pcFile -Encoding ASCII
+  #         'exec_prefix=${prefix}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+  #         'libdir=${exec_prefix}/lib' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+  #         'includedir=${prefix}/include' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+  #         '' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+  #         'Name: accesskit' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+  #         'Description: AccessKit stub' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+  #         'Version: 0.1' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+  #         'Libs:' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+  #         'Cflags: -I${includedir}' | Out-File -FilePath $pcFile -Append -Encoding ASCII
+
+  #     - name: Setup Meson
+  #       run: |
+  #         $env:PKG_CONFIG_PATH = "$env:GITHUB_WORKSPACE\unity-install\lib\pkgconfig;$env:GITHUB_WORKSPACE\stb-stub\lib\pkgconfig;$env:GITHUB_WORKSPACE\accesskit-stub\lib\pkgconfig;$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\lib\pkgconfig"
+  #         # Find Vulkan SDK directory (installed in C:\VulkanSDK\<version>)
+  #         $vulkanDir = Get-ChildItem -Path "C:\VulkanSDK" -Directory | Select-Object -First 1
+  #         $env:PATH = "$($vulkanDir.FullName)\Bin;$env:PATH"
+  #         Write-Host "Using Vulkan SDK at: $($vulkanDir.FullName)"
+  #         meson setup build
+
+  #     - name: Build
+  #       run: ninja -C build
+
+  #     - name: Run tests
+  #       run: meson test -C build --print-errorlogs
+
+  #     - name: Get version
+  #       id: version
+  #       shell: bash
+  #       run: |
+  #         if [ -n "${{ inputs.version }}" ]; then
+  #           echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+  #         else
+  #           echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+  #         fi
+
+  #     - name: Create Windows package
+  #       run: |
+  #         $VERSION = "${{ steps.version.outputs.version }}"
+
+  #         New-Item -ItemType Directory -Force -Path "dist"
+  #         New-Item -ItemType Directory -Force -Path "dist\fonts"
+  #         New-Item -ItemType Directory -Force -Path "dist\shaders"
+  #         Copy-Item "build\sicompass.exe" "dist\"
+  #         Copy-Item "fonts\Consolas-Regular.ttf" "dist\fonts\"
+  #         Copy-Item "shaders\*.spv" "dist\shaders\"
+
+  #         # Copy DLLs from vcpkg (includes SDL3, freetype, harfbuzz, etc.)
+  #         Copy-Item "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin\*.dll" "dist\" -ErrorAction SilentlyContinue
+
+  #         # Create ZIP
+  #         Compress-Archive -Path "dist\*" -DestinationPath "sicompass-${VERSION}-windows-x64.zip"
+
+  #     - name: Upload Windows artifact
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: windows-package
+  #         path: "*.zip"
+
+  # publish-release:
+  #   needs: [build-linux-deb, build-linux-rpm, build-linux-arch, build-nix, build-macos, build-windows]
+  #   if: always() && needs.build-linux-deb.result == 'success'
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Download all artifacts
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         path: artifacts
+
+  #     - name: Get version
+  #       id: version
+  #       run: |
+  #         if [ -n "${{ inputs.version }}" ]; then
+  #           echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+  #         else
+  #           echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+  #         fi
+
+  #     - name: List artifacts
+  #       run: find artifacts -type f
+
+  #     - name: Create Release
+  #       uses: softprops/action-gh-release@v2
+  #       with:
+  #         tag_name: "v${{ steps.version.outputs.version }}"
+  #         name: "v${{ steps.version.outputs.version }}"
+  #         draft: false
+  #         prerelease: false
+  #         files: |
+  #           artifacts/**/*.deb
+  #           artifacts/**/*.rpm
+  #           artifacts/**/*.pkg.tar.xz
+  #           artifacts/**/*.tar.gz
+  #           artifacts/**/*.nar.gz
+  #           artifacts/**/*.dmg
+  #           artifacts/**/*.zip
+  #         body: |
+  #           ## Downloads
+
+  #           ### Linux
+  #           | Distribution | Package |
+  #           |--------------|---------|
+  #           | Debian/Ubuntu | `sicompass_${{ steps.version.outputs.version }}_amd64.deb` |
+  #           | Fedora/RHEL | `sicompass-${{ steps.version.outputs.version }}-1.x86_64.rpm` |
+  #           | Arch Linux | `sicompass-${{ steps.version.outputs.version }}-1-x86_64.pkg.tar.xz` |
+
+  #           ### macOS
+  #           - **macOS**: `sicompass-${{ steps.version.outputs.version }}-macos.dmg`
+
+  #           ### Windows
+  #           - **Windows x64**: `sicompass-${{ steps.version.outputs.version }}-windows-x64.zip`
+
+  #           ### Nix
+  #           - **Source tarball**: `sicompass-${{ steps.version.outputs.version }}-nix-source.tar.gz`
+  #           - **Nix closure**: `sicompass-${{ steps.version.outputs.version }}-nix-closure.nar.gz`
+
+  #           Or run directly:
+  #           ```bash
+  #           nix run github:friendlyflow/sicompass/v${{ steps.version.outputs.version }}
+  #           ```
+
+  #           ## Installation
+
+  #           ### Debian/Ubuntu
+  #           ```bash
+  #           sudo dpkg -i sicompass_${{ steps.version.outputs.version }}_amd64.deb
+  #           sudo apt-get install -f  # Install dependencies if needed
+  #           ```
+
+  #           ### Fedora/RHEL
+  #           ```bash
+  #           sudo dnf install sicompass-${{ steps.version.outputs.version }}-1.x86_64.rpm
+  #           ```
+
+  #           ### Arch Linux
+  #           ```bash
+  #           sudo pacman -U sicompass-${{ steps.version.outputs.version }}-1-x86_64.pkg.tar.xz
+  #           ```
+
+  #           ### Nix
+  #           ```bash
+  #           # Run directly
+  #           nix run github:friendlyflow/sicompass/v${{ steps.version.outputs.version }}
+
+  #           # Or install
+  #           nix profile install github:friendlyflow/sicompass/v${{ steps.version.outputs.version }}
+  #           ```
+
+  #           ### macOS
+  #           1. Download the DMG file
+  #           2. Open and drag to Applications
+
+  #           ### Windows
+  #           1. Download and extract the ZIP
+  #           2. Run `sicompass.exe`
