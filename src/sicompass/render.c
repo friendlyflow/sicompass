@@ -93,6 +93,13 @@ static struct accesskit_tree_update* accesskitSpeakUpdateFactory(void *userdata)
 
     struct accesskit_tree_update *update = accesskit_tree_update_with_focus(ACCESSKIT_ROOT_ID);
 
+    // Include root node with children to ensure AT-SPI can traverse the tree
+    struct accesskit_node *root = accesskit_node_new(ACCESSKIT_ROLE_WINDOW);
+    accesskit_node_set_label(root, "Silicon's Compass");
+    accesskit_node_id children[] = {ACCESSKIT_LIVE_REGION_ID};
+    accesskit_node_set_children(root, 1, children);
+    accesskit_tree_update_push_node(update, ACCESSKIT_ROOT_ID, root);
+
     // Update live region with new text
     struct accesskit_node *liveRegion = accesskit_node_new(ACCESSKIT_ROLE_LABEL);
     accesskit_node_set_live(liveRegion, ACCESSKIT_LIVE_POLITE);
