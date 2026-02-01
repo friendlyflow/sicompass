@@ -129,6 +129,19 @@ void accesskitSpeak(AppRenderer *appRenderer, const char *text) {
 #endif
 }
 
+void accesskitSpeakCurrentItem(AppRenderer *appRenderer) {
+    ListItem *list = appRenderer->filteredListCount > 0 ?
+                     appRenderer->filteredListCurrentLayer : appRenderer->totalListCurrentLayer;
+    int count = appRenderer->filteredListCount > 0 ?
+                appRenderer->filteredListCount : appRenderer->totalListCount;
+
+    if (!list || count == 0 || appRenderer->listIndex < 0 || appRenderer->listIndex >= count) {
+        return;
+    }
+
+    accesskitSpeak(appRenderer, list[appRenderer->listIndex].value);
+}
+
 int renderText(SiCompassApplication *app, const char *text, int x, int y,
                uint32_t color, bool highlight) {
     if (!text || strlen(text) == 0) {
@@ -454,11 +467,6 @@ void renderInteraction(SiCompassApplication *app) {
         // Render text (may be multiple lines)
         int textLines = renderText(app, displayText, itemX, itemYPos, COLOR_TEXT, isSelected);
 
-        // Speak selected item for accessibility
-        if (isSelected) {
-            accesskitSpeak(app->appRenderer, displayText);
-        }
-
         yPos += lineHeight * textLines;
     }
 }
@@ -495,11 +503,6 @@ void renderSimpleSearch(SiCompassApplication *app) {
 
         // Render text (may be multiple lines)
         int textLines = renderText(app, list[i].value, 50 + indent, itemYPos, COLOR_TEXT, isSelected);
-
-        // Speak selected item for accessibility
-        if (isSelected) {
-            accesskitSpeak(app->appRenderer, list[i].value);
-        }
 
         yPos += lineHeight * textLines;
     }
