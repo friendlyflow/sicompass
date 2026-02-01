@@ -6,6 +6,7 @@
 
 #include "main.h"
 #include "provider.h"
+#include "accesskit_sdl.h"
 
 // Constants
 #define MAX_LINE_LENGTH 4096
@@ -147,14 +148,8 @@ typedef struct AppRenderer {
     // Current URI for provider-based navigation
     char currentUri[MAX_URI_LENGTH];
 
-    // AccessKit accessibility adapter (platform-specific)
-#if defined(__APPLE__)
-    struct accesskit_macos_adapter *accesskitAdapter;
-#elif defined(_WIN32)
-    struct accesskit_windows_adapter *accesskitAdapter;
-#else
-    struct accesskit_unix_adapter *accesskitAdapter;
-#endif
+    // AccessKit SDL adapter (cross-platform wrapper)
+    struct accesskit_sdl_adapter accesskitAdapter;
     accesskit_node_id accesskitRootId;
     accesskit_node_id accesskitLiveRegionId;
 } AppRenderer;
