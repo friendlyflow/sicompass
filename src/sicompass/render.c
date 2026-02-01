@@ -50,20 +50,10 @@ void accesskitInit(SiCompassApplication *app) {
     app->appRenderer->accesskitRootId = ACCESSKIT_ROOT_ID;
     app->appRenderer->accesskitLiveRegionId = ACCESSKIT_LIVE_REGION_ID;
 
-    // Create platform-specific adapter
-#if defined(__APPLE__)
-    // macOS: AccessKit uses NSAccessibility under the hood
-    // Note: macOS adapter requires window handle, which we don't have here
-    // For now, disable accessibility on macOS until proper SDL3 integration
-    app->appRenderer->accesskitAdapter = NULL;
-#elif defined(_WIN32)
-    // Windows: AccessKit uses UI Automation
-    // Note: Windows adapter requires HWND, which we don't have here
-    // For now, disable accessibility on Windows until proper SDL3 integration
-    app->appRenderer->accesskitAdapter = NULL;
-#else
-    // Linux/Unix: AccessKit uses AT-SPI over D-Bus
-    app->appRenderer->accesskitAdapter = accesskit_unix_adapter_new(
+    // Create cross-platform SDL adapter
+    accesskit_sdl_adapter_init(
+        &app->appRenderer->accesskitAdapter,
+        app->window,
         accesskitActivationHandler,
         NULL,  // userdata for activation handler
         accesskitActionHandler,
@@ -71,20 +61,10 @@ void accesskitInit(SiCompassApplication *app) {
         accesskitDeactivationHandler,
         NULL   // userdata for deactivation handler
     );
-#endif
 }
 
 void accesskitDestroy(AppRenderer *appRenderer) {
-    if (appRenderer->accesskitAdapter) {
-#if defined(__APPLE__)
-        accesskit_macos_adapter_free(appRenderer->accesskitAdapter);
-#elif defined(_WIN32)
-        accesskit_windows_adapter_free(appRenderer->accesskitAdapter);
-#else
-        accesskit_unix_adapter_free(appRenderer->accesskitAdapter);
-#endif
-        appRenderer->accesskitAdapter = NULL;
-    }
+    accesskit_sdl_adapter_destroy(&appRenderer->accesskitAdapter);
 }
 
 // Factory function for tree updates when speaking
@@ -110,45 +90,20 @@ static struct accesskit_tree_update* accesskitSpeakUpdateFactory(void *userdata)
 }
 
 void accesskitSpeak(AppRenderer *appRenderer, const char *text) {
-    if (!appRenderer->accesskitAdapter || !text) {
+    if (!text) {
         return;
     }
 
-    // Update the tree with new live region content (platform-specific)
-#if defined(__APPLE__)
-    accesskit_macos_adapter_update_if_active(
-        appRenderer->accesskitAdapter,
+    accesskit_sdl_adapter_update_if_active(
+        &appRenderer->accesskitAdapter,
         accesskitSpeakUpdateFactory,
         (void *)text
     );
-#elif defined(_WIN32)
-    accesskit_windows_adapter_update_if_active(
-        appRenderer->accesskitAdapter,
-        accesskitSpeakUpdateFactory,
-        (void *)text
-    );
-#else
-    accesskit_unix_adapter_update_if_active(
-        appRenderer->accesskitAdapter,
-        accesskitSpeakUpdateFactory,
-        (void *)text
-    );
-#endif
 }
 
 void accesskitUpdateWindowFocus(AppRenderer *appRenderer, bool isFocused) {
-    if (!appRenderer->accesskitAdapter) {
-        return;
-    }
-
-#if defined(__APPLE__)
-    // macOS adapter not yet implemented
-#elif defined(_WIN32)
-    // Windows adapter not yet implemented
-#else
-    accesskit_unix_adapter_update_window_focus_state(
-        appRenderer->accesskitAdapter, isFocused);
-#endif
+    accesskit_sdl_adapter_update_window_focus_state(
+        &appRenderer->accesskitAdapter, isFocused);
 }
 
 void accesskitSpeakCurrentItem(AppRenderer *appRenderer) {

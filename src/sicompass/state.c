@@ -50,8 +50,8 @@ SiCompassApplication* appRendererCreate(SiCompassApplication* app) {
     appRenderer->running = true;
     appRenderer->needsRedraw = true;
 
-    // Initialize AccessKit adapter to NULL (will be initialized later with window)
-    appRenderer->accesskitAdapter = NULL;
+    // Initialize AccessKit adapter (internal pointer will be set by accesskitInit)
+    appRenderer->accesskitAdapter.adapter = NULL;
 
     app->appRenderer = appRenderer;
 

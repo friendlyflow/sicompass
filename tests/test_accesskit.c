@@ -19,16 +19,38 @@ struct accesskit_tree_update;
 struct accesskit_node;
 struct accesskit_tree;
 struct accesskit_action_request;
+
+// Platform-specific adapter types (for the SDL adapter wrapper)
 struct accesskit_unix_adapter;
-struct accesskit_macos_adapter;
-struct accesskit_windows_adapter;
+struct accesskit_macos_subclassing_adapter;
+struct accesskit_windows_subclassing_adapter;
+
+// Mock SDL_Window
+typedef struct SDL_Window SDL_Window;
+
+// SDL adapter struct (matches accesskit_sdl.h)
+struct accesskit_sdl_adapter {
+#if defined(__APPLE__)
+    struct accesskit_macos_subclassing_adapter *adapter;
+#elif defined(_WIN32)
+    struct accesskit_windows_subclassing_adapter *adapter;
+#else
+    struct accesskit_unix_adapter *adapter;
+#endif
+};
 
 // AccessKit constants
 #define ACCESSKIT_ROLE_WINDOW 0
 #define ACCESSKIT_ROLE_LABEL 1
 #define ACCESSKIT_LIVE_POLITE 1
 
-// Mock AccessKit functions
+// Callback types (matching accesskit_sdl.h)
+typedef struct accesskit_tree_update* (*accesskit_activation_handler_callback)(void*);
+typedef void (*accesskit_action_handler_callback)(struct accesskit_action_request*, void*);
+typedef void (*accesskit_deactivation_handler_callback)(void*);
+typedef struct accesskit_tree_update* (*accesskit_tree_update_factory)(void*);
+
+// Mock AccessKit tree/node functions
 FAKE_VALUE_FUNC(struct accesskit_tree_update*, accesskit_tree_update_with_capacity_and_focus, size_t, accesskit_node_id)
 FAKE_VALUE_FUNC(struct accesskit_tree_update*, accesskit_tree_update_with_focus, accesskit_node_id)
 FAKE_VALUE_FUNC(struct accesskit_node*, accesskit_node_new, accesskit_role)
@@ -42,19 +64,15 @@ FAKE_VOID_FUNC(accesskit_tree_set_toolkit_version, struct accesskit_tree*, const
 FAKE_VOID_FUNC(accesskit_tree_update_set_tree, struct accesskit_tree_update*, struct accesskit_tree*)
 FAKE_VOID_FUNC(accesskit_action_request_free, struct accesskit_action_request*)
 
-// Unix adapter mocks
-typedef struct accesskit_tree_update* (*accesskit_activation_handler)(void*);
-typedef void (*accesskit_action_handler)(struct accesskit_action_request*, void*);
-typedef void (*accesskit_deactivation_handler)(void*);
-typedef struct accesskit_tree_update* (*accesskit_update_factory)(void*);
-
-FAKE_VALUE_FUNC(struct accesskit_unix_adapter*, accesskit_unix_adapter_new,
-    accesskit_activation_handler, void*,
-    accesskit_action_handler, void*,
-    accesskit_deactivation_handler, void*)
-FAKE_VOID_FUNC(accesskit_unix_adapter_free, struct accesskit_unix_adapter*)
-FAKE_VOID_FUNC(accesskit_unix_adapter_update_if_active, struct accesskit_unix_adapter*,
-    accesskit_update_factory, void*)
+// SDL adapter mocks
+FAKE_VOID_FUNC(accesskit_sdl_adapter_init, struct accesskit_sdl_adapter*, SDL_Window*,
+    accesskit_activation_handler_callback, void*,
+    accesskit_action_handler_callback, void*,
+    accesskit_deactivation_handler_callback, void*)
+FAKE_VOID_FUNC(accesskit_sdl_adapter_destroy, struct accesskit_sdl_adapter*)
+FAKE_VOID_FUNC(accesskit_sdl_adapter_update_if_active, struct accesskit_sdl_adapter*,
+    accesskit_tree_update_factory, void*)
+FAKE_VOID_FUNC(accesskit_sdl_adapter_update_window_focus_state, struct accesskit_sdl_adapter*, bool)
 
 // AccessKit node IDs (same as in render.c)
 #define ACCESSKIT_ROOT_ID 1
@@ -87,7 +105,7 @@ typedef struct AppRenderer AppRenderer;
 typedef struct SiCompassApplication SiCompassApplication;
 
 struct AppRenderer {
-    struct accesskit_unix_adapter *accesskitAdapter;
+    struct accesskit_sdl_adapter accesskitAdapter;
     accesskit_node_id accesskitRootId;
     accesskit_node_id accesskitLiveRegionId;
     Coordinate currentCoordinate;
@@ -95,52 +113,57 @@ struct AppRenderer {
 
 struct SiCompassApplication {
     AppRenderer* appRenderer;
+    SDL_Window* window;
 };
 
-// Static variable to capture the activation handler for testing
-static accesskit_activation_handler captured_activation_handler = NULL;
-static accesskit_action_handler captured_action_handler = NULL;
-static accesskit_deactivation_handler captured_deactivation_handler = NULL;
+// Static variables to capture handlers for testing
+static accesskit_activation_handler_callback captured_activation_handler = NULL;
+static accesskit_action_handler_callback captured_action_handler = NULL;
+static accesskit_deactivation_handler_callback captured_deactivation_handler = NULL;
 
-// Custom fake for accesskit_unix_adapter_new that captures handlers
-static struct accesskit_unix_adapter* fake_accesskit_unix_adapter_new(
-    accesskit_activation_handler activation_handler, void* activation_userdata,
-    accesskit_action_handler action_handler, void* action_userdata,
-    accesskit_deactivation_handler deactivation_handler, void* deactivation_userdata) {
+// Custom fake for accesskit_sdl_adapter_init that captures handlers
+static void fake_accesskit_sdl_adapter_init(
+    struct accesskit_sdl_adapter *adapter, SDL_Window *window,
+    accesskit_activation_handler_callback activation_handler, void* activation_userdata,
+    accesskit_action_handler_callback action_handler, void* action_userdata,
+    accesskit_deactivation_handler_callback deactivation_handler, void* deactivation_userdata) {
+    (void)window;
     (void)activation_userdata;
     (void)action_userdata;
     (void)deactivation_userdata;
     captured_activation_handler = activation_handler;
     captured_action_handler = action_handler;
     captured_deactivation_handler = deactivation_handler;
-    return (struct accesskit_unix_adapter*)malloc(sizeof(void*));
+    adapter->adapter = (void*)1; // Mark as initialized
 }
 
-// Custom fake for accesskit_unix_adapter_free that actually frees memory
-static void fake_accesskit_unix_adapter_free(struct accesskit_unix_adapter* adapter) {
-    free(adapter);
+// Custom fake for accesskit_sdl_adapter_destroy
+static void fake_accesskit_sdl_adapter_destroy(struct accesskit_sdl_adapter* adapter) {
+    adapter->adapter = NULL;
 }
 
 // Static variable to capture speak text
 static const char* captured_speak_text = NULL;
-static struct accesskit_tree_update* (*captured_update_factory)(void*) = NULL;
+static accesskit_tree_update_factory captured_update_factory = NULL;
 
-// Custom fake for accesskit_unix_adapter_update_if_active
-static void fake_accesskit_unix_adapter_update_if_active(
-    struct accesskit_unix_adapter* adapter,
-    struct accesskit_tree_update* (*update_factory)(void*),
+// Custom fake for accesskit_sdl_adapter_update_if_active
+static void fake_accesskit_sdl_adapter_update_if_active(
+    struct accesskit_sdl_adapter* adapter,
+    accesskit_tree_update_factory update_factory,
     void* userdata) {
     (void)adapter;
     captured_update_factory = update_factory;
     captured_speak_text = (const char*)userdata;
 }
 
-// Implementation of accesskitInit (copied from render.c, simplified for Linux)
+// Implementation of accesskitInit (matching render.c with SDL adapter)
 void accesskitInit(SiCompassApplication *app) {
     app->appRenderer->accesskitRootId = ACCESSKIT_ROOT_ID;
     app->appRenderer->accesskitLiveRegionId = ACCESSKIT_LIVE_REGION_ID;
 
-    app->appRenderer->accesskitAdapter = accesskit_unix_adapter_new(
+    accesskit_sdl_adapter_init(
+        &app->appRenderer->accesskitAdapter,
+        app->window,
         NULL, // activation handler placeholder
         NULL,
         NULL, // action handler placeholder
@@ -150,22 +173,19 @@ void accesskitInit(SiCompassApplication *app) {
     );
 }
 
-// Implementation of accesskitDestroy (copied from render.c, simplified for Linux)
+// Implementation of accesskitDestroy (matching render.c with SDL adapter)
 void accesskitDestroy(AppRenderer *appRenderer) {
-    if (appRenderer->accesskitAdapter) {
-        accesskit_unix_adapter_free(appRenderer->accesskitAdapter);
-        appRenderer->accesskitAdapter = NULL;
-    }
+    accesskit_sdl_adapter_destroy(&appRenderer->accesskitAdapter);
 }
 
-// Implementation of accesskitSpeak (copied from render.c, simplified for Linux)
+// Implementation of accesskitSpeak (matching render.c with SDL adapter)
 void accesskitSpeak(AppRenderer *appRenderer, const char *text) {
-    if (!appRenderer->accesskitAdapter || !text) {
+    if (!text) {
         return;
     }
 
-    accesskit_unix_adapter_update_if_active(
-        appRenderer->accesskitAdapter,
+    accesskit_sdl_adapter_update_if_active(
+        &appRenderer->accesskitAdapter,
         NULL, // update factory placeholder
         (void *)text
     );
@@ -205,14 +225,12 @@ void accesskitSpeakModeChange(AppRenderer *appRenderer, const char *context) {
 static SiCompassApplication* createTestApp(void) {
     SiCompassApplication *app = calloc(1, sizeof(SiCompassApplication));
     app->appRenderer = calloc(1, sizeof(AppRenderer));
+    app->window = (SDL_Window*)0x12345678; // Mock window pointer
     return app;
 }
 
 static void destroyTestApp(SiCompassApplication *app) {
     if (app->appRenderer) {
-        if (app->appRenderer->accesskitAdapter) {
-            free(app->appRenderer->accesskitAdapter);
-        }
         free(app->appRenderer);
     }
     free(app);
@@ -235,13 +253,16 @@ void setUp(void) {
     RESET_FAKE(accesskit_tree_set_toolkit_version);
     RESET_FAKE(accesskit_tree_update_set_tree);
     RESET_FAKE(accesskit_action_request_free);
-    RESET_FAKE(accesskit_unix_adapter_new);
-    RESET_FAKE(accesskit_unix_adapter_free);
-    RESET_FAKE(accesskit_unix_adapter_update_if_active);
+    RESET_FAKE(accesskit_sdl_adapter_init);
+    RESET_FAKE(accesskit_sdl_adapter_destroy);
+    RESET_FAKE(accesskit_sdl_adapter_update_if_active);
+    RESET_FAKE(accesskit_sdl_adapter_update_window_focus_state);
     FFF_RESET_HISTORY();
 
-    // Set up custom fakes that properly handle memory
-    accesskit_unix_adapter_free_fake.custom_fake = fake_accesskit_unix_adapter_free;
+    // Set up custom fakes
+    accesskit_sdl_adapter_init_fake.custom_fake = fake_accesskit_sdl_adapter_init;
+    accesskit_sdl_adapter_destroy_fake.custom_fake = fake_accesskit_sdl_adapter_destroy;
+    accesskit_sdl_adapter_update_if_active_fake.custom_fake = fake_accesskit_sdl_adapter_update_if_active;
 
     captured_activation_handler = NULL;
     captured_action_handler = NULL;
@@ -259,7 +280,6 @@ void tearDown(void) {
 
 void test_accesskitInit_sets_root_id(void) {
     SiCompassApplication *app = createTestApp();
-    accesskit_unix_adapter_new_fake.custom_fake = fake_accesskit_unix_adapter_new;
 
     accesskitInit(app);
 
@@ -270,7 +290,6 @@ void test_accesskitInit_sets_root_id(void) {
 
 void test_accesskitInit_sets_live_region_id(void) {
     SiCompassApplication *app = createTestApp();
-    accesskit_unix_adapter_new_fake.custom_fake = fake_accesskit_unix_adapter_new;
 
     accesskitInit(app);
 
@@ -279,25 +298,23 @@ void test_accesskitInit_sets_live_region_id(void) {
     destroyTestApp(app);
 }
 
-void test_accesskitInit_creates_adapter(void) {
+void test_accesskitInit_initializes_adapter(void) {
     SiCompassApplication *app = createTestApp();
-    accesskit_unix_adapter_new_fake.custom_fake = fake_accesskit_unix_adapter_new;
 
     accesskitInit(app);
 
-    TEST_ASSERT_NOT_NULL(app->appRenderer->accesskitAdapter);
-    TEST_ASSERT_EQUAL_INT(1, accesskit_unix_adapter_new_fake.call_count);
+    TEST_ASSERT_EQUAL_INT(1, accesskit_sdl_adapter_init_fake.call_count);
+    TEST_ASSERT_NOT_NULL(app->appRenderer->accesskitAdapter.adapter);
 
     destroyTestApp(app);
 }
 
-void test_accesskitInit_adapter_is_null_when_creation_fails(void) {
+void test_accesskitInit_passes_window_to_adapter(void) {
     SiCompassApplication *app = createTestApp();
-    accesskit_unix_adapter_new_fake.return_val = NULL;
 
     accesskitInit(app);
 
-    TEST_ASSERT_NULL(app->appRenderer->accesskitAdapter);
+    TEST_ASSERT_EQUAL_PTR(app->window, accesskit_sdl_adapter_init_fake.arg1_val);
 
     destroyTestApp(app);
 }
@@ -306,46 +323,28 @@ void test_accesskitInit_adapter_is_null_when_creation_fails(void) {
  * accesskitDestroy tests
  * ============================================ */
 
-void test_accesskitDestroy_frees_adapter(void) {
+void test_accesskitDestroy_destroys_adapter(void) {
     SiCompassApplication *app = createTestApp();
-    accesskit_unix_adapter_new_fake.custom_fake = fake_accesskit_unix_adapter_new;
     accesskitInit(app);
 
     accesskitDestroy(app->appRenderer);
 
-    TEST_ASSERT_EQUAL_INT(1, accesskit_unix_adapter_free_fake.call_count);
-    TEST_ASSERT_NULL(app->appRenderer->accesskitAdapter);
-
-    // Clean up without double-free
-    free(app->appRenderer);
-    free(app);
-}
-
-void test_accesskitDestroy_handles_null_adapter(void) {
-    SiCompassApplication *app = createTestApp();
-    app->appRenderer->accesskitAdapter = NULL;
-
-    // Should not crash
-    accesskitDestroy(app->appRenderer);
-
-    TEST_ASSERT_EQUAL_INT(0, accesskit_unix_adapter_free_fake.call_count);
+    TEST_ASSERT_EQUAL_INT(1, accesskit_sdl_adapter_destroy_fake.call_count);
 
     destroyTestApp(app);
 }
 
-void test_accesskitDestroy_sets_adapter_to_null(void) {
+void test_accesskitDestroy_clears_adapter_internal(void) {
     SiCompassApplication *app = createTestApp();
-    accesskit_unix_adapter_new_fake.custom_fake = fake_accesskit_unix_adapter_new;
     accesskitInit(app);
 
-    TEST_ASSERT_NOT_NULL(app->appRenderer->accesskitAdapter);
+    TEST_ASSERT_NOT_NULL(app->appRenderer->accesskitAdapter.adapter);
 
     accesskitDestroy(app->appRenderer);
 
-    TEST_ASSERT_NULL(app->appRenderer->accesskitAdapter);
+    TEST_ASSERT_NULL(app->appRenderer->accesskitAdapter.adapter);
 
-    free(app->appRenderer);
-    free(app);
+    destroyTestApp(app);
 }
 
 /* ============================================
@@ -354,21 +353,17 @@ void test_accesskitDestroy_sets_adapter_to_null(void) {
 
 void test_accesskitSpeak_calls_update_if_active(void) {
     SiCompassApplication *app = createTestApp();
-    accesskit_unix_adapter_new_fake.custom_fake = fake_accesskit_unix_adapter_new;
-    accesskit_unix_adapter_update_if_active_fake.custom_fake = fake_accesskit_unix_adapter_update_if_active;
     accesskitInit(app);
 
     accesskitSpeak(app->appRenderer, "Hello World");
 
-    TEST_ASSERT_EQUAL_INT(1, accesskit_unix_adapter_update_if_active_fake.call_count);
+    TEST_ASSERT_EQUAL_INT(1, accesskit_sdl_adapter_update_if_active_fake.call_count);
 
     destroyTestApp(app);
 }
 
 void test_accesskitSpeak_passes_text_to_update(void) {
     SiCompassApplication *app = createTestApp();
-    accesskit_unix_adapter_new_fake.custom_fake = fake_accesskit_unix_adapter_new;
-    accesskit_unix_adapter_update_if_active_fake.custom_fake = fake_accesskit_unix_adapter_update_if_active;
     accesskitInit(app);
 
     const char *text = "Test announcement";
@@ -379,39 +374,25 @@ void test_accesskitSpeak_passes_text_to_update(void) {
     destroyTestApp(app);
 }
 
-void test_accesskitSpeak_does_nothing_with_null_adapter(void) {
-    SiCompassApplication *app = createTestApp();
-    app->appRenderer->accesskitAdapter = NULL;
-
-    accesskitSpeak(app->appRenderer, "Hello");
-
-    TEST_ASSERT_EQUAL_INT(0, accesskit_unix_adapter_update_if_active_fake.call_count);
-
-    destroyTestApp(app);
-}
-
 void test_accesskitSpeak_does_nothing_with_null_text(void) {
     SiCompassApplication *app = createTestApp();
-    accesskit_unix_adapter_new_fake.custom_fake = fake_accesskit_unix_adapter_new;
     accesskitInit(app);
 
     accesskitSpeak(app->appRenderer, NULL);
 
-    TEST_ASSERT_EQUAL_INT(0, accesskit_unix_adapter_update_if_active_fake.call_count);
+    TEST_ASSERT_EQUAL_INT(0, accesskit_sdl_adapter_update_if_active_fake.call_count);
 
     destroyTestApp(app);
 }
 
 void test_accesskitSpeak_with_empty_string(void) {
     SiCompassApplication *app = createTestApp();
-    accesskit_unix_adapter_new_fake.custom_fake = fake_accesskit_unix_adapter_new;
-    accesskit_unix_adapter_update_if_active_fake.custom_fake = fake_accesskit_unix_adapter_update_if_active;
     accesskitInit(app);
 
     // Empty string is not NULL, so it should still call the update
     accesskitSpeak(app->appRenderer, "");
 
-    TEST_ASSERT_EQUAL_INT(1, accesskit_unix_adapter_update_if_active_fake.call_count);
+    TEST_ASSERT_EQUAL_INT(1, accesskit_sdl_adapter_update_if_active_fake.call_count);
     TEST_ASSERT_EQUAL_STRING("", captured_speak_text);
 
     destroyTestApp(app);
@@ -419,8 +400,6 @@ void test_accesskitSpeak_with_empty_string(void) {
 
 void test_accesskitSpeak_multiple_announcements(void) {
     SiCompassApplication *app = createTestApp();
-    accesskit_unix_adapter_new_fake.custom_fake = fake_accesskit_unix_adapter_new;
-    accesskit_unix_adapter_update_if_active_fake.custom_fake = fake_accesskit_unix_adapter_update_if_active;
     accesskitInit(app);
 
     accesskitSpeak(app->appRenderer, "First");
@@ -432,7 +411,7 @@ void test_accesskitSpeak_multiple_announcements(void) {
     accesskitSpeak(app->appRenderer, "Third");
     TEST_ASSERT_EQUAL_STRING("Third", captured_speak_text);
 
-    TEST_ASSERT_EQUAL_INT(3, accesskit_unix_adapter_update_if_active_fake.call_count);
+    TEST_ASSERT_EQUAL_INT(3, accesskit_sdl_adapter_update_if_active_fake.call_count);
 
     destroyTestApp(app);
 }
@@ -443,12 +422,10 @@ void test_accesskitSpeak_multiple_announcements(void) {
 
 void test_accesskit_lifecycle_init_speak_destroy(void) {
     SiCompassApplication *app = createTestApp();
-    accesskit_unix_adapter_new_fake.custom_fake = fake_accesskit_unix_adapter_new;
-    accesskit_unix_adapter_update_if_active_fake.custom_fake = fake_accesskit_unix_adapter_update_if_active;
 
     // Initialize
     accesskitInit(app);
-    TEST_ASSERT_NOT_NULL(app->appRenderer->accesskitAdapter);
+    TEST_ASSERT_NOT_NULL(app->appRenderer->accesskitAdapter.adapter);
     TEST_ASSERT_EQUAL_UINT64(ACCESSKIT_ROOT_ID, app->appRenderer->accesskitRootId);
     TEST_ASSERT_EQUAL_UINT64(ACCESSKIT_LIVE_REGION_ID, app->appRenderer->accesskitLiveRegionId);
 
@@ -458,30 +435,10 @@ void test_accesskit_lifecycle_init_speak_destroy(void) {
 
     // Destroy
     accesskitDestroy(app->appRenderer);
-    TEST_ASSERT_NULL(app->appRenderer->accesskitAdapter);
-    TEST_ASSERT_EQUAL_INT(1, accesskit_unix_adapter_free_fake.call_count);
+    TEST_ASSERT_NULL(app->appRenderer->accesskitAdapter.adapter);
+    TEST_ASSERT_EQUAL_INT(1, accesskit_sdl_adapter_destroy_fake.call_count);
 
-    free(app->appRenderer);
-    free(app);
-}
-
-void test_accesskit_speak_after_destroy_does_nothing(void) {
-    SiCompassApplication *app = createTestApp();
-    accesskit_unix_adapter_new_fake.custom_fake = fake_accesskit_unix_adapter_new;
-    accesskit_unix_adapter_update_if_active_fake.custom_fake = fake_accesskit_unix_adapter_update_if_active;
-
-    accesskitInit(app);
-    accesskitDestroy(app->appRenderer);
-
-    int call_count_before = accesskit_unix_adapter_update_if_active_fake.call_count;
-
-    // Should not crash or call update after destroy
-    accesskitSpeak(app->appRenderer, "This should not be spoken");
-
-    TEST_ASSERT_EQUAL_INT(call_count_before, accesskit_unix_adapter_update_if_active_fake.call_count);
-
-    free(app->appRenderer);
-    free(app);
+    destroyTestApp(app);
 }
 
 /* ============================================
@@ -490,8 +447,6 @@ void test_accesskit_speak_after_destroy_does_nothing(void) {
 
 void test_accesskitSpeakModeChange_announces_mode_name(void) {
     SiCompassApplication *app = createTestApp();
-    accesskit_unix_adapter_new_fake.custom_fake = fake_accesskit_unix_adapter_new;
-    accesskit_unix_adapter_update_if_active_fake.custom_fake = fake_accesskit_unix_adapter_update_if_active;
     accesskitInit(app);
 
     app->appRenderer->currentCoordinate = COORDINATE_SIMPLE_SEARCH;
@@ -504,8 +459,6 @@ void test_accesskitSpeakModeChange_announces_mode_name(void) {
 
 void test_accesskitSpeakModeChange_announces_mode_with_context(void) {
     SiCompassApplication *app = createTestApp();
-    accesskit_unix_adapter_new_fake.custom_fake = fake_accesskit_unix_adapter_new;
-    accesskit_unix_adapter_update_if_active_fake.custom_fake = fake_accesskit_unix_adapter_update_if_active;
     accesskitInit(app);
 
     app->appRenderer->currentCoordinate = COORDINATE_EDITOR_INSERT;
@@ -518,8 +471,6 @@ void test_accesskitSpeakModeChange_announces_mode_with_context(void) {
 
 void test_accesskitSpeakModeChange_handles_empty_context(void) {
     SiCompassApplication *app = createTestApp();
-    accesskit_unix_adapter_new_fake.custom_fake = fake_accesskit_unix_adapter_new;
-    accesskit_unix_adapter_update_if_active_fake.custom_fake = fake_accesskit_unix_adapter_update_if_active;
     accesskitInit(app);
 
     app->appRenderer->currentCoordinate = COORDINATE_COMMAND;
@@ -533,8 +484,6 @@ void test_accesskitSpeakModeChange_handles_empty_context(void) {
 
 void test_accesskitSpeakModeChange_operator_mode(void) {
     SiCompassApplication *app = createTestApp();
-    accesskit_unix_adapter_new_fake.custom_fake = fake_accesskit_unix_adapter_new;
-    accesskit_unix_adapter_update_if_active_fake.custom_fake = fake_accesskit_unix_adapter_update_if_active;
     accesskitInit(app);
 
     app->appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
@@ -547,8 +496,6 @@ void test_accesskitSpeakModeChange_operator_mode(void) {
 
 void test_accesskitSpeakModeChange_operator_insert_with_context(void) {
     SiCompassApplication *app = createTestApp();
-    accesskit_unix_adapter_new_fake.custom_fake = fake_accesskit_unix_adapter_new;
-    accesskit_unix_adapter_update_if_active_fake.custom_fake = fake_accesskit_unix_adapter_update_if_active;
     accesskitInit(app);
 
     app->appRenderer->currentCoordinate = COORDINATE_OPERATOR_INSERT;
@@ -561,8 +508,6 @@ void test_accesskitSpeakModeChange_operator_insert_with_context(void) {
 
 void test_accesskitSpeakModeChange_editor_mode(void) {
     SiCompassApplication *app = createTestApp();
-    accesskit_unix_adapter_new_fake.custom_fake = fake_accesskit_unix_adapter_new;
-    accesskit_unix_adapter_update_if_active_fake.custom_fake = fake_accesskit_unix_adapter_update_if_active;
     accesskitInit(app);
 
     app->appRenderer->currentCoordinate = COORDINATE_EDITOR_GENERAL;
@@ -575,8 +520,6 @@ void test_accesskitSpeakModeChange_editor_mode(void) {
 
 void test_accesskitSpeakModeChange_extended_search(void) {
     SiCompassApplication *app = createTestApp();
-    accesskit_unix_adapter_new_fake.custom_fake = fake_accesskit_unix_adapter_new;
-    accesskit_unix_adapter_update_if_active_fake.custom_fake = fake_accesskit_unix_adapter_update_if_active;
     accesskitInit(app);
 
     app->appRenderer->currentCoordinate = COORDINATE_EXTENDED_SEARCH;
@@ -597,25 +540,22 @@ int main(void) {
     // accesskitInit tests
     RUN_TEST(test_accesskitInit_sets_root_id);
     RUN_TEST(test_accesskitInit_sets_live_region_id);
-    RUN_TEST(test_accesskitInit_creates_adapter);
-    RUN_TEST(test_accesskitInit_adapter_is_null_when_creation_fails);
+    RUN_TEST(test_accesskitInit_initializes_adapter);
+    RUN_TEST(test_accesskitInit_passes_window_to_adapter);
 
     // accesskitDestroy tests
-    RUN_TEST(test_accesskitDestroy_frees_adapter);
-    RUN_TEST(test_accesskitDestroy_handles_null_adapter);
-    RUN_TEST(test_accesskitDestroy_sets_adapter_to_null);
+    RUN_TEST(test_accesskitDestroy_destroys_adapter);
+    RUN_TEST(test_accesskitDestroy_clears_adapter_internal);
 
     // accesskitSpeak tests
     RUN_TEST(test_accesskitSpeak_calls_update_if_active);
     RUN_TEST(test_accesskitSpeak_passes_text_to_update);
-    RUN_TEST(test_accesskitSpeak_does_nothing_with_null_adapter);
     RUN_TEST(test_accesskitSpeak_does_nothing_with_null_text);
     RUN_TEST(test_accesskitSpeak_with_empty_string);
     RUN_TEST(test_accesskitSpeak_multiple_announcements);
 
     // Integration tests
     RUN_TEST(test_accesskit_lifecycle_init_speak_destroy);
-    RUN_TEST(test_accesskit_speak_after_destroy_does_nothing);
 
     // accesskitSpeakModeChange tests
     RUN_TEST(test_accesskitSpeakModeChange_announces_mode_name);
