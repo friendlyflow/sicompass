@@ -10,6 +10,11 @@ on:
         description: 'Version to release (e.g., 0.1.0)'
         required: true
         type: string
+      debug:
+        description: 'Build with debug symbols'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -187,8 +192,13 @@ jobs:
         run: |
           export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH"
           export LD_LIBRARY_PATH="/usr/local/lib:$LD_LIBRARY_PATH"
-          # Disable address sanitizer for release build
-          meson setup build --buildtype=release -Db_sanitize=none -Db_ndebug=true
+          if [ "${{ inputs.debug }}" = "true" ]; then
+            # Debug build with symbols
+            meson setup build --buildtype=debug -Db_sanitize=none
+          else
+            # Release build
+            meson setup build --buildtype=release -Db_sanitize=none -Db_ndebug=true
+          fi
           ninja -C build
 
       - name: Run tests
@@ -205,7 +215,11 @@ jobs:
       - name: Create .deb package
         run: |
           VERSION=${{ steps.version.outputs.version }}
-          PKG_DIR=sicompass_${VERSION}_amd64
+          if [ "${{ inputs.debug }}" = "true" ]; then
+            PKG_DIR=sicompass-debug_${VERSION}_amd64
+          else
+            PKG_DIR=sicompass_${VERSION}_amd64
+          fi
 
           mkdir -p ${PKG_DIR}/DEBIAN
           mkdir -p ${PKG_DIR}/usr/bin

@@ -8,11 +8,11 @@
 
 // Callback for AccessKit activation - returns initial tree
 static struct accesskit_tree_update* accesskitActivationHandler(void *userdata) {
-    // Create initial tree with root window and live region
+    // Create initial tree with root application, window, and live region
     struct accesskit_tree_update *update = accesskit_tree_update_with_capacity_and_focus(2, ACCESSKIT_ROOT_ID);
 
-    // Create root node (window)
-    struct accesskit_node *root = accesskit_node_new(ACCESSKIT_ROLE_WINDOW);
+    // Create root node as application (required for AT-SPI registration)
+    struct accesskit_node *root = accesskit_node_new(ACCESSKIT_ROLE_APPLICATION);
     accesskit_node_set_label(root, "Silicon's Compass");
     accesskit_node_id children[] = {ACCESSKIT_LIVE_REGION_ID};
     accesskit_node_set_children(root, 1, children);
@@ -71,6 +71,12 @@ void accesskitInit(SiCompassApplication *app) {
         accesskitDeactivationHandler,
         NULL   // userdata for deactivation handler
     );
+
+    if (app->appRenderer->accesskitAdapter) {
+        // Set initial window focus state to activate AT-SPI
+        accesskit_unix_adapter_update_window_focus_state(
+            app->appRenderer->accesskitAdapter, true);
+    }
 #endif
 }
 
@@ -94,7 +100,7 @@ static struct accesskit_tree_update* accesskitSpeakUpdateFactory(void *userdata)
     struct accesskit_tree_update *update = accesskit_tree_update_with_focus(ACCESSKIT_ROOT_ID);
 
     // Include root node with children to ensure AT-SPI can traverse the tree
-    struct accesskit_node *root = accesskit_node_new(ACCESSKIT_ROLE_WINDOW);
+    struct accesskit_node *root = accesskit_node_new(ACCESSKIT_ROLE_APPLICATION);
     accesskit_node_set_label(root, "Silicon's Compass");
     accesskit_node_id children[] = {ACCESSKIT_LIVE_REGION_ID};
     accesskit_node_set_children(root, 1, children);
