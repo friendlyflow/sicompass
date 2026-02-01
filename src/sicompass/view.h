@@ -245,3 +245,4 @@ void setErrorMessage(AppRenderer *appRenderer, const char *message);
 void accesskitInit(SiCompassApplication *app);
 void accesskitDestroy(AppRenderer *appRenderer);
 void accesskitSpeak(AppRenderer *appRenderer, const char *text);
+void accesskitSpeakModeChange(AppRenderer *appRenderer, const char *context);

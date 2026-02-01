@@ -69,6 +69,19 @@ typedef struct {
     int depth;
 } IdArray;
 
+// Coordinate enum (matching view.h)
+typedef enum {
+    COORDINATE_OPERATOR_GENERAL,
+    COORDINATE_OPERATOR_INSERT,
+    COORDINATE_EDITOR_GENERAL,
+    COORDINATE_EDITOR_INSERT,
+    COORDINATE_EDITOR_NORMAL,
+    COORDINATE_EDITOR_VISUAL,
+    COORDINATE_SIMPLE_SEARCH,
+    COORDINATE_EXTENDED_SEARCH,
+    COORDINATE_COMMAND
+} Coordinate;
+
 // Forward declarations matching view.h
 typedef struct AppRenderer AppRenderer;
 typedef struct SiCompassApplication SiCompassApplication;
@@ -77,6 +90,7 @@ struct AppRenderer {
     struct accesskit_unix_adapter *accesskitAdapter;
     accesskit_node_id accesskitRootId;
     accesskit_node_id accesskitLiveRegionId;
+    Coordinate currentCoordinate;
 };
 
 struct SiCompassApplication {
@@ -155,6 +169,36 @@ void accesskitSpeak(AppRenderer *appRenderer, const char *text) {
         NULL, // update factory placeholder
         (void *)text
     );
+}
+
+// Implementation of coordinateToString (copied from state.c)
+const char* coordinateToString(Coordinate coord) {
+    switch (coord) {
+        case COORDINATE_OPERATOR_GENERAL: return "operator mode";
+        case COORDINATE_OPERATOR_INSERT: return "operator insert";
+        case COORDINATE_EDITOR_GENERAL: return "editor mode";
+        case COORDINATE_EDITOR_INSERT: return "editor insert";
+        case COORDINATE_EDITOR_NORMAL: return "editor normal";
+        case COORDINATE_EDITOR_VISUAL: return "editor visual";
+        case COORDINATE_SIMPLE_SEARCH: return "search";
+        case COORDINATE_COMMAND: return "run command";
+        case COORDINATE_EXTENDED_SEARCH: return "ext search";
+        default: return "unknown";
+    }
+}
+
+// Implementation of accesskitSpeakModeChange (copied from state.c)
+void accesskitSpeakModeChange(AppRenderer *appRenderer, const char *context) {
+    char announcement[512];
+    const char *modeName = coordinateToString(appRenderer->currentCoordinate);
+
+    if (context && context[0] != '\0') {
+        snprintf(announcement, sizeof(announcement), "%s - %s", modeName, context);
+    } else {
+        snprintf(announcement, sizeof(announcement), "%s", modeName);
+    }
+
+    accesskitSpeak(appRenderer, announcement);
 }
 
 // Helper functions
@@ -441,6 +485,109 @@ void test_accesskit_speak_after_destroy_does_nothing(void) {
 }
 
 /* ============================================
+ * accesskitSpeakModeChange tests
+ * ============================================ */
+
+void test_accesskitSpeakModeChange_announces_mode_name(void) {
+    SiCompassApplication *app = createTestApp();
+    accesskit_unix_adapter_new_fake.custom_fake = fake_accesskit_unix_adapter_new;
+    accesskit_unix_adapter_update_if_active_fake.custom_fake = fake_accesskit_unix_adapter_update_if_active;
+    accesskitInit(app);
+
+    app->appRenderer->currentCoordinate = COORDINATE_SIMPLE_SEARCH;
+    accesskitSpeakModeChange(app->appRenderer, NULL);
+
+    TEST_ASSERT_EQUAL_STRING("search", captured_speak_text);
+
+    destroyTestApp(app);
+}
+
+void test_accesskitSpeakModeChange_announces_mode_with_context(void) {
+    SiCompassApplication *app = createTestApp();
+    accesskit_unix_adapter_new_fake.custom_fake = fake_accesskit_unix_adapter_new;
+    accesskit_unix_adapter_update_if_active_fake.custom_fake = fake_accesskit_unix_adapter_update_if_active;
+    accesskitInit(app);
+
+    app->appRenderer->currentCoordinate = COORDINATE_EDITOR_INSERT;
+    accesskitSpeakModeChange(app->appRenderer, "filename.txt");
+
+    TEST_ASSERT_EQUAL_STRING("editor insert - filename.txt", captured_speak_text);
+
+    destroyTestApp(app);
+}
+
+void test_accesskitSpeakModeChange_handles_empty_context(void) {
+    SiCompassApplication *app = createTestApp();
+    accesskit_unix_adapter_new_fake.custom_fake = fake_accesskit_unix_adapter_new;
+    accesskit_unix_adapter_update_if_active_fake.custom_fake = fake_accesskit_unix_adapter_update_if_active;
+    accesskitInit(app);
+
+    app->appRenderer->currentCoordinate = COORDINATE_COMMAND;
+    accesskitSpeakModeChange(app->appRenderer, "");
+
+    // Empty context should result in mode name only
+    TEST_ASSERT_EQUAL_STRING("run command", captured_speak_text);
+
+    destroyTestApp(app);
+}
+
+void test_accesskitSpeakModeChange_operator_mode(void) {
+    SiCompassApplication *app = createTestApp();
+    accesskit_unix_adapter_new_fake.custom_fake = fake_accesskit_unix_adapter_new;
+    accesskit_unix_adapter_update_if_active_fake.custom_fake = fake_accesskit_unix_adapter_update_if_active;
+    accesskitInit(app);
+
+    app->appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
+    accesskitSpeakModeChange(app->appRenderer, NULL);
+
+    TEST_ASSERT_EQUAL_STRING("operator mode", captured_speak_text);
+
+    destroyTestApp(app);
+}
+
+void test_accesskitSpeakModeChange_operator_insert_with_context(void) {
+    SiCompassApplication *app = createTestApp();
+    accesskit_unix_adapter_new_fake.custom_fake = fake_accesskit_unix_adapter_new;
+    accesskit_unix_adapter_update_if_active_fake.custom_fake = fake_accesskit_unix_adapter_update_if_active;
+    accesskitInit(app);
+
+    app->appRenderer->currentCoordinate = COORDINATE_OPERATOR_INSERT;
+    accesskitSpeakModeChange(app->appRenderer, "Documents");
+
+    TEST_ASSERT_EQUAL_STRING("operator insert - Documents", captured_speak_text);
+
+    destroyTestApp(app);
+}
+
+void test_accesskitSpeakModeChange_editor_mode(void) {
+    SiCompassApplication *app = createTestApp();
+    accesskit_unix_adapter_new_fake.custom_fake = fake_accesskit_unix_adapter_new;
+    accesskit_unix_adapter_update_if_active_fake.custom_fake = fake_accesskit_unix_adapter_update_if_active;
+    accesskitInit(app);
+
+    app->appRenderer->currentCoordinate = COORDINATE_EDITOR_GENERAL;
+    accesskitSpeakModeChange(app->appRenderer, NULL);
+
+    TEST_ASSERT_EQUAL_STRING("editor mode", captured_speak_text);
+
+    destroyTestApp(app);
+}
+
+void test_accesskitSpeakModeChange_extended_search(void) {
+    SiCompassApplication *app = createTestApp();
+    accesskit_unix_adapter_new_fake.custom_fake = fake_accesskit_unix_adapter_new;
+    accesskit_unix_adapter_update_if_active_fake.custom_fake = fake_accesskit_unix_adapter_update_if_active;
+    accesskitInit(app);
+
+    app->appRenderer->currentCoordinate = COORDINATE_EXTENDED_SEARCH;
+    accesskitSpeakModeChange(app->appRenderer, NULL);
+
+    TEST_ASSERT_EQUAL_STRING("ext search", captured_speak_text);
+
+    destroyTestApp(app);
+}
+
+/* ============================================
  * Main - Run all tests
  * ============================================ */
 
@@ -469,6 +616,15 @@ int main(void) {
     // Integration tests
     RUN_TEST(test_accesskit_lifecycle_init_speak_destroy);
     RUN_TEST(test_accesskit_speak_after_destroy_does_nothing);
+
+    // accesskitSpeakModeChange tests
+    RUN_TEST(test_accesskitSpeakModeChange_announces_mode_name);
+    RUN_TEST(test_accesskitSpeakModeChange_announces_mode_with_context);
+    RUN_TEST(test_accesskitSpeakModeChange_handles_empty_context);
+    RUN_TEST(test_accesskitSpeakModeChange_operator_mode);
+    RUN_TEST(test_accesskitSpeakModeChange_operator_insert_with_context);
+    RUN_TEST(test_accesskitSpeakModeChange_editor_mode);
+    RUN_TEST(test_accesskitSpeakModeChange_extended_search);
 
     return UNITY_END();
 }

@@ -140,3 +140,16 @@ bool isLineKey(const char *line) {
 void setErrorMessage(AppRenderer *appRenderer, const char *message) {
     snprintf(appRenderer->errorMessage, sizeof(appRenderer->errorMessage), "%s", message);
 }
+
+void accesskitSpeakModeChange(AppRenderer *appRenderer, const char *context) {
+    char announcement[512];
+    const char *modeName = coordinateToString(appRenderer->currentCoordinate);
+
+    if (context && context[0] != '\0') {
+        snprintf(announcement, sizeof(announcement), "%s - %s", modeName, context);
+    } else {
+        snprintf(announcement, sizeof(announcement), "%s", modeName);
+    }
+
+    accesskitSpeak(appRenderer, announcement);
+}

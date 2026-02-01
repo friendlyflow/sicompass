@@ -70,6 +70,7 @@ static int utf8_move_forward(const char *str, int cursorPos, int bufferSize) {
 void handleTab(AppRenderer *appRenderer) {
     appRenderer->previousCoordinate = appRenderer->currentCoordinate;
     appRenderer->currentCoordinate = COORDINATE_SIMPLE_SEARCH;
+    accesskitSpeakModeChange(appRenderer, NULL);
 
     // Clear input buffer for searching
     appRenderer->inputBuffer[0] = '\0';
@@ -133,6 +134,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                     // Return to operator general
                     appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
                     appRenderer->previousCoordinate = COORDINATE_OPERATOR_GENERAL;
+                    accesskitSpeakModeChange(appRenderer, NULL);
                     createListCurrentLayer(appRenderer);
                     appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
                     appRenderer->needsRedraw = true;
@@ -145,6 +147,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
         updateState(appRenderer, TASK_INPUT, HISTORY_NONE);
         appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
         appRenderer->previousCoordinate = COORDINATE_OPERATOR_GENERAL;
+        accesskitSpeakModeChange(appRenderer, NULL);
         appRenderer->needsRedraw = true;
     } else if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
         // Get current element to check if it's a string (file) or object (directory)
@@ -183,6 +186,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
             idArrayCopy(&appRenderer->currentId, &list[appRenderer->listIndex].id);
         }
         appRenderer->currentCoordinate = appRenderer->previousCoordinate;
+        accesskitSpeakModeChange(appRenderer, NULL);
         createListCurrentLayer(appRenderer);
         // Sync listIndex with current position (after createListCurrentLayer which resets it)
         appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
@@ -240,6 +244,7 @@ void handleDelete(AppRenderer *appRenderer, History history) {
 void handleColon(AppRenderer *appRenderer) {
     appRenderer->previousCoordinate = appRenderer->currentCoordinate;
     appRenderer->currentCoordinate = COORDINATE_COMMAND;
+    accesskitSpeakModeChange(appRenderer, NULL);
 
     // Clear input buffer for searching
     appRenderer->inputBuffer[0] = '\0';
@@ -364,12 +369,14 @@ void handleI(AppRenderer *appRenderer) {
         // Get current element
         int count;
         FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId, &count);
+        const char *context = NULL;
         if (arr && count > 0) {
             int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
             if (idx >= 0 && idx < count) {
                 FfonElement *elem = arr[idx];
                 const char *elementKey = (elem->type == FFON_STRING) ?
                     elem->data.string : elem->data.object->key;
+                context = elementKey;
 
                 // Try provider first
                 char *content = providerGetEditableContent(elementKey);
@@ -391,6 +398,9 @@ void handleI(AppRenderer *appRenderer) {
                 }
             }
         }
+
+        // Speak mode change with current item as context
+        accesskitSpeakModeChange(appRenderer, context);
 
         appRenderer->cursorPosition = 0;
         idArrayInit(&appRenderer->currentInsertId);
@@ -414,12 +424,14 @@ void handleA(AppRenderer *appRenderer) {
         // Get current element
         int count;
         FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId, &count);
+        const char *context = NULL;
         if (arr && count > 0) {
             int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
             if (idx >= 0 && idx < count) {
                 FfonElement *elem = arr[idx];
                 const char *elementKey = (elem->type == FFON_STRING) ?
                     elem->data.string : elem->data.object->key;
+                context = elementKey;
 
                 // Try provider first
                 char *content = providerGetEditableContent(elementKey);
@@ -442,6 +454,9 @@ void handleA(AppRenderer *appRenderer) {
             }
         }
 
+        // Speak mode change with current item as context
+        accesskitSpeakModeChange(appRenderer, context);
+
         appRenderer->cursorPosition = appRenderer->inputBufferSize;
         idArrayInit(&appRenderer->currentInsertId);
         appRenderer->needsRedraw = true;
@@ -453,6 +468,7 @@ void handleFind(AppRenderer *appRenderer) {
         appRenderer->currentCoordinate != COORDINATE_COMMAND) {
         appRenderer->previousCoordinate = appRenderer->currentCoordinate;
         appRenderer->currentCoordinate = COORDINATE_EXTENDED_SEARCH;
+        accesskitSpeakModeChange(appRenderer, NULL);
 
         // Clear input buffer for searching
         appRenderer->inputBuffer[0] = '\0';
@@ -496,6 +512,7 @@ void handleEscape(AppRenderer *appRenderer) {
                     free(oldContent);
                     appRenderer->currentCoordinate = COORDINATE_EDITOR_GENERAL;
                     appRenderer->previousCoordinate = COORDINATE_EDITOR_GENERAL;
+                    accesskitSpeakModeChange(appRenderer, NULL);
                     createListCurrentLayer(appRenderer);
                     appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
                     appRenderer->needsRedraw = true;
@@ -517,6 +534,7 @@ void handleEscape(AppRenderer *appRenderer) {
     }
 
     appRenderer->previousCoordinate = appRenderer->currentCoordinate;
+    accesskitSpeakModeChange(appRenderer, NULL);
     appRenderer->needsRedraw = true;
 }
 
@@ -525,11 +543,13 @@ void handleCommand(AppRenderer *appRenderer) {
         case COMMAND_EDITOR_MODE:
             appRenderer->previousCoordinate = appRenderer->currentCoordinate;
             appRenderer->currentCoordinate = COORDINATE_EDITOR_GENERAL;
+            accesskitSpeakModeChange(appRenderer, NULL);
             break;
 
         case COMMAND_OPERATOR_MODE:
             appRenderer->previousCoordinate = appRenderer->currentCoordinate;
             appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
+            accesskitSpeakModeChange(appRenderer, NULL);
             break;
     }
 
