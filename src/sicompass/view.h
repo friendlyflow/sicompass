@@ -247,3 +247,4 @@ void accesskitDestroy(AppRenderer *appRenderer);
 void accesskitSpeak(AppRenderer *appRenderer, const char *text);
 void accesskitSpeakCurrentItem(AppRenderer *appRenderer);
 void accesskitSpeakModeChange(AppRenderer *appRenderer, const char *context);
+void accesskitUpdateWindowFocus(AppRenderer *appRenderer, bool isFocused);

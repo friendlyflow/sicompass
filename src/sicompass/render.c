@@ -136,6 +136,21 @@ void accesskitSpeak(AppRenderer *appRenderer, const char *text) {
 #endif
 }
 
+void accesskitUpdateWindowFocus(AppRenderer *appRenderer, bool isFocused) {
+    if (!appRenderer->accesskitAdapter) {
+        return;
+    }
+
+#if defined(__APPLE__)
+    // macOS adapter not yet implemented
+#elif defined(_WIN32)
+    // Windows adapter not yet implemented
+#else
+    accesskit_unix_adapter_update_window_focus_state(
+        appRenderer->accesskitAdapter, isFocused);
+#endif
+}
+
 void accesskitSpeakCurrentItem(AppRenderer *appRenderer) {
     ListItem *list = appRenderer->filteredListCount > 0 ?
                      appRenderer->filteredListCurrentLayer : appRenderer->totalListCurrentLayer;

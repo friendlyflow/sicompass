@@ -84,6 +84,14 @@ void mainLoop(SiCompassApplication* app) {
                     app->framebufferResized = true;
                     app->appRenderer->needsRedraw = true;
                     break;
+
+                case SDL_EVENT_WINDOW_FOCUS_GAINED:
+                    accesskitUpdateWindowFocus(app->appRenderer, true);
+                    break;
+
+                case SDL_EVENT_WINDOW_FOCUS_LOST:
+                    accesskitUpdateWindowFocus(app->appRenderer, false);
+                    break;
             }
         }
 
