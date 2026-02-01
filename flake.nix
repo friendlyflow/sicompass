@@ -186,6 +186,7 @@
               # wlroots for desicompass
               wlroots_0_19
               pixman
+              accerciser
             ];
 
             # shellHooks = ''
