@@ -831,99 +831,45 @@ jobs:
   #         name: windows-package
   #         path: "*.zip"
 
-  # publish-release:
-  #   needs: [build-linux-deb, build-linux-rpm, build-linux-arch, build-nix, build-macos, build-windows]
-  #   if: always() && needs.build-linux-deb.result == 'success'
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: Download all artifacts
-  #       uses: actions/download-artifact@v4
-  #       with:
-  #         path: artifacts
+  publish-release:
+    needs: [build-linux-deb]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
 
-  #     - name: Get version
-  #       id: version
-  #       run: |
-  #         if [ -n "${{ inputs.version }}" ]; then
-  #           echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
-  #         else
-  #           echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-  #         fi
+      - name: Get version
+        id: version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
 
-  #     - name: List artifacts
-  #       run: find artifacts -type f
+      - name: List artifacts
+        run: find artifacts -type f
 
-  #     - name: Create Release
-  #       uses: softprops/action-gh-release@v2
-  #       with:
-  #         tag_name: "v${{ steps.version.outputs.version }}"
-  #         name: "v${{ steps.version.outputs.version }}"
-  #         draft: false
-  #         prerelease: false
-  #         files: |
-  #           artifacts/**/*.deb
-  #           artifacts/**/*.rpm
-  #           artifacts/**/*.pkg.tar.xz
-  #           artifacts/**/*.tar.gz
-  #           artifacts/**/*.nar.gz
-  #           artifacts/**/*.dmg
-  #           artifacts/**/*.zip
-  #         body: |
-  #           ## Downloads
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ steps.version.outputs.version }}"
+          name: "v${{ steps.version.outputs.version }}"
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/**/*.deb
+          body: |
+            ## Downloads
 
-  #           ### Linux
-  #           | Distribution | Package |
-  #           |--------------|---------|
-  #           | Debian/Ubuntu | `sicompass_${{ steps.version.outputs.version }}_amd64.deb` |
-  #           | Fedora/RHEL | `sicompass-${{ steps.version.outputs.version }}-1.x86_64.rpm` |
-  #           | Arch Linux | `sicompass-${{ steps.version.outputs.version }}-1-x86_64.pkg.tar.xz` |
+            ### Linux (Debian/Ubuntu)
+            Download: `sicompass_${{ steps.version.outputs.version }}_amd64.deb`
 
-  #           ### macOS
-  #           - **macOS**: `sicompass-${{ steps.version.outputs.version }}-macos.dmg`
+            ## Installation
 
-  #           ### Windows
-  #           - **Windows x64**: `sicompass-${{ steps.version.outputs.version }}-windows-x64.zip`
-
-  #           ### Nix
-  #           - **Source tarball**: `sicompass-${{ steps.version.outputs.version }}-nix-source.tar.gz`
-  #           - **Nix closure**: `sicompass-${{ steps.version.outputs.version }}-nix-closure.nar.gz`
-
-  #           Or run directly:
-  #           ```bash
-  #           nix run github:friendlyflow/sicompass/v${{ steps.version.outputs.version }}
-  #           ```
-
-  #           ## Installation
-
-  #           ### Debian/Ubuntu
-  #           ```bash
-  #           sudo dpkg -i sicompass_${{ steps.version.outputs.version }}_amd64.deb
-  #           sudo apt-get install -f  # Install dependencies if needed
-  #           ```
-
-  #           ### Fedora/RHEL
-  #           ```bash
-  #           sudo dnf install sicompass-${{ steps.version.outputs.version }}-1.x86_64.rpm
-  #           ```
-
-  #           ### Arch Linux
-  #           ```bash
-  #           sudo pacman -U sicompass-${{ steps.version.outputs.version }}-1-x86_64.pkg.tar.xz
-  #           ```
-
-  #           ### Nix
-  #           ```bash
-  #           # Run directly
-  #           nix run github:friendlyflow/sicompass/v${{ steps.version.outputs.version }}
-
-  #           # Or install
-  #           nix profile install github:friendlyflow/sicompass/v${{ steps.version.outputs.version }}
-  #           ```
-
-  #           ### macOS
-  #           1. Download the DMG file
-  #           2. Open and drag to Applications
-
-  #           ### Windows
-  #           1. Download and extract the ZIP
-  #           2. Run `sicompass.exe`
+            ```bash
+            sudo dpkg -i sicompass_${{ steps.version.outputs.version }}_amd64.deb
+            sudo apt-get install -f  # Install dependencies if needed
+            ```
