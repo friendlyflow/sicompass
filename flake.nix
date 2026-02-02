@@ -207,10 +207,14 @@
               echo "tools-lunarg: ${vulkan-tools-lunarg}"
               echo "extension-layer: ${vulkan-extension-layer}"
 
-              export LD_LIBRARY_PATH="${stb}/lib:${glfw}/lib:${freetype}/lib:${vulkan-loader}/lib:${vulkan-validation-layers}/lib";
+              # Include system library path for Vulkan drivers (Debian/non-NixOS)
+              export LD_LIBRARY_PATH="${stb}/lib:${glfw}/lib:${freetype}/lib:${vulkan-loader}/lib:${vulkan-validation-layers}/lib:/usr/lib/x86_64-linux-gnu";
               export VULKAN_SDK="${vulkan-headers}";
               export VK_LAYER_PATH="${vulkan-validation-layers}/share/vulkan/explicit_layer.d";
-              
+
+              # Point Vulkan loader to system drivers (for non-NixOS systems)
+              export VK_ICD_FILENAMES="/usr/share/vulkan/icd.d/radeon_icd.json";
+
               exec fish
             '';
           };
