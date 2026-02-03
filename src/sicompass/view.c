@@ -55,6 +55,7 @@ void mainLoop(SiCompassApplication* app) {
                     break;
 
                 case SDL_EVENT_KEY_DOWN:
+                    if (event.key.windowID != app->window_id) break;
                     handleKeys(app->appRenderer, &event);
                     // Enable/disable text input based on current mode
                     if (app->appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
@@ -69,6 +70,7 @@ void mainLoop(SiCompassApplication* app) {
                     break;
 
                 case SDL_EVENT_TEXT_INPUT:
+                    if (event.text.windowID != app->window_id) break;
                     if (app->appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
                         app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
                         app->appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
@@ -81,16 +83,73 @@ void mainLoop(SiCompassApplication* app) {
                 case SDL_EVENT_WINDOW_RESIZED:
                 case SDL_EVENT_WINDOW_MAXIMIZED:
                 case SDL_EVENT_WINDOW_EXPOSED:
+                    if (event.window.windowID != app->window_id) break;
                     app->framebufferResized = true;
                     app->appRenderer->needsRedraw = true;
                     break;
 
                 case SDL_EVENT_WINDOW_FOCUS_GAINED:
+                    if (event.window.windowID != app->window_id) break;
                     accesskitUpdateWindowFocus(app->appRenderer, true);
                     break;
 
                 case SDL_EVENT_WINDOW_FOCUS_LOST:
+                    if (event.window.windowID != app->window_id) break;
                     accesskitUpdateWindowFocus(app->appRenderer, false);
+                    break;
+
+                default:
+                    // Handle custom accessibility events
+                    if (event.type == app->user_event) {
+                        if (event.user.windowID != app->window_id) break;
+                        // Process AccessKit action request
+                        accesskit_action_request *request = (accesskit_action_request *)event.user.data1;
+                        if (request) {
+                            accesskit_action action = accesskit_action_request_action(request);
+                            accesskit_node_id target = accesskit_action_request_target(request);
+
+                            // Check if target is a list item (ID >= 100)
+                            if (target >= 100) {
+                                int index = target - 100;
+
+                                switch (action) {
+                                    case ACCESSKIT_ACTION_CLICK:
+                                        // Activate item (like pressing Enter)
+                                        app->appRenderer->listIndex = index;
+                                        handleEnter(app->appRenderer, HISTORY_NONE);
+                                        break;
+
+                                    case ACCESSKIT_ACTION_FOCUS:
+                                        // Navigate to item
+                                        app->appRenderer->listIndex = index;
+                                        accesskitSpeakCurrentItem(app->appRenderer);
+                                        break;
+
+                                    case ACCESSKIT_ACTION_SCROLL_DOWN:
+                                        handleDown(app->appRenderer);  // j key - next item
+                                        break;
+
+                                    case ACCESSKIT_ACTION_SCROLL_UP:
+                                        handleUp(app->appRenderer);    // k key - previous item
+                                        break;
+
+                                    case ACCESSKIT_ACTION_SCROLL_LEFT:
+                                        handleLeft(app->appRenderer);  // h key - go to parent
+                                        break;
+
+                                    case ACCESSKIT_ACTION_SCROLL_RIGHT:
+                                        handleRight(app->appRenderer); // l key - enter item
+                                        break;
+
+                                    default:
+                                        break;
+                                }
+                                app->appRenderer->needsRedraw = true;
+                            }
+
+                            accesskit_action_request_free(request);
+                        }
+                    }
                     break;
             }
         }

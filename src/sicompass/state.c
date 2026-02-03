@@ -53,6 +53,9 @@ SiCompassApplication* appRendererCreate(SiCompassApplication* app) {
     // Initialize AccessKit adapter (internal pointer will be set by accesskitInit)
     appRenderer->accesskitAdapter.adapter = NULL;
 
+    // Initialize window state for thread-safe accessibility
+    window_state_init(&appRenderer->state, 1, appRenderer);  // ACCESSKIT_ROOT_ID = 1
+
     app->appRenderer = appRenderer;
 
     // Initialize AccessKit

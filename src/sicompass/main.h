@@ -37,6 +37,8 @@ typedef struct {
 
 typedef struct SiCompassApplication {
     SDL_Window* window;
+    SDL_WindowID window_id;  // For event filtering
+    Uint32 user_event;       // Custom SDL event for accessibility actions
 
     VkInstance instance;
     VkDebugUtilsMessengerEXT debugMessenger;
