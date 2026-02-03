@@ -76,6 +76,23 @@ typedef enum {
 typedef struct SiCompassApplication SiCompassApplication;
 typedef struct CaretState CaretState;
 
+// Forward declaration for window_state
+struct AppRenderer;
+
+// Window state for thread-safe accessibility state management
+struct window_state {
+    accesskit_node_id focus;
+    const char *announcement;
+    SDL_Mutex *mutex;
+    struct AppRenderer *appRenderer;  // Pointer to access list data for accessibility tree
+};
+
+// Action handler state for routing accessibility actions to SDL events
+struct action_handler_state {
+    Uint32 event_type;
+    SDL_WindowID window_id;
+};
+
 // Undo history entry
 typedef struct {
     IdArray id;
@@ -152,6 +169,12 @@ typedef struct AppRenderer {
     struct accesskit_sdl_adapter accesskitAdapter;
     accesskit_node_id accesskitRootId;
     accesskit_node_id accesskitLiveRegionId;
+
+    // Window state for thread-safe accessibility
+    struct window_state state;
+
+    // Action handler state for accessibility events
+    struct action_handler_state action_handler;
 } AppRenderer;
 
 // Function declarations
@@ -243,3 +266,10 @@ void accesskitSpeak(AppRenderer *appRenderer, const char *text);
 void accesskitSpeakCurrentItem(AppRenderer *appRenderer);
 void accesskitSpeakModeChange(AppRenderer *appRenderer, const char *context);
 void accesskitUpdateWindowFocus(AppRenderer *appRenderer, bool isFocused);
+
+// Window state functions for thread-safe accessibility
+void window_state_init(struct window_state *state, accesskit_node_id initial_focus, AppRenderer *appRenderer);
+void window_state_destroy(struct window_state *state);
+void window_state_lock(struct window_state *state);
+void window_state_unlock(struct window_state *state);
+void window_state_set_focus(struct window_state *state, struct accesskit_sdl_adapter *adapter, accesskit_node_id new_focus);

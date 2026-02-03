@@ -5,24 +5,57 @@
 // AccessKit node IDs
 #define ACCESSKIT_ROOT_ID 1
 #define ACCESSKIT_LIVE_REGION_ID 2
+#define ACCESSKIT_LIST_ITEM_BASE 100  // List items start at ID 100
 
 // Callback for AccessKit activation - returns initial tree
 static struct accesskit_tree_update* accesskitActivationHandler(void *userdata) {
-    // Create initial tree with root window and live region
-    struct accesskit_tree_update *update = accesskit_tree_update_with_capacity_and_focus(2, ACCESSKIT_ROOT_ID);
+    struct window_state *state = (struct window_state *)userdata;
+    AppRenderer *appRenderer = state->appRenderer;
+
+    window_state_lock(state);
+
+    // Get current list (filtered if searching, otherwise total)
+    ListItem *list = appRenderer->filteredListCount > 0 ?
+                     appRenderer->filteredListCurrentLayer : appRenderer->totalListCurrentLayer;
+    int count = appRenderer->filteredListCount > 0 ?
+                appRenderer->filteredListCount : appRenderer->totalListCount;
+
+    // Create update with capacity for root + live region + list items
+    struct accesskit_tree_update *update = accesskit_tree_update_with_capacity_and_focus(2 + count, state->focus);
+
+    // Build children array for root (live region + list items)
+    accesskit_node_id *children = malloc((1 + count) * sizeof(accesskit_node_id));
+    children[0] = ACCESSKIT_LIVE_REGION_ID;
+    for (int i = 0; i < count; i++) {
+        children[1 + i] = ACCESSKIT_LIST_ITEM_BASE + i;
+    }
 
     // Create root node (window)
     struct accesskit_node *root = accesskit_node_new(ACCESSKIT_ROLE_WINDOW);
     accesskit_node_set_label(root, "Silicon's Compass");
-    accesskit_node_id children[] = {ACCESSKIT_LIVE_REGION_ID};
-    accesskit_node_set_children(root, 1, children);
+    accesskit_node_set_children(root, 1 + count, children);
     accesskit_tree_update_push_node(update, ACCESSKIT_ROOT_ID, root);
 
     // Create live region for announcements
     struct accesskit_node *liveRegion = accesskit_node_new(ACCESSKIT_ROLE_LABEL);
     accesskit_node_set_live(liveRegion, ACCESSKIT_LIVE_POLITE);
-    accesskit_node_set_label(liveRegion, "");
+    accesskit_node_set_label(liveRegion, state->announcement ? state->announcement : "");
     accesskit_tree_update_push_node(update, ACCESSKIT_LIVE_REGION_ID, liveRegion);
+
+    // Create list item nodes
+    for (int i = 0; i < count; i++) {
+        struct accesskit_node *item = accesskit_node_new(ACCESSKIT_ROLE_LIST_ITEM);
+        accesskit_node_set_label(item, list[i].value);
+        accesskit_node_add_action(item, ACCESSKIT_ACTION_CLICK);
+        accesskit_node_add_action(item, ACCESSKIT_ACTION_FOCUS);
+        accesskit_node_add_action(item, ACCESSKIT_ACTION_SCROLL_UP);
+        accesskit_node_add_action(item, ACCESSKIT_ACTION_SCROLL_DOWN);
+        accesskit_node_add_action(item, ACCESSKIT_ACTION_SCROLL_LEFT);
+        accesskit_node_add_action(item, ACCESSKIT_ACTION_SCROLL_RIGHT);
+        accesskit_tree_update_push_node(update, ACCESSKIT_LIST_ITEM_BASE + i, item);
+    }
+
+    free(children);
 
     // Set tree info
     struct accesskit_tree *tree = accesskit_tree_new(ACCESSKIT_ROOT_ID);
@@ -30,41 +63,92 @@ static struct accesskit_tree_update* accesskitActivationHandler(void *userdata) 
     accesskit_tree_set_toolkit_version(tree, "0.1");
     accesskit_tree_update_set_tree(update, tree);
 
+    window_state_unlock(state);
+
     return update;
 }
 
-// Callback for AccessKit action requests
+// Callback for AccessKit action requests - routes to SDL event loop
 static void accesskitActionHandler(accesskit_action_request *request, void *userdata) {
-    // Handle accessibility actions (click, focus, etc.)
-    // For now, we just free the request
-    accesskit_action_request_free(request);
+    struct action_handler_state *handler = (struct action_handler_state *)userdata;
+
+    // Push accessibility action as SDL user event
+    SDL_Event event;
+    SDL_zero(event);
+    event.type = handler->event_type;
+    event.user.windowID = handler->window_id;
+    event.user.data1 = request;  // Pass request to event handler
+    SDL_PushEvent(&event);
 }
 
 // Callback for AccessKit deactivation
 static void accesskitDeactivationHandler(void *userdata) {
     // Called when assistive technology disconnects
-    // Nothing to do here for now
+    // There's nothing in the state that depends on whether the adapter is active
+    (void)userdata;
 }
 
 void accesskitInit(SiCompassApplication *app) {
     app->appRenderer->accesskitRootId = ACCESSKIT_ROOT_ID;
     app->appRenderer->accesskitLiveRegionId = ACCESSKIT_LIVE_REGION_ID;
 
+    // Initialize action handler state
+    app->appRenderer->action_handler.event_type = app->user_event;
+    app->appRenderer->action_handler.window_id = app->window_id;
+
     // Create cross-platform SDL adapter
     accesskit_sdl_adapter_init(
         &app->appRenderer->accesskitAdapter,
         app->window,
         accesskitActivationHandler,
-        NULL,  // userdata for activation handler
+        &app->appRenderer->state,           // userdata for activation handler
         accesskitActionHandler,
-        NULL,  // userdata for action handler
+        &app->appRenderer->action_handler,  // userdata for action handler
         accesskitDeactivationHandler,
-        NULL   // userdata for deactivation handler
+        &app->appRenderer->state            // userdata for deactivation handler
     );
+
+    // Show window after adapter initialization (per AccessKit example)
+    SDL_ShowWindow(app->window);
 }
 
 void accesskitDestroy(AppRenderer *appRenderer) {
+    window_state_destroy(&appRenderer->state);
     accesskit_sdl_adapter_destroy(&appRenderer->accesskitAdapter);
+}
+
+// Window state functions for thread-safe accessibility
+void window_state_init(struct window_state *state, accesskit_node_id initial_focus, AppRenderer *appRenderer) {
+    state->focus = initial_focus;
+    state->announcement = NULL;
+    state->mutex = SDL_CreateMutex();  // SDL3: Returns SDL_Mutex*
+    state->appRenderer = appRenderer;
+}
+
+void window_state_destroy(struct window_state *state) {
+    if (state->mutex) {
+        SDL_DestroyMutex(state->mutex);  // SDL3: Takes SDL_Mutex*
+        state->mutex = NULL;
+    }
+}
+
+void window_state_lock(struct window_state *state) {
+    SDL_LockMutex(state->mutex);  // SDL3: Takes SDL_Mutex*
+}
+
+void window_state_unlock(struct window_state *state) {
+    SDL_UnlockMutex(state->mutex);  // SDL3: Takes SDL_Mutex*
+}
+
+// Factory function for focus update
+static struct accesskit_tree_update* focus_update_factory(void *userdata) {
+    accesskit_node_id *new_focus = (accesskit_node_id *)userdata;
+    return accesskit_tree_update_with_focus(*new_focus);
+}
+
+void window_state_set_focus(struct window_state *state, struct accesskit_sdl_adapter *adapter, accesskit_node_id new_focus) {
+    state->focus = new_focus;
+    accesskit_sdl_adapter_update_if_active(adapter, focus_update_factory, &state->focus);
 }
 
 // Factory function for tree updates when speaking

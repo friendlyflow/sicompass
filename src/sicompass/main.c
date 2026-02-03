@@ -154,6 +154,8 @@ void initWindow(SiCompassApplication* app) {
         SDL_Quit();
         exit(EXIT_FAILURE);
     }
+    app->window_id = SDL_GetWindowID(app->window);
+    app->user_event = SDL_RegisterEvents(1);
 }
 
 void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT* createInfo) {
