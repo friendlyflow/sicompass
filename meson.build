@@ -81,7 +81,7 @@ subdir('lib/lib_webbrowser')
 
 subdir('src')
 
-exe_sc = executable('sicompass', [sources_sc], dependencies: [vulkan_dep, sdl3_dep, m_dep, ft_dep, hb_dep, stb_dep, jsonc_dep, accesskit_dep, cglm_dep, lib_ffon_dep, lib_provider_dep, lib_filebrowser_dep],
+exe_sc = executable('sicompass', [sources_sc], dependencies: [vulkan_dep, sdl3_dep, xkbcommon_dep, m_dep, ft_dep, hb_dep, stb_dep, jsonc_dep, accesskit_dep, cglm_dep, lib_ffon_dep, lib_provider_dep, lib_filebrowser_dep],
                     include_directories: [], install : true)
 
 exe_dc = executable('desicompass', [sources_dc, xdg_shell_c, xdg_shell_h],
