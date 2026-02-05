@@ -54,7 +54,7 @@ SiCompassApplication* appRendererCreate(SiCompassApplication* app) {
     appRenderer->accesskitAdapter.adapter = NULL;
 
     // Initialize window state for thread-safe accessibility
-    window_state_init(&appRenderer->state, 1, appRenderer);  // ACCESSKIT_ROOT_ID = 1
+    windowStateInit(&appRenderer->state, 1, appRenderer);  // ACCESSKIT_ROOT_ID = 1
 
     app->appRenderer = appRenderer;
 
