@@ -80,7 +80,7 @@ typedef struct CaretState CaretState;
 struct AppRenderer;
 
 // Window state for thread-safe accessibility state management
-struct window_state {
+struct windowState {
     accesskit_node_id focus;
     const char *announcement;
     SDL_Mutex *mutex;
@@ -88,9 +88,9 @@ struct window_state {
 };
 
 // Action handler state for routing accessibility actions to SDL events
-struct action_handler_state {
-    Uint32 event_type;
-    SDL_WindowID window_id;
+struct actionHandlerState {
+    Uint32 eventType;
+    SDL_WindowID windowId;
 };
 
 // Undo history entry
@@ -171,10 +171,10 @@ typedef struct AppRenderer {
     accesskit_node_id accesskitLiveRegionId;
 
     // Window state for thread-safe accessibility
-    struct window_state state;
+    struct windowState state;
 
     // Action handler state for accessibility events
-    struct action_handler_state action_handler;
+    struct actionHandlerState actionHandler;
 } AppRenderer;
 
 // Function declarations
@@ -268,8 +268,8 @@ void accesskitSpeakModeChange(AppRenderer *appRenderer, const char *context);
 void accesskitUpdateWindowFocus(AppRenderer *appRenderer, bool isFocused);
 
 // Window state functions for thread-safe accessibility
-void window_state_init(struct window_state *state, accesskit_node_id initial_focus, AppRenderer *appRenderer);
-void window_state_destroy(struct window_state *state);
-void window_state_lock(struct window_state *state);
-void window_state_unlock(struct window_state *state);
-void window_state_set_focus(struct window_state *state, struct accesskit_sdl_adapter *adapter, accesskit_node_id new_focus);
+void windowStateInit(struct windowState *state, accesskit_node_id initialFocus, AppRenderer *appRenderer);
+void windowStateDestroy(struct windowState *state);
+void windowStateLock(struct windowState *state);
+void windowStateUnlock(struct windowState *state);
+void windowStateSetFocus(struct windowState *state, struct accesskit_sdl_adapter *adapter, accesskit_node_id new_focus);

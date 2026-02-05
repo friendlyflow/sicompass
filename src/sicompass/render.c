@@ -9,10 +9,10 @@
 
 // Callback for AccessKit activation - returns initial tree
 static struct accesskit_tree_update* accesskitActivationHandler(void *userdata) {
-    struct window_state *state = (struct window_state *)userdata;
+    struct windowState *state = (struct windowState *)userdata;
     AppRenderer *appRenderer = state->appRenderer;
 
-    window_state_lock(state);
+    windowStateLock(state);
 
     // Get current list (filtered if searching, otherwise total)
     ListItem *list = appRenderer->filteredListCount > 0 ?
@@ -63,20 +63,20 @@ static struct accesskit_tree_update* accesskitActivationHandler(void *userdata) 
     accesskit_tree_set_toolkit_version(tree, "0.1");
     accesskit_tree_update_set_tree(update, tree);
 
-    window_state_unlock(state);
+    windowStateUnlock(state);
 
     return update;
 }
 
 // Callback for AccessKit action requests - routes to SDL event loop
 static void accesskitActionHandler(accesskit_action_request *request, void *userdata) {
-    struct action_handler_state *handler = (struct action_handler_state *)userdata;
+    struct actionHandlerState *handler = (struct actionHandlerState *)userdata;
 
     // Push accessibility action as SDL user event
     SDL_Event event;
     SDL_zero(event);
-    event.type = handler->event_type;
-    event.user.windowID = handler->window_id;
+    event.type = handler->eventType;
+    event.user.windowID = handler->windowId;
     event.user.data1 = request;  // Pass request to event handler
     SDL_PushEvent(&event);
 }
@@ -93,8 +93,8 @@ void accesskitInit(SiCompassApplication *app) {
     app->appRenderer->accesskitLiveRegionId = ACCESSKIT_LIVE_REGION_ID;
 
     // Initialize action handler state
-    app->appRenderer->action_handler.event_type = app->user_event;
-    app->appRenderer->action_handler.window_id = app->window_id;
+    app->appRenderer->actionHandler.eventType = app->user_event;
+    app->appRenderer->actionHandler.windowId = app->window_id;
 
     // Create cross-platform SDL adapter
     accesskit_sdl_adapter_init(
@@ -103,7 +103,7 @@ void accesskitInit(SiCompassApplication *app) {
         accesskitActivationHandler,
         &app->appRenderer->state,           // userdata for activation handler
         accesskitActionHandler,
-        &app->appRenderer->action_handler,  // userdata for action handler
+        &app->appRenderer->actionHandler,  // userdata for action handler
         accesskitDeactivationHandler,
         &app->appRenderer->state            // userdata for deactivation handler
     );
@@ -113,30 +113,30 @@ void accesskitInit(SiCompassApplication *app) {
 }
 
 void accesskitDestroy(AppRenderer *appRenderer) {
-    window_state_destroy(&appRenderer->state);
+    windowStateDestroy(&appRenderer->state);
     accesskit_sdl_adapter_destroy(&appRenderer->accesskitAdapter);
 }
 
 // Window state functions for thread-safe accessibility
-void window_state_init(struct window_state *state, accesskit_node_id initial_focus, AppRenderer *appRenderer) {
-    state->focus = initial_focus;
+void windowStateInit(struct windowState *state, accesskit_node_id initialFocus, AppRenderer *appRenderer) {
+    state->focus = initialFocus;
     state->announcement = NULL;
     state->mutex = SDL_CreateMutex();  // SDL3: Returns SDL_Mutex*
     state->appRenderer = appRenderer;
 }
 
-void window_state_destroy(struct window_state *state) {
+void windowStateDestroy(struct windowState *state) {
     if (state->mutex) {
         SDL_DestroyMutex(state->mutex);  // SDL3: Takes SDL_Mutex*
         state->mutex = NULL;
     }
 }
 
-void window_state_lock(struct window_state *state) {
+void windowStateLock(struct windowState *state) {
     SDL_LockMutex(state->mutex);  // SDL3: Takes SDL_Mutex*
 }
 
-void window_state_unlock(struct window_state *state) {
+void windowStateUnlock(struct windowState *state) {
     SDL_UnlockMutex(state->mutex);  // SDL3: Takes SDL_Mutex*
 }
 
@@ -146,7 +146,7 @@ static struct accesskit_tree_update* focus_update_factory(void *userdata) {
     return accesskit_tree_update_with_focus(*new_focus);
 }
 
-void window_state_set_focus(struct window_state *state, struct accesskit_sdl_adapter *adapter, accesskit_node_id new_focus) {
+void windowStateSetFocus(struct windowState *state, struct accesskit_sdl_adapter *adapter, accesskit_node_id new_focus) {
     state->focus = new_focus;
     accesskit_sdl_adapter_update_if_active(adapter, focus_update_factory, &state->focus);
 }
