@@ -69,7 +69,9 @@ typedef enum {
 
 typedef enum {
     COMMAND_EDITOR_MODE,
-    COMMAND_OPERATOR_MODE
+    COMMAND_OPERATOR_MODE,
+    COMMAND_CREATE_DIRECTORY,
+    COMMAND_CREATE_FILE
 } Command;
 
 // Forward declarations

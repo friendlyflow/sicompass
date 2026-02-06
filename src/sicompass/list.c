@@ -81,7 +81,9 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
         // List available commands
         const char *commands[] = {
             "editor mode",
-            "operator mode"
+            "operator mode",
+            "create directory",
+            "create file"
         };
         int numCommands = sizeof(commands) / sizeof(commands[0]);
 

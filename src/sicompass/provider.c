@@ -83,6 +83,20 @@ bool providerCommitEdit(const char *elementKey, const char *oldContent, const ch
     return provider->commitEdit(provider, oldContent, newContent);
 }
 
+// Create a directory
+bool providerCreateDirectory(const char *elementKey, const char *name) {
+    Provider *provider = providerFindForElement(elementKey);
+    if (!provider || !provider->createDirectory) return false;
+    return provider->createDirectory(provider, name);
+}
+
+// Create a file
+bool providerCreateFile(const char *elementKey, const char *name) {
+    Provider *provider = providerFindForElement(elementKey);
+    if (!provider || !provider->createFile) return false;
+    return provider->createFile(provider, name);
+}
+
 // Format updated key after edit
 char* providerFormatUpdatedKey(const char *elementKey, const char *newContent) {
     Provider *provider = providerFindForElement(elementKey);
@@ -150,15 +164,15 @@ bool providerNavigateRight(AppRenderer *appRenderer) {
     printf("providerNavigateRight: fetched %d children\n", childCount);
 
     if (!children || childCount == 0) {
-        if (provider->popPath) provider->popPath(provider);
+        // Empty directory: add placeholder child so user can create files
         if (children) free(children);
-        return false;
+        ffonObjectAddElement(obj, ffonElementCreateString("<input></input>"));
+    } else {
+        for (int i = 0; i < childCount; i++) {
+            ffonObjectAddElement(obj, children[i]);
+        }
+        free(children);
     }
-
-    for (int i = 0; i < childCount; i++) {
-        ffonObjectAddElement(obj, children[i]);
-    }
-    free(children);
 
     idArrayPush(&appRenderer->currentId, 0);
     return true;

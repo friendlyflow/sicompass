@@ -25,3 +25,7 @@ const char* providerGetCurrentPath(const char *elementKey);
 char* providerGetEditableContent(const char *elementKey);
 bool providerCommitEdit(const char *elementKey, const char *oldContent, const char *newContent);
 char* providerFormatUpdatedKey(const char *elementKey, const char *newContent);
+
+// Create operations
+bool providerCreateDirectory(const char *elementKey, const char *name);
+bool providerCreateFile(const char *elementKey, const char *name);

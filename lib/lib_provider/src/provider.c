@@ -60,6 +60,20 @@ static bool genericCommitEdit(Provider *self, const char *oldContent, const char
     return state->ops->commit(state->currentPath, oldContent, newContent);
 }
 
+// Generic createDirectory: call ops->createDirectory with current path
+static bool genericCreateDirectory(Provider *self, const char *name) {
+    GenericProviderState *state = (GenericProviderState*)self->state;
+    if (!state->ops->createDirectory) return false;
+    return state->ops->createDirectory(state->currentPath, name);
+}
+
+// Generic createFile: call ops->createFile with current path
+static bool genericCreateFile(Provider *self, const char *name) {
+    GenericProviderState *state = (GenericProviderState*)self->state;
+    if (!state->ops->createFile) return false;
+    return state->ops->createFile(state->currentPath, name);
+}
+
 // Generic formatUpdatedKey: wrap content in tags
 static char* genericFormatUpdatedKey(Provider *self, const char *newContent) {
     if (!newContent || !self->tagPrefix) return NULL;
@@ -163,6 +177,8 @@ Provider* providerCreate(const ProviderOps *ops) {
     provider->pushPath = genericPushPath;
     provider->popPath = genericPopPath;
     provider->getCurrentPath = genericGetCurrentPath;
+    provider->createDirectory = ops->createDirectory ? genericCreateDirectory : NULL;
+    provider->createFile = ops->createFile ? genericCreateFile : NULL;
     provider->loadConfig = NULL;
     provider->saveConfig = NULL;
 
