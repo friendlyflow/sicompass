@@ -57,16 +57,16 @@ void mainLoop(SiCompassApplication* app) {
                 case SDL_EVENT_KEY_DOWN:
                     if (event.key.windowID != app->windowId) break;
                     handleKeys(app->appRenderer, &event);
-                    // // Enable/disable text input based on current mode
-                    // if (app->appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
-                    //     app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
-                    //     app->appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
-                    //     app->appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-                    //     app->appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
-                    //     SDL_StartTextInput(app->window);
-                    // } else {
-                    //     SDL_StopTextInput(app->window);
-                    // }
+                    // Enable/disable text input based on current mode
+                    if (app->appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+                        app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
+                        app->appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
+                        app->appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+                        app->appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
+                        SDL_StartTextInput(app->window);
+                    } else {
+                        SDL_StopTextInput(app->window);
+                    }
                     break;
 
                 case SDL_EVENT_TEXT_INPUT:
