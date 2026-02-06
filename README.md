@@ -6,12 +6,12 @@
 
 Sicompass is an open-source, Vulkan-based application designed from the ground up with accessibility as its core principle. It bridges the gap between visual and non-visual interfaces, providing a fast, keyboard-navigable experience for structured data.
 
-Built for users who prefer or require keyboard-driven interaction, Sicompass offers intuitive keyboard navigation and seamless screen reader integration through AccessKit.
+<!-- Built for users who prefer or require keyboard-driven interaction, Sicompass offers intuitive keyboard navigation and seamless screen reader integration through AccessKit. -->
 
 ## Key Features
 
 - **Keyboard-First Design** — Faster and handier navigation because your hands never leave the keyboard
-- **Native Accessibility** — Built-in support for screen readers on Linux, macOS, and Windows
+<!-- - **Native Accessibility** — Built-in support for screen readers on Linux, macOS, and Windows -->
 - **Cross-Platform** — Currently developed and tested on NixOS and Ubuntu, with macOS and Windows releases planned for later
 - **High-Performance Rendering** — Vulkan-powered graphics with FreeType2/HarfBuzz text shaping
 - **Extensible Architecture** — Provider-based plugin system for different data sources
