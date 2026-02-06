@@ -235,6 +235,35 @@ bool filebrowserRename(const char *uri, const char *oldName, const char *newName
     return true;
 }
 
+bool filebrowserCreateDirectory(const char *uri, const char *name) {
+    if (!uri || !name || name[0] == '\0') return false;
+
+    char fullpath[4096];
+#if defined(_WIN32)
+    snprintf(fullpath, sizeof(fullpath), "%s\\%s", uri, name);
+    return CreateDirectoryA(fullpath, NULL) != 0;
+#else
+    snprintf(fullpath, sizeof(fullpath), "%s/%s", uri, name);
+    return mkdir(fullpath, 0755) == 0;
+#endif
+}
+
+bool filebrowserCreateFile(const char *uri, const char *name) {
+    if (!uri || !name || name[0] == '\0') return false;
+
+    char fullpath[4096];
+#if defined(_WIN32)
+    snprintf(fullpath, sizeof(fullpath), "%s\\%s", uri, name);
+#else
+    snprintf(fullpath, sizeof(fullpath), "%s/%s", uri, name);
+#endif
+
+    FILE *f = fopen(fullpath, "w");
+    if (!f) return false;
+    fclose(f);
+    return true;
+}
+
 bool filebrowserHasInputTags(const char *text) {
     if (!text) return false;
     return strstr(text, INPUT_TAG_OPEN) != NULL && strstr(text, INPUT_TAG_CLOSE) != NULL;

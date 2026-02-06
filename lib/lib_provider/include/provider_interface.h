@@ -47,6 +47,10 @@ typedef struct Provider {
     void (*popPath)(struct Provider *self);
     const char* (*getCurrentPath)(struct Provider *self);
 
+    // Optional: Create operations
+    bool (*createDirectory)(struct Provider *self, const char *name);
+    bool (*createFile)(struct Provider *self, const char *name);
+
     // Optional: Persistent config
     bool (*loadConfig)(struct Provider *self, const char *configPath);
     bool (*saveConfig)(struct Provider *self, const char *configPath);
@@ -77,6 +81,10 @@ typedef struct ProviderOps {
     // Optional: Commit an edit (e.g., rename)
     // path: current path, oldName/newName: the content being changed
     bool (*commit)(const char *path, const char *oldName, const char *newName);
+
+    // Optional: Create operations
+    bool (*createDirectory)(const char *path, const char *name);
+    bool (*createFile)(const char *path, const char *name);
 } ProviderOps;
 
 /**

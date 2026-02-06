@@ -116,7 +116,15 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                     const char *newContent = appRenderer->inputBuffer;
                     // Only commit if changed
                     if (strcmp(oldContent, newContent) != 0) {
-                        if (providerCommitEdit(elementKey, oldContent, newContent)) {
+                        bool success;
+                        if (oldContent[0] == '\0' && elem->type == FFON_OBJECT) {
+                            success = providerCreateDirectory(elementKey, newContent);
+                        } else if (oldContent[0] == '\0' && elem->type == FFON_STRING) {
+                            success = providerCreateFile(elementKey, newContent);
+                        } else {
+                            success = providerCommitEdit(elementKey, oldContent, newContent);
+                        }
+                        if (success) {
                             // Update element with new key
                             char *newKey = providerFormatUpdatedKey(elementKey, newContent);
                             if (newKey) {
@@ -204,6 +212,10 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                 appRenderer->currentCommand = COMMAND_EDITOR_MODE;
             } else if (strcmp(cmd, "operator mode") == 0) {
                 appRenderer->currentCommand = COMMAND_OPERATOR_MODE;
+            } else if (strcmp(cmd, "create directory") == 0) {
+                appRenderer->currentCommand = COMMAND_CREATE_DIRECTORY;
+            } else if (strcmp(cmd, "create file") == 0) {
+                appRenderer->currentCommand = COMMAND_CREATE_FILE;
             }
             handleCommand(appRenderer);
         }
@@ -595,6 +607,58 @@ void handleCommand(AppRenderer *appRenderer) {
             appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
             accesskitSpeakModeChange(appRenderer, NULL);
             break;
+
+        case COMMAND_CREATE_DIRECTORY:
+        case COMMAND_CREATE_FILE: {
+            // Create the new FFON element
+            FfonElement *newElem;
+            if (appRenderer->currentCommand == COMMAND_CREATE_DIRECTORY) {
+                newElem = ffonElementCreateObject("<input></input>");
+                ffonObjectAddElement(newElem->data.object, ffonElementCreateString("<input></input>"));
+            } else {
+                newElem = ffonElementCreateString("<input></input>");
+            }
+
+            // Insert after current position
+            int insertIdx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1] + 1;
+
+            if (appRenderer->currentId.depth == 1) {
+                // Root level: insert into appRenderer->ffon[]
+                if (appRenderer->ffonCount >= appRenderer->ffonCapacity) {
+                    appRenderer->ffonCapacity *= 2;
+                    appRenderer->ffon = realloc(appRenderer->ffon,
+                        appRenderer->ffonCapacity * sizeof(FfonElement*));
+                }
+                memmove(&appRenderer->ffon[insertIdx + 1],
+                        &appRenderer->ffon[insertIdx],
+                        (appRenderer->ffonCount - insertIdx) * sizeof(FfonElement*));
+                appRenderer->ffon[insertIdx] = newElem;
+                appRenderer->ffonCount++;
+            } else {
+                // Nested: get parent object and insert
+                IdArray parentId;
+                idArrayCopy(&parentId, &appRenderer->currentId);
+                idArrayPop(&parentId);
+                int parentCount;
+                FfonElement **parentArr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                                       &parentId, &parentCount);
+                int parentIdx = parentId.ids[parentId.depth - 1];
+                if (parentArr && parentIdx >= 0 && parentIdx < parentCount &&
+                    parentArr[parentIdx]->type == FFON_OBJECT) {
+                    ffonObjectInsertElement(parentArr[parentIdx]->data.object, newElem, insertIdx);
+                }
+            }
+
+            // Move cursor to new element
+            appRenderer->currentId.ids[appRenderer->currentId.depth - 1] = insertIdx;
+
+            // Switch to operator general, refresh list, then enter insert mode
+            appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
+            createListCurrentLayer(appRenderer);
+            appRenderer->listIndex = insertIdx;
+            handleI(appRenderer);
+            break;
+        }
     }
 
     appRenderer->needsRedraw = true;

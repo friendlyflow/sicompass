@@ -28,6 +28,24 @@ FfonElement** filebrowserListDirectory(const char *uri, bool commands, int *out_
 bool filebrowserRename(const char *uri, const char *oldName, const char *newName);
 
 /**
+ * Create a new directory.
+ *
+ * @param uri The parent directory path (must start with '/')
+ * @param name The directory name to create
+ * @return true on success, false on failure
+ */
+bool filebrowserCreateDirectory(const char *uri, const char *name);
+
+/**
+ * Create a new empty file.
+ *
+ * @param uri The parent directory path (must start with '/')
+ * @param name The file name to create
+ * @return true on success, false on failure
+ */
+bool filebrowserCreateFile(const char *uri, const char *name);
+
+/**
  * Check if text contains <input>...</input> tags.
  *
  * @param text The text to check
