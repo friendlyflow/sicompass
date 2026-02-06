@@ -25,6 +25,8 @@
 
 #define MAX_FRAMES_IN_FLIGHT 2
 
+#define WINDOW_TITLE "sicompass"
+
 // Forward declarations
 typedef struct AppRenderer AppRenderer;
 
@@ -37,8 +39,8 @@ typedef struct {
 
 typedef struct SiCompassApplication {
     SDL_Window* window;
-    SDL_WindowID window_id;  // For event filtering
-    Uint32 user_event;       // Custom SDL event for accessibility actions
+    SDL_WindowID windowId;   // For event filtering
+    Uint32 userEvent;       // Custom SDL event for accessibility actions
 
     VkInstance instance;
     VkDebugUtilsMessengerEXT debugMessenger;

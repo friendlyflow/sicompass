@@ -261,14 +261,14 @@ void handleUp(AppRenderer *appRenderer) {
         appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
         if (appRenderer->listIndex > 0) {
             appRenderer->listIndex--;
-            accesskitSpeakCurrentItem(appRenderer);
+            accesskitSpeakCurrentElement(appRenderer);
         }
     } else if (appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT &&
                appRenderer->currentCoordinate != COORDINATE_OPERATOR_INSERT) {
         updateState(appRenderer, TASK_K_ARROW_UP, HISTORY_NONE);
         // Sync listIndex with current position in hierarchy
         appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
-        accesskitSpeakCurrentItem(appRenderer);
+        accesskitSpeakCurrentElement(appRenderer);
     }
     appRenderer->needsRedraw = true;
 }
@@ -282,14 +282,14 @@ void handleDown(AppRenderer *appRenderer) {
                         appRenderer->totalListCount - 1;
         if (appRenderer->listIndex < maxIndex) {
             appRenderer->listIndex++;
-            accesskitSpeakCurrentItem(appRenderer);
+            accesskitSpeakCurrentElement(appRenderer);
         }
     } else if (appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT &&
                appRenderer->currentCoordinate != COORDINATE_OPERATOR_INSERT) {
         updateState(appRenderer, TASK_J_ARROW_DOWN, HISTORY_NONE);
         // Sync listIndex with current position in hierarchy
         appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
-        accesskitSpeakCurrentItem(appRenderer);
+        accesskitSpeakCurrentElement(appRenderer);
     }
     appRenderer->needsRedraw = true;
 }
@@ -311,7 +311,7 @@ void handleLeft(AppRenderer *appRenderer) {
             uint64_t currentTime = SDL_GetTicks();
             caretReset(appRenderer->caretState, currentTime);
 
-            accesskitSpeakCurrentItem(appRenderer);
+            accesskitSpeakCurrentElement(appRenderer);
 
             appRenderer->needsRedraw = true;
         }
@@ -322,7 +322,7 @@ void handleLeft(AppRenderer *appRenderer) {
             createListCurrentLayer(appRenderer);
             // Sync listIndex with current position in hierarchy
             appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
-            accesskitSpeakCurrentItem(appRenderer);
+            accesskitSpeakCurrentElement(appRenderer);
             appRenderer->needsRedraw = true;
         }
     }
@@ -346,7 +346,7 @@ void handleRight(AppRenderer *appRenderer) {
             uint64_t currentTime = SDL_GetTicks();
             caretReset(appRenderer->caretState, currentTime);
 
-            accesskitSpeakCurrentItem(appRenderer);
+            accesskitSpeakCurrentElement(appRenderer);
 
             appRenderer->needsRedraw = true;
         }
@@ -357,7 +357,7 @@ void handleRight(AppRenderer *appRenderer) {
             createListCurrentLayer(appRenderer);
             // When entering a child, start at the first item
             appRenderer->listIndex = 0;
-            accesskitSpeakCurrentItem(appRenderer);
+            accesskitSpeakCurrentElement(appRenderer);
             appRenderer->needsRedraw = true;
         }
     }
