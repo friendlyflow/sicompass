@@ -3,98 +3,94 @@
 #include <string.h>
 
 // AccessKit node IDs
-#define ACCESSKIT_ROOT_ID 1
-#define ACCESSKIT_LIVE_REGION_ID 2
-#define ACCESSKIT_LIST_ITEM_BASE 100  // List items start at ID 100
+const accesskit_node_id ROOT_ID = 0;
+const accesskit_node_id ELEMENT_ID = 1;
+const accesskit_node_id ANNOUNCEMENT_ID = 2;
+
+const Sint32 SET_FOCUS_MSG = 0;
+
+accesskit_node *buildElement(const FfonElement *ffon) {
+    accesskit_node *node = accesskit_node_new(ACCESSKIT_ROLE_LIST_ITEM);
+    const char *label = (ffon->type == FFON_OBJECT) ?
+        ffon->data.object->key : ffon->data.string;
+    accesskit_node_set_label(node, label);
+    accesskit_node_add_action(node, ACCESSKIT_ACTION_FOCUS);
+    return node;
+}
+
+accesskit_node *buildAnnouncement(const char *text) {
+    accesskit_node *node = accesskit_node_new(ACCESSKIT_ROLE_LIST_ITEM);
+    accesskit_node_set_value(node, text);
+    accesskit_node_set_live(node, ACCESSKIT_LIVE_POLITE);
+    return node;
+}
+
+accesskit_node *windowStateBuildRoot(const struct windowState *state) {
+    accesskit_node *node = accesskit_node_new(ACCESSKIT_ROLE_WINDOW);
+    accesskit_node_push_child(node, ELEMENT_ID);
+    if (state->announcement != NULL) {
+        accesskit_node_push_child(node, ANNOUNCEMENT_ID);
+    }
+    accesskit_node_set_label(node, WINDOW_TITLE);
+    return node;
+}
 
 // Callback for AccessKit activation - returns initial tree
 static struct accesskit_tree_update* accesskitActivationHandler(void *userdata) {
-    struct windowState *state = (struct windowState *)userdata;
+    const struct windowState *state = (const struct windowState *)userdata;
     AppRenderer *appRenderer = state->appRenderer;
 
-    windowStateLock(state);
+    windowStateLock((struct windowState *)state);
 
-    // Get current list (filtered if searching, otherwise total)
-    ListItem *list = appRenderer->filteredListCount > 0 ?
-                     appRenderer->filteredListCurrentLayer : appRenderer->totalListCurrentLayer;
-    int count = appRenderer->filteredListCount > 0 ?
-                appRenderer->filteredListCount : appRenderer->totalListCount;
+    accesskit_node *root = windowStateBuildRoot(state);
+    accesskit_node *element = buildElement(appRenderer->ffon[0]);
+    accesskit_tree_update *result = accesskit_tree_update_with_capacity_and_focus(
+        (state->announcement != NULL) ? 4 : 3, state->focus);
 
-    // Create update with capacity for root + live region + list items
-    struct accesskit_tree_update *update = accesskit_tree_update_with_capacity_and_focus(2 + count, state->focus);
-
-    // Build children array for root (live region + list items)
-    accesskit_node_id *children = malloc((1 + count) * sizeof(accesskit_node_id));
-    children[0] = ACCESSKIT_LIVE_REGION_ID;
-    for (int i = 0; i < count; i++) {
-        children[1 + i] = ACCESSKIT_LIST_ITEM_BASE + i;
+    accesskit_tree *tree = accesskit_tree_new(ROOT_ID);
+    accesskit_tree_update_set_tree(result, tree);
+    accesskit_tree_update_push_node(result, ROOT_ID, root);
+    accesskit_tree_update_push_node(result, ELEMENT_ID, element);
+    if (state->announcement != NULL) {
+        accesskit_node *announcement = buildAnnouncement(state->announcement);
+        accesskit_tree_update_push_node(result, ANNOUNCEMENT_ID, announcement);
     }
 
-    // Create root node (window)
-    struct accesskit_node *root = accesskit_node_new(ACCESSKIT_ROLE_WINDOW);
-    accesskit_node_set_label(root, "Silicon's Compass");
-    accesskit_node_set_children(root, 1 + count, children);
-    accesskit_tree_update_push_node(update, ACCESSKIT_ROOT_ID, root);
+    windowStateUnlock((struct windowState *)state);
 
-    // Create live region for announcements
-    struct accesskit_node *liveRegion = accesskit_node_new(ACCESSKIT_ROLE_LABEL);
-    accesskit_node_set_live(liveRegion, ACCESSKIT_LIVE_POLITE);
-    accesskit_node_set_label(liveRegion, state->announcement ? state->announcement : "");
-    accesskit_tree_update_push_node(update, ACCESSKIT_LIVE_REGION_ID, liveRegion);
-
-    // Create list item nodes
-    for (int i = 0; i < count; i++) {
-        struct accesskit_node *item = accesskit_node_new(ACCESSKIT_ROLE_LIST_ITEM);
-        accesskit_node_set_label(item, list[i].value);
-        accesskit_node_add_action(item, ACCESSKIT_ACTION_CLICK);
-        accesskit_node_add_action(item, ACCESSKIT_ACTION_FOCUS);
-        accesskit_node_add_action(item, ACCESSKIT_ACTION_SCROLL_UP);
-        accesskit_node_add_action(item, ACCESSKIT_ACTION_SCROLL_DOWN);
-        accesskit_node_add_action(item, ACCESSKIT_ACTION_SCROLL_LEFT);
-        accesskit_node_add_action(item, ACCESSKIT_ACTION_SCROLL_RIGHT);
-        accesskit_tree_update_push_node(update, ACCESSKIT_LIST_ITEM_BASE + i, item);
-    }
-
-    free(children);
-
-    // Set tree info
-    struct accesskit_tree *tree = accesskit_tree_new(ACCESSKIT_ROOT_ID);
-    accesskit_tree_set_toolkit_name(tree, "sicompass");
-    accesskit_tree_set_toolkit_version(tree, "0.1");
-    accesskit_tree_update_set_tree(update, tree);
-
-    windowStateUnlock(state);
-
-    return update;
+    return result;
 }
 
 // Callback for AccessKit action requests - routes to SDL event loop
 static void accesskitActionHandler(accesskit_action_request *request, void *userdata) {
-    struct actionHandlerState *handler = (struct actionHandlerState *)userdata;
+    struct actionHandlerState *state = (struct actionHandlerState *)userdata;
 
     // Push accessibility action as SDL user event
     SDL_Event event;
     SDL_zero(event);
-    event.type = handler->eventType;
-    event.user.windowID = handler->windowId;
-    event.user.data1 = request;  // Pass request to event handler
-    SDL_PushEvent(&event);
+    event.type = state->eventType;
+    event.user.windowID = state->windowId;
+    event.user.data1 = (void *)((uintptr_t)(request->target_node));
+    if (request->action == ACCESSKIT_ACTION_FOCUS) {
+        event.user.code = SET_FOCUS_MSG;
+        SDL_PushEvent(&event);
+    }
+    accesskit_action_request_free(request);
 }
 
 // Callback for AccessKit deactivation
 static void accesskitDeactivationHandler(void *userdata) {
     // Called when assistive technology disconnects
     // There's nothing in the state that depends on whether the adapter is active
-    (void)userdata;
 }
 
 void accesskitInit(SiCompassApplication *app) {
-    app->appRenderer->accesskitRootId = ACCESSKIT_ROOT_ID;
-    app->appRenderer->accesskitLiveRegionId = ACCESSKIT_LIVE_REGION_ID;
+    app->appRenderer->accesskitRootId = ROOT_ID;
+    app->appRenderer->accesskitElementId = ELEMENT_ID;
 
     // Initialize action handler state
-    app->appRenderer->actionHandler.eventType = app->user_event;
-    app->appRenderer->actionHandler.windowId = app->window_id;
+    app->appRenderer->actionHandler.eventType = app->userEvent;
+    app->appRenderer->actionHandler.windowId = app->windowId;
 
     // Create cross-platform SDL adapter
     accesskit_sdl_adapter_init(
@@ -140,36 +136,10 @@ void windowStateUnlock(struct windowState *state) {
     SDL_UnlockMutex(state->mutex);  // SDL3: Takes SDL_Mutex*
 }
 
-// Factory function for focus update
-static struct accesskit_tree_update* focus_update_factory(void *userdata) {
-    accesskit_node_id *new_focus = (accesskit_node_id *)userdata;
-    return accesskit_tree_update_with_focus(*new_focus);
-}
-
-void windowStateSetFocus(struct windowState *state, struct accesskit_sdl_adapter *adapter, accesskit_node_id new_focus) {
-    state->focus = new_focus;
-    accesskit_sdl_adapter_update_if_active(adapter, focus_update_factory, &state->focus);
-}
-
 // Factory function for tree updates when speaking
-static struct accesskit_tree_update* accesskitSpeakUpdateFactory(void *userdata) {
-    const char *text = (const char *)userdata;
-
-    struct accesskit_tree_update *update = accesskit_tree_update_with_focus(ACCESSKIT_ROOT_ID);
-
-    // Include root node with children to ensure AT-SPI can traverse the tree
-    struct accesskit_node *root = accesskit_node_new(ACCESSKIT_ROLE_WINDOW);
-    accesskit_node_set_label(root, "Silicon's Compass");
-    accesskit_node_id children[] = {ACCESSKIT_LIVE_REGION_ID};
-    accesskit_node_set_children(root, 1, children);
-    accesskit_tree_update_push_node(update, ACCESSKIT_ROOT_ID, root);
-
-    // Update live region with new text
-    struct accesskit_node *liveRegion = accesskit_node_new(ACCESSKIT_ROLE_LABEL);
-    accesskit_node_set_live(liveRegion, ACCESSKIT_LIVE_POLITE);
-    accesskit_node_set_label(liveRegion, text);
-    accesskit_tree_update_push_node(update, ACCESSKIT_LIVE_REGION_ID, liveRegion);
-
+static struct accesskit_tree_update* accesskitSpeakUpdateOnFocus(void *userdata) {
+    struct windowState *state = userdata;
+    accesskit_tree_update *update = accesskit_tree_update_with_focus(state->focus);
     return update;
 }
 
@@ -178,11 +148,15 @@ void accesskitSpeak(AppRenderer *appRenderer, const char *text) {
         return;
     }
 
+    windowStateLock(&appRenderer->state);
+
     accesskit_sdl_adapter_update_if_active(
         &appRenderer->accesskitAdapter,
-        accesskitSpeakUpdateFactory,
-        (void *)text
+        accesskitSpeakUpdateOnFocus,
+        &appRenderer->state
     );
+
+    windowStateUnlock(&appRenderer->state);
 }
 
 void accesskitUpdateWindowFocus(AppRenderer *appRenderer, bool isFocused) {
@@ -190,17 +164,36 @@ void accesskitUpdateWindowFocus(AppRenderer *appRenderer, bool isFocused) {
         &appRenderer->accesskitAdapter, isFocused);
 }
 
-void accesskitSpeakCurrentItem(AppRenderer *appRenderer) {
-    ListItem *list = appRenderer->filteredListCount > 0 ?
-                     appRenderer->filteredListCurrentLayer : appRenderer->totalListCurrentLayer;
-    int count = appRenderer->filteredListCount > 0 ?
-                appRenderer->filteredListCount : appRenderer->totalListCount;
+void accesskitSpeakCurrentElement(AppRenderer *appRenderer) {
+    int count;
+    FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId, &count);
+    if (!arr || count == 0) return;
 
-    if (!list || count == 0 || appRenderer->listIndex < 0 || appRenderer->listIndex >= count) {
-        return;
+    int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+    if (idx < 0 || idx >= count) return;
+
+    FfonElement *elem = arr[idx];
+    const char *announcement = (elem->type == FFON_OBJECT) ?
+        elem->data.object->key : elem->data.string;
+
+    // appRenderer->state.focus = focus;
+    appRenderer->state.announcement = announcement;
+    accesskitSpeak(appRenderer, announcement);
+}
+
+void accesskitSpeakModeChange(AppRenderer *appRenderer, const char *context) {
+    char announcement[512];
+    const char *modeName = coordinateToString(appRenderer->currentCoordinate);
+
+    if (context && context[0] != '\0') {
+        snprintf(announcement, sizeof(announcement), "%s - %s", modeName, context);
+    } else {
+        snprintf(announcement, sizeof(announcement), "%s", modeName);
     }
 
-    accesskitSpeak(appRenderer, list[appRenderer->listIndex].value);
+    // appRenderer->state.focus = focus;
+    appRenderer->state.announcement = announcement;
+    accesskitSpeak(appRenderer, announcement);
 }
 
 int renderText(SiCompassApplication *app, const char *text, int x, int y,

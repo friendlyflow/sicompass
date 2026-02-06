@@ -54,7 +54,7 @@ SiCompassApplication* appRendererCreate(SiCompassApplication* app) {
     appRenderer->accesskitAdapter.adapter = NULL;
 
     // Initialize window state for thread-safe accessibility
-    windowStateInit(&appRenderer->state, 1, appRenderer);  // ACCESSKIT_ROOT_ID = 1
+    windowStateInit(&appRenderer->state, 0, appRenderer);  // ACCESSKIT_ROOT_ID = 0
 
     app->appRenderer = appRenderer;
 
@@ -142,17 +142,4 @@ bool isLineKey(const char *line) {
 
 void setErrorMessage(AppRenderer *appRenderer, const char *message) {
     snprintf(appRenderer->errorMessage, sizeof(appRenderer->errorMessage), "%s", message);
-}
-
-void accesskitSpeakModeChange(AppRenderer *appRenderer, const char *context) {
-    char announcement[512];
-    const char *modeName = coordinateToString(appRenderer->currentCoordinate);
-
-    if (context && context[0] != '\0') {
-        snprintf(announcement, sizeof(announcement), "%s - %s", modeName, context);
-    } else {
-        snprintf(announcement, sizeof(announcement), "%s", modeName);
-    }
-
-    accesskitSpeak(appRenderer, announcement);
 }

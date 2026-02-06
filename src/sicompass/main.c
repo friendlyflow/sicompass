@@ -148,14 +148,19 @@ void initWindow(SiCompassApplication* app) {
         exit(EXIT_FAILURE);
     }
 
-    app->window = SDL_CreateWindow("sicompass", WIDTH, HEIGHT, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
+    app->window = SDL_CreateWindow(WINDOW_TITLE, WIDTH, HEIGHT, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
     if (!app->window) {
         fprintf(stderr, "Failed to create window: %s\n", SDL_GetError());
         SDL_Quit();
         exit(EXIT_FAILURE);
     }
-    app->window_id = SDL_GetWindowID(app->window);
-    app->user_event = SDL_RegisterEvents(1);
+    app->windowId = SDL_GetWindowID(app->window);
+
+    app->userEvent = SDL_RegisterEvents(1);
+    if (app->userEvent == (Uint32)-1) {
+        fprintf(stderr, "Couldn't register user event: (%s)\n", SDL_GetError());
+        return;
+    }
 }
 
 void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT* createInfo) {
@@ -205,7 +210,7 @@ void createInstance(SiCompassApplication* app) {
 
     VkApplicationInfo appInfo = {0};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    appInfo.pApplicationName = "sicompass";
+    appInfo.pApplicationName = WINDOW_TITLE;
     appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
     appInfo.pEngineName = "No Engine";
     appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);

@@ -168,7 +168,7 @@ typedef struct AppRenderer {
     // AccessKit SDL adapter (cross-platform wrapper)
     struct accesskit_sdl_adapter accesskitAdapter;
     accesskit_node_id accesskitRootId;
-    accesskit_node_id accesskitLiveRegionId;
+    accesskit_node_id accesskitElementId;
 
     // Window state for thread-safe accessibility
     struct windowState state;
@@ -176,6 +176,10 @@ typedef struct AppRenderer {
     // Action handler state for accessibility events
     struct actionHandlerState actionHandler;
 } AppRenderer;
+
+// AccessKit constants (defined in render.c)
+extern const accesskit_node_id ELEMENT_ID;
+extern const Sint32 SET_FOCUS_MSG;
 
 // Function declarations
 
@@ -263,7 +267,7 @@ void setErrorMessage(AppRenderer *appRenderer, const char *message);
 void accesskitInit(SiCompassApplication *app);
 void accesskitDestroy(AppRenderer *appRenderer);
 void accesskitSpeak(AppRenderer *appRenderer, const char *text);
-void accesskitSpeakCurrentItem(AppRenderer *appRenderer);
+void accesskitSpeakCurrentElement(AppRenderer *appRenderer);
 void accesskitSpeakModeChange(AppRenderer *appRenderer, const char *context);
 void accesskitUpdateWindowFocus(AppRenderer *appRenderer, bool isFocused);
 
@@ -272,4 +276,3 @@ void windowStateInit(struct windowState *state, accesskit_node_id initialFocus, 
 void windowStateDestroy(struct windowState *state);
 void windowStateLock(struct windowState *state);
 void windowStateUnlock(struct windowState *state);
-void windowStateSetFocus(struct windowState *state, struct accesskit_sdl_adapter *adapter, accesskit_node_id new_focus);
