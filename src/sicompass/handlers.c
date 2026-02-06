@@ -367,6 +367,23 @@ void handleI(AppRenderer *appRenderer) {
     if (appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL ||
         appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
 
+        // In operator mode, only allow insert on provider-editable elements
+        if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
+            int count;
+            FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId, &count);
+            if (arr && count > 0) {
+                int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                if (idx >= 0 && idx < count) {
+                    FfonElement *elem = arr[idx];
+                    const char *elementKey = (elem->type == FFON_STRING) ?
+                        elem->data.string : elem->data.object->key;
+                    char *content = providerGetEditableContent(elementKey);
+                    if (!content) return;
+                    free(content);
+                }
+            }
+        }
+
         idArrayCopy(&appRenderer->currentInsertId, &appRenderer->currentId);
         appRenderer->previousCoordinate = appRenderer->currentCoordinate;
         appRenderer->currentCoordinate = (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) ?
@@ -421,6 +438,23 @@ void handleI(AppRenderer *appRenderer) {
 void handleA(AppRenderer *appRenderer) {
     if (appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL ||
         appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
+
+        // In operator mode, only allow insert on provider-editable elements
+        if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
+            int count;
+            FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId, &count);
+            if (arr && count > 0) {
+                int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                if (idx >= 0 && idx < count) {
+                    FfonElement *elem = arr[idx];
+                    const char *elementKey = (elem->type == FFON_STRING) ?
+                        elem->data.string : elem->data.object->key;
+                    char *content = providerGetEditableContent(elementKey);
+                    if (!content) return;
+                    free(content);
+                }
+            }
+        }
 
         idArrayCopy(&appRenderer->currentInsertId, &appRenderer->currentId);
         appRenderer->previousCoordinate = appRenderer->currentCoordinate;
