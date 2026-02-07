@@ -627,7 +627,67 @@ void updateView(SiCompassApplication *app) {
                    50 + searchPrefixWidth, (int)minY,
                    app->appRenderer->cursorPosition,
                    COLOR_TEXT);
-    } else if (app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
+    }
+
+    // Render selection highlight in all text input modes
+    if (hasSelection(app->appRenderer)) {
+        int selStart, selEnd;
+        getSelectionRange(app->appRenderer, &selStart, &selEnd);
+
+        int baseX, baseY;
+        if (app->appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
+            app->appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+            app->appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
+            // Search/command modes: account for "search: " prefix
+            int searchTextYPos = lineHeight * 2;
+            float pfxMinX, pfxMinY, pfxMaxX, pfxMaxY;
+            calculateTextBounds(app, "search: ", 50.0f, (float)searchTextYPos, scale,
+                                &pfxMinX, &pfxMinY, &pfxMaxX, &pfxMaxY);
+            baseX = 50 + (int)(pfxMaxX - pfxMinX);
+            baseY = searchTextYPos;
+        } else {
+            // Insert modes: use stored element position
+            baseX = app->appRenderer->currentElementX;
+            baseY = app->appRenderer->currentElementY;
+        }
+
+        // Get proper Y from text bounds
+        float tMinX, tMinY, tMaxX, tMaxY;
+        calculateTextBounds(app, " ", (float)baseX, (float)baseY, scale,
+                            &tMinX, &tMinY, &tMaxX, &tMaxY);
+        float selY = tMinY;
+
+        // Calculate X start of selection
+        float selXStart = (float)baseX;
+        if (selStart > 0) {
+            char tempStr[MAX_LINE_LENGTH];
+            int copyLen = selStart < MAX_LINE_LENGTH - 1 ? selStart : MAX_LINE_LENGTH - 1;
+            strncpy(tempStr, app->appRenderer->inputBuffer, copyLen);
+            tempStr[copyLen] = '\0';
+            float sMinX, sMinY, sMaxX, sMaxY;
+            calculateTextBounds(app, tempStr, (float)baseX, (float)baseY, scale,
+                                &sMinX, &sMinY, &sMaxX, &sMaxY);
+            selXStart = sMaxX;
+        }
+
+        // Calculate X end of selection
+        char tempStr2[MAX_LINE_LENGTH];
+        int copyLen2 = selEnd < MAX_LINE_LENGTH - 1 ? selEnd : MAX_LINE_LENGTH - 1;
+        strncpy(tempStr2, app->appRenderer->inputBuffer, copyLen2);
+        tempStr2[copyLen2] = '\0';
+        float eMinX, eMinY, eMaxX, eMaxY;
+        calculateTextBounds(app, tempStr2, (float)baseX, (float)baseY, scale,
+                            &eMinX, &eMinY, &eMaxX, &eMaxY);
+        float selXEnd = eMaxX;
+
+        // Render selection rectangle
+        float selWidth = selXEnd - selXStart;
+        float selHeight = getLineHeight(app, scale, TEXT_PADDING) - (2.0f * TEXT_PADDING);
+        prepareRectangle(app, selXStart, selY, selWidth, selHeight,
+                         COLOR_SELECTION, 0.0f);
+    }
+
+    if (app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
                app->appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT) {
         // Caret in hierarchy editor
         int caretX = app->appRenderer->currentElementX;

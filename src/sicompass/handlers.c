@@ -68,6 +68,108 @@ static int utf8_move_forward(const char *str, int cursorPos, int bufferSize) {
     return newPos;
 }
 
+// Selection helpers
+
+bool hasSelection(AppRenderer *appRenderer) {
+    return appRenderer->selectionAnchor != -1 &&
+           appRenderer->selectionAnchor != appRenderer->cursorPosition;
+}
+
+void clearSelection(AppRenderer *appRenderer) {
+    appRenderer->selectionAnchor = -1;
+}
+
+void getSelectionRange(AppRenderer *appRenderer, int *start, int *end) {
+    int a = appRenderer->selectionAnchor;
+    int b = appRenderer->cursorPosition;
+    *start = (a < b) ? a : b;
+    *end = (a > b) ? a : b;
+}
+
+void deleteSelection(AppRenderer *appRenderer) {
+    if (!hasSelection(appRenderer)) return;
+    int start, end;
+    getSelectionRange(appRenderer, &start, &end);
+    memmove(&appRenderer->inputBuffer[start],
+            &appRenderer->inputBuffer[end],
+            appRenderer->inputBufferSize - end + 1);
+    appRenderer->inputBufferSize -= (end - start);
+    appRenderer->cursorPosition = start;
+    clearSelection(appRenderer);
+}
+
+// Selection-extending handlers
+
+void handleShiftLeft(AppRenderer *appRenderer) {
+    if (appRenderer->cursorPosition <= 0) return;
+
+    if (appRenderer->selectionAnchor == -1) {
+        appRenderer->selectionAnchor = appRenderer->cursorPosition;
+    }
+
+    appRenderer->cursorPosition = utf8_move_backward(
+        appRenderer->inputBuffer, appRenderer->cursorPosition);
+
+    caretReset(appRenderer->caretState, SDL_GetTicks());
+    appRenderer->needsRedraw = true;
+}
+
+void handleShiftRight(AppRenderer *appRenderer) {
+    if (appRenderer->cursorPosition >= appRenderer->inputBufferSize) return;
+
+    if (appRenderer->selectionAnchor == -1) {
+        appRenderer->selectionAnchor = appRenderer->cursorPosition;
+    }
+
+    appRenderer->cursorPosition = utf8_move_forward(
+        appRenderer->inputBuffer, appRenderer->cursorPosition,
+        appRenderer->inputBufferSize);
+
+    caretReset(appRenderer->caretState, SDL_GetTicks());
+    appRenderer->needsRedraw = true;
+}
+
+void handleHome(AppRenderer *appRenderer) {
+    clearSelection(appRenderer);
+    appRenderer->cursorPosition = 0;
+    caretReset(appRenderer->caretState, SDL_GetTicks());
+    appRenderer->needsRedraw = true;
+}
+
+void handleShiftHome(AppRenderer *appRenderer) {
+    if (appRenderer->selectionAnchor == -1) {
+        appRenderer->selectionAnchor = appRenderer->cursorPosition;
+    }
+    appRenderer->cursorPosition = 0;
+    caretReset(appRenderer->caretState, SDL_GetTicks());
+    appRenderer->needsRedraw = true;
+}
+
+void handleEnd(AppRenderer *appRenderer) {
+    clearSelection(appRenderer);
+    appRenderer->cursorPosition = appRenderer->inputBufferSize;
+    caretReset(appRenderer->caretState, SDL_GetTicks());
+    appRenderer->needsRedraw = true;
+}
+
+void handleShiftEnd(AppRenderer *appRenderer) {
+    if (appRenderer->selectionAnchor == -1) {
+        appRenderer->selectionAnchor = appRenderer->cursorPosition;
+    }
+    appRenderer->cursorPosition = appRenderer->inputBufferSize;
+    caretReset(appRenderer->caretState, SDL_GetTicks());
+    appRenderer->needsRedraw = true;
+}
+
+void handleSelectAll(AppRenderer *appRenderer) {
+    if (appRenderer->inputBufferSize == 0) return;
+
+    appRenderer->selectionAnchor = 0;
+    appRenderer->cursorPosition = appRenderer->inputBufferSize;
+    caretReset(appRenderer->caretState, SDL_GetTicks());
+    appRenderer->needsRedraw = true;
+}
+
 void handleTab(AppRenderer *appRenderer) {
     appRenderer->previousCoordinate = appRenderer->currentCoordinate;
     appRenderer->currentCoordinate = COORDINATE_SIMPLE_SEARCH;
@@ -77,6 +179,7 @@ void handleTab(AppRenderer *appRenderer) {
     appRenderer->inputBuffer[0] = '\0';
     appRenderer->inputBufferSize = 0;
     appRenderer->cursorPosition = 0;
+    appRenderer->selectionAnchor = -1;
 
     createListCurrentLayer(appRenderer);
     appRenderer->needsRedraw = true;
@@ -279,6 +382,7 @@ void handleColon(AppRenderer *appRenderer) {
     appRenderer->inputBuffer[0] = '\0';
     appRenderer->inputBufferSize = 0;
     appRenderer->cursorPosition = 0;
+    appRenderer->selectionAnchor = -1;
 
     createListCurrentLayer(appRenderer);
     appRenderer->needsRedraw = true;
@@ -329,6 +433,16 @@ void handleLeft(AppRenderer *appRenderer) {
         appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
         appRenderer->currentCoordinate == COORDINATE_COMMAND ||
         appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
+        // If selection active, jump to selection start and clear
+        if (hasSelection(appRenderer)) {
+            int start, end;
+            getSelectionRange(appRenderer, &start, &end);
+            appRenderer->cursorPosition = start;
+            clearSelection(appRenderer);
+            caretReset(appRenderer->caretState, SDL_GetTicks());
+            appRenderer->needsRedraw = true;
+            return;
+        }
         if (appRenderer->cursorPosition > 0) {
             // Move backward by one UTF-8 character
             appRenderer->cursorPosition = utf8_move_backward(
@@ -363,6 +477,16 @@ void handleRight(AppRenderer *appRenderer) {
         appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
         appRenderer->currentCoordinate == COORDINATE_COMMAND ||
         appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
+        // If selection active, jump to selection end and clear
+        if (hasSelection(appRenderer)) {
+            int start, end;
+            getSelectionRange(appRenderer, &start, &end);
+            appRenderer->cursorPosition = end;
+            clearSelection(appRenderer);
+            caretReset(appRenderer->caretState, SDL_GetTicks());
+            appRenderer->needsRedraw = true;
+            return;
+        }
         if (appRenderer->cursorPosition < appRenderer->inputBufferSize) {
             // Move forward by one UTF-8 character
             appRenderer->cursorPosition = utf8_move_forward(
@@ -459,6 +583,7 @@ void handleI(AppRenderer *appRenderer) {
         accesskitSpeakModeChange(appRenderer, context);
 
         appRenderer->cursorPosition = 0;
+        appRenderer->selectionAnchor = -1;
         idArrayInit(&appRenderer->currentInsertId);
         appRenderer->needsRedraw = true;
     }
@@ -531,6 +656,7 @@ void handleA(AppRenderer *appRenderer) {
         accesskitSpeakModeChange(appRenderer, context);
 
         appRenderer->cursorPosition = appRenderer->inputBufferSize;
+        appRenderer->selectionAnchor = -1;
         idArrayInit(&appRenderer->currentInsertId);
         appRenderer->needsRedraw = true;
     }
@@ -547,12 +673,14 @@ void handleFind(AppRenderer *appRenderer) {
         appRenderer->inputBuffer[0] = '\0';
         appRenderer->inputBufferSize = 0;
         appRenderer->cursorPosition = 0;
+        appRenderer->selectionAnchor = -1;
 
         appRenderer->needsRedraw = true;
     }
 }
 
 void handleEscape(AppRenderer *appRenderer) {
+    clearSelection(appRenderer);
     if (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT) {
         // Editor mode: Escape saves changes
         int count;
