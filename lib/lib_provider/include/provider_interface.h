@@ -119,3 +119,19 @@ char* providerGetConfigDir(void);
  * Returns: ~/.config/sicompass/providers/<name>.json (caller must free)
  */
 char* providerGetConfigPath(const char *providerName);
+
+/**
+ * Create a provider backed by a script (e.g., TypeScript run with Bun).
+ *
+ * On each fetch(), runs: bun run <scriptPath> <currentPath>
+ * Parses the JSON array output into FFON elements.
+ * The provider is read-only (no commit/create operations).
+ *
+ * @param name Provider name (e.g., "tutorial")
+ * @param displayName Display name shown in UI (e.g., "tutorial")
+ * @param tagPrefix Tag prefix for elements (e.g., "<tutorial>")
+ * @param scriptPath Absolute path to the script file
+ * @return A fully configured Provider (caller must free with providerDestroy)
+ */
+Provider* scriptProviderCreate(const char *name, const char *displayName,
+                               const char *tagPrefix, const char *scriptPath);

@@ -582,6 +582,15 @@ void handleEscape(AppRenderer *appRenderer) {
     } else if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT) {
         // Operator mode: Escape discards changes
         appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
+    } else if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH) {
+        // Search mode: Escape cancels search without selecting
+        appRenderer->currentCoordinate = appRenderer->previousCoordinate;
+        appRenderer->previousCoordinate = appRenderer->currentCoordinate;
+        accesskitSpeakModeChange(appRenderer, NULL);
+        createListCurrentLayer(appRenderer);
+        appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+        appRenderer->needsRedraw = true;
+        return;
     } else if (appRenderer->previousCoordinate == COORDINATE_OPERATOR_GENERAL ||
                appRenderer->previousCoordinate == COORDINATE_OPERATOR_INSERT) {
         appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;

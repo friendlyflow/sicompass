@@ -9,6 +9,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
       - name: Install system dependencies
         run: |
           sudo apt-get update

@@ -114,6 +114,8 @@
               sdl3
               # AccessKit for accessibility
               accesskit-c
+              # Runtime dependency for script providers (e.g., tutorial)
+              bun
               # Testing
               unity-test
             ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
@@ -169,6 +171,8 @@
               flawfinder
               # AccessKit for accessibility
               accesskit-c
+              # Runtime dependency for script providers (e.g., tutorial)
+              bun
               # Testing
               unity-test
             ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
