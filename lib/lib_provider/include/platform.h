@@ -47,3 +47,29 @@ const char* platformGetPathSeparator(void);
  * Check if running on Windows.
  */
 bool platformIsWindows(void);
+
+/**
+ * Get a list of executable program names found in the system PATH.
+ *
+ * @param outCount Output parameter for the number of programs found
+ * @return Array of newly allocated strings (caller must free via platformFreePathExecutables),
+ *         or NULL on failure
+ */
+char** platformGetPathExecutables(int *outCount);
+
+/**
+ * Free an array of strings returned by platformGetPathExecutables.
+ */
+void platformFreePathExecutables(char **executables, int count);
+
+/**
+ * Open a file with a specific program.
+ * - Linux: runs "program \"filePath\" &"
+ * - macOS: runs "open -a \"program\" \"filePath\" &"
+ * - Windows: uses ShellExecuteA with program as the executable
+ *
+ * @param program The program name or path
+ * @param filePath The file path to open
+ * @return true on success, false on failure
+ */
+bool platformOpenWith(const char *program, const char *filePath);

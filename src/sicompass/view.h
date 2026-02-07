@@ -68,10 +68,12 @@ typedef enum {
 } History;
 
 typedef enum {
+    COMMAND_NONE,
     COMMAND_EDITOR_MODE,
     COMMAND_OPERATOR_MODE,
     COMMAND_CREATE_DIRECTORY,
-    COMMAND_CREATE_FILE
+    COMMAND_CREATE_FILE,
+    COMMAND_OPEN_WITH
 } Command;
 
 // Forward declarations
@@ -166,6 +168,9 @@ typedef struct AppRenderer {
 
     // Current URI for provider-based navigation
     char currentUri[MAX_URI_LENGTH];
+
+    // File path for "open with" command
+    char openWithFilePath[MAX_URI_LENGTH];
 
     // AccessKit SDL adapter (cross-platform wrapper)
     struct accesskit_sdl_adapter accesskitAdapter;
