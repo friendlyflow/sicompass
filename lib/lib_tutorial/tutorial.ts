@@ -100,7 +100,7 @@ function toJson(children: (string | Section)[]): unknown[] {
     if (typeof child === "string") {
       return child;
     }
-    return { [child.key]: [] };
+    return { [child.key]: toJson(child.children) };
   });
 }
 

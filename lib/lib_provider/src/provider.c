@@ -317,9 +317,11 @@ static FfonElement** scriptFetch(Provider *self, int *outCount) {
         return NULL;
     }
 
-    // Build closing tag from prefix (e.g., "<tutorial>" -> "</tutorial>")
-    char closeTag[64];
-    snprintf(closeTag, sizeof(closeTag), "</%s", self->tagPrefix + 1);
+    // Build closing tag from prefix (e.g., "<input>" -> "</input>")
+    char closeTag[64] = "";
+    if (self->tagPrefix) {
+        snprintf(closeTag, sizeof(closeTag), "</%s", self->tagPrefix + 1);
+    }
 
     int count = 0;
     for (int i = 0; i < arrayLen; i++) {
@@ -327,7 +329,7 @@ static FfonElement** scriptFetch(Provider *self, int *outCount) {
         FfonElement *elem = parseJsonValue(item);
         if (elem) {
             // Wrap object keys with provider's tag prefix so provider matching works
-            if (elem->type == FFON_OBJECT && elem->data.object->key) {
+            if (self->tagPrefix && elem->type == FFON_OBJECT && elem->data.object->key) {
                 char *oldKey = elem->data.object->key;
                 size_t newLen = strlen(self->tagPrefix) + strlen(oldKey) + strlen(closeTag) + 1;
                 char *newKey = malloc(newLen);
@@ -348,7 +350,7 @@ static FfonElement** scriptFetch(Provider *self, int *outCount) {
 
 Provider* scriptProviderCreate(const char *name, const char *displayName,
                                const char *tagPrefix, const char *scriptPath) {
-    if (!name || !tagPrefix || !scriptPath) return NULL;
+    if (!name || !scriptPath) return NULL;
 
     Provider *provider = calloc(1, sizeof(Provider));
     if (!provider) return NULL;
