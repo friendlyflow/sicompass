@@ -317,28 +317,11 @@ static FfonElement** scriptFetch(Provider *self, int *outCount) {
         return NULL;
     }
 
-    // Build closing tag from prefix (e.g., "<input>" -> "</input>")
-    char closeTag[64] = "";
-    if (self->tagPrefix) {
-        snprintf(closeTag, sizeof(closeTag), "</%s", self->tagPrefix + 1);
-    }
-
     int count = 0;
     for (int i = 0; i < arrayLen; i++) {
         json_object *item = json_object_array_get_idx(root, i);
         FfonElement *elem = parseJsonValue(item);
         if (elem) {
-            // Wrap object keys with provider's tag prefix so provider matching works
-            if (self->tagPrefix && elem->type == FFON_OBJECT && elem->data.object->key) {
-                char *oldKey = elem->data.object->key;
-                size_t newLen = strlen(self->tagPrefix) + strlen(oldKey) + strlen(closeTag) + 1;
-                char *newKey = malloc(newLen);
-                if (newKey) {
-                    snprintf(newKey, newLen, "%s%s%s", self->tagPrefix, oldKey, closeTag);
-                    elem->data.object->key = newKey;
-                    free(oldKey);
-                }
-            }
             elements[count++] = elem;
         }
     }
@@ -349,7 +332,7 @@ static FfonElement** scriptFetch(Provider *self, int *outCount) {
 }
 
 Provider* scriptProviderCreate(const char *name, const char *displayName,
-                               const char *tagPrefix, const char *scriptPath) {
+                               const char *scriptPath) {
     if (!name || !scriptPath) return NULL;
 
     Provider *provider = calloc(1, sizeof(Provider));
@@ -370,7 +353,7 @@ Provider* scriptProviderCreate(const char *name, const char *displayName,
     }
     ops->name = name;
     ops->displayName = displayName;
-    ops->tagPrefix = tagPrefix;
+    ops->tagPrefix = NULL;
     ops->fetch = NULL;
     ops->commit = NULL;
     ops->createDirectory = NULL;
@@ -382,10 +365,10 @@ Provider* scriptProviderCreate(const char *name, const char *displayName,
     state->ops = ops;
 
     provider->name = name;
-    provider->tagPrefix = tagPrefix;
+    provider->tagPrefix = NULL;
     provider->state = state;
 
-    // Wire up: custom fetch, reuse generic path management and tag handling
+    // Wire up: custom fetch, reuse generic path management
     provider->canHandle = genericCanHandle;
     provider->fetch = scriptFetch;
     provider->getEditableContent = genericGetEditableContent;
