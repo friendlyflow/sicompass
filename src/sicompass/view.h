@@ -29,6 +29,7 @@
 #define COLOR_DARK_GREEN 0x1C4414FF
 #define COLOR_DIMGREY 0x696969FF
 #define COLOR_DARK_GREY 0x333333FF
+#define COLOR_SELECTION 0x0F2440FF
 #define COLOR_LIGHTGREY 0xD3D3D3FF
 
 // Enums
@@ -131,6 +132,7 @@ typedef struct AppRenderer {
     int inputBufferSize;
     int inputBufferCapacity;
     int cursorPosition;
+    int selectionAnchor;  // -1 = no selection; byte offset of anchor otherwise
     int scrollOffset;
 
     // Right panel
@@ -240,6 +242,17 @@ void handleCtrlV(AppRenderer *appRenderer);
 void handleFind(AppRenderer *appRenderer);
 void handleEscape(AppRenderer *appRenderer);
 void handleCommand(AppRenderer *appRenderer);
+void handleHome(AppRenderer *appRenderer);
+void handleEnd(AppRenderer *appRenderer);
+void handleShiftHome(AppRenderer *appRenderer);
+void handleShiftEnd(AppRenderer *appRenderer);
+void handleSelectAll(AppRenderer *appRenderer);
+void handleShiftLeft(AppRenderer *appRenderer);
+void handleShiftRight(AppRenderer *appRenderer);
+bool hasSelection(AppRenderer *appRenderer);
+void clearSelection(AppRenderer *appRenderer);
+void getSelectionRange(AppRenderer *appRenderer, int *start, int *end);
+void deleteSelection(AppRenderer *appRenderer);
 
 // Right panel
 void createListCurrentLayer(AppRenderer *appRenderer);

@@ -13,6 +13,15 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
     if (!ctrl && !shift && !alt && key == SDLK_TAB) {
         handleTab(appRenderer);
     }
+    // Ctrl+A in text input modes - select all text
+    else if (ctrl && !shift && !alt && key == SDLK_A &&
+             (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+              appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
+              appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
+              appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+              appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH)) {
+        handleSelectAll(appRenderer);
+    }
     // Ctrl+A or Enter in editor general mode
     else if (((ctrl && !shift && !alt && key == SDLK_A) ||
               (!ctrl && !shift && !alt && key == SDLK_RETURN)) &&
@@ -82,12 +91,66 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
               key == SDLK_LEFT)) {
         handleLeft(appRenderer);
     }
+    // Shift+Left in text input modes - extend selection left
+    else if (!ctrl && shift && !alt && key == SDLK_LEFT &&
+             (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+              appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
+              appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
+              appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+              appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH)) {
+        handleShiftLeft(appRenderer);
+    }
     // L or Right arrow
     else if (!ctrl && !shift && !alt &&
              ((key == SDLK_L && (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL ||
                                  appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL)) ||
               key == SDLK_RIGHT)) {
         handleRight(appRenderer);
+    }
+    // Shift+Right in text input modes - extend selection right
+    else if (!ctrl && shift && !alt && key == SDLK_RIGHT &&
+             (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+              appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
+              appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
+              appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+              appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH)) {
+        handleShiftRight(appRenderer);
+    }
+    // Home in text input modes
+    else if (!ctrl && !shift && !alt && key == SDLK_HOME &&
+             (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+              appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
+              appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
+              appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+              appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH)) {
+        handleHome(appRenderer);
+    }
+    // End in text input modes
+    else if (!ctrl && !shift && !alt && key == SDLK_END &&
+             (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+              appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
+              appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
+              appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+              appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH)) {
+        handleEnd(appRenderer);
+    }
+    // Shift+Home in text input modes - extend selection to start
+    else if (!ctrl && shift && !alt && key == SDLK_HOME &&
+             (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+              appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
+              appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
+              appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+              appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH)) {
+        handleShiftHome(appRenderer);
+    }
+    // Shift+End in text input modes - extend selection to end
+    else if (!ctrl && shift && !alt && key == SDLK_END &&
+             (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+              appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
+              appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
+              appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+              appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH)) {
+        handleShiftEnd(appRenderer);
     }
     // I (insert mode)
     else if (!ctrl && !shift && !alt && key == SDLK_I) {
@@ -155,7 +218,20 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
               appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
               appRenderer->currentCoordinate == COORDINATE_COMMAND ||
               appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH)) {
-        if (appRenderer->inputBufferSize > 0 && appRenderer->cursorPosition > 0) {
+        // If there's an active selection, delete it
+        if (hasSelection(appRenderer)) {
+            deleteSelection(appRenderer);
+            caretReset(appRenderer->caretState, SDL_GetTicks());
+
+            // Update search when deleting selection in right panel modes
+            if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
+                appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+                appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
+                populateListCurrentLayer(appRenderer, appRenderer->inputBuffer);
+            }
+
+            appRenderer->needsRedraw = true;
+        } else if (appRenderer->inputBufferSize > 0 && appRenderer->cursorPosition > 0) {
             // Delete character before cursor
             memmove(&appRenderer->inputBuffer[appRenderer->cursorPosition - 1],
                    &appRenderer->inputBuffer[appRenderer->cursorPosition],
@@ -184,7 +260,20 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
               appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
               appRenderer->currentCoordinate == COORDINATE_COMMAND ||
               appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH)) {
-        if (appRenderer->cursorPosition < appRenderer->inputBufferSize) {
+        // If there's an active selection, delete it
+        if (hasSelection(appRenderer)) {
+            deleteSelection(appRenderer);
+            caretReset(appRenderer->caretState, SDL_GetTicks());
+
+            // Update search when deleting selection in right panel modes
+            if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
+                appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+                appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
+                populateListCurrentLayer(appRenderer, appRenderer->inputBuffer);
+            }
+
+            appRenderer->needsRedraw = true;
+        } else if (appRenderer->cursorPosition < appRenderer->inputBufferSize) {
             // Delete character at cursor
             memmove(&appRenderer->inputBuffer[appRenderer->cursorPosition],
                    &appRenderer->inputBuffer[appRenderer->cursorPosition + 1],
@@ -215,6 +304,11 @@ void handleInput(AppRenderer *appRenderer, const char *text) {
         appRenderer->inputBufferSize == 0 &&
         strcmp(text, ":") == 0) {
         return;
+    }
+
+    // Replace selected text if there's an active selection
+    if (hasSelection(appRenderer)) {
+        deleteSelection(appRenderer);
     }
 
     int len = strlen(text);

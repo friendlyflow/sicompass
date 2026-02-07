@@ -47,6 +47,7 @@ SiCompassApplication* appRendererCreate(SiCompassApplication* app) {
         return NULL;
     }
 
+    appRenderer->selectionAnchor = -1;
     appRenderer->running = true;
     appRenderer->needsRedraw = true;
 

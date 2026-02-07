@@ -109,7 +109,7 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
                 "operator mode",
                 "create directory",
                 "create file",
-                "open with"
+                "open file with"
             };
             int numCommands = sizeof(commands) / sizeof(commands[0]);
 
