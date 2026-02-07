@@ -1,5 +1,6 @@
 #include "view.h"
 #include "provider.h"
+#include <platform.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -78,23 +79,49 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
         }
 
     } else if (appRenderer->currentCoordinate == COORDINATE_COMMAND) {
-        // List available commands
-        const char *commands[] = {
-            "editor mode",
-            "operator mode",
-            "create directory",
-            "create file"
-        };
-        int numCommands = sizeof(commands) / sizeof(commands[0]);
+        if (appRenderer->currentCommand == COMMAND_OPEN_WITH) {
+            // List executables from system PATH
+            int execCount = 0;
+            char **executables = platformGetPathExecutables(&execCount);
+            if (!executables || execCount == 0) {
+                platformFreePathExecutables(executables, execCount);
+                return;
+            }
 
-        appRenderer->totalListCurrentLayer = calloc(numCommands, sizeof(ListItem));
-        if (!appRenderer->totalListCurrentLayer) return;
+            appRenderer->totalListCurrentLayer = calloc(execCount, sizeof(ListItem));
+            if (!appRenderer->totalListCurrentLayer) {
+                platformFreePathExecutables(executables, execCount);
+                return;
+            }
 
-        for (int i = 0; i < numCommands; i++) {
-            appRenderer->totalListCurrentLayer[i].id.depth = 1;
-            appRenderer->totalListCurrentLayer[i].id.ids[0] = i;
-            appRenderer->totalListCurrentLayer[i].value = strdup(commands[i]);
-            appRenderer->totalListCount++;
+            for (int i = 0; i < execCount; i++) {
+                appRenderer->totalListCurrentLayer[i].id.depth = 1;
+                appRenderer->totalListCurrentLayer[i].id.ids[0] = i;
+                appRenderer->totalListCurrentLayer[i].value = strdup(executables[i]);
+                appRenderer->totalListCount++;
+            }
+
+            platformFreePathExecutables(executables, execCount);
+        } else {
+            // List available commands
+            const char *commands[] = {
+                "editor mode",
+                "operator mode",
+                "create directory",
+                "create file",
+                "open with"
+            };
+            int numCommands = sizeof(commands) / sizeof(commands[0]);
+
+            appRenderer->totalListCurrentLayer = calloc(numCommands, sizeof(ListItem));
+            if (!appRenderer->totalListCurrentLayer) return;
+
+            for (int i = 0; i < numCommands; i++) {
+                appRenderer->totalListCurrentLayer[i].id.depth = 1;
+                appRenderer->totalListCurrentLayer[i].id.ids[0] = i;
+                appRenderer->totalListCurrentLayer[i].value = strdup(commands[i]);
+                appRenderer->totalListCount++;
+            }
         }
     }
 }

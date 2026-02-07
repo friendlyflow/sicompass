@@ -2,6 +2,7 @@
 #include "provider.h"
 #include <filebrowser.h>
 #include <platform.h>
+#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <SDL3/SDL.h>
@@ -200,24 +201,39 @@ void handleEnter(AppRenderer *appRenderer, History history) {
         appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
         appRenderer->needsRedraw = true;
     } else if (appRenderer->currentCoordinate == COORDINATE_COMMAND) {
-        // Execute selected command
         ListItem *list = appRenderer->filteredListCount > 0 ?
                          appRenderer->filteredListCurrentLayer : appRenderer->totalListCurrentLayer;
         int count = appRenderer->filteredListCount > 0 ?
                     appRenderer->filteredListCount : appRenderer->totalListCount;
 
         if (appRenderer->listIndex >= 0 && appRenderer->listIndex < count) {
-            const char *cmd = list[appRenderer->listIndex].value;
-            if (strcmp(cmd, "editor mode") == 0) {
-                appRenderer->currentCommand = COMMAND_EDITOR_MODE;
-            } else if (strcmp(cmd, "operator mode") == 0) {
-                appRenderer->currentCommand = COMMAND_OPERATOR_MODE;
-            } else if (strcmp(cmd, "create directory") == 0) {
-                appRenderer->currentCommand = COMMAND_CREATE_DIRECTORY;
-            } else if (strcmp(cmd, "create file") == 0) {
-                appRenderer->currentCommand = COMMAND_CREATE_FILE;
+            if (appRenderer->currentCommand == COMMAND_OPEN_WITH) {
+                // Open file with selected program
+                const char *program = list[appRenderer->listIndex].value;
+                platformOpenWith(program, appRenderer->openWithFilePath);
+                appRenderer->currentCommand = COMMAND_NONE;
+                appRenderer->currentCoordinate = appRenderer->previousCoordinate;
+                appRenderer->previousCoordinate = appRenderer->currentCoordinate;
+                accesskitSpeakModeChange(appRenderer, NULL);
+                createListCurrentLayer(appRenderer);
+                appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                appRenderer->needsRedraw = true;
+            } else {
+                // Execute selected command
+                const char *cmd = list[appRenderer->listIndex].value;
+                if (strcmp(cmd, "editor mode") == 0) {
+                    appRenderer->currentCommand = COMMAND_EDITOR_MODE;
+                } else if (strcmp(cmd, "operator mode") == 0) {
+                    appRenderer->currentCommand = COMMAND_OPERATOR_MODE;
+                } else if (strcmp(cmd, "create directory") == 0) {
+                    appRenderer->currentCommand = COMMAND_CREATE_DIRECTORY;
+                } else if (strcmp(cmd, "create file") == 0) {
+                    appRenderer->currentCommand = COMMAND_CREATE_FILE;
+                } else if (strcmp(cmd, "open with") == 0) {
+                    appRenderer->currentCommand = COMMAND_OPEN_WITH;
+                }
+                handleCommand(appRenderer);
             }
-            handleCommand(appRenderer);
         }
     }
 
@@ -256,6 +272,7 @@ void handleDelete(AppRenderer *appRenderer, History history) {
 void handleColon(AppRenderer *appRenderer) {
     appRenderer->previousCoordinate = appRenderer->currentCoordinate;
     appRenderer->currentCoordinate = COORDINATE_COMMAND;
+    appRenderer->currentCommand = COMMAND_NONE;
     accesskitSpeakModeChange(appRenderer, NULL);
 
     // Clear input buffer for searching
@@ -582,6 +599,16 @@ void handleEscape(AppRenderer *appRenderer) {
     } else if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT) {
         // Operator mode: Escape discards changes
         appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
+    } else if (appRenderer->currentCoordinate == COORDINATE_COMMAND) {
+        // Cancel command mode (or open with)
+        appRenderer->currentCommand = COMMAND_NONE;
+        appRenderer->currentCoordinate = appRenderer->previousCoordinate;
+        appRenderer->previousCoordinate = appRenderer->currentCoordinate;
+        accesskitSpeakModeChange(appRenderer, NULL);
+        createListCurrentLayer(appRenderer);
+        appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+        appRenderer->needsRedraw = true;
+        return;
     } else if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH) {
         // Search mode: Escape cancels search without selecting
         appRenderer->currentCoordinate = appRenderer->previousCoordinate;
@@ -605,6 +632,9 @@ void handleEscape(AppRenderer *appRenderer) {
 
 void handleCommand(AppRenderer *appRenderer) {
     switch (appRenderer->currentCommand) {
+        case COMMAND_NONE:
+            break;
+
         case COMMAND_EDITOR_MODE:
             appRenderer->previousCoordinate = appRenderer->currentCoordinate;
             appRenderer->currentCoordinate = COORDINATE_EDITOR_GENERAL;
@@ -666,6 +696,42 @@ void handleCommand(AppRenderer *appRenderer) {
             createListCurrentLayer(appRenderer);
             appRenderer->listIndex = insertIdx;
             handleI(appRenderer);
+            break;
+        }
+
+        case COMMAND_OPEN_WITH: {
+            // Check that a file (FFON_STRING) is currently selected
+            int count;
+            FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                            &appRenderer->currentId, &count);
+            if (arr && count > 0) {
+                int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                if (idx >= 0 && idx < count) {
+                    FfonElement *elem = arr[idx];
+                    if (elem->type == FFON_STRING) {
+                        char *filename = providerGetEditableContent(elem->data.string);
+                        const char *path = providerGetCurrentPath(elem->data.string);
+                        if (filename && path) {
+                            const char *sep = platformGetPathSeparator();
+                            snprintf(appRenderer->openWithFilePath,
+                                     sizeof(appRenderer->openWithFilePath),
+                                     "%s%s%s", path, sep, filename);
+
+                            // Clear input buffer for searching programs
+                            appRenderer->inputBuffer[0] = '\0';
+                            appRenderer->inputBufferSize = 0;
+                            appRenderer->cursorPosition = 0;
+
+                            // Stay in COORDINATE_COMMAND, repopulate with executables
+                            createListCurrentLayer(appRenderer);
+                        }
+                        free(filename);
+                    } else {
+                        setErrorMessage(appRenderer, "open with: select a file, not a directory");
+                        appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
+                    }
+                }
+            }
             break;
         }
     }

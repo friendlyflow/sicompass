@@ -10,8 +10,12 @@
     #include <shellapi.h>
 #elif defined(__APPLE__)
     #define PLATFORM_MACOS 1
+    #include <dirent.h>
+    #include <sys/stat.h>
 #else
     #define PLATFORM_LINUX 1
+    #include <dirent.h>
+    #include <sys/stat.h>
 #endif
 
 bool platformOpenWithDefault(const char *path) {
@@ -133,5 +137,148 @@ bool platformIsWindows(void) {
     return true;
 #else
     return false;
+#endif
+}
+
+char** platformGetPathExecutables(int *outCount) {
+    *outCount = 0;
+
+    const char *pathEnv = getenv("PATH");
+    if (!pathEnv || pathEnv[0] == '\0') return NULL;
+
+    char *pathCopy = strdup(pathEnv);
+    if (!pathCopy) return NULL;
+
+    int capacity = 256;
+    int count = 0;
+    char **result = malloc(capacity * sizeof(char*));
+    if (!result) {
+        free(pathCopy);
+        return NULL;
+    }
+
+#if defined(PLATFORM_WINDOWS)
+    const char *delim = ";";
+#else
+    const char *delim = ":";
+#endif
+
+    char *dir = strtok(pathCopy, delim);
+    while (dir != NULL) {
+#if defined(PLATFORM_WINDOWS)
+        char searchPath[4096];
+        snprintf(searchPath, sizeof(searchPath), "%s\\*", dir);
+        WIN32_FIND_DATAA findData;
+        HANDLE hFind = FindFirstFileA(searchPath, &findData);
+        if (hFind != INVALID_HANDLE_VALUE) {
+            do {
+                if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+                const char *name = findData.cFileName;
+                size_t len = strlen(name);
+                if (len > 4) {
+                    const char *ext = name + len - 4;
+                    if (_stricmp(ext, ".exe") != 0 &&
+                        _stricmp(ext, ".bat") != 0 &&
+                        _stricmp(ext, ".cmd") != 0) {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+
+                bool duplicate = false;
+                for (int i = 0; i < count; i++) {
+                    if (_stricmp(result[i], name) == 0) {
+                        duplicate = true;
+                        break;
+                    }
+                }
+                if (duplicate) continue;
+
+                if (count >= capacity) {
+                    capacity *= 2;
+                    char **newResult = realloc(result, capacity * sizeof(char*));
+                    if (!newResult) break;
+                    result = newResult;
+                }
+                result[count++] = _strdup(name);
+            } while (FindNextFileA(hFind, &findData) != 0);
+            FindClose(hFind);
+        }
+#else
+        DIR *d = opendir(dir);
+        if (d) {
+            struct dirent *entry;
+            while ((entry = readdir(d)) != NULL) {
+                if (entry->d_name[0] == '.') continue;
+
+                char fullpath[4096];
+                snprintf(fullpath, sizeof(fullpath), "%s/%s", dir, entry->d_name);
+
+                struct stat st;
+                if (stat(fullpath, &st) != 0) continue;
+                if (S_ISDIR(st.st_mode)) continue;
+                if (!(st.st_mode & S_IXUSR)) continue;
+
+                bool duplicate = false;
+                for (int i = 0; i < count; i++) {
+                    if (strcmp(result[i], entry->d_name) == 0) {
+                        duplicate = true;
+                        break;
+                    }
+                }
+                if (duplicate) continue;
+
+                if (count >= capacity) {
+                    capacity *= 2;
+                    char **newResult = realloc(result, capacity * sizeof(char*));
+                    if (!newResult) break;
+                    result = newResult;
+                }
+                result[count++] = strdup(entry->d_name);
+            }
+            closedir(d);
+        }
+#endif
+        dir = strtok(NULL, delim);
+    }
+
+    free(pathCopy);
+    *outCount = count;
+    return result;
+}
+
+void platformFreePathExecutables(char **executables, int count) {
+    if (!executables) return;
+    for (int i = 0; i < count; i++) {
+        free(executables[i]);
+    }
+    free(executables);
+}
+
+bool platformOpenWith(const char *program, const char *filePath) {
+    if (!program || !filePath) return false;
+
+#if defined(PLATFORM_WINDOWS)
+    HINSTANCE result = ShellExecuteA(NULL, "open", program, filePath, NULL, SW_SHOWNORMAL);
+    return (intptr_t)result > 32;
+
+#elif defined(PLATFORM_MACOS)
+    size_t len = strlen(program) + strlen(filePath) + 64;
+    char *command = malloc(len);
+    if (!command) return false;
+    snprintf(command, len, "open -a \"%s\" \"%s\" &", program, filePath);
+    int result = system(command);
+    free(command);
+    return result == 0;
+
+#else
+    size_t len = strlen(program) + strlen(filePath) + 16;
+    char *command = malloc(len);
+    if (!command) return false;
+    snprintf(command, len, "\"%s\" \"%s\" &", program, filePath);
+    int result = system(command);
+    free(command);
+    return result == 0;
 #endif
 }
