@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <json-c/json.h>
 
 // Internal state for generic providers
 typedef struct GenericProviderState {
@@ -226,4 +227,177 @@ FfonElement* providerGetInitialElement(Provider *provider) {
     free(children);
 
     return root;
+}
+
+// ============================================
+// Script provider (runs external scripts via bun)
+// ============================================
+
+// State for script-backed providers.
+// Layout-compatible with GenericProviderState (currentPath and ops at same offsets)
+// so generic path management functions work unchanged.
+typedef struct ScriptProviderState {
+    char currentPath[4096];
+    const ProviderOps *ops;
+    char scriptPath[4096];
+} ScriptProviderState;
+
+// Run script and parse JSON output into FFON elements
+static FfonElement** scriptFetch(Provider *self, int *outCount) {
+    *outCount = 0;
+    ScriptProviderState *state = (ScriptProviderState*)self->state;
+
+    // Build command: bun run <scriptPath> <currentPath>
+    char command[8192 + 64];
+    snprintf(command, sizeof(command), "bun run \"%s\" \"%s\"",
+             state->scriptPath, state->currentPath);
+
+    FILE *pipe = popen(command, "r");
+    if (!pipe) {
+        fprintf(stderr, "scriptProvider: failed to run: %s\n", command);
+        return NULL;
+    }
+
+    // Read all output
+    size_t capacity = 4096;
+    size_t size = 0;
+    char *buffer = malloc(capacity);
+    if (!buffer) {
+        pclose(pipe);
+        return NULL;
+    }
+
+    size_t bytesRead;
+    while ((bytesRead = fread(buffer + size, 1, capacity - size - 1, pipe)) > 0) {
+        size += bytesRead;
+        if (size + 1 >= capacity) {
+            capacity *= 2;
+            char *newBuf = realloc(buffer, capacity);
+            if (!newBuf) {
+                free(buffer);
+                pclose(pipe);
+                return NULL;
+            }
+            buffer = newBuf;
+        }
+    }
+    buffer[size] = '\0';
+    pclose(pipe);
+
+    if (size == 0) {
+        free(buffer);
+        return NULL;
+    }
+
+    // Parse JSON
+    json_object *root = json_tokener_parse(buffer);
+    free(buffer);
+
+    if (!root) {
+        fprintf(stderr, "scriptProvider: failed to parse JSON from: %s\n", state->scriptPath);
+        return NULL;
+    }
+
+    if (!json_object_is_type(root, json_type_array)) {
+        fprintf(stderr, "scriptProvider: expected JSON array from: %s\n", state->scriptPath);
+        json_object_put(root);
+        return NULL;
+    }
+
+    // Convert JSON array to FFON elements
+    int arrayLen = json_object_array_length(root);
+    if (arrayLen == 0) {
+        json_object_put(root);
+        return NULL;
+    }
+
+    FfonElement **elements = malloc(sizeof(FfonElement*) * arrayLen);
+    if (!elements) {
+        json_object_put(root);
+        return NULL;
+    }
+
+    // Build closing tag from prefix (e.g., "<tutorial>" -> "</tutorial>")
+    char closeTag[64];
+    snprintf(closeTag, sizeof(closeTag), "</%s", self->tagPrefix + 1);
+
+    int count = 0;
+    for (int i = 0; i < arrayLen; i++) {
+        json_object *item = json_object_array_get_idx(root, i);
+        FfonElement *elem = parseJsonValue(item);
+        if (elem) {
+            // Wrap object keys with provider's tag prefix so provider matching works
+            if (elem->type == FFON_OBJECT && elem->data.object->key) {
+                char *oldKey = elem->data.object->key;
+                size_t newLen = strlen(self->tagPrefix) + strlen(oldKey) + strlen(closeTag) + 1;
+                char *newKey = malloc(newLen);
+                if (newKey) {
+                    snprintf(newKey, newLen, "%s%s%s", self->tagPrefix, oldKey, closeTag);
+                    elem->data.object->key = newKey;
+                    free(oldKey);
+                }
+            }
+            elements[count++] = elem;
+        }
+    }
+
+    json_object_put(root);
+    *outCount = count;
+    return elements;
+}
+
+Provider* scriptProviderCreate(const char *name, const char *displayName,
+                               const char *tagPrefix, const char *scriptPath) {
+    if (!name || !tagPrefix || !scriptPath) return NULL;
+
+    Provider *provider = calloc(1, sizeof(Provider));
+    if (!provider) return NULL;
+
+    ScriptProviderState *state = calloc(1, sizeof(ScriptProviderState));
+    if (!state) {
+        free(provider);
+        return NULL;
+    }
+
+    // Create a static-lifetime ProviderOps for providerGetInitialElement compatibility
+    ProviderOps *ops = calloc(1, sizeof(ProviderOps));
+    if (!ops) {
+        free(state);
+        free(provider);
+        return NULL;
+    }
+    ops->name = name;
+    ops->displayName = displayName;
+    ops->tagPrefix = tagPrefix;
+    ops->fetch = NULL;
+    ops->commit = NULL;
+    ops->createDirectory = NULL;
+    ops->createFile = NULL;
+
+    strcpy(state->currentPath, "/");
+    strncpy(state->scriptPath, scriptPath, sizeof(state->scriptPath) - 1);
+    state->scriptPath[sizeof(state->scriptPath) - 1] = '\0';
+    state->ops = ops;
+
+    provider->name = name;
+    provider->tagPrefix = tagPrefix;
+    provider->state = state;
+
+    // Wire up: custom fetch, reuse generic path management and tag handling
+    provider->canHandle = genericCanHandle;
+    provider->fetch = scriptFetch;
+    provider->getEditableContent = genericGetEditableContent;
+    provider->commitEdit = NULL;
+    provider->formatUpdatedKey = genericFormatUpdatedKey;
+    provider->init = genericInit;
+    provider->cleanup = NULL;
+    provider->pushPath = genericPushPath;
+    provider->popPath = genericPopPath;
+    provider->getCurrentPath = genericGetCurrentPath;
+    provider->createDirectory = NULL;
+    provider->createFile = NULL;
+    provider->loadConfig = NULL;
+    provider->saveConfig = NULL;
+
+    return provider;
 }

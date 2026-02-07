@@ -12,12 +12,12 @@ endif
 lib_provider = library('provider',
   lib_provider_src,
   include_directories: lib_provider_inc,
-  dependencies: [lib_ffon_dep] + lib_provider_platform_deps,
+  dependencies: [lib_ffon_dep, jsonc_dep] + lib_provider_platform_deps,
   install: true,
 )
 
 lib_provider_dep = declare_dependency(
   link_with: lib_provider,
   include_directories: lib_provider_inc,
-  dependencies: [lib_ffon_dep],
+  dependencies: [lib_ffon_dep, jsonc_dep],
 )

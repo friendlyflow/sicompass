@@ -1,5 +1,6 @@
 #include "view.h"
 #include "provider.h"
+#include <provider_interface.h>
 #include <filebrowser_provider.h>
 #include <string.h>
 
@@ -11,26 +12,40 @@ void mainLoop(SiCompassApplication* app) {
         return;
     }
 
-    // Register providers
+    // Register providers - tutorial first, then file browser
+    Provider *tutorialProvider = scriptProviderCreate(
+        "tutorial", "tutorial", "<tutorial>", TUTORIAL_SCRIPT_PATH);
+    if (tutorialProvider) {
+        providerRegister(tutorialProvider);
+    }
+
     Provider *fbProvider = filebrowserGetProvider();
     providerRegister(fbProvider);
     providerInitAll();
 
-    // Get initial element from provider
+    // Get initial elements from providers
+    FfonElement *tutorialElement = tutorialProvider ?
+        providerGetInitialElement(tutorialProvider) : NULL;
     FfonElement *fileBrowserElement = providerGetInitialElement(fbProvider);
-    if (!fileBrowserElement) {
-        fprintf(stderr, "Failed to get initial element from filebrowser provider\n");
+    if (!tutorialElement && !fileBrowserElement) {
+        fprintf(stderr, "Failed to get initial elements from providers\n");
         appRendererDestroy(app->appRenderer);
         return;
     }
 
-    // Create root array with just the file browser object
-    app->appRenderer->ffon = malloc(sizeof(FfonElement*));
-    app->appRenderer->ffon[0] = fileBrowserElement;
-    app->appRenderer->ffonCount = 1;
-    app->appRenderer->ffonCapacity = 1;
+    // Create root array with tutorial before file browser
+    int providerCount = 0;
+    app->appRenderer->ffon = malloc(2 * sizeof(FfonElement*));
+    app->appRenderer->ffonCapacity = 2;
+    if (tutorialElement) {
+        app->appRenderer->ffon[providerCount++] = tutorialElement;
+    }
+    if (fileBrowserElement) {
+        app->appRenderer->ffon[providerCount++] = fileBrowserElement;
+    }
+    app->appRenderer->ffonCount = providerCount;
 
-    // Initialize current_id - start at "file browser" object
+    // Initialize current_id - start at first provider object
     idArrayInit(&app->appRenderer->currentId);
     idArrayPush(&app->appRenderer->currentId, 0);
 

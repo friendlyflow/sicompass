@@ -1,5 +1,5 @@
 #include "view.h"
-#include <filebrowser.h>
+#include "provider.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -50,23 +50,23 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
             idArrayCopy(&appRenderer->totalListCurrentLayer[appRenderer->totalListCount].id, &thisId);
 
             if (elem->type == FFON_STRING) {
-                // Strip input tags from display
-                bool hasInput = filebrowserHasInputTags(elem->data.string);
-                char *stripped = filebrowserStripInputTags(elem->data.string);
+                // Strip provider tags from display
+                bool hasTags = (providerFindForElement(elem->data.string) != NULL);
+                char *stripped = hasTags ? providerGetEditableContent(elem->data.string) : NULL;
                 char prefixed[MAX_LINE_LENGTH];
                 snprintf(prefixed, sizeof(prefixed), "%s %s",
-                         hasInput ? "-i" : "-",
+                         hasTags ? "-i" : "-",
                          stripped ? stripped : elem->data.string);
                 appRenderer->totalListCurrentLayer[appRenderer->totalListCount].value =
                     strdup(prefixed);
                 free(stripped);
             } else {
-                // Strip input tags from display
-                bool hasInput = filebrowserHasInputTags(elem->data.object->key);
-                char *stripped = filebrowserStripInputTags(elem->data.object->key);
+                // Strip provider tags from display
+                bool hasTags = (providerFindForElement(elem->data.object->key) != NULL);
+                char *stripped = hasTags ? providerGetEditableContent(elem->data.object->key) : NULL;
                 char prefixed[MAX_LINE_LENGTH];
                 snprintf(prefixed, sizeof(prefixed), "%s %s",
-                         hasInput ? "+i" : "+",
+                         hasTags ? "+i" : "+",
                          stripped ? stripped : elem->data.object->key);
                 appRenderer->totalListCurrentLayer[appRenderer->totalListCount].value =
                     strdup(prefixed);
