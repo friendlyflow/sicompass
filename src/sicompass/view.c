@@ -14,7 +14,7 @@ void mainLoop(SiCompassApplication* app) {
 
     // Register providers - tutorial first, then file browser
     Provider *tutorialProvider = scriptProviderCreate(
-        "tutorial", "tutorial", NULL, TUTORIAL_SCRIPT_PATH);
+        "tutorial", "tutorial", TUTORIAL_SCRIPT_PATH);
     if (tutorialProvider) {
         providerRegister(tutorialProvider);
     }

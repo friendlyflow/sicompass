@@ -129,9 +129,8 @@ char* providerGetConfigPath(const char *providerName);
  *
  * @param name Provider name (e.g., "tutorial")
  * @param displayName Display name shown in UI (e.g., "tutorial")
- * @param tagPrefix Tag prefix for elements (e.g., "<tutorial>")
  * @param scriptPath Absolute path to the script file
  * @return A fully configured Provider (caller must free with providerDestroy)
  */
 Provider* scriptProviderCreate(const char *name, const char *displayName,
-                               const char *tagPrefix, const char *scriptPath);
+                               const char *scriptPath);
