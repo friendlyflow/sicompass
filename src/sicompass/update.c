@@ -641,9 +641,9 @@ void handleHistoryAction(AppRenderer *appRenderer, History history) {
 
             case TASK_DELETE:
                 if (appRenderer->currentId.ids[appRenderer->currentId.depth - 1] == 0) {
-                    handleCtrlI(appRenderer, history);
+                    updateState(appRenderer, TASK_INSERT, history);
                 } else {
-                    handleCtrlA(appRenderer, history);
+                    updateState(appRenderer, TASK_APPEND, history);
                 }
                 break;
 
@@ -663,17 +663,23 @@ void handleHistoryAction(AppRenderer *appRenderer, History history) {
             // Redo the operation
             switch (entry->task) {
                 case TASK_APPEND:
+                    updateState(appRenderer, TASK_APPEND, history);
+                    break;
+
                 case TASK_APPEND_APPEND:
-                    handleCtrlA(appRenderer, history);
+                    updateState(appRenderer, TASK_APPEND_APPEND, history);
                     break;
 
                 case TASK_INSERT:
+                    updateState(appRenderer, TASK_INSERT, history);
+                    break;
+
                 case TASK_INSERT_INSERT:
-                    handleCtrlI(appRenderer, history);
+                    updateState(appRenderer, TASK_INSERT_INSERT, history);
                     break;
 
                 case TASK_DELETE:
-                    handleDelete(appRenderer, history);
+                    updateState(appRenderer, TASK_DELETE, history);
                     break;
 
                 default:
