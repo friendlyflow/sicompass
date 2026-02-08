@@ -97,6 +97,37 @@ bool providerCreateFile(const char *elementKey, const char *name) {
     return provider->createFile(provider, name);
 }
 
+// Get commands from the provider handling this element
+const char** providerGetCommands(const char *elementKey, int *outCount) {
+    Provider *provider = providerFindForElement(elementKey);
+    if (!provider || !provider->getCommands) { *outCount = 0; return NULL; }
+    return provider->getCommands(provider, outCount);
+}
+
+// Handle a provider command
+FfonElement* providerHandleCommand(const char *elementKey, const char *command,
+                                    int elementType,
+                                    char *errorMsg, int errorMsgSize) {
+    Provider *provider = providerFindForElement(elementKey);
+    if (!provider || !provider->handleCommand) return NULL;
+    return provider->handleCommand(provider, command, elementKey, elementType,
+                                    errorMsg, errorMsgSize);
+}
+
+// Get list items for a command's secondary selection
+ProviderListItem* providerGetCommandListItems(const char *elementKey, const char *command, int *outCount) {
+    Provider *provider = providerFindForElement(elementKey);
+    if (!provider || !provider->getCommandListItems) { *outCount = 0; return NULL; }
+    return provider->getCommandListItems(provider, command, outCount);
+}
+
+// Execute a command with selection
+bool providerExecuteCommand(const char *elementKey, const char *command, const char *selection) {
+    Provider *provider = providerFindForElement(elementKey);
+    if (!provider || !provider->executeCommand) return false;
+    return provider->executeCommand(provider, command, selection);
+}
+
 // Format updated key after edit
 char* providerFormatUpdatedKey(const char *elementKey, const char *newContent) {
     Provider *provider = providerFindForElement(elementKey);

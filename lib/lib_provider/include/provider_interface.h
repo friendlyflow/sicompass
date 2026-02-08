@@ -4,6 +4,19 @@
 #include <ffon.h>
 
 /**
+ * List item returned by provider commands (e.g., applications for "open with").
+ */
+typedef struct {
+    char *label;
+    char *data;
+} ProviderListItem;
+
+/**
+ * Free an array of ProviderListItem returned by getCommandListItems.
+ */
+void providerFreeCommandListItems(ProviderListItem *items, int count);
+
+/**
  * Provider interface - defines what a plugin must implement.
  *
  * Providers handle data operations only:
@@ -51,6 +64,14 @@ typedef struct Provider {
     bool (*createDirectory)(struct Provider *self, const char *name);
     bool (*createFile)(struct Provider *self, const char *name);
 
+    // Optional: Commands this provider supports
+    const char** (*getCommands)(struct Provider *self, int *outCount);
+    FfonElement* (*handleCommand)(struct Provider *self, const char *command,
+                                   const char *elementKey, int elementType,
+                                   char *errorMsg, int errorMsgSize);
+    ProviderListItem* (*getCommandListItems)(struct Provider *self, const char *command, int *outCount);
+    bool (*executeCommand)(struct Provider *self, const char *command, const char *selection);
+
     // Optional: Persistent config
     bool (*loadConfig)(struct Provider *self, const char *configPath);
     bool (*saveConfig)(struct Provider *self, const char *configPath);
@@ -85,6 +106,14 @@ typedef struct ProviderOps {
     // Optional: Create operations
     bool (*createDirectory)(const char *path, const char *name);
     bool (*createFile)(const char *path, const char *name);
+
+    // Optional: Commands this provider supports
+    const char** (*getCommands)(int *outCount);
+    FfonElement* (*handleCommand)(const char *path, const char *command,
+                                   const char *elementKey, int elementType,
+                                   char *errorMsg, int errorMsgSize);
+    ProviderListItem* (*getCommandListItems)(const char *path, const char *command, int *outCount);
+    bool (*executeCommand)(const char *path, const char *command, const char *selection);
 } ProviderOps;
 
 /**
