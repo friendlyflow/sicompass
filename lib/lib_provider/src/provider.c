@@ -75,6 +75,37 @@ static bool genericCreateFile(Provider *self, const char *name) {
     return state->ops->createFile(state->currentPath, name);
 }
 
+// Generic getCommands: call ops->getCommands
+static const char** genericGetCommands(Provider *self, int *outCount) {
+    GenericProviderState *state = (GenericProviderState*)self->state;
+    if (!state->ops->getCommands) { *outCount = 0; return NULL; }
+    return state->ops->getCommands(outCount);
+}
+
+// Generic handleCommand: call ops->handleCommand with current path
+static FfonElement* genericHandleCommand(Provider *self, const char *command,
+                                          const char *elementKey, int elementType,
+                                          char *errorMsg, int errorMsgSize) {
+    GenericProviderState *state = (GenericProviderState*)self->state;
+    if (!state->ops->handleCommand) return NULL;
+    return state->ops->handleCommand(state->currentPath, command, elementKey, elementType,
+                                      errorMsg, errorMsgSize);
+}
+
+// Generic getCommandListItems: call ops->getCommandListItems with current path
+static ProviderListItem* genericGetCommandListItems(Provider *self, const char *command, int *outCount) {
+    GenericProviderState *state = (GenericProviderState*)self->state;
+    if (!state->ops->getCommandListItems) { *outCount = 0; return NULL; }
+    return state->ops->getCommandListItems(state->currentPath, command, outCount);
+}
+
+// Generic executeCommand: call ops->executeCommand with current path
+static bool genericExecuteCommand(Provider *self, const char *command, const char *selection) {
+    GenericProviderState *state = (GenericProviderState*)self->state;
+    if (!state->ops->executeCommand) return false;
+    return state->ops->executeCommand(state->currentPath, command, selection);
+}
+
 // Generic formatUpdatedKey: wrap content in tags
 static char* genericFormatUpdatedKey(Provider *self, const char *newContent) {
     if (!newContent || !self->tagPrefix) return NULL;
@@ -180,6 +211,10 @@ Provider* providerCreate(const ProviderOps *ops) {
     provider->getCurrentPath = genericGetCurrentPath;
     provider->createDirectory = ops->createDirectory ? genericCreateDirectory : NULL;
     provider->createFile = ops->createFile ? genericCreateFile : NULL;
+    provider->getCommands = ops->getCommands ? genericGetCommands : NULL;
+    provider->handleCommand = ops->handleCommand ? genericHandleCommand : NULL;
+    provider->getCommandListItems = ops->getCommandListItems ? genericGetCommandListItems : NULL;
+    provider->executeCommand = ops->executeCommand ? genericExecuteCommand : NULL;
     provider->loadConfig = NULL;
     provider->saveConfig = NULL;
 
@@ -190,6 +225,15 @@ void providerDestroy(Provider *provider) {
     if (!provider) return;
     free(provider->state);
     free(provider);
+}
+
+void providerFreeCommandListItems(ProviderListItem *items, int count) {
+    if (!items) return;
+    for (int i = 0; i < count; i++) {
+        free(items[i].label);
+        free(items[i].data);
+    }
+    free(items);
 }
 
 FfonElement* providerGetInitialElement(Provider *provider) {

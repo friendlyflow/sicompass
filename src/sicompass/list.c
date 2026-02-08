@@ -1,6 +1,5 @@
 #include "view.h"
 #include "provider.h"
-#include <platform.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -80,49 +79,75 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
         }
 
     } else if (appRenderer->currentCoordinate == COORDINATE_COMMAND) {
-        if (appRenderer->currentCommand == COMMAND_OPEN_WITH) {
-            // List installed applications
-            int appCount = 0;
-            PlatformApplication *apps = platformGetApplications(&appCount);
-            if (!apps || appCount == 0) {
-                platformFreeApplications(apps, appCount);
-                return;
-            }
+        if (appRenderer->currentCommand == COMMAND_PROVIDER) {
+            // Provider command needs secondary selection (e.g., applications for open-with)
+            int ecount;
+            FfonElement **earr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                              &appRenderer->currentId, &ecount);
+            if (earr && ecount > 0) {
+                int eidx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                if (eidx >= 0 && eidx < ecount) {
+                    const char *elementKey = (earr[eidx]->type == FFON_STRING) ?
+                        earr[eidx]->data.string : earr[eidx]->data.object->key;
 
-            appRenderer->totalListCurrentLayer = calloc(appCount, sizeof(ListItem));
-            if (!appRenderer->totalListCurrentLayer) {
-                platformFreeApplications(apps, appCount);
-                return;
+                    int itemCount = 0;
+                    ProviderListItem *items = providerGetCommandListItems(elementKey,
+                        appRenderer->providerCommandName, &itemCount);
+                    if (items && itemCount > 0) {
+                        appRenderer->totalListCurrentLayer = calloc(itemCount, sizeof(ListItem));
+                        if (!appRenderer->totalListCurrentLayer) {
+                            providerFreeCommandListItems(items, itemCount);
+                            return;
+                        }
+                        for (int i = 0; i < itemCount; i++) {
+                            appRenderer->totalListCurrentLayer[i].id.depth = 1;
+                            appRenderer->totalListCurrentLayer[i].id.ids[0] = i;
+                            appRenderer->totalListCurrentLayer[i].label = strdup(items[i].label);
+                            appRenderer->totalListCurrentLayer[i].data = items[i].data ? strdup(items[i].data) : NULL;
+                            appRenderer->totalListCount++;
+                        }
+                        providerFreeCommandListItems(items, itemCount);
+                    }
+                }
             }
-
-            for (int i = 0; i < appCount; i++) {
-                appRenderer->totalListCurrentLayer[i].id.depth = 1;
-                appRenderer->totalListCurrentLayer[i].id.ids[0] = i;
-                appRenderer->totalListCurrentLayer[i].label = strdup(apps[i].name);
-                appRenderer->totalListCurrentLayer[i].data = strdup(apps[i].exec);
-                appRenderer->totalListCount++;
-            }
-
-            platformFreeApplications(apps, appCount);
         } else {
-            // List available commands
-            const char *commands[] = {
-                "editor mode",
-                "operator mode",
-                "create directory",
-                "create file",
-                "open file with"
-            };
-            int numCommands = sizeof(commands) / sizeof(commands[0]);
+            // List available commands: app commands + provider commands
+            const char *appCommands[] = {"editor mode", "operator mode"};
+            int numAppCommands = 2;
 
+            // Get provider commands for current element
+            int numProviderCommands = 0;
+            const char **providerCmds = NULL;
+            int ecount;
+            FfonElement **earr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                              &appRenderer->currentId, &ecount);
+            if (earr && ecount > 0) {
+                int eidx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                if (eidx >= 0 && eidx < ecount) {
+                    const char *elementKey = (earr[eidx]->type == FFON_STRING) ?
+                        earr[eidx]->data.string : earr[eidx]->data.object->key;
+                    providerCmds = providerGetCommands(elementKey, &numProviderCommands);
+                }
+            }
+
+            int numCommands = numAppCommands + numProviderCommands;
             appRenderer->totalListCurrentLayer = calloc(numCommands, sizeof(ListItem));
             if (!appRenderer->totalListCurrentLayer) return;
 
-            for (int i = 0; i < numCommands; i++) {
-                appRenderer->totalListCurrentLayer[i].id.depth = 1;
-                appRenderer->totalListCurrentLayer[i].id.ids[0] = i;
-                appRenderer->totalListCurrentLayer[i].label = strdup(commands[i]);
+            int idx = 0;
+            for (int i = 0; i < numAppCommands; i++) {
+                appRenderer->totalListCurrentLayer[idx].id.depth = 1;
+                appRenderer->totalListCurrentLayer[idx].id.ids[0] = idx;
+                appRenderer->totalListCurrentLayer[idx].label = strdup(appCommands[i]);
                 appRenderer->totalListCount++;
+                idx++;
+            }
+            for (int i = 0; i < numProviderCommands; i++) {
+                appRenderer->totalListCurrentLayer[idx].id.depth = 1;
+                appRenderer->totalListCurrentLayer[idx].id.ids[0] = idx;
+                appRenderer->totalListCurrentLayer[idx].label = strdup(providerCmds[i]);
+                appRenderer->totalListCount++;
+                idx++;
             }
         }
     }

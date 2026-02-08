@@ -29,3 +29,11 @@ char* providerFormatUpdatedKey(const char *elementKey, const char *newContent);
 // Create operations
 bool providerCreateDirectory(const char *elementKey, const char *name);
 bool providerCreateFile(const char *elementKey, const char *name);
+
+// Command operations
+const char** providerGetCommands(const char *elementKey, int *outCount);
+FfonElement* providerHandleCommand(const char *elementKey, const char *command,
+                                    int elementType,
+                                    char *errorMsg, int errorMsgSize);
+ProviderListItem* providerGetCommandListItems(const char *elementKey, const char *command, int *outCount);
+bool providerExecuteCommand(const char *elementKey, const char *command, const char *selection);

@@ -1,6 +1,5 @@
 #include "view.h"
 #include "provider.h"
-#include <filebrowser.h>
 #include <platform.h>
 #include <stdio.h>
 #include <string.h>
@@ -310,12 +309,23 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                     appRenderer->filteredListCount : appRenderer->totalListCount;
 
         if (appRenderer->listIndex >= 0 && appRenderer->listIndex < count) {
-            if (appRenderer->currentCommand == COMMAND_OPEN_WITH) {
-                // Open file with selected program
-                const char *program = list[appRenderer->listIndex].data ?
-                                     list[appRenderer->listIndex].data :
-                                     list[appRenderer->listIndex].label;
-                platformOpenWith(program, appRenderer->openWithFilePath);
+            if (appRenderer->currentCommand == COMMAND_PROVIDER) {
+                // Execute provider command with selected item
+                const char *selection = list[appRenderer->listIndex].data ?
+                                       list[appRenderer->listIndex].data :
+                                       list[appRenderer->listIndex].label;
+                int ecount;
+                FfonElement **earr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                                  &appRenderer->currentId, &ecount);
+                if (earr && ecount > 0) {
+                    int eidx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                    if (eidx >= 0 && eidx < ecount) {
+                        FfonElement *elem = earr[eidx];
+                        const char *elementKey = (elem->type == FFON_STRING) ?
+                            elem->data.string : elem->data.object->key;
+                        providerExecuteCommand(elementKey, appRenderer->providerCommandName, selection);
+                    }
+                }
                 appRenderer->currentCommand = COMMAND_NONE;
                 appRenderer->currentCoordinate = appRenderer->previousCoordinate;
                 appRenderer->previousCoordinate = appRenderer->currentCoordinate;
@@ -330,12 +340,11 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                     appRenderer->currentCommand = COMMAND_EDITOR_MODE;
                 } else if (strcmp(cmd, "operator mode") == 0) {
                     appRenderer->currentCommand = COMMAND_OPERATOR_MODE;
-                } else if (strcmp(cmd, "create directory") == 0) {
-                    appRenderer->currentCommand = COMMAND_CREATE_DIRECTORY;
-                } else if (strcmp(cmd, "create file") == 0) {
-                    appRenderer->currentCommand = COMMAND_CREATE_FILE;
-                } else if (strcmp(cmd, "open file with") == 0) {
-                    appRenderer->currentCommand = COMMAND_OPEN_WITH;
+                } else {
+                    appRenderer->currentCommand = COMMAND_PROVIDER;
+                    strncpy(appRenderer->providerCommandName, cmd,
+                            sizeof(appRenderer->providerCommandName) - 1);
+                    appRenderer->providerCommandName[sizeof(appRenderer->providerCommandName) - 1] = '\0';
                 }
                 handleCommand(appRenderer);
             }
@@ -777,90 +786,70 @@ void handleCommand(AppRenderer *appRenderer) {
             accesskitSpeakModeChange(appRenderer, NULL);
             break;
 
-        case COMMAND_CREATE_DIRECTORY:
-        case COMMAND_CREATE_FILE: {
-            // Create the new FFON element
-            FfonElement *newElem;
-            if (appRenderer->currentCommand == COMMAND_CREATE_DIRECTORY) {
-                newElem = ffonElementCreateObject("<input></input>");
-                ffonObjectAddElement(newElem->data.object, ffonElementCreateString("<input></input>"));
-            } else {
-                newElem = ffonElementCreateString("<input></input>");
-            }
-
-            // Insert after current position
-            int insertIdx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1] + 1;
-
-            if (appRenderer->currentId.depth == 1) {
-                // Root level: insert into appRenderer->ffon[]
-                if (appRenderer->ffonCount >= appRenderer->ffonCapacity) {
-                    appRenderer->ffonCapacity *= 2;
-                    appRenderer->ffon = realloc(appRenderer->ffon,
-                        appRenderer->ffonCapacity * sizeof(FfonElement*));
-                }
-                memmove(&appRenderer->ffon[insertIdx + 1],
-                        &appRenderer->ffon[insertIdx],
-                        (appRenderer->ffonCount - insertIdx) * sizeof(FfonElement*));
-                appRenderer->ffon[insertIdx] = newElem;
-                appRenderer->ffonCount++;
-            } else {
-                // Nested: get parent object and insert
-                IdArray parentId;
-                idArrayCopy(&parentId, &appRenderer->currentId);
-                idArrayPop(&parentId);
-                int parentCount;
-                FfonElement **parentArr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
-                                                       &parentId, &parentCount);
-                int parentIdx = parentId.ids[parentId.depth - 1];
-                if (parentArr && parentIdx >= 0 && parentIdx < parentCount &&
-                    parentArr[parentIdx]->type == FFON_OBJECT) {
-                    ffonObjectInsertElement(parentArr[parentIdx]->data.object, newElem, insertIdx);
-                }
-            }
-
-            // Move cursor to new element
-            appRenderer->currentId.ids[appRenderer->currentId.depth - 1] = insertIdx;
-
-            // Switch to operator general, refresh list, then enter insert mode
-            appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
-            createListCurrentLayer(appRenderer);
-            appRenderer->listIndex = insertIdx;
-            handleI(appRenderer);
-            break;
-        }
-
-        case COMMAND_OPEN_WITH: {
-            // Check that a file (FFON_STRING) is currently selected
+        case COMMAND_PROVIDER: {
             int count;
             FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
                                             &appRenderer->currentId, &count);
-            if (arr && count > 0) {
-                int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
-                if (idx >= 0 && idx < count) {
-                    FfonElement *elem = arr[idx];
-                    if (elem->type == FFON_STRING) {
-                        char *filename = providerGetEditableContent(elem->data.string);
-                        const char *path = providerGetCurrentPath(elem->data.string);
-                        if (filename && path) {
-                            const char *sep = platformGetPathSeparator();
-                            snprintf(appRenderer->openWithFilePath,
-                                     sizeof(appRenderer->openWithFilePath),
-                                     "%s%s%s", path, sep, filename);
+            if (!arr || count == 0) break;
+            int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+            if (idx < 0 || idx >= count) break;
+            FfonElement *elem = arr[idx];
+            const char *elementKey = (elem->type == FFON_STRING) ?
+                elem->data.string : elem->data.object->key;
 
-                            // Clear input buffer for searching programs
-                            appRenderer->inputBuffer[0] = '\0';
-                            appRenderer->inputBufferSize = 0;
-                            appRenderer->cursorPosition = 0;
+            char errorMsg[256] = {0};
+            FfonElement *newElem = providerHandleCommand(elementKey,
+                appRenderer->providerCommandName, elem->type, errorMsg, sizeof(errorMsg));
 
-                            // Stay in COORDINATE_COMMAND, repopulate with executables
-                            createListCurrentLayer(appRenderer);
-                        }
-                        free(filename);
-                    } else {
-                        setErrorMessage(appRenderer, "open with: select a file, not a directory");
-                        appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
+            if (newElem) {
+                // Insert after current position
+                int insertIdx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1] + 1;
+
+                if (appRenderer->currentId.depth == 1) {
+                    // Root level: insert into appRenderer->ffon[]
+                    if (appRenderer->ffonCount >= appRenderer->ffonCapacity) {
+                        appRenderer->ffonCapacity *= 2;
+                        appRenderer->ffon = realloc(appRenderer->ffon,
+                            appRenderer->ffonCapacity * sizeof(FfonElement*));
+                    }
+                    memmove(&appRenderer->ffon[insertIdx + 1],
+                            &appRenderer->ffon[insertIdx],
+                            (appRenderer->ffonCount - insertIdx) * sizeof(FfonElement*));
+                    appRenderer->ffon[insertIdx] = newElem;
+                    appRenderer->ffonCount++;
+                } else {
+                    // Nested: get parent object and insert
+                    IdArray parentId;
+                    idArrayCopy(&parentId, &appRenderer->currentId);
+                    idArrayPop(&parentId);
+                    int parentCount;
+                    FfonElement **parentArr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                                           &parentId, &parentCount);
+                    int parentIdx = parentId.ids[parentId.depth - 1];
+                    if (parentArr && parentIdx >= 0 && parentIdx < parentCount &&
+                        parentArr[parentIdx]->type == FFON_OBJECT) {
+                        ffonObjectInsertElement(parentArr[parentIdx]->data.object, newElem, insertIdx);
                     }
                 }
+
+                // Move cursor to new element
+                appRenderer->currentId.ids[appRenderer->currentId.depth - 1] = insertIdx;
+
+                // Switch to operator general, refresh list, then enter insert mode
+                appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
+                createListCurrentLayer(appRenderer);
+                appRenderer->listIndex = insertIdx;
+                handleI(appRenderer);
+            } else if (errorMsg[0]) {
+                setErrorMessage(appRenderer, errorMsg);
+                appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
+                appRenderer->currentCommand = COMMAND_NONE;
+            } else {
+                // Command needs secondary selection (e.g., open-with app list)
+                appRenderer->inputBuffer[0] = '\0';
+                appRenderer->inputBufferSize = 0;
+                appRenderer->cursorPosition = 0;
+                createListCurrentLayer(appRenderer);
             }
             break;
         }
