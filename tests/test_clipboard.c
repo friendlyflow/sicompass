@@ -1,5 +1,6 @@
 /*
  * Tests for clipboard operations: handleCtrlX (cut), handleCtrlC (copy), handleCtrlV (paste)
+ * Tests both element mode (editor general) and text mode (insert/search/command).
  */
 
 #include <unity.h>
@@ -11,7 +12,13 @@
 DEFINE_FFF_GLOBALS;
 
 // Mock updateHistory since we don't want to test history tracking here
-FAKE_VOID_FUNC(updateHistory, void*, int, bool, const char*, int);
+FAKE_VOID_FUNC(updateHistory, void*, int, const void*, void*, void*, int);
+
+// Mock SDL clipboard functions for text mode tests
+FAKE_VALUE_FUNC(bool, SDL_SetClipboardText, const char*);
+FAKE_VALUE_FUNC(char*, SDL_GetClipboardText);
+FAKE_VALUE_FUNC(bool, SDL_HasClipboardText);
+FAKE_VOID_FUNC(SDL_free, void*);
 
 // Include necessary type definitions
 #define MAX_ID_DEPTH 32
@@ -63,11 +70,23 @@ typedef enum {
     TASK_PASTE
 } Task;
 
+typedef enum {
+    COORDINATE_OPERATOR_GENERAL,
+    COORDINATE_OPERATOR_INSERT,
+    COORDINATE_EDITOR_GENERAL,
+    COORDINATE_EDITOR_INSERT,
+    COORDINATE_EDITOR_NORMAL,
+    COORDINATE_EDITOR_VISUAL,
+    COORDINATE_SIMPLE_SEARCH,
+    COORDINATE_EXTENDED_SEARCH,
+    COORDINATE_COMMAND
+} Coordinate;
+
 typedef struct {
     IdArray id;
     Task task;
-    char *line;
-    bool isKey;
+    FfonElement *prevElement;
+    FfonElement *newElement;
 } UndoEntry;
 
 typedef struct {
@@ -78,11 +97,20 @@ typedef struct {
     IdArray currentId;
     IdArray previousId;
 
+    Coordinate currentCoordinate;
+
     FfonElement *clipboard;
 
     UndoEntry *undoHistory;
     int undoHistoryCount;
     int undoPosition;
+
+    // Text input fields
+    char *inputBuffer;
+    int inputBufferSize;
+    int inputBufferCapacity;
+    int cursorPosition;
+    int selectionAnchor;
 
     bool needsRedraw;
 } AppRenderer;
@@ -149,8 +177,37 @@ static FfonElement* ffonElementClone(FfonElement *elem) {
     }
 }
 
-// Implementation of the functions under test (copied from update.c)
-static void handleCtrlX(AppRenderer *appRenderer) {
+// Selection helpers (matching handlers.c)
+static bool hasSelection(AppRenderer *appRenderer) {
+    return appRenderer->selectionAnchor != -1 &&
+           appRenderer->selectionAnchor != appRenderer->cursorPosition;
+}
+
+static void clearSelection(AppRenderer *appRenderer) {
+    appRenderer->selectionAnchor = -1;
+}
+
+static void getSelectionRange(AppRenderer *appRenderer, int *start, int *end) {
+    int a = appRenderer->selectionAnchor;
+    int b = appRenderer->cursorPosition;
+    *start = (a < b) ? a : b;
+    *end = (a > b) ? a : b;
+}
+
+static void deleteSelection(AppRenderer *appRenderer) {
+    if (!hasSelection(appRenderer)) return;
+    int start, end;
+    getSelectionRange(appRenderer, &start, &end);
+    memmove(&appRenderer->inputBuffer[start],
+            &appRenderer->inputBuffer[end],
+            appRenderer->inputBufferSize - end + 1);
+    appRenderer->inputBufferSize -= (end - start);
+    appRenderer->cursorPosition = start;
+    clearSelection(appRenderer);
+}
+
+// Element-mode clipboard functions (simplified from update.c, element path only)
+static void handleCtrlX_element(AppRenderer *appRenderer) {
     FfonElement **_ffon = appRenderer->ffon;
     int _ffon_count = appRenderer->ffonCount;
     FfonObject *parentObj = NULL;
@@ -195,7 +252,7 @@ static void handleCtrlX(AppRenderer *appRenderer) {
     appRenderer->needsRedraw = true;
 }
 
-static void handleCtrlC(AppRenderer *appRenderer) {
+static void handleCtrlC_element(AppRenderer *appRenderer) {
     FfonElement **_ffon = appRenderer->ffon;
     int _ffon_count = appRenderer->ffonCount;
 
@@ -223,7 +280,7 @@ static void handleCtrlC(AppRenderer *appRenderer) {
     appRenderer->needsRedraw = true;
 }
 
-static void handleCtrlV(AppRenderer *appRenderer) {
+static void handleCtrlV_element(AppRenderer *appRenderer) {
     if (!appRenderer->clipboard) return;
 
     FfonElement **_ffon = appRenderer->ffon;
@@ -251,6 +308,80 @@ static void handleCtrlV(AppRenderer *appRenderer) {
     appRenderer->needsRedraw = true;
 }
 
+// Text-mode clipboard functions (matching the text path in update.c)
+static void handleCtrlX_text(AppRenderer *appRenderer) {
+    if (!hasSelection(appRenderer)) return;
+
+    int start, end;
+    getSelectionRange(appRenderer, &start, &end);
+
+    int len = end - start;
+    char *selectedText = malloc(len + 1);
+    if (!selectedText) return;
+    memcpy(selectedText, &appRenderer->inputBuffer[start], len);
+    selectedText[len] = '\0';
+
+    SDL_SetClipboardText(selectedText);
+    free(selectedText);
+
+    deleteSelection(appRenderer);
+    appRenderer->needsRedraw = true;
+}
+
+static void handleCtrlC_text(AppRenderer *appRenderer) {
+    if (!hasSelection(appRenderer)) return;
+
+    int start, end;
+    getSelectionRange(appRenderer, &start, &end);
+
+    int len = end - start;
+    char *selectedText = malloc(len + 1);
+    if (!selectedText) return;
+    memcpy(selectedText, &appRenderer->inputBuffer[start], len);
+    selectedText[len] = '\0';
+
+    SDL_SetClipboardText(selectedText);
+    free(selectedText);
+
+    appRenderer->needsRedraw = true;
+}
+
+static void handleCtrlV_text(AppRenderer *appRenderer) {
+    if (!SDL_HasClipboardText()) return;
+
+    char *text = SDL_GetClipboardText();
+    if (!text || text[0] == '\0') {
+        SDL_free(text);
+        return;
+    }
+
+    if (hasSelection(appRenderer)) {
+        deleteSelection(appRenderer);
+    }
+
+    int len = strlen(text);
+    while (appRenderer->inputBufferSize + len >= appRenderer->inputBufferCapacity) {
+        int newCapacity = appRenderer->inputBufferCapacity * 2;
+        char *newBuffer = realloc(appRenderer->inputBuffer, newCapacity);
+        if (!newBuffer) {
+            SDL_free(text);
+            return;
+        }
+        appRenderer->inputBuffer = newBuffer;
+        appRenderer->inputBufferCapacity = newCapacity;
+    }
+
+    memmove(&appRenderer->inputBuffer[appRenderer->cursorPosition + len],
+            &appRenderer->inputBuffer[appRenderer->cursorPosition],
+            appRenderer->inputBufferSize - appRenderer->cursorPosition + 1);
+    memcpy(&appRenderer->inputBuffer[appRenderer->cursorPosition], text, len);
+    appRenderer->inputBufferSize += len;
+    appRenderer->cursorPosition += len;
+
+    SDL_free(text);
+    appRenderer->needsRedraw = true;
+}
+
 // Helper to create a test AppRenderer with basic structure
 static AppRenderer* createTestAppRenderer(void) {
     AppRenderer *app = calloc(1, sizeof(AppRenderer));
@@ -258,6 +389,19 @@ static AppRenderer* createTestAppRenderer(void) {
     app->currentId.ids[0] = 0;
     app->previousId.depth = 1;
     app->previousId.ids[0] = 0;
+    app->currentCoordinate = COORDINATE_EDITOR_GENERAL;
+    app->selectionAnchor = -1;
+    return app;
+}
+
+static AppRenderer* createTestAppRendererWithTextBuffer(const char *text) {
+    AppRenderer *app = createTestAppRenderer();
+    app->inputBufferCapacity = 1024;
+    app->inputBuffer = calloc(app->inputBufferCapacity, sizeof(char));
+    if (text) {
+        strncpy(app->inputBuffer, text, app->inputBufferCapacity - 1);
+        app->inputBufferSize = strlen(app->inputBuffer);
+    }
     return app;
 }
 
@@ -269,6 +413,7 @@ static void destroyTestAppRenderer(AppRenderer *app) {
     if (app->clipboard) {
         ffonElementDestroy(app->clipboard);
     }
+    free(app->inputBuffer);
     free(app);
 }
 
@@ -278,6 +423,10 @@ static void destroyTestAppRenderer(AppRenderer *app) {
 
 void setUp(void) {
     RESET_FAKE(updateHistory);
+    RESET_FAKE(SDL_SetClipboardText);
+    RESET_FAKE(SDL_GetClipboardText);
+    RESET_FAKE(SDL_HasClipboardText);
+    RESET_FAKE(SDL_free);
     FFF_RESET_HISTORY();
 }
 
@@ -285,13 +434,12 @@ void tearDown(void) {
 }
 
 /* ============================================
- * handleCtrlC (copy) tests
+ * handleCtrlC (copy) element tests
  * ============================================ */
 
 void test_handleCtrlC_copy_string_element(void) {
     AppRenderer *app = createTestAppRenderer();
 
-    // Create a simple list: ["hello", "world"]
     app->ffon = malloc(sizeof(FfonElement*) * 2);
     app->ffon[0] = ffonElementCreateString("hello");
     app->ffon[1] = ffonElementCreateString("world");
@@ -299,12 +447,12 @@ void test_handleCtrlC_copy_string_element(void) {
 
     app->currentId.ids[0] = 0;
 
-    handleCtrlC(app);
+    handleCtrlC_element(app);
 
     TEST_ASSERT_NOT_NULL(app->clipboard);
     TEST_ASSERT_EQUAL_INT(FFON_STRING, app->clipboard->type);
     TEST_ASSERT_EQUAL_STRING("hello", app->clipboard->data.string);
-    TEST_ASSERT_EQUAL_INT(2, app->ffonCount);  // Original not modified
+    TEST_ASSERT_EQUAL_INT(2, app->ffonCount);
     TEST_ASSERT_TRUE(app->needsRedraw);
 
     destroyTestAppRenderer(app);
@@ -320,7 +468,7 @@ void test_handleCtrlC_copy_second_element(void) {
 
     app->currentId.ids[0] = 1;
 
-    handleCtrlC(app);
+    handleCtrlC_element(app);
 
     TEST_ASSERT_NOT_NULL(app->clipboard);
     TEST_ASSERT_EQUAL_STRING("second", app->clipboard->data.string);
@@ -332,7 +480,6 @@ void test_handleCtrlC_copy_second_element(void) {
 void test_handleCtrlC_copy_object_element(void) {
     AppRenderer *app = createTestAppRenderer();
 
-    // Create: ["item", {key: ["child"]}]
     app->ffon = malloc(sizeof(FfonElement*) * 2);
     app->ffon[0] = ffonElementCreateString("item");
     app->ffon[1] = ffonElementCreateObject("mykey");
@@ -341,7 +488,7 @@ void test_handleCtrlC_copy_object_element(void) {
 
     app->currentId.ids[0] = 1;
 
-    handleCtrlC(app);
+    handleCtrlC_element(app);
 
     TEST_ASSERT_NOT_NULL(app->clipboard);
     TEST_ASSERT_EQUAL_INT(FFON_OBJECT, app->clipboard->type);
@@ -355,19 +502,17 @@ void test_handleCtrlC_copy_object_element(void) {
 void test_handleCtrlC_copy_nested_element(void) {
     AppRenderer *app = createTestAppRenderer();
 
-    // Create: [{parent: ["child1", "child2"]}]
     app->ffon = malloc(sizeof(FfonElement*));
     app->ffon[0] = ffonElementCreateObject("parent");
     ffonObjectAddElement(app->ffon[0]->data.object, ffonElementCreateString("child1"));
     ffonObjectAddElement(app->ffon[0]->data.object, ffonElementCreateString("child2"));
     app->ffonCount = 1;
 
-    // Navigate to child2 (id = [0, 1])
     app->currentId.depth = 2;
     app->currentId.ids[0] = 0;
     app->currentId.ids[1] = 1;
 
-    handleCtrlC(app);
+    handleCtrlC_element(app);
 
     TEST_ASSERT_NOT_NULL(app->clipboard);
     TEST_ASSERT_EQUAL_INT(FFON_STRING, app->clipboard->type);
@@ -384,14 +529,12 @@ void test_handleCtrlC_copy_replaces_previous_clipboard(void) {
     app->ffon[1] = ffonElementCreateString("second");
     app->ffonCount = 2;
 
-    // First copy
     app->currentId.ids[0] = 0;
-    handleCtrlC(app);
+    handleCtrlC_element(app);
     TEST_ASSERT_EQUAL_STRING("first", app->clipboard->data.string);
 
-    // Second copy should replace
     app->currentId.ids[0] = 1;
-    handleCtrlC(app);
+    handleCtrlC_element(app);
     TEST_ASSERT_EQUAL_STRING("second", app->clipboard->data.string);
 
     destroyTestAppRenderer(app);
@@ -404,10 +547,10 @@ void test_handleCtrlC_copy_invalid_index_does_nothing(void) {
     app->ffon[0] = ffonElementCreateString("only");
     app->ffonCount = 1;
 
-    app->currentId.ids[0] = 5;  // Out of bounds
+    app->currentId.ids[0] = 5;
     app->needsRedraw = false;
 
-    handleCtrlC(app);
+    handleCtrlC_element(app);
 
     TEST_ASSERT_NULL(app->clipboard);
     TEST_ASSERT_FALSE(app->needsRedraw);
@@ -416,7 +559,7 @@ void test_handleCtrlC_copy_invalid_index_does_nothing(void) {
 }
 
 /* ============================================
- * handleCtrlX (cut) tests
+ * handleCtrlX (cut) element tests
  * ============================================ */
 
 void test_handleCtrlX_cut_removes_element(void) {
@@ -430,18 +573,15 @@ void test_handleCtrlX_cut_removes_element(void) {
 
     app->currentId.ids[0] = 1;
 
-    handleCtrlX(app);
+    handleCtrlX_element(app);
 
-    // Check clipboard has the cut element
     TEST_ASSERT_NOT_NULL(app->clipboard);
     TEST_ASSERT_EQUAL_STRING("second", app->clipboard->data.string);
 
-    // Check element was removed
     TEST_ASSERT_EQUAL_INT(2, app->ffonCount);
     TEST_ASSERT_EQUAL_STRING("first", app->ffon[0]->data.string);
     TEST_ASSERT_EQUAL_STRING("third", app->ffon[1]->data.string);
 
-    // Cursor moved back
     TEST_ASSERT_EQUAL_INT(0, app->currentId.ids[0]);
     TEST_ASSERT_TRUE(app->needsRedraw);
 
@@ -458,12 +598,12 @@ void test_handleCtrlX_cut_first_element_cursor_stays(void) {
 
     app->currentId.ids[0] = 0;
 
-    handleCtrlX(app);
+    handleCtrlX_element(app);
 
     TEST_ASSERT_EQUAL_STRING("first", app->clipboard->data.string);
     TEST_ASSERT_EQUAL_INT(1, app->ffonCount);
     TEST_ASSERT_EQUAL_STRING("second", app->ffon[0]->data.string);
-    TEST_ASSERT_EQUAL_INT(0, app->currentId.ids[0]);  // Stays at 0
+    TEST_ASSERT_EQUAL_INT(0, app->currentId.ids[0]);
 
     destroyTestAppRenderer(app);
 }
@@ -478,12 +618,12 @@ void test_handleCtrlX_cut_last_element(void) {
 
     app->currentId.ids[0] = 1;
 
-    handleCtrlX(app);
+    handleCtrlX_element(app);
 
     TEST_ASSERT_EQUAL_STRING("second", app->clipboard->data.string);
     TEST_ASSERT_EQUAL_INT(1, app->ffonCount);
     TEST_ASSERT_EQUAL_STRING("first", app->ffon[0]->data.string);
-    TEST_ASSERT_EQUAL_INT(0, app->currentId.ids[0]);  // Moved back
+    TEST_ASSERT_EQUAL_INT(0, app->currentId.ids[0]);
 
     destroyTestAppRenderer(app);
 }
@@ -499,7 +639,7 @@ void test_handleCtrlX_cut_object_element(void) {
 
     app->currentId.ids[0] = 1;
 
-    handleCtrlX(app);
+    handleCtrlX_element(app);
 
     TEST_ASSERT_EQUAL_INT(FFON_OBJECT, app->clipboard->type);
     TEST_ASSERT_EQUAL_STRING("myobj", app->clipboard->data.object->key);
@@ -511,7 +651,6 @@ void test_handleCtrlX_cut_object_element(void) {
 void test_handleCtrlX_cut_nested_element(void) {
     AppRenderer *app = createTestAppRenderer();
 
-    // Create: [{parent: ["child1", "child2", "child3"]}]
     app->ffon = malloc(sizeof(FfonElement*));
     app->ffon[0] = ffonElementCreateObject("parent");
     ffonObjectAddElement(app->ffon[0]->data.object, ffonElementCreateString("child1"));
@@ -519,18 +658,17 @@ void test_handleCtrlX_cut_nested_element(void) {
     ffonObjectAddElement(app->ffon[0]->data.object, ffonElementCreateString("child3"));
     app->ffonCount = 1;
 
-    // Navigate to child2 (id = [0, 1])
     app->currentId.depth = 2;
     app->currentId.ids[0] = 0;
     app->currentId.ids[1] = 1;
 
-    handleCtrlX(app);
+    handleCtrlX_element(app);
 
     TEST_ASSERT_EQUAL_STRING("child2", app->clipboard->data.string);
     TEST_ASSERT_EQUAL_INT(2, app->ffon[0]->data.object->count);
     TEST_ASSERT_EQUAL_STRING("child1", app->ffon[0]->data.object->elements[0]->data.string);
     TEST_ASSERT_EQUAL_STRING("child3", app->ffon[0]->data.object->elements[1]->data.string);
-    TEST_ASSERT_EQUAL_INT(0, app->currentId.ids[1]);  // Cursor moved back
+    TEST_ASSERT_EQUAL_INT(0, app->currentId.ids[1]);
 
     destroyTestAppRenderer(app);
 }
@@ -542,10 +680,10 @@ void test_handleCtrlX_cut_invalid_index_does_nothing(void) {
     app->ffon[0] = ffonElementCreateString("only");
     app->ffonCount = 1;
 
-    app->currentId.ids[0] = 5;  // Out of bounds
+    app->currentId.ids[0] = 5;
     app->needsRedraw = false;
 
-    handleCtrlX(app);
+    handleCtrlX_element(app);
 
     TEST_ASSERT_NULL(app->clipboard);
     TEST_ASSERT_EQUAL_INT(1, app->ffonCount);
@@ -555,7 +693,7 @@ void test_handleCtrlX_cut_invalid_index_does_nothing(void) {
 }
 
 /* ============================================
- * handleCtrlV (paste) tests
+ * handleCtrlV (paste) element tests
  * ============================================ */
 
 void test_handleCtrlV_paste_replaces_current_element(void) {
@@ -569,7 +707,7 @@ void test_handleCtrlV_paste_replaces_current_element(void) {
     app->clipboard = ffonElementCreateString("pasted");
     app->currentId.ids[0] = 0;
 
-    handleCtrlV(app);
+    handleCtrlV_element(app);
 
     TEST_ASSERT_EQUAL_STRING("pasted", app->ffon[0]->data.string);
     TEST_ASSERT_EQUAL_STRING("original2", app->ffon[1]->data.string);
@@ -589,7 +727,7 @@ void test_handleCtrlV_paste_object_element(void) {
     app->clipboard = ffonElementCreateObject("pastedobj");
     ffonObjectAddElement(app->clipboard->data.object, ffonElementCreateString("child"));
 
-    handleCtrlV(app);
+    handleCtrlV_element(app);
 
     TEST_ASSERT_EQUAL_INT(FFON_OBJECT, app->ffon[0]->type);
     TEST_ASSERT_EQUAL_STRING("pastedobj", app->ffon[0]->data.object->key);
@@ -607,7 +745,7 @@ void test_handleCtrlV_paste_without_clipboard_does_nothing(void) {
     app->clipboard = NULL;
     app->needsRedraw = false;
 
-    handleCtrlV(app);
+    handleCtrlV_element(app);
 
     TEST_ASSERT_EQUAL_STRING("original", app->ffon[0]->data.string);
     TEST_ASSERT_FALSE(app->needsRedraw);
@@ -618,7 +756,6 @@ void test_handleCtrlV_paste_without_clipboard_does_nothing(void) {
 void test_handleCtrlV_paste_into_nested_position(void) {
     AppRenderer *app = createTestAppRenderer();
 
-    // Create: [{parent: ["child1", "child2"]}]
     app->ffon = malloc(sizeof(FfonElement*));
     app->ffon[0] = ffonElementCreateObject("parent");
     ffonObjectAddElement(app->ffon[0]->data.object, ffonElementCreateString("child1"));
@@ -627,12 +764,11 @@ void test_handleCtrlV_paste_into_nested_position(void) {
 
     app->clipboard = ffonElementCreateString("pasted");
 
-    // Navigate to child2 (id = [0, 1])
     app->currentId.depth = 2;
     app->currentId.ids[0] = 0;
     app->currentId.ids[1] = 1;
 
-    handleCtrlV(app);
+    handleCtrlV_element(app);
 
     TEST_ASSERT_EQUAL_STRING("child1", app->ffon[0]->data.object->elements[0]->data.string);
     TEST_ASSERT_EQUAL_STRING("pasted", app->ffon[0]->data.object->elements[1]->data.string);
@@ -648,10 +784,10 @@ void test_handleCtrlV_paste_invalid_index_does_nothing(void) {
     app->ffonCount = 1;
 
     app->clipboard = ffonElementCreateString("pasted");
-    app->currentId.ids[0] = 5;  // Out of bounds
+    app->currentId.ids[0] = 5;
     app->needsRedraw = false;
 
-    handleCtrlV(app);
+    handleCtrlV_element(app);
 
     TEST_ASSERT_EQUAL_STRING("original", app->ffon[0]->data.string);
     TEST_ASSERT_FALSE(app->needsRedraw);
@@ -672,16 +808,14 @@ void test_clipboard_integration_copy_then_paste(void) {
     app->ffon[2] = ffonElementCreateString("other");
     app->ffonCount = 3;
 
-    // Copy from index 0
     app->currentId.ids[0] = 0;
-    handleCtrlC(app);
+    handleCtrlC_element(app);
 
-    // Paste to index 1
     app->currentId.ids[0] = 1;
-    handleCtrlV(app);
+    handleCtrlV_element(app);
 
     TEST_ASSERT_EQUAL_STRING("source", app->ffon[0]->data.string);
-    TEST_ASSERT_EQUAL_STRING("source", app->ffon[1]->data.string);  // Pasted
+    TEST_ASSERT_EQUAL_STRING("source", app->ffon[1]->data.string);
     TEST_ASSERT_EQUAL_STRING("other", app->ffon[2]->data.string);
     TEST_ASSERT_EQUAL_INT(3, app->ffonCount);
 
@@ -697,20 +831,17 @@ void test_clipboard_integration_cut_then_paste(void) {
     app->ffon[2] = ffonElementCreateString("target");
     app->ffonCount = 3;
 
-    // Cut from index 0
     app->currentId.ids[0] = 0;
-    handleCtrlX(app);
+    handleCtrlX_element(app);
 
-    // Now we have ["middle", "target"], cursor at 0
     TEST_ASSERT_EQUAL_INT(2, app->ffonCount);
     TEST_ASSERT_EQUAL_INT(0, app->currentId.ids[0]);
 
-    // Paste to index 1
     app->currentId.ids[0] = 1;
-    handleCtrlV(app);
+    handleCtrlV_element(app);
 
     TEST_ASSERT_EQUAL_STRING("middle", app->ffon[0]->data.string);
-    TEST_ASSERT_EQUAL_STRING("to-cut", app->ffon[1]->data.string);  // Pasted
+    TEST_ASSERT_EQUAL_STRING("to-cut", app->ffon[1]->data.string);
     TEST_ASSERT_EQUAL_INT(2, app->ffonCount);
 
     destroyTestAppRenderer(app);
@@ -725,21 +856,226 @@ void test_clipboard_integration_multiple_pastes(void) {
     app->ffon[2] = ffonElementCreateString("target2");
     app->ffonCount = 3;
 
-    // Copy from index 0
     app->currentId.ids[0] = 0;
-    handleCtrlC(app);
+    handleCtrlC_element(app);
 
-    // Paste to index 1
     app->currentId.ids[0] = 1;
-    handleCtrlV(app);
+    handleCtrlV_element(app);
 
-    // Paste to index 2
     app->currentId.ids[0] = 2;
-    handleCtrlV(app);
+    handleCtrlV_element(app);
 
     TEST_ASSERT_EQUAL_STRING("source", app->ffon[0]->data.string);
     TEST_ASSERT_EQUAL_STRING("source", app->ffon[1]->data.string);
     TEST_ASSERT_EQUAL_STRING("source", app->ffon[2]->data.string);
+
+    destroyTestAppRenderer(app);
+}
+
+/* ============================================
+ * Custom SDL fakes for text clipboard tests
+ * ============================================ */
+
+// Custom fake for SDL_SetClipboardText that captures the string content
+static char captured_clipboard_text[1024] = "";
+
+static bool custom_SDL_SetClipboardText(const char *text) {
+    if (text) {
+        strncpy(captured_clipboard_text, text, sizeof(captured_clipboard_text) - 1);
+        captured_clipboard_text[sizeof(captured_clipboard_text) - 1] = '\0';
+    }
+    return true;
+}
+
+// Custom fake for SDL_GetClipboardText that returns a strdup'd string
+static char *fake_clipboard_text = NULL;
+
+static char* custom_SDL_GetClipboardText(void) {
+    return fake_clipboard_text ? strdup(fake_clipboard_text) : NULL;
+}
+
+static bool custom_SDL_HasClipboardText(void) {
+    return fake_clipboard_text != NULL && fake_clipboard_text[0] != '\0';
+}
+
+// Custom SDL_free that uses regular free (since our mock GetClipboardText uses strdup)
+static void custom_SDL_free(void *ptr) {
+    free(ptr);
+}
+
+/* ============================================
+ * Text mode: handleCtrlC (copy) tests
+ * ============================================ */
+
+void test_text_handleCtrlC_copies_selection_to_system_clipboard(void) {
+    AppRenderer *app = createTestAppRendererWithTextBuffer("hello world");
+    app->currentCoordinate = COORDINATE_EDITOR_INSERT;
+    app->selectionAnchor = 0;
+    app->cursorPosition = 5;
+
+    captured_clipboard_text[0] = '\0';
+    SDL_SetClipboardText_fake.custom_fake = custom_SDL_SetClipboardText;
+
+    handleCtrlC_text(app);
+
+    TEST_ASSERT_EQUAL_INT(1, SDL_SetClipboardText_fake.call_count);
+    TEST_ASSERT_EQUAL_STRING("hello", captured_clipboard_text);
+    // Buffer unchanged
+    TEST_ASSERT_EQUAL_STRING("hello world", app->inputBuffer);
+    TEST_ASSERT_EQUAL_INT(11, app->inputBufferSize);
+    TEST_ASSERT_TRUE(app->needsRedraw);
+
+    destroyTestAppRenderer(app);
+}
+
+void test_text_handleCtrlC_no_selection_does_nothing(void) {
+    AppRenderer *app = createTestAppRendererWithTextBuffer("hello");
+    app->currentCoordinate = COORDINATE_EDITOR_INSERT;
+    app->selectionAnchor = -1;
+    app->cursorPosition = 3;
+
+    handleCtrlC_text(app);
+
+    TEST_ASSERT_EQUAL_INT(0, SDL_SetClipboardText_fake.call_count);
+
+    destroyTestAppRenderer(app);
+}
+
+/* ============================================
+ * Text mode: handleCtrlX (cut) tests
+ * ============================================ */
+
+void test_text_handleCtrlX_cuts_selection(void) {
+    AppRenderer *app = createTestAppRendererWithTextBuffer("hello world");
+    app->currentCoordinate = COORDINATE_EDITOR_INSERT;
+    app->selectionAnchor = 6;
+    app->cursorPosition = 11;
+
+    captured_clipboard_text[0] = '\0';
+    SDL_SetClipboardText_fake.custom_fake = custom_SDL_SetClipboardText;
+
+    handleCtrlX_text(app);
+
+    TEST_ASSERT_EQUAL_INT(1, SDL_SetClipboardText_fake.call_count);
+    TEST_ASSERT_EQUAL_STRING("world", captured_clipboard_text);
+    TEST_ASSERT_EQUAL_STRING("hello ", app->inputBuffer);
+    TEST_ASSERT_EQUAL_INT(6, app->inputBufferSize);
+    TEST_ASSERT_EQUAL_INT(6, app->cursorPosition);
+    TEST_ASSERT_TRUE(app->needsRedraw);
+
+    destroyTestAppRenderer(app);
+}
+
+void test_text_handleCtrlX_no_selection_does_nothing(void) {
+    AppRenderer *app = createTestAppRendererWithTextBuffer("hello");
+    app->currentCoordinate = COORDINATE_EDITOR_INSERT;
+    app->selectionAnchor = -1;
+    app->cursorPosition = 3;
+    app->needsRedraw = false;
+
+    handleCtrlX_text(app);
+
+    TEST_ASSERT_EQUAL_INT(0, SDL_SetClipboardText_fake.call_count);
+    TEST_ASSERT_EQUAL_STRING("hello", app->inputBuffer);
+    TEST_ASSERT_FALSE(app->needsRedraw);
+
+    destroyTestAppRenderer(app);
+}
+
+void test_text_handleCtrlX_cuts_middle_selection(void) {
+    AppRenderer *app = createTestAppRendererWithTextBuffer("abcdefgh");
+    app->currentCoordinate = COORDINATE_EDITOR_INSERT;
+    app->selectionAnchor = 2;
+    app->cursorPosition = 5;
+
+    captured_clipboard_text[0] = '\0';
+    SDL_SetClipboardText_fake.custom_fake = custom_SDL_SetClipboardText;
+
+    handleCtrlX_text(app);
+
+    TEST_ASSERT_EQUAL_STRING("cde", captured_clipboard_text);
+    TEST_ASSERT_EQUAL_STRING("abfgh", app->inputBuffer);
+    TEST_ASSERT_EQUAL_INT(5, app->inputBufferSize);
+    TEST_ASSERT_EQUAL_INT(2, app->cursorPosition);
+
+    destroyTestAppRenderer(app);
+}
+
+/* ============================================
+ * Text mode: handleCtrlV (paste) tests
+ * ============================================ */
+
+void test_text_handleCtrlV_pastes_at_cursor(void) {
+    AppRenderer *app = createTestAppRendererWithTextBuffer("hello");
+    app->currentCoordinate = COORDINATE_EDITOR_INSERT;
+    app->cursorPosition = 5;
+
+    fake_clipboard_text = " world";
+    SDL_GetClipboardText_fake.custom_fake = custom_SDL_GetClipboardText;
+    SDL_HasClipboardText_fake.custom_fake = custom_SDL_HasClipboardText;
+    SDL_free_fake.custom_fake = custom_SDL_free;
+
+    handleCtrlV_text(app);
+
+    TEST_ASSERT_EQUAL_STRING("hello world", app->inputBuffer);
+    TEST_ASSERT_EQUAL_INT(11, app->inputBufferSize);
+    TEST_ASSERT_EQUAL_INT(11, app->cursorPosition);
+    TEST_ASSERT_TRUE(app->needsRedraw);
+
+    destroyTestAppRenderer(app);
+}
+
+void test_text_handleCtrlV_pastes_at_beginning(void) {
+    AppRenderer *app = createTestAppRendererWithTextBuffer("world");
+    app->currentCoordinate = COORDINATE_EDITOR_INSERT;
+    app->cursorPosition = 0;
+
+    fake_clipboard_text = "hello ";
+    SDL_GetClipboardText_fake.custom_fake = custom_SDL_GetClipboardText;
+    SDL_HasClipboardText_fake.custom_fake = custom_SDL_HasClipboardText;
+    SDL_free_fake.custom_fake = custom_SDL_free;
+
+    handleCtrlV_text(app);
+
+    TEST_ASSERT_EQUAL_STRING("hello world", app->inputBuffer);
+    TEST_ASSERT_EQUAL_INT(11, app->inputBufferSize);
+    TEST_ASSERT_EQUAL_INT(6, app->cursorPosition);
+
+    destroyTestAppRenderer(app);
+}
+
+void test_text_handleCtrlV_replaces_selection(void) {
+    AppRenderer *app = createTestAppRendererWithTextBuffer("hello world");
+    app->currentCoordinate = COORDINATE_EDITOR_INSERT;
+    app->selectionAnchor = 6;
+    app->cursorPosition = 11;
+
+    fake_clipboard_text = "earth";
+    SDL_GetClipboardText_fake.custom_fake = custom_SDL_GetClipboardText;
+    SDL_HasClipboardText_fake.custom_fake = custom_SDL_HasClipboardText;
+    SDL_free_fake.custom_fake = custom_SDL_free;
+
+    handleCtrlV_text(app);
+
+    TEST_ASSERT_EQUAL_STRING("hello earth", app->inputBuffer);
+    TEST_ASSERT_EQUAL_INT(11, app->inputBufferSize);
+
+    destroyTestAppRenderer(app);
+}
+
+void test_text_handleCtrlV_no_clipboard_does_nothing(void) {
+    AppRenderer *app = createTestAppRendererWithTextBuffer("hello");
+    app->currentCoordinate = COORDINATE_EDITOR_INSERT;
+    app->cursorPosition = 5;
+    app->needsRedraw = false;
+
+    fake_clipboard_text = NULL;
+    SDL_HasClipboardText_fake.custom_fake = custom_SDL_HasClipboardText;
+
+    handleCtrlV_text(app);
+
+    TEST_ASSERT_EQUAL_STRING("hello", app->inputBuffer);
+    TEST_ASSERT_FALSE(app->needsRedraw);
 
     destroyTestAppRenderer(app);
 }
@@ -751,7 +1087,7 @@ void test_clipboard_integration_multiple_pastes(void) {
 int main(void) {
     UNITY_BEGIN();
 
-    // handleCtrlC (copy) tests
+    // handleCtrlC (copy) element tests
     RUN_TEST(test_handleCtrlC_copy_string_element);
     RUN_TEST(test_handleCtrlC_copy_second_element);
     RUN_TEST(test_handleCtrlC_copy_object_element);
@@ -759,7 +1095,7 @@ int main(void) {
     RUN_TEST(test_handleCtrlC_copy_replaces_previous_clipboard);
     RUN_TEST(test_handleCtrlC_copy_invalid_index_does_nothing);
 
-    // handleCtrlX (cut) tests
+    // handleCtrlX (cut) element tests
     RUN_TEST(test_handleCtrlX_cut_removes_element);
     RUN_TEST(test_handleCtrlX_cut_first_element_cursor_stays);
     RUN_TEST(test_handleCtrlX_cut_last_element);
@@ -767,7 +1103,7 @@ int main(void) {
     RUN_TEST(test_handleCtrlX_cut_nested_element);
     RUN_TEST(test_handleCtrlX_cut_invalid_index_does_nothing);
 
-    // handleCtrlV (paste) tests
+    // handleCtrlV (paste) element tests
     RUN_TEST(test_handleCtrlV_paste_replaces_current_element);
     RUN_TEST(test_handleCtrlV_paste_object_element);
     RUN_TEST(test_handleCtrlV_paste_without_clipboard_does_nothing);
@@ -778,6 +1114,21 @@ int main(void) {
     RUN_TEST(test_clipboard_integration_copy_then_paste);
     RUN_TEST(test_clipboard_integration_cut_then_paste);
     RUN_TEST(test_clipboard_integration_multiple_pastes);
+
+    // Text mode: copy tests
+    RUN_TEST(test_text_handleCtrlC_copies_selection_to_system_clipboard);
+    RUN_TEST(test_text_handleCtrlC_no_selection_does_nothing);
+
+    // Text mode: cut tests
+    RUN_TEST(test_text_handleCtrlX_cuts_selection);
+    RUN_TEST(test_text_handleCtrlX_no_selection_does_nothing);
+    RUN_TEST(test_text_handleCtrlX_cuts_middle_selection);
+
+    // Text mode: paste tests
+    RUN_TEST(test_text_handleCtrlV_pastes_at_cursor);
+    RUN_TEST(test_text_handleCtrlV_pastes_at_beginning);
+    RUN_TEST(test_text_handleCtrlV_replaces_selection);
+    RUN_TEST(test_text_handleCtrlV_no_clipboard_does_nothing);
 
     return UNITY_END();
 }

@@ -100,8 +100,8 @@ struct actionHandlerState {
 typedef struct {
     IdArray id;
     Task task;
-    char *line;
-    bool isKey;
+    FfonElement *prevElement;  // Element state before operation (NULL for insert/append)
+    FfonElement *newElement;   // Element state after operation (NULL for delete/cut)
 } UndoEntry;
 
 // List item for right panel
@@ -216,7 +216,7 @@ FfonElement* parseJsonValue(json_object *jobj);
 void updateState(AppRenderer *appRenderer, Task task, History history);
 void updateIds(AppRenderer *appRenderer, bool isKey, Task task, History history);
 void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task task, History history);
-void updateHistory(AppRenderer *appRenderer, Task task, bool isKey, const char *line, History history);
+void updateHistory(AppRenderer *appRenderer, Task task, const IdArray *id, FfonElement *prevElement, FfonElement *newElement, History history);
 
 // Event handling
 void handleKeys(AppRenderer *appRenderer, SDL_Event *event);
