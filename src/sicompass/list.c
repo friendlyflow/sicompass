@@ -7,7 +7,8 @@
 void clearListCurrentLayer(AppRenderer *appRenderer) {
     if (appRenderer->totalListCurrentLayer) {
         for (int i = 0; i < appRenderer->totalListCount; i++) {
-            free(appRenderer->totalListCurrentLayer[i].value);
+            free(appRenderer->totalListCurrentLayer[i].label);
+            free(appRenderer->totalListCurrentLayer[i].data);
         }
         free(appRenderer->totalListCurrentLayer);
         appRenderer->totalListCurrentLayer = NULL;
@@ -58,7 +59,7 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
                 snprintf(prefixed, sizeof(prefixed), "%s %s",
                          hasTags ? "-i" : "-",
                          stripped ? stripped : elem->data.string);
-                appRenderer->totalListCurrentLayer[appRenderer->totalListCount].value =
+                appRenderer->totalListCurrentLayer[appRenderer->totalListCount].label =
                     strdup(prefixed);
                 free(stripped);
             } else {
@@ -69,7 +70,7 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
                 snprintf(prefixed, sizeof(prefixed), "%s %s",
                          hasTags ? "+i" : "+",
                          stripped ? stripped : elem->data.object->key);
-                appRenderer->totalListCurrentLayer[appRenderer->totalListCount].value =
+                appRenderer->totalListCurrentLayer[appRenderer->totalListCount].label =
                     strdup(prefixed);
                 free(stripped);
             }
@@ -80,28 +81,29 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
 
     } else if (appRenderer->currentCoordinate == COORDINATE_COMMAND) {
         if (appRenderer->currentCommand == COMMAND_OPEN_WITH) {
-            // List executables from system PATH
-            int execCount = 0;
-            char **executables = platformGetPathExecutables(&execCount);
-            if (!executables || execCount == 0) {
-                platformFreePathExecutables(executables, execCount);
+            // List installed applications
+            int appCount = 0;
+            PlatformApplication *apps = platformGetApplications(&appCount);
+            if (!apps || appCount == 0) {
+                platformFreeApplications(apps, appCount);
                 return;
             }
 
-            appRenderer->totalListCurrentLayer = calloc(execCount, sizeof(ListItem));
+            appRenderer->totalListCurrentLayer = calloc(appCount, sizeof(ListItem));
             if (!appRenderer->totalListCurrentLayer) {
-                platformFreePathExecutables(executables, execCount);
+                platformFreeApplications(apps, appCount);
                 return;
             }
 
-            for (int i = 0; i < execCount; i++) {
+            for (int i = 0; i < appCount; i++) {
                 appRenderer->totalListCurrentLayer[i].id.depth = 1;
                 appRenderer->totalListCurrentLayer[i].id.ids[0] = i;
-                appRenderer->totalListCurrentLayer[i].value = strdup(executables[i]);
+                appRenderer->totalListCurrentLayer[i].label = strdup(apps[i].name);
+                appRenderer->totalListCurrentLayer[i].data = strdup(apps[i].exec);
                 appRenderer->totalListCount++;
             }
 
-            platformFreePathExecutables(executables, execCount);
+            platformFreeApplications(apps, appCount);
         } else {
             // List available commands
             const char *commands[] = {
@@ -119,7 +121,7 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
             for (int i = 0; i < numCommands; i++) {
                 appRenderer->totalListCurrentLayer[i].id.depth = 1;
                 appRenderer->totalListCurrentLayer[i].id.ids[0] = i;
-                appRenderer->totalListCurrentLayer[i].value = strdup(commands[i]);
+                appRenderer->totalListCurrentLayer[i].label = strdup(commands[i]);
                 appRenderer->totalListCount++;
             }
         }
@@ -149,11 +151,13 @@ void populateListCurrentLayer(AppRenderer *appRenderer, const char *searchString
     appRenderer->filteredListCount = 0;
 
     for (int i = 0; i < appRenderer->totalListCount; i++) {
-        if (strstr(appRenderer->totalListCurrentLayer[i].value, searchString) != NULL) {
+        if (strstr(appRenderer->totalListCurrentLayer[i].label, searchString) != NULL) {
             idArrayCopy(&appRenderer->filteredListCurrentLayer[appRenderer->filteredListCount].id,
                          &appRenderer->totalListCurrentLayer[i].id);
-            appRenderer->filteredListCurrentLayer[appRenderer->filteredListCount].value =
-                appRenderer->totalListCurrentLayer[i].value; // Share pointer
+            appRenderer->filteredListCurrentLayer[appRenderer->filteredListCount].label =
+                appRenderer->totalListCurrentLayer[i].label; // Share pointer
+            appRenderer->filteredListCurrentLayer[appRenderer->filteredListCount].data =
+                appRenderer->totalListCurrentLayer[i].data; // Share pointer
             appRenderer->filteredListCount++;
         }
     }

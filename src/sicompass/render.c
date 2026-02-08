@@ -507,7 +507,7 @@ void renderInteraction(SiCompassApplication *app) {
         int itemX = 50 + indent;
 
         // Determine what text to display
-        const char *displayText = list[i].value;
+        const char *displayText = list[i].label;
 
         // In insert mode, show inputBuffer for selected item
         if (isSelected && inInsertMode) {
@@ -556,7 +556,7 @@ void renderSimpleSearch(SiCompassApplication *app) {
         // renderText(app, indicator, 50 + indent, itemYPos, COLOR_ORANGE, false);
 
         // Render text (may be multiple lines)
-        int textLines = renderText(app, list[i].value, 50 + indent, itemYPos, COLOR_TEXT, isSelected);
+        int textLines = renderText(app, list[i].label, 50 + indent, itemYPos, COLOR_TEXT, isSelected);
 
         yPos += lineHeight * textLines;
     }

@@ -140,120 +140,299 @@ bool platformIsWindows(void) {
 #endif
 }
 
-char** platformGetPathExecutables(int *outCount) {
+PlatformApplication* platformGetApplications(int *outCount) {
     *outCount = 0;
 
-    const char *pathEnv = getenv("PATH");
-    if (!pathEnv || pathEnv[0] == '\0') return NULL;
-
-    char *pathCopy = strdup(pathEnv);
-    if (!pathCopy) return NULL;
-
-    int capacity = 256;
+    int capacity = 128;
     int count = 0;
-    char **result = malloc(capacity * sizeof(char*));
-    if (!result) {
-        free(pathCopy);
+    PlatformApplication *result = malloc(capacity * sizeof(PlatformApplication));
+    if (!result) return NULL;
+
+#if defined(PLATFORM_WINDOWS)
+    // Windows: enumerate App Paths registry key
+    HKEY hKey;
+    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE,
+                      "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths",
+                      0, KEY_READ, &hKey) != ERROR_SUCCESS) {
+        free(result);
         return NULL;
     }
 
-#if defined(PLATFORM_WINDOWS)
-    const char *delim = ";";
-#else
-    const char *delim = ":";
-#endif
+    char subKeyName[256];
+    DWORD subKeyLen;
+    for (DWORD idx = 0; ; idx++) {
+        subKeyLen = sizeof(subKeyName);
+        if (RegEnumKeyExA(hKey, idx, subKeyName, &subKeyLen,
+                          NULL, NULL, NULL, NULL) != ERROR_SUCCESS) break;
 
-    char *dir = strtok(pathCopy, delim);
-    while (dir != NULL) {
-#if defined(PLATFORM_WINDOWS)
-        char searchPath[4096];
-        snprintf(searchPath, sizeof(searchPath), "%s\\*", dir);
-        WIN32_FIND_DATAA findData;
-        HANDLE hFind = FindFirstFileA(searchPath, &findData);
-        if (hFind != INVALID_HANDLE_VALUE) {
-            do {
-                if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
-                const char *name = findData.cFileName;
-                size_t len = strlen(name);
-                if (len > 4) {
-                    const char *ext = name + len - 4;
-                    if (_stricmp(ext, ".exe") != 0 &&
-                        _stricmp(ext, ".bat") != 0 &&
-                        _stricmp(ext, ".cmd") != 0) {
-                        continue;
-                    }
-                } else {
-                    continue;
-                }
-
-                bool duplicate = false;
-                for (int i = 0; i < count; i++) {
-                    if (_stricmp(result[i], name) == 0) {
-                        duplicate = true;
-                        break;
-                    }
-                }
-                if (duplicate) continue;
-
-                if (count >= capacity) {
-                    capacity *= 2;
-                    char **newResult = realloc(result, capacity * sizeof(char*));
-                    if (!newResult) break;
-                    result = newResult;
-                }
-                result[count++] = _strdup(name);
-            } while (FindNextFileA(hFind, &findData) != 0);
-            FindClose(hFind);
-        }
-#else
-        DIR *d = opendir(dir);
-        if (d) {
-            struct dirent *entry;
-            while ((entry = readdir(d)) != NULL) {
-                if (entry->d_name[0] == '.') continue;
-
-                char fullpath[4096];
-                snprintf(fullpath, sizeof(fullpath), "%s/%s", dir, entry->d_name);
-
-                struct stat st;
-                if (stat(fullpath, &st) != 0) continue;
-                if (S_ISDIR(st.st_mode)) continue;
-                if (!(st.st_mode & S_IXUSR)) continue;
-
-                bool duplicate = false;
-                for (int i = 0; i < count; i++) {
-                    if (strcmp(result[i], entry->d_name) == 0) {
-                        duplicate = true;
-                        break;
-                    }
-                }
-                if (duplicate) continue;
-
-                if (count >= capacity) {
-                    capacity *= 2;
-                    char **newResult = realloc(result, capacity * sizeof(char*));
-                    if (!newResult) break;
-                    result = newResult;
-                }
-                result[count++] = strdup(entry->d_name);
+        // Display name: strip .exe extension
+        char displayName[256];
+        strncpy(displayName, subKeyName, sizeof(displayName) - 1);
+        displayName[sizeof(displayName) - 1] = '\0';
+        size_t nameLen = strlen(displayName);
+        if (nameLen > 4) {
+            const char *ext = displayName + nameLen - 4;
+            if (_stricmp(ext, ".exe") == 0) {
+                displayName[nameLen - 4] = '\0';
             }
-            closedir(d);
         }
-#endif
-        dir = strtok(NULL, delim);
+
+        // Deduplicate by display name
+        bool duplicate = false;
+        for (int i = 0; i < count; i++) {
+            if (_stricmp(result[i].name, displayName) == 0) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (duplicate) continue;
+
+        if (count >= capacity) {
+            capacity *= 2;
+            PlatformApplication *newResult = realloc(result, capacity * sizeof(PlatformApplication));
+            if (!newResult) break;
+            result = newResult;
+        }
+
+        result[count].name = _strdup(displayName);
+        result[count].exec = _strdup(subKeyName);
+        count++;
     }
 
-    free(pathCopy);
+    RegCloseKey(hKey);
+
+#elif defined(PLATFORM_MACOS)
+    // macOS: scan /Applications and ~/Applications for .app bundles
+    const char *appDirs[3];
+    int numDirs = 0;
+
+    appDirs[numDirs++] = "/Applications";
+
+    char userApps[4096];
+    const char *home = getenv("HOME");
+    if (home && home[0] != '\0') {
+        snprintf(userApps, sizeof(userApps), "%s/Applications", home);
+        appDirs[numDirs++] = userApps;
+    }
+
+    for (int d = 0; d < numDirs; d++) {
+        DIR *dir = opendir(appDirs[d]);
+        if (!dir) continue;
+
+        struct dirent *entry;
+        while ((entry = readdir(dir)) != NULL) {
+            if (entry->d_name[0] == '.') continue;
+
+            size_t nameLen = strlen(entry->d_name);
+            bool isApp = (nameLen > 4 && strcmp(entry->d_name + nameLen - 4, ".app") == 0);
+
+            if (isApp) {
+                // Display name: strip .app suffix
+                char displayName[256];
+                size_t dispLen = nameLen - 4;
+                if (dispLen >= sizeof(displayName)) dispLen = sizeof(displayName) - 1;
+                memcpy(displayName, entry->d_name, dispLen);
+                displayName[dispLen] = '\0';
+
+                // Deduplicate
+                bool duplicate = false;
+                for (int i = 0; i < count; i++) {
+                    if (strcmp(result[i].name, displayName) == 0) {
+                        duplicate = true;
+                        break;
+                    }
+                }
+                if (duplicate) continue;
+
+                if (count >= capacity) {
+                    capacity *= 2;
+                    PlatformApplication *newResult = realloc(result, capacity * sizeof(PlatformApplication));
+                    if (!newResult) { closedir(dir); goto done; }
+                    result = newResult;
+                }
+
+                result[count].name = strdup(displayName);
+                result[count].exec = strdup(displayName);
+                count++;
+            } else {
+                // Check subdirectories (e.g., /Applications/Utilities/) one level deep
+                char subPath[4096];
+                snprintf(subPath, sizeof(subPath), "%s/%s", appDirs[d], entry->d_name);
+
+                struct stat st;
+                if (stat(subPath, &st) != 0 || !S_ISDIR(st.st_mode)) continue;
+
+                DIR *subDir = opendir(subPath);
+                if (!subDir) continue;
+
+                struct dirent *subEntry;
+                while ((subEntry = readdir(subDir)) != NULL) {
+                    if (subEntry->d_name[0] == '.') continue;
+                    size_t subLen = strlen(subEntry->d_name);
+                    if (subLen <= 4 || strcmp(subEntry->d_name + subLen - 4, ".app") != 0) continue;
+
+                    char displayName[256];
+                    size_t dispLen = subLen - 4;
+                    if (dispLen >= sizeof(displayName)) dispLen = sizeof(displayName) - 1;
+                    memcpy(displayName, subEntry->d_name, dispLen);
+                    displayName[dispLen] = '\0';
+
+                    bool duplicate = false;
+                    for (int i = 0; i < count; i++) {
+                        if (strcmp(result[i].name, displayName) == 0) {
+                            duplicate = true;
+                            break;
+                        }
+                    }
+                    if (duplicate) continue;
+
+                    if (count >= capacity) {
+                        capacity *= 2;
+                        PlatformApplication *newResult = realloc(result, capacity * sizeof(PlatformApplication));
+                        if (!newResult) { closedir(subDir); closedir(dir); goto done; }
+                        result = newResult;
+                    }
+
+                    result[count].name = strdup(displayName);
+                    result[count].exec = strdup(displayName);
+                    count++;
+                }
+                closedir(subDir);
+            }
+        }
+        closedir(dir);
+    }
+
+#else
+    // Linux: parse .desktop files from XDG application directories
+    const char *desktopDirs[3];
+    int numDirs = 0;
+
+    desktopDirs[numDirs++] = "/usr/share/applications";
+    desktopDirs[numDirs++] = "/usr/local/share/applications";
+
+    char userDesktop[4096];
+    const char *home = getenv("HOME");
+    if (home && home[0] != '\0') {
+        snprintf(userDesktop, sizeof(userDesktop), "%s/.local/share/applications", home);
+        desktopDirs[numDirs++] = userDesktop;
+    }
+
+    for (int d = 0; d < numDirs; d++) {
+        DIR *dir = opendir(desktopDirs[d]);
+        if (!dir) continue;
+
+        struct dirent *entry;
+        while ((entry = readdir(dir)) != NULL) {
+            size_t nameLen = strlen(entry->d_name);
+            if (nameLen <= 8 || strcmp(entry->d_name + nameLen - 8, ".desktop") != 0) continue;
+
+            char filepath[4096];
+            snprintf(filepath, sizeof(filepath), "%s/%s", desktopDirs[d], entry->d_name);
+
+            FILE *f = fopen(filepath, "r");
+            if (!f) continue;
+
+            char appName[256] = {0};
+            char appExec[4096] = {0};
+            bool noDisplay = false;
+            bool hidden = false;
+            bool typeApp = false;
+            bool inDesktopEntry = false;
+            char line[4096];
+
+            while (fgets(line, sizeof(line), f)) {
+                // Strip trailing newline
+                size_t len = strlen(line);
+                while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
+                    line[--len] = '\0';
+
+                // Track sections
+                if (line[0] == '[') {
+                    inDesktopEntry = (strcmp(line, "[Desktop Entry]") == 0);
+                    continue;
+                }
+                if (!inDesktopEntry) continue;
+
+                if (strncmp(line, "Name=", 5) == 0 && appName[0] == '\0') {
+                    strncpy(appName, line + 5, sizeof(appName) - 1);
+                } else if (strncmp(line, "Exec=", 5) == 0 && appExec[0] == '\0') {
+                    strncpy(appExec, line + 5, sizeof(appExec) - 1);
+                } else if (strncmp(line, "NoDisplay=", 10) == 0) {
+                    noDisplay = (strcmp(line + 10, "true") == 0);
+                } else if (strncmp(line, "Hidden=", 7) == 0) {
+                    hidden = (strcmp(line + 7, "true") == 0);
+                } else if (strncmp(line, "Type=", 5) == 0) {
+                    typeApp = (strcmp(line + 5, "Application") == 0);
+                }
+            }
+            fclose(f);
+
+            if (!typeApp || noDisplay || hidden || appName[0] == '\0' || appExec[0] == '\0')
+                continue;
+
+            // Strip field codes (%f, %F, %u, %U, %d, %D, %n, %N, %i, %c, %k, %v, %m) from exec
+            char cleanExec[4096];
+            int ci = 0;
+            for (int i = 0; appExec[i] != '\0' && ci < (int)sizeof(cleanExec) - 1; i++) {
+                if (appExec[i] == '%' && appExec[i + 1] != '\0') {
+                    char code = appExec[i + 1];
+                    if (code == 'f' || code == 'F' || code == 'u' || code == 'U' ||
+                        code == 'd' || code == 'D' || code == 'n' || code == 'N' ||
+                        code == 'i' || code == 'c' || code == 'k' || code == 'v' ||
+                        code == 'm') {
+                        i++; // Skip the code character
+                        // Also skip trailing space
+                        if (appExec[i + 1] == ' ') i++;
+                        continue;
+                    }
+                }
+                cleanExec[ci++] = appExec[i];
+            }
+            cleanExec[ci] = '\0';
+
+            // Trim trailing whitespace
+            while (ci > 0 && cleanExec[ci - 1] == ' ') cleanExec[--ci] = '\0';
+
+            if (cleanExec[0] == '\0') continue;
+
+            // Deduplicate by exec command
+            bool duplicate = false;
+            for (int i = 0; i < count; i++) {
+                if (strcmp(result[i].exec, cleanExec) == 0) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (duplicate) continue;
+
+            if (count >= capacity) {
+                capacity *= 2;
+                PlatformApplication *newResult = realloc(result, capacity * sizeof(PlatformApplication));
+                if (!newResult) { closedir(dir); goto done; }
+                result = newResult;
+            }
+
+            result[count].name = strdup(appName);
+            result[count].exec = strdup(cleanExec);
+            count++;
+        }
+        closedir(dir);
+    }
+#endif
+
+done:
     *outCount = count;
     return result;
 }
 
-void platformFreePathExecutables(char **executables, int count) {
-    if (!executables) return;
+void platformFreeApplications(PlatformApplication *apps, int count) {
+    if (!apps) return;
     for (int i = 0; i < count; i++) {
-        free(executables[i]);
+        free(apps[i].name);
+        free(apps[i].exec);
     }
-    free(executables);
+    free(apps);
 }
 
 bool platformOpenWith(const char *program, const char *filePath) {

@@ -109,7 +109,8 @@ typedef struct {
 // List item for right panel
 typedef struct {
     IdArray id;
-    char *value;
+    char *label;
+    char *data;
 } ListItem;
 
 // Main application state

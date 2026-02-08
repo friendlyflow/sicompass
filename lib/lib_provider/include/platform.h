@@ -49,18 +49,29 @@ const char* platformGetPathSeparator(void);
 bool platformIsWindows(void);
 
 /**
- * Get a list of executable program names found in the system PATH.
- *
- * @param outCount Output parameter for the number of programs found
- * @return Array of newly allocated strings (caller must free via platformFreePathExecutables),
- *         or NULL on failure
+ * An installed application with display name and executable command.
  */
-char** platformGetPathExecutables(int *outCount);
+typedef struct {
+    char *name;  // Display name (e.g., "Firefox Web Browser")
+    char *exec;  // Command to execute (e.g., "firefox")
+} PlatformApplication;
 
 /**
- * Free an array of strings returned by platformGetPathExecutables.
+ * Get a list of installed applications.
+ * - Linux: parses .desktop files from XDG application directories
+ * - macOS: scans /Applications and ~/Applications for .app bundles
+ * - Windows: enumerates App Paths registry key
+ *
+ * @param outCount Output parameter for the number of applications found
+ * @return Array of PlatformApplication (caller must free via platformFreeApplications),
+ *         or NULL on failure
  */
-void platformFreePathExecutables(char **executables, int count);
+PlatformApplication* platformGetApplications(int *outCount);
+
+/**
+ * Free an array returned by platformGetApplications.
+ */
+void platformFreeApplications(PlatformApplication *apps, int count);
 
 /**
  * Open a file with a specific program.

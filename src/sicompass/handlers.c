@@ -312,7 +312,9 @@ void handleEnter(AppRenderer *appRenderer, History history) {
         if (appRenderer->listIndex >= 0 && appRenderer->listIndex < count) {
             if (appRenderer->currentCommand == COMMAND_OPEN_WITH) {
                 // Open file with selected program
-                const char *program = list[appRenderer->listIndex].value;
+                const char *program = list[appRenderer->listIndex].data ?
+                                     list[appRenderer->listIndex].data :
+                                     list[appRenderer->listIndex].label;
                 platformOpenWith(program, appRenderer->openWithFilePath);
                 appRenderer->currentCommand = COMMAND_NONE;
                 appRenderer->currentCoordinate = appRenderer->previousCoordinate;
@@ -323,7 +325,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                 appRenderer->needsRedraw = true;
             } else {
                 // Execute selected command
-                const char *cmd = list[appRenderer->listIndex].value;
+                const char *cmd = list[appRenderer->listIndex].label;
                 if (strcmp(cmd, "editor mode") == 0) {
                     appRenderer->currentCommand = COMMAND_EDITOR_MODE;
                 } else if (strcmp(cmd, "operator mode") == 0) {
@@ -332,7 +334,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                     appRenderer->currentCommand = COMMAND_CREATE_DIRECTORY;
                 } else if (strcmp(cmd, "create file") == 0) {
                     appRenderer->currentCommand = COMMAND_CREATE_FILE;
-                } else if (strcmp(cmd, "open with") == 0) {
+                } else if (strcmp(cmd, "open file with") == 0) {
                     appRenderer->currentCommand = COMMAND_OPEN_WITH;
                 }
                 handleCommand(appRenderer);
