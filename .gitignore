@@ -4,3 +4,4 @@ build
 .vscode
 PLAN.md
 *.spv
+.claude
