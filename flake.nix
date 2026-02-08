@@ -112,6 +112,7 @@
               uthash
               json_c
               sdl3
+              utf8proc
               # AccessKit for accessibility
               accesskit-c
               # Runtime dependency for script providers (e.g., tutorial)
@@ -167,6 +168,7 @@
               uthash
               json_c
               sdl3
+              utf8proc
               cppcheck
               flawfinder
               # AccessKit for accessibility

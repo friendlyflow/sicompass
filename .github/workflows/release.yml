@@ -63,6 +63,7 @@ jobs:
             libxcb-icccm4-dev \
             libxcb-image0-dev \
             libxcb-shm0-dev \
+            libutf8proc-dev \
             cmake
 
       - name: Install Meson and Ninja
