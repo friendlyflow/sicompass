@@ -79,7 +79,12 @@ void appRendererDestroy(AppRenderer *appRenderer) {
 
     // Free undo history
     for (int i = 0; i < appRenderer->undoHistoryCount; i++) {
-        free(appRenderer->undoHistory[i].line);
+        if (appRenderer->undoHistory[i].prevElement) {
+            ffonElementDestroy(appRenderer->undoHistory[i].prevElement);
+        }
+        if (appRenderer->undoHistory[i].newElement) {
+            ffonElementDestroy(appRenderer->undoHistory[i].newElement);
+        }
     }
     free(appRenderer->undoHistory);
 

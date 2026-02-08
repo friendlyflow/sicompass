@@ -168,25 +168,16 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
     else if (ctrl && shift && !alt && key == SDLK_Z) {
         handleHistoryAction(appRenderer, HISTORY_REDO);
     }
-    // Ctrl+X (cut)
-    else if (ctrl && !shift && !alt && key == SDLK_X &&
-             appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT &&
-             appRenderer->currentCoordinate != COORDINATE_OPERATOR_INSERT &&
-             appRenderer->currentCoordinate != COORDINATE_OPERATOR_GENERAL) {
+    // Ctrl+X (cut) - mode-aware: text in insert/search/command, elements in editor general
+    else if (ctrl && !shift && !alt && key == SDLK_X) {
         handleCtrlX(appRenderer);
     }
-    // Ctrl+C (copy)
-    else if (ctrl && !shift && !alt && key == SDLK_C &&
-             appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT &&
-             appRenderer->currentCoordinate != COORDINATE_OPERATOR_INSERT &&
-             appRenderer->currentCoordinate != COORDINATE_OPERATOR_GENERAL) {
+    // Ctrl+C (copy) - mode-aware: text in insert/search/command, elements in editor general
+    else if (ctrl && !shift && !alt && key == SDLK_C) {
         handleCtrlC(appRenderer);
     }
-    // Ctrl+V (paste)
-    else if (ctrl && !shift && !alt && key == SDLK_V &&
-             appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT &&
-             appRenderer->currentCoordinate != COORDINATE_OPERATOR_INSERT &&
-             appRenderer->currentCoordinate != COORDINATE_OPERATOR_GENERAL) {
+    // Ctrl+V (paste) - mode-aware: text in insert/search/command, elements in editor general
+    else if (ctrl && !shift && !alt && key == SDLK_V) {
         handleCtrlV(appRenderer);
     }
     // Ctrl+F (find)

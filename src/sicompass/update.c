@@ -26,33 +26,42 @@ void updateState(AppRenderer *appRenderer, Task task, History history) {
     for (int i = 0; i < appRenderer->currentId.depth; i++) printf("%d ", appRenderer->currentId.ids[i]);
     printf("\n");
 
-    // Get current line
+    // Capture element BEFORE modification for undo history
+    FfonElement *prevElement = NULL;
+    IdArray historyId;
+    idArrayCopy(&historyId, &appRenderer->currentId);
+
+    if (history == HISTORY_NONE &&
+        (task == TASK_DELETE || task == TASK_INPUT)) {
+        int count;
+        FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId, &count);
+        if (arr && count > 0) {
+            int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+            if (idx >= 0 && idx < count) {
+                prevElement = ffonElementClone(arr[idx]);
+            }
+        }
+    }
+
+    // Get current line (still needed for updateFfon/updateIds)
     char line[MAX_LINE_LENGTH] = "";
     bool currentElemIsObject = false;
 
-    if (history == HISTORY_UNDO || history == HISTORY_REDO) {
-        if (appRenderer->undoPosition > 0 && appRenderer->undoPosition <= appRenderer->undoHistoryCount) {
-            strncpy(line, appRenderer->undoHistory[appRenderer->undoHistoryCount - appRenderer->undoPosition].line,
-                   MAX_LINE_LENGTH - 1);
-        }
+    if (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+        appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT) {
+        strncpy(line, appRenderer->inputBuffer, MAX_LINE_LENGTH - 1);
     } else {
-        // Get line from current element or input buffer
-        if (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
-            appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT) {
-            strncpy(line, appRenderer->inputBuffer, MAX_LINE_LENGTH - 1);
-        } else {
-            int count;
-            FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId, &count);
-            if (arr && count > 0) {
-                int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
-                if (idx >= 0 && idx < count) {
-                    const FfonElement *elem = arr[idx];
-                    if (elem->type == FFON_STRING) {
-                        strncpy(line, elem->data.string, MAX_LINE_LENGTH - 1);
-                    } else {
-                        strncpy(line, elem->data.object->key, MAX_LINE_LENGTH - 1);
-                        currentElemIsObject = true;
-                    }
+        int count;
+        FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId, &count);
+        if (arr && count > 0) {
+            int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+            if (idx >= 0 && idx < count) {
+                const FfonElement *elem = arr[idx];
+                if (elem->type == FFON_STRING) {
+                    strncpy(line, elem->data.string, MAX_LINE_LENGTH - 1);
+                } else {
+                    strncpy(line, elem->data.object->key, MAX_LINE_LENGTH - 1);
+                    currentElemIsObject = true;
                 }
             }
         }
@@ -63,7 +72,33 @@ void updateState(AppRenderer *appRenderer, Task task, History history) {
     bool isKey = isLineKey(line) || currentElemIsObject;
     updateIds(appRenderer, isKey, task, history);
     updateFfon(appRenderer, line, isKey, task, history);
-    updateHistory(appRenderer, task, isKey, line, history);
+
+    // Capture element AFTER modification for undo history
+    FfonElement *newElement = NULL;
+    if (history == HISTORY_NONE &&
+        (task == TASK_APPEND || task == TASK_APPEND_APPEND ||
+         task == TASK_INSERT || task == TASK_INSERT_INSERT ||
+         task == TASK_INPUT)) {
+        int count;
+        FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId, &count);
+        if (arr && count > 0) {
+            int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+            if (idx >= 0 && idx < count) {
+                newElement = ffonElementClone(arr[idx]);
+            }
+        }
+    }
+
+    // For APPEND/INSERT, the history id is the new element's position (currentId)
+    // For DELETE, the history id is the original position (captured before updateIds)
+    // For INPUT, position doesn't change so either works
+    const IdArray *recordId = (task == TASK_DELETE) ? &historyId : &appRenderer->currentId;
+    updateHistory(appRenderer, task, recordId, prevElement, newElement, history);
+
+    // Clean up local clones (updateHistory clones them internally)
+    if (prevElement) ffonElementDestroy(prevElement);
+    if (newElement) ffonElementDestroy(newElement);
+
     createListCurrentLayer(appRenderer);
 }
 
@@ -586,28 +621,99 @@ void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task tas
     printf("\n");
 }
 
-void updateHistory(AppRenderer *appRenderer, Task task, bool isKey, const char *line, History history) {
+void updateHistory(AppRenderer *appRenderer, Task task, const IdArray *id, FfonElement *prevElement, FfonElement *newElement, History history) {
     if (history != HISTORY_NONE) return;
 
     if (task == TASK_APPEND || task == TASK_APPEND_APPEND ||
         task == TASK_INSERT || task == TASK_INSERT_INSERT ||
-        task == TASK_DELETE || task == TASK_INPUT) {
+        task == TASK_DELETE || task == TASK_INPUT ||
+        task == TASK_CUT || task == TASK_PASTE) {
+
+        // Truncate redo entries beyond current position
+        if (appRenderer->undoPosition > 0) {
+            int newCount = appRenderer->undoHistoryCount - appRenderer->undoPosition;
+            for (int i = newCount; i < appRenderer->undoHistoryCount; i++) {
+                if (appRenderer->undoHistory[i].prevElement) {
+                    ffonElementDestroy(appRenderer->undoHistory[i].prevElement);
+                    appRenderer->undoHistory[i].prevElement = NULL;
+                }
+                if (appRenderer->undoHistory[i].newElement) {
+                    ffonElementDestroy(appRenderer->undoHistory[i].newElement);
+                    appRenderer->undoHistory[i].newElement = NULL;
+                }
+            }
+            appRenderer->undoHistoryCount = newCount;
+        }
 
         if (appRenderer->undoHistoryCount >= UNDO_HISTORY_SIZE) {
             // Remove oldest entry
-            free(appRenderer->undoHistory[0].line);
+            if (appRenderer->undoHistory[0].prevElement) {
+                ffonElementDestroy(appRenderer->undoHistory[0].prevElement);
+            }
+            if (appRenderer->undoHistory[0].newElement) {
+                ffonElementDestroy(appRenderer->undoHistory[0].newElement);
+            }
             memmove(&appRenderer->undoHistory[0], &appRenderer->undoHistory[1],
                    sizeof(UndoEntry) * (UNDO_HISTORY_SIZE - 1));
             appRenderer->undoHistoryCount--;
         }
 
         UndoEntry *entry = &appRenderer->undoHistory[appRenderer->undoHistoryCount++];
-        idArrayCopy(&entry->id, &appRenderer->currentId);
+        idArrayCopy(&entry->id, id);
         entry->task = task;
-        entry->isKey = isKey;
-        entry->line = strdup(line ? line : "");
+        entry->prevElement = prevElement ? ffonElementClone(prevElement) : NULL;
+        entry->newElement = newElement ? ffonElementClone(newElement) : NULL;
 
         appRenderer->undoPosition = 0;
+    }
+}
+
+// Helper: Insert a cloned element at a given IdArray position
+static void insertElementAtId(AppRenderer *appRenderer, const IdArray *id, FfonElement *elem) {
+    int insertIdx = id->ids[id->depth - 1];
+
+    if (id->depth == 1) {
+        // Root level
+        if (appRenderer->ffonCount >= appRenderer->ffonCapacity) {
+            appRenderer->ffonCapacity = appRenderer->ffonCapacity ? appRenderer->ffonCapacity * 2 : 4;
+            appRenderer->ffon = realloc(appRenderer->ffon,
+                appRenderer->ffonCapacity * sizeof(FfonElement*));
+        }
+        for (int i = appRenderer->ffonCount; i > insertIdx; i--) {
+            appRenderer->ffon[i] = appRenderer->ffon[i - 1];
+        }
+        appRenderer->ffon[insertIdx] = ffonElementClone(elem);
+        appRenderer->ffonCount++;
+    } else {
+        // Navigate to parent object
+        FfonElement **ffon = appRenderer->ffon;
+        int count = appRenderer->ffonCount;
+        FfonObject *parent = NULL;
+
+        for (int i = 0; i < id->depth - 1; i++) {
+            int idx = id->ids[i];
+            if (idx < 0 || idx >= count || ffon[idx]->type != FFON_OBJECT) return;
+            parent = ffon[idx]->data.object;
+            ffon = parent->elements;
+            count = parent->count;
+        }
+
+        if (parent) {
+            ffonObjectInsertElement(parent, ffonElementClone(elem), insertIdx);
+        }
+    }
+}
+
+// Helper: Replace the element at a given IdArray position with a clone
+static void replaceElementAtId(AppRenderer *appRenderer, const IdArray *id, FfonElement *elem) {
+    int count;
+    FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, id, &count);
+    if (!arr) return;
+
+    int replaceIdx = id->ids[id->depth - 1];
+    if (replaceIdx >= 0 && replaceIdx < count) {
+        ffonElementDestroy(arr[replaceIdx]);
+        arr[replaceIdx] = ffonElementClone(elem);
     }
 }
 
@@ -617,33 +723,46 @@ void handleHistoryAction(AppRenderer *appRenderer, History history) {
         return;
     }
 
-    fprintf(stderr, "undoPosition: %d", appRenderer->undoPosition);
+    // Exit insert mode first
+    handleEscape(appRenderer);
 
     if (history == HISTORY_UNDO) {
-        // Save current state before undo
-        handleEscape(appRenderer);
-
-        if (appRenderer->undoPosition < appRenderer->undoHistoryCount) {
-            appRenderer->undoPosition++;
+        if (appRenderer->undoPosition >= appRenderer->undoHistoryCount) {
+            setErrorMessage(appRenderer, "Nothing to undo");
+            return;
         }
 
+        appRenderer->undoPosition++;
         UndoEntry *entry = &appRenderer->undoHistory[appRenderer->undoHistoryCount - appRenderer->undoPosition];
-        idArrayCopy(&appRenderer->currentId, &entry->id);
 
-        // Reverse the operation
         switch (entry->task) {
             case TASK_APPEND:
             case TASK_APPEND_APPEND:
             case TASK_INSERT:
             case TASK_INSERT_INSERT:
+                // These created an element. Undo = remove it.
+                idArrayCopy(&appRenderer->currentId, &entry->id);
                 handleDelete(appRenderer, history);
+                if (appRenderer->currentId.ids[appRenderer->currentId.depth - 1] > 0) {
+                    appRenderer->currentId.ids[appRenderer->currentId.depth - 1]--;
+                }
                 break;
 
             case TASK_DELETE:
-                if (appRenderer->currentId.ids[appRenderer->currentId.depth - 1] == 0) {
-                    updateState(appRenderer, TASK_INSERT, history);
-                } else {
-                    updateState(appRenderer, TASK_APPEND, history);
+            case TASK_CUT:
+                // These removed an element. Undo = re-insert prevElement.
+                if (entry->prevElement) {
+                    insertElementAtId(appRenderer, &entry->id, entry->prevElement);
+                    idArrayCopy(&appRenderer->currentId, &entry->id);
+                }
+                break;
+
+            case TASK_INPUT:
+            case TASK_PASTE:
+                // These replaced an element. Undo = replace with prevElement.
+                if (entry->prevElement) {
+                    replaceElementAtId(appRenderer, &entry->id, entry->prevElement);
+                    idArrayCopy(&appRenderer->currentId, &entry->id);
                 }
                 break;
 
@@ -651,56 +770,98 @@ void handleHistoryAction(AppRenderer *appRenderer, History history) {
                 break;
         }
     } else if (history == HISTORY_REDO) {
-        if (appRenderer->undoPosition > 0) {
-            // Save current state before undo
-            handleEscape(appRenderer);
-                
-            // appRenderer->undoPosition--;
+        if (appRenderer->undoPosition <= 0) {
+            setErrorMessage(appRenderer, "Nothing to redo");
+            return;
+        }
 
-            UndoEntry *entry = &appRenderer->undoHistory[appRenderer->undoHistoryCount - appRenderer->undoPosition];
-            idArrayCopy(&appRenderer->currentId, &entry->id);
+        UndoEntry *entry = &appRenderer->undoHistory[appRenderer->undoHistoryCount - appRenderer->undoPosition];
+        appRenderer->undoPosition--;
 
-            // Redo the operation
-            switch (entry->task) {
-                case TASK_APPEND:
-                    updateState(appRenderer, TASK_APPEND, history);
-                    break;
+        switch (entry->task) {
+            case TASK_APPEND:
+            case TASK_APPEND_APPEND:
+            case TASK_INSERT:
+            case TASK_INSERT_INSERT:
+                // These created an element. Redo = re-insert newElement.
+                if (entry->newElement) {
+                    insertElementAtId(appRenderer, &entry->id, entry->newElement);
+                    idArrayCopy(&appRenderer->currentId, &entry->id);
+                }
+                break;
 
-                case TASK_APPEND_APPEND:
-                    updateState(appRenderer, TASK_APPEND_APPEND, history);
-                    break;
+            case TASK_DELETE:
+            case TASK_CUT:
+                // These removed an element. Redo = remove again.
+                idArrayCopy(&appRenderer->currentId, &entry->id);
+                handleDelete(appRenderer, history);
+                // Adjust cursor if it's now out of bounds
+                {
+                    int count;
+                    getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                               &appRenderer->currentId, &count);
+                    int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                    if (idx >= count && count > 0) {
+                        appRenderer->currentId.ids[appRenderer->currentId.depth - 1] = count - 1;
+                    }
+                }
+                break;
 
-                case TASK_INSERT:
-                    updateState(appRenderer, TASK_INSERT, history);
-                    break;
+            case TASK_INPUT:
+            case TASK_PASTE:
+                // These replaced an element. Redo = replace with newElement.
+                if (entry->newElement) {
+                    replaceElementAtId(appRenderer, &entry->id, entry->newElement);
+                    idArrayCopy(&appRenderer->currentId, &entry->id);
+                }
+                break;
 
-                case TASK_INSERT_INSERT:
-                    updateState(appRenderer, TASK_INSERT_INSERT, history);
-                    break;
-
-                case TASK_DELETE:
-                    updateState(appRenderer, TASK_DELETE, history);
-                    break;
-
-                default:
-                    break;
-            }
-
-            // appRenderer->undoPosition--;
+            default:
+                break;
         }
     }
 
+    createListCurrentLayer(appRenderer);
+    appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
     appRenderer->needsRedraw = true;
 }
 
 void handleCtrlX(AppRenderer *appRenderer) {
-    printf("handle cut, previous_id=");
-    for (int i = 0; i < appRenderer->previousId.depth; i++) printf("%d ", appRenderer->previousId.ids[i]);
-    printf(", current_id=");
-    for (int i = 0; i < appRenderer->currentId.depth; i++) printf("%d ", appRenderer->currentId.ids[i]);
-    printf("\n");
+    // Text mode: cut selected text to system clipboard
+    if (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+        appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
+        appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
+        appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH ||
+        appRenderer->currentCoordinate == COORDINATE_COMMAND) {
 
-    // Navigate to the parent level using current_id
+        if (!hasSelection(appRenderer)) return;
+
+        int start, end;
+        getSelectionRange(appRenderer, &start, &end);
+
+        int len = end - start;
+        char *selectedText = malloc(len + 1);
+        if (!selectedText) return;
+        memcpy(selectedText, &appRenderer->inputBuffer[start], len);
+        selectedText[len] = '\0';
+
+        SDL_SetClipboardText(selectedText);
+        free(selectedText);
+
+        deleteSelection(appRenderer);
+        caretReset(appRenderer->caretState, SDL_GetTicks());
+
+        if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
+            appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+            appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
+            populateListCurrentLayer(appRenderer, appRenderer->inputBuffer);
+        }
+
+        appRenderer->needsRedraw = true;
+        return;
+    }
+
+    // Element mode: cut FFON element
     FfonElement **_ffon = appRenderer->ffon;
     int _ffon_count = appRenderer->ffonCount;
     FfonObject *parentObj = NULL;
@@ -718,13 +879,19 @@ void handleCtrlX(AppRenderer *appRenderer) {
     int currentIdx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
     if (currentIdx < 0 || currentIdx >= _ffon_count) return;
 
-    // Store in clipboard
     FfonElement *elem = _ffon[currentIdx];
 
+    // Clone for undo history BEFORE destroying
+    FfonElement *prevElement = ffonElementClone(elem);
+
+    // Capture the id before cursor adjustment
+    IdArray historyId;
+    idArrayCopy(&historyId, &appRenderer->currentId);
+
+    // Store in clipboard
     if (appRenderer->clipboard) {
         ffonElementDestroy(appRenderer->clipboard);
     }
-
     appRenderer->clipboard = ffonElementClone(elem);
 
     // Remove element at current position
@@ -734,40 +901,50 @@ void handleCtrlX(AppRenderer *appRenderer) {
     }
     _ffon_count--;
 
-    // Update parent count
     if (parentObj) {
         parentObj->count = _ffon_count;
     } else {
         appRenderer->ffonCount = _ffon_count;
     }
 
-    // Adjust cursor position if needed
+    // Adjust cursor position
     if (currentIdx > 0) {
         appRenderer->currentId.ids[appRenderer->currentId.depth - 1]--;
     }
 
-    // Get line for history from clipboard
-    const char *line = "";
-    if (appRenderer->clipboard) {
-        if (appRenderer->clipboard->type == FFON_STRING) {
-            line = appRenderer->clipboard->data.string;
-        } else if (appRenderer->clipboard->type == FFON_OBJECT) {
-            line = appRenderer->clipboard->data.object->key;
-        }
-    }
-    updateHistory(appRenderer, TASK_CUT, false, line, HISTORY_NONE);
+    updateHistory(appRenderer, TASK_CUT, &historyId, prevElement, NULL, HISTORY_NONE);
+    ffonElementDestroy(prevElement);
 
     appRenderer->needsRedraw = true;
 }
 
 void handleCtrlC(AppRenderer *appRenderer) {
-    printf("handle copy, previous_id=");
-    for (int i = 0; i < appRenderer->previousId.depth; i++) printf("%d ", appRenderer->previousId.ids[i]);
-    printf(", current_id=");
-    for (int i = 0; i < appRenderer->currentId.depth; i++) printf("%d ", appRenderer->currentId.ids[i]);
-    printf("\n");
+    // Text mode: copy selected text to system clipboard
+    if (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+        appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
+        appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
+        appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH ||
+        appRenderer->currentCoordinate == COORDINATE_COMMAND) {
 
-    // Navigate to the parent level using current_id
+        if (!hasSelection(appRenderer)) return;
+
+        int start, end;
+        getSelectionRange(appRenderer, &start, &end);
+
+        int len = end - start;
+        char *selectedText = malloc(len + 1);
+        if (!selectedText) return;
+        memcpy(selectedText, &appRenderer->inputBuffer[start], len);
+        selectedText[len] = '\0';
+
+        SDL_SetClipboardText(selectedText);
+        free(selectedText);
+
+        appRenderer->needsRedraw = true;
+        return;
+    }
+
+    // Element mode: copy FFON element
     FfonElement **_ffon = appRenderer->ffon;
     int _ffon_count = appRenderer->ffonCount;
 
@@ -784,28 +961,73 @@ void handleCtrlC(AppRenderer *appRenderer) {
     int currentIdx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
     if (currentIdx < 0 || currentIdx >= _ffon_count) return;
 
-    // Store in clipboard
     FfonElement *elem = _ffon[currentIdx];
 
     if (appRenderer->clipboard) {
         ffonElementDestroy(appRenderer->clipboard);
     }
-
     appRenderer->clipboard = ffonElementClone(elem);
 
     appRenderer->needsRedraw = true;
 }
 
 void handleCtrlV(AppRenderer *appRenderer) {
-    printf("handle paste, previous_id=");
-    for (int i = 0; i < appRenderer->previousId.depth; i++) printf("%d ", appRenderer->previousId.ids[i]);
-    printf(", current_id=");
-    for (int i = 0; i < appRenderer->currentId.depth; i++) printf("%d ", appRenderer->currentId.ids[i]);
-    printf("\n");
+    // Text mode: paste from system clipboard
+    if (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+        appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
+        appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
+        appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH ||
+        appRenderer->currentCoordinate == COORDINATE_COMMAND) {
 
+        if (!SDL_HasClipboardText()) return;
+
+        char *text = SDL_GetClipboardText();
+        if (!text || text[0] == '\0') {
+            SDL_free(text);
+            return;
+        }
+
+        // Delete selection if active
+        if (hasSelection(appRenderer)) {
+            deleteSelection(appRenderer);
+        }
+
+        // Insert clipboard text at cursor position
+        int len = strlen(text);
+        while (appRenderer->inputBufferSize + len >= appRenderer->inputBufferCapacity) {
+            int newCapacity = appRenderer->inputBufferCapacity * 2;
+            char *newBuffer = realloc(appRenderer->inputBuffer, newCapacity);
+            if (!newBuffer) {
+                SDL_free(text);
+                return;
+            }
+            appRenderer->inputBuffer = newBuffer;
+            appRenderer->inputBufferCapacity = newCapacity;
+        }
+
+        memmove(&appRenderer->inputBuffer[appRenderer->cursorPosition + len],
+                &appRenderer->inputBuffer[appRenderer->cursorPosition],
+                appRenderer->inputBufferSize - appRenderer->cursorPosition + 1);
+        memcpy(&appRenderer->inputBuffer[appRenderer->cursorPosition], text, len);
+        appRenderer->inputBufferSize += len;
+        appRenderer->cursorPosition += len;
+
+        SDL_free(text);
+        caretReset(appRenderer->caretState, SDL_GetTicks());
+
+        if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
+            appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+            appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
+            populateListCurrentLayer(appRenderer, appRenderer->inputBuffer);
+        }
+
+        appRenderer->needsRedraw = true;
+        return;
+    }
+
+    // Element mode: paste FFON element
     if (!appRenderer->clipboard) return;
 
-    // Navigate to the parent level using current_id
     FfonElement **_ffon = appRenderer->ffon;
     int _ffon_count = appRenderer->ffonCount;
 
@@ -822,21 +1044,19 @@ void handleCtrlV(AppRenderer *appRenderer) {
     int currentIdx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
     if (currentIdx < 0 || currentIdx >= _ffon_count) return;
 
-    // Replace element at current position with clipboard content
+    // Clone the element being replaced for undo
+    FfonElement *prevElement = ffonElementClone(_ffon[currentIdx]);
+
+    // Replace with clipboard content
     FfonElement *newElem = ffonElementClone(appRenderer->clipboard);
     if (newElem) {
         ffonElementDestroy(_ffon[currentIdx]);
         _ffon[currentIdx] = newElem;
 
-        // Get line for history
-        const char *line = "";
-        if (newElem->type == FFON_STRING) {
-            line = newElem->data.string;
-        } else if (newElem->type == FFON_OBJECT) {
-            line = newElem->data.object->key;
-        }
-        updateHistory(appRenderer, TASK_PASTE, false, line, HISTORY_NONE);
+        updateHistory(appRenderer, TASK_PASTE, &appRenderer->currentId, prevElement, newElem, HISTORY_NONE);
     }
+
+    if (prevElement) ffonElementDestroy(prevElement);
 
     appRenderer->needsRedraw = true;
 }
