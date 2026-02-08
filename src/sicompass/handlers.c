@@ -673,7 +673,7 @@ void handleA(AppRenderer *appRenderer) {
     }
 }
 
-void handleFind(AppRenderer *appRenderer) {
+void handleCtrlF(AppRenderer *appRenderer) {
     if (appRenderer->currentCoordinate != COORDINATE_SIMPLE_SEARCH &&
         appRenderer->currentCoordinate != COORDINATE_COMMAND) {
         appRenderer->previousCoordinate = appRenderer->currentCoordinate;

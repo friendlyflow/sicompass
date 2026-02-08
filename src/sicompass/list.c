@@ -1,5 +1,6 @@
 #include "view.h"
 #include "provider.h"
+#include "unicode_search.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -176,7 +177,7 @@ void populateListCurrentLayer(AppRenderer *appRenderer, const char *searchString
     appRenderer->filteredListCount = 0;
 
     for (int i = 0; i < appRenderer->totalListCount; i++) {
-        if (strstr(appRenderer->totalListCurrentLayer[i].label, searchString) != NULL) {
+        if (utf8_stristr(appRenderer->totalListCurrentLayer[i].label, searchString) != NULL) {
             idArrayCopy(&appRenderer->filteredListCurrentLayer[appRenderer->filteredListCount].id,
                          &appRenderer->totalListCurrentLayer[i].id);
             appRenderer->filteredListCurrentLayer[appRenderer->filteredListCount].label =

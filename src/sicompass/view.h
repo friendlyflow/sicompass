@@ -238,7 +238,7 @@ void handleHistoryAction(AppRenderer *appRenderer, History history);
 void handleCtrlX(AppRenderer *appRenderer);
 void handleCtrlC(AppRenderer *appRenderer);
 void handleCtrlV(AppRenderer *appRenderer);
-void handleFind(AppRenderer *appRenderer);
+void handleCtrlF(AppRenderer *appRenderer);
 void handleEscape(AppRenderer *appRenderer);
 void handleCommand(AppRenderer *appRenderer);
 void handleHome(AppRenderer *appRenderer);

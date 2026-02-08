@@ -14,6 +14,7 @@ stb_dep = dependency('stb')
 hb_dep = dependency('harfbuzz')
 jsonc_dep = dependency('json-c')
 accesskit_dep = dependency('accesskit')
+utf8proc_dep = dependency('libutf8proc')
 cglm_dep = dependency('cglm')
 wlroots_dep = dependency('wlroots-0.19')
 wayland_server_dep = dependency('wayland-server')
@@ -83,7 +84,7 @@ subdir('src')
 
 tutorial_script_path = meson.project_source_root() / 'lib' / 'lib_tutorial' / 'tutorial.ts'
 
-exe_sc = executable('sicompass', [sources_sc], dependencies: [vulkan_dep, sdl3_dep, xkbcommon_dep, m_dep, ft_dep, hb_dep, stb_dep, jsonc_dep, accesskit_dep, cglm_dep, lib_ffon_dep, lib_provider_dep, lib_filebrowser_dep],
+exe_sc = executable('sicompass', [sources_sc], dependencies: [vulkan_dep, sdl3_dep, xkbcommon_dep, m_dep, ft_dep, hb_dep, stb_dep, jsonc_dep, accesskit_dep, utf8proc_dep, cglm_dep, lib_ffon_dep, lib_provider_dep, lib_filebrowser_dep],
                     c_args: ['-DTUTORIAL_SCRIPT_PATH="' + tutorial_script_path + '"'],
                     include_directories: [], install : true)
 

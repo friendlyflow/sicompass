@@ -191,7 +191,7 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
     }
     // Ctrl+F (find)
     else if (ctrl && !shift && !alt && key == SDLK_F) {
-        handleFind(appRenderer);
+        handleCtrlF(appRenderer);
     }
     // Escape
     else if (!ctrl && !shift && !alt && key == SDLK_ESCAPE) {
