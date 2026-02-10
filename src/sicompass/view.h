@@ -42,7 +42,8 @@ typedef enum {
     COORDINATE_EDITOR_VISUAL,
     COORDINATE_SIMPLE_SEARCH,
     COORDINATE_EXTENDED_SEARCH,
-    COORDINATE_COMMAND
+    COORDINATE_COMMAND,
+    COORDINATE_SCROLL
 } Coordinate;
 
 typedef enum {
@@ -133,6 +134,8 @@ typedef struct AppRenderer {
     int cursorPosition;
     int selectionAnchor;  // -1 = no selection; byte offset of anchor otherwise
     int scrollOffset;
+    int textScrollOffset;      // Line offset for scroll mode text viewing
+    int textScrollLineCount;   // Total wrapped lines from last renderScroll (for clamping)
 
     // Right panel
     ListItem *totalListCurrentLayer;
@@ -268,6 +271,7 @@ void clearListCurrentLayer(AppRenderer *appRenderer);
 // Rendering
 void updateView(SiCompassApplication *app);
 void renderSimpleSearch(SiCompassApplication *app);
+void renderScroll(SiCompassApplication *app);
 // void renderHierarchy(SiCompassApplication *app);
 void renderInteraction(SiCompassApplication *app);
 void renderLine(SiCompassApplication *app, FfonElement *elem, const IdArray *id, int indent, int *yPos);

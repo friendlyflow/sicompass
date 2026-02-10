@@ -130,6 +130,12 @@ void handleShiftRight(AppRenderer *appRenderer) {
 }
 
 void handleHome(AppRenderer *appRenderer) {
+    if (appRenderer->currentCoordinate == COORDINATE_SCROLL) {
+        // Text scroll mode: go to top of text
+        appRenderer->textScrollOffset = 0;
+        appRenderer->needsRedraw = true;
+        return;
+    }
     if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL ||
         appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL) {
         // List navigation: go to first item, or root on double-tap
@@ -168,6 +174,21 @@ void handleShiftHome(AppRenderer *appRenderer) {
 }
 
 void handleEnd(AppRenderer *appRenderer) {
+    if (appRenderer->currentCoordinate == COORDINATE_SCROLL) {
+        // Text scroll mode: go to bottom of text
+        float scale = getTextScale(appRenderer->app, FONT_SIZE_PT);
+        int lineHeight = (int)getLineHeight(appRenderer->app, scale, TEXT_PADDING);
+        int headerLines = 2;  // header line + gap
+        int availableHeight = (int)appRenderer->app->swapChainExtent.height - (lineHeight * headerLines);
+        int visibleLines = availableHeight / lineHeight;
+        if (visibleLines < 1) visibleLines = 1;
+
+        int maxOffset = appRenderer->textScrollLineCount - visibleLines;
+        if (maxOffset < 0) maxOffset = 0;
+        appRenderer->textScrollOffset = maxOffset;
+        appRenderer->needsRedraw = true;
+        return;
+    }
     if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL ||
         appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL) {
         // List navigation: go to last item at current level
@@ -232,6 +253,22 @@ void handleSelectAll(AppRenderer *appRenderer) {
 }
 
 void handleTab(AppRenderer *appRenderer) {
+    if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH) {
+        ListItem *list = appRenderer->filteredListCount > 0 ?
+                         appRenderer->filteredListCurrentLayer : appRenderer->totalListCurrentLayer;
+        int count = appRenderer->filteredListCount > 0 ?
+                    appRenderer->filteredListCount : appRenderer->totalListCount;
+        if (appRenderer->listIndex >= 0 && appRenderer->listIndex < count) {
+            idArrayCopy(&appRenderer->currentId, &list[appRenderer->listIndex].id);
+        }
+        appRenderer->currentCoordinate = COORDINATE_SCROLL;
+        appRenderer->textScrollOffset = 0;
+        appRenderer->textScrollLineCount = 0;
+        accesskitSpeakModeChange(appRenderer, NULL);
+        appRenderer->needsRedraw = true;
+        return;
+    }
+
     appRenderer->previousCoordinate = appRenderer->currentCoordinate;
     appRenderer->currentCoordinate = COORDINATE_SIMPLE_SEARCH;
     accesskitSpeakModeChange(appRenderer, NULL);
@@ -467,6 +504,14 @@ void handleColon(AppRenderer *appRenderer) {
 }
 
 void handleUp(AppRenderer *appRenderer) {
+    if (appRenderer->currentCoordinate == COORDINATE_SCROLL) {
+        // Text scroll mode: scroll up one line
+        if (appRenderer->textScrollOffset > 0) {
+            appRenderer->textScrollOffset--;
+        }
+        appRenderer->needsRedraw = true;
+        return;
+    }
     if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
         appRenderer->currentCoordinate == COORDINATE_COMMAND ||
         appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
@@ -485,6 +530,24 @@ void handleUp(AppRenderer *appRenderer) {
 }
 
 void handleDown(AppRenderer *appRenderer) {
+    if (appRenderer->currentCoordinate == COORDINATE_SCROLL) {
+        // Text scroll mode: scroll down one line
+        // Calculate visible lines from window height
+        float scale = getTextScale(appRenderer->app, FONT_SIZE_PT);
+        int lineHeight = (int)getLineHeight(appRenderer->app, scale, TEXT_PADDING);
+        int headerLines = 2;  // header line + gap
+        int availableHeight = (int)appRenderer->app->swapChainExtent.height - (lineHeight * headerLines);
+        int visibleLines = availableHeight / lineHeight;
+        if (visibleLines < 1) visibleLines = 1;
+
+        int maxOffset = appRenderer->textScrollLineCount - visibleLines;
+        if (maxOffset < 0) maxOffset = 0;
+        if (appRenderer->textScrollOffset < maxOffset) {
+            appRenderer->textScrollOffset++;
+        }
+        appRenderer->needsRedraw = true;
+        return;
+    }
     if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
         appRenderer->currentCoordinate == COORDINATE_COMMAND ||
         appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
@@ -517,6 +580,16 @@ void handlePageUp(AppRenderer *appRenderer) {
     int lineHeight = (int)getLineHeight(appRenderer->app, scale, TEXT_PADDING);
     int pageSize = lineHeight > 0 ? (int)appRenderer->app->swapChainExtent.height / lineHeight - 3 : 10;
     if (pageSize < 1) pageSize = 1;
+
+    if (appRenderer->currentCoordinate == COORDINATE_SCROLL) {
+        // Text scroll mode: scroll up by page
+        appRenderer->textScrollOffset -= pageSize;
+        if (appRenderer->textScrollOffset < 0) {
+            appRenderer->textScrollOffset = 0;
+        }
+        appRenderer->needsRedraw = true;
+        return;
+    }
 
     if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
         appRenderer->currentCoordinate == COORDINATE_COMMAND ||
@@ -568,6 +641,24 @@ void handlePageDown(AppRenderer *appRenderer) {
     int pageSize = lineHeight > 0 ? (int)appRenderer->app->swapChainExtent.height / lineHeight - 3 : 10;
     if (pageSize < 1) pageSize = 1;
 
+    if (appRenderer->currentCoordinate == COORDINATE_SCROLL) {
+        // Text scroll mode: scroll down by page
+        int headerLines = 2;  // header line + gap
+        int availableHeight = (int)appRenderer->app->swapChainExtent.height - (lineHeight * headerLines);
+        int visibleLines = availableHeight / lineHeight;
+        if (visibleLines < 1) visibleLines = 1;
+
+        int maxOffset = appRenderer->textScrollLineCount - visibleLines;
+        if (maxOffset < 0) maxOffset = 0;
+
+        appRenderer->textScrollOffset += pageSize;
+        if (appRenderer->textScrollOffset > maxOffset) {
+            appRenderer->textScrollOffset = maxOffset;
+        }
+        appRenderer->needsRedraw = true;
+        return;
+    }
+
     if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
         appRenderer->currentCoordinate == COORDINATE_COMMAND ||
         appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
@@ -606,6 +697,10 @@ void handlePageDown(AppRenderer *appRenderer) {
 }
 
 void handleLeft(AppRenderer *appRenderer) {
+    if (appRenderer->currentCoordinate == COORDINATE_SCROLL) {
+        // Text scroll mode: left/right navigation disabled
+        return;
+    }
     if (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
         appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
         appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
@@ -650,6 +745,10 @@ void handleLeft(AppRenderer *appRenderer) {
 }
 
 void handleRight(AppRenderer *appRenderer) {
+    if (appRenderer->currentCoordinate == COORDINATE_SCROLL) {
+        // Text scroll mode: left/right navigation disabled
+        return;
+    }
     if (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
         appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
         appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
@@ -927,6 +1026,17 @@ void handleEscape(AppRenderer *appRenderer) {
         createListCurrentLayer(appRenderer);
         appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
         appRenderer->scrollOffset = 0;
+        appRenderer->needsRedraw = true;
+        return;
+    } else if (appRenderer->currentCoordinate == COORDINATE_SCROLL) {
+        appRenderer->currentCoordinate = COORDINATE_SIMPLE_SEARCH;
+        appRenderer->inputBuffer[0] = '\0';
+        appRenderer->inputBufferSize = 0;
+        appRenderer->cursorPosition = 0;
+        appRenderer->selectionAnchor = -1;
+        createListCurrentLayer(appRenderer);
+        appRenderer->scrollOffset = 0;
+        accesskitSpeakModeChange(appRenderer, NULL);
         appRenderer->needsRedraw = true;
         return;
     } else if (appRenderer->previousCoordinate == COORDINATE_OPERATOR_GENERAL ||

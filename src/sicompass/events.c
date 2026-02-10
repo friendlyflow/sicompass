@@ -131,13 +131,15 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
     // Home in operator/editor general modes (list navigation + double-tap to root)
     else if (!ctrl && !shift && !alt && key == SDLK_HOME &&
              (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL ||
-              appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL)) {
+              appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL ||
+              appRenderer->currentCoordinate == COORDINATE_SCROLL)) {
         handleHome(appRenderer);
     }
     // End in operator/editor general modes (list navigation)
     else if (!ctrl && !shift && !alt && key == SDLK_END &&
              (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL ||
-              appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL)) {
+              appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL ||
+              appRenderer->currentCoordinate == COORDINATE_SCROLL)) {
         handleEnd(appRenderer);
     }
     // Ctrl+Home in search/command modes (jump to first in list)
