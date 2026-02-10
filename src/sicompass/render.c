@@ -628,6 +628,28 @@ void renderSimpleSearch(SiCompassApplication *app) {
     }
 }
 
+void renderScroll(SiCompassApplication *app) {
+    float scale = getTextScale(app, FONT_SIZE_PT);
+    int lineHeight = (int)getLineHeight(app, scale, TEXT_PADDING);
+    int yPos = lineHeight * 2 - app->appRenderer->textScrollOffset * lineHeight;
+
+    int count;
+    FfonElement **arr = getFfonAtId(app->appRenderer->ffon, app->appRenderer->ffonCount,
+                                     &app->appRenderer->currentId, &count);
+    if (arr && count > 0) {
+        int idx = app->appRenderer->currentId.ids[app->appRenderer->currentId.depth - 1];
+        if (idx >= 0 && idx < count) {
+            FfonElement *elem = arr[idx];
+            const char *text = (elem->type == FFON_OBJECT) ?
+                elem->data.object->key : elem->data.string;
+            char *stripped = filebrowserStripInputTags(text);
+            int lines = renderText(app, stripped ? stripped : text, 50, yPos, COLOR_TEXT, true);
+            app->appRenderer->textScrollLineCount = lines;
+            free(stripped);
+        }
+    }
+}
+
 void updateView(SiCompassApplication *app) {
     // Note: Screen clearing is handled by the Vulkan rendering pipeline in drawFrame()
 
@@ -666,7 +688,9 @@ void updateView(SiCompassApplication *app) {
     }
 
     // Render appropriate panel
-    if (app->appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
+    if (app->appRenderer->currentCoordinate == COORDINATE_SCROLL) {
+        renderScroll(app);
+    } else if (app->appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
         app->appRenderer->currentCoordinate == COORDINATE_COMMAND ||
         app->appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
         renderSimpleSearch(app);
