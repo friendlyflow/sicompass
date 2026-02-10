@@ -508,13 +508,26 @@ void renderInteraction(SiCompassApplication *app) {
     if (visibleItems < 1) visibleItems = 1;
 
     int startIndex = app->appRenderer->scrollOffset;
-    // Ensure listIndex is within visible window
+    int scrolloff = 1;
+
+    // Keep margin above: selected stays at position >= scrolloff, unless at first item
+    if (app->appRenderer->listIndex > 0 &&
+        app->appRenderer->listIndex < startIndex + scrolloff) {
+        startIndex = app->appRenderer->listIndex - scrolloff;
+    }
     if (app->appRenderer->listIndex < startIndex) {
         startIndex = app->appRenderer->listIndex;
+    }
+
+    // Keep margin below: selected stays at position <= visibleItems-1-scrolloff, unless at last item
+    if (app->appRenderer->listIndex < count - 1 &&
+        app->appRenderer->listIndex >= startIndex + visibleItems - scrolloff) {
+        startIndex = app->appRenderer->listIndex - visibleItems + 1 + scrolloff;
     }
     if (app->appRenderer->listIndex >= startIndex + visibleItems) {
         startIndex = app->appRenderer->listIndex - visibleItems + 1;
     }
+
     if (startIndex < 0) startIndex = 0;
     app->appRenderer->scrollOffset = startIndex;
 
@@ -574,12 +587,26 @@ void renderSimpleSearch(SiCompassApplication *app) {
     if (visibleItems < 1) visibleItems = 1;
 
     int startIndex = app->appRenderer->scrollOffset;
+    int scrolloff = 1;
+
+    // Keep margin above: selected stays at position >= scrolloff, unless at first item
+    if (app->appRenderer->listIndex > 0 &&
+        app->appRenderer->listIndex < startIndex + scrolloff) {
+        startIndex = app->appRenderer->listIndex - scrolloff;
+    }
     if (app->appRenderer->listIndex < startIndex) {
         startIndex = app->appRenderer->listIndex;
+    }
+
+    // Keep margin below: selected stays at position <= visibleItems-1-scrolloff, unless at last item
+    if (app->appRenderer->listIndex < count - 1 &&
+        app->appRenderer->listIndex >= startIndex + visibleItems - scrolloff) {
+        startIndex = app->appRenderer->listIndex - visibleItems + 1 + scrolloff;
     }
     if (app->appRenderer->listIndex >= startIndex + visibleItems) {
         startIndex = app->appRenderer->listIndex - visibleItems + 1;
     }
+
     if (startIndex < 0) startIndex = 0;
     app->appRenderer->scrollOffset = startIndex;
 
