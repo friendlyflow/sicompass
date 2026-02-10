@@ -164,6 +164,9 @@ typedef struct AppRenderer {
     bool needsRedraw;
     bool inputDown;
 
+    // Application pointer for accessing window dimensions and font metrics
+    SiCompassApplication *app;
+
     // Error message
     char errorMessage[256];
 
@@ -230,6 +233,8 @@ void handleDelete(AppRenderer *appRenderer, History history);
 void handleColon(AppRenderer *appRenderer);
 void handleUp(AppRenderer *appRenderer);
 void handleDown(AppRenderer *appRenderer);
+void handlePageUp(AppRenderer *appRenderer);
+void handlePageDown(AppRenderer *appRenderer);
 void handleLeft(AppRenderer *appRenderer);
 void handleRight(AppRenderer *appRenderer);
 void handleI(AppRenderer *appRenderer);

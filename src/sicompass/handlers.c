@@ -1,5 +1,6 @@
 #include "view.h"
 #include "provider.h"
+#include "text.h"
 #include <platform.h>
 #include <stdio.h>
 #include <string.h>
@@ -181,6 +182,7 @@ void handleTab(AppRenderer *appRenderer) {
     appRenderer->selectionAnchor = -1;
 
     createListCurrentLayer(appRenderer);
+    appRenderer->scrollOffset = 0;
     appRenderer->needsRedraw = true;
 }
 
@@ -248,6 +250,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                     accesskitSpeakModeChange(appRenderer, NULL);
                     createListCurrentLayer(appRenderer);
                     appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                    appRenderer->scrollOffset = 0;
                     appRenderer->needsRedraw = true;
                     appRenderer->lastKeypressTime = now;
                     return;
@@ -301,6 +304,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
         createListCurrentLayer(appRenderer);
         // Sync listIndex with current position (after createListCurrentLayer which resets it)
         appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+        appRenderer->scrollOffset = 0;
         appRenderer->needsRedraw = true;
     } else if (appRenderer->currentCoordinate == COORDINATE_COMMAND) {
         ListItem *list = appRenderer->filteredListCount > 0 ?
@@ -332,6 +336,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                 accesskitSpeakModeChange(appRenderer, NULL);
                 createListCurrentLayer(appRenderer);
                 appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                appRenderer->scrollOffset = 0;
                 appRenderer->needsRedraw = true;
             } else {
                 // Execute selected command
@@ -396,6 +401,7 @@ void handleColon(AppRenderer *appRenderer) {
     appRenderer->selectionAnchor = -1;
 
     createListCurrentLayer(appRenderer);
+    appRenderer->scrollOffset = 0;
     appRenderer->needsRedraw = true;
 }
 
@@ -435,6 +441,106 @@ void handleDown(AppRenderer *appRenderer) {
         appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
         accesskitSpeakCurrentElement(appRenderer);
     }
+    appRenderer->needsRedraw = true;
+}
+
+void handlePageUp(AppRenderer *appRenderer) {
+    // Skip insert modes
+    if (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+        appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT) {
+        return;
+    }
+
+    // Calculate page size from window height and line height
+    float scale = getTextScale(appRenderer->app, FONT_SIZE_PT);
+    int lineHeight = (int)getLineHeight(appRenderer->app, scale, TEXT_PADDING);
+    int pageSize = lineHeight > 0 ? (int)appRenderer->app->swapChainExtent.height / lineHeight - 3 : 10;
+    if (pageSize < 1) pageSize = 1;
+
+    if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
+        appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+        appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
+        // Search/command/extended search modes: adjust listIndex
+        int count = (appRenderer->filteredListCount > 0) ?
+                     appRenderer->filteredListCount :
+                     appRenderer->totalListCount;
+        if (count > 0) {
+            appRenderer->listIndex -= pageSize;
+            if (appRenderer->listIndex < 0) {
+                appRenderer->listIndex = 0;
+            }
+            appRenderer->scrollOffset = appRenderer->listIndex;
+            accesskitSpeakCurrentElement(appRenderer);
+        }
+    } else if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL ||
+               appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL) {
+        // General modes: adjust currentId directly
+        if (appRenderer->currentId.depth > 0) {
+            int maxId = getFfonMaxIdAtPath(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId);
+            if (maxId >= 0) {
+                int newId = appRenderer->currentId.ids[appRenderer->currentId.depth - 1] - pageSize;
+                if (newId < 0) newId = 0;
+                appRenderer->currentId.ids[appRenderer->currentId.depth - 1] = newId;
+
+                // Rebuild list and sync listIndex
+                createListCurrentLayer(appRenderer);
+                appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                appRenderer->scrollOffset = appRenderer->listIndex;
+                accesskitSpeakCurrentElement(appRenderer);
+            }
+        }
+    }
+
+    appRenderer->needsRedraw = true;
+}
+
+void handlePageDown(AppRenderer *appRenderer) {
+    // Skip insert modes
+    if (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+        appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT) {
+        return;
+    }
+
+    // Calculate page size from window height and line height
+    float scale = getTextScale(appRenderer->app, FONT_SIZE_PT);
+    int lineHeight = (int)getLineHeight(appRenderer->app, scale, TEXT_PADDING);
+    int pageSize = lineHeight > 0 ? (int)appRenderer->app->swapChainExtent.height / lineHeight - 3 : 10;
+    if (pageSize < 1) pageSize = 1;
+
+    if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
+        appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+        appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
+        // Search/command/extended search modes: adjust listIndex
+        int count = (appRenderer->filteredListCount > 0) ?
+                     appRenderer->filteredListCount :
+                     appRenderer->totalListCount;
+        if (count > 0) {
+            appRenderer->listIndex += pageSize;
+            if (appRenderer->listIndex >= count) {
+                appRenderer->listIndex = count - 1;
+            }
+            appRenderer->scrollOffset = appRenderer->listIndex;
+            accesskitSpeakCurrentElement(appRenderer);
+        }
+    } else if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL ||
+               appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL) {
+        // General modes: adjust currentId directly
+        if (appRenderer->currentId.depth > 0) {
+            int maxId = getFfonMaxIdAtPath(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId);
+            if (maxId >= 0) {
+                int newId = appRenderer->currentId.ids[appRenderer->currentId.depth - 1] + pageSize;
+                if (newId > maxId) newId = maxId;
+                appRenderer->currentId.ids[appRenderer->currentId.depth - 1] = newId;
+
+                // Rebuild list and sync listIndex
+                createListCurrentLayer(appRenderer);
+                appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                appRenderer->scrollOffset = appRenderer->listIndex;
+                accesskitSpeakCurrentElement(appRenderer);
+            }
+        }
+    }
+
     appRenderer->needsRedraw = true;
 }
 
@@ -521,6 +627,7 @@ void handleRight(AppRenderer *appRenderer) {
             createListCurrentLayer(appRenderer);
             // When entering a child, start at the first item
             appRenderer->listIndex = 0;
+            appRenderer->scrollOffset = 0;
             accesskitSpeakCurrentElement(appRenderer);
             appRenderer->needsRedraw = true;
         }
@@ -685,6 +792,7 @@ void handleCtrlF(AppRenderer *appRenderer) {
         appRenderer->inputBufferSize = 0;
         appRenderer->cursorPosition = 0;
         appRenderer->selectionAnchor = -1;
+        appRenderer->scrollOffset = 0;
 
         appRenderer->needsRedraw = true;
     }
@@ -727,6 +835,7 @@ void handleEscape(AppRenderer *appRenderer) {
                     accesskitSpeakModeChange(appRenderer, NULL);
                     createListCurrentLayer(appRenderer);
                     appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                    appRenderer->scrollOffset = 0;
                     appRenderer->needsRedraw = true;
                     return;
                 }
@@ -746,6 +855,7 @@ void handleEscape(AppRenderer *appRenderer) {
         accesskitSpeakModeChange(appRenderer, NULL);
         createListCurrentLayer(appRenderer);
         appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+        appRenderer->scrollOffset = 0;
         appRenderer->needsRedraw = true;
         return;
     } else if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH) {
@@ -755,6 +865,7 @@ void handleEscape(AppRenderer *appRenderer) {
         accesskitSpeakModeChange(appRenderer, NULL);
         createListCurrentLayer(appRenderer);
         appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+        appRenderer->scrollOffset = 0;
         appRenderer->needsRedraw = true;
         return;
     } else if (appRenderer->previousCoordinate == COORDINATE_OPERATOR_GENERAL ||
@@ -839,6 +950,7 @@ void handleCommand(AppRenderer *appRenderer) {
                 appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
                 createListCurrentLayer(appRenderer);
                 appRenderer->listIndex = insertIdx;
+                appRenderer->scrollOffset = 0;
                 handleI(appRenderer);
             } else if (errorMsg[0]) {
                 setErrorMessage(appRenderer, errorMsg);
@@ -850,6 +962,7 @@ void handleCommand(AppRenderer *appRenderer) {
                 appRenderer->inputBufferSize = 0;
                 appRenderer->cursorPosition = 0;
                 createListCurrentLayer(appRenderer);
+                appRenderer->scrollOffset = 0;
             }
             break;
         }

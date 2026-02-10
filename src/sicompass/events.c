@@ -84,6 +84,18 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
                appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT))) {
         handleDown(appRenderer);
     }
+    // Page Up
+    else if (!ctrl && !shift && !alt && key == SDLK_PAGEUP &&
+             appRenderer->currentCoordinate != COORDINATE_OPERATOR_INSERT &&
+             appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT) {
+        handlePageUp(appRenderer);
+    }
+    // Page Down
+    else if (!ctrl && !shift && !alt && key == SDLK_PAGEDOWN &&
+             appRenderer->currentCoordinate != COORDINATE_OPERATOR_INSERT &&
+             appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT) {
+        handlePageDown(appRenderer);
+    }
     // H or Left arrow
     else if (!ctrl && !shift && !alt &&
              ((key == SDLK_H && (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL ||
