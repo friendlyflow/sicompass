@@ -501,7 +501,27 @@ void renderInteraction(SiCompassApplication *app) {
     bool inInsertMode = (app->appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
                          app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT);
 
-    for (int i = 0; i < count; i++) {
+    // Calculate visible item range to keep listIndex in view
+    int headerLines = (app->appRenderer->currentId.depth > 1) ? 3 : 2;  // parent + gap = 3, or just header = 2
+    int availableHeight = (int)app->swapChainExtent.height - (lineHeight * headerLines);
+    int visibleItems = availableHeight / lineHeight;
+    if (visibleItems < 1) visibleItems = 1;
+
+    int startIndex = app->appRenderer->scrollOffset;
+    // Ensure listIndex is within visible window
+    if (app->appRenderer->listIndex < startIndex) {
+        startIndex = app->appRenderer->listIndex;
+    }
+    if (app->appRenderer->listIndex >= startIndex + visibleItems) {
+        startIndex = app->appRenderer->listIndex - visibleItems + 1;
+    }
+    if (startIndex < 0) startIndex = 0;
+    app->appRenderer->scrollOffset = startIndex;
+
+    int endIndex = startIndex + visibleItems;
+    if (endIndex > count) endIndex = count;
+
+    for (int i = startIndex; i < endIndex; i++) {
         bool isSelected = (i == app->appRenderer->listIndex);
         int itemYPos = yPos;
         int itemX = 50 + indent;
@@ -547,7 +567,26 @@ void renderSimpleSearch(SiCompassApplication *app) {
     int count = app->appRenderer->filteredListCount > 0 ?
                 app->appRenderer->filteredListCount : app->appRenderer->totalListCount;
 
-    for (int i = 0; i < count; i++) {
+    // Calculate visible item range to keep listIndex in view
+    int headerLines = 3;  // header line + search input line + gap
+    int availableHeight = (int)app->swapChainExtent.height - (lineHeight * headerLines);
+    int visibleItems = availableHeight / lineHeight;
+    if (visibleItems < 1) visibleItems = 1;
+
+    int startIndex = app->appRenderer->scrollOffset;
+    if (app->appRenderer->listIndex < startIndex) {
+        startIndex = app->appRenderer->listIndex;
+    }
+    if (app->appRenderer->listIndex >= startIndex + visibleItems) {
+        startIndex = app->appRenderer->listIndex - visibleItems + 1;
+    }
+    if (startIndex < 0) startIndex = 0;
+    app->appRenderer->scrollOffset = startIndex;
+
+    int endIndex = startIndex + visibleItems;
+    if (endIndex > count) endIndex = count;
+
+    for (int i = startIndex; i < endIndex; i++) {
         bool isSelected = (i == app->appRenderer->listIndex);
         int itemYPos = yPos;
 
