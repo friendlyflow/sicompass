@@ -130,6 +130,28 @@ void handleShiftRight(AppRenderer *appRenderer) {
 }
 
 void handleHome(AppRenderer *appRenderer) {
+    if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL ||
+        appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL) {
+        // List navigation: go to first item, or root on double-tap
+        uint64_t now = SDL_GetTicks();
+        if (now - appRenderer->lastKeypressTime <= DELTA_MS && appRenderer->currentId.depth > 1) {
+            // Double-tap: navigate to root ffon[x]
+            while (appRenderer->currentId.depth > 1) {
+                providerNavigateLeft(appRenderer);
+            }
+        } else {
+            // Single: go to first item at current level
+            appRenderer->currentId.ids[appRenderer->currentId.depth - 1] = 0;
+        }
+        appRenderer->lastKeypressTime = now;
+        createListCurrentLayer(appRenderer);
+        appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+        appRenderer->scrollOffset = appRenderer->listIndex;
+        accesskitSpeakCurrentElement(appRenderer);
+        appRenderer->needsRedraw = true;
+        return;
+    }
+    // Text cursor: move to start (existing behavior)
     clearSelection(appRenderer);
     appRenderer->cursorPosition = 0;
     caretReset(appRenderer->caretState, SDL_GetTicks());
@@ -146,6 +168,23 @@ void handleShiftHome(AppRenderer *appRenderer) {
 }
 
 void handleEnd(AppRenderer *appRenderer) {
+    if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL ||
+        appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL) {
+        // List navigation: go to last item at current level
+        if (appRenderer->currentId.depth > 0) {
+            int maxId = getFfonMaxIdAtPath(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId);
+            if (maxId >= 0) {
+                appRenderer->currentId.ids[appRenderer->currentId.depth - 1] = maxId;
+                createListCurrentLayer(appRenderer);
+                appRenderer->listIndex = maxId;
+                appRenderer->scrollOffset = maxId;
+                accesskitSpeakCurrentElement(appRenderer);
+            }
+        }
+        appRenderer->needsRedraw = true;
+        return;
+    }
+    // Text cursor: move to end (existing behavior)
     clearSelection(appRenderer);
     appRenderer->cursorPosition = appRenderer->inputBufferSize;
     caretReset(appRenderer->caretState, SDL_GetTicks());
@@ -158,6 +197,28 @@ void handleShiftEnd(AppRenderer *appRenderer) {
     }
     appRenderer->cursorPosition = appRenderer->inputBufferSize;
     caretReset(appRenderer->caretState, SDL_GetTicks());
+    appRenderer->needsRedraw = true;
+}
+
+void handleCtrlHome(AppRenderer *appRenderer) {
+    int count = (appRenderer->filteredListCount > 0) ?
+                 appRenderer->filteredListCount : appRenderer->totalListCount;
+    if (count > 0) {
+        appRenderer->listIndex = 0;
+        appRenderer->scrollOffset = 0;
+        accesskitSpeakCurrentElement(appRenderer);
+    }
+    appRenderer->needsRedraw = true;
+}
+
+void handleCtrlEnd(AppRenderer *appRenderer) {
+    int count = (appRenderer->filteredListCount > 0) ?
+                 appRenderer->filteredListCount : appRenderer->totalListCount;
+    if (count > 0) {
+        appRenderer->listIndex = count - 1;
+        appRenderer->scrollOffset = count - 1;
+        accesskitSpeakCurrentElement(appRenderer);
+    }
     appRenderer->needsRedraw = true;
 }
 

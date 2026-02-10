@@ -128,6 +128,32 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
               appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH)) {
         handleShiftRight(appRenderer);
     }
+    // Home in operator/editor general modes (list navigation + double-tap to root)
+    else if (!ctrl && !shift && !alt && key == SDLK_HOME &&
+             (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL ||
+              appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL)) {
+        handleHome(appRenderer);
+    }
+    // End in operator/editor general modes (list navigation)
+    else if (!ctrl && !shift && !alt && key == SDLK_END &&
+             (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL ||
+              appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL)) {
+        handleEnd(appRenderer);
+    }
+    // Ctrl+Home in search/command modes (jump to first in list)
+    else if (ctrl && !shift && !alt && key == SDLK_HOME &&
+             (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
+              appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+              appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH)) {
+        handleCtrlHome(appRenderer);
+    }
+    // Ctrl+End in search/command modes (jump to last in list)
+    else if (ctrl && !shift && !alt && key == SDLK_END &&
+             (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
+              appRenderer->currentCoordinate == COORDINATE_COMMAND ||
+              appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH)) {
+        handleCtrlEnd(appRenderer);
+    }
     // Home in text input modes
     else if (!ctrl && !shift && !alt && key == SDLK_HOME &&
              (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||

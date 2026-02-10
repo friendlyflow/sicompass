@@ -248,6 +248,8 @@ void handleEscape(AppRenderer *appRenderer);
 void handleCommand(AppRenderer *appRenderer);
 void handleHome(AppRenderer *appRenderer);
 void handleEnd(AppRenderer *appRenderer);
+void handleCtrlHome(AppRenderer *appRenderer);
+void handleCtrlEnd(AppRenderer *appRenderer);
 void handleShiftHome(AppRenderer *appRenderer);
 void handleShiftEnd(AppRenderer *appRenderer);
 void handleSelectAll(AppRenderer *appRenderer);
