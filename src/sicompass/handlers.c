@@ -725,6 +725,11 @@ void handleLeft(AppRenderer *appRenderer) {
             accesskitSpeakCurrentElement(appRenderer);
 
             appRenderer->needsRedraw = true;
+        } else if (providerNavigateLeft(appRenderer)) {
+            createListCurrentLayer(appRenderer);
+            appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+            accesskitSpeakCurrentElement(appRenderer);
+            appRenderer->needsRedraw = true;
         }
     } else {
         // Use provider for navigation
@@ -773,6 +778,12 @@ void handleRight(AppRenderer *appRenderer) {
 
             accesskitSpeakCurrentElement(appRenderer);
 
+            appRenderer->needsRedraw = true;
+        } else if (providerNavigateRight(appRenderer)) {
+            createListCurrentLayer(appRenderer);
+            appRenderer->listIndex = 0;
+            appRenderer->scrollOffset = 0;
+            accesskitSpeakCurrentElement(appRenderer);
             appRenderer->needsRedraw = true;
         }
     } else {
