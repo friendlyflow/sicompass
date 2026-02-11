@@ -1,4 +1,5 @@
 #include "view.h"
+#include <provider_tags.h>
 #include <string.h>
 
 // AccessKit node IDs
@@ -487,7 +488,7 @@ void renderInteraction(SiCompassApplication *app) {
                 const char *parentText = (parentElem->type == FFON_OBJECT) ?
                     parentElem->data.object->key : parentElem->data.string;
                 // Strip input tags from parent display
-                char *strippedParent = providerStripDisplayTags(parentText);
+                char *strippedParent = providerTagStripDisplay(parentText);
                 renderText(app, strippedParent ? strippedParent : parentText, 50, yPos, COLOR_TEXT, false);
                 free(strippedParent);
                 yPos += lineHeight;
@@ -651,7 +652,7 @@ void renderScroll(SiCompassApplication *app) {
             FfonElement *elem = arr[idx];
             const char *text = (elem->type == FFON_OBJECT) ?
                 elem->data.object->key : elem->data.string;
-            char *stripped = providerStripDisplayTags(text);
+            char *stripped = providerTagStripDisplay(text);
             int lines = renderText(app, stripped ? stripped : text, 50, yPos, COLOR_TEXT, true);
             app->appRenderer->textScrollLineCount = lines;
             free(stripped);

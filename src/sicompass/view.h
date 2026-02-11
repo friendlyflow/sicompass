@@ -116,6 +116,7 @@ typedef struct {
 typedef struct AppRenderer {
     // FFON data
     FfonElement **ffon;
+    Provider **providers;  // parallel to ffon: providers[i] owns ffon[i]
     int ffonCount;
     int ffonCapacity;
 

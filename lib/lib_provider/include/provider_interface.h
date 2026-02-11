@@ -31,25 +31,13 @@ void providerFreeCommandListItems(ProviderListItem *items, int count);
 typedef struct Provider {
     // Identity
     const char *name;           // e.g., "filebrowser", "git", "docker"
-    const char *tagPrefix;      // e.g., "<input>", "<git>", "<docker>"
-
-    // Required: Does this provider handle this element?
-    bool (*canHandle)(struct Provider *self, const char *elementKey);
 
     // Required: Fetch children for objects this provider handles
     FfonElement** (*fetch)(struct Provider *self, int *outCount);
 
-    // Optional: Extract editable content from an element key
-    // Returns: newly allocated string (caller must free), or NULL
-    char* (*getEditableContent)(struct Provider *self, const char *elementKey);
-
     // Optional: Commit an edit (e.g., rename file)
     // Returns: true on success, false on failure
     bool (*commitEdit)(struct Provider *self, const char *oldContent, const char *newContent);
-
-    // Optional: Update element after successful edit
-    // Returns: newly allocated string with updated element key (caller must free)
-    char* (*formatUpdatedKey)(struct Provider *self, const char *newContent);
 
     // Optional: Lifecycle
     void (*init)(struct Provider *self);
@@ -84,16 +72,15 @@ typedef struct Provider {
  * ProviderOps - simplified interface for plugin authors.
  *
  * Plugin authors only need to provide:
- * 1. name and tagPrefix (identity)
+ * 1. name (identity)
  * 2. fetch function (data source)
  * 3. commit function (optional, for editable elements)
  *
- * Everything else (path management, tag handling) is handled generically.
+ * Everything else (path management) is handled generically.
  */
 typedef struct ProviderOps {
     const char *name;        // e.g., "filebrowser"
     const char *displayName; // e.g., "file browser" (shown in UI)
-    const char *tagPrefix;   // e.g., "<input>"
 
     // Required: Fetch children at current path
     // path: current path from provider state (e.g., "/home/user")
@@ -118,7 +105,7 @@ typedef struct ProviderOps {
 
 /**
  * Create a provider from simplified ops.
- * Handles all boilerplate: path management, tag extraction/formatting, etc.
+ * Handles all boilerplate: path management, etc.
  *
  * @param ops The plugin-specific operations
  * @return A fully configured Provider (caller must free with providerDestroy)

@@ -10,12 +10,6 @@ typedef struct GenericProviderState {
     const ProviderOps *ops;
 } GenericProviderState;
 
-// Generic canHandle: check if elementKey starts with tagPrefix
-static bool genericCanHandle(Provider *self, const char *elementKey) {
-    if (!elementKey || !self->tagPrefix) return false;
-    return strncmp(elementKey, self->tagPrefix, strlen(self->tagPrefix)) == 0;
-}
-
 // Generic fetch: call ops->fetch with current path
 static FfonElement** genericFetch(Provider *self, int *outCount) {
     GenericProviderState *state = (GenericProviderState*)self->state;
@@ -24,34 +18,6 @@ static FfonElement** genericFetch(Provider *self, int *outCount) {
         return NULL;
     }
     return state->ops->fetch(state->currentPath, outCount);
-}
-
-// Generic getEditableContent: extract content between tags
-static char* genericGetEditableContent(Provider *self, const char *elementKey) {
-    if (!elementKey || !self->tagPrefix) return NULL;
-
-    size_t prefixLen = strlen(self->tagPrefix);
-    if (strncmp(elementKey, self->tagPrefix, prefixLen) != 0) return NULL;
-
-    const char *start = elementKey + prefixLen;
-
-    // Build closing tag from prefix (e.g., "<input>" -> "</input>")
-    char closeTag[64];
-    snprintf(closeTag, sizeof(closeTag), "</%s", self->tagPrefix + 1);
-
-    const char *end = strstr(start, closeTag);
-    if (!end) {
-        // No closing tag, return everything after prefix
-        return strdup(start);
-    }
-
-    size_t len = end - start;
-    char *result = malloc(len + 1);
-    if (result) {
-        memcpy(result, start, len);
-        result[len] = '\0';
-    }
-    return result;
 }
 
 // Generic commitEdit: call ops->commit with current path
@@ -104,22 +70,6 @@ static bool genericExecuteCommand(Provider *self, const char *command, const cha
     GenericProviderState *state = (GenericProviderState*)self->state;
     if (!state->ops->executeCommand) return false;
     return state->ops->executeCommand(state->currentPath, command, selection);
-}
-
-// Generic formatUpdatedKey: wrap content in tags
-static char* genericFormatUpdatedKey(Provider *self, const char *newContent) {
-    if (!newContent || !self->tagPrefix) return NULL;
-
-    // Build closing tag
-    char closeTag[64];
-    snprintf(closeTag, sizeof(closeTag), "</%s", self->tagPrefix + 1);
-
-    size_t len = strlen(self->tagPrefix) + strlen(newContent) + strlen(closeTag) + 1;
-    char *result = malloc(len);
-    if (result) {
-        snprintf(result, len, "%s%s%s", self->tagPrefix, newContent, closeTag);
-    }
-    return result;
 }
 
 // Generic init: set path to "/"
@@ -180,7 +130,7 @@ static const char* genericGetCurrentPath(Provider *self) {
 }
 
 Provider* providerCreate(const ProviderOps *ops) {
-    if (!ops || !ops->name || !ops->tagPrefix) return NULL;
+    if (!ops || !ops->name) return NULL;
 
     Provider *provider = calloc(1, sizeof(Provider));
     if (!provider) return NULL;
@@ -195,15 +145,11 @@ Provider* providerCreate(const ProviderOps *ops) {
     strcpy(state->currentPath, "/");
 
     provider->name = ops->name;
-    provider->tagPrefix = ops->tagPrefix;
     provider->state = state;
 
     // Wire up generic implementations
-    provider->canHandle = genericCanHandle;
     provider->fetch = genericFetch;
-    provider->getEditableContent = genericGetEditableContent;
     provider->commitEdit = ops->commit ? genericCommitEdit : NULL;
-    provider->formatUpdatedKey = genericFormatUpdatedKey;
     provider->init = genericInit;
     provider->cleanup = NULL;
     provider->pushPath = genericPushPath;
@@ -397,7 +343,6 @@ Provider* scriptProviderCreate(const char *name, const char *displayName,
     }
     ops->name = name;
     ops->displayName = displayName;
-    ops->tagPrefix = NULL;
     ops->fetch = NULL;
     ops->commit = NULL;
     ops->createDirectory = NULL;
@@ -409,15 +354,11 @@ Provider* scriptProviderCreate(const char *name, const char *displayName,
     state->ops = ops;
 
     provider->name = name;
-    provider->tagPrefix = NULL;
     provider->state = state;
 
     // Wire up: custom fetch, reuse generic path management
-    provider->canHandle = genericCanHandle;
     provider->fetch = scriptFetch;
-    provider->getEditableContent = genericGetEditableContent;
     provider->commitEdit = NULL;
-    provider->formatUpdatedKey = genericFormatUpdatedKey;
     provider->init = genericInit;
     provider->cleanup = NULL;
     provider->pushPath = genericPushPath;

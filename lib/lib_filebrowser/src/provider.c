@@ -1,5 +1,6 @@
 #include <filebrowser.h>
 #include <filebrowser_provider.h>
+#include <provider_tags.h>
 #include <platform.h>
 #include <string.h>
 #include <stdlib.h>
@@ -55,7 +56,7 @@ static FfonElement* fbHandleCommand(const char *path, const char *command,
             snprintf(errorMsg, errorMsgSize, "open with: select a file, not a directory");
             return NULL;
         }
-        char *filename = filebrowserExtractInputContent(elementKey);
+        char *filename = providerTagExtractContent(elementKey);
         if (!filename) {
             snprintf(errorMsg, errorMsgSize, "open with: could not extract filename");
             return NULL;
@@ -110,7 +111,6 @@ Provider* filebrowserGetProvider(void) {
         static ProviderOps ops = {
             .name = "filebrowser",
             .displayName = "file browser",
-            .tagPrefix = "<input>",
             .fetch = fbFetch,
             .commit = fbCommit,
             .createDirectory = fbCreateDirectory,

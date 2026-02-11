@@ -1,6 +1,7 @@
 #include "view.h"
 #include "provider.h"
 #include "unicode_search.h"
+#include <provider_tags.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -53,8 +54,8 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
 
             if (elem->type == FFON_STRING) {
                 // Strip provider tags from display
-                bool hasTags = (providerFindForElement(elem->data.string) != NULL);
-                char *stripped = hasTags ? providerGetEditableContent(elem->data.string) : NULL;
+                bool hasTags = providerTagHasInput(elem->data.string);
+                char *stripped = hasTags ? providerTagExtractContent(elem->data.string) : NULL;
                 char prefixed[MAX_LINE_LENGTH];
                 snprintf(prefixed, sizeof(prefixed), "%s %s",
                          hasTags ? "-i" : "-",
@@ -64,8 +65,8 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
                 free(stripped);
             } else {
                 // Strip provider tags from display
-                bool hasTags = (providerFindForElement(elem->data.object->key) != NULL);
-                char *stripped = hasTags ? providerGetEditableContent(elem->data.object->key) : NULL;
+                bool hasTags = providerTagHasInput(elem->data.object->key);
+                char *stripped = hasTags ? providerTagExtractContent(elem->data.object->key) : NULL;
                 char prefixed[MAX_LINE_LENGTH];
                 snprintf(prefixed, sizeof(prefixed), "%s %s",
                          hasTags ? "+i" : "+",
@@ -92,7 +93,7 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
                         earr[eidx]->data.string : earr[eidx]->data.object->key;
 
                     int itemCount = 0;
-                    ProviderListItem *items = providerGetCommandListItems(elementKey,
+                    ProviderListItem *items = providerGetCommandListItems(appRenderer,
                         appRenderer->providerCommandName, &itemCount);
                     if (items && itemCount > 0) {
                         appRenderer->totalListCurrentLayer = calloc(itemCount, sizeof(ListItem));
@@ -127,7 +128,7 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
                 if (eidx >= 0 && eidx < ecount) {
                     const char *elementKey = (earr[eidx]->type == FFON_STRING) ?
                         earr[eidx]->data.string : earr[eidx]->data.object->key;
-                    providerCmds = providerGetCommands(elementKey, &numProviderCommands);
+                    providerCmds = providerGetCommands(appRenderer, &numProviderCommands);
                 }
             }
 

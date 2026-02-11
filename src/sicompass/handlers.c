@@ -1,6 +1,7 @@
 #include "view.h"
 #include "provider.h"
 #include "text.h"
+#include <provider_tags.h>
 #include <platform.h>
 #include <stdio.h>
 #include <string.h>
@@ -319,22 +320,22 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                     elem->data.string : elem->data.object->key;
 
                 // Check if provider handles this element
-                char *oldContent = providerGetEditableContent(elementKey);
+                char *oldContent = providerTagExtractContent(elementKey);
                 if (oldContent) {
                     const char *newContent = appRenderer->inputBuffer;
                     // Only commit if changed
                     if (strcmp(oldContent, newContent) != 0) {
                         bool success;
                         if (oldContent[0] == '\0' && elem->type == FFON_OBJECT) {
-                            success = providerCreateDirectory(elementKey, newContent);
+                            success = providerCreateDirectory(appRenderer, newContent);
                         } else if (oldContent[0] == '\0' && elem->type == FFON_STRING) {
-                            success = providerCreateFile(elementKey, newContent);
+                            success = providerCreateFile(appRenderer, newContent);
                         } else {
-                            success = providerCommitEdit(elementKey, oldContent, newContent);
+                            success = providerCommitEdit(appRenderer, oldContent, newContent);
                         }
                         if (success) {
                             // Update element with new key
-                            char *newKey = providerFormatUpdatedKey(elementKey, newContent);
+                            char *newKey = providerTagFormatKey(newContent);
                             if (newKey) {
                                 if (elem->type == FFON_STRING) {
                                     free(elem->data.string);
@@ -376,8 +377,8 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                 FfonElement *elem = arr[idx];
                 if (elem->type == FFON_STRING) {
                     // Open file with default program
-                    char *filename = providerGetEditableContent(elem->data.string);
-                    const char *path = providerGetCurrentPath(elem->data.string);
+                    char *filename = providerTagExtractContent(elem->data.string);
+                    const char *path = providerGetCurrentPath(appRenderer);
                     if (filename && path) {
                         const char *sep = platformGetPathSeparator();
                         char fullPath[MAX_URI_LENGTH * 2 + 2];
@@ -421,18 +422,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                 const char *selection = list[appRenderer->listIndex].data ?
                                        list[appRenderer->listIndex].data :
                                        list[appRenderer->listIndex].label;
-                int ecount;
-                FfonElement **earr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
-                                                  &appRenderer->currentId, &ecount);
-                if (earr && ecount > 0) {
-                    int eidx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
-                    if (eidx >= 0 && eidx < ecount) {
-                        FfonElement *elem = earr[eidx];
-                        const char *elementKey = (elem->type == FFON_STRING) ?
-                            elem->data.string : elem->data.object->key;
-                        providerExecuteCommand(elementKey, appRenderer->providerCommandName, selection);
-                    }
-                }
+                providerExecuteCommand(appRenderer, appRenderer->providerCommandName, selection);
                 appRenderer->currentCommand = COMMAND_NONE;
                 appRenderer->currentCoordinate = appRenderer->previousCoordinate;
                 appRenderer->previousCoordinate = appRenderer->currentCoordinate;
@@ -813,7 +803,7 @@ void handleI(AppRenderer *appRenderer) {
                     FfonElement *elem = arr[idx];
                     const char *elementKey = (elem->type == FFON_STRING) ?
                         elem->data.string : elem->data.object->key;
-                    char *content = providerGetEditableContent(elementKey);
+                    char *content = providerTagExtractContent(elementKey);
                     if (!content) return;
                     free(content);
                 }
@@ -842,7 +832,7 @@ void handleI(AppRenderer *appRenderer) {
                 context = elementKey;
 
                 // Try provider first
-                char *content = providerGetEditableContent(elementKey);
+                char *content = providerTagExtractContent(elementKey);
                 if (content) {
                     strncpy(appRenderer->inputBuffer, content,
                            appRenderer->inputBufferCapacity - 1);
@@ -886,7 +876,7 @@ void handleA(AppRenderer *appRenderer) {
                     FfonElement *elem = arr[idx];
                     const char *elementKey = (elem->type == FFON_STRING) ?
                         elem->data.string : elem->data.object->key;
-                    char *content = providerGetEditableContent(elementKey);
+                    char *content = providerTagExtractContent(elementKey);
                     if (!content) return;
                     free(content);
                 }
@@ -915,7 +905,7 @@ void handleA(AppRenderer *appRenderer) {
                 context = elementKey;
 
                 // Try provider first
-                char *content = providerGetEditableContent(elementKey);
+                char *content = providerTagExtractContent(elementKey);
                 if (content) {
                     strncpy(appRenderer->inputBuffer, content,
                            appRenderer->inputBufferCapacity - 1);
@@ -977,12 +967,12 @@ void handleEscape(AppRenderer *appRenderer) {
                     elem->data.string : elem->data.object->key;
 
                 // Check if provider handles this element
-                char *oldContent = providerGetEditableContent(elementKey);
+                char *oldContent = providerTagExtractContent(elementKey);
                 if (oldContent) {
                     const char *newContent = appRenderer->inputBuffer;
                     if (strcmp(oldContent, newContent) != 0) {
-                        if (providerCommitEdit(elementKey, oldContent, newContent)) {
-                            char *newKey = providerFormatUpdatedKey(elementKey, newContent);
+                        if (providerCommitEdit(appRenderer, oldContent, newContent)) {
+                            char *newKey = providerTagFormatKey(newContent);
                             if (newKey) {
                                 if (elem->type == FFON_STRING) {
                                     free(elem->data.string);
@@ -1086,8 +1076,8 @@ void handleCommand(AppRenderer *appRenderer) {
                 elem->data.string : elem->data.object->key;
 
             char errorMsg[256] = {0};
-            FfonElement *newElem = providerHandleCommand(elementKey,
-                appRenderer->providerCommandName, elem->type, errorMsg, sizeof(errorMsg));
+            FfonElement *newElem = providerHandleCommand(appRenderer,
+                appRenderer->providerCommandName, elementKey, elem->type, errorMsg, sizeof(errorMsg));
 
             if (newElem) {
                 // Insert after current position

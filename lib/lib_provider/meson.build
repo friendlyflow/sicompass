@@ -1,4 +1,4 @@
-lib_provider_src = files('src/config.c', 'src/provider.c', 'src/platform.c')
+lib_provider_src = files('src/config.c', 'src/provider.c', 'src/platform.c', 'src/tags.c')
 lib_provider_inc = include_directories('include')
 
 # Windows needs shell32 for ShellExecuteA

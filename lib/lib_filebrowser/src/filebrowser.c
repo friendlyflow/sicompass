@@ -1,4 +1,5 @@
 #include "filebrowser.h"
+#include <provider_tags.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,11 +15,6 @@
     #include <sys/stat.h>
     #include <unistd.h>
 #endif
-
-#define INPUT_TAG_OPEN "<input>"
-#define INPUT_TAG_CLOSE "</input>"
-#define INPUT_TAG_OPEN_LEN 7
-#define INPUT_TAG_CLOSE_LEN 8
 
 FfonElement** filebrowserListDirectory(const char *uri, bool commands, int *out_count) {
     *out_count = 0;
@@ -264,80 +260,3 @@ bool filebrowserCreateFile(const char *uri, const char *name) {
     return true;
 }
 
-bool filebrowserHasInputTags(const char *text) {
-    if (!text) return false;
-    return strstr(text, INPUT_TAG_OPEN) != NULL && strstr(text, INPUT_TAG_CLOSE) != NULL;
-}
-
-char* filebrowserExtractInputContent(const char *text) {
-    if (!text) return NULL;
-
-    const char *start = strstr(text, INPUT_TAG_OPEN);
-    if (!start) return NULL;
-
-    start += INPUT_TAG_OPEN_LEN;
-
-    const char *end = strstr(start, INPUT_TAG_CLOSE);
-    if (!end) return NULL;
-
-    size_t len = end - start;
-    char *result = malloc(len + 1);
-    if (!result) return NULL;
-
-    strncpy(result, start, len);
-    result[len] = '\0';
-
-    return result;
-}
-
-char* filebrowserStripInputTags(const char *text) {
-    if (!text) return NULL;
-
-    // If no input tags, just return a copy
-    if (!filebrowserHasInputTags(text)) {
-#if defined(_WIN32)
-        return _strdup(text);
-#else
-        return strdup(text);
-#endif
-    }
-
-    // Find tag positions
-    const char *openTag = strstr(text, INPUT_TAG_OPEN);
-    const char *closeTag = strstr(text, INPUT_TAG_CLOSE);
-
-    if (!openTag || !closeTag) {
-#if defined(_WIN32)
-        return _strdup(text);
-#else
-        return strdup(text);
-#endif
-    }
-
-    // Calculate result length: original - open tag length - close tag length
-    size_t textLen = strlen(text);
-    size_t resultLen = textLen - INPUT_TAG_OPEN_LEN - INPUT_TAG_CLOSE_LEN;
-
-    char *result = malloc(resultLen + 1);
-    if (!result) return NULL;
-
-    // Copy parts: before open tag + between tags + after close tag
-    size_t pos = 0;
-
-    // Copy before <input>
-    size_t beforeLen = openTag - text;
-    strncpy(result + pos, text, beforeLen);
-    pos += beforeLen;
-
-    // Copy between tags
-    const char *contentStart = openTag + INPUT_TAG_OPEN_LEN;
-    size_t contentLen = closeTag - contentStart;
-    strncpy(result + pos, contentStart, contentLen);
-    pos += contentLen;
-
-    // Copy after </input>
-    const char *afterClose = closeTag + INPUT_TAG_CLOSE_LEN;
-    strcpy(result + pos, afterClose);
-
-    return result;
-}
