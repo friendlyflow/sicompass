@@ -136,6 +136,7 @@ typedef struct AppRenderer {
     int scrollOffset;
     int textScrollOffset;      // Line offset for scroll mode text viewing
     int textScrollLineCount;   // Total wrapped lines from last renderScroll (for clamping)
+    int renderClipTopY;        // Skip rendering lines with Y < this value (0 = no clipping)
 
     // Right panel
     ListItem *totalListCurrentLayer;
