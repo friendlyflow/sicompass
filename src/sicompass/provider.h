@@ -37,3 +37,7 @@ FfonElement* providerHandleCommand(const char *elementKey, const char *command,
                                     char *errorMsg, int errorMsgSize);
 ProviderListItem* providerGetCommandListItems(const char *elementKey, const char *command, int *outCount);
 bool providerExecuteCommand(const char *elementKey, const char *command, const char *selection);
+
+// Strip provider display tags from text for rendering
+// Returns: newly allocated string (caller must free), or NULL if text is NULL
+char* providerStripDisplayTags(const char *text);

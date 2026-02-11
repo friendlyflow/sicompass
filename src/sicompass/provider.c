@@ -135,6 +135,52 @@ char* providerFormatUpdatedKey(const char *elementKey, const char *newContent) {
     return provider->formatUpdatedKey(provider, newContent);
 }
 
+// Strip provider display tags from text for rendering
+char* providerStripDisplayTags(const char *text) {
+    if (!text) return NULL;
+
+    for (int i = 0; i < g_providerCount; i++) {
+        const char *tagPrefix = g_providers[i]->tagPrefix;
+        if (!tagPrefix) continue;
+
+        const char *openTag = strstr(text, tagPrefix);
+        if (!openTag) continue;
+
+        // Build closing tag from prefix (e.g., "<input>" -> "</input>")
+        char closeTag[64];
+        snprintf(closeTag, sizeof(closeTag), "</%s", tagPrefix + 1);
+
+        const char *closePos = strstr(text, closeTag);
+        if (!closePos) continue;
+
+        size_t tagPrefixLen = strlen(tagPrefix);
+        size_t closeTagLen = strlen(closeTag);
+        size_t textLen = strlen(text);
+        size_t resultLen = textLen - tagPrefixLen - closeTagLen;
+
+        char *result = malloc(resultLen + 1);
+        if (!result) return NULL;
+
+        // Copy: [before open tag] + [between tags] + [after close tag]
+        size_t pos = 0;
+        size_t beforeLen = openTag - text;
+        memcpy(result + pos, text, beforeLen);
+        pos += beforeLen;
+
+        const char *contentStart = openTag + tagPrefixLen;
+        size_t contentLen = closePos - contentStart;
+        memcpy(result + pos, contentStart, contentLen);
+        pos += contentLen;
+
+        const char *afterClose = closePos + closeTagLen;
+        strcpy(result + pos, afterClose);
+
+        return result;
+    }
+
+    return strdup(text);
+}
+
 // Navigate right into an object
 bool providerNavigateRight(AppRenderer *appRenderer) {
     int count;
