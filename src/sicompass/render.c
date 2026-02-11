@@ -292,6 +292,7 @@ int renderText(SiCompassApplication *app, const char *text, int x, int y,
     }
 
     // Second pass: calculate overall bounding box and render highlight if needed
+    int clipY = app->appRenderer->renderClipTopY;
     if (highlight && lineCount > 0) {
         float overallMinX = INFINITY;
         float overallMinY = INFINITY;
@@ -299,11 +300,13 @@ int renderText(SiCompassApplication *app, const char *text, int x, int y,
         float overallMaxY = -INFINITY;
 
         for (int i = 0; i < lineCount; i++) {
+            int currentY = y + i * lineHeight;
+            if (clipY > 0 && currentY < clipY) continue;
+
             char lineText[MAX_LINE_LENGTH];
             strncpy(lineText, lines[i].start, lines[i].len);
             lineText[lines[i].len] = '\0';
 
-            int currentY = y + i * lineHeight;
             float minX, minY, maxX, maxY;
             calculateTextBounds(app, lineText, (float)x, (float)currentY, scale,
                               &minX, &minY, &maxX, &maxY);
@@ -314,17 +317,19 @@ int renderText(SiCompassApplication *app, const char *text, int x, int y,
             if (maxY > overallMaxY) overallMaxY = maxY;
         }
 
-        // Add padding and render single rectangle
-        overallMinX -= TEXT_PADDING;
-        overallMinY -= TEXT_PADDING;
-        overallMaxX += TEXT_PADDING;
-        overallMaxY += TEXT_PADDING;
+        if (overallMinX != INFINITY) {
+            // Add padding and render single rectangle
+            overallMinX -= TEXT_PADDING;
+            overallMinY -= TEXT_PADDING;
+            overallMaxX += TEXT_PADDING;
+            overallMaxY += TEXT_PADDING;
 
-        float width = overallMaxX - overallMinX;
-        float height = overallMaxY - overallMinY;
-        float cornerRadius = 5.0f;
+            float width = overallMaxX - overallMinX;
+            float height = overallMaxY - overallMinY;
+            float cornerRadius = 5.0f;
 
-        prepareRectangle(app, overallMinX, overallMinY, width, height, COLOR_DARK_GREEN, cornerRadius);
+            prepareRectangle(app, overallMinX, overallMinY, width, height, COLOR_DARK_GREEN, cornerRadius);
+        }
     }
 
     // Third pass: render all text lines
@@ -335,7 +340,9 @@ int renderText(SiCompassApplication *app, const char *text, int x, int y,
         lineText[lines[i].len] = '\0';
 
         if (lines[i].len > 0) {
-            prepareTextForRendering(app, lineText, (float)x, (float)currentY, scale, color);
+            if (clipY <= 0 || currentY >= clipY) {
+                prepareTextForRendering(app, lineText, (float)x, (float)currentY, scale, color);
+            }
             currentY += lineHeight;
         }
     }
@@ -632,6 +639,9 @@ void renderScroll(SiCompassApplication *app) {
     int lineHeight = (int)getLineHeight(app, scale, TEXT_PADDING);
     int yPos = lineHeight * 2 - app->appRenderer->textScrollOffset * lineHeight;
 
+    // Clip content to its initial top position (below header + gap)
+    app->appRenderer->renderClipTopY = lineHeight * 2;
+
     int count;
     FfonElement **arr = getFfonAtId(app->appRenderer->ffon, app->appRenderer->ffonCount,
                                      &app->appRenderer->currentId, &count);
@@ -647,6 +657,8 @@ void renderScroll(SiCompassApplication *app) {
             free(stripped);
         }
     }
+
+    app->appRenderer->renderClipTopY = 0;
 }
 
 void updateView(SiCompassApplication *app) {
