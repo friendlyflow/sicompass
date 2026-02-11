@@ -512,6 +512,13 @@ void handleUp(AppRenderer *appRenderer) {
         appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
         if (appRenderer->listIndex > 0) {
             appRenderer->listIndex--;
+            ListItem *list = appRenderer->filteredListCount > 0 ?
+                             appRenderer->filteredListCurrentLayer : appRenderer->totalListCurrentLayer;
+            int count = appRenderer->filteredListCount > 0 ?
+                        appRenderer->filteredListCount : appRenderer->totalListCount;
+            if (appRenderer->listIndex >= 0 && appRenderer->listIndex < count) {
+                idArrayCopy(&appRenderer->currentId, &list[appRenderer->listIndex].id);
+            }
             accesskitSpeakCurrentElement(appRenderer);
         }
     } else if (appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT &&
@@ -551,6 +558,13 @@ void handleDown(AppRenderer *appRenderer) {
                         appRenderer->totalListCount - 1;
         if (appRenderer->listIndex < maxIndex) {
             appRenderer->listIndex++;
+            ListItem *list = appRenderer->filteredListCount > 0 ?
+                             appRenderer->filteredListCurrentLayer : appRenderer->totalListCurrentLayer;
+            int count = appRenderer->filteredListCount > 0 ?
+                        appRenderer->filteredListCount : appRenderer->totalListCount;
+            if (appRenderer->listIndex >= 0 && appRenderer->listIndex < count) {
+                idArrayCopy(&appRenderer->currentId, &list[appRenderer->listIndex].id);
+            }
             accesskitSpeakCurrentElement(appRenderer);
         }
     } else if (appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT &&
