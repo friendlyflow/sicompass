@@ -284,6 +284,7 @@ void handleTab(AppRenderer *appRenderer) {
     appRenderer->selectionAnchor = -1;
 
     createListCurrentLayer(appRenderer);
+    appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
     appRenderer->scrollOffset = 0;
     appRenderer->needsRedraw = true;
 }
@@ -1039,6 +1040,7 @@ void handleEscape(AppRenderer *appRenderer) {
         appRenderer->cursorPosition = 0;
         appRenderer->selectionAnchor = -1;
         createListCurrentLayer(appRenderer);
+        appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
         appRenderer->scrollOffset = 0;
         accesskitSpeakModeChange(appRenderer, NULL);
         appRenderer->needsRedraw = true;
