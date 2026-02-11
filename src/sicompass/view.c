@@ -36,12 +36,17 @@ void mainLoop(SiCompassApplication* app) {
     // Create root array with tutorial before file browser
     int providerCount = 0;
     app->appRenderer->ffon = malloc(2 * sizeof(FfonElement*));
+    app->appRenderer->providers = malloc(2 * sizeof(Provider*));
     app->appRenderer->ffonCapacity = 2;
     if (tutorialElement) {
-        app->appRenderer->ffon[providerCount++] = tutorialElement;
+        app->appRenderer->ffon[providerCount] = tutorialElement;
+        app->appRenderer->providers[providerCount] = tutorialProvider;
+        providerCount++;
     }
     if (fileBrowserElement) {
-        app->appRenderer->ffon[providerCount++] = fileBrowserElement;
+        app->appRenderer->ffon[providerCount] = fileBrowserElement;
+        app->appRenderer->providers[providerCount] = fbProvider;
+        providerCount++;
     }
     app->appRenderer->ffonCount = providerCount;
 

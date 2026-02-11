@@ -9,35 +9,27 @@ typedef struct AppRenderer AppRenderer;
 
 // Provider registry
 void providerRegister(Provider *provider);
-Provider* providerFindForElement(const char *elementKey);
 Provider* providerFindByName(const char *name);
 void providerInitAll(void);
 void providerCleanupAll(void);
+
+// Get active provider from navigation context
+Provider* providerGetActive(AppRenderer *appRenderer);
 
 // Navigation using providers
 bool providerNavigateRight(AppRenderer *appRenderer);
 bool providerNavigateLeft(AppRenderer *appRenderer);
 
-// Get current path for an element's provider
-const char* providerGetCurrentPath(const char *elementKey);
-
-// Data operations for editing (called by handlers.c)
-char* providerGetEditableContent(const char *elementKey);
-bool providerCommitEdit(const char *elementKey, const char *oldContent, const char *newContent);
-char* providerFormatUpdatedKey(const char *elementKey, const char *newContent);
-
-// Create operations
-bool providerCreateDirectory(const char *elementKey, const char *name);
-bool providerCreateFile(const char *elementKey, const char *name);
+// Provider operations (dispatch via active provider)
+const char* providerGetCurrentPath(AppRenderer *appRenderer);
+bool providerCommitEdit(AppRenderer *appRenderer, const char *oldContent, const char *newContent);
+bool providerCreateDirectory(AppRenderer *appRenderer, const char *name);
+bool providerCreateFile(AppRenderer *appRenderer, const char *name);
 
 // Command operations
-const char** providerGetCommands(const char *elementKey, int *outCount);
-FfonElement* providerHandleCommand(const char *elementKey, const char *command,
-                                    int elementType,
+const char** providerGetCommands(AppRenderer *appRenderer, int *outCount);
+FfonElement* providerHandleCommand(AppRenderer *appRenderer, const char *command,
+                                    const char *elementKey, int elementType,
                                     char *errorMsg, int errorMsgSize);
-ProviderListItem* providerGetCommandListItems(const char *elementKey, const char *command, int *outCount);
-bool providerExecuteCommand(const char *elementKey, const char *command, const char *selection);
-
-// Strip provider display tags from text for rendering
-// Returns: newly allocated string (caller must free), or NULL if text is NULL
-char* providerStripDisplayTags(const char *text);
+ProviderListItem* providerGetCommandListItems(AppRenderer *appRenderer, const char *command, int *outCount);
+bool providerExecuteCommand(AppRenderer *appRenderer, const char *command, const char *selection);

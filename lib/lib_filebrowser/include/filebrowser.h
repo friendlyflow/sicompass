@@ -45,28 +45,3 @@ bool filebrowserCreateDirectory(const char *uri, const char *name);
  */
 bool filebrowserCreateFile(const char *uri, const char *name);
 
-/**
- * Check if text contains <input>...</input> tags.
- *
- * @param text The text to check
- * @return true if text contains input tags
- */
-bool filebrowserHasInputTags(const char *text);
-
-/**
- * Extract content between <input> and </input> tags.
- * Caller must free the returned string.
- *
- * @param text The text containing input tags
- * @return The content between tags, or NULL if no tags found
- */
-char* filebrowserExtractInputContent(const char *text);
-
-/**
- * Strip <input> and </input> tags from text.
- * Caller must free the returned string.
- *
- * @param text The text containing input tags
- * @return The text with tags removed
- */
-char* filebrowserStripInputTags(const char *text);
