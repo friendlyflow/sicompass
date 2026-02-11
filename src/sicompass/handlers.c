@@ -253,6 +253,10 @@ void handleSelectAll(AppRenderer *appRenderer) {
 }
 
 void handleTab(AppRenderer *appRenderer) {
+    if (appRenderer->currentCoordinate == COORDINATE_SCROLL) {
+        return;
+    }
+
     if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH) {
         ListItem *list = appRenderer->filteredListCount > 0 ?
                          appRenderer->filteredListCurrentLayer : appRenderer->totalListCurrentLayer;
