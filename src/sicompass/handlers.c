@@ -363,6 +363,43 @@ static bool handleRadioSelect(AppRenderer *appRenderer, IdArray *elementId) {
     return true;
 }
 
+// Returns true if the element at elementId is a checkbox and was toggled.
+static bool handleCheckboxToggle(AppRenderer *appRenderer, IdArray *elementId) {
+    int count;
+    FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, elementId, &count);
+    if (!arr) return false;
+    int idx = elementId->ids[elementId->depth - 1];
+    if (idx < 0 || idx >= count) return false;
+    FfonElement *elem = arr[idx];
+    if (elem->type != FFON_STRING) return false;
+
+    if (providerTagHasCheckboxChecked(elem->data.string)) {
+        // Uncheck: <checkbox checked>content -> <checkbox>content
+        char *content = providerTagExtractCheckboxCheckedContent(elem->data.string);
+        if (!content) return false;
+        char *newKey = providerTagFormatCheckboxKey(content);
+        free(content);
+        if (newKey) {
+            free(elem->data.string);
+            elem->data.string = newKey;
+        }
+        return true;
+    } else if (providerTagHasCheckbox(elem->data.string)) {
+        // Check: <checkbox>content -> <checkbox checked>content
+        char *content = providerTagExtractCheckboxContent(elem->data.string);
+        if (!content) return false;
+        char *newKey = providerTagFormatCheckboxCheckedKey(content);
+        free(content);
+        if (newKey) {
+            free(elem->data.string);
+            elem->data.string = newKey;
+        }
+        return true;
+    }
+
+    return false;
+}
+
 void handleEnter(AppRenderer *appRenderer, History history) {
     uint64_t now = SDL_GetTicks();
 
@@ -426,7 +463,16 @@ void handleEnter(AppRenderer *appRenderer, History history) {
         accesskitSpeakModeChange(appRenderer, NULL);
         appRenderer->needsRedraw = true;
     } else if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
-        // Check for radio selection first
+        // Check for checkbox toggle first
+        if (handleCheckboxToggle(appRenderer, &appRenderer->currentId)) {
+            int savedIndex = appRenderer->listIndex;
+            createListCurrentLayer(appRenderer);
+            appRenderer->listIndex = savedIndex;
+            appRenderer->needsRedraw = true;
+            appRenderer->lastKeypressTime = now;
+            return;
+        }
+        // Check for radio selection
         if (handleRadioSelect(appRenderer, &appRenderer->currentId)) {
             appRenderer->currentId.ids[appRenderer->currentId.depth - 1] = 0;
             createListCurrentLayer(appRenderer);
@@ -471,6 +517,15 @@ void handleEnter(AppRenderer *appRenderer, History history) {
         if (appRenderer->listIndex >= 0 && appRenderer->listIndex < count) {
             IdArray selectedId;
             idArrayCopy(&selectedId, &list[appRenderer->listIndex].id);
+
+            if (handleCheckboxToggle(appRenderer, &selectedId)) {
+                int savedIndex = appRenderer->listIndex;
+                createListCurrentLayer(appRenderer);
+                appRenderer->listIndex = savedIndex;
+                appRenderer->needsRedraw = true;
+                appRenderer->lastKeypressTime = now;
+                return;
+            }
 
             if (handleRadioSelect(appRenderer, &selectedId)) {
                 selectedId.ids[selectedId.depth - 1] = 0;

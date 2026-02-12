@@ -230,6 +230,40 @@ static float renderRadioIndicator(SiCompassApplication *app,
     return circleSize + charWidth;
 }
 
+typedef enum { CHECKBOX_NONE, CHECKBOX_UNCHECKED, CHECKBOX_CHECKED } CheckboxType;
+
+static CheckboxType getCheckboxType(const char *label) {
+    if (!label) return CHECKBOX_NONE;
+    if (strncmp(label, "-cc ", 4) == 0) return CHECKBOX_CHECKED;
+    if (strncmp(label, "-c ", 3) == 0) return CHECKBOX_UNCHECKED;
+    return CHECKBOX_NONE;
+}
+
+static float renderCheckboxIndicator(SiCompassApplication *app,
+                                     CheckboxType checkboxType, int itemX, int itemYPos) {
+    float scale = getTextScale(app, FONT_SIZE_PT);
+    float lineH = getLineHeight(app, scale, TEXT_PADDING);
+    float boxSize = lineH * 0.8f;
+    float boxX = (float)itemX;
+    float lineTop = (float)itemYPos - app->fontRenderer->ascender * scale - TEXT_PADDING;
+    float boxY = lineTop + (lineH - boxSize) / 2.0f;
+
+    // Outer square (always rendered)
+    prepareRectangle(app, boxX, boxY, boxSize, boxSize,
+                     COLOR_LIGHT_GREEN, 0.0f);
+
+    // Inner square: green for checked, black (clear) for unchecked
+    float innerSize = boxSize * 0.55f;
+    float innerOffset = (boxSize - innerSize) / 2.0f;
+    uint32_t innerColor = (checkboxType == CHECKBOX_CHECKED) ? COLOR_DARK_GREEN : 0x000000FF;
+    prepareRectangle(app, boxX + innerOffset, boxY + innerOffset,
+                     innerSize, innerSize, innerColor, 0.0f);
+
+    // Return box width + one character gap
+    float charWidth = getWidthEM(app, scale);
+    return boxSize + charWidth;
+}
+
 int renderText(SiCompassApplication *app, const char *text, int x, int y,
                uint32_t color, bool highlight) {
     if (!text || strlen(text) == 0) {
@@ -587,6 +621,13 @@ void renderInteraction(SiCompassApplication *app) {
             itemX += (int)circleWidth;
         }
 
+        // Render checkbox indicator before text if this is a checkbox item
+        CheckboxType checkboxType = getCheckboxType(list[i].label);
+        if (checkboxType != CHECKBOX_NONE) {
+            float boxWidth = renderCheckboxIndicator(app, checkboxType, itemX, itemYPos);
+            itemX += (int)boxWidth;
+        }
+
         // Determine what text to display
         const char *displayText = list[i].label;
 
@@ -671,6 +712,13 @@ void renderSimpleSearch(SiCompassApplication *app) {
         if (radioType != RADIO_NONE) {
             float circleWidth = renderRadioIndicator(app, radioType, itemX, itemYPos);
             itemX += (int)circleWidth;
+        }
+
+        // Render checkbox indicator before text if this is a checkbox item
+        CheckboxType checkboxType = getCheckboxType(list[i].label);
+        if (checkboxType != CHECKBOX_NONE) {
+            float boxWidth = renderCheckboxIndicator(app, checkboxType, itemX, itemYPos);
+            itemX += (int)boxWidth;
         }
 
         // Render text (may be multiple lines)

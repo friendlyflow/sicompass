@@ -100,12 +100,20 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
             idArrayCopy(&appRenderer->totalListCurrentLayer[appRenderer->totalListCount].id, &thisId);
 
             if (elem->type == FFON_STRING) {
+                bool hasCheckboxChecked = providerTagHasCheckboxChecked(elem->data.string);
+                bool hasCheckbox = providerTagHasCheckbox(elem->data.string);
                 bool hasChecked = providerTagHasChecked(elem->data.string);
                 bool hasInput = providerTagHasInput(elem->data.string);
                 const char *prefix;
                 char *stripped = NULL;
 
-                if (hasChecked) {
+                if (hasCheckboxChecked) {
+                    prefix = "-cc";
+                    stripped = providerTagExtractCheckboxCheckedContent(elem->data.string);
+                } else if (hasCheckbox) {
+                    prefix = "-c";
+                    stripped = providerTagExtractCheckboxContent(elem->data.string);
+                } else if (hasChecked) {
                     prefix = "-rc";
                     stripped = providerTagExtractCheckedContent(elem->data.string);
                 } else if (hasInput) {
