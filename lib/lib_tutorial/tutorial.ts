@@ -19,6 +19,15 @@ const sections: Section[] = [
           "item 3",
         ],
       },
+      {
+        key: "<radio>radio parent wrong",
+        children: [
+          "<checked>item 1",
+          "item 2",
+          "item 3",
+          "<checked>item 111",
+        ],
+      },
       "Sicompass is a keyboard-driven navigable structure.",
       "Use j/k or arrows to move up and down in this list.",
       "Press Enter or l to go deeper. Press Escape or h to go back.",

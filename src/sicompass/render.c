@@ -696,7 +696,7 @@ void updateView(SiCompassApplication *app) {
 
     // Render error message if any
     if (app->appRenderer->errorMessage[0] != '\0') {
-        renderText(app, app->appRenderer->errorMessage, 400, 10, COLOR_RED, false);
+        renderText(app, app->appRenderer->errorMessage, maxX + 20, (float)headerHeight, COLOR_RED, false);
     }
 
     // Render appropriate panel
