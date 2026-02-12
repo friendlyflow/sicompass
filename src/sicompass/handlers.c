@@ -594,6 +594,7 @@ void handleUp(AppRenderer *appRenderer) {
     if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
         appRenderer->currentCoordinate == COORDINATE_COMMAND ||
         appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
+        appRenderer->errorMessage[0] = '\0';
         if (appRenderer->listIndex > 0) {
             appRenderer->listIndex--;
             ListItem *list = appRenderer->filteredListCount > 0 ?
@@ -637,6 +638,7 @@ void handleDown(AppRenderer *appRenderer) {
     if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
         appRenderer->currentCoordinate == COORDINATE_COMMAND ||
         appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
+        appRenderer->errorMessage[0] = '\0';
         int maxIndex = (appRenderer->filteredListCount > 0) ?
                         appRenderer->filteredListCount - 1 :
                         appRenderer->totalListCount - 1;
@@ -688,6 +690,7 @@ void handlePageUp(AppRenderer *appRenderer) {
         appRenderer->currentCoordinate == COORDINATE_COMMAND ||
         appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
         // Search/command/extended search modes: adjust listIndex
+        appRenderer->errorMessage[0] = '\0';
         int count = (appRenderer->filteredListCount > 0) ?
                      appRenderer->filteredListCount :
                      appRenderer->totalListCount;
@@ -756,6 +759,7 @@ void handlePageDown(AppRenderer *appRenderer) {
         appRenderer->currentCoordinate == COORDINATE_COMMAND ||
         appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
         // Search/command/extended search modes: adjust listIndex
+        appRenderer->errorMessage[0] = '\0';
         int count = (appRenderer->filteredListCount > 0) ?
                      appRenderer->filteredListCount :
                      appRenderer->totalListCount;
