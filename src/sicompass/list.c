@@ -82,6 +82,11 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
                 errorMsg = "Radio group must have at most one checked item";
             }
             if (errorMsg) {
+                // Pop path since providerNavigateRight already pushed it
+                Provider *provider = providerGetActive(appRenderer);
+                if (provider && provider->popPath) {
+                    provider->popPath(provider);
+                }
                 idArrayCopy(&appRenderer->currentId, &parentId);
                 createListCurrentLayer(appRenderer);
                 setErrorMessage(appRenderer, errorMsg);

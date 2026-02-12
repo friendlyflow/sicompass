@@ -879,8 +879,8 @@ void handleRight(AppRenderer *appRenderer) {
             appRenderer->needsRedraw = true;
         } else if (providerNavigateRight(appRenderer)) {
             createListCurrentLayer(appRenderer);
-            appRenderer->listIndex = 0;
-            appRenderer->scrollOffset = 0;
+            appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+            appRenderer->scrollOffset = appRenderer->listIndex;
             accesskitSpeakCurrentElement(appRenderer);
             appRenderer->needsRedraw = true;
         }
@@ -889,9 +889,10 @@ void handleRight(AppRenderer *appRenderer) {
         if (providerNavigateRight(appRenderer)) {
             // Rebuild list for new location
             createListCurrentLayer(appRenderer);
-            // When entering a child, start at the first item
-            appRenderer->listIndex = 0;
-            appRenderer->scrollOffset = 0;
+            // Sync listIndex with currentId (normally 0 for new child,
+            // but may differ if validation bounced back to parent)
+            appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+            appRenderer->scrollOffset = appRenderer->listIndex;
             accesskitSpeakCurrentElement(appRenderer);
             appRenderer->needsRedraw = true;
         }
