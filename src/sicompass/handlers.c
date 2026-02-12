@@ -354,12 +354,6 @@ static bool handleRadioSelect(AppRenderer *appRenderer, IdArray *elementId) {
         elem->data.string = checkedKey;
     }
 
-    // Move element to index 0
-    if (idx > 0) {
-        ffonObjectRemoveElement(parent, idx);
-        ffonObjectInsertElement(parent, elem, 0);
-    }
-
     return true;
 }
 
@@ -474,10 +468,9 @@ void handleEnter(AppRenderer *appRenderer, History history) {
         }
         // Check for radio selection
         if (handleRadioSelect(appRenderer, &appRenderer->currentId)) {
-            appRenderer->currentId.ids[appRenderer->currentId.depth - 1] = 0;
+            int savedIndex = appRenderer->listIndex;
             createListCurrentLayer(appRenderer);
-            appRenderer->listIndex = 0;
-            appRenderer->scrollOffset = 0;
+            appRenderer->listIndex = savedIndex;
             appRenderer->needsRedraw = true;
             appRenderer->lastKeypressTime = now;
             return;
@@ -528,13 +521,11 @@ void handleEnter(AppRenderer *appRenderer, History history) {
             }
 
             if (handleRadioSelect(appRenderer, &selectedId)) {
-                selectedId.ids[selectedId.depth - 1] = 0;
                 idArrayCopy(&appRenderer->currentId, &selectedId);
                 appRenderer->currentCoordinate = appRenderer->previousCoordinate;
                 accesskitSpeakModeChange(appRenderer, NULL);
                 createListCurrentLayer(appRenderer);
-                appRenderer->listIndex = 0;
-                appRenderer->scrollOffset = 0;
+                appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
                 appRenderer->needsRedraw = true;
                 appRenderer->lastKeypressTime = now;
                 return;

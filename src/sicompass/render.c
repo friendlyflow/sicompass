@@ -542,6 +542,7 @@ void renderInteraction(SiCompassApplication *app) {
     int yPos = lineHeight * 2;
 
     // Render parent element if we're not at root
+    bool hasRadioSummary = false;
     if (app->appRenderer->currentId.depth > 1) {
         IdArray parentId;
         idArrayCopy(&parentId, &app->appRenderer->currentId);
@@ -560,6 +561,29 @@ void renderInteraction(SiCompassApplication *app) {
                 renderText(app, strippedParent ? strippedParent : parentText, 50, yPos, COLOR_TEXT, false);
                 free(strippedParent);
                 yPos += lineHeight;
+
+                // Render checked radio summary if parent is a radio group
+                if (parentElem->type == FFON_OBJECT &&
+                    providerTagHasRadio(parentElem->data.object->key)) {
+                    FfonObject *radioObj = parentElem->data.object;
+                    for (int i = 0; i < radioObj->count; i++) {
+                        FfonElement *child = radioObj->elements[i];
+                        if (child->type == FFON_STRING &&
+                            providerTagHasChecked(child->data.string)) {
+                            char *checkedText = providerTagExtractCheckedContent(child->data.string);
+                            if (checkedText) {
+                                int summaryX = 50 + indent;
+                                float circleWidth = renderRadioIndicator(app, RADIO_CHECKED, summaryX, yPos);
+                                summaryX += (int)circleWidth;
+                                renderText(app, checkedText, summaryX, yPos, COLOR_TEXT, false);
+                                free(checkedText);
+                                yPos += lineHeight;
+                                hasRadioSummary = true;
+                            }
+                            break;
+                        }
+                    }
+                }
             }
         }
     }
@@ -578,6 +602,7 @@ void renderInteraction(SiCompassApplication *app) {
 
     // Calculate visible item range to keep listIndex in view
     int headerLines = (app->appRenderer->currentId.depth > 1) ? 3 : 2;  // parent + gap = 3, or just header = 2
+    if (hasRadioSummary) headerLines++;
     int availableHeight = (int)app->swapChainExtent.height - (lineHeight * headerLines);
     int visibleItems = availableHeight / lineHeight;
     if (visibleItems < 1) visibleItems = 1;
@@ -664,6 +689,44 @@ void renderSimpleSearch(SiCompassApplication *app) {
     int linesRendered = renderText(app, searchText, 50, yPos, COLOR_TEXT, false);
     yPos += lineHeight * linesRendered;
 
+    // Render checked radio summary if inside a radio group
+    bool hasRadioSummary = false;
+    if (app->appRenderer->currentId.depth >= 2) {
+        IdArray parentId;
+        idArrayCopy(&parentId, &app->appRenderer->currentId);
+        idArrayPop(&parentId);
+
+        int parentCount;
+        FfonElement **parentArr = getFfonAtId(app->appRenderer->ffon, app->appRenderer->ffonCount, &parentId, &parentCount);
+        if (parentArr && parentCount > 0) {
+            int parentIdx = parentId.ids[parentId.depth - 1];
+            if (parentIdx >= 0 && parentIdx < parentCount) {
+                FfonElement *parentElem = parentArr[parentIdx];
+                if (parentElem->type == FFON_OBJECT &&
+                    providerTagHasRadio(parentElem->data.object->key)) {
+                    FfonObject *radioObj = parentElem->data.object;
+                    for (int i = 0; i < radioObj->count; i++) {
+                        FfonElement *child = radioObj->elements[i];
+                        if (child->type == FFON_STRING &&
+                            providerTagHasChecked(child->data.string)) {
+                            char *checkedText = providerTagExtractCheckedContent(child->data.string);
+                            if (checkedText) {
+                                int summaryX = 50 + indent;
+                                float circleWidth = renderRadioIndicator(app, RADIO_CHECKED, summaryX, yPos);
+                                summaryX += (int)circleWidth;
+                                renderText(app, checkedText, summaryX, yPos, COLOR_TEXT, false);
+                                free(checkedText);
+                                yPos += lineHeight;
+                                hasRadioSummary = true;
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     ListItem *list = app->appRenderer->filteredListCount > 0 ?
                      app->appRenderer->filteredListCurrentLayer : app->appRenderer->totalListCurrentLayer;
     int count = app->appRenderer->filteredListCount > 0 ?
@@ -671,6 +734,7 @@ void renderSimpleSearch(SiCompassApplication *app) {
 
     // Calculate visible item range to keep listIndex in view
     int headerLines = 3;  // header line + search input line + gap
+    if (hasRadioSummary) headerLines++;
     int availableHeight = (int)app->swapChainExtent.height - (lineHeight * headerLines);
     int visibleItems = availableHeight / lineHeight;
     if (visibleItems < 1) visibleItems = 1;
