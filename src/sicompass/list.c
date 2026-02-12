@@ -131,7 +131,7 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
                 char *stripped = NULL;
 
                 if (hasRadio) {
-                    prefix = "+rp";
+                    prefix = "+R";
                     stripped = providerTagExtractRadioContent(elem->data.object->key);
                 } else if (hasInput) {
                     prefix = "+i";
