@@ -47,29 +47,72 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
         idArrayCopy(&thisId, &appRenderer->currentId);
         thisId.ids[thisId.depth - 1] = 0;
 
+        // Detect if parent has <radio> tag (for -r prefix on children)
+        bool parentHasRadio = false;
+        if (appRenderer->currentId.depth >= 2) {
+            IdArray parentId;
+            idArrayCopy(&parentId, &appRenderer->currentId);
+            idArrayPop(&parentId);
+            int parentCount;
+            FfonElement **parentArr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &parentId, &parentCount);
+            if (parentArr) {
+                int parentIdx = parentId.ids[parentId.depth - 1];
+                if (parentIdx >= 0 && parentIdx < parentCount &&
+                    parentArr[parentIdx]->type == FFON_OBJECT) {
+                    parentHasRadio = providerTagHasRadio(parentArr[parentIdx]->data.object->key);
+                }
+            }
+        }
+
         for (int i = 0; i < count; i++) {
             FfonElement *elem = arr[i];
 
             idArrayCopy(&appRenderer->totalListCurrentLayer[appRenderer->totalListCount].id, &thisId);
 
             if (elem->type == FFON_STRING) {
-                // Strip provider tags from display
-                bool hasTags = providerTagHasInput(elem->data.string);
-                char *stripped = hasTags ? providerTagExtractContent(elem->data.string) : NULL;
+                bool hasChecked = providerTagHasChecked(elem->data.string);
+                bool hasInput = providerTagHasInput(elem->data.string);
+                const char *prefix;
+                char *stripped = NULL;
+
+                if (hasChecked) {
+                    prefix = "-rc";
+                    stripped = providerTagExtractCheckedContent(elem->data.string);
+                } else if (hasInput) {
+                    prefix = "-i";
+                    stripped = providerTagExtractContent(elem->data.string);
+                } else if (parentHasRadio) {
+                    prefix = "-r";
+                } else {
+                    prefix = "-";
+                }
+
                 char prefixed[MAX_LINE_LENGTH];
                 snprintf(prefixed, sizeof(prefixed), "%s %s",
-                         hasTags ? "-i" : "-",
+                         prefix,
                          stripped ? stripped : elem->data.string);
                 appRenderer->totalListCurrentLayer[appRenderer->totalListCount].label =
                     strdup(prefixed);
                 free(stripped);
             } else {
-                // Strip provider tags from display
-                bool hasTags = providerTagHasInput(elem->data.object->key);
-                char *stripped = hasTags ? providerTagExtractContent(elem->data.object->key) : NULL;
+                bool hasRadio = providerTagHasRadio(elem->data.object->key);
+                bool hasInput = providerTagHasInput(elem->data.object->key);
+                const char *prefix;
+                char *stripped = NULL;
+
+                if (hasRadio) {
+                    prefix = "+rp";
+                    stripped = providerTagExtractRadioContent(elem->data.object->key);
+                } else if (hasInput) {
+                    prefix = "+i";
+                    stripped = providerTagExtractContent(elem->data.object->key);
+                } else {
+                    prefix = "+";
+                }
+
                 char prefixed[MAX_LINE_LENGTH];
                 snprintf(prefixed, sizeof(prefixed), "%s %s",
-                         hasTags ? "+i" : "+",
+                         prefix,
                          stripped ? stripped : elem->data.object->key);
                 appRenderer->totalListCurrentLayer[appRenderer->totalListCount].label =
                     strdup(prefixed);
