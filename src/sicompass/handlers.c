@@ -305,6 +305,64 @@ void handleCtrlA(AppRenderer *appRenderer, History history) {
     appRenderer->needsRedraw = true;
 }
 
+// Returns true if the element at elementId is a radio child and was toggled checked + moved to top.
+static bool handleRadioSelect(AppRenderer *appRenderer, IdArray *elementId) {
+    if (elementId->depth < 2) return false;
+
+    // Resolve the element
+    int count;
+    FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, elementId, &count);
+    if (!arr) return false;
+    int idx = elementId->ids[elementId->depth - 1];
+    if (idx < 0 || idx >= count) return false;
+    FfonElement *elem = arr[idx];
+    if (elem->type != FFON_STRING) return false;
+
+    // Get parent object and check for <radio> tag
+    IdArray parentId;
+    idArrayCopy(&parentId, elementId);
+    idArrayPop(&parentId);
+    int parentCount;
+    FfonElement **parentArr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &parentId, &parentCount);
+    if (!parentArr) return false;
+    int parentIdx = parentId.ids[parentId.depth - 1];
+    if (parentIdx < 0 || parentIdx >= parentCount) return false;
+    FfonElement *parentElem = parentArr[parentIdx];
+    if (parentElem->type != FFON_OBJECT) return false;
+    if (!providerTagHasRadio(parentElem->data.object->key)) return false;
+
+    FfonObject *parent = parentElem->data.object;
+
+    // Uncheck any currently checked sibling
+    for (int i = 0; i < parent->count; i++) {
+        FfonElement *child = parent->elements[i];
+        if (child->type == FFON_STRING && providerTagHasChecked(child->data.string)) {
+            char *content = providerTagExtractCheckedContent(child->data.string);
+            if (content) {
+                free(child->data.string);
+                child->data.string = content;
+            }
+        }
+    }
+
+    // Add <checked> to the selected element (strip display text first if it had tags)
+    char *displayText = providerTagStripDisplay(elem->data.string);
+    char *checkedKey = providerTagFormatCheckedKey(displayText ? displayText : elem->data.string);
+    free(displayText);
+    if (checkedKey) {
+        free(elem->data.string);
+        elem->data.string = checkedKey;
+    }
+
+    // Move element to index 0
+    if (idx > 0) {
+        ffonObjectRemoveElement(parent, idx);
+        ffonObjectInsertElement(parent, elem, 0);
+    }
+
+    return true;
+}
+
 void handleEnter(AppRenderer *appRenderer, History history) {
     uint64_t now = SDL_GetTicks();
 
@@ -368,6 +426,16 @@ void handleEnter(AppRenderer *appRenderer, History history) {
         accesskitSpeakModeChange(appRenderer, NULL);
         appRenderer->needsRedraw = true;
     } else if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
+        // Check for radio selection first
+        if (handleRadioSelect(appRenderer, &appRenderer->currentId)) {
+            appRenderer->currentId.ids[appRenderer->currentId.depth - 1] = 0;
+            createListCurrentLayer(appRenderer);
+            appRenderer->listIndex = 0;
+            appRenderer->scrollOffset = 0;
+            appRenderer->needsRedraw = true;
+            appRenderer->lastKeypressTime = now;
+            return;
+        }
         // Get current element to check if it's a string (file) or object (directory)
         int count;
         FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId, &count);
@@ -401,7 +469,23 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                     appRenderer->filteredListCount : appRenderer->totalListCount;
 
         if (appRenderer->listIndex >= 0 && appRenderer->listIndex < count) {
-            idArrayCopy(&appRenderer->currentId, &list[appRenderer->listIndex].id);
+            IdArray selectedId;
+            idArrayCopy(&selectedId, &list[appRenderer->listIndex].id);
+
+            if (handleRadioSelect(appRenderer, &selectedId)) {
+                selectedId.ids[selectedId.depth - 1] = 0;
+                idArrayCopy(&appRenderer->currentId, &selectedId);
+                appRenderer->currentCoordinate = appRenderer->previousCoordinate;
+                accesskitSpeakModeChange(appRenderer, NULL);
+                createListCurrentLayer(appRenderer);
+                appRenderer->listIndex = 0;
+                appRenderer->scrollOffset = 0;
+                appRenderer->needsRedraw = true;
+                appRenderer->lastKeypressTime = now;
+                return;
+            }
+
+            idArrayCopy(&appRenderer->currentId, &selectedId);
         }
         appRenderer->currentCoordinate = appRenderer->previousCoordinate;
         accesskitSpeakModeChange(appRenderer, NULL);

@@ -61,3 +61,9 @@ char* providerTagExtractRadioContent(const char *taggedText);
  * Caller must free the returned string.
  */
 char* providerTagExtractCheckedContent(const char *taggedText);
+
+/**
+ * Wrap content in <checked> tag (no closing tag).
+ * Caller must free the returned string.
+ */
+char* providerTagFormatCheckedKey(const char *content);

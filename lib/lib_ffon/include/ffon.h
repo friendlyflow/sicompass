@@ -49,6 +49,7 @@ FfonObject* ffonObjectCreate(const char *key);
 void ffonObjectDestroy(FfonObject *obj);
 void ffonObjectAddElement(FfonObject *obj, FfonElement *elem);
 void ffonObjectInsertElement(FfonObject *obj, FfonElement *elem, int index);
+FfonElement* ffonObjectRemoveElement(FfonObject *obj, int index);
 
 // JSON parsing
 FfonElement* parseJsonValue(json_object *jobj);
