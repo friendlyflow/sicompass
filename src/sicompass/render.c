@@ -196,6 +196,40 @@ void accesskitSpeakModeChange(AppRenderer *appRenderer, const char *context) {
     accesskitSpeak(appRenderer, announcement);
 }
 
+typedef enum { RADIO_NONE, RADIO_UNCHECKED, RADIO_CHECKED } RadioType;
+
+static RadioType getRadioType(const char *label) {
+    if (!label) return RADIO_NONE;
+    if (strncmp(label, "-rc ", 4) == 0) return RADIO_CHECKED;
+    if (strncmp(label, "-r ", 3) == 0) return RADIO_UNCHECKED;
+    return RADIO_NONE;
+}
+
+static float renderRadioIndicator(SiCompassApplication *app,
+                                  RadioType radioType, int itemX, int itemYPos) {
+    float scale = getTextScale(app, FONT_SIZE_PT);
+    float lineH = getLineHeight(app, scale, TEXT_PADDING);
+    float circleSize = lineH * 0.8f;
+    float circleX = (float)itemX;
+    float lineTop = (float)itemYPos - app->fontRenderer->ascender * scale - TEXT_PADDING;
+    float circleY = lineTop + (lineH - circleSize) / 2.0f;
+
+    // Outer circle (always rendered)
+    prepareRectangle(app, circleX, circleY, circleSize, circleSize,
+                     COLOR_LIGHT_GREEN, circleSize / 2.0f);
+
+    // Inner circle: green for checked, black (clearvalue) for unchecked
+    float innerSize = circleSize * 0.55f;
+    float innerOffset = (circleSize - innerSize) / 2.0f;
+    uint32_t innerColor = (radioType == RADIO_CHECKED) ? COLOR_DARK_GREEN : 0x000000FF;
+    prepareRectangle(app, circleX + innerOffset, circleY + innerOffset,
+                     innerSize, innerSize, innerColor, innerSize / 2.0f);
+
+    // Return circle width + one character gap
+    float charWidth = getWidthEM(app, scale);
+    return circleSize + charWidth;
+}
+
 int renderText(SiCompassApplication *app, const char *text, int x, int y,
                uint32_t color, bool highlight) {
     if (!text || strlen(text) == 0) {
@@ -546,6 +580,13 @@ void renderInteraction(SiCompassApplication *app) {
         int itemYPos = yPos;
         int itemX = 50 + indent;
 
+        // Render radio indicator before text if this is a radio item
+        RadioType radioType = getRadioType(list[i].label);
+        if (radioType != RADIO_NONE) {
+            float circleWidth = renderRadioIndicator(app, radioType, itemX, itemYPos);
+            itemX += (int)circleWidth;
+        }
+
         // Determine what text to display
         const char *displayText = list[i].label;
 
@@ -623,13 +664,17 @@ void renderSimpleSearch(SiCompassApplication *app) {
     for (int i = startIndex; i < endIndex; i++) {
         bool isSelected = (i == app->appRenderer->listIndex);
         int itemYPos = yPos;
+        int itemX = 50 + indent;
 
-        // Render radio button indicator
-        // const char *indicator = isSelected ? "●" : "○";
-        // renderText(app, indicator, 50 + indent, itemYPos, COLOR_ORANGE, false);
+        // Render radio indicator before text if this is a radio item
+        RadioType radioType = getRadioType(list[i].label);
+        if (radioType != RADIO_NONE) {
+            float circleWidth = renderRadioIndicator(app, radioType, itemX, itemYPos);
+            itemX += (int)circleWidth;
+        }
 
         // Render text (may be multiple lines)
-        int textLines = renderText(app, list[i].label, 50 + indent, itemYPos, COLOR_TEXT, isSelected);
+        int textLines = renderText(app, list[i].label, itemX, itemYPos, COLOR_TEXT, isSelected);
 
         yPos += lineHeight * textLines;
     }
