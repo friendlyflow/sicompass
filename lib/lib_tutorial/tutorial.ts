@@ -12,9 +12,9 @@ const sections: Section[] = [
     key: "Welcome",
     children: [
       {
-        key: "<radio>radio parent</radio>",
+        key: "<radio>radio parent",
         children: [
-          "<checked>item 1</checked>",
+          "<checked>item 1",
           "item 2",
           "item 3",
         ],
