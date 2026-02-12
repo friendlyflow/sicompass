@@ -28,6 +28,7 @@ void clearListCurrentLayer(AppRenderer *appRenderer) {
 
 void createListCurrentLayer(AppRenderer *appRenderer) {
     clearListCurrentLayer(appRenderer);
+    appRenderer->errorMessage[0] = '\0';
 
     if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
         appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL ||
@@ -49,8 +50,8 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
 
         // Detect if parent has <radio> tag (for -r prefix on children)
         bool parentHasRadio = false;
+        IdArray parentId;
         if (appRenderer->currentId.depth >= 2) {
-            IdArray parentId;
             idArrayCopy(&parentId, &appRenderer->currentId);
             idArrayPop(&parentId);
             int parentCount;
@@ -61,6 +62,30 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
                     parentArr[parentIdx]->type == FFON_OBJECT) {
                     parentHasRadio = providerTagHasRadio(parentArr[parentIdx]->data.object->key);
                 }
+            }
+        }
+
+        // Validate radio group children
+        if (parentHasRadio) {
+            const char *errorMsg = NULL;
+            int checkedCount = 0;
+            for (int i = 0; i < count; i++) {
+                if (arr[i]->type == FFON_OBJECT) {
+                    errorMsg = "Radio group children must be strings, not objects";
+                    break;
+                }
+                if (providerTagHasChecked(arr[i]->data.string)) {
+                    checkedCount++;
+                }
+            }
+            if (!errorMsg && checkedCount > 1) {
+                errorMsg = "Radio group must have at most one checked item";
+            }
+            if (errorMsg) {
+                idArrayCopy(&appRenderer->currentId, &parentId);
+                createListCurrentLayer(appRenderer);
+                setErrorMessage(appRenderer, errorMsg);
+                return;
             }
         }
 
