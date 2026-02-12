@@ -4,7 +4,7 @@
 #include <cglm/cglm.h>
 
 #define MAX_FRAMES_IN_FLIGHT 2
-#define MAX_RECTANGLES 100  // Maximum number of rectangles per frame
+#define MAX_RECTANGLES 200  // Maximum number of rectangles per frame
 
 // Forward declaration
 typedef struct SiCompassApplication SiCompassApplication;
