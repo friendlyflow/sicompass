@@ -11,6 +11,8 @@ const sections: Section[] = [
   {
     key: "Welcome",
     children: [
+      "<checkbox checked>checkbox 1",
+      "<checkbox>checkbox 2",
       {
         key: "<radio>radio parent",
         children: [

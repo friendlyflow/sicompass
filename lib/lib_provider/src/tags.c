@@ -50,6 +50,21 @@ char* providerTagStripDisplay(const char *text) {
         closeLen = CHECKED_TAG_CLOSE_LEN;
     }
 
+    // Check <checkbox checked> before <checkbox> (longer match first)
+    if (!openTag) {
+        openTag = strstr(text, CHECKBOX_CHECKED_TAG_OPEN);
+        closeTag = openTag ? strstr(openTag + CHECKBOX_CHECKED_TAG_OPEN_LEN, CHECKBOX_TAG_CLOSE) : NULL;
+        openLen = CHECKBOX_CHECKED_TAG_OPEN_LEN;
+        closeLen = CHECKBOX_TAG_CLOSE_LEN;
+    }
+
+    if (!openTag) {
+        openTag = strstr(text, CHECKBOX_TAG_OPEN);
+        closeTag = openTag ? strstr(openTag + CHECKBOX_TAG_OPEN_LEN, CHECKBOX_TAG_CLOSE) : NULL;
+        openLen = CHECKBOX_TAG_OPEN_LEN;
+        closeLen = CHECKBOX_TAG_CLOSE_LEN;
+    }
+
     if (!openTag) {
         return strdup(text);
     }
@@ -148,6 +163,76 @@ char* providerTagFormatCheckedKey(const char *content) {
     char *result = malloc(len);
     if (result) {
         snprintf(result, len, CHECKED_TAG_OPEN "%s", content);
+    }
+    return result;
+}
+
+bool providerTagHasCheckbox(const char *text) {
+    if (!text) return false;
+    // Must have <checkbox> but NOT <checkbox checked>
+    return strstr(text, CHECKBOX_TAG_OPEN) != NULL &&
+           strstr(text, CHECKBOX_CHECKED_TAG_OPEN) == NULL;
+}
+
+bool providerTagHasCheckboxChecked(const char *text) {
+    if (!text) return false;
+    return strstr(text, CHECKBOX_CHECKED_TAG_OPEN) != NULL;
+}
+
+char* providerTagExtractCheckboxContent(const char *taggedText) {
+    if (!taggedText) return NULL;
+
+    const char *start = strstr(taggedText, CHECKBOX_TAG_OPEN);
+    if (!start) return NULL;
+
+    start += CHECKBOX_TAG_OPEN_LEN;
+
+    const char *end = strstr(start, CHECKBOX_TAG_CLOSE);
+    size_t len = end ? (size_t)(end - start) : strlen(start);
+    char *result = malloc(len + 1);
+    if (!result) return NULL;
+
+    memcpy(result, start, len);
+    result[len] = '\0';
+    return result;
+}
+
+char* providerTagExtractCheckboxCheckedContent(const char *taggedText) {
+    if (!taggedText) return NULL;
+
+    const char *start = strstr(taggedText, CHECKBOX_CHECKED_TAG_OPEN);
+    if (!start) return NULL;
+
+    start += CHECKBOX_CHECKED_TAG_OPEN_LEN;
+
+    const char *end = strstr(start, CHECKBOX_TAG_CLOSE);
+    size_t len = end ? (size_t)(end - start) : strlen(start);
+    char *result = malloc(len + 1);
+    if (!result) return NULL;
+
+    memcpy(result, start, len);
+    result[len] = '\0';
+    return result;
+}
+
+char* providerTagFormatCheckboxKey(const char *content) {
+    if (!content) return NULL;
+
+    size_t len = CHECKBOX_TAG_OPEN_LEN + strlen(content) + 1;
+    char *result = malloc(len);
+    if (result) {
+        snprintf(result, len, CHECKBOX_TAG_OPEN "%s", content);
+    }
+    return result;
+}
+
+char* providerTagFormatCheckboxCheckedKey(const char *content) {
+    if (!content) return NULL;
+
+    size_t len = CHECKBOX_CHECKED_TAG_OPEN_LEN + strlen(content) + 1;
+    char *result = malloc(len);
+    if (result) {
+        snprintf(result, len, CHECKBOX_CHECKED_TAG_OPEN "%s", content);
     }
     return result;
 }

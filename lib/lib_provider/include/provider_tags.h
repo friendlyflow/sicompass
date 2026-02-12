@@ -17,6 +17,14 @@
 #define CHECKED_TAG_OPEN_LEN 9
 #define CHECKED_TAG_CLOSE_LEN 10
 
+#define CHECKBOX_TAG_OPEN "<checkbox>"
+#define CHECKBOX_TAG_CLOSE "</checkbox>"
+#define CHECKBOX_TAG_OPEN_LEN 10
+#define CHECKBOX_TAG_CLOSE_LEN 11
+
+#define CHECKBOX_CHECKED_TAG_OPEN "<checkbox checked>"
+#define CHECKBOX_CHECKED_TAG_OPEN_LEN 18
+
 /**
  * Check if text contains <input>...</input> tags.
  */
@@ -67,3 +75,37 @@ char* providerTagExtractCheckedContent(const char *taggedText);
  * Caller must free the returned string.
  */
 char* providerTagFormatCheckedKey(const char *content);
+
+/**
+ * Check if text contains <checkbox> tag (but not <checkbox checked>).
+ */
+bool providerTagHasCheckbox(const char *text);
+
+/**
+ * Check if text contains <checkbox checked> tag.
+ */
+bool providerTagHasCheckboxChecked(const char *text);
+
+/**
+ * Extract content after <checkbox> tag.
+ * Caller must free the returned string.
+ */
+char* providerTagExtractCheckboxContent(const char *taggedText);
+
+/**
+ * Extract content after <checkbox checked> tag.
+ * Caller must free the returned string.
+ */
+char* providerTagExtractCheckboxCheckedContent(const char *taggedText);
+
+/**
+ * Wrap content in <checkbox> tag (no closing tag).
+ * Caller must free the returned string.
+ */
+char* providerTagFormatCheckboxKey(const char *content);
+
+/**
+ * Wrap content in <checkbox checked> tag (no closing tag).
+ * Caller must free the returned string.
+ */
+char* providerTagFormatCheckboxCheckedKey(const char *content);
