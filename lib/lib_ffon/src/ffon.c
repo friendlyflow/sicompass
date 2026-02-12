@@ -193,6 +193,19 @@ void ffonObjectInsertElement(FfonObject *obj, FfonElement *elem, int index) {
     obj->count++;
 }
 
+FfonElement* ffonObjectRemoveElement(FfonObject *obj, int index) {
+    if (!obj || index < 0 || index >= obj->count) return NULL;
+
+    FfonElement *elem = obj->elements[index];
+
+    for (int i = index; i < obj->count - 1; i++) {
+        obj->elements[i] = obj->elements[i + 1];
+    }
+    obj->count--;
+
+    return elem;
+}
+
 // ============================================
 // JSON parsing
 // ============================================

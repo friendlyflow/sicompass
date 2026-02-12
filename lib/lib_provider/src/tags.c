@@ -140,3 +140,14 @@ char* providerTagExtractCheckedContent(const char *taggedText) {
     result[len] = '\0';
     return result;
 }
+
+char* providerTagFormatCheckedKey(const char *content) {
+    if (!content) return NULL;
+
+    size_t len = CHECKED_TAG_OPEN_LEN + strlen(content) + 1;
+    char *result = malloc(len);
+    if (result) {
+        snprintf(result, len, CHECKED_TAG_OPEN "%s", content);
+    }
+    return result;
+}
