@@ -65,35 +65,6 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
             }
         }
 
-        // Validate radio group children
-        if (parentHasRadio) {
-            const char *errorMsg = NULL;
-            int checkedCount = 0;
-            for (int i = 0; i < count; i++) {
-                if (arr[i]->type == FFON_OBJECT) {
-                    errorMsg = "Radio group children must be strings, not objects";
-                    break;
-                }
-                if (providerTagHasChecked(arr[i]->data.string)) {
-                    checkedCount++;
-                }
-            }
-            if (!errorMsg && checkedCount > 1) {
-                errorMsg = "Radio group must have at most one checked item";
-            }
-            if (errorMsg) {
-                // Pop path since providerNavigateRight already pushed it
-                Provider *provider = providerGetActive(appRenderer);
-                if (provider && provider->popPath) {
-                    provider->popPath(provider);
-                }
-                idArrayCopy(&appRenderer->currentId, &parentId);
-                createListCurrentLayer(appRenderer);
-                setErrorMessage(appRenderer, errorMsg);
-                return;
-            }
-        }
-
         for (int i = 0; i < count; i++) {
             FfonElement *elem = arr[i];
 

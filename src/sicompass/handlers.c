@@ -532,6 +532,22 @@ void handleEnter(AppRenderer *appRenderer, History history) {
             }
 
             idArrayCopy(&appRenderer->currentId, &selectedId);
+
+            // If selected item is an object, try navigating into it
+            int ecount;
+            FfonElement **earr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                              &appRenderer->currentId, &ecount);
+            if (earr) {
+                int eidx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                if (eidx >= 0 && eidx < ecount && earr[eidx]->type == FFON_OBJECT) {
+                    if (!providerNavigateRight(appRenderer)) {
+                        // Navigation rejected (e.g. invalid radio group) - stay in search mode
+                        appRenderer->needsRedraw = true;
+                        appRenderer->lastKeypressTime = now;
+                        return;
+                    }
+                }
+            }
         }
         appRenderer->currentCoordinate = appRenderer->previousCoordinate;
         accesskitSpeakModeChange(appRenderer, NULL);
@@ -944,8 +960,8 @@ void handleRight(AppRenderer *appRenderer) {
             appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
             appRenderer->scrollOffset = appRenderer->listIndex;
             accesskitSpeakCurrentElement(appRenderer);
-            appRenderer->needsRedraw = true;
         }
+        appRenderer->needsRedraw = true;
     }
 }
 

@@ -143,6 +143,30 @@ bool providerNavigateRight(AppRenderer *appRenderer) {
     Provider *provider = providerGetActive(appRenderer);
     char *strippedKey = providerTagExtractContent(key);
 
+    // Validate radio group constraints before navigating in
+    if (providerTagHasRadio(key) && obj->count > 0) {
+        const char *radioError = NULL;
+        int checkedCount = 0;
+        for (int i = 0; i < obj->count; i++) {
+            if (obj->elements[i]->type == FFON_OBJECT) {
+                radioError = "Radio group children must be strings, not objects";
+                break;
+            }
+            if (obj->elements[i]->type == FFON_STRING &&
+                providerTagHasChecked(obj->elements[i]->data.string)) {
+                checkedCount++;
+            }
+        }
+        if (!radioError && checkedCount > 1) {
+            radioError = "Radio group must have at most one checked item";
+        }
+        if (radioError) {
+            setErrorMessage(appRenderer, radioError);
+            free(strippedKey);
+            return false;
+        }
+    }
+
     // If object already has children, just navigate into it
     if (obj->count > 0) {
         if (provider && provider->pushPath && strippedKey) {
@@ -181,6 +205,33 @@ bool providerNavigateRight(AppRenderer *appRenderer) {
             ffonObjectAddElement(obj, children[i]);
         }
         free(children);
+    }
+
+    // Validate radio group constraints after fetching
+    if (providerTagHasRadio(key)) {
+        const char *radioError = NULL;
+        int checkedCount = 0;
+        for (int i = 0; i < obj->count; i++) {
+            if (obj->elements[i]->type == FFON_OBJECT) {
+                radioError = "Radio group children must be strings, not objects";
+                break;
+            }
+            if (obj->elements[i]->type == FFON_STRING &&
+                providerTagHasChecked(obj->elements[i]->data.string)) {
+                checkedCount++;
+            }
+        }
+        if (!radioError && checkedCount > 1) {
+            radioError = "Radio group must have at most one checked item";
+        }
+        if (radioError) {
+            // Undo pushPath if it was called
+            if (provider && provider->popPath) {
+                provider->popPath(provider);
+            }
+            setErrorMessage(appRenderer, radioError);
+            return false;
+        }
     }
 
     idArrayPush(&appRenderer->currentId, 0);
