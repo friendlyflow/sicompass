@@ -1,4 +1,5 @@
 #include "view.h"
+#include "checkmark.h"
 #include <provider_tags.h>
 #include <string.h>
 
@@ -248,16 +249,23 @@ static float renderCheckboxIndicator(SiCompassApplication *app,
     float lineTop = (float)itemYPos - app->fontRenderer->ascender * scale - TEXT_PADDING;
     float boxY = lineTop + (lineH - boxSize) / 2.0f;
 
-    // Outer square (always rendered)
-    prepareRectangle(app, boxX, boxY, boxSize, boxSize,
-                     COLOR_LIGHT_GREEN, 0.0f);
-
-    // Inner square: green for checked, black (clear) for unchecked
-    float innerSize = boxSize * 0.55f;
-    float innerOffset = (boxSize - innerSize) / 2.0f;
-    uint32_t innerColor = (checkboxType == CHECKBOX_CHECKED) ? COLOR_DARK_GREEN : 0x000000FF;
-    prepareRectangle(app, boxX + innerOffset, boxY + innerOffset,
-                     innerSize, innerSize, innerColor, 0.0f);
+    if (checkboxType == CHECKBOX_CHECKED) {
+        // Checked: dark green square with text-colored checkmark
+        prepareRectangle(app, boxX, boxY, boxSize, boxSize,
+                         COLOR_DARK_GREEN, 0.0f);
+        float checkPadding = boxSize * 0.02f;
+        float checkSize = boxSize - checkPadding * 2.0f;
+        prepareCheckmark(app, boxX + checkPadding, boxY + checkPadding,
+                         checkSize, COLOR_TEXT);
+    } else {
+        // Unchecked: text-colored border with black center
+        prepareRectangle(app, boxX, boxY, boxSize, boxSize,
+                         COLOR_TEXT, 0.0f);
+        float border = boxSize * 0.07f;
+        float innerSize = boxSize - border * 2.0f;
+        prepareRectangle(app, boxX + border, boxY + border,
+                         innerSize, innerSize, 0x000000FF, 0.0f);
+    }
 
     // Return box width + one character gap
     float charWidth = getWidthEM(app, scale);
