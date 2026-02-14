@@ -1,7 +1,9 @@
 #include "view.h"
 #include "checkmark.h"
+#include "image.h"
 #include <provider_tags.h>
 #include <string.h>
+#include <math.h>
 
 // AccessKit node IDs
 const accesskit_node_id ROOT_ID = 0;
@@ -538,9 +540,34 @@ int renderText(SiCompassApplication *app, const char *text, int x, int y,
 //     }
 // }
 
+static int getItemLineCount(const char *label, SiCompassApplication *app,
+                            float charWidth, int lineHeight, int headerLines) {
+    if (label && strncmp(label, "-p ", 3) == 0) {
+        const char *imagePath = label + 3;
+        if (loadImageTexture(app, imagePath)) {
+            ImageRenderer *ir = app->imageRenderer;
+            float imgW = (float)ir->textureWidth;
+            float imgH = (float)ir->textureHeight;
+
+            float maxW = charWidth * 120.0f;
+            float maxH = (float)app->swapChainExtent.height - (float)(lineHeight * headerLines);
+
+            float displayScale = 1.0f;
+            if (imgW > maxW) displayScale = maxW / imgW;
+            if (imgH * displayScale > maxH) displayScale = maxH / imgH;
+
+            float displayH = imgH * displayScale;
+            int imageLines = (int)ceilf(displayH / (float)lineHeight);
+            return imageLines > 1 ? imageLines : 1;
+        }
+    }
+    return 1;
+}
+
 void renderInteraction(SiCompassApplication *app) {
     float scale = getTextScale(app, FONT_SIZE_PT);
     int lineHeight = (int)getLineHeight(app, scale, TEXT_PADDING);
+    float charWidth = getWidthEM(app, scale);
 
     // Calculate indent as the actual width of 4 spaces using text bounds
     float minX, minY, maxX, maxY;
@@ -608,44 +635,108 @@ void renderInteraction(SiCompassApplication *app) {
     bool inInsertMode = (app->appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
                          app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT);
 
-    // Calculate visible item range to keep listIndex in view
+    // Calculate visible line range to keep listIndex in view
     int headerLines = (app->appRenderer->currentId.depth > 1) ? 3 : 2;  // parent + gap = 3, or just header = 2
     if (hasRadioSummary) headerLines++;
     int availableHeight = (int)app->swapChainExtent.height - (lineHeight * headerLines);
-    int visibleItems = availableHeight / lineHeight;
-    if (visibleItems < 1) visibleItems = 1;
+    int availableLines = availableHeight / lineHeight;
+    if (availableLines < 1) availableLines = 1;
 
     int startIndex = app->appRenderer->scrollOffset;
-    int scrolloff = 1;
+    int listIndex = app->appRenderer->listIndex;
 
-    // Keep margin above: selected stays at position >= scrolloff, unless at first item
-    if (app->appRenderer->listIndex > 0 &&
-        app->appRenderer->listIndex < startIndex + scrolloff) {
-        startIndex = app->appRenderer->listIndex - scrolloff;
-    }
-    if (app->appRenderer->listIndex < startIndex) {
-        startIndex = app->appRenderer->listIndex;
+    // Ensure startIndex <= listIndex
+    if (listIndex < startIndex) {
+        startIndex = listIndex;
     }
 
-    // Keep margin below: selected stays at position <= visibleItems-1-scrolloff, unless at last item
-    if (app->appRenderer->listIndex < count - 1 &&
-        app->appRenderer->listIndex >= startIndex + visibleItems - scrolloff) {
-        startIndex = app->appRenderer->listIndex - visibleItems + 1 + scrolloff;
+    // Accumulate lines from startIndex to listIndex (inclusive) to check if it fits
+    int linesToSelected = 0;
+    for (int i = startIndex; i <= listIndex; i++) {
+        linesToSelected += getItemLineCount(list[i].label, app, charWidth, lineHeight, headerLines);
     }
-    if (app->appRenderer->listIndex >= startIndex + visibleItems) {
-        startIndex = app->appRenderer->listIndex - visibleItems + 1;
+
+    // If selected item extends past viewport, scroll forward
+    while (linesToSelected > availableLines && startIndex < listIndex) {
+        linesToSelected -= getItemLineCount(list[startIndex].label, app, charWidth, lineHeight, headerLines);
+        startIndex++;
+    }
+
+    // Try to show 1 item above selected if possible (scrolloff)
+    if (startIndex > 0 && startIndex == listIndex) {
+        int prevLines = getItemLineCount(list[startIndex - 1].label, app, charWidth, lineHeight, headerLines);
+        if (linesToSelected + prevLines <= availableLines) {
+            startIndex--;
+        }
     }
 
     if (startIndex < 0) startIndex = 0;
     app->appRenderer->scrollOffset = startIndex;
 
-    int endIndex = startIndex + visibleItems;
+    // Calculate endIndex: include items whose start position is within viewport
+    int totalLines = 0;
+    int endIndex = startIndex;
+    while (endIndex < count) {
+        if (totalLines >= availableLines) break;
+        totalLines += getItemLineCount(list[endIndex].label, app, charWidth, lineHeight, headerLines);
+        endIndex++;
+    }
     if (endIndex > count) endIndex = count;
 
     for (int i = startIndex; i < endIndex; i++) {
         bool isSelected = (i == app->appRenderer->listIndex);
         int itemYPos = yPos;
         int itemX = 50 + indent;
+
+        // Check if this is an image item
+        if (list[i].label && strncmp(list[i].label, "-p ", 3) == 0) {
+            const char *imagePath = list[i].label + 3;
+
+            if (loadImageTexture(app, imagePath)) {
+                ImageRenderer *ir = app->imageRenderer;
+                float imgW = (float)ir->textureWidth;
+                float imgH = (float)ir->textureHeight;
+
+                // Calculate max display dimensions
+                float maxW = charWidth * 120.0f;
+                float maxH = (float)app->swapChainExtent.height - (float)(lineHeight * headerLines);
+
+                // Scale to fit within constraints, maintaining aspect ratio
+                float displayScale = 1.0f;
+                if (imgW > maxW) {
+                    displayScale = maxW / imgW;
+                }
+                if (imgH * displayScale > maxH) {
+                    displayScale = maxH / imgH;
+                }
+
+                float displayW = imgW * displayScale;
+                float displayH = imgH * displayScale;
+
+                // Position image at current item location
+                float imgX = (float)itemX;
+                float imgY = (float)itemYPos - app->fontRenderer->ascender * scale - TEXT_PADDING;
+
+                // Render dark green border around image when selected
+                if (isSelected) {
+                    float border = 2.0f;
+                    prepareRectangle(app, imgX - border, imgY - border,
+                                     displayW + border * 2.0f, displayH + border * 2.0f,
+                                     COLOR_DARK_GREEN, 0.0f);
+                }
+
+                prepareImage(app, imgX, imgY, displayW, displayH);
+
+                int imageLines = (int)ceilf(displayH / (float)lineHeight);
+                if (imageLines < 1) imageLines = 1;
+                yPos += lineHeight * imageLines;
+            } else {
+                // Failed to load image, show path as text
+                int textLines = renderText(app, imagePath, itemX, itemYPos, COLOR_TEXT, isSelected);
+                yPos += lineHeight * textLines;
+            }
+            continue;
+        }
 
         // Render radio indicator before text if this is a radio item
         RadioType radioType = getRadioType(list[i].label);
@@ -740,44 +831,100 @@ void renderSimpleSearch(SiCompassApplication *app) {
     int count = app->appRenderer->filteredListCount > 0 ?
                 app->appRenderer->filteredListCount : app->appRenderer->totalListCount;
 
-    // Calculate visible item range to keep listIndex in view
+    // Calculate visible line range to keep listIndex in view
     int headerLines = 3;  // header line + search input line + gap
     if (hasRadioSummary) headerLines++;
     int availableHeight = (int)app->swapChainExtent.height - (lineHeight * headerLines);
-    int visibleItems = availableHeight / lineHeight;
-    if (visibleItems < 1) visibleItems = 1;
+    float charWidth = getWidthEM(app, scale);
+    int availableLines = availableHeight / lineHeight;
+    if (availableLines < 1) availableLines = 1;
 
     int startIndex = app->appRenderer->scrollOffset;
-    int scrolloff = 1;
+    int listIndex = app->appRenderer->listIndex;
 
-    // Keep margin above: selected stays at position >= scrolloff, unless at first item
-    if (app->appRenderer->listIndex > 0 &&
-        app->appRenderer->listIndex < startIndex + scrolloff) {
-        startIndex = app->appRenderer->listIndex - scrolloff;
-    }
-    if (app->appRenderer->listIndex < startIndex) {
-        startIndex = app->appRenderer->listIndex;
+    // Ensure startIndex <= listIndex
+    if (listIndex < startIndex) {
+        startIndex = listIndex;
     }
 
-    // Keep margin below: selected stays at position <= visibleItems-1-scrolloff, unless at last item
-    if (app->appRenderer->listIndex < count - 1 &&
-        app->appRenderer->listIndex >= startIndex + visibleItems - scrolloff) {
-        startIndex = app->appRenderer->listIndex - visibleItems + 1 + scrolloff;
+    // Accumulate lines from startIndex to listIndex (inclusive) to check if it fits
+    int linesToSelected = 0;
+    for (int i = startIndex; i <= listIndex; i++) {
+        linesToSelected += getItemLineCount(list[i].label, app, charWidth, lineHeight, headerLines);
     }
-    if (app->appRenderer->listIndex >= startIndex + visibleItems) {
-        startIndex = app->appRenderer->listIndex - visibleItems + 1;
+
+    // If selected item extends past viewport, scroll forward
+    while (linesToSelected > availableLines && startIndex < listIndex) {
+        linesToSelected -= getItemLineCount(list[startIndex].label, app, charWidth, lineHeight, headerLines);
+        startIndex++;
+    }
+
+    // Try to show 1 item above selected if possible (scrolloff)
+    if (startIndex > 0 && startIndex == listIndex) {
+        int prevLines = getItemLineCount(list[startIndex - 1].label, app, charWidth, lineHeight, headerLines);
+        if (linesToSelected + prevLines <= availableLines) {
+            startIndex--;
+        }
     }
 
     if (startIndex < 0) startIndex = 0;
     app->appRenderer->scrollOffset = startIndex;
 
-    int endIndex = startIndex + visibleItems;
+    // Calculate endIndex: include items whose start position is within viewport
+    int totalLines = 0;
+    int endIndex = startIndex;
+    while (endIndex < count) {
+        if (totalLines >= availableLines) break;
+        totalLines += getItemLineCount(list[endIndex].label, app, charWidth, lineHeight, headerLines);
+        endIndex++;
+    }
     if (endIndex > count) endIndex = count;
 
     for (int i = startIndex; i < endIndex; i++) {
         bool isSelected = (i == app->appRenderer->listIndex);
         int itemYPos = yPos;
         int itemX = 50 + indent;
+
+        // Check if this is an image item
+        if (list[i].label && strncmp(list[i].label, "-p ", 3) == 0) {
+            const char *imagePath = list[i].label + 3;
+
+            if (loadImageTexture(app, imagePath)) {
+                ImageRenderer *ir = app->imageRenderer;
+                float imgW = (float)ir->textureWidth;
+                float imgH = (float)ir->textureHeight;
+
+                float maxW = charWidth * 120.0f;
+                float maxH = (float)app->swapChainExtent.height - (float)(lineHeight * headerLines);
+
+                float displayScale = 1.0f;
+                if (imgW > maxW) displayScale = maxW / imgW;
+                if (imgH * displayScale > maxH) displayScale = maxH / imgH;
+
+                float displayW = imgW * displayScale;
+                float displayH = imgH * displayScale;
+
+                float imgX = (float)itemX;
+                float imgY = (float)itemYPos - app->fontRenderer->ascender * scale - TEXT_PADDING;
+
+                if (isSelected) {
+                    float border = 2.0f;
+                    prepareRectangle(app, imgX - border, imgY - border,
+                                     displayW + border * 2.0f, displayH + border * 2.0f,
+                                     COLOR_DARK_GREEN, 0.0f);
+                }
+
+                prepareImage(app, imgX, imgY, displayW, displayH);
+
+                int imageLines = (int)ceilf(displayH / (float)lineHeight);
+                if (imageLines < 1) imageLines = 1;
+                yPos += lineHeight * imageLines;
+            } else {
+                int textLines = renderText(app, imagePath, itemX, itemYPos, COLOR_TEXT, isSelected);
+                yPos += lineHeight * textLines;
+            }
+            continue;
+        }
 
         // Render radio indicator before text if this is a radio item
         RadioType radioType = getRadioType(list[i].label);
@@ -817,10 +964,54 @@ void renderScroll(SiCompassApplication *app) {
             FfonElement *elem = arr[idx];
             const char *text = (elem->type == FFON_OBJECT) ?
                 elem->data.object->key : elem->data.string;
-            char *stripped = providerTagStripDisplay(text);
-            int lines = renderText(app, stripped ? stripped : text, 50, yPos, COLOR_TEXT, true);
-            app->appRenderer->textScrollLineCount = lines;
-            free(stripped);
+
+            if (providerTagHasImage(text)) {
+                char *imagePath = providerTagExtractImageContent(text);
+                if (imagePath && loadImageTexture(app, imagePath)) {
+                    ImageRenderer *ir = app->imageRenderer;
+                    float imgW = (float)ir->textureWidth;
+                    float imgH = (float)ir->textureHeight;
+                    float charWidth = getWidthEM(app, scale);
+
+                    // Fit to width only, no height constraint for scroll mode
+                    float maxW = charWidth * 120.0f;
+                    float displayScale = 1.0f;
+                    if (imgW > maxW) displayScale = maxW / imgW;
+
+                    float displayW = imgW * displayScale;
+                    float displayH = imgH * displayScale;
+
+                    float imgX = 50.0f;
+                    float imgY = 1.5f * (float)lineHeight - (float)(app->appRenderer->textScrollOffset * lineHeight);
+
+                    prepareImage(app, imgX, imgY, displayW, displayH);
+
+                    // Clip top edge at header boundary
+                    float clipTop = 1.5f * (float)lineHeight;
+                    if (imgY < clipTop && ir->drawCallCount > 0) {
+                        float uvTop = (clipTop - imgY) / displayH;
+                        ImageDrawCall *dc = &ir->drawCalls[ir->drawCallCount - 1];
+                        dc->vertices[0].pos[1] = clipTop;
+                        dc->vertices[0].texCoord[1] = uvTop;
+                        dc->vertices[1].pos[1] = clipTop;
+                        dc->vertices[1].texCoord[1] = uvTop;
+                        dc->vertices[3].pos[1] = clipTop;
+                        dc->vertices[3].texCoord[1] = uvTop;
+                    }
+
+                    int imageLines = (int)ceilf(displayH / (float)lineHeight);
+                    app->appRenderer->textScrollLineCount = imageLines > 1 ? imageLines : 1;
+                } else {
+                    int lines = renderText(app, imagePath ? imagePath : text, 50, yPos, COLOR_TEXT, true);
+                    app->appRenderer->textScrollLineCount = lines;
+                }
+                free(imagePath);
+            } else {
+                char *stripped = providerTagStripDisplay(text);
+                int lines = renderText(app, stripped ? stripped : text, 50, yPos, COLOR_TEXT, true);
+                app->appRenderer->textScrollLineCount = lines;
+                free(stripped);
+            }
         }
     }
 
@@ -835,6 +1026,9 @@ void updateView(SiCompassApplication *app) {
 
     // Begin rectangle rendering for this frame (resets rectangle count)
     beginRectangleRendering(app);
+
+    // Begin image rendering for this frame (resets vertex count)
+    beginImageRendering(app);
 
     // Render header
     float scale = getTextScale(app, FONT_SIZE_PT);

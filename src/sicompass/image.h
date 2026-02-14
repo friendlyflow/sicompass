@@ -1,37 +1,74 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
+#include <cglm/cglm.h>
+#include <stdbool.h>
+
+#define MAX_FRAMES_IN_FLIGHT 2
 
 // Forward declaration
 typedef struct SiCompassApplication SiCompassApplication;
 
-// Vertex description functions
-VkVertexInputBindingDescription getBindingDescription(void);
-void getAttributeDescriptions(VkVertexInputAttributeDescription* attributeDescriptions);
+typedef struct ImageVertex {
+    vec2 pos;
+    vec2 texCoord;
+} ImageVertex;
 
-// Texture image creation and management
-void createTextureImage(SiCompassApplication* app);
-void createTextureImageView(SiCompassApplication* app);
-void createTextureSampler(SiCompassApplication* app);
-void cleanupTextureResources(SiCompassApplication* app);
+#define MAX_CACHED_IMAGES 16
+#define MAX_VISIBLE_IMAGES 16
 
-// Uniform buffers
-void createUniformBuffers(SiCompassApplication* app);
-void updateUniformBuffer(SiCompassApplication* app, uint32_t currentImage);
+typedef struct CachedTexture {
+    VkImage image;
+    VkDeviceMemory memory;
+    VkImageView imageView;
+    VkSampler sampler;
+    VkDescriptorSet descriptorSets[MAX_FRAMES_IN_FLIGHT];
+    char path[4096];
+    int width;
+    int height;
+    bool loaded;
+    uint32_t lastUsedFrame;
+} CachedTexture;
 
-// Image vertex and index buffers
-void createImageVertexBuffer(SiCompassApplication* app);
-void createImageIndexBuffer(SiCompassApplication* app);
+typedef struct ImageDrawCall {
+    int cacheIndex;
+    ImageVertex vertices[6];
+} ImageDrawCall;
 
-// Image descriptor layout, pool and sets
-void createImageDescriptorSetLayout(SiCompassApplication* app);
-void createImageDescriptorPool(SiCompassApplication* app);
-void createImageDescriptorSets(SiCompassApplication* app);
+typedef struct ImageRenderer {
+    CachedTexture cache[MAX_CACHED_IMAGES];
+    uint32_t frameCounter;
 
-// Image pipeline
-void createImagePipeline(SiCompassApplication* app);
+    ImageDrawCall drawCalls[MAX_VISIBLE_IMAGES];
+    uint32_t drawCallCount;
 
-// Render pass and framebuffers
+    int textureWidth;
+    int textureHeight;
+    int lastLoadedCacheIndex;
+
+    VkBuffer vertexBuffer;
+    VkDeviceMemory vertexBufferMemory;
+
+    VkDescriptorSetLayout descriptorSetLayout;
+    VkDescriptorPool descriptorPool;
+
+    VkPipelineLayout pipelineLayout;
+    VkPipeline pipeline;
+} ImageRenderer;
+
+// Initialization and cleanup
+void initImageRenderer(SiCompassApplication* app);
+void cleanupImageRenderer(SiCompassApplication* app);
+
+// Texture loading
+bool loadImageTexture(SiCompassApplication* app, const char* path);
+
+// Rendering
+void beginImageRendering(SiCompassApplication* app);
+void prepareImage(SiCompassApplication* app, float x, float y, float width, float height);
+void drawImageQuad(SiCompassApplication* app, VkCommandBuffer commandBuffer);
+
+// Render pass and framebuffers (general Vulkan setup, not image-specific)
 void createRenderPass(SiCompassApplication* app);
 void createFramebuffers(SiCompassApplication* app);
 
@@ -47,6 +84,3 @@ VkFormat findDepthFormat(SiCompassApplication* app);
 
 // Synchronization
 void createSyncObjects(SiCompassApplication* app);
-
-// Drawing
-void drawImage(SiCompassApplication* app, VkCommandBuffer commandBuffer);

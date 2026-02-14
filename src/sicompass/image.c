@@ -1,47 +1,6 @@
 #include "image.h"
 #include "main.h"
 #include <stb_image.h>
-#include <cglm/cglm.h>
-
-#ifdef _MSC_VER
-#define ALIGNED(x) __declspec(align(x))
-typedef struct {
-    ALIGNED(16) mat4 model;
-    ALIGNED(16) mat4 view;
-    ALIGNED(16) mat4 proj;
-} UniformBufferObject;
-#else
-typedef struct {
-    mat4 model __attribute__((aligned(16)));
-    mat4 view __attribute__((aligned(16)));
-    mat4 proj __attribute__((aligned(16)));
-} UniformBufferObject;
-#endif
-
-typedef struct {
-    vec3 pos;
-    vec2 texCoord;
-    vec3 color;
-} Vertex;
-
-const Vertex vertices[] = {
-    {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}},
-    {{0.5f, -0.5f, 0.0f}, {0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}},
-    {{0.5f, 0.5f, 0.0f}, {0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}},
-    {{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f}, {1.0f, 1.0f, 1.0f}},
-
-    {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}},
-    {{0.5f, -0.5f, -0.5f}, {0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}},
-    {{0.5f, 0.5f, -0.5f}, {0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}},
-    {{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f}, {1.0f, 1.0f, 1.0f}}
-};
-const uint32_t vertexCount = 8;
-
-const uint16_t indices[] = {
-    0, 1, 2, 2, 3, 0,
-    4, 5, 6, 6, 7, 4
-};
-const uint32_t indexCount = 12;
 
 // Forward declarations of helper functions from main.c
 extern void createBuffer(SiCompassApplication* app, VkDeviceSize size, VkBufferUsageFlags usage,
@@ -59,41 +18,265 @@ extern char* readFile(const char* filename, size_t* fileSize);
 extern VkShaderModule createShaderModule(VkDevice device, const char* code, size_t codeSize);
 extern QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface);
 
-VkVertexInputBindingDescription getBindingDescription(void) {
-    VkVertexInputBindingDescription bindingDescription = {0};
-    bindingDescription.binding = 0;
-    bindingDescription.stride = sizeof(Vertex);
-    bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-    return bindingDescription;
+// ============================================================================
+// IMAGE RENDERER FUNCTIONS
+// ============================================================================
+
+static void createImageVertexBuffer(SiCompassApplication* app) {
+    ImageRenderer* ir = app->imageRenderer;
+    VkDeviceSize bufferSize = sizeof(ImageVertex) * 6 * MAX_VISIBLE_IMAGES;
+
+    createBuffer(app, bufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                 &ir->vertexBuffer, &ir->vertexBufferMemory);
 }
 
-void getAttributeDescriptions(VkVertexInputAttributeDescription* attributeDescriptions) {
-    attributeDescriptions[0].binding = 0;
-    attributeDescriptions[0].location = 0;
-    attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attributeDescriptions[0].offset = offsetof(Vertex, pos);
+static void createImageDescriptorSetLayout(SiCompassApplication* app) {
+    ImageRenderer* ir = app->imageRenderer;
 
-    attributeDescriptions[1].binding = 0;
-    attributeDescriptions[1].location = 1;
-    attributeDescriptions[1].format = VK_FORMAT_R32G32_SFLOAT;
-    attributeDescriptions[1].offset = offsetof(Vertex, texCoord);
+    VkDescriptorSetLayoutBinding samplerBinding = {0};
+    samplerBinding.binding = 0;
+    samplerBinding.descriptorCount = 1;
+    samplerBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    samplerBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    attributeDescriptions[2].binding = 0;
-    attributeDescriptions[2].location = 2;
-    attributeDescriptions[2].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attributeDescriptions[2].offset = offsetof(Vertex, color);
-}
+    VkDescriptorSetLayoutCreateInfo layoutInfo = {0};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layoutInfo.bindingCount = 1;
+    layoutInfo.pBindings = &samplerBinding;
 
-void createTextureImage(SiCompassApplication* app) {
-    int texWidth, texHeight, texChannels;
-    stbi_uc* pixels = stbi_load("textures/texture.jpg", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
-    VkDeviceSize imageSize = texWidth * texHeight * 4;
-
-    if (!pixels) {
-        fprintf(stderr, "Failed to load texture image!\n");
+    if (vkCreateDescriptorSetLayout(app->device, &layoutInfo, NULL,
+                                    &ir->descriptorSetLayout) != VK_SUCCESS) {
+        fprintf(stderr, "Failed to create image descriptor set layout!\n");
         exit(EXIT_FAILURE);
     }
+}
 
+static void createImageDescriptorPool(SiCompassApplication* app) {
+    ImageRenderer* ir = app->imageRenderer;
+    uint32_t maxSets = MAX_CACHED_IMAGES * MAX_FRAMES_IN_FLIGHT;
+
+    VkDescriptorPoolSize poolSize = {0};
+    poolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    poolSize.descriptorCount = maxSets;
+
+    VkDescriptorPoolCreateInfo poolInfo = {0};
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.poolSizeCount = 1;
+    poolInfo.pPoolSizes = &poolSize;
+    poolInfo.maxSets = maxSets;
+    poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+
+    if (vkCreateDescriptorPool(app->device, &poolInfo, NULL,
+                               &ir->descriptorPool) != VK_SUCCESS) {
+        fprintf(stderr, "Failed to create image descriptor pool!\n");
+        exit(EXIT_FAILURE);
+    }
+}
+
+static void createImagePipeline(SiCompassApplication* app) {
+    ImageRenderer* ir = app->imageRenderer;
+
+    size_t vertSize, fragSize;
+    char* vertCode = readFile("shaders/image_vert.spv", &vertSize);
+    char* fragCode = readFile("shaders/image_frag.spv", &fragSize);
+
+    VkShaderModule vertModule = createShaderModule(app->device, vertCode, vertSize);
+    VkShaderModule fragModule = createShaderModule(app->device, fragCode, fragSize);
+
+    VkPipelineShaderStageCreateInfo stages[2] = {0};
+    stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+    stages[0].module = vertModule;
+    stages[0].pName = "main";
+    stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    stages[1].module = fragModule;
+    stages[1].pName = "main";
+
+    VkVertexInputBindingDescription binding = {0};
+    binding.binding = 0;
+    binding.stride = sizeof(ImageVertex);
+    binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+    VkVertexInputAttributeDescription attrs[2] = {0};
+    attrs[0].location = 0;
+    attrs[0].binding = 0;
+    attrs[0].format = VK_FORMAT_R32G32_SFLOAT;
+    attrs[0].offset = offsetof(ImageVertex, pos);
+
+    attrs[1].location = 1;
+    attrs[1].binding = 0;
+    attrs[1].format = VK_FORMAT_R32G32_SFLOAT;
+    attrs[1].offset = offsetof(ImageVertex, texCoord);
+
+    VkPipelineVertexInputStateCreateInfo vertexInput = {0};
+    vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    vertexInput.vertexBindingDescriptionCount = 1;
+    vertexInput.pVertexBindingDescriptions = &binding;
+    vertexInput.vertexAttributeDescriptionCount = 2;
+    vertexInput.pVertexAttributeDescriptions = attrs;
+
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly = {0};
+    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+    VkPipelineViewportStateCreateInfo viewport = {0};
+    viewport.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewport.viewportCount = 1;
+    viewport.scissorCount = 1;
+
+    VkPipelineRasterizationStateCreateInfo rasterizer = {0};
+    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterizer.lineWidth = 1.0f;
+    rasterizer.cullMode = VK_CULL_MODE_NONE;
+    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+
+    VkPipelineMultisampleStateCreateInfo multisampling = {0};
+    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineDepthStencilStateCreateInfo depthStencil = {0};
+    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depthStencil.depthTestEnable = VK_FALSE;
+    depthStencil.depthWriteEnable = VK_FALSE;
+    depthStencil.depthCompareOp = VK_COMPARE_OP_ALWAYS;
+    depthStencil.depthBoundsTestEnable = VK_FALSE;
+    depthStencil.stencilTestEnable = VK_FALSE;
+
+    VkPipelineColorBlendAttachmentState blendAttachment = {0};
+    blendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                                     VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    blendAttachment.blendEnable = VK_TRUE;
+    blendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+    blendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    blendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+    blendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    blendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+    blendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+
+    VkPipelineColorBlendStateCreateInfo blending = {0};
+    blending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    blending.attachmentCount = 1;
+    blending.pAttachments = &blendAttachment;
+
+    VkDynamicState dynamicStates[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+    VkPipelineDynamicStateCreateInfo dynamicState = {0};
+    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dynamicState.dynamicStateCount = 2;
+    dynamicState.pDynamicStates = dynamicStates;
+
+    VkPushConstantRange pushConstantRange = {0};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(float) * 2;
+
+    VkPipelineLayoutCreateInfo layoutInfo = {0};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    layoutInfo.setLayoutCount = 1;
+    layoutInfo.pSetLayouts = &ir->descriptorSetLayout;
+    layoutInfo.pushConstantRangeCount = 1;
+    layoutInfo.pPushConstantRanges = &pushConstantRange;
+
+    vkCreatePipelineLayout(app->device, &layoutInfo, NULL, &ir->pipelineLayout);
+
+    VkGraphicsPipelineCreateInfo pipelineInfo = {0};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipelineInfo.stageCount = 2;
+    pipelineInfo.pStages = stages;
+    pipelineInfo.pVertexInputState = &vertexInput;
+    pipelineInfo.pInputAssemblyState = &inputAssembly;
+    pipelineInfo.pViewportState = &viewport;
+    pipelineInfo.pRasterizationState = &rasterizer;
+    pipelineInfo.pMultisampleState = &multisampling;
+    pipelineInfo.pDepthStencilState = &depthStencil;
+    pipelineInfo.pColorBlendState = &blending;
+    pipelineInfo.pDynamicState = &dynamicState;
+    pipelineInfo.layout = ir->pipelineLayout;
+    pipelineInfo.renderPass = app->renderPass;
+    pipelineInfo.subpass = 0;
+
+    vkCreateGraphicsPipelines(app->device, VK_NULL_HANDLE, 1, &pipelineInfo, NULL, &ir->pipeline);
+
+    vkDestroyShaderModule(app->device, fragModule, NULL);
+    vkDestroyShaderModule(app->device, vertModule, NULL);
+    free(vertCode);
+    free(fragCode);
+}
+
+void initImageRenderer(SiCompassApplication* app) {
+    app->imageRenderer = (ImageRenderer*)calloc(1, sizeof(ImageRenderer));
+
+    createImageVertexBuffer(app);
+    createImageDescriptorSetLayout(app);
+    createImageDescriptorPool(app);
+    createImagePipeline(app);
+}
+
+static void destroyCachedTexture(SiCompassApplication* app, int index) {
+    ImageRenderer* ir = app->imageRenderer;
+    CachedTexture* ct = &ir->cache[index];
+    if (!ct->loaded) return;
+
+    vkDeviceWaitIdle(app->device);
+
+    vkFreeDescriptorSets(app->device, ir->descriptorPool,
+                         MAX_FRAMES_IN_FLIGHT, ct->descriptorSets);
+    vkDestroySampler(app->device, ct->sampler, NULL);
+    vkDestroyImageView(app->device, ct->imageView, NULL);
+    vkDestroyImage(app->device, ct->image, NULL);
+    vkFreeMemory(app->device, ct->memory, NULL);
+
+    ct->loaded = false;
+}
+
+bool loadImageTexture(SiCompassApplication* app, const char* path) {
+    ImageRenderer* ir = app->imageRenderer;
+
+    // Check cache for existing entry
+    for (int i = 0; i < MAX_CACHED_IMAGES; i++) {
+        if (ir->cache[i].loaded && strcmp(ir->cache[i].path, path) == 0) {
+            ir->cache[i].lastUsedFrame = ir->frameCounter;
+            ir->lastLoadedCacheIndex = i;
+            ir->textureWidth = ir->cache[i].width;
+            ir->textureHeight = ir->cache[i].height;
+            return true;
+        }
+    }
+
+    // Find free slot or evict LRU
+    int slot = -1;
+    for (int i = 0; i < MAX_CACHED_IMAGES; i++) {
+        if (!ir->cache[i].loaded) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot == -1) {
+        uint32_t oldest = UINT32_MAX;
+        for (int i = 0; i < MAX_CACHED_IMAGES; i++) {
+            if (ir->cache[i].lastUsedFrame < oldest) {
+                oldest = ir->cache[i].lastUsedFrame;
+                slot = i;
+            }
+        }
+        destroyCachedTexture(app, slot);
+    }
+
+    CachedTexture* ct = &ir->cache[slot];
+
+    // Load image from disk
+    int texWidth, texHeight, texChannels;
+    stbi_uc* pixels = stbi_load(path, &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+    if (!pixels) {
+        fprintf(stderr, "Failed to load image: %s\n", path);
+        return false;
+    }
+
+    VkDeviceSize imageSize = texWidth * texHeight * 4;
+
+    // Create staging buffer
     VkBuffer stagingBuffer;
     VkDeviceMemory stagingBufferMemory;
     createBuffer(app, imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
@@ -107,383 +290,184 @@ void createTextureImage(SiCompassApplication* app) {
 
     stbi_image_free(pixels);
 
+    // Create Vulkan image
     createImage(app, texWidth, texHeight, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
                 VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                &app->textureImage, &app->textureImageMemory);
+                &ct->image, &ct->memory);
 
-    transitionImageLayout(app, app->textureImage, VK_FORMAT_R8G8B8A8_SRGB,
+    transitionImageLayout(app, ct->image, VK_FORMAT_R8G8B8A8_SRGB,
                          VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-    copyBufferToImage(app, stagingBuffer, app->textureImage, (uint32_t)texWidth, (uint32_t)texHeight);
-    transitionImageLayout(app, app->textureImage, VK_FORMAT_R8G8B8A8_SRGB,
+    copyBufferToImage(app, stagingBuffer, ct->image, (uint32_t)texWidth, (uint32_t)texHeight);
+    transitionImageLayout(app, ct->image, VK_FORMAT_R8G8B8A8_SRGB,
                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
     vkDestroyBuffer(app->device, stagingBuffer, NULL);
     vkFreeMemory(app->device, stagingBufferMemory, NULL);
-}
 
-void createTextureImageView(SiCompassApplication* app) {
-    app->textureImageView = createImageView(app, app->textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
-}
+    // Create image view
+    ct->imageView = createImageView(app, ct->image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
 
-void createTextureSampler(SiCompassApplication* app) {
-    VkPhysicalDeviceProperties properties = {0};
-    vkGetPhysicalDeviceProperties(app->physicalDevice, &properties);
-
+    // Create sampler
     VkSamplerCreateInfo samplerInfo = {0};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     samplerInfo.magFilter = VK_FILTER_LINEAR;
     samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.anisotropyEnable = VK_TRUE;
-    samplerInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
+    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerInfo.anisotropyEnable = VK_FALSE;
     samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
     samplerInfo.unnormalizedCoordinates = VK_FALSE;
     samplerInfo.compareEnable = VK_FALSE;
-    samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
     samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
 
-    if (vkCreateSampler(app->device, &samplerInfo, NULL, &app->textureSampler) != VK_SUCCESS) {
-        fprintf(stderr, "Failed to create texture sampler!\n");
-        exit(EXIT_FAILURE);
+    if (vkCreateSampler(app->device, &samplerInfo, NULL, &ct->sampler) != VK_SUCCESS) {
+        fprintf(stderr, "Failed to create image texture sampler!\n");
+        return false;
     }
-}
 
-void cleanupTextureResources(SiCompassApplication* app) {
-    vkDestroySampler(app->device, app->textureSampler, NULL);
-    vkDestroyImageView(app->device, app->textureImageView, NULL);
-    vkDestroyImage(app->device, app->textureImage, NULL);
-    vkFreeMemory(app->device, app->textureImageMemory, NULL);
-}
-
-void createUniformBuffers(SiCompassApplication* app) {
-    VkDeviceSize bufferSize = sizeof(UniformBufferObject);
-
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        createBuffer(app, bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                     &app->uniformBuffers[i], &app->uniformBuffersMemory[i]);
-
-        vkMapMemory(app->device, app->uniformBuffersMemory[i], 0, bufferSize, 0, &app->uniformBuffersMapped[i]);
-    }
-}
-
-void updateUniformBuffer(SiCompassApplication* app, uint32_t currentImage) {
-    clock_t currentTime = clock();
-    float time = (float)(currentTime - app->startTime) / CLOCKS_PER_SEC;
-
-    UniformBufferObject ubo;
-    glm_mat4_identity(ubo.model);
-    glm_rotate(ubo.model, time * glm_rad(90.0f), (vec3){0.0f, 0.0f, 1.0f});
-
-    vec3 eye = {2.0f, 2.0f, 2.0f};
-    vec3 center = {0.0f, 0.0f, 0.0f};
-    vec3 up = {0.0f, 0.0f, 1.0f};
-    glm_lookat(eye, center, up, ubo.view);
-
-    glm_perspective(glm_rad(45.0f), app->swapChainExtent.width / (float)app->swapChainExtent.height, 0.1f, 10.0f, ubo.proj);
-    ubo.proj[1][1] *= -1;
-
-    memcpy(app->uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
-}
-
-void createImageVertexBuffer(SiCompassApplication* app) {
-
-    VkDeviceSize bufferSize = sizeof(vertices[0]) * vertexCount;
-
-    VkBuffer stagingBuffer;
-    VkDeviceMemory stagingBufferMemory;
-    createBuffer(app, bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                 &stagingBuffer, &stagingBufferMemory);
-
-    void* data;
-    vkMapMemory(app->device, stagingBufferMemory, 0, bufferSize, 0, &data);
-    memcpy(data, vertices, (size_t)bufferSize);
-    vkUnmapMemory(app->device, stagingBufferMemory);
-
-    createBuffer(app, bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &app->vertexBuffer, &app->vertexBufferMemory);
-
-    copyBuffer(app, stagingBuffer, app->vertexBuffer, bufferSize);
-
-    vkDestroyBuffer(app->device, stagingBuffer, NULL);
-    vkFreeMemory(app->device, stagingBufferMemory, NULL);
-}
-
-void createImageIndexBuffer(SiCompassApplication* app) {
-    VkDeviceSize bufferSize = sizeof(indices[0]) * indexCount;
-
-    VkBuffer stagingBuffer;
-    VkDeviceMemory stagingBufferMemory;
-    createBuffer(app, bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                 &stagingBuffer, &stagingBufferMemory);
-
-    void* data;
-    vkMapMemory(app->device, stagingBufferMemory, 0, bufferSize, 0, &data);
-    memcpy(data, indices, (size_t)bufferSize);
-    vkUnmapMemory(app->device, stagingBufferMemory);
-
-    createBuffer(app, bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &app->indexBuffer, &app->indexBufferMemory);
-
-    copyBuffer(app, stagingBuffer, app->indexBuffer, bufferSize);
-
-    vkDestroyBuffer(app->device, stagingBuffer, NULL);
-    vkFreeMemory(app->device, stagingBufferMemory, NULL);
-}
-
-void createImageDescriptorSetLayout(SiCompassApplication* app) {
-    VkDescriptorSetLayoutBinding uboLayoutBinding = {0};
-    uboLayoutBinding.binding = 0;
-    uboLayoutBinding.descriptorCount = 1;
-    uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    uboLayoutBinding.pImmutableSamplers = NULL;
-    uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-
-    VkDescriptorSetLayoutBinding samplerLayoutBinding = {0};
-    samplerLayoutBinding.binding = 1;
-    samplerLayoutBinding.descriptorCount = 1;
-    samplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    samplerLayoutBinding.pImmutableSamplers = NULL;
-    samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-    VkDescriptorSetLayoutBinding bindings[2] = {uboLayoutBinding, samplerLayoutBinding};
-
-    VkDescriptorSetLayoutCreateInfo layoutInfo = {0};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = 2;
-    layoutInfo.pBindings = bindings;
-
-    if (vkCreateDescriptorSetLayout(app->device, &layoutInfo, NULL, &app->descriptorSetLayout) != VK_SUCCESS) {
-        fprintf(stderr, "Failed to create descriptor set layout!\n");
-        exit(EXIT_FAILURE);
-    }
-}
-
-void createImageDescriptorPool(SiCompassApplication* app) {
-    VkDescriptorPoolSize poolSizes[2] = {0};
-    poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[0].descriptorCount = (uint32_t)MAX_FRAMES_IN_FLIGHT;
-    poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = (uint32_t)MAX_FRAMES_IN_FLIGHT;
-
-    VkDescriptorPoolCreateInfo poolInfo = {0};
-    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.poolSizeCount = 2;
-    poolInfo.pPoolSizes = poolSizes;
-    poolInfo.maxSets = (uint32_t)MAX_FRAMES_IN_FLIGHT;
-
-    if (vkCreateDescriptorPool(app->device, &poolInfo, NULL, &app->descriptorPool) != VK_SUCCESS) {
-        fprintf(stderr, "Failed to create descriptor pool!\n");
-        exit(EXIT_FAILURE);
-    }
-}
-
-void createImageDescriptorSets(SiCompassApplication* app) {
+    // Allocate descriptor sets for this cache entry
     VkDescriptorSetLayout layouts[MAX_FRAMES_IN_FLIGHT];
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        layouts[i] = app->descriptorSetLayout;
+        layouts[i] = ir->descriptorSetLayout;
     }
 
     VkDescriptorSetAllocateInfo allocInfo = {0};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = app->descriptorPool;
+    allocInfo.descriptorPool = ir->descriptorPool;
     allocInfo.descriptorSetCount = (uint32_t)MAX_FRAMES_IN_FLIGHT;
     allocInfo.pSetLayouts = layouts;
 
-    if (vkAllocateDescriptorSets(app->device, &allocInfo, app->descriptorSets) != VK_SUCCESS) {
-        fprintf(stderr, "Failed to allocate descriptor sets!\n");
-        exit(EXIT_FAILURE);
+    if (vkAllocateDescriptorSets(app->device, &allocInfo, ct->descriptorSets) != VK_SUCCESS) {
+        fprintf(stderr, "Failed to allocate image descriptor sets!\n");
+        return false;
     }
 
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        VkDescriptorBufferInfo bufferInfo = {0};
-        bufferInfo.buffer = app->uniformBuffers[i];
-        bufferInfo.offset = 0;
-        bufferInfo.range = sizeof(UniformBufferObject);
-
         VkDescriptorImageInfo imageInfo = {0};
         imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        imageInfo.imageView = app->textureImageView;
-        imageInfo.sampler = app->textureSampler;
+        imageInfo.imageView = ct->imageView;
+        imageInfo.sampler = ct->sampler;
 
-        VkWriteDescriptorSet descriptorWrites[2] = {0};
+        VkWriteDescriptorSet descriptorWrite = {0};
+        descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptorWrite.dstSet = ct->descriptorSets[i];
+        descriptorWrite.dstBinding = 0;
+        descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptorWrite.descriptorCount = 1;
+        descriptorWrite.pImageInfo = &imageInfo;
 
-        descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[0].dstSet = app->descriptorSets[i];
-        descriptorWrites[0].dstBinding = 0;
-        descriptorWrites[0].dstArrayElement = 0;
-        descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        descriptorWrites[0].descriptorCount = 1;
-        descriptorWrites[0].pBufferInfo = &bufferInfo;
-
-        descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[1].dstSet = app->descriptorSets[i];
-        descriptorWrites[1].dstBinding = 1;
-        descriptorWrites[1].dstArrayElement = 0;
-        descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptorWrites[1].descriptorCount = 1;
-        descriptorWrites[1].pImageInfo = &imageInfo;
-
-        vkUpdateDescriptorSets(app->device, 2, descriptorWrites, 0, NULL);
+        vkUpdateDescriptorSets(app->device, 1, &descriptorWrite, 0, NULL);
     }
+
+    ct->width = texWidth;
+    ct->height = texHeight;
+    ct->loaded = true;
+    ct->lastUsedFrame = ir->frameCounter;
+    strncpy(ct->path, path, sizeof(ct->path) - 1);
+    ct->path[sizeof(ct->path) - 1] = '\0';
+
+    ir->lastLoadedCacheIndex = slot;
+    ir->textureWidth = texWidth;
+    ir->textureHeight = texHeight;
+
+    return true;
 }
 
-void createImagePipeline(SiCompassApplication* app) {
-    size_t vertShaderSize, fragShaderSize;
-    char* vertShaderCode = readFile("shaders/image_vert.spv", &vertShaderSize);
-    char* fragShaderCode = readFile("shaders/image_frag.spv", &fragShaderSize);
-
-    VkShaderModule vertShaderModule = createShaderModule(app->device, vertShaderCode, vertShaderSize);
-    VkShaderModule fragShaderModule = createShaderModule(app->device, fragShaderCode, fragShaderSize);
-
-    VkPipelineShaderStageCreateInfo vertShaderStageInfo = {0};
-    vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
-    vertShaderStageInfo.module = vertShaderModule;
-    vertShaderStageInfo.pName = "main";
-
-    VkPipelineShaderStageCreateInfo fragShaderStageInfo = {0};
-    fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    fragShaderStageInfo.module = fragShaderModule;
-    fragShaderStageInfo.pName = "main";
-
-    VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
-
-    VkVertexInputBindingDescription bindingDescription = getBindingDescription();
-    VkVertexInputAttributeDescription attributeDescriptions[3];
-    getAttributeDescriptions(attributeDescriptions);
-
-    VkPipelineVertexInputStateCreateInfo vertexInputInfo = {0};
-    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInputInfo.vertexBindingDescriptionCount = 1;
-    vertexInputInfo.vertexAttributeDescriptionCount = 3;
-    vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
-    vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions;
-
-    VkPipelineInputAssemblyStateCreateInfo inputAssembly = {0};
-    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    inputAssembly.primitiveRestartEnable = VK_FALSE;
-
-    VkPipelineViewportStateCreateInfo viewportState = {0};
-    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewportState.viewportCount = 1;
-    viewportState.scissorCount = 1;
-
-    VkPipelineRasterizationStateCreateInfo rasterizer = {0};
-    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizer.depthClampEnable = VK_FALSE;
-    rasterizer.rasterizerDiscardEnable = VK_FALSE;
-    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
-    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    rasterizer.depthBiasEnable = VK_FALSE;
-
-    VkPipelineMultisampleStateCreateInfo multisampling = {0};
-    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisampling.sampleShadingEnable = VK_FALSE;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-    VkPipelineDepthStencilStateCreateInfo depthStencil = {0};
-    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = VK_TRUE;
-    depthStencil.depthWriteEnable = VK_TRUE;
-    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
-    depthStencil.depthBoundsTestEnable = VK_FALSE;
-    depthStencil.stencilTestEnable = VK_FALSE;
-
-    VkPipelineColorBlendAttachmentState colorBlendAttachment = {0};
-    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-                                         VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    colorBlendAttachment.blendEnable = VK_FALSE;
-
-    VkPipelineColorBlendStateCreateInfo colorBlending = {0};
-    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    colorBlending.logicOpEnable = VK_FALSE;
-    colorBlending.logicOp = VK_LOGIC_OP_COPY;
-    colorBlending.attachmentCount = 1;
-    colorBlending.pAttachments = &colorBlendAttachment;
-
-    VkDynamicState dynamicStates[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-    VkPipelineDynamicStateCreateInfo dynamicState = {0};
-    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamicState.dynamicStateCount = 2;
-    dynamicState.pDynamicStates = dynamicStates;
-
-    VkPipelineLayoutCreateInfo pipelineLayoutInfo = {0};
-    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &app->descriptorSetLayout;
-
-    if (vkCreatePipelineLayout(app->device, &pipelineLayoutInfo, NULL, &app->pipelineLayout) != VK_SUCCESS) {
-        fprintf(stderr, "Failed to create pipeline layout!\n");
-        exit(EXIT_FAILURE);
-    }
-
-    VkGraphicsPipelineCreateInfo pipelineInfo = {0};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipelineInfo.stageCount = 2;
-    pipelineInfo.pStages = shaderStages;
-    pipelineInfo.pVertexInputState = &vertexInputInfo;
-    pipelineInfo.pInputAssemblyState = &inputAssembly;
-    pipelineInfo.pViewportState = &viewportState;
-    pipelineInfo.pRasterizationState = &rasterizer;
-    pipelineInfo.pMultisampleState = &multisampling;
-    pipelineInfo.pDepthStencilState = &depthStencil;
-    pipelineInfo.pColorBlendState = &colorBlending;
-    pipelineInfo.pDynamicState = &dynamicState;
-    pipelineInfo.layout = app->pipelineLayout;
-    pipelineInfo.renderPass = app->renderPass;
-    pipelineInfo.subpass = 0;
-    pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
-
-    if (vkCreateGraphicsPipelines(app->device, VK_NULL_HANDLE, 1, &pipelineInfo, NULL, &app->graphicsPipeline) != VK_SUCCESS) {
-        fprintf(stderr, "Failed to create graphics pipeline!\n");
-        exit(EXIT_FAILURE);
-    }
-
-    vkDestroyShaderModule(app->device, fragShaderModule, NULL);
-    vkDestroyShaderModule(app->device, vertShaderModule, NULL);
-
-    free(vertShaderCode);
-    free(fragShaderCode);
+void beginImageRendering(SiCompassApplication* app) {
+    ImageRenderer* ir = app->imageRenderer;
+    ir->drawCallCount = 0;
+    ir->frameCounter++;
 }
 
-void drawImage(SiCompassApplication* app, VkCommandBuffer commandBuffer) {
-    // Draw image
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, app->graphicsPipeline);
+void prepareImage(SiCompassApplication* app, float x, float y, float width, float height) {
+    ImageRenderer* ir = app->imageRenderer;
+    if (ir->drawCallCount >= MAX_VISIBLE_IMAGES) return;
 
-    VkViewport viewport = {0};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = (float)app->swapChainExtent.width;
-    viewport.height = (float)app->swapChainExtent.height;
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+    ImageDrawCall* dc = &ir->drawCalls[ir->drawCallCount];
+    dc->cacheIndex = ir->lastLoadedCacheIndex;
 
-    VkRect2D scissor = {0};
-    scissor.offset = (VkOffset2D){0, 0};
-    scissor.extent = app->swapChainExtent;
-    vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+    float minX = x;
+    float minY = y;
+    float maxX = x + width;
+    float maxY = y + height;
 
-    VkBuffer vertexBuffers[] = {app->vertexBuffer};
+    // Triangle 1
+    dc->vertices[0] = (ImageVertex){{minX, minY}, {0.0f, 0.0f}};
+    dc->vertices[1] = (ImageVertex){{maxX, minY}, {1.0f, 0.0f}};
+    dc->vertices[2] = (ImageVertex){{maxX, maxY}, {1.0f, 1.0f}};
+
+    // Triangle 2
+    dc->vertices[3] = (ImageVertex){{minX, minY}, {0.0f, 0.0f}};
+    dc->vertices[4] = (ImageVertex){{maxX, maxY}, {1.0f, 1.0f}};
+    dc->vertices[5] = (ImageVertex){{minX, maxY}, {0.0f, 1.0f}};
+
+    ir->drawCallCount++;
+}
+
+void drawImageQuad(SiCompassApplication* app, VkCommandBuffer commandBuffer) {
+    ImageRenderer* ir = app->imageRenderer;
+    if (ir->drawCallCount == 0) return;
+
+    // Upload all vertices at once
+    VkDeviceSize totalSize = ir->drawCallCount * 6 * sizeof(ImageVertex);
+    void* data;
+    vkMapMemory(app->device, ir->vertexBufferMemory, 0, totalSize, 0, &data);
+    for (uint32_t i = 0; i < ir->drawCallCount; i++) {
+        memcpy((char*)data + i * 6 * sizeof(ImageVertex),
+               ir->drawCalls[i].vertices, 6 * sizeof(ImageVertex));
+    }
+    vkUnmapMemory(app->device, ir->vertexBufferMemory);
+
+    float screenDimensions[2] = {
+        (float)app->swapChainExtent.width,
+        (float)app->swapChainExtent.height
+    };
+
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ir->pipeline);
+
+    vkCmdPushConstants(commandBuffer, ir->pipelineLayout,
+                      VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(screenDimensions),
+                      screenDimensions);
+
+    VkBuffer buffers[] = {ir->vertexBuffer};
     VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+    vkCmdBindVertexBuffers(commandBuffer, 0, 1, buffers, offsets);
 
-    vkCmdBindIndexBuffer(commandBuffer, app->indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+    for (uint32_t i = 0; i < ir->drawCallCount; i++) {
+        CachedTexture* ct = &ir->cache[ir->drawCalls[i].cacheIndex];
 
-    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, app->pipelineLayout,
-                           0, 1, &app->descriptorSets[app->currentFrame], 0, NULL);
+        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                               ir->pipelineLayout, 0, 1,
+                               &ct->descriptorSets[app->currentFrame],
+                               0, NULL);
 
-    vkCmdDrawIndexed(commandBuffer, indexCount, 1, 0, 0, 0);
+        vkCmdDraw(commandBuffer, 6, 1, i * 6, 0);
+    }
 }
+
+void cleanupImageRenderer(SiCompassApplication* app) {
+    ImageRenderer* ir = app->imageRenderer;
+    if (!ir) return;
+
+    for (int i = 0; i < MAX_CACHED_IMAGES; i++) {
+        destroyCachedTexture(app, i);
+    }
+
+    vkDestroyPipeline(app->device, ir->pipeline, NULL);
+    vkDestroyPipelineLayout(app->device, ir->pipelineLayout, NULL);
+    vkDestroyDescriptorPool(app->device, ir->descriptorPool, NULL);
+    vkDestroyDescriptorSetLayout(app->device, ir->descriptorSetLayout, NULL);
+    vkDestroyBuffer(app->device, ir->vertexBuffer, NULL);
+    vkFreeMemory(app->device, ir->vertexBufferMemory, NULL);
+
+    free(ir);
+    app->imageRenderer = NULL;
+}
+
+// ============================================================================
+// GENERAL VULKAN SETUP FUNCTIONS (not image-specific)
+// ============================================================================
 
 void createRenderPass(SiCompassApplication* app) {
     VkAttachmentDescription colorAttachment = {0};

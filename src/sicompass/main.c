@@ -869,8 +869,8 @@ void recordCommandBuffer(SiCompassApplication* app, VkCommandBuffer commandBuffe
     scissor.extent = app->swapChainExtent;
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-    // drawImage(app, commandBuffer);
     drawRectangle(app, commandBuffer);
+    drawImageQuad(app, commandBuffer);
     drawText(app, commandBuffer);
 
     vkCmdEndRenderPass(commandBuffer);
@@ -995,21 +995,10 @@ void initVulkan(SiCompassApplication* app) {
     createSwapChain(app);
     createImageViews(app);
 
-    // Image
     createRenderPass(app);
-    // createImageDescriptorSetLayout(app);
-    // createImagePipeline(app);
     createCommandPool(app);
     createDepthResources(app);
     createFramebuffers(app);
-    // createTextureImage(app);
-    // createTextureImageView(app);
-    // createTextureSampler(app);
-    // createImageVertexBuffer(app);
-    // createImageIndexBuffer(app);
-    // createUniformBuffers(app);
-    // createImageDescriptorPool(app);
-    // createImageDescriptorSets(app);
     createCommandBuffers(app);
     createSyncObjects(app);
 
@@ -1029,6 +1018,9 @@ void initVulkan(SiCompassApplication* app) {
     app->rectangleRenderer->vertexCount = 0;
     createRectangleVertexBuffer(app);
     createRectanglePipeline(app);
+
+    // Initialize image renderer
+    initImageRenderer(app);
 }
 
 void startApp(SiCompassApplication* app) {
@@ -1040,32 +1032,17 @@ void startApp(SiCompassApplication* app) {
 void cleanup(SiCompassApplication* app) {
     cleanupSwapChain(app);
 
-    vkDestroyPipeline(app->device, app->graphicsPipeline, NULL);
-    vkDestroyPipelineLayout(app->device, app->pipelineLayout, NULL);
     vkDestroyRenderPass(app->device, app->renderPass, NULL);
-
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        vkDestroyBuffer(app->device, app->uniformBuffers[i], NULL);
-        vkFreeMemory(app->device, app->uniformBuffersMemory[i], NULL);
-    }
-
-    vkDestroyDescriptorPool(app->device, app->descriptorPool, NULL);
-
-    cleanupTextureResources(app);
-
-    vkDestroyDescriptorSetLayout(app->device, app->descriptorSetLayout, NULL);
-
-    vkDestroyBuffer(app->device, app->indexBuffer, NULL);
-    vkFreeMemory(app->device, app->indexBufferMemory, NULL);
-
-    vkDestroyBuffer(app->device, app->vertexBuffer, NULL);
-    vkFreeMemory(app->device, app->vertexBufferMemory, NULL);
 
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         vkDestroySemaphore(app->device, app->renderFinishedSemaphores[i], NULL);
         vkDestroySemaphore(app->device, app->imageAvailableSemaphores[i], NULL);
         vkDestroyFence(app->device, app->inFlightFences[i], NULL);
     }
+
+    cleanupImageRenderer(app);
+    cleanupRectangleRenderer(app);
+    cleanupFontRenderer(app);
 
     vkDestroyCommandPool(app->device, app->commandPool, NULL);
 
@@ -1080,9 +1057,6 @@ void cleanup(SiCompassApplication* app) {
 
     SDL_DestroyWindow(app->window);
     SDL_Quit();
-
-    cleanupRectangleRenderer(app);
-    cleanupFontRenderer(app);
 }
 
 void run(SiCompassApplication* app) {

@@ -30,6 +30,11 @@
 #define LINK_TAG_OPEN_LEN 6
 #define LINK_TAG_CLOSE_LEN 7
 
+#define IMAGE_TAG_OPEN "<image>"
+#define IMAGE_TAG_CLOSE "</image>"
+#define IMAGE_TAG_OPEN_LEN 7
+#define IMAGE_TAG_CLOSE_LEN 8
+
 /**
  * Check if text contains <input>...</input> tags.
  */
@@ -125,3 +130,14 @@ bool providerTagHasLink(const char *text);
  * Caller must free the returned string.
  */
 char* providerTagExtractLinkContent(const char *taggedText);
+
+/**
+ * Check if text contains <image>...</image> tags.
+ */
+bool providerTagHasImage(const char *text);
+
+/**
+ * Extract content between <image> and </image> tags.
+ * Caller must free the returned string.
+ */
+char* providerTagExtractImageContent(const char *taggedText);

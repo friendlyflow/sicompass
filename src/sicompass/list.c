@@ -71,6 +71,7 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
             idArrayCopy(&appRenderer->totalListCurrentLayer[appRenderer->totalListCount].id, &thisId);
 
             if (elem->type == FFON_STRING) {
+                bool hasImage = providerTagHasImage(elem->data.string);
                 bool hasCheckboxChecked = providerTagHasCheckboxChecked(elem->data.string);
                 bool hasCheckbox = providerTagHasCheckbox(elem->data.string);
                 bool hasChecked = providerTagHasChecked(elem->data.string);
@@ -78,7 +79,10 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
                 const char *prefix;
                 char *stripped = NULL;
 
-                if (hasCheckboxChecked) {
+                if (hasImage) {
+                    prefix = "-p";
+                    stripped = providerTagExtractImageContent(elem->data.string);
+                } else if (hasCheckboxChecked) {
                     prefix = "-cc";
                     stripped = providerTagExtractCheckboxCheckedContent(elem->data.string);
                 } else if (hasCheckbox) {

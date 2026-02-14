@@ -119,6 +119,7 @@ typedef struct SiCompassApplication {
 
     FontRenderer* fontRenderer;
     RectangleRenderer* rectangleRenderer;
+    ImageRenderer* imageRenderer;
 
     AppRenderer* appRenderer;
 } SiCompassApplication;
