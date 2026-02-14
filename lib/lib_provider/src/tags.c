@@ -66,6 +66,13 @@ char* providerTagStripDisplay(const char *text) {
     }
 
     if (!openTag) {
+        openTag = strstr(text, LINK_TAG_OPEN);
+        closeTag = openTag ? strstr(text, LINK_TAG_CLOSE) : NULL;
+        openLen = LINK_TAG_OPEN_LEN;
+        closeLen = LINK_TAG_CLOSE_LEN;
+    }
+
+    if (!openTag) {
         return strdup(text);
     }
 
@@ -234,5 +241,30 @@ char* providerTagFormatCheckboxCheckedKey(const char *content) {
     if (result) {
         snprintf(result, len, CHECKBOX_CHECKED_TAG_OPEN "%s", content);
     }
+    return result;
+}
+
+bool providerTagHasLink(const char *text) {
+    if (!text) return false;
+    return strstr(text, LINK_TAG_OPEN) != NULL && strstr(text, LINK_TAG_CLOSE) != NULL;
+}
+
+char* providerTagExtractLinkContent(const char *taggedText) {
+    if (!taggedText) return NULL;
+
+    const char *start = strstr(taggedText, LINK_TAG_OPEN);
+    if (!start) return NULL;
+
+    start += LINK_TAG_OPEN_LEN;
+
+    const char *end = strstr(start, LINK_TAG_CLOSE);
+    if (!end) return NULL;
+
+    size_t len = end - start;
+    char *result = malloc(len + 1);
+    if (!result) return NULL;
+
+    memcpy(result, start, len);
+    result[len] = '\0';
     return result;
 }

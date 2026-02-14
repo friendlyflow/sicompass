@@ -25,6 +25,11 @@
 #define CHECKBOX_CHECKED_TAG_OPEN "<checkbox checked>"
 #define CHECKBOX_CHECKED_TAG_OPEN_LEN 18
 
+#define LINK_TAG_OPEN "<link>"
+#define LINK_TAG_CLOSE "</link>"
+#define LINK_TAG_OPEN_LEN 6
+#define LINK_TAG_CLOSE_LEN 7
+
 /**
  * Check if text contains <input>...</input> tags.
  */
@@ -109,3 +114,14 @@ char* providerTagFormatCheckboxKey(const char *content);
  * Caller must free the returned string.
  */
 char* providerTagFormatCheckboxCheckedKey(const char *content);
+
+/**
+ * Check if text contains <link>...</link> tags.
+ */
+bool providerTagHasLink(const char *text);
+
+/**
+ * Extract content between <link> and </link> tags.
+ * Caller must free the returned string.
+ */
+char* providerTagExtractLinkContent(const char *taggedText);

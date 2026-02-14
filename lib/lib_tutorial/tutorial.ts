@@ -88,6 +88,16 @@ const sections: Section[] = [
     ],
   },
   {
+    key: "Links",
+    children: [
+      "Links load external JSON or FFON files as children.",
+      {
+        key: "<link>src/sicompass/json/sf.json</link>",
+        children: [],
+      },
+    ],
+  },
+  {
     key: "Next Steps",
     children: [
       "Press Escape or h to go back to the root.",
