@@ -117,6 +117,118 @@ bool providerExecuteCommand(AppRenderer *appRenderer, const char *command, const
     return provider->executeCommand(provider, command, selection);
 }
 
+// Fetch URL content via curl and parse into FFON elements
+static FfonElement** fetchUrlToElements(const char *url, int *outCount) {
+    *outCount = 0;
+
+    char command[4096 + 64];
+    snprintf(command, sizeof(command), "curl -sfL \"%s\"", url);
+
+    FILE *pipe = popen(command, "r");
+    if (!pipe) {
+        fprintf(stderr, "fetchUrlToElements: failed to run curl\n");
+        return NULL;
+    }
+
+    size_t capacity = 4096;
+    size_t size = 0;
+    char *buffer = malloc(capacity);
+    if (!buffer) {
+        pclose(pipe);
+        return NULL;
+    }
+
+    size_t bytesRead;
+    while ((bytesRead = fread(buffer + size, 1, capacity - size - 1, pipe)) > 0) {
+        size += bytesRead;
+        if (size + 1 >= capacity) {
+            capacity *= 2;
+            char *newBuf = realloc(buffer, capacity);
+            if (!newBuf) {
+                free(buffer);
+                pclose(pipe);
+                return NULL;
+            }
+            buffer = newBuf;
+        }
+    }
+    buffer[size] = '\0';
+    pclose(pipe);
+
+    if (size == 0) {
+        free(buffer);
+        return NULL;
+    }
+
+    // Check if URL ends with .ffon for binary format
+    size_t urlLen = strlen(url);
+    if (urlLen > 5 && strcmp(url + urlLen - 5, ".ffon") == 0) {
+        FfonElement **elements = ffonDeserializeBinary((uint8_t*)buffer, size, outCount);
+        free(buffer);
+        return elements;
+    }
+
+    // Default: parse as JSON
+    json_object *root = json_tokener_parse(buffer);
+    free(buffer);
+
+    if (!root) {
+        fprintf(stderr, "fetchUrlToElements: failed to parse JSON from: %s\n", url);
+        return NULL;
+    }
+
+    if (!json_object_is_type(root, json_type_array)) {
+        fprintf(stderr, "fetchUrlToElements: expected JSON array from: %s\n", url);
+        json_object_put(root);
+        return NULL;
+    }
+
+    int arrayLen = json_object_array_length(root);
+    if (arrayLen == 0) {
+        json_object_put(root);
+        return NULL;
+    }
+
+    FfonElement **elements = malloc(sizeof(FfonElement*) * arrayLen);
+    if (!elements) {
+        json_object_put(root);
+        return NULL;
+    }
+
+    int count = 0;
+    for (int i = 0; i < arrayLen; i++) {
+        json_object *item = json_object_array_get_idx(root, i);
+        FfonElement *elem = parseJsonValue(item);
+        if (elem) {
+            elements[count++] = elem;
+        }
+    }
+
+    json_object_put(root);
+    *outCount = count;
+    return elements;
+}
+
+// Resolve a link URL (local file or HTTP) into FFON elements
+static FfonElement** resolveLinkToElements(const char *url, int *outCount) {
+    *outCount = 0;
+    if (!url) return NULL;
+
+    // HTTP/HTTPS: fetch via curl
+    if (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0) {
+        return fetchUrlToElements(url, outCount);
+    }
+
+    // Local file: determine format by extension
+    size_t urlLen = strlen(url);
+    if (urlLen > 5 && strcmp(url + urlLen - 5, ".ffon") == 0) {
+        return loadFfonFileToElements(url, outCount);
+    }
+
+    // Default: JSON file
+    return loadJsonFileToElements(url, outCount);
+}
+
 // Navigate right into an object
 bool providerNavigateRight(AppRenderer *appRenderer) {
     int count;
@@ -138,6 +250,35 @@ bool providerNavigateRight(AppRenderer *appRenderer) {
 
     FfonObject *obj = elem->data.object;
     const char *key = obj->key;
+
+    // Handle <link> tags: resolve URL and load content as children
+    if (providerTagHasLink(key)) {
+        if (obj->count > 0) {
+            // Already loaded: just navigate in
+            idArrayPush(&appRenderer->currentId, 0);
+            return true;
+        }
+
+        char *url = providerTagExtractLinkContent(key);
+        if (!url) return false;
+
+        int childCount = 0;
+        FfonElement **children = resolveLinkToElements(url, &childCount);
+        free(url);
+
+        if (!children || childCount == 0) {
+            if (children) free(children);
+            return false;
+        }
+
+        for (int i = 0; i < childCount; i++) {
+            ffonObjectAddElement(obj, children[i]);
+        }
+        free(children);
+
+        idArrayPush(&appRenderer->currentId, 0);
+        return true;
+    }
 
     // Get active provider and extract content from tagged key
     Provider *provider = providerGetActive(appRenderer);
@@ -244,10 +385,32 @@ bool providerNavigateLeft(AppRenderer *appRenderer) {
         return false;
     }
 
-    // Pop path on the active provider
-    Provider *provider = providerGetActive(appRenderer);
-    if (provider && provider->popPath) {
-        provider->popPath(provider);
+    // Check if the parent element (the one we're leaving) has a <link> tag
+    // If so, skip popPath since we didn't pushPath when entering a link
+    bool parentIsLink = false;
+    if (appRenderer->currentId.depth >= 2) {
+        IdArray parentId;
+        idArrayCopy(&parentId, &appRenderer->currentId);
+        idArrayPop(&parentId);
+        int parentCount;
+        FfonElement **parentArr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                               &parentId, &parentCount);
+        if (parentArr) {
+            int parentIdx = parentId.ids[parentId.depth - 1];
+            if (parentIdx >= 0 && parentIdx < parentCount &&
+                parentArr[parentIdx]->type == FFON_OBJECT &&
+                providerTagHasLink(parentArr[parentIdx]->data.object->key)) {
+                parentIsLink = true;
+            }
+        }
+    }
+
+    // Pop path on the active provider (skip for link parents)
+    if (!parentIsLink) {
+        Provider *provider = providerGetActive(appRenderer);
+        if (provider && provider->popPath) {
+            provider->popPath(provider);
+        }
     }
 
     idArrayPop(&appRenderer->currentId);

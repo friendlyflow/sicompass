@@ -104,12 +104,16 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
                     strdup(prefixed);
                 free(stripped);
             } else {
+                bool hasLink = providerTagHasLink(elem->data.object->key);
                 bool hasRadio = providerTagHasRadio(elem->data.object->key);
                 bool hasInput = providerTagHasInput(elem->data.object->key);
                 const char *prefix;
                 char *stripped = NULL;
 
-                if (hasRadio) {
+                if (hasLink) {
+                    prefix = "+l";
+                    stripped = providerTagExtractLinkContent(elem->data.object->key);
+                } else if (hasRadio) {
                     prefix = "+R";
                     stripped = providerTagExtractRadioContent(elem->data.object->key);
                 } else if (hasInput) {
