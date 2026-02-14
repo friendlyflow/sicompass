@@ -30,6 +30,8 @@ const sections: Section[] = [
           "<checked>item 111",
         ],
       },
+      "<image>textures/texture.jpg</image>",
+      "<image>textures/texture.jpg</image>",
       "Sicompass is a keyboard-driven navigable structure.",
       "Use j/k or arrows to move up and down in this list.",
       "Press Enter or l to go deeper. Press Escape or h to go back.",

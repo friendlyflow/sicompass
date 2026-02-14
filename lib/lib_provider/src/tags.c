@@ -73,6 +73,13 @@ char* providerTagStripDisplay(const char *text) {
     }
 
     if (!openTag) {
+        openTag = strstr(text, IMAGE_TAG_OPEN);
+        closeTag = openTag ? strstr(text, IMAGE_TAG_CLOSE) : NULL;
+        openLen = IMAGE_TAG_OPEN_LEN;
+        closeLen = IMAGE_TAG_CLOSE_LEN;
+    }
+
+    if (!openTag) {
         return strdup(text);
     }
 
@@ -258,6 +265,31 @@ char* providerTagExtractLinkContent(const char *taggedText) {
     start += LINK_TAG_OPEN_LEN;
 
     const char *end = strstr(start, LINK_TAG_CLOSE);
+    if (!end) return NULL;
+
+    size_t len = end - start;
+    char *result = malloc(len + 1);
+    if (!result) return NULL;
+
+    memcpy(result, start, len);
+    result[len] = '\0';
+    return result;
+}
+
+bool providerTagHasImage(const char *text) {
+    if (!text) return false;
+    return strstr(text, IMAGE_TAG_OPEN) != NULL && strstr(text, IMAGE_TAG_CLOSE) != NULL;
+}
+
+char* providerTagExtractImageContent(const char *taggedText) {
+    if (!taggedText) return NULL;
+
+    const char *start = strstr(taggedText, IMAGE_TAG_OPEN);
+    if (!start) return NULL;
+
+    start += IMAGE_TAG_OPEN_LEN;
+
+    const char *end = strstr(start, IMAGE_TAG_CLOSE);
     if (!end) return NULL;
 
     size_t len = end - start;
