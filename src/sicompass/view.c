@@ -82,7 +82,8 @@ void mainLoop(SiCompassApplication* app) {
                         app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
                         app->appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
                         app->appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-                        app->appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
+                        app->appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH ||
+                        app->appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH) {
                         SDL_StartTextInput(app->window);
                     } else {
                         SDL_StopTextInput(app->window);
@@ -95,7 +96,8 @@ void mainLoop(SiCompassApplication* app) {
                         app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
                         app->appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
                         app->appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-                        app->appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
+                        app->appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH ||
+                        app->appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH) {
                         handleInput(app->appRenderer, event.text.text);
                     }
                     break;

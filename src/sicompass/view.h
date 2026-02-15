@@ -31,6 +31,8 @@
 #define COLOR_DARK_GREY 0x333333FF
 #define COLOR_SELECTION 0x0F2440FF
 #define COLOR_LIGHTGREY 0xD3D3D3FF
+#define COLOR_MATCH_CURRENT 0x264F78FF
+#define COLOR_MATCH_OTHER 0x3A3D1EFF
 
 // Enums
 typedef enum {
@@ -43,7 +45,8 @@ typedef enum {
     COORDINATE_SIMPLE_SEARCH,
     COORDINATE_EXTENDED_SEARCH,
     COORDINATE_COMMAND,
-    COORDINATE_SCROLL
+    COORDINATE_SCROLL,
+    COORDINATE_SCROLL_SEARCH
 } Coordinate;
 
 typedef enum {
@@ -138,6 +141,8 @@ typedef struct AppRenderer {
     int textScrollOffset;      // Line offset for scroll mode text viewing
     int textScrollLineCount;   // Total wrapped lines from last renderScroll (for clamping)
     int renderClipTopY;        // Skip rendering lines with Y < this value (0 = no clipping)
+    int scrollSearchMatchCount;    // Total number of search matches in scroll text
+    int scrollSearchCurrentMatch;  // Index of currently-focused match (0-based)
 
     // Right panel
     ListItem *totalListCurrentLayer;
@@ -276,6 +281,7 @@ void updateView(SiCompassApplication *app);
 void renderSimpleSearch(SiCompassApplication *app);
 void renderExtendedSearch(SiCompassApplication *app);
 void renderScroll(SiCompassApplication *app);
+void renderScrollSearch(SiCompassApplication *app);
 // void renderHierarchy(SiCompassApplication *app);
 void renderInteraction(SiCompassApplication *app);
 void renderLine(SiCompassApplication *app, FfonElement *elem, const IdArray *id, int indent, int *yPos);

@@ -118,6 +118,7 @@ const char* coordinateToString(Coordinate coord) {
         case COORDINATE_COMMAND: return "run command";
         case COORDINATE_EXTENDED_SEARCH: return "ext search";
         case COORDINATE_SCROLL: return "scroll mode";
+        case COORDINATE_SCROLL_SEARCH: return "scroll search";
         default: return "unknown";
     }
 }
