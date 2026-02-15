@@ -267,12 +267,14 @@ void deleteSelection(AppRenderer *appRenderer);
 
 // Right panel
 void createListCurrentLayer(AppRenderer *appRenderer);
+void createListExtendedSearch(AppRenderer *appRenderer);
 void populateListCurrentLayer(AppRenderer *appRenderer, const char *searchString);
 void clearListCurrentLayer(AppRenderer *appRenderer);
 
 // Rendering
 void updateView(SiCompassApplication *app);
 void renderSimpleSearch(SiCompassApplication *app);
+void renderExtendedSearch(SiCompassApplication *app);
 void renderScroll(SiCompassApplication *app);
 // void renderHierarchy(SiCompassApplication *app);
 void renderInteraction(SiCompassApplication *app);

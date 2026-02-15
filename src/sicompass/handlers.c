@@ -556,6 +556,115 @@ void handleEnter(AppRenderer *appRenderer, History history) {
         appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
         appRenderer->scrollOffset = 0;
         appRenderer->needsRedraw = true;
+    } else if (appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
+        // Get selected item from list
+        ListItem *list = appRenderer->filteredListCount > 0 ?
+                         appRenderer->filteredListCurrentLayer : appRenderer->totalListCurrentLayer;
+        int count = appRenderer->filteredListCount > 0 ?
+                    appRenderer->filteredListCount : appRenderer->totalListCount;
+
+        if (appRenderer->listIndex >= 0 && appRenderer->listIndex < count) {
+            IdArray selectedId;
+            idArrayCopy(&selectedId, &list[appRenderer->listIndex].id);
+
+            // Validate ancestor objects between root and selected item
+            const char *blockedError = NULL;
+            for (int d = 1; d < selectedId.depth - 1; d++) {
+                IdArray ancestorId;
+                idArrayCopy(&ancestorId, &selectedId);
+                ancestorId.depth = d + 1;
+
+                int acount;
+                FfonElement **aarr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                                  &ancestorId, &acount);
+                if (!aarr) continue;
+
+                int aidx = ancestorId.ids[d];
+                if (aidx < 0 || aidx >= acount) continue;
+
+                FfonElement *aelem = aarr[aidx];
+                if (aelem->type != FFON_OBJECT) continue;
+
+                if (providerTagHasRadio(aelem->data.object->key) && aelem->data.object->count > 0) {
+                    const char *radioError = NULL;
+                    int checkedCount = 0;
+                    for (int ci = 0; ci < aelem->data.object->count; ci++) {
+                        if (aelem->data.object->elements[ci]->type == FFON_OBJECT) {
+                            radioError = "Radio group children must be strings, not objects";
+                            break;
+                        }
+                        if (aelem->data.object->elements[ci]->type == FFON_STRING &&
+                            providerTagHasChecked(aelem->data.object->elements[ci]->data.string)) {
+                            checkedCount++;
+                        }
+                    }
+                    if (!radioError && checkedCount > 1) {
+                        radioError = "Radio group must have at most one checked item";
+                    }
+                    if (radioError) {
+                        idArrayCopy(&appRenderer->currentId, &ancestorId);
+                        blockedError = radioError;
+                        break;
+                    }
+                }
+            }
+
+            if (blockedError) {
+                appRenderer->currentCoordinate = appRenderer->previousCoordinate;
+                accesskitSpeakModeChange(appRenderer, NULL);
+                createListCurrentLayer(appRenderer);
+                setErrorMessage(appRenderer, blockedError);
+                appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                appRenderer->scrollOffset = 0;
+                appRenderer->needsRedraw = true;
+                appRenderer->lastKeypressTime = now;
+                return;
+            }
+
+            if (handleCheckboxToggle(appRenderer, &selectedId)) {
+                int savedIndex = appRenderer->listIndex;
+                createListExtendedSearch(appRenderer);
+                appRenderer->listIndex = savedIndex;
+                appRenderer->needsRedraw = true;
+                appRenderer->lastKeypressTime = now;
+                return;
+            }
+
+            if (handleRadioSelect(appRenderer, &selectedId)) {
+                idArrayCopy(&appRenderer->currentId, &selectedId);
+                appRenderer->currentCoordinate = appRenderer->previousCoordinate;
+                accesskitSpeakModeChange(appRenderer, NULL);
+                createListCurrentLayer(appRenderer);
+                appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                appRenderer->needsRedraw = true;
+                appRenderer->lastKeypressTime = now;
+                return;
+            }
+
+            idArrayCopy(&appRenderer->currentId, &selectedId);
+
+            // If selected item is an object, try navigating into it
+            int ecount;
+            FfonElement **earr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                              &appRenderer->currentId, &ecount);
+            if (earr) {
+                int eidx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                if (eidx >= 0 && eidx < ecount && earr[eidx]->type == FFON_OBJECT) {
+                    if (!providerNavigateRight(appRenderer)) {
+                        // Navigation rejected (e.g. invalid radio group) - stay in search mode
+                        appRenderer->needsRedraw = true;
+                        appRenderer->lastKeypressTime = now;
+                        return;
+                    }
+                }
+            }
+        }
+        appRenderer->currentCoordinate = appRenderer->previousCoordinate;
+        accesskitSpeakModeChange(appRenderer, NULL);
+        createListCurrentLayer(appRenderer);
+        appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+        appRenderer->scrollOffset = 0;
+        appRenderer->needsRedraw = true;
     } else if (appRenderer->currentCoordinate == COORDINATE_COMMAND) {
         ListItem *list = appRenderer->filteredListCount > 0 ?
                          appRenderer->filteredListCurrentLayer : appRenderer->totalListCurrentLayer;
@@ -890,7 +999,11 @@ void handleLeft(AppRenderer *appRenderer) {
 
             appRenderer->needsRedraw = true;
         } else if (providerNavigateLeft(appRenderer)) {
-            createListCurrentLayer(appRenderer);
+            if (appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
+                createListExtendedSearch(appRenderer);
+            } else {
+                createListCurrentLayer(appRenderer);
+            }
             appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
             accesskitSpeakCurrentElement(appRenderer);
             appRenderer->needsRedraw = true;
@@ -1112,8 +1225,28 @@ void handleA(AppRenderer *appRenderer) {
 }
 
 void handleCtrlF(AppRenderer *appRenderer) {
+    uint64_t now = SDL_GetTicks();
+
+    // Double-tap: if already in extended search, switch to root search
+    if (appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH &&
+        now - appRenderer->lastKeypressTime <= DELTA_MS) {
+        // Reset to root of currentId provider
+        appRenderer->currentId.depth = 1;
+        appRenderer->inputBuffer[0] = '\0';
+        appRenderer->inputBufferSize = 0;
+        appRenderer->cursorPosition = 0;
+        appRenderer->selectionAnchor = -1;
+        appRenderer->scrollOffset = 0;
+        createListExtendedSearch(appRenderer);
+        appRenderer->listIndex = 0;
+        appRenderer->lastKeypressTime = now;
+        appRenderer->needsRedraw = true;
+        return;
+    }
+
     if (appRenderer->currentCoordinate != COORDINATE_SIMPLE_SEARCH &&
-        appRenderer->currentCoordinate != COORDINATE_COMMAND) {
+        appRenderer->currentCoordinate != COORDINATE_COMMAND &&
+        appRenderer->currentCoordinate != COORDINATE_EXTENDED_SEARCH) {
         appRenderer->previousCoordinate = appRenderer->currentCoordinate;
         appRenderer->currentCoordinate = COORDINATE_EXTENDED_SEARCH;
         accesskitSpeakModeChange(appRenderer, NULL);
@@ -1125,6 +1258,9 @@ void handleCtrlF(AppRenderer *appRenderer) {
         appRenderer->selectionAnchor = -1;
         appRenderer->scrollOffset = 0;
 
+        createListExtendedSearch(appRenderer);
+        appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+        appRenderer->lastKeypressTime = now;
         appRenderer->needsRedraw = true;
     }
 }
@@ -1191,6 +1327,16 @@ void handleEscape(AppRenderer *appRenderer) {
         return;
     } else if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH) {
         // Search mode: Escape cancels search without selecting
+        appRenderer->currentCoordinate = appRenderer->previousCoordinate;
+        appRenderer->previousCoordinate = appRenderer->currentCoordinate;
+        accesskitSpeakModeChange(appRenderer, NULL);
+        createListCurrentLayer(appRenderer);
+        appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+        appRenderer->scrollOffset = 0;
+        appRenderer->needsRedraw = true;
+        return;
+    } else if (appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
+        // Extended search mode: Escape cancels search without selecting
         appRenderer->currentCoordinate = appRenderer->previousCoordinate;
         appRenderer->previousCoordinate = appRenderer->currentCoordinate;
         accesskitSpeakModeChange(appRenderer, NULL);

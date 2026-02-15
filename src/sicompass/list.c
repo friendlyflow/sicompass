@@ -215,6 +215,145 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
     }
 }
 
+static int countElementsRecursive(FfonElement **elements, int count, int depth) {
+    if (depth >= MAX_ID_DEPTH) return 0;
+    int total = count;
+    for (int i = 0; i < count; i++) {
+        if (elements[i]->type == FFON_OBJECT) {
+            total += countElementsRecursive(
+                elements[i]->data.object->elements,
+                elements[i]->data.object->count,
+                depth + 1);
+        }
+    }
+    return total;
+}
+
+static void collectItemsRecursive(AppRenderer *appRenderer, FfonElement **elements, int count,
+                                   IdArray *basePath, const char *breadcrumb) {
+    if (basePath->depth >= MAX_ID_DEPTH) return;
+
+    IdArray itemId;
+    idArrayCopy(&itemId, basePath);
+    itemId.ids[itemId.depth - 1] = 0;
+
+    for (int i = 0; i < count; i++) {
+        FfonElement *elem = elements[i];
+        int idx = appRenderer->totalListCount;
+
+        idArrayCopy(&appRenderer->totalListCurrentLayer[idx].id, &itemId);
+
+        if (elem->type == FFON_STRING) {
+            bool hasImage = providerTagHasImage(elem->data.string);
+            bool hasCheckboxChecked = providerTagHasCheckboxChecked(elem->data.string);
+            bool hasCheckbox = providerTagHasCheckbox(elem->data.string);
+            bool hasChecked = providerTagHasChecked(elem->data.string);
+            bool hasInput = providerTagHasInput(elem->data.string);
+            const char *prefix;
+            char *stripped = NULL;
+
+            if (hasImage) {
+                prefix = "-p";
+                stripped = providerTagExtractImageContent(elem->data.string);
+            } else if (hasCheckboxChecked) {
+                prefix = "-cc";
+                stripped = providerTagExtractCheckboxCheckedContent(elem->data.string);
+            } else if (hasCheckbox) {
+                prefix = "-c";
+                stripped = providerTagExtractCheckboxContent(elem->data.string);
+            } else if (hasChecked) {
+                prefix = "-rc";
+                stripped = providerTagExtractCheckedContent(elem->data.string);
+            } else if (hasInput) {
+                prefix = "-i";
+                stripped = providerTagExtractContent(elem->data.string);
+            } else {
+                prefix = "-";
+            }
+
+            char prefixed[MAX_LINE_LENGTH];
+            snprintf(prefixed, sizeof(prefixed), "%s %s",
+                     prefix, stripped ? stripped : elem->data.string);
+            appRenderer->totalListCurrentLayer[idx].label = strdup(prefixed);
+            free(stripped);
+        } else {
+            bool hasLink = providerTagHasLink(elem->data.object->key);
+            bool hasRadio = providerTagHasRadio(elem->data.object->key);
+            bool hasInput = providerTagHasInput(elem->data.object->key);
+            const char *prefix;
+            char *stripped = NULL;
+
+            if (hasLink) {
+                prefix = "+l";
+                stripped = providerTagExtractLinkContent(elem->data.object->key);
+            } else if (hasRadio) {
+                prefix = "+R";
+                stripped = providerTagExtractRadioContent(elem->data.object->key);
+            } else if (hasInput) {
+                prefix = "+i";
+                stripped = providerTagExtractContent(elem->data.object->key);
+            } else {
+                prefix = "+";
+            }
+
+            char prefixed[MAX_LINE_LENGTH];
+            snprintf(prefixed, sizeof(prefixed), "%s %s",
+                     prefix, stripped ? stripped : elem->data.object->key);
+            appRenderer->totalListCurrentLayer[idx].label = strdup(prefixed);
+            free(stripped);
+        }
+
+        // Store breadcrumb in data field
+        appRenderer->totalListCurrentLayer[idx].data =
+            (breadcrumb && breadcrumb[0] != '\0') ? strdup(breadcrumb) : NULL;
+
+        appRenderer->totalListCount++;
+        itemId.ids[itemId.depth - 1]++;
+
+        // Recurse into object children
+        if (elem->type == FFON_OBJECT && elem->data.object->count > 0) {
+            char *displayName = providerTagStripDisplay(elem->data.object->key);
+            char newBreadcrumb[MAX_LINE_LENGTH];
+            if (breadcrumb && breadcrumb[0] != '\0') {
+                snprintf(newBreadcrumb, sizeof(newBreadcrumb), "%s%s > ", breadcrumb, displayName);
+            } else {
+                snprintf(newBreadcrumb, sizeof(newBreadcrumb), "%s > ", displayName);
+            }
+            free(displayName);
+
+            IdArray childPath;
+            idArrayCopy(&childPath, &itemId);
+            childPath.ids[childPath.depth - 1] = i;
+            idArrayPush(&childPath, 0);
+
+            collectItemsRecursive(appRenderer, elem->data.object->elements,
+                                  elem->data.object->count, &childPath, newBreadcrumb);
+        }
+    }
+}
+
+void createListExtendedSearch(AppRenderer *appRenderer) {
+    clearListCurrentLayer(appRenderer);
+    appRenderer->errorMessage[0] = '\0';
+
+    int count;
+    FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                     &appRenderer->currentId, &count);
+    if (!arr) return;
+
+    int totalCount = countElementsRecursive(arr, count, appRenderer->currentId.depth);
+    if (totalCount == 0) return;
+
+    appRenderer->totalListCurrentLayer = calloc(totalCount, sizeof(ListItem));
+    if (!appRenderer->totalListCurrentLayer) return;
+
+    IdArray basePath;
+    idArrayCopy(&basePath, &appRenderer->currentId);
+    basePath.ids[basePath.depth - 1] = 0;
+
+    collectItemsRecursive(appRenderer, arr, count, &basePath, "");
+}
+
 void populateListCurrentLayer(AppRenderer *appRenderer, const char *searchString) {
     if (!searchString || strlen(searchString) == 0) {
         // No search, use all items

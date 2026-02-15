@@ -947,6 +947,154 @@ void renderSimpleSearch(SiCompassApplication *app) {
     }
 }
 
+void renderExtendedSearch(SiCompassApplication *app) {
+    float scale = getTextScale(app, FONT_SIZE_PT);
+    int lineHeight = (int)getLineHeight(app, scale, TEXT_PADDING);
+
+    // Calculate indent as the actual width of 4 spaces using text bounds
+    float minX, minY, maxX, maxY;
+    calculateTextBounds(app, "    ", 0.0f, 0.0f, scale, &minX, &minY, &maxX, &maxY);
+    int indent = (int)(maxX - minX);
+
+    int yPos = lineHeight * 2;
+
+    // Render search input
+    char searchText[MAX_LINE_LENGTH];
+    snprintf(searchText, sizeof(searchText), "ext search: %s", app->appRenderer->inputBuffer);
+    int linesRendered = renderText(app, searchText, 50, yPos, COLOR_TEXT, false);
+    yPos += lineHeight * linesRendered;
+
+    ListItem *list = app->appRenderer->filteredListCount > 0 ?
+                     app->appRenderer->filteredListCurrentLayer : app->appRenderer->totalListCurrentLayer;
+    int count = app->appRenderer->filteredListCount > 0 ?
+                app->appRenderer->filteredListCount : app->appRenderer->totalListCount;
+
+    if (!list || count == 0) return;
+
+    // Calculate visible line range to keep listIndex in view
+    int headerLines = 3;  // header line + search input line + gap
+    int availableHeight = (int)app->swapChainExtent.height - (lineHeight * headerLines);
+    float charWidth = getWidthEM(app, scale);
+    int availableLines = availableHeight / lineHeight;
+    if (availableLines < 1) availableLines = 1;
+
+    int startIndex = app->appRenderer->scrollOffset;
+    int listIndex = app->appRenderer->listIndex;
+
+    // Ensure startIndex <= listIndex
+    if (listIndex < startIndex) {
+        startIndex = listIndex;
+    }
+
+    // Accumulate lines from startIndex to listIndex (inclusive) to check if it fits
+    int linesToSelected = 0;
+    for (int i = startIndex; i <= listIndex; i++) {
+        linesToSelected += getItemLineCount(list[i].label, app, charWidth, lineHeight, headerLines);
+    }
+
+    // If selected item extends past viewport, scroll forward
+    while (linesToSelected > availableLines && startIndex < listIndex) {
+        linesToSelected -= getItemLineCount(list[startIndex].label, app, charWidth, lineHeight, headerLines);
+        startIndex++;
+    }
+
+    // Try to show 1 item above selected if possible (scrolloff)
+    if (startIndex > 0 && startIndex == listIndex) {
+        int prevLines = getItemLineCount(list[startIndex - 1].label, app, charWidth, lineHeight, headerLines);
+        if (linesToSelected + prevLines <= availableLines) {
+            startIndex--;
+        }
+    }
+
+    if (startIndex < 0) startIndex = 0;
+    app->appRenderer->scrollOffset = startIndex;
+
+    // Calculate endIndex: include items whose start position is within viewport
+    int totalLines = 0;
+    int endIndex = startIndex;
+    while (endIndex < count) {
+        if (totalLines >= availableLines) break;
+        totalLines += getItemLineCount(list[endIndex].label, app, charWidth, lineHeight, headerLines);
+        endIndex++;
+    }
+    if (endIndex > count) endIndex = count;
+
+    for (int i = startIndex; i < endIndex; i++) {
+        bool isSelected = (i == app->appRenderer->listIndex);
+        int itemYPos = yPos;
+        int itemX = 50 + indent;
+
+        // Render breadcrumb prefix if present
+        if (list[i].data && ((char *)list[i].data)[0] != '\0') {
+            float bMinX, bMinY, bMaxX, bMaxY;
+            calculateTextBounds(app, list[i].data, (float)itemX, (float)itemYPos, scale,
+                                &bMinX, &bMinY, &bMaxX, &bMaxY);
+            renderText(app, list[i].data, itemX, itemYPos, COLOR_DIMGREY, false);
+            itemX += (int)(bMaxX - bMinX);
+        }
+
+        // Check if this is an image item
+        if (list[i].label && strncmp(list[i].label, "-p ", 3) == 0) {
+            const char *imagePath = list[i].label + 3;
+
+            if (loadImageTexture(app, imagePath)) {
+                ImageRenderer *ir = app->imageRenderer;
+                float imgW = (float)ir->textureWidth;
+                float imgH = (float)ir->textureHeight;
+
+                float maxW = charWidth * 120.0f;
+                float maxH = (float)app->swapChainExtent.height - (float)(lineHeight * headerLines);
+
+                float displayScale = 1.0f;
+                if (imgW > maxW) displayScale = maxW / imgW;
+                if (imgH * displayScale > maxH) displayScale = maxH / imgH;
+
+                float displayW = imgW * displayScale;
+                float displayH = imgH * displayScale;
+
+                float imgX = (float)itemX;
+                float imgY = (float)itemYPos - app->fontRenderer->ascender * scale - TEXT_PADDING;
+
+                if (isSelected) {
+                    float border = 2.0f;
+                    prepareRectangle(app, imgX - border, imgY - border,
+                                     displayW + border * 2.0f, displayH + border * 2.0f,
+                                     COLOR_DARK_GREEN, 0.0f);
+                }
+
+                prepareImage(app, imgX, imgY, displayW, displayH);
+
+                int imageLines = (int)ceilf(displayH / (float)lineHeight);
+                if (imageLines < 1) imageLines = 1;
+                yPos += lineHeight * imageLines;
+            } else {
+                int textLines = renderText(app, imagePath, itemX, itemYPos, COLOR_TEXT, isSelected);
+                yPos += lineHeight * textLines;
+            }
+            continue;
+        }
+
+        // Render radio indicator before text if this is a radio item
+        RadioType radioType = getRadioType(list[i].label);
+        if (radioType != RADIO_NONE) {
+            float circleWidth = renderRadioIndicator(app, radioType, itemX, itemYPos);
+            itemX += (int)circleWidth;
+        }
+
+        // Render checkbox indicator before text if this is a checkbox item
+        CheckboxType checkboxType = getCheckboxType(list[i].label);
+        if (checkboxType != CHECKBOX_NONE) {
+            float boxWidth = renderCheckboxIndicator(app, checkboxType, itemX, itemYPos);
+            itemX += (int)boxWidth;
+        }
+
+        // Render text (may be multiple lines)
+        int textLines = renderText(app, list[i].label, itemX, itemYPos, COLOR_TEXT, isSelected);
+
+        yPos += lineHeight * textLines;
+    }
+}
+
 void renderScroll(SiCompassApplication *app) {
     float scale = getTextScale(app, FONT_SIZE_PT);
     int lineHeight = (int)getLineHeight(app, scale, TEXT_PADDING);
@@ -1062,9 +1210,10 @@ void updateView(SiCompassApplication *app) {
     if (app->appRenderer->currentCoordinate == COORDINATE_SCROLL) {
         renderScroll(app);
     } else if (app->appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
-        app->appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-        app->appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
+        app->appRenderer->currentCoordinate == COORDINATE_COMMAND) {
         renderSimpleSearch(app);
+    } else if (app->appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
+        renderExtendedSearch(app);
     } else {
         renderInteraction(app);
     }
@@ -1076,9 +1225,11 @@ void updateView(SiCompassApplication *app) {
         // Caret in search field
         int searchTextYPos = lineHeight * 2;
 
-        // Calculate X offset for "search: " prefix and get actual text Y position
+        // Calculate X offset for search prefix and get actual text Y position
+        const char *searchPrefix = (app->appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH)
+            ? "ext search: " : "search: ";
         float minX, minY, maxX, maxY;
-        calculateTextBounds(app, "search: ", 50.0f, (float)searchTextYPos, scale,
+        calculateTextBounds(app, searchPrefix, 50.0f, (float)searchTextYPos, scale,
                           &minX, &minY, &maxX, &maxY);
         int searchPrefixWidth = (int)(maxX - minX);
 
@@ -1099,10 +1250,12 @@ void updateView(SiCompassApplication *app) {
         if (app->appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
             app->appRenderer->currentCoordinate == COORDINATE_COMMAND ||
             app->appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
-            // Search/command modes: account for "search: " prefix
+            // Search/command modes: account for search prefix
+            const char *selPrefix = (app->appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH)
+                ? "ext search: " : "search: ";
             int searchTextYPos = lineHeight * 2;
             float pfxMinX, pfxMinY, pfxMaxX, pfxMaxY;
-            calculateTextBounds(app, "search: ", 50.0f, (float)searchTextYPos, scale,
+            calculateTextBounds(app, selPrefix, 50.0f, (float)searchTextYPos, scale,
                                 &pfxMinX, &pfxMinY, &pfxMaxX, &pfxMaxY);
             baseX = 50 + (int)(pfxMaxX - pfxMinX);
             baseY = searchTextYPos;
