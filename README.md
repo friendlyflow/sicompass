@@ -4,7 +4,9 @@
 
 ## What is Sicompass?
 
-Sicompass is an open-source, Vulkan-based application designed from the ground up with accessibility as its core principle. It bridges the gap between visual and non-visual interfaces, providing a fast, keyboard-navigable experience for structured data.
+Sicompass is an open-source, keyboard-only interface for navigating and editing structured content. Every graphical interface is essentially a tree of lists — Sicompass makes that structure explicit and navigable entirely from the keyboard, eliminating the need for a mouse.
+
+This unified interaction model means one consistent way to navigate everything: files, documents, settings, and any data source built on top of it. For developers, it means simpler UI development with fewer bugs. For users, it means a fast experience that works the same everywhere.
 
 <!-- Built for users who prefer or require keyboard-driven interaction, Sicompass offers intuitive keyboard navigation and seamless screen reader integration through AccessKit. -->
 
