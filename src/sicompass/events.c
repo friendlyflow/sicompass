@@ -19,7 +19,8 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
               appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
               appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
               appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-              appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH)) {
+              appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH ||
+              appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH)) {
         handleSelectAll(appRenderer);
     }
     // Ctrl+A or Enter in editor general mode
@@ -109,7 +110,8 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
               appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
               appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
               appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-              appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH)) {
+              appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH ||
+              appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH)) {
         handleShiftLeft(appRenderer);
     }
     // L or Right arrow
@@ -125,7 +127,8 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
               appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
               appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
               appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-              appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH)) {
+              appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH ||
+              appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH)) {
         handleShiftRight(appRenderer);
     }
     // Home in operator/editor general modes (list navigation + double-tap to root)
@@ -162,7 +165,8 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
               appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
               appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
               appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-              appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH)) {
+              appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH ||
+              appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH)) {
         handleHome(appRenderer);
     }
     // End in text input modes
@@ -171,7 +175,8 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
               appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
               appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
               appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-              appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH)) {
+              appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH ||
+              appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH)) {
         handleEnd(appRenderer);
     }
     // Shift+Home in text input modes - extend selection to start
@@ -180,7 +185,8 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
               appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
               appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
               appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-              appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH)) {
+              appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH ||
+              appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH)) {
         handleShiftHome(appRenderer);
     }
     // Shift+End in text input modes - extend selection to end
@@ -189,7 +195,8 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
               appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
               appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
               appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-              appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH)) {
+              appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH ||
+              appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH)) {
         handleShiftEnd(appRenderer);
     }
     // I (insert mode)
@@ -248,7 +255,8 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
               appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
               appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
               appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-              appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH)) {
+              appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH ||
+              appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH)) {
         // If there's an active selection, delete it
         if (hasSelection(appRenderer)) {
             deleteSelection(appRenderer);
@@ -290,7 +298,8 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
               appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
               appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
               appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-              appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH)) {
+              appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH ||
+              appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH)) {
         // If there's an active selection, delete it
         if (hasSelection(appRenderer)) {
             deleteSelection(appRenderer);

@@ -1,6 +1,7 @@
 #include "view.h"
 #include "checkmark.h"
 #include "image.h"
+#include "unicode_search.h"
 #include <provider_tags.h>
 #include <string.h>
 #include <math.h>
@@ -1166,6 +1167,271 @@ void renderScroll(SiCompassApplication *app) {
     app->appRenderer->renderClipTopY = 0;
 }
 
+void renderScrollSearch(SiCompassApplication *app) {
+    float scale = getTextScale(app, FONT_SIZE_PT);
+    int lineHeight = (int)getLineHeight(app, scale, TEXT_PADDING);
+    float charWidth = getWidthEM(app, scale);
+    float maxWidth = charWidth * 120.0f;
+
+    // Get the text to search in
+    int count;
+    FfonElement **arr = getFfonAtId(app->appRenderer->ffon, app->appRenderer->ffonCount,
+                                     &app->appRenderer->currentId, &count);
+    const char *rawText = "";
+    char *stripped = NULL;
+    if (arr && count > 0) {
+        int idx = app->appRenderer->currentId.ids[app->appRenderer->currentId.depth - 1];
+        if (idx >= 0 && idx < count) {
+            FfonElement *elem = arr[idx];
+            rawText = (elem->type == FFON_OBJECT) ?
+                elem->data.object->key : elem->data.string;
+        }
+    }
+
+    // Handle image elements: show search bar with 0 matches and render image
+    if (providerTagHasImage(rawText)) {
+        char searchDisplay[MAX_LINE_LENGTH];
+        snprintf(searchDisplay, sizeof(searchDisplay), "search: %s [0 items]",
+                 app->appRenderer->inputBuffer);
+        renderText(app, searchDisplay, 50, lineHeight * 2, COLOR_TEXT, false);
+        app->appRenderer->scrollSearchMatchCount = 0;
+        app->appRenderer->scrollSearchCurrentMatch = 0;
+
+        // Render the image below the search bar
+        char *imagePath = providerTagExtractImageContent(rawText);
+        if (imagePath && loadImageTexture(app, imagePath)) {
+            ImageRenderer *ir = app->imageRenderer;
+            float imgW = (float)ir->textureWidth;
+            float imgH = (float)ir->textureHeight;
+            float imgMaxW = charWidth * 120.0f;
+            float displayScale = 1.0f;
+            if (imgW > imgMaxW) displayScale = imgMaxW / imgW;
+            float displayW = imgW * displayScale;
+            float displayH = imgH * displayScale;
+            float imgX = 50.0f;
+            float imgY = (float)(lineHeight * 3) - (float)(app->appRenderer->textScrollOffset * lineHeight);
+            prepareImage(app, imgX, imgY, displayW, displayH);
+            int imageLines = (int)ceilf(displayH / (float)lineHeight);
+            app->appRenderer->textScrollLineCount = imageLines > 1 ? imageLines : 1;
+        }
+        free(imagePath);
+        return;
+    }
+
+    stripped = providerTagStripDisplay(rawText);
+    const char *text = stripped ? stripped : rawText;
+
+    // Line-wrap the text (same algorithm as renderText first pass)
+    typedef struct {
+        const char *start;
+        size_t len;
+        int byteOffset;
+    } LineInfo;
+
+    LineInfo lines[1000];
+    int lineCount = 0;
+    const char *lineStart = text;
+
+    while (*lineStart != '\0' && lineCount < 1000) {
+        const char *lineEnd = lineStart;
+        const char *lastSpace = NULL;
+        const char *lastFit = lineStart;
+        int currentY = lineHeight * 3 + lineCount * lineHeight;
+
+        while (*lineEnd != '\0') {
+            size_t testLen = lineEnd - lineStart + 1;
+            if (testLen >= MAX_LINE_LENGTH) testLen = MAX_LINE_LENGTH - 1;
+
+            char testText[MAX_LINE_LENGTH];
+            strncpy(testText, lineStart, testLen);
+            testText[testLen] = '\0';
+
+            float minX, minY, maxX, maxY;
+            calculateTextBounds(app, testText, 50.0f, (float)currentY, scale,
+                              &minX, &minY, &maxX, &maxY);
+            float width = maxX - minX;
+
+            if (width > maxWidth) {
+                if (lastSpace != NULL && lastSpace > lineStart) {
+                    lineEnd = lastSpace;
+                } else {
+                    lineEnd = lastFit;
+                }
+                break;
+            }
+
+            if (*lineEnd == ' ') lastSpace = lineEnd;
+            lineEnd++;
+            lastFit = lineEnd;
+        }
+
+        size_t lineLen = lineEnd - lineStart;
+        if (lineLen == 0 && *lineStart != '\0') {
+            lineLen = 1;
+            lineEnd = lineStart + 1;
+        }
+        if (lineLen >= MAX_LINE_LENGTH) lineLen = MAX_LINE_LENGTH - 1;
+
+        lines[lineCount].start = lineStart;
+        lines[lineCount].len = lineLen;
+        lines[lineCount].byteOffset = (int)(lineStart - text);
+        lineCount++;
+
+        lineStart = lineEnd;
+        if (*lineStart == ' ') lineStart++;
+    }
+
+    app->appRenderer->textScrollLineCount = lineCount;
+
+    // Find all matches
+    typedef struct {
+        int byteOffset;
+        int length;
+        int wrappedLine;
+        int lineLocalByte;
+    } MatchInfo;
+
+    MatchInfo matches[500];
+    int matchCount = 0;
+    const char *searchTerm = app->appRenderer->inputBuffer;
+    int searchLen = app->appRenderer->inputBufferSize;
+
+    if (searchLen > 0) {
+        const char *pos = text;
+        while (pos && *pos && matchCount < 500) {
+            const char *found = utf8_stristr_pos(pos, searchTerm);
+            if (!found) break;
+
+            int byteOffset = (int)(found - text);
+
+            // Determine match length in original text (search for needle length bytes)
+            // For simple case, use searchLen; case folding may differ but this is close enough
+            int matchLen = searchLen;
+
+            matches[matchCount].byteOffset = byteOffset;
+            matches[matchCount].length = matchLen;
+            matches[matchCount].wrappedLine = 0;
+            matches[matchCount].lineLocalByte = 0;
+
+            // Find which wrapped line this match falls on
+            for (int line = 0; line < lineCount; line++) {
+                int lStart = lines[line].byteOffset;
+                int lEnd = lStart + (int)lines[line].len;
+                if (byteOffset >= lStart && byteOffset < lEnd) {
+                    matches[matchCount].wrappedLine = line;
+                    matches[matchCount].lineLocalByte = byteOffset - lStart;
+                    break;
+                }
+            }
+
+            matchCount++;
+            // Advance past this match start by one byte to find overlapping/next matches
+            pos = found + 1;
+        }
+    }
+
+    app->appRenderer->scrollSearchMatchCount = matchCount;
+    if (app->appRenderer->scrollSearchCurrentMatch >= matchCount) {
+        app->appRenderer->scrollSearchCurrentMatch = matchCount > 0 ? matchCount - 1 : 0;
+    }
+
+    // Auto-scroll to current match
+    if (matchCount > 0) {
+        int currentIdx = app->appRenderer->scrollSearchCurrentMatch;
+        int matchLine = matches[currentIdx].wrappedLine;
+
+        int headerLines = 3;
+        int availableHeight = (int)app->swapChainExtent.height - (lineHeight * headerLines);
+        int visibleLines = availableHeight / lineHeight;
+        if (visibleLines < 1) visibleLines = 1;
+
+        if (matchLine < app->appRenderer->textScrollOffset) {
+            app->appRenderer->textScrollOffset = matchLine;
+        } else if (matchLine >= app->appRenderer->textScrollOffset + visibleLines) {
+            app->appRenderer->textScrollOffset = matchLine - visibleLines + 1;
+        }
+
+        int maxOffset = lineCount - visibleLines;
+        if (maxOffset < 0) maxOffset = 0;
+        if (app->appRenderer->textScrollOffset > maxOffset)
+            app->appRenderer->textScrollOffset = maxOffset;
+        if (app->appRenderer->textScrollOffset < 0)
+            app->appRenderer->textScrollOffset = 0;
+    }
+
+    // Render search bar
+    char searchDisplay[MAX_LINE_LENGTH];
+    snprintf(searchDisplay, sizeof(searchDisplay), "search: %s [%d items]",
+             app->appRenderer->inputBuffer, matchCount);
+    renderText(app, searchDisplay, 50, lineHeight * 2, COLOR_TEXT, false);
+
+    // Render text with highlights
+    int textStartY = lineHeight * 3;
+    app->appRenderer->renderClipTopY = textStartY;
+
+    for (int i = 0; i < lineCount; i++) {
+        int currentY = textStartY + (i - app->appRenderer->textScrollOffset) * lineHeight;
+
+        // Skip lines above viewport
+        if (currentY + lineHeight < textStartY) continue;
+        // Stop if below viewport
+        if (currentY > (int)app->swapChainExtent.height) break;
+
+        // Render match highlight rectangles for this line
+        for (int m = 0; m < matchCount; m++) {
+            if (matches[m].wrappedLine != i) continue;
+            if (currentY < textStartY) continue;
+
+            int localStart = matches[m].lineLocalByte;
+            int localEnd = localStart + matches[m].length;
+            if (localEnd > (int)lines[i].len) localEnd = (int)lines[i].len;
+
+            // Measure X position of match start
+            float matchX = 50.0f;
+            if (localStart > 0) {
+                char prefix[MAX_LINE_LENGTH];
+                strncpy(prefix, lines[i].start, localStart);
+                prefix[localStart] = '\0';
+
+                float pMinX, pMinY, pMaxX, pMaxY;
+                calculateTextBounds(app, prefix, 50.0f, (float)currentY, scale,
+                                    &pMinX, &pMinY, &pMaxX, &pMaxY);
+                matchX = pMaxX;
+            }
+
+            // Measure match text width
+            int matchLen = localEnd - localStart;
+            char matchStr[MAX_LINE_LENGTH];
+            strncpy(matchStr, lines[i].start + localStart, matchLen);
+            matchStr[matchLen] = '\0';
+
+            float mMinX, mMinY, mMaxX, mMaxY;
+            calculateTextBounds(app, matchStr, matchX, (float)currentY, scale,
+                                &mMinX, &mMinY, &mMaxX, &mMaxY);
+
+            uint32_t highlightColor = (m == app->appRenderer->scrollSearchCurrentMatch)
+                ? COLOR_MATCH_CURRENT : COLOR_MATCH_OTHER;
+
+            float rectY = mMinY - TEXT_PADDING;
+            float rectH = getLineHeight(app, scale, TEXT_PADDING);
+            float rectW = mMaxX - matchX;
+            prepareRectangle(app, matchX, rectY, rectW, rectH, highlightColor, 3.0f);
+        }
+
+        // Render the text itself
+        char lineText[MAX_LINE_LENGTH];
+        strncpy(lineText, lines[i].start, lines[i].len);
+        lineText[lines[i].len] = '\0';
+
+        if (lines[i].len > 0 && currentY >= textStartY) {
+            prepareTextForRendering(app, lineText, 50.0f, (float)currentY, scale, COLOR_TEXT);
+        }
+    }
+
+    app->appRenderer->renderClipTopY = 0;
+    free(stripped);
+}
+
 void updateView(SiCompassApplication *app) {
     // Note: Screen clearing is handled by the Vulkan rendering pipeline in drawFrame()
 
@@ -1209,6 +1475,8 @@ void updateView(SiCompassApplication *app) {
     // Render appropriate panel
     if (app->appRenderer->currentCoordinate == COORDINATE_SCROLL) {
         renderScroll(app);
+    } else if (app->appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH) {
+        renderScrollSearch(app);
     } else if (app->appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
         app->appRenderer->currentCoordinate == COORDINATE_COMMAND) {
         renderSimpleSearch(app);
@@ -1221,7 +1489,8 @@ void updateView(SiCompassApplication *app) {
     // Render caret for all modes at end of frame
     if (app->appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
         app->appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-        app->appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
+        app->appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH ||
+        app->appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH) {
         // Caret in search field
         int searchTextYPos = lineHeight * 2;
 
@@ -1249,7 +1518,8 @@ void updateView(SiCompassApplication *app) {
         int baseX, baseY;
         if (app->appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
             app->appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-            app->appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
+            app->appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH ||
+            app->appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH) {
             // Search/command modes: account for search prefix
             const char *selPrefix = (app->appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH)
                 ? "ext search: " : "search: ";
