@@ -1244,10 +1244,11 @@ void handleCtrlF(AppRenderer *appRenderer) {
         return;
     }
 
-    if (appRenderer->currentCoordinate != COORDINATE_SIMPLE_SEARCH &&
-        appRenderer->currentCoordinate != COORDINATE_COMMAND &&
+    if (appRenderer->currentCoordinate != COORDINATE_COMMAND &&
         appRenderer->currentCoordinate != COORDINATE_EXTENDED_SEARCH) {
-        appRenderer->previousCoordinate = appRenderer->currentCoordinate;
+        if (appRenderer->currentCoordinate != COORDINATE_SIMPLE_SEARCH) {
+            appRenderer->previousCoordinate = appRenderer->currentCoordinate;
+        }
         appRenderer->currentCoordinate = COORDINATE_EXTENDED_SEARCH;
         accesskitSpeakModeChange(appRenderer, NULL);
 
