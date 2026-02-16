@@ -10,6 +10,8 @@ Sicompass is an open-source, keyboard-only interface for navigating and editing 
 
 This unified interaction model means one consistent way to navigate everything: files, documents, settings, and any data source built on top of it. For developers, it means simpler UI development with fewer bugs. For users, it means a fast experience that works the same everywhere.
 
+A simple json is assembled to feed into Sicompass's user interface. Which makes it extremely easy to use plugins, in any programming language, who generate json to be used in an easy, portable structured way.
+
 <!-- Built for users who prefer or require keyboard-driven interaction, Sicompass offers intuitive keyboard navigation and seamless screen reader integration through AccessKit. -->
 
 ## Key Features
