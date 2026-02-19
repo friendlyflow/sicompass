@@ -379,6 +379,60 @@ bool providerNavigateRight(AppRenderer *appRenderer) {
     return true;
 }
 
+// Refresh the current directory listing by clearing cached children and re-fetching
+void providerRefreshCurrentDirectory(AppRenderer *appRenderer) {
+    if (appRenderer->currentId.depth < 2) return;
+
+    Provider *provider = providerGetActive(appRenderer);
+    if (!provider || !provider->fetch) return;
+
+    // Find the parent FFON_OBJECT that contains the current directory listing
+    IdArray parentId;
+    idArrayCopy(&parentId, &appRenderer->currentId);
+    idArrayPop(&parentId);
+
+    int parentCount;
+    FfonElement **parentArr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                          &parentId, &parentCount);
+    if (!parentArr) return;
+
+    int parentIdx = parentId.ids[parentId.depth - 1];
+    if (parentIdx < 0 || parentIdx >= parentCount) return;
+
+    FfonElement *parentElem = parentArr[parentIdx];
+    if (parentElem->type != FFON_OBJECT) return;
+
+    FfonObject *obj = parentElem->data.object;
+
+    // Destroy the old cached children and reset count (keep the elements array allocated)
+    for (int i = 0; i < obj->count; i++) {
+        ffonElementDestroy(obj->elements[i]);
+        obj->elements[i] = NULL;
+    }
+    obj->count = 0;
+
+    // Re-fetch using the provider's current path (already set correctly)
+    int childCount = 0;
+    FfonElement **children = provider->fetch(provider, &childCount);
+
+    if (!children || childCount == 0) {
+        if (children) free(children);
+        ffonObjectAddElement(obj, ffonElementCreateString(INPUT_TAG_OPEN INPUT_TAG_CLOSE));
+    } else {
+        for (int i = 0; i < childCount; i++) {
+            ffonObjectAddElement(obj, children[i]);
+        }
+        free(children);
+    }
+
+    // Clamp cursor to valid range
+    int newCount = obj->count;
+    int *cursorIdx = &appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+    if (*cursorIdx >= newCount) {
+        *cursorIdx = newCount > 0 ? newCount - 1 : 0;
+    }
+}
+
 // Navigate left out of an object
 bool providerNavigateLeft(AppRenderer *appRenderer) {
     if (appRenderer->currentId.depth <= 1) {

@@ -645,6 +645,10 @@ void renderInteraction(SiCompassApplication *app) {
 
     int startIndex = app->appRenderer->scrollOffset;
     int listIndex = app->appRenderer->listIndex;
+    if (listIndex >= count) {
+        listIndex = count - 1;
+        app->appRenderer->listIndex = listIndex;
+    }
 
     // Ensure startIndex <= listIndex
     if (listIndex < startIndex) {
@@ -832,6 +836,8 @@ void renderSimpleSearch(SiCompassApplication *app) {
     int count = app->appRenderer->filteredListCount > 0 ?
                 app->appRenderer->filteredListCount : app->appRenderer->totalListCount;
 
+    if (!list || count == 0) return;
+
     // Calculate visible line range to keep listIndex in view
     int headerLines = 3;  // header line + search input line + gap
     if (hasRadioSummary) headerLines++;
@@ -842,6 +848,10 @@ void renderSimpleSearch(SiCompassApplication *app) {
 
     int startIndex = app->appRenderer->scrollOffset;
     int listIndex = app->appRenderer->listIndex;
+    if (listIndex >= count) {
+        listIndex = count - 1;
+        app->appRenderer->listIndex = listIndex;
+    }
 
     // Ensure startIndex <= listIndex
     if (listIndex < startIndex) {
@@ -981,6 +991,10 @@ void renderExtendedSearch(SiCompassApplication *app) {
 
     int startIndex = app->appRenderer->scrollOffset;
     int listIndex = app->appRenderer->listIndex;
+    if (listIndex >= count) {
+        listIndex = count - 1;
+        app->appRenderer->listIndex = listIndex;
+    }
 
     // Ensure startIndex <= listIndex
     if (listIndex < startIndex) {

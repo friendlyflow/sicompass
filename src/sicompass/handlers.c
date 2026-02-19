@@ -1511,6 +1511,15 @@ void handleCommand(AppRenderer *appRenderer) {
                 appRenderer->cursorPosition = 0;
                 createListCurrentLayer(appRenderer);
                 appRenderer->scrollOffset = 0;
+                // If no secondary items were produced, the command was a state-toggle
+                // (e.g., "show/hide properties"). Return to normal mode and refresh.
+                if (appRenderer->totalListCount == 0) {
+                    appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
+                    appRenderer->previousCoordinate = COORDINATE_OPERATOR_GENERAL;
+                    appRenderer->currentCommand = COMMAND_NONE;
+                    providerRefreshCurrentDirectory(appRenderer);
+                    createListCurrentLayer(appRenderer);
+                }
             }
             break;
         }

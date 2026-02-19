@@ -6,9 +6,12 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+// Toggle for show/hide properties command
+static bool g_showProperties = false;
+
 // Fetch children at current path
 static FfonElement** fbFetch(const char *path, int *outCount) {
-    return filebrowserListDirectory(path, false, outCount);
+    return filebrowserListDirectory(path, false, g_showProperties, outCount);
 }
 
 // Commit a rename operation
@@ -32,11 +35,12 @@ static char fb_openWithPath[4096];
 static const char *fb_commands[] = {
     "create directory",
     "create file",
-    "open file with"
+    "open file with",
+    "show/hide properties"
 };
 
 static const char** fbGetCommands(int *outCount) {
-    *outCount = 3;
+    *outCount = 4;
     return fb_commands;
 }
 
@@ -50,6 +54,10 @@ static FfonElement* fbHandleCommand(const char *path, const char *command,
     }
     if (strcmp(command, "create file") == 0) {
         return ffonElementCreateString("<input></input>");
+    }
+    if (strcmp(command, "show/hide properties") == 0) {
+        g_showProperties = !g_showProperties;
+        return NULL;
     }
     if (strcmp(command, "open file with") == 0) {
         if (elementType != FFON_STRING) {

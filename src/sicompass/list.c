@@ -93,7 +93,7 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
                     stripped = providerTagExtractCheckedContent(elem->data.string);
                 } else if (hasInput) {
                     prefix = "-i";
-                    stripped = providerTagExtractContent(elem->data.string);
+                    stripped = providerTagStripDisplay(elem->data.string);
                 } else if (parentHasRadio) {
                     prefix = "-r";
                 } else {
@@ -122,7 +122,7 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
                     stripped = providerTagExtractRadioContent(elem->data.object->key);
                 } else if (hasInput) {
                     prefix = "+i";
-                    stripped = providerTagExtractContent(elem->data.object->key);
+                    stripped = providerTagStripDisplay(elem->data.object->key);
                 } else {
                     prefix = "+";
                 }

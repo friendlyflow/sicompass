@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #if defined(_WIN32)
     #include <windows.h>
@@ -14,9 +15,66 @@
     #include <dirent.h>
     #include <sys/stat.h>
     #include <unistd.h>
+    #include <pwd.h>
+    #include <grp.h>
 #endif
 
-FfonElement** filebrowserListDirectory(const char *uri, bool commands, int *out_count) {
+#if !defined(_WIN32)
+static void filebrowserFormatProperties(struct stat *st, char *buf, size_t bufSize) {
+    // Permissions string (e.g. "drwxr-xr-x")
+    char perm[11];
+    perm[0] = S_ISDIR(st->st_mode) ? 'd' : (S_ISLNK(st->st_mode) ? 'l' : '-');
+    perm[1] = (st->st_mode & S_IRUSR) ? 'r' : '-';
+    perm[2] = (st->st_mode & S_IWUSR) ? 'w' : '-';
+    perm[3] = (st->st_mode & S_IXUSR) ? 'x' : '-';
+    perm[4] = (st->st_mode & S_IRGRP) ? 'r' : '-';
+    perm[5] = (st->st_mode & S_IWGRP) ? 'w' : '-';
+    perm[6] = (st->st_mode & S_IXGRP) ? 'x' : '-';
+    perm[7] = (st->st_mode & S_IROTH) ? 'r' : '-';
+    perm[8] = (st->st_mode & S_IWOTH) ? 'w' : '-';
+    perm[9] = (st->st_mode & S_IXOTH) ? 'x' : '-';
+    perm[10] = '\0';
+
+    // Owner and group names (fall back to numeric ids)
+    const char *owner = "?";
+    const char *group = "?";
+    struct passwd *pw = getpwuid(st->st_uid);
+    struct group  *gr = getgrgid(st->st_gid);
+    char ownerBuf[32], groupBuf[32];
+    if (pw) {
+        owner = pw->pw_name;
+    } else {
+        snprintf(ownerBuf, sizeof(ownerBuf), "%u", (unsigned)st->st_uid);
+        owner = ownerBuf;
+    }
+    if (gr) {
+        group = gr->gr_name;
+    } else {
+        snprintf(groupBuf, sizeof(groupBuf), "%u", (unsigned)st->st_gid);
+        group = groupBuf;
+    }
+
+    // Date: "Mon DD HH:MM" for recent, "Mon DD  YYYY" for older
+    char dateBuf[16];
+    time_t now = time(NULL);
+    struct tm *tm_info = localtime(&st->st_mtime);
+    if (now - st->st_mtime < 6 * 30 * 24 * 3600) {
+        strftime(dateBuf, sizeof(dateBuf), "%b %e %H:%M", tm_info);
+    } else {
+        strftime(dateBuf, sizeof(dateBuf), "%b %e  %Y", tm_info);
+    }
+
+    snprintf(buf, bufSize, "%s %2lu %-8s %-8s %5lld %s ",
+             perm,
+             (unsigned long)st->st_nlink,
+             owner,
+             group,
+             (long long)st->st_size,
+             dateBuf);
+}
+#endif
+
+FfonElement** filebrowserListDirectory(const char *uri, bool commands, bool showProperties, int *out_count) {
     *out_count = 0;
 
     if (uri == NULL) {
@@ -93,16 +151,29 @@ FfonElement** filebrowserListDirectory(const char *uri, bool commands, int *out_
             elements = new_elements;
         }
 
+        // Build properties prefix for Windows (size + date)
+        char propBuf[64] = "";
+        if (showProperties) {
+            SYSTEMTIME st;
+            FileTimeToSystemTime(&findData.ftLastWriteTime, &st);
+            ULARGE_INTEGER size;
+            size.LowPart  = findData.nFileSizeLow;
+            size.HighPart = findData.nFileSizeHigh;
+            snprintf(propBuf, sizeof(propBuf), "%8llu %04d-%02d-%02d %02d:%02d ",
+                     (unsigned long long)size.QuadPart,
+                     st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute);
+        }
+
         FfonElement *elem;
         if (is_dir) {
-            char key_with_tags[512];
-            snprintf(key_with_tags, sizeof(key_with_tags), "%s%s%s",
-                     INPUT_TAG_OPEN, name, INPUT_TAG_CLOSE);
+            char key_with_tags[1024];
+            snprintf(key_with_tags, sizeof(key_with_tags), "%s%s%s%s",
+                     propBuf, INPUT_TAG_OPEN, name, INPUT_TAG_CLOSE);
             elem = ffonElementCreateObject(key_with_tags);
         } else {
-            char name_with_tags[512];
-            snprintf(name_with_tags, sizeof(name_with_tags), "%s%s%s",
-                     INPUT_TAG_OPEN, name, INPUT_TAG_CLOSE);
+            char name_with_tags[1024];
+            snprintf(name_with_tags, sizeof(name_with_tags), "%s%s%s%s",
+                     propBuf, INPUT_TAG_OPEN, name, INPUT_TAG_CLOSE);
             elem = ffonElementCreateString(name_with_tags);
         }
 
@@ -158,16 +229,22 @@ FfonElement** filebrowserListDirectory(const char *uri, bool commands, int *out_
             elements = new_elements;
         }
 
+        // Build properties prefix (ls -al style)
+        char propBuf[128] = "";
+        if (showProperties) {
+            filebrowserFormatProperties(&st, propBuf, sizeof(propBuf));
+        }
+
         FfonElement *elem;
         if (is_dir) {
-            char key_with_tags[512];
-            snprintf(key_with_tags, sizeof(key_with_tags), "%s%s%s",
-                     INPUT_TAG_OPEN, entry->d_name, INPUT_TAG_CLOSE);
+            char key_with_tags[1024];
+            snprintf(key_with_tags, sizeof(key_with_tags), "%s%s%s%s",
+                     propBuf, INPUT_TAG_OPEN, entry->d_name, INPUT_TAG_CLOSE);
             elem = ffonElementCreateObject(key_with_tags);
         } else {
-            char name_with_tags[512];
-            snprintf(name_with_tags, sizeof(name_with_tags), "%s%s%s",
-                     INPUT_TAG_OPEN, entry->d_name, INPUT_TAG_CLOSE);
+            char name_with_tags[1024];
+            snprintf(name_with_tags, sizeof(name_with_tags), "%s%s%s%s",
+                     propBuf, INPUT_TAG_OPEN, entry->d_name, INPUT_TAG_CLOSE);
             elem = ffonElementCreateString(name_with_tags);
         }
 

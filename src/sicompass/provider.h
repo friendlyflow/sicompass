@@ -33,3 +33,6 @@ FfonElement* providerHandleCommand(AppRenderer *appRenderer, const char *command
                                     char *errorMsg, int errorMsgSize);
 ProviderListItem* providerGetCommandListItems(AppRenderer *appRenderer, const char *command, int *outCount);
 bool providerExecuteCommand(AppRenderer *appRenderer, const char *command, const char *selection);
+
+// Refresh the current directory listing by clearing the cached children and re-fetching
+void providerRefreshCurrentDirectory(AppRenderer *appRenderer);
