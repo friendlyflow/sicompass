@@ -18,21 +18,19 @@
 #define FONT_SIZE_PT 12.0f
 #define TEXT_PADDING 4.0f
 
-// Colors
-#define COLOR_BG 0x1E1E1EFF
-#define COLOR_TEXT 0xD4D4D4FF
-#define COLOR_SC_HIGHLIGHT 0xC0ECB8FF
-#define COLOR_BORDER 0xFFE5B4FF
-#define COLOR_ORANGE 0xFFA500FF
-#define COLOR_RED 0xFF0000FF
-#define COLOR_LIGHT_GREEN 0xC0ECB8FF
-#define COLOR_DARK_GREEN 0x1C4414FF
-#define COLOR_DIMGREY 0x696969FF
-#define COLOR_DARK_GREY 0x333333FF
-#define COLOR_SELECTION 0x0F2440FF
-#define COLOR_LIGHTGREY 0xD3D3D3FF
-#define COLOR_MATCH_CURRENT 0x264F78FF
-#define COLOR_MATCH_OTHER 0x3A3D1EFF
+// Runtime color palette (theme-aware)
+typedef struct {
+    uint32_t background;
+    uint32_t text;
+    uint32_t headerseparator;
+    uint32_t selected;
+    uint32_t extsearch;
+    uint32_t scrollsearch;
+    uint32_t error;
+} ColorPalette;
+
+extern const ColorPalette PALETTE_DARK;
+extern const ColorPalette PALETTE_LIGHT;
 
 // Enums
 typedef enum {
@@ -196,6 +194,9 @@ typedef struct AppRenderer {
 
     // Action handler state for accessibility events
     struct actionHandlerState actionHandler;
+
+    // Active color palette (points to PALETTE_DARK or PALETTE_LIGHT)
+    const ColorPalette *palette;
 } AppRenderer;
 
 // AccessKit constants (defined in render.c)

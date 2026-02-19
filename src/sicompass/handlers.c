@@ -472,6 +472,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
         // Check for radio selection
         if (handleRadioSelect(appRenderer, &appRenderer->currentId)) {
             int savedIndex = appRenderer->listIndex;
+            providerNotifyRadioChanged(appRenderer, &appRenderer->currentId);
             createListCurrentLayer(appRenderer);
             appRenderer->listIndex = savedIndex;
             appRenderer->needsRedraw = true;
@@ -527,6 +528,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                 idArrayCopy(&appRenderer->currentId, &selectedId);
                 appRenderer->currentCoordinate = appRenderer->previousCoordinate;
                 accesskitSpeakModeChange(appRenderer, NULL);
+                providerNotifyRadioChanged(appRenderer, &appRenderer->currentId);
                 createListCurrentLayer(appRenderer);
                 appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
                 appRenderer->needsRedraw = true;
@@ -637,6 +639,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                 idArrayCopy(&appRenderer->currentId, &selectedId);
                 appRenderer->currentCoordinate = appRenderer->previousCoordinate;
                 accesskitSpeakModeChange(appRenderer, NULL);
+                providerNotifyRadioChanged(appRenderer, &appRenderer->currentId);
                 createListCurrentLayer(appRenderer);
                 appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
                 appRenderer->needsRedraw = true;

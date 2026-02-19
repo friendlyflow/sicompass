@@ -2,7 +2,38 @@
 #include "provider.h"
 #include <provider_interface.h>
 #include <filebrowser_provider.h>
+#include <settings_provider.h>
 #include <string.h>
+
+// Palette definitions
+const ColorPalette PALETTE_DARK = {
+    .background         = 0x000000FF,
+    .text               = 0xFFFFFFFF,
+    .headerseparator    = 0x333333FF,
+    .selected           = 0x2D4A28FF,
+    .extsearch          = 0x696969FF,
+    .scrollsearch       = 0x264F78FF,
+    .error              = 0xFF0000FF,
+};
+
+const ColorPalette PALETTE_LIGHT = {
+    .background         = 0xFFFFFFFF,
+    .text               = 0x000000FF,
+    .headerseparator    = 0xE0E0E0FF,
+    .selected           = 0xC0ECB8FF,
+    .extsearch          = 0x333333FF,
+    .scrollsearch       = 0xA8C7FAFF,
+    .error              = 0xFF0000FF,
+};
+
+static void applySettings(const char *key, const char *value, void *userdata) {
+    AppRenderer *appRenderer = (AppRenderer *)userdata;
+    if (!appRenderer) return;
+    if (strcmp(key, "colorScheme") == 0) {
+        appRenderer->palette = (strcmp(value, "light") == 0) ? &PALETTE_LIGHT : &PALETTE_DARK;
+        appRenderer->needsRedraw = true;
+    }
+}
 
 void mainLoop(SiCompassApplication* app) {
     // Initialize app renderer
@@ -12,7 +43,10 @@ void mainLoop(SiCompassApplication* app) {
         return;
     }
 
-    // Register providers - tutorial first, then file browser
+    // Initialize palette before any rendering
+    app->appRenderer->palette = &PALETTE_DARK;
+
+    // Register providers - tutorial first, then file browser, then settings last
     Provider *tutorialProvider = scriptProviderCreate(
         "tutorial", "tutorial", TUTORIAL_SCRIPT_PATH);
     if (tutorialProvider) {
@@ -21,23 +55,32 @@ void mainLoop(SiCompassApplication* app) {
 
     Provider *fbProvider = filebrowserGetProvider();
     providerRegister(fbProvider);
-    providerInitAll();
+
+    Provider *settingsProvider = settingsProviderCreate(applySettings, app->appRenderer);
+    if (tutorialProvider) {
+        settingsAddSection(settingsProvider, "tutorial");
+    }
+    settingsAddSection(settingsProvider, "file browser");
+    providerRegister(settingsProvider);
+
+    providerInitAll();  // triggers settingsInit → loads config → applies palette
 
     // Get initial elements from providers
     FfonElement *tutorialElement = tutorialProvider ?
         providerGetInitialElement(tutorialProvider) : NULL;
     FfonElement *fileBrowserElement = providerGetInitialElement(fbProvider);
+    FfonElement *settingsElement = providerGetInitialElement(settingsProvider);
     if (!tutorialElement && !fileBrowserElement) {
         fprintf(stderr, "Failed to get initial elements from providers\n");
         appRendererDestroy(app->appRenderer);
         return;
     }
 
-    // Create root array with tutorial before file browser
+    // Create root array: tutorial, file browser, settings (settings always last)
     int providerCount = 0;
-    app->appRenderer->ffon = malloc(2 * sizeof(FfonElement*));
-    app->appRenderer->providers = malloc(2 * sizeof(Provider*));
-    app->appRenderer->ffonCapacity = 2;
+    app->appRenderer->ffon = malloc(3 * sizeof(FfonElement*));
+    app->appRenderer->providers = malloc(3 * sizeof(Provider*));
+    app->appRenderer->ffonCapacity = 3;
     if (tutorialElement) {
         app->appRenderer->ffon[providerCount] = tutorialElement;
         app->appRenderer->providers[providerCount] = tutorialProvider;
@@ -46,6 +89,11 @@ void mainLoop(SiCompassApplication* app) {
     if (fileBrowserElement) {
         app->appRenderer->ffon[providerCount] = fileBrowserElement;
         app->appRenderer->providers[providerCount] = fbProvider;
+        providerCount++;
+    }
+    if (settingsElement) {
+        app->appRenderer->ffon[providerCount] = settingsElement;
+        app->appRenderer->providers[providerCount] = settingsProvider;
         providerCount++;
     }
     app->appRenderer->ffonCount = providerCount;

@@ -36,3 +36,7 @@ bool providerExecuteCommand(AppRenderer *appRenderer, const char *command, const
 
 // Refresh the current directory listing by clearing the cached children and re-fetching
 void providerRefreshCurrentDirectory(AppRenderer *appRenderer);
+
+// Notify the active provider that a radio item was selected.
+// elementId: ID of the newly checked radio child element.
+void providerNotifyRadioChanged(AppRenderer *appRenderer, IdArray *elementId);

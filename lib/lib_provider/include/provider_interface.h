@@ -60,6 +60,11 @@ typedef struct Provider {
     ProviderListItem* (*getCommandListItems)(struct Provider *self, const char *command, int *outCount);
     bool (*executeCommand)(struct Provider *self, const char *command, const char *selection);
 
+    // Optional: Called after a radio child is selected within this provider's FFON tree.
+    // groupKey: stripped key of the <radio> parent (e.g. "color scheme")
+    // selectedValue: stripped text of the newly checked child (e.g. "light")
+    void (*onRadioChange)(struct Provider *self, const char *groupKey, const char *selectedValue);
+
     // Optional: Persistent config
     bool (*loadConfig)(struct Provider *self, const char *configPath);
     bool (*saveConfig)(struct Provider *self, const char *configPath);
