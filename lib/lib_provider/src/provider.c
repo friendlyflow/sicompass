@@ -185,11 +185,16 @@ void providerFreeCommandListItems(ProviderListItem *items, int count) {
 FfonElement* providerGetInitialElement(Provider *provider) {
     if (!provider || !provider->fetch) return NULL;
 
+    // Resolve display name: prefer ProviderOps displayName/name, fall back to provider->name
+    const char *displayName = NULL;
     GenericProviderState *state = (GenericProviderState*)provider->state;
-    if (!state || !state->ops) return NULL;
-
-    // Use displayName if set, otherwise fall back to name
-    const char *displayName = state->ops->displayName ? state->ops->displayName : state->ops->name;
+    if (state && state->ops) {
+        displayName = state->ops->displayName ? state->ops->displayName : state->ops->name;
+    }
+    if (!displayName) {
+        displayName = provider->name;
+    }
+    if (!displayName) return NULL;
 
     // Fetch initial children
     int count = 0;

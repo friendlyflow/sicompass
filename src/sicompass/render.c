@@ -220,12 +220,14 @@ static float renderRadioIndicator(SiCompassApplication *app,
 
     // Outer circle (always rendered)
     prepareRectangle(app, circleX, circleY, circleSize, circleSize,
-                     COLOR_LIGHT_GREEN, circleSize / 2.0f);
+                     app->appRenderer->palette->text, circleSize / 2.0f);
 
-    // Inner circle: green for checked, black (clearvalue) for unchecked
+    // Inner circle: light green for checked, white for unchecked
     float innerSize = circleSize * 0.55f;
     float innerOffset = (circleSize - innerSize) / 2.0f;
-    uint32_t innerColor = (radioType == RADIO_CHECKED) ? COLOR_DARK_GREEN : 0x000000FF;
+    uint32_t innerColor = (radioType == RADIO_CHECKED)
+        ? app->appRenderer->palette->selected
+        : app->appRenderer->palette->background;
     prepareRectangle(app, circleX + innerOffset, circleY + innerOffset,
                      innerSize, innerSize, innerColor, innerSize / 2.0f);
 
@@ -253,21 +255,21 @@ static float renderCheckboxIndicator(SiCompassApplication *app,
     float boxY = lineTop + (lineH - boxSize) / 2.0f;
 
     if (checkboxType == CHECKBOX_CHECKED) {
-        // Checked: dark green square with text-colored checkmark
+        // Checked: highlight square with text-colored checkmark
         prepareRectangle(app, boxX, boxY, boxSize, boxSize,
-                         COLOR_DARK_GREEN, 0.0f);
+                         app->appRenderer->palette->selected, 0.0f);
         float checkPadding = boxSize * 0.02f;
         float checkSize = boxSize - checkPadding * 2.0f;
         prepareCheckmark(app, boxX + checkPadding, boxY + checkPadding,
-                         checkSize, COLOR_TEXT);
+                         checkSize, app->appRenderer->palette->text);
     } else {
-        // Unchecked: text-colored border with black center
+        // Unchecked: text-colored border with bg-colored center
         prepareRectangle(app, boxX, boxY, boxSize, boxSize,
-                         COLOR_TEXT, 0.0f);
+                         app->appRenderer->palette->text, 0.0f);
         float border = boxSize * 0.07f;
         float innerSize = boxSize - border * 2.0f;
         prepareRectangle(app, boxX + border, boxY + border,
-                         innerSize, innerSize, 0x000000FF, 0.0f);
+                         innerSize, innerSize, app->appRenderer->palette->background, 0.0f);
     }
 
     // Return box width + one character gap
@@ -408,7 +410,7 @@ int renderText(SiCompassApplication *app, const char *text, int x, int y,
             float height = overallMaxY - overallMinY;
             float cornerRadius = 5.0f;
 
-            prepareRectangle(app, overallMinX, overallMinY, width, height, COLOR_DARK_GREEN, cornerRadius);
+            prepareRectangle(app, overallMinX, overallMinY, width, height, app->appRenderer->palette->selected, cornerRadius);
         }
     }
 
@@ -457,7 +459,7 @@ int renderText(SiCompassApplication *app, const char *text, int x, int y,
 //     int linesRendered = 0;
 
 //     if (elem->type == FFON_STRING) {
-//         uint32_t color = COLOR_TEXT;
+//         uint32_t color = app->appRenderer->palette->text;
 //         const char *displayText = elem->data.string;
 
 //         // In insert mode, show inputBuffer for current element
@@ -486,7 +488,7 @@ int renderText(SiCompassApplication *app, const char *text, int x, int y,
 //             snprintf(keyWithColon, sizeof(keyWithColon), "%s:", keyToRender);
 //         }
 
-//         uint32_t color = COLOR_TEXT;
+//         uint32_t color = app->appRenderer->palette->text;
 //         linesRendered = renderText(app, keyWithColon, x, *yPos, color, isCurrent);
 
 //         // Speak current element for accessibility
@@ -527,7 +529,7 @@ int renderText(SiCompassApplication *app, const char *text, int x, int y,
 //             app->appRenderer->currentElementY = yPos;
 //             app->appRenderer->currentElementIsObject = false;
 //         }
-//         renderText(app, displayText, 50, yPos, COLOR_TEXT, true);
+//         renderText(app, displayText, 50, yPos, app->appRenderer->palette->text, true);
 //         return;
 //     }
 
@@ -594,7 +596,7 @@ void renderInteraction(SiCompassApplication *app) {
                     parentElem->data.object->key : parentElem->data.string;
                 // Strip input tags from parent display
                 char *strippedParent = providerTagStripDisplay(parentText);
-                renderText(app, strippedParent ? strippedParent : parentText, 50, yPos, COLOR_TEXT, false);
+                renderText(app, strippedParent ? strippedParent : parentText, 50, yPos, app->appRenderer->palette->text, false);
                 free(strippedParent);
                 yPos += lineHeight;
 
@@ -611,7 +613,7 @@ void renderInteraction(SiCompassApplication *app) {
                                 int summaryX = 50 + indent;
                                 float circleWidth = renderRadioIndicator(app, RADIO_CHECKED, summaryX, yPos);
                                 summaryX += (int)circleWidth;
-                                renderText(app, checkedText, summaryX, yPos, COLOR_TEXT, false);
+                                renderText(app, checkedText, summaryX, yPos, app->appRenderer->palette->text, false);
                                 free(checkedText);
                                 yPos += lineHeight;
                                 hasRadioSummary = true;
@@ -727,7 +729,7 @@ void renderInteraction(SiCompassApplication *app) {
                     float border = 2.0f;
                     prepareRectangle(app, imgX - border, imgY - border,
                                      displayW + border * 2.0f, displayH + border * 2.0f,
-                                     COLOR_DARK_GREEN, 0.0f);
+                                     app->appRenderer->palette->selected, 0.0f);
                 }
 
                 prepareImage(app, imgX, imgY, displayW, displayH);
@@ -737,7 +739,7 @@ void renderInteraction(SiCompassApplication *app) {
                 yPos += lineHeight * imageLines;
             } else {
                 // Failed to load image, show path as text
-                int textLines = renderText(app, imagePath, itemX, itemYPos, COLOR_TEXT, isSelected);
+                int textLines = renderText(app, imagePath, itemX, itemYPos, app->appRenderer->palette->text, isSelected);
                 yPos += lineHeight * textLines;
             }
             continue;
@@ -770,7 +772,7 @@ void renderInteraction(SiCompassApplication *app) {
         }
 
         // Render text (may be multiple lines)
-        int textLines = renderText(app, displayText, itemX, itemYPos, COLOR_TEXT, isSelected);
+        int textLines = renderText(app, displayText, itemX, itemYPos, app->appRenderer->palette->text, isSelected);
 
         yPos += lineHeight * textLines;
     }
@@ -790,7 +792,7 @@ void renderSimpleSearch(SiCompassApplication *app) {
     // Render search input
     char searchText[MAX_LINE_LENGTH];
     snprintf(searchText, sizeof(searchText), "search: %s", app->appRenderer->inputBuffer);
-    int linesRendered = renderText(app, searchText, 50, yPos, COLOR_TEXT, false);
+    int linesRendered = renderText(app, searchText, 50, yPos, app->appRenderer->palette->text, false);
     yPos += lineHeight * linesRendered;
 
     // Render checked radio summary if inside a radio group
@@ -818,7 +820,7 @@ void renderSimpleSearch(SiCompassApplication *app) {
                                 int summaryX = 50 + indent;
                                 float circleWidth = renderRadioIndicator(app, RADIO_CHECKED, summaryX, yPos);
                                 summaryX += (int)circleWidth;
-                                renderText(app, checkedText, summaryX, yPos, COLOR_TEXT, false);
+                                renderText(app, checkedText, summaryX, yPos, app->appRenderer->palette->text, false);
                                 free(checkedText);
                                 yPos += lineHeight;
                                 hasRadioSummary = true;
@@ -922,7 +924,7 @@ void renderSimpleSearch(SiCompassApplication *app) {
                     float border = 2.0f;
                     prepareRectangle(app, imgX - border, imgY - border,
                                      displayW + border * 2.0f, displayH + border * 2.0f,
-                                     COLOR_DARK_GREEN, 0.0f);
+                                     app->appRenderer->palette->selected, 0.0f);
                 }
 
                 prepareImage(app, imgX, imgY, displayW, displayH);
@@ -931,7 +933,7 @@ void renderSimpleSearch(SiCompassApplication *app) {
                 if (imageLines < 1) imageLines = 1;
                 yPos += lineHeight * imageLines;
             } else {
-                int textLines = renderText(app, imagePath, itemX, itemYPos, COLOR_TEXT, isSelected);
+                int textLines = renderText(app, imagePath, itemX, itemYPos, app->appRenderer->palette->text, isSelected);
                 yPos += lineHeight * textLines;
             }
             continue;
@@ -952,7 +954,7 @@ void renderSimpleSearch(SiCompassApplication *app) {
         }
 
         // Render text (may be multiple lines)
-        int textLines = renderText(app, list[i].label, itemX, itemYPos, COLOR_TEXT, isSelected);
+        int textLines = renderText(app, list[i].label, itemX, itemYPos, app->appRenderer->palette->text, isSelected);
 
         yPos += lineHeight * textLines;
     }
@@ -972,7 +974,7 @@ void renderExtendedSearch(SiCompassApplication *app) {
     // Render search input
     char searchText[MAX_LINE_LENGTH];
     snprintf(searchText, sizeof(searchText), "ext search: %s", app->appRenderer->inputBuffer);
-    int linesRendered = renderText(app, searchText, 50, yPos, COLOR_TEXT, false);
+    int linesRendered = renderText(app, searchText, 50, yPos, app->appRenderer->palette->text, false);
     yPos += lineHeight * linesRendered;
 
     ListItem *list = app->appRenderer->filteredListCount > 0 ?
@@ -1044,7 +1046,7 @@ void renderExtendedSearch(SiCompassApplication *app) {
             float bMinX, bMinY, bMaxX, bMaxY;
             calculateTextBounds(app, list[i].data, (float)itemX, (float)itemYPos, scale,
                                 &bMinX, &bMinY, &bMaxX, &bMaxY);
-            renderText(app, list[i].data, itemX, itemYPos, COLOR_DIMGREY, false);
+            renderText(app, list[i].data, itemX, itemYPos, app->appRenderer->palette->extsearch, false);
             itemX += (int)(bMaxX - bMinX);
         }
 
@@ -1074,7 +1076,7 @@ void renderExtendedSearch(SiCompassApplication *app) {
                     float border = 2.0f;
                     prepareRectangle(app, imgX - border, imgY - border,
                                      displayW + border * 2.0f, displayH + border * 2.0f,
-                                     COLOR_DARK_GREEN, 0.0f);
+                                     app->appRenderer->palette->selected, 0.0f);
                 }
 
                 prepareImage(app, imgX, imgY, displayW, displayH);
@@ -1083,7 +1085,7 @@ void renderExtendedSearch(SiCompassApplication *app) {
                 if (imageLines < 1) imageLines = 1;
                 yPos += lineHeight * imageLines;
             } else {
-                int textLines = renderText(app, imagePath, itemX, itemYPos, COLOR_TEXT, isSelected);
+                int textLines = renderText(app, imagePath, itemX, itemYPos, app->appRenderer->palette->text, isSelected);
                 yPos += lineHeight * textLines;
             }
             continue;
@@ -1104,7 +1106,7 @@ void renderExtendedSearch(SiCompassApplication *app) {
         }
 
         // Render text (may be multiple lines)
-        int textLines = renderText(app, list[i].label, itemX, itemYPos, COLOR_TEXT, isSelected);
+        int textLines = renderText(app, list[i].label, itemX, itemYPos, app->appRenderer->palette->text, isSelected);
 
         yPos += lineHeight * textLines;
     }
@@ -1165,13 +1167,13 @@ void renderScroll(SiCompassApplication *app) {
                     int imageLines = (int)ceilf(displayH / (float)lineHeight);
                     app->appRenderer->textScrollLineCount = imageLines > 1 ? imageLines : 1;
                 } else {
-                    int lines = renderText(app, imagePath ? imagePath : text, 50, yPos, COLOR_TEXT, true);
+                    int lines = renderText(app, imagePath ? imagePath : text, 50, yPos, app->appRenderer->palette->text, true);
                     app->appRenderer->textScrollLineCount = lines;
                 }
                 free(imagePath);
             } else {
                 char *stripped = providerTagStripDisplay(text);
-                int lines = renderText(app, stripped ? stripped : text, 50, yPos, COLOR_TEXT, true);
+                int lines = renderText(app, stripped ? stripped : text, 50, yPos, app->appRenderer->palette->text, true);
                 app->appRenderer->textScrollLineCount = lines;
                 free(stripped);
             }
@@ -1207,7 +1209,7 @@ void renderScrollSearch(SiCompassApplication *app) {
         char searchDisplay[MAX_LINE_LENGTH];
         snprintf(searchDisplay, sizeof(searchDisplay), "search: %s [0 items]",
                  app->appRenderer->inputBuffer);
-        renderText(app, searchDisplay, 50, lineHeight * 2, COLOR_TEXT, false);
+        renderText(app, searchDisplay, 50, lineHeight * 2, app->appRenderer->palette->text, false);
         app->appRenderer->scrollSearchMatchCount = 0;
         app->appRenderer->scrollSearchCurrentMatch = 0;
 
@@ -1377,7 +1379,7 @@ void renderScrollSearch(SiCompassApplication *app) {
     char searchDisplay[MAX_LINE_LENGTH];
     snprintf(searchDisplay, sizeof(searchDisplay), "search: %s [%d items]",
              app->appRenderer->inputBuffer, matchCount);
-    renderText(app, searchDisplay, 50, lineHeight * 2, COLOR_TEXT, false);
+    renderText(app, searchDisplay, 50, lineHeight * 2, app->appRenderer->palette->text, false);
 
     // Render text with highlights
     int textStartY = lineHeight * 3;
@@ -1424,7 +1426,7 @@ void renderScrollSearch(SiCompassApplication *app) {
                                 &mMinX, &mMinY, &mMaxX, &mMaxY);
 
             uint32_t highlightColor = (m == app->appRenderer->scrollSearchCurrentMatch)
-                ? COLOR_MATCH_CURRENT : COLOR_MATCH_OTHER;
+                ? app->appRenderer->palette->scrollsearch : app->appRenderer->palette->selected;
 
             float rectY = mMinY - TEXT_PADDING;
             float rectH = getLineHeight(app, scale, TEXT_PADDING);
@@ -1438,7 +1440,7 @@ void renderScrollSearch(SiCompassApplication *app) {
         lineText[lines[i].len] = '\0';
 
         if (lines[i].len > 0 && currentY >= textStartY) {
-            prepareTextForRendering(app, lineText, 50.0f, (float)currentY, scale, COLOR_TEXT);
+            prepareTextForRendering(app, lineText, 50.0f, (float)currentY, scale, app->appRenderer->palette->text);
         }
     }
 
@@ -1454,6 +1456,12 @@ void updateView(SiCompassApplication *app) {
 
     // Begin rectangle rendering for this frame (resets rectangle count)
     beginRectangleRendering(app);
+
+    // Draw background fill (covers the Vulkan clear color with the palette background)
+    prepareRectangle(app, 0.0f, 0.0f,
+                     (float)app->swapChainExtent.width,
+                     (float)app->swapChainExtent.height,
+                     app->appRenderer->palette->background, 0.0f);
 
     // Begin image rendering for this frame (resets vertex count)
     beginImageRendering(app);
@@ -1477,13 +1485,13 @@ void updateView(SiCompassApplication *app) {
     // Render line under header
     float headerWidth = (float)app->swapChainExtent.width;
     float lineThickness = 1.0f;
-    prepareRectangle(app, 0.0f, (float)lineHeight, headerWidth, lineThickness, COLOR_DARK_GREY, 0.0f);
+    prepareRectangle(app, 0.0f, (float)lineHeight, headerWidth, lineThickness, app->appRenderer->palette->headerseparator, 0.0f);
 
-    renderText(app, header, (float)50, (float)headerHeight, COLOR_TEXT, false);
+    renderText(app, header, (float)50, (float)headerHeight, app->appRenderer->palette->text, false);
 
     // Render error message if any
     if (app->appRenderer->errorMessage[0] != '\0') {
-        renderText(app, app->appRenderer->errorMessage, maxX + 20, (float)headerHeight, COLOR_RED, false);
+        renderText(app, app->appRenderer->errorMessage, maxX + 20, (float)headerHeight, app->appRenderer->palette->error, false);
     }
 
     // Render appropriate panel
@@ -1521,7 +1529,7 @@ void updateView(SiCompassApplication *app) {
                    app->appRenderer->inputBuffer,
                    50 + searchPrefixWidth, (int)minY,
                    app->appRenderer->cursorPosition,
-                   COLOR_TEXT);
+                   app->appRenderer->palette->text);
     }
 
     // Render selection highlight in all text input modes
@@ -1582,7 +1590,7 @@ void updateView(SiCompassApplication *app) {
         float selWidth = selXEnd - selXStart;
         float selHeight = getLineHeight(app, scale, TEXT_PADDING) - (2.0f * TEXT_PADDING);
         prepareRectangle(app, selXStart, selY, selWidth, selHeight,
-                         COLOR_SELECTION, 0.0f);
+                         app->appRenderer->palette->selected, 0.0f);
     }
 
     if (app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
@@ -1605,7 +1613,7 @@ void updateView(SiCompassApplication *app) {
                    textForCaret,
                    caretX, caretY,
                    app->appRenderer->cursorPosition,
-                   COLOR_TEXT);
+                   app->appRenderer->palette->text);
     }
 
     // The actual drawing to the screen happens in drawFrame() which calls

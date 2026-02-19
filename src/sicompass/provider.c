@@ -470,3 +470,43 @@ bool providerNavigateLeft(AppRenderer *appRenderer) {
     idArrayPop(&appRenderer->currentId);
     return true;
 }
+
+// Notify the active provider that a radio item was selected.
+// elementId: ID of the newly checked radio child element.
+void providerNotifyRadioChanged(AppRenderer *appRenderer, IdArray *elementId) {
+    Provider *provider = providerGetActive(appRenderer);
+    if (!provider || !provider->onRadioChange) return;
+    if (!elementId || elementId->depth < 2) return;
+
+    // Get the selected child element
+    int count;
+    FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, elementId, &count);
+    if (!arr) return;
+    int idx = elementId->ids[elementId->depth - 1];
+    if (idx < 0 || idx >= count) return;
+    FfonElement *elem = arr[idx];
+    if (elem->type != FFON_STRING) return;
+
+    // Get the parent radio group element
+    IdArray parentId;
+    idArrayCopy(&parentId, elementId);
+    idArrayPop(&parentId);
+    int parentCount;
+    FfonElement **parentArr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                          &parentId, &parentCount);
+    if (!parentArr) return;
+    int parentIdx = parentId.ids[parentId.depth - 1];
+    if (parentIdx < 0 || parentIdx >= parentCount) return;
+    FfonElement *parentElem = parentArr[parentIdx];
+    if (parentElem->type != FFON_OBJECT) return;
+
+    char *groupKey = providerTagStripDisplay(parentElem->data.object->key);
+    char *selectedValue = providerTagStripDisplay(elem->data.string);
+
+    if (groupKey && selectedValue) {
+        provider->onRadioChange(provider, groupKey, selectedValue);
+    }
+
+    free(groupKey);
+    free(selectedValue);
+}

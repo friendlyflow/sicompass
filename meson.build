@@ -79,12 +79,13 @@ subdir('lib/lib_filebrowser')
 subdir('lib/lib_friendlystore')
 subdir('lib/lib_notebook')
 subdir('lib/lib_webbrowser')
+subdir('lib/lib_settings')
 
 subdir('src')
 
 tutorial_script_path = meson.project_source_root() / 'lib' / 'lib_tutorial' / 'tutorial.ts'
 
-exe_sc = executable('sicompass', [sources_sc], dependencies: [vulkan_dep, sdl3_dep, xkbcommon_dep, m_dep, ft_dep, hb_dep, stb_dep, jsonc_dep, accesskit_dep, utf8proc_dep, cglm_dep, lib_ffon_dep, lib_provider_dep, lib_filebrowser_dep],
+exe_sc = executable('sicompass', [sources_sc], dependencies: [vulkan_dep, sdl3_dep, xkbcommon_dep, m_dep, ft_dep, hb_dep, stb_dep, jsonc_dep, accesskit_dep, utf8proc_dep, cglm_dep, lib_ffon_dep, lib_provider_dep, lib_filebrowser_dep, lib_settings_dep],
                     c_args: ['-DTUTORIAL_SCRIPT_PATH="' + tutorial_script_path + '"'],
                     include_directories: [], install : true)
 
