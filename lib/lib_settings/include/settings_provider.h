@@ -31,3 +31,19 @@ Provider* settingsProviderCreate(SettingsApplyFn applyCallback, void *userdata);
  * The section appears as a child of the settings root with a "no settings" placeholder.
  */
 void settingsAddSection(Provider *provider, const char *sectionName);
+
+/**
+ * Register a radio group as a direct child of a named section in the settings tree.
+ * The section is created automatically (no separate settingsAddSection call needed).
+ * radioKey becomes the display label of the radio group (e.g. "global sorting").
+ * configKey is used for JSON persistence and as the applyCallback key (e.g. "sortOrder").
+ * options/optionCount list the selectable values; defaultValue is used when no config exists.
+ * Must be called before providerInitAll() / providerGetInitialElement().
+ */
+void settingsAddSectionRadio(Provider *provider,
+                             const char *sectionName,
+                             const char *radioKey,
+                             const char *configKey,
+                             const char **options,
+                             int optionCount,
+                             const char *defaultValue);

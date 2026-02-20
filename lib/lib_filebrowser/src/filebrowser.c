@@ -74,7 +74,52 @@ static void filebrowserFormatProperties(struct stat *st, char *buf, size_t bufSi
 }
 #endif
 
-FfonElement** filebrowserListDirectory(const char *uri, bool commands, bool showProperties, int *out_count) {
+// ---- Intermediate entry for two-pass collection + sort ----
+
+#if defined(_WIN32)
+typedef struct {
+    char name[512];
+    ULONGLONG mtime; // 100-nanosecond intervals since 1601 (FILETIME as uint64)
+    bool is_dir;
+    bool is_executable;
+    WIN32_FIND_DATAA findData;
+} FilebrowserRawEntry;
+
+static int fbCompareAlpha(const void *a, const void *b) {
+    return _stricmp(((const FilebrowserRawEntry *)a)->name,
+                    ((const FilebrowserRawEntry *)b)->name);
+}
+static int fbCompareChrono(const void *a, const void *b) {
+    ULONGLONG ta = ((const FilebrowserRawEntry *)a)->mtime;
+    ULONGLONG tb = ((const FilebrowserRawEntry *)b)->mtime;
+    if (tb > ta) return 1;
+    if (tb < ta) return -1;
+    return 0;
+}
+#else
+typedef struct {
+    char name[512];
+    time_t mtime;
+    bool is_dir;
+    bool is_executable;
+    struct stat st;
+} FilebrowserRawEntry;
+
+static int fbCompareAlpha(const void *a, const void *b) {
+    return strcasecmp(((const FilebrowserRawEntry *)a)->name,
+                      ((const FilebrowserRawEntry *)b)->name);
+}
+static int fbCompareChrono(const void *a, const void *b) {
+    time_t ta = ((const FilebrowserRawEntry *)a)->mtime;
+    time_t tb = ((const FilebrowserRawEntry *)b)->mtime;
+    if (tb > ta) return 1;
+    if (tb < ta) return -1;
+    return 0;
+}
+#endif
+
+FfonElement** filebrowserListDirectory(const char *uri, bool commands, bool showProperties,
+                                       FilebrowserSortMode sortMode, int *out_count) {
     *out_count = 0;
 
     if (uri == NULL) {
@@ -82,182 +127,152 @@ FfonElement** filebrowserListDirectory(const char *uri, bool commands, bool show
     }
 
 #if defined(_WIN32)
-    // Windows: path should start with drive letter or be a UNC path
     if (strlen(uri) < 2) {
         return NULL;
     }
 #else
-    // Unix: path should start with /
     if (uri[0] != '/') {
         return NULL;
     }
 #endif
 
-    int capacity = 16;
-    int count = 0;
-    FfonElement **elements = malloc(capacity * sizeof(FfonElement*));
-    if (elements == NULL) {
-        return NULL;
-    }
+    // ---- Pass 1: collect raw entries ----
+
+    int rawCapacity = 16;
+    int rawCount = 0;
+    FilebrowserRawEntry *raw = malloc(rawCapacity * sizeof(FilebrowserRawEntry));
+    if (!raw) return NULL;
 
 #if defined(_WIN32)
-    // Windows directory listing using FindFirstFile/FindNextFile
     char searchPath[4096];
     snprintf(searchPath, sizeof(searchPath), "%s\\*", uri);
 
     WIN32_FIND_DATAA findData;
     HANDLE hFind = FindFirstFileA(searchPath, &findData);
     if (hFind == INVALID_HANDLE_VALUE) {
-        free(elements);
+        free(raw);
         return NULL;
     }
 
     do {
         const char *name = findData.cFileName;
-
-        if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
-            continue;
-        }
+        if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) continue;
 
         bool is_dir = (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-
-        // Skip executables if not showing commands (simplified check for Windows)
         bool is_executable = false;
         if (!is_dir) {
             size_t len = strlen(name);
             if (len > 4) {
                 const char *ext = name + len - 4;
                 is_executable = (_stricmp(ext, ".exe") == 0 ||
-                                _stricmp(ext, ".bat") == 0 ||
-                                _stricmp(ext, ".cmd") == 0);
+                                 _stricmp(ext, ".bat") == 0 ||
+                                 _stricmp(ext, ".cmd") == 0);
             }
         }
+        if (!commands && is_executable) continue;
 
-        if (!commands && is_executable) {
-            continue;
+        if (rawCount >= rawCapacity) {
+            rawCapacity *= 2;
+            FilebrowserRawEntry *newRaw = realloc(raw, rawCapacity * sizeof(FilebrowserRawEntry));
+            if (!newRaw) { free(raw); FindClose(hFind); return NULL; }
+            raw = newRaw;
         }
 
-        if (count >= capacity) {
-            capacity *= 2;
-            FfonElement **new_elements = realloc(elements, capacity * sizeof(FfonElement*));
-            if (new_elements == NULL) {
-                for (int i = 0; i < count; i++) {
-                    ffonElementDestroy(elements[i]);
-                }
-                free(elements);
-                FindClose(hFind);
-                return NULL;
-            }
-            elements = new_elements;
-        }
-
-        // Build properties prefix for Windows (size + date)
-        char propBuf[64] = "";
-        if (showProperties) {
-            SYSTEMTIME st;
-            FileTimeToSystemTime(&findData.ftLastWriteTime, &st);
-            ULARGE_INTEGER size;
-            size.LowPart  = findData.nFileSizeLow;
-            size.HighPart = findData.nFileSizeHigh;
-            snprintf(propBuf, sizeof(propBuf), "%8llu %04d-%02d-%02d %02d:%02d ",
-                     (unsigned long long)size.QuadPart,
-                     st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute);
-        }
-
-        FfonElement *elem;
-        if (is_dir) {
-            char key_with_tags[1024];
-            snprintf(key_with_tags, sizeof(key_with_tags), "%s%s%s%s",
-                     propBuf, INPUT_TAG_OPEN, name, INPUT_TAG_CLOSE);
-            elem = ffonElementCreateObject(key_with_tags);
-        } else {
-            char name_with_tags[1024];
-            snprintf(name_with_tags, sizeof(name_with_tags), "%s%s%s%s",
-                     propBuf, INPUT_TAG_OPEN, name, INPUT_TAG_CLOSE);
-            elem = ffonElementCreateString(name_with_tags);
-        }
-
-        if (elem == NULL) {
-            continue;
-        }
-
-        elements[count++] = elem;
+        strncpy(raw[rawCount].name, name, sizeof(raw[rawCount].name) - 1);
+        raw[rawCount].name[sizeof(raw[rawCount].name) - 1] = '\0';
+        ULARGE_INTEGER ul;
+        ul.LowPart  = findData.ftLastWriteTime.dwLowDateTime;
+        ul.HighPart = findData.ftLastWriteTime.dwHighDateTime;
+        raw[rawCount].mtime = ul.QuadPart;
+        raw[rawCount].is_dir = is_dir;
+        raw[rawCount].is_executable = is_executable;
+        raw[rawCount].findData = findData;
+        rawCount++;
     } while (FindNextFileA(hFind, &findData) != 0);
 
     FindClose(hFind);
 
 #else
-    // POSIX directory listing
     DIR *dir = opendir(uri);
-    if (dir == NULL) {
-        free(elements);
-        return NULL;
-    }
+    if (!dir) { free(raw); return NULL; }
 
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
-            continue;
-        }
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
 
         char fullpath[4096];
         snprintf(fullpath, sizeof(fullpath), "%s/%s", uri, entry->d_name);
 
         struct stat st;
-        if (stat(fullpath, &st) != 0) {
-            continue;
-        }
+        if (stat(fullpath, &st) != 0) continue;
 
         bool is_dir = S_ISDIR(st.st_mode);
         bool is_executable = !is_dir && (st.st_mode & S_IXUSR);
+        if (!commands && is_executable) continue;
 
-        if (!commands && is_executable) {
-            continue;
+        if (rawCount >= rawCapacity) {
+            rawCapacity *= 2;
+            FilebrowserRawEntry *newRaw = realloc(raw, rawCapacity * sizeof(FilebrowserRawEntry));
+            if (!newRaw) { free(raw); closedir(dir); return NULL; }
+            raw = newRaw;
         }
 
-        if (count >= capacity) {
-            capacity *= 2;
-            FfonElement **new_elements = realloc(elements, capacity * sizeof(FfonElement*));
-            if (new_elements == NULL) {
-                for (int i = 0; i < count; i++) {
-                    ffonElementDestroy(elements[i]);
-                }
-                free(elements);
-                closedir(dir);
-                return NULL;
-            }
-            elements = new_elements;
-        }
-
-        // Build properties prefix (ls -al style)
-        char propBuf[128] = "";
-        if (showProperties) {
-            filebrowserFormatProperties(&st, propBuf, sizeof(propBuf));
-        }
-
-        FfonElement *elem;
-        if (is_dir) {
-            char key_with_tags[1024];
-            snprintf(key_with_tags, sizeof(key_with_tags), "%s%s%s%s",
-                     propBuf, INPUT_TAG_OPEN, entry->d_name, INPUT_TAG_CLOSE);
-            elem = ffonElementCreateObject(key_with_tags);
-        } else {
-            char name_with_tags[1024];
-            snprintf(name_with_tags, sizeof(name_with_tags), "%s%s%s%s",
-                     propBuf, INPUT_TAG_OPEN, entry->d_name, INPUT_TAG_CLOSE);
-            elem = ffonElementCreateString(name_with_tags);
-        }
-
-        if (elem == NULL) {
-            continue;
-        }
-
-        elements[count++] = elem;
+        strncpy(raw[rawCount].name, entry->d_name, sizeof(raw[rawCount].name) - 1);
+        raw[rawCount].name[sizeof(raw[rawCount].name) - 1] = '\0';
+        raw[rawCount].mtime = st.st_mtime;
+        raw[rawCount].is_dir = is_dir;
+        raw[rawCount].is_executable = is_executable;
+        raw[rawCount].st = st;
+        rawCount++;
     }
 
     closedir(dir);
 #endif
 
+    // ---- Sort ----
+
+    if (rawCount > 1) {
+        qsort(raw, rawCount,  sizeof(FilebrowserRawEntry),
+              sortMode == FILEBROWSER_SORT_CHRONO ? fbCompareChrono : fbCompareAlpha);
+    }
+
+    // ---- Pass 2: create FfonElement* from sorted entries ----
+
+    FfonElement **elements = malloc(rawCount * sizeof(FfonElement *));
+    if (!elements) { free(raw); return NULL; }
+
+    int count = 0;
+    for (int i = 0; i < rawCount; i++) {
+        FilebrowserRawEntry *e = &raw[i];
+
+#if defined(_WIN32)
+        char propBuf[64] = "";
+        if (showProperties) {
+            SYSTEMTIME st;
+            FileTimeToSystemTime(&e->findData.ftLastWriteTime, &st);
+            ULARGE_INTEGER size;
+            size.LowPart  = e->findData.nFileSizeLow;
+            size.HighPart = e->findData.nFileSizeHigh;
+            snprintf(propBuf, sizeof(propBuf), "%8llu %04d-%02d-%02d %02d:%02d ",
+                     (unsigned long long)size.QuadPart,
+                     st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute);
+        }
+#else
+        char propBuf[128] = "";
+        if (showProperties) {
+            filebrowserFormatProperties(&e->st, propBuf, sizeof(propBuf));
+        }
+#endif
+
+        char buf[1024];
+        snprintf(buf, sizeof(buf), "%s%s%s%s", propBuf, INPUT_TAG_OPEN, e->name, INPUT_TAG_CLOSE);
+
+        FfonElement *elem = e->is_dir ? ffonElementCreateObject(buf)
+                                      : ffonElementCreateString(buf);
+        if (elem) elements[count++] = elem;
+    }
+
+    free(raw);
     *out_count = count;
     return elements;
 }

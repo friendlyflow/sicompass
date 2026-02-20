@@ -32,6 +32,21 @@ static void applySettings(const char *key, const char *value, void *userdata) {
     if (strcmp(key, "colorScheme") == 0) {
         appRenderer->palette = (strcmp(value, "light") == 0) ? &PALETTE_LIGHT : &PALETTE_DARK;
         appRenderer->needsRedraw = true;
+        return;
+    }
+    if (strcmp(key, "sortOrder") == 0) {
+        const char *cmd = strcmp(value, "chronologically") == 0
+            ? "sort chronologically" : "sort alphanumerically";
+        for (int i = 0; i < appRenderer->ffonCount; i++) {
+            if (strcmp(appRenderer->providers[i]->name, "filebrowser") == 0) {
+                Provider *fb = appRenderer->providers[i];
+                if (fb->handleCommand) {
+                    fb->handleCommand(fb, cmd, NULL, 0, NULL, 0);
+                }
+                break;
+            }
+        }
+        appRenderer->needsRedraw = true;
     }
 }
 
@@ -60,7 +75,10 @@ void mainLoop(SiCompassApplication* app) {
     if (tutorialProvider) {
         settingsAddSection(settingsProvider, "tutorial");
     }
-    settingsAddSection(settingsProvider, "file browser");
+    const char *sortOptions[] = {"alphanumerically", "chronologically"};
+    settingsAddSectionRadio(settingsProvider, "file browser",
+                            "global sorting", "sortOrder",
+                            sortOptions, 2, "alphanumerically");
     providerRegister(settingsProvider);
 
     providerInitAll();  // triggers settingsInit → loads config → applies palette
