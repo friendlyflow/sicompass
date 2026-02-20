@@ -129,6 +129,20 @@ static const char* genericGetCurrentPath(Provider *self) {
     return state->currentPath;
 }
 
+// Generic setCurrentPath: overwrite currentPath directly (for teleport navigation)
+static void genericSetCurrentPath(Provider *self, const char *absolutePath) {
+    GenericProviderState *state = (GenericProviderState*)self->state;
+    strncpy(state->currentPath, absolutePath, sizeof(state->currentPath) - 1);
+    state->currentPath[sizeof(state->currentPath) - 1] = '\0';
+}
+
+// Generic collectDeepSearchItems: delegate to ops->collectDeepSearchItems with currentPath
+static SearchResultItem* genericCollectDeepSearchItems(Provider *self, int *outCount) {
+    GenericProviderState *state = (GenericProviderState*)self->state;
+    if (!state->ops->collectDeepSearchItems) { *outCount = 0; return NULL; }
+    return state->ops->collectDeepSearchItems(state->currentPath, outCount);
+}
+
 Provider* providerCreate(const ProviderOps *ops) {
     if (!ops || !ops->name) return NULL;
 
@@ -161,6 +175,8 @@ Provider* providerCreate(const ProviderOps *ops) {
     provider->handleCommand = ops->handleCommand ? genericHandleCommand : NULL;
     provider->getCommandListItems = ops->getCommandListItems ? genericGetCommandListItems : NULL;
     provider->executeCommand = ops->executeCommand ? genericExecuteCommand : NULL;
+    provider->setCurrentPath = genericSetCurrentPath;
+    provider->collectDeepSearchItems = ops->collectDeepSearchItems ? genericCollectDeepSearchItems : NULL;
     provider->loadConfig = NULL;
     provider->saveConfig = NULL;
 

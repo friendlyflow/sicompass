@@ -37,6 +37,11 @@ bool providerExecuteCommand(AppRenderer *appRenderer, const char *command, const
 // Refresh the current directory listing by clearing the cached children and re-fetching
 void providerRefreshCurrentDirectory(AppRenderer *appRenderer);
 
+// Teleport a provider to absoluteDir: set its path, clear root FFON children, re-fetch.
+// Returns the index of targetFilename in the new listing, or -1 if not found.
+int providerNavigateToPath(AppRenderer *appRenderer, int rootIdx,
+                           const char *absoluteDir, const char *targetFilename);
+
 // Notify the active provider that a radio item was selected.
 // elementId: ID of the newly checked radio child element.
 void providerNotifyRadioChanged(AppRenderer *appRenderer, IdArray *elementId);

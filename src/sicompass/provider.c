@@ -471,6 +471,86 @@ bool providerNavigateLeft(AppRenderer *appRenderer) {
     return true;
 }
 
+// Navigate to absoluteDir by building the full FFON path from root, then find targetFilename.
+// Sets appRenderer->currentId to point at targetFilename.
+// Returns the index of targetFilename in the final listing, or -1 on failure.
+int providerNavigateToPath(AppRenderer *appRenderer, int rootIdx,
+                           const char *absoluteDir, const char *targetFilename) {
+    if (rootIdx < 0 || rootIdx >= appRenderer->ffonCount) return -1;
+
+    Provider *provider = appRenderer->providers[rootIdx];
+    if (!provider || !provider->setCurrentPath || !provider->fetch) return -1;
+
+    // Reset provider path to "/"
+    provider->setCurrentPath(provider, "/");
+
+    // Clear and reload root FFON from "/"
+    FfonElement *rootElem = appRenderer->ffon[rootIdx];
+    if (!rootElem || rootElem->type != FFON_OBJECT) return -1;
+    FfonObject *rootObj = rootElem->data.object;
+    for (int i = 0; i < rootObj->count; i++) {
+        ffonElementDestroy(rootObj->elements[i]);
+        rootObj->elements[i] = NULL;
+    }
+    rootObj->count = 0;
+    int cc = 0;
+    FfonElement **ch = provider->fetch(provider, &cc);
+    for (int i = 0; i < cc; i++) ffonObjectAddElement(rootObj, ch[i]);
+    free(ch);
+
+    // Start at depth=2 (inside root, viewing "/" listing)
+    appRenderer->currentId.depth = 2;
+    appRenderer->currentId.ids[0] = rootIdx;
+    appRenderer->currentId.ids[1] = 0;
+
+    // Navigate through each path component of absoluteDir (skip leading "/")
+    char pathBuf[4096];
+    strncpy(pathBuf, absoluteDir, sizeof(pathBuf) - 1);
+    pathBuf[sizeof(pathBuf) - 1] = '\0';
+    char *saveptr = NULL;
+    char *start = pathBuf + (pathBuf[0] == '/' ? 1 : 0);
+    char *component = strtok_r(start, "/", &saveptr);
+    while (component && *component != '\0') {
+        int levelCount;
+        FfonElement **levelArr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                             &appRenderer->currentId, &levelCount);
+        if (!levelArr) return -1;
+
+        int idx = -1;
+        for (int i = 0; i < levelCount; i++) {
+            FfonElement *e = levelArr[i];
+            const char *raw = (e->type == FFON_STRING) ? e->data.string : e->data.object->key;
+            char *name = providerTagExtractContent(raw);
+            if (name && strcmp(name, component) == 0) { free(name); idx = i; break; }
+            free(name);
+        }
+        if (idx < 0) return -1;
+
+        appRenderer->currentId.ids[appRenderer->currentId.depth - 1] = idx;
+        if (!providerNavigateRight(appRenderer)) return -1;
+
+        component = strtok_r(NULL, "/", &saveptr);
+    }
+
+    // Now inside absoluteDir — find targetFilename
+    int finalCount;
+    FfonElement **finalArr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                          &appRenderer->currentId, &finalCount);
+    if (!finalArr) return -1;
+    for (int i = 0; i < finalCount; i++) {
+        FfonElement *e = finalArr[i];
+        const char *raw = (e->type == FFON_STRING) ? e->data.string : e->data.object->key;
+        char *name = providerTagExtractContent(raw);
+        bool match = name && strcmp(name, targetFilename) == 0;
+        free(name);
+        if (match) {
+            appRenderer->currentId.ids[appRenderer->currentId.depth - 1] = i;
+            return i;
+        }
+    }
+    return -1;
+}
+
 // Notify the active provider that a radio item was selected.
 // elementId: ID of the newly checked radio child element.
 void providerNotifyRadioChanged(AppRenderer *appRenderer, IdArray *elementId) {

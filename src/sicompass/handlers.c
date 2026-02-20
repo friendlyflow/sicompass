@@ -647,6 +647,46 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                 return;
             }
 
+            // Deep search item: navigate by path instead of FFON id
+            const char *navPath = list[appRenderer->listIndex].navPath;
+            if (navPath) {
+                const char *slash = strrchr(navPath, '/');
+                const char *filename = slash ? slash + 1 : navPath;
+                char parentDir[4096];
+                if (slash && slash != navPath) {
+                    size_t len = (size_t)(slash - navPath);
+                    strncpy(parentDir, navPath, len);
+                    parentDir[len] = '\0';
+                } else {
+                    strcpy(parentDir, "/");
+                }
+                int rootIdx = list[appRenderer->listIndex].id.ids[0];
+                providerNavigateToPath(appRenderer, rootIdx, parentDir, filename);
+
+                // currentId is now set by providerNavigateToPath.
+                // If the found item is a directory, navigate into it.
+                {
+                    int ecount;
+                    FfonElement **earr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                                      &appRenderer->currentId, &ecount);
+                    if (earr) {
+                        int eidx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                        if (eidx >= 0 && eidx < ecount && earr[eidx]->type == FFON_OBJECT) {
+                            providerNavigateRight(appRenderer);
+                        }
+                    }
+                }
+
+                appRenderer->currentCoordinate = appRenderer->previousCoordinate;
+                accesskitSpeakModeChange(appRenderer, NULL);
+                createListCurrentLayer(appRenderer);
+                appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                appRenderer->scrollOffset = 0;
+                appRenderer->needsRedraw = true;
+                appRenderer->lastKeypressTime = now;
+                return;
+            }
+
             idArrayCopy(&appRenderer->currentId, &selectedId);
 
             // If selected item is an object, try navigating into it

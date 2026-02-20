@@ -110,7 +110,8 @@ typedef struct {
 typedef struct {
     IdArray id;
     char *label;
-    char *data;
+    char *data;      // breadcrumb for display (extended search)
+    char *navPath;   // non-NULL = path-based navigation (deep search items not in FFON tree)
 } ListItem;
 
 // Main application state

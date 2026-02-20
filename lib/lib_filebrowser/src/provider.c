@@ -5,6 +5,8 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <dirent.h>
+#include <sys/stat.h>
 
 // Toggle for show/hide properties command
 static bool g_showProperties = false;
@@ -124,6 +126,114 @@ static bool fbExecuteCommand(const char *path __attribute__((unused)), const cha
     return false;
 }
 
+// Deep search implementation
+
+#define FILEBROWSER_MAX_DEEP_ITEMS 50000
+
+typedef struct {
+    SearchResultItem *items;
+    int count;
+    int cap;
+} DeepCtx;
+
+static bool deepCtxAppend(DeepCtx *ctx, char *label, char *breadcrumb, char *navPath) {
+    if (ctx->count >= ctx->cap) {
+        int newCap = ctx->cap == 0 ? 256 : ctx->cap * 2;
+        SearchResultItem *newItems = realloc(ctx->items, newCap * sizeof(SearchResultItem));
+        if (!newItems) {
+            free(label); free(breadcrumb); free(navPath);
+            return false;
+        }
+        ctx->items = newItems;
+        ctx->cap = newCap;
+    }
+    ctx->items[ctx->count].label = label;
+    ctx->items[ctx->count].breadcrumb = breadcrumb;
+    ctx->items[ctx->count].navPath = navPath;
+    ctx->count++;
+    return true;
+}
+
+// BFS queue node for deep search
+typedef struct BfsNode {
+    char *dirPath;
+    char *breadcrumb;
+    struct BfsNode *next;
+} BfsNode;
+
+static SearchResultItem* fbCollectDeepSearchItems(const char *rootPath, int *outCount) {
+    DeepCtx ctx = {NULL, 0, 0};
+
+    // Seed the BFS queue with the root directory
+    BfsNode *head = malloc(sizeof(BfsNode));
+    if (!head) { *outCount = 0; return NULL; }
+    head->dirPath = strdup(rootPath);
+    head->breadcrumb = strdup("");
+    head->next = NULL;
+    BfsNode *tail = head;
+
+    while (head && ctx.count < FILEBROWSER_MAX_DEEP_ITEMS) {
+        // Pop from front of queue
+        BfsNode *node = head;
+        head = head->next;
+        if (!head) tail = NULL;
+
+        DIR *dir = opendir(node->dirPath);
+        if (!dir) { free(node->dirPath); free(node->breadcrumb); free(node); continue; }
+
+        struct dirent *entry;
+        while ((entry = readdir(dir)) != NULL && ctx.count < FILEBROWSER_MAX_DEEP_ITEMS) {
+            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+
+            char fullPath[4096];
+            const char *sep = (node->dirPath[strlen(node->dirPath) - 1] == '/') ? "" : "/";
+            snprintf(fullPath, sizeof(fullPath), "%s%s%s", node->dirPath, sep, entry->d_name);
+
+            // Use lstat to avoid following symlinks (circular symlinks cause infinite loops)
+            struct stat st;
+            bool isDir = (lstat(fullPath, &st) == 0 && S_ISDIR(st.st_mode));
+
+            char *label = malloc(strlen(entry->d_name) + 3); // "prefix name\0"
+            if (!label) continue;
+            snprintf(label, strlen(entry->d_name) + 3, "%s %s", isDir ? "+" : "-", entry->d_name);
+
+            char *bc = strdup(node->breadcrumb);
+            char *navPath = strdup(fullPath);
+            if (!bc || !navPath) { free(label); free(bc); free(navPath); continue; }
+
+            deepCtxAppend(&ctx, label, bc, navPath);
+
+            // Enqueue subdirectories for later processing (BFS: process siblings before children)
+            if (isDir) {
+                BfsNode *child = malloc(sizeof(BfsNode));
+                if (child) {
+                    char newBreadcrumb[4096];
+                    if (node->breadcrumb[0] != '\0')
+                        snprintf(newBreadcrumb, sizeof(newBreadcrumb), "%s%s > ", node->breadcrumb, entry->d_name);
+                    else
+                        snprintf(newBreadcrumb, sizeof(newBreadcrumb), "%s > ", entry->d_name);
+                    child->dirPath = strdup(fullPath);
+                    child->breadcrumb = strdup(newBreadcrumb);
+                    child->next = NULL;
+                    if (tail) tail->next = child; else head = child;
+                    tail = child;
+                }
+            }
+        }
+        closedir(dir);
+        free(node->dirPath); free(node->breadcrumb); free(node);
+    }
+
+    // Free any remaining queue entries if cap was hit
+    while (head) {
+        BfsNode *node = head; head = head->next;
+        free(node->dirPath); free(node->breadcrumb); free(node);
+    }
+
+    *outCount = ctx.count;
+    return ctx.items;
+}
+
 // Provider singleton
 static Provider *g_provider = NULL;
 
@@ -140,6 +250,7 @@ Provider* filebrowserGetProvider(void) {
             .handleCommand = fbHandleCommand,
             .getCommandListItems = fbGetCommandListItems,
             .executeCommand = fbExecuteCommand,
+            .collectDeepSearchItems = fbCollectDeepSearchItems,
         };
         g_provider = providerCreate(&ops);
     }
