@@ -789,7 +789,8 @@ void handleUp(AppRenderer *appRenderer) {
                              appRenderer->filteredListCurrentLayer : appRenderer->totalListCurrentLayer;
             int count = appRenderer->filteredListCount > 0 ?
                         appRenderer->filteredListCount : appRenderer->totalListCount;
-            if (appRenderer->listIndex >= 0 && appRenderer->listIndex < count) {
+            if (appRenderer->listIndex >= 0 && appRenderer->listIndex < count &&
+                appRenderer->currentCoordinate != COORDINATE_COMMAND) {
                 idArrayCopy(&appRenderer->currentId, &list[appRenderer->listIndex].id);
             }
             accesskitSpeakCurrentElement(appRenderer);
@@ -847,7 +848,8 @@ void handleDown(AppRenderer *appRenderer) {
                              appRenderer->filteredListCurrentLayer : appRenderer->totalListCurrentLayer;
             int count = appRenderer->filteredListCount > 0 ?
                         appRenderer->filteredListCount : appRenderer->totalListCount;
-            if (appRenderer->listIndex >= 0 && appRenderer->listIndex < count) {
+            if (appRenderer->listIndex >= 0 && appRenderer->listIndex < count &&
+                appRenderer->currentCoordinate != COORDINATE_COMMAND) {
                 idArrayCopy(&appRenderer->currentId, &list[appRenderer->listIndex].id);
             }
             accesskitSpeakCurrentElement(appRenderer);
@@ -1522,6 +1524,10 @@ void handleCommand(AppRenderer *appRenderer) {
                     appRenderer->currentCommand = COMMAND_NONE;
                     providerRefreshCurrentDirectory(appRenderer);
                     createListCurrentLayer(appRenderer);
+                    // Sync visual selection with logical cursor so Enter acts on the
+                    // highlighted item (createListCurrentLayer resets listIndex to 0).
+                    appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                    appRenderer->scrollOffset = 0;
                 }
             }
             break;

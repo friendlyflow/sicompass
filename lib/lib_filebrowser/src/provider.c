@@ -9,9 +9,12 @@
 // Toggle for show/hide properties command
 static bool g_showProperties = false;
 
+// Current sort mode (session-only, initialised from settings on startup)
+static FilebrowserSortMode g_sortMode = FILEBROWSER_SORT_ALPHA;
+
 // Fetch children at current path
 static FfonElement** fbFetch(const char *path, int *outCount) {
-    return filebrowserListDirectory(path, false, g_showProperties, outCount);
+    return filebrowserListDirectory(path, false, g_showProperties, g_sortMode, outCount);
 }
 
 // Commit a rename operation
@@ -36,11 +39,13 @@ static const char *fb_commands[] = {
     "create directory",
     "create file",
     "open file with",
-    "show/hide properties"
+    "show/hide properties",
+    "sort alphanumerically",
+    "sort chronologically"
 };
 
 static const char** fbGetCommands(int *outCount) {
-    *outCount = 4;
+    *outCount = 6;
     return fb_commands;
 }
 
@@ -57,6 +62,14 @@ static FfonElement* fbHandleCommand(const char *path, const char *command,
     }
     if (strcmp(command, "show/hide properties") == 0) {
         g_showProperties = !g_showProperties;
+        return NULL;
+    }
+    if (strcmp(command, "sort alphanumerically") == 0) {
+        g_sortMode = FILEBROWSER_SORT_ALPHA;
+        return NULL;
+    }
+    if (strcmp(command, "sort chronologically") == 0) {
+        g_sortMode = FILEBROWSER_SORT_CHRONO;
         return NULL;
     }
     if (strcmp(command, "open file with") == 0) {
