@@ -4,6 +4,17 @@
 #include <ffon.h>
 
 /**
+ * Search result item returned by collectDeepSearchItems.
+ * All string fields are heap-allocated; caller frees the array but transfers
+ * string ownership to ListItem (no extra strdup needed).
+ */
+typedef struct {
+    char *label;      // display label with prefix (e.g., "- report.pdf", "+ docs")
+    char *breadcrumb; // relative path context (e.g., "docs > projects > ")
+    char *navPath;    // full absolute path to item (for path-based navigation)
+} SearchResultItem;
+
+/**
  * List item returned by provider commands (e.g., applications for "open with").
  */
 typedef struct {
@@ -65,6 +76,15 @@ typedef struct Provider {
     // selectedValue: stripped text of the newly checked child (e.g. "light")
     void (*onRadioChange)(struct Provider *self, const char *groupKey, const char *selectedValue);
 
+    // Optional: Set current path directly (for teleport navigation after deep search).
+    void (*setCurrentPath)(struct Provider *self, const char *absolutePath);
+
+    // Optional: Collect all items under current path for deep extended search.
+    // Returns allocated array of SearchResultItem; caller frees the array (strings
+    // are transferred to ListItem, not double-freed).
+    // If NULL, createListExtendedSearch falls back to FFON-tree traversal.
+    SearchResultItem* (*collectDeepSearchItems)(struct Provider *self, int *outCount);
+
     // Optional: Persistent config
     bool (*loadConfig)(struct Provider *self, const char *configPath);
     bool (*saveConfig)(struct Provider *self, const char *configPath);
@@ -106,6 +126,9 @@ typedef struct ProviderOps {
                                    char *errorMsg, int errorMsgSize);
     ProviderListItem* (*getCommandListItems)(const char *path, const char *command, int *outCount);
     bool (*executeCommand)(const char *path, const char *command, const char *selection);
+
+    // Optional: Collect all items under rootPath for deep extended search.
+    SearchResultItem* (*collectDeepSearchItems)(const char *rootPath, int *outCount);
 } ProviderOps;
 
 /**

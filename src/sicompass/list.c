@@ -10,6 +10,7 @@ void clearListCurrentLayer(AppRenderer *appRenderer) {
         for (int i = 0; i < appRenderer->totalListCount; i++) {
             free(appRenderer->totalListCurrentLayer[i].label);
             free(appRenderer->totalListCurrentLayer[i].data);
+            free(appRenderer->totalListCurrentLayer[i].navPath);
         }
         free(appRenderer->totalListCurrentLayer);
         appRenderer->totalListCurrentLayer = NULL;
@@ -336,6 +337,42 @@ void createListExtendedSearch(AppRenderer *appRenderer) {
     clearListCurrentLayer(appRenderer);
     appRenderer->errorMessage[0] = '\0';
 
+    // If the active provider supports deep search, use it instead of FFON-tree traversal
+    Provider *provider = providerGetActive(appRenderer);
+    if (provider && provider->collectDeepSearchItems) {
+        int deepCount = 0;
+        SearchResultItem *items = provider->collectDeepSearchItems(provider, &deepCount);
+        if (items && deepCount > 0) {
+            appRenderer->totalListCurrentLayer = calloc(deepCount, sizeof(ListItem));
+            if (!appRenderer->totalListCurrentLayer) {
+                for (int i = 0; i < deepCount; i++) {
+                    free(items[i].label); free(items[i].breadcrumb); free(items[i].navPath);
+                }
+                free(items);
+                return;
+            }
+            int rootIdx = appRenderer->currentId.ids[0];
+            for (int i = 0; i < deepCount; i++) {
+                appRenderer->totalListCurrentLayer[i].id.depth = 1;
+                appRenderer->totalListCurrentLayer[i].id.ids[0] = rootIdx;
+                // Transfer string ownership into ListItem (no extra strdup)
+                appRenderer->totalListCurrentLayer[i].label    = items[i].label;
+                appRenderer->totalListCurrentLayer[i].data     = items[i].breadcrumb;
+                appRenderer->totalListCurrentLayer[i].navPath  = items[i].navPath;
+                appRenderer->totalListCount++;
+            }
+            free(items); // free array only; strings now owned by ListItem
+            return;
+        }
+        if (items) {
+            for (int i = 0; i < deepCount; i++) {
+                free(items[i].label); free(items[i].breadcrumb); free(items[i].navPath);
+            }
+            free(items);
+        }
+    }
+
+    // Fallback: walk in-memory FFON tree
     int count;
     FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
                                      &appRenderer->currentId, &count);
@@ -377,13 +414,25 @@ void populateListCurrentLayer(AppRenderer *appRenderer, const char *searchString
     appRenderer->filteredListCount = 0;
 
     for (int i = 0; i < appRenderer->totalListCount; i++) {
-        if (utf8_stristr(appRenderer->totalListCurrentLayer[i].label, searchString) != NULL) {
+        const char *curLabel = appRenderer->totalListCurrentLayer[i].label;
+        bool matches;
+        if (appRenderer->totalListCurrentLayer[i].navPath) {
+            // Deep filesystem item: prefix-match on bare filename (skip "- " or "+ " prefix)
+            const char *bareName = (curLabel[0] != '\0' && curLabel[1] == ' ') ? curLabel + 2 : curLabel;
+            const char *found = utf8_stristr(bareName, searchString);
+            matches = (found == bareName);
+        } else {
+            matches = (utf8_stristr(curLabel, searchString) != NULL);
+        }
+        if (matches) {
             idArrayCopy(&appRenderer->filteredListCurrentLayer[appRenderer->filteredListCount].id,
                          &appRenderer->totalListCurrentLayer[i].id);
             appRenderer->filteredListCurrentLayer[appRenderer->filteredListCount].label =
                 appRenderer->totalListCurrentLayer[i].label; // Share pointer
             appRenderer->filteredListCurrentLayer[appRenderer->filteredListCount].data =
                 appRenderer->totalListCurrentLayer[i].data; // Share pointer
+            appRenderer->filteredListCurrentLayer[appRenderer->filteredListCount].navPath =
+                appRenderer->totalListCurrentLayer[i].navPath; // Share pointer
             appRenderer->filteredListCount++;
         }
     }
