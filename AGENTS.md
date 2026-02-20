@@ -29,7 +29,7 @@ Always use `#pragma once` as the include guard in header files. Do not use tradi
 
 ## Library Architecture
 
-When implementing a library (except `lib_provider` and `lib_ffon`), it must always use the provider interface to interact with Sicompass. Libraries should not directly depend on or call into Sicompass internals.
+Libraries communicate with `src/sicompass` through the `lib_provider` interface — do not depend on or call into Sicompass internals directly.
 
 ## GitHub Workflows
 
