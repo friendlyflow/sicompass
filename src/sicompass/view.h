@@ -242,6 +242,7 @@ void handleEnter(AppRenderer *appRenderer, History history);
 void handleCtrlEnter(AppRenderer *appRenderer, History history);
 void handleCtrlI(AppRenderer *appRenderer, History history);
 void handleDelete(AppRenderer *appRenderer, History history);
+void handleFileDelete(AppRenderer *appRenderer);
 void handleColon(AppRenderer *appRenderer);
 void handleUp(AppRenderer *appRenderer);
 void handleDown(AppRenderer *appRenderer);

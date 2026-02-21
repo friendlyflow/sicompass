@@ -27,6 +27,7 @@ const char* providerGetCurrentPath(AppRenderer *appRenderer);
 bool providerCommitEdit(AppRenderer *appRenderer, const char *oldContent, const char *newContent);
 bool providerCreateDirectory(AppRenderer *appRenderer, const char *name);
 bool providerCreateFile(AppRenderer *appRenderer, const char *name);
+bool providerDeleteItem(AppRenderer *appRenderer, const char *name);
 
 // Command operations
 const char** providerGetCommands(AppRenderer *appRenderer, int *outCount);

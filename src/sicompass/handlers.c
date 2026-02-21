@@ -782,6 +782,30 @@ void handleDelete(AppRenderer *appRenderer, History history) {
     appRenderer->needsRedraw = true;
 }
 
+void handleFileDelete(AppRenderer *appRenderer) {
+    int count;
+    FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                    &appRenderer->currentId, &count);
+    if (!arr || count == 0) return;
+    int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+    if (idx < 0 || idx >= count) return;
+
+    FfonElement *elem = arr[idx];
+    const char *elementKey = (elem->type == FFON_STRING) ?
+        elem->data.string : elem->data.object->key;
+
+    char *name = providerTagExtractContent(elementKey);
+    if (!name) return;
+
+    bool success = providerDeleteItem(appRenderer, name);
+    free(name);
+
+    if (success) {
+        updateState(appRenderer, TASK_DELETE, HISTORY_NONE);
+        appRenderer->needsRedraw = true;
+    }
+}
+
 void handleColon(AppRenderer *appRenderer) {
     appRenderer->previousCoordinate = appRenderer->currentCoordinate;
     appRenderer->currentCoordinate = COORDINATE_COMMAND;

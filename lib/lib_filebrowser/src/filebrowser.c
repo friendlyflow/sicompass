@@ -352,3 +352,56 @@ bool filebrowserCreateFile(const char *uri, const char *name) {
     return true;
 }
 
+#if !defined(_WIN32)
+static bool deleteRecursive(const char *path) {
+    struct stat st;
+    if (lstat(path, &st) != 0) return false;
+
+    if (!S_ISDIR(st.st_mode)) {
+        return unlink(path) == 0;
+    }
+
+    DIR *dir = opendir(path);
+    if (!dir) return false;
+
+    struct dirent *entry;
+    bool ok = true;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+        char child[4096];
+        snprintf(child, sizeof(child), "%s/%s", path, entry->d_name);
+        if (!deleteRecursive(child)) ok = false;
+    }
+    closedir(dir);
+    if (!ok) return false;
+    return rmdir(path) == 0;
+}
+#endif
+
+bool filebrowserDelete(const char *uri, const char *name) {
+    if (!uri || !name || name[0] == '\0') return false;
+
+    // Strip trailing slash
+    char nameClean[512];
+    strncpy(nameClean, name, sizeof(nameClean) - 1);
+    nameClean[sizeof(nameClean) - 1] = '\0';
+    size_t len = strlen(nameClean);
+    if (len > 0 && (nameClean[len - 1] == '/' || nameClean[len - 1] == '\\')) {
+        nameClean[len - 1] = '\0';
+    }
+
+    char fullpath[4096];
+#if defined(_WIN32)
+    snprintf(fullpath, sizeof(fullpath), "%s\\%s", uri, nameClean);
+    DWORD attrs = GetFileAttributesA(fullpath);
+    if (attrs == INVALID_FILE_ATTRIBUTES) return false;
+    if (attrs & FILE_ATTRIBUTE_DIRECTORY) {
+        return RemoveDirectoryA(fullpath) != 0;
+    }
+    return DeleteFileA(fullpath) != 0;
+#else
+    snprintf(fullpath, sizeof(fullpath), "%s/%s", uri, nameClean);
+    return deleteRecursive(fullpath);
+#endif
+}
+
