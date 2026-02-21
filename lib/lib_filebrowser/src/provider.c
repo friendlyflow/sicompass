@@ -34,6 +34,11 @@ static bool fbCreateFile(const char *path, const char *name) {
     return filebrowserCreateFile(path, name);
 }
 
+// Delete a file or directory
+static bool fbDeleteItem(const char *path, const char *name) {
+    return filebrowserDelete(path, name);
+}
+
 // Stored file path between handleCommand and executeCommand for "open with"
 static char fb_openWithPath[4096];
 
@@ -246,6 +251,7 @@ Provider* filebrowserGetProvider(void) {
             .commit = fbCommit,
             .createDirectory = fbCreateDirectory,
             .createFile = fbCreateFile,
+            .deleteItem = fbDeleteItem,
             .getCommands = fbGetCommands,
             .handleCommand = fbHandleCommand,
             .getCommandListItems = fbGetCommandListItems,

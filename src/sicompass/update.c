@@ -611,6 +611,33 @@ void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task tas
 
                 break;
             }
+        } else if (task == TASK_DELETE) {
+            // Non-editor delete (e.g. file browser in COORDINATE_OPERATOR_GENERAL)
+            int prevIdx = appRenderer->previousId.ids[i];
+            if (i < appRenderer->previousId.depth - 1 && prevIdx >= 0 && prevIdx < _ffon_count &&
+                _ffon[prevIdx]->type == FFON_OBJECT) {
+                // Intermediate level: navigate deeper next iteration
+                continue;
+            } else {
+                // Target level: remove the element
+                int removeIdx = appRenderer->previousId.ids[i];
+                if (removeIdx >= 0 && removeIdx < _ffon_count) {
+                    ffonElementDestroy(_ffon[removeIdx]);
+                    for (int j = removeIdx; j < _ffon_count - 1; j++) {
+                        _ffon[j] = _ffon[j + 1];
+                    }
+                    _ffon_count--;
+                    if (_parentObj) {
+                        _parentObj->count = _ffon_count;
+                    } else if (i == 0) {
+                        appRenderer->ffonCount = _ffon_count;
+                    }
+                    if (appRenderer->currentId.ids[appRenderer->currentId.depth - 1] > 0) {
+                        appRenderer->currentId.ids[appRenderer->currentId.depth - 1]--;
+                    }
+                }
+                break;
+            }
         }
     }
 

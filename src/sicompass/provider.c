@@ -95,6 +95,13 @@ bool providerCreateFile(AppRenderer *appRenderer, const char *name) {
     return provider->createFile(provider, name);
 }
 
+// Delete a file or directory
+bool providerDeleteItem(AppRenderer *appRenderer, const char *name) {
+    Provider *provider = providerGetActive(appRenderer);
+    if (!provider || !provider->deleteItem) return false;
+    return provider->deleteItem(provider, name);
+}
+
 // Get commands from active provider
 const char** providerGetCommands(AppRenderer *appRenderer, int *outCount) {
     Provider *provider = providerGetActive(appRenderer);

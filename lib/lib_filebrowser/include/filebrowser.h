@@ -55,3 +55,12 @@ bool filebrowserCreateDirectory(const char *uri, const char *name);
  */
 bool filebrowserCreateFile(const char *uri, const char *name);
 
+/**
+ * Delete a file or directory (recursively) at uri/name.
+ *
+ * @param uri The parent directory path (must start with '/')
+ * @param name The file or directory name (trailing slash allowed for dirs)
+ * @return true on success, false on failure
+ */
+bool filebrowserDelete(const char *uri, const char *name);
+

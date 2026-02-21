@@ -61,6 +61,11 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
              appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL) {
         handleDelete(appRenderer, HISTORY_NONE);
     }
+    // Delete key - delete file/folder in operator general mode
+    else if (!ctrl && !shift && !alt && key == SDLK_DELETE &&
+             appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
+        handleFileDelete(appRenderer);
+    }
     // Colon (command mode)
     else if (!ctrl && !shift && !alt && key == SDLK_COLON &&
              appRenderer->currentCoordinate != COORDINATE_OPERATOR_INSERT &&

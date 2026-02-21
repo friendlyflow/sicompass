@@ -63,6 +63,9 @@ typedef struct Provider {
     bool (*createDirectory)(struct Provider *self, const char *name);
     bool (*createFile)(struct Provider *self, const char *name);
 
+    // Optional: Delete a file or directory (recursively for non-empty dirs)
+    bool (*deleteItem)(struct Provider *self, const char *name);
+
     // Optional: Commands this provider supports
     const char** (*getCommands)(struct Provider *self, int *outCount);
     FfonElement* (*handleCommand)(struct Provider *self, const char *command,
@@ -118,6 +121,9 @@ typedef struct ProviderOps {
     // Optional: Create operations
     bool (*createDirectory)(const char *path, const char *name);
     bool (*createFile)(const char *path, const char *name);
+
+    // Optional: Delete a file or directory (recursively for non-empty dirs)
+    bool (*deleteItem)(const char *path, const char *name);
 
     // Optional: Commands this provider supports
     const char** (*getCommands)(int *outCount);

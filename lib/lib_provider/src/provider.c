@@ -41,6 +41,13 @@ static bool genericCreateFile(Provider *self, const char *name) {
     return state->ops->createFile(state->currentPath, name);
 }
 
+// Generic deleteItem: call ops->deleteItem with current path
+static bool genericDeleteItem(Provider *self, const char *name) {
+    GenericProviderState *state = (GenericProviderState*)self->state;
+    if (!state->ops->deleteItem) return false;
+    return state->ops->deleteItem(state->currentPath, name);
+}
+
 // Generic getCommands: call ops->getCommands
 static const char** genericGetCommands(Provider *self, int *outCount) {
     GenericProviderState *state = (GenericProviderState*)self->state;
@@ -171,6 +178,7 @@ Provider* providerCreate(const ProviderOps *ops) {
     provider->getCurrentPath = genericGetCurrentPath;
     provider->createDirectory = ops->createDirectory ? genericCreateDirectory : NULL;
     provider->createFile = ops->createFile ? genericCreateFile : NULL;
+    provider->deleteItem = ops->deleteItem ? genericDeleteItem : NULL;
     provider->getCommands = ops->getCommands ? genericGetCommands : NULL;
     provider->handleCommand = ops->handleCommand ? genericHandleCommand : NULL;
     provider->getCommandListItems = ops->getCommandListItems ? genericGetCommandListItems : NULL;
