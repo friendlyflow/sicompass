@@ -165,6 +165,12 @@ char* providerGetConfigDir(void);
 char* providerGetConfigPath(const char *providerName);
 
 /**
+ * Get the main unified config file path.
+ * Returns: ~/.config/sicompass/settings.json (caller must free)
+ */
+char* providerGetMainConfigPath(void);
+
+/**
  * Create a provider backed by a script (e.g., TypeScript run with Bun).
  *
  * On each fetch(), runs: bun run <scriptPath> <currentPath>

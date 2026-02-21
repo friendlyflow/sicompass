@@ -96,29 +96,53 @@ static FfonElement** settingsFetch(Provider *self, int *outCount) {
 }
 
 static void settingsEnsureConfigDir(void) {
-    char *configDir = providerGetConfigDir();
-    if (!configDir) return;
-    for (char *p = configDir + 1; *p; p++) {
+    char *configPath = providerGetMainConfigPath();
+    if (!configPath) return;
+    // Walk up to the parent directory of the config file
+    char *dir = strdup(configPath);
+    free(configPath);
+    if (!dir) return;
+    char *lastSep = strrchr(dir, '/');
+    if (lastSep) *lastSep = '\0';
+    for (char *p = dir + 1; *p; p++) {
         if (*p == '/') {
             char c = *p;
             *p = '\0';
-            mkdir(configDir, 0755);
+            mkdir(dir, 0755);
             *p = c;
         }
     }
-    mkdir(configDir, 0755);
-    free(configDir);
+    mkdir(dir, 0755);
+    free(dir);
 }
 
 static void settingsSaveConfig(SettingsProviderState *state, const char *configPath) {
     settingsEnsureConfigDir();
-    json_object *root = json_object_new_object();
-    json_object_object_add(root, "colorScheme",
-                           json_object_new_string(state->colorScheme));
-    for (int i = 0; i < state->radioEntryCount; i++) {
-        json_object_object_add(root, state->radioEntries[i].configKey,
-                               json_object_new_string(state->radioEntries[i].currentValue));
+    // Read existing file so we preserve fields we don't own (e.g. programsToLoad)
+    json_object *root = json_object_from_file(configPath);
+    if (!root) root = json_object_new_object();
+
+    // sicompass section: colorScheme
+    json_object *sicompassObj = NULL;
+    if (!json_object_object_get_ex(root, "sicompass", &sicompassObj)) {
+        sicompassObj = json_object_new_object();
+        json_object_object_add(root, "sicompass", sicompassObj);
     }
+    json_object_object_add(sicompassObj, "colorScheme",
+                           json_object_new_string(state->colorScheme));
+
+    // Per-section radio entries namespaced by section name
+    for (int i = 0; i < state->radioEntryCount; i++) {
+        SettingsRadioEntry *e = &state->radioEntries[i];
+        json_object *sectionObj = NULL;
+        if (!json_object_object_get_ex(root, e->sectionName, &sectionObj)) {
+            sectionObj = json_object_new_object();
+            json_object_object_add(root, e->sectionName, sectionObj);
+        }
+        json_object_object_add(sectionObj, e->configKey,
+                               json_object_new_string(e->currentValue));
+    }
+
     json_object_to_file_ext(configPath, root, JSON_C_TO_STRING_PRETTY);
     json_object_put(root);
 }
@@ -126,29 +150,41 @@ static void settingsSaveConfig(SettingsProviderState *state, const char *configP
 static void settingsLoadConfig(SettingsProviderState *state, const char *configPath) {
     json_object *root = json_object_from_file(configPath);
     if (!root) return;
-    json_object *obj;
-    if (json_object_object_get_ex(root, "colorScheme", &obj)) {
-        const char *cs = json_object_get_string(obj);
-        if (cs && (strcmp(cs, "dark") == 0 || strcmp(cs, "light") == 0)) {
-            strncpy(state->colorScheme, cs, sizeof(state->colorScheme) - 1);
-            state->colorScheme[sizeof(state->colorScheme) - 1] = '\0';
+
+    // sicompass section: colorScheme
+    json_object *sicompassObj;
+    if (json_object_object_get_ex(root, "sicompass", &sicompassObj)) {
+        json_object *obj;
+        if (json_object_object_get_ex(sicompassObj, "colorScheme", &obj)) {
+            const char *cs = json_object_get_string(obj);
+            if (cs && (strcmp(cs, "dark") == 0 || strcmp(cs, "light") == 0)) {
+                strncpy(state->colorScheme, cs, sizeof(state->colorScheme) - 1);
+                state->colorScheme[sizeof(state->colorScheme) - 1] = '\0';
+            }
         }
     }
+
+    // Per-section radio entries namespaced by section name
     for (int i = 0; i < state->radioEntryCount; i++) {
         SettingsRadioEntry *e = &state->radioEntries[i];
-        if (json_object_object_get_ex(root, e->configKey, &obj)) {
-            const char *val = json_object_get_string(obj);
-            if (val) {
-                for (int j = 0; j < e->optionCount; j++) {
-                    if (strcmp(val, e->options[j]) == 0) {
-                        strncpy(e->currentValue, val, sizeof(e->currentValue) - 1);
-                        e->currentValue[sizeof(e->currentValue) - 1] = '\0';
-                        break;
+        json_object *sectionObj;
+        if (json_object_object_get_ex(root, e->sectionName, &sectionObj)) {
+            json_object *obj;
+            if (json_object_object_get_ex(sectionObj, e->configKey, &obj)) {
+                const char *val = json_object_get_string(obj);
+                if (val) {
+                    for (int j = 0; j < e->optionCount; j++) {
+                        if (strcmp(val, e->options[j]) == 0) {
+                            strncpy(e->currentValue, val, sizeof(e->currentValue) - 1);
+                            e->currentValue[sizeof(e->currentValue) - 1] = '\0';
+                            break;
+                        }
                     }
                 }
             }
         }
     }
+
     json_object_put(root);
 }
 
@@ -156,7 +192,7 @@ static void settingsInit(Provider *self) {
     SettingsProviderState *state = (SettingsProviderState *)self->state;
     strcpy(state->currentPath, "/");
 
-    char *configPath = providerGetConfigPath("settings");
+    char *configPath = providerGetMainConfigPath();
     if (configPath) {
         settingsLoadConfig(state, configPath);
         free(configPath);
@@ -180,7 +216,7 @@ static void settingsOnRadioChange(Provider *self, const char *groupKey,
         strncpy(state->colorScheme, selectedValue, sizeof(state->colorScheme) - 1);
         state->colorScheme[sizeof(state->colorScheme) - 1] = '\0';
 
-        char *configPath = providerGetConfigPath("settings");
+        char *configPath = providerGetMainConfigPath();
         if (configPath) {
             settingsSaveConfig(state, configPath);
             free(configPath);
@@ -198,7 +234,7 @@ static void settingsOnRadioChange(Provider *self, const char *groupKey,
             strncpy(e->currentValue, selectedValue, sizeof(e->currentValue) - 1);
             e->currentValue[sizeof(e->currentValue) - 1] = '\0';
 
-            char *configPath = providerGetConfigPath("settings");
+            char *configPath = providerGetMainConfigPath();
             if (configPath) {
                 settingsSaveConfig(state, configPath);
                 free(configPath);

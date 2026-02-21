@@ -42,3 +42,19 @@ char* providerGetConfigPath(const char *providerName) {
 
     return result;
 }
+
+char* providerGetMainConfigPath(void) {
+    char *configHome = platformGetConfigHome();
+    if (!configHome) return NULL;
+
+    const char *sep = platformGetPathSeparator();
+    const char *subdir = "sicompass";
+    const char *filename = "settings.json";
+    size_t len = strlen(configHome) + strlen(subdir) + strlen(sep) + strlen(filename) + 1;
+    char *result = malloc(len);
+    if (!result) { free(configHome); return NULL; }
+    snprintf(result, len, "%s%s%s%s", configHome, subdir, sep, filename);
+    free(configHome);
+
+    return result;
+}
