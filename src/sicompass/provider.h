@@ -10,6 +10,8 @@ typedef struct AppRenderer AppRenderer;
 // Provider registry
 void providerRegister(Provider *provider);
 Provider* providerFindByName(const char *name);
+int providerGetRegisteredCount(void);
+Provider* providerGetRegisteredAt(int i);
 void providerInitAll(void);
 void providerCleanupAll(void);
 

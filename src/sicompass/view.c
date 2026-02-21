@@ -1,7 +1,7 @@
 #include "view.h"
 #include "provider.h"
+#include "programs.h"
 #include <provider_interface.h>
-#include <filebrowser_provider.h>
 #include <settings_provider.h>
 #include <string.h>
 
@@ -61,60 +61,38 @@ void mainLoop(SiCompassApplication* app) {
     // Initialize palette before any rendering
     app->appRenderer->palette = &PALETTE_DARK;
 
-    // Register providers - tutorial first, then file browser, then settings last
-    Provider *tutorialProvider = scriptProviderCreate(
-        "tutorial", "tutorial", TUTORIAL_SCRIPT_PATH);
-    if (tutorialProvider) {
-        providerRegister(tutorialProvider);
-    }
-
-    Provider *fbProvider = filebrowserGetProvider();
-    providerRegister(fbProvider);
-
+    // Create settings before programs so they can register their settings sections
     Provider *settingsProvider = settingsProviderCreate(applySettings, app->appRenderer);
-    if (tutorialProvider) {
-        settingsAddSection(settingsProvider, "tutorial");
-    }
-    const char *sortOptions[] = {"alphanumerically", "chronologically"};
-    settingsAddSectionRadio(settingsProvider, "file browser",
-                            "global sorting", "sortOrder",
-                            sortOptions, 2, "alphanumerically");
+
+    // Load programs from config - registers providers and their settings
+    programsLoad(settingsProvider);
+
+    // Settings always registered last
     providerRegister(settingsProvider);
 
     providerInitAll();  // triggers settingsInit → loads config → applies palette
 
-    // Get initial elements from providers
-    FfonElement *tutorialElement = tutorialProvider ?
-        providerGetInitialElement(tutorialProvider) : NULL;
-    FfonElement *fileBrowserElement = providerGetInitialElement(fbProvider);
-    FfonElement *settingsElement = providerGetInitialElement(settingsProvider);
-    if (!tutorialElement && !fileBrowserElement) {
+    // Build root array dynamically from all registered providers
+    int total = providerGetRegisteredCount();
+    app->appRenderer->ffon = malloc(total * sizeof(FfonElement*));
+    app->appRenderer->providers = malloc(total * sizeof(Provider*));
+    app->appRenderer->ffonCapacity = total;
+    int providerCount = 0;
+    for (int i = 0; i < total; i++) {
+        Provider *p = providerGetRegisteredAt(i);
+        FfonElement *elem = providerGetInitialElement(p);
+        if (elem) {
+            app->appRenderer->ffon[providerCount] = elem;
+            app->appRenderer->providers[providerCount] = p;
+            providerCount++;
+        }
+    }
+    app->appRenderer->ffonCount = providerCount;
+    if (providerCount == 0) {
         fprintf(stderr, "Failed to get initial elements from providers\n");
         appRendererDestroy(app->appRenderer);
         return;
     }
-
-    // Create root array: tutorial, file browser, settings (settings always last)
-    int providerCount = 0;
-    app->appRenderer->ffon = malloc(3 * sizeof(FfonElement*));
-    app->appRenderer->providers = malloc(3 * sizeof(Provider*));
-    app->appRenderer->ffonCapacity = 3;
-    if (tutorialElement) {
-        app->appRenderer->ffon[providerCount] = tutorialElement;
-        app->appRenderer->providers[providerCount] = tutorialProvider;
-        providerCount++;
-    }
-    if (fileBrowserElement) {
-        app->appRenderer->ffon[providerCount] = fileBrowserElement;
-        app->appRenderer->providers[providerCount] = fbProvider;
-        providerCount++;
-    }
-    if (settingsElement) {
-        app->appRenderer->ffon[providerCount] = settingsElement;
-        app->appRenderer->providers[providerCount] = settingsProvider;
-        providerCount++;
-    }
-    app->appRenderer->ffonCount = providerCount;
 
     // Initialize current_id - start at first provider object
     idArrayInit(&app->appRenderer->currentId);

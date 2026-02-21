@@ -31,6 +31,15 @@ Provider* providerFindByName(const char *name) {
     return NULL;
 }
 
+int providerGetRegisteredCount(void) {
+    return g_providerCount;
+}
+
+Provider* providerGetRegisteredAt(int i) {
+    if (i < 0 || i >= g_providerCount) return NULL;
+    return g_providers[i];
+}
+
 // Initialize all providers
 void providerInitAll(void) {
     for (int i = 0; i < g_providerCount; i++) {
