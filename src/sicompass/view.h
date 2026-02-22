@@ -172,6 +172,7 @@ typedef struct AppRenderer {
     bool running;
     bool needsRedraw;
     bool inputDown;
+    bool prefixedInsertMode;  // true when in OPERATOR_INSERT via Ctrl+I/Ctrl+A (prefix-based creation)
 
     // Application pointer for accessing window dimensions and font metrics
     SiCompassApplication *app;
@@ -241,6 +242,8 @@ void handleCtrlA(AppRenderer *appRenderer, History history);
 void handleEnter(AppRenderer *appRenderer, History history);
 void handleCtrlEnter(AppRenderer *appRenderer, History history);
 void handleCtrlI(AppRenderer *appRenderer, History history);
+void handleCtrlIOperator(AppRenderer *appRenderer);
+void handleCtrlAOperator(AppRenderer *appRenderer);
 void handleDelete(AppRenderer *appRenderer, History history);
 void handleFileDelete(AppRenderer *appRenderer);
 void handleColon(AppRenderer *appRenderer);
