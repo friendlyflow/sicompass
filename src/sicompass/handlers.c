@@ -1304,6 +1304,54 @@ void handleRight(AppRenderer *appRenderer) {
             accesskitSpeakCurrentElement(appRenderer);
 
             appRenderer->needsRedraw = true;
+        } else if (appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
+            // Navigate into the selected search result (not stale currentId)
+            ListItem *list = appRenderer->filteredListCount > 0 ?
+                             appRenderer->filteredListCurrentLayer : appRenderer->totalListCurrentLayer;
+            int count = appRenderer->filteredListCount > 0 ?
+                        appRenderer->filteredListCount : appRenderer->totalListCount;
+            if (appRenderer->listIndex >= 0 && appRenderer->listIndex < count) {
+                const char *navPath = list[appRenderer->listIndex].navPath;
+                if (navPath) {
+                    const char *slash = strrchr(navPath, '/');
+                    const char *filename = slash ? slash + 1 : navPath;
+                    char parentDir[4096];
+                    if (slash && slash != navPath) {
+                        size_t len = (size_t)(slash - navPath);
+                        strncpy(parentDir, navPath, len);
+                        parentDir[len] = '\0';
+                    } else {
+                        strcpy(parentDir, "/");
+                    }
+                    int rootIdx = list[appRenderer->listIndex].id.ids[0];
+                    providerNavigateToPath(appRenderer, rootIdx, parentDir, filename);
+                } else {
+                    idArrayCopy(&appRenderer->currentId, &list[appRenderer->listIndex].id);
+                }
+                if (providerNavigateRight(appRenderer)) {
+                    createListExtendedSearch(appRenderer);
+                    appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                    appRenderer->scrollOffset = appRenderer->listIndex;
+                    accesskitSpeakCurrentElement(appRenderer);
+                    appRenderer->needsRedraw = true;
+                }
+            }
+        } else if (appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH) {
+            // Navigate into the selected search result (not stale currentId)
+            ListItem *list = appRenderer->filteredListCount > 0 ?
+                             appRenderer->filteredListCurrentLayer : appRenderer->totalListCurrentLayer;
+            int count = appRenderer->filteredListCount > 0 ?
+                        appRenderer->filteredListCount : appRenderer->totalListCount;
+            if (appRenderer->listIndex >= 0 && appRenderer->listIndex < count) {
+                idArrayCopy(&appRenderer->currentId, &list[appRenderer->listIndex].id);
+                if (providerNavigateRight(appRenderer)) {
+                    createListCurrentLayer(appRenderer);
+                    appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                    appRenderer->scrollOffset = appRenderer->listIndex;
+                    accesskitSpeakCurrentElement(appRenderer);
+                    appRenderer->needsRedraw = true;
+                }
+            }
         } else if (appRenderer->currentCoordinate != COORDINATE_SCROLL_SEARCH &&
                    providerNavigateRight(appRenderer)) {
             createListCurrentLayer(appRenderer);
