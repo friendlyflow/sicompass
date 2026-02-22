@@ -1243,7 +1243,8 @@ void handleLeft(AppRenderer *appRenderer) {
             accesskitSpeakCurrentElement(appRenderer);
 
             appRenderer->needsRedraw = true;
-        } else if (appRenderer->currentCoordinate != COORDINATE_SCROLL_SEARCH &&
+        } else if ((appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
+                    appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) &&
                    providerNavigateLeft(appRenderer)) {
             if (appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
                 createListExtendedSearch(appRenderer);
