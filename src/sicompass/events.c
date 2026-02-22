@@ -44,6 +44,11 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
     else if (ctrl && !shift && !alt && key == SDLK_RETURN) {
         handleCtrlEnter(appRenderer, HISTORY_NONE);
     }
+    // Ctrl+I in operator general mode — insert before current item
+    else if (ctrl && !shift && !alt && key == SDLK_I &&
+             appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
+        handleCtrlIOperator(appRenderer);
+    }
     // Ctrl+I in editor general mode
     else if (ctrl && !shift && !alt && key == SDLK_I &&
              appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL) {
@@ -55,6 +60,16 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
         handleEscape(appRenderer);
         handleCtrlI(appRenderer, HISTORY_NONE);
         handleI(appRenderer);
+    }
+    // Ctrl+A in operator general mode — append after current item
+    else if (ctrl && !shift && !alt && key == SDLK_A &&
+             appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
+        handleCtrlAOperator(appRenderer);
+    }
+    // Ctrl+D in operator general mode — delete (same as Delete key)
+    else if (ctrl && !shift && !alt && key == SDLK_D &&
+             appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
+        handleFileDelete(appRenderer);
     }
     // Ctrl+D (delete)
     else if (ctrl && !shift && !alt && key == SDLK_D &&

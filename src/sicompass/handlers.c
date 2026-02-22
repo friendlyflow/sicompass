@@ -415,6 +415,70 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                 char *oldContent = providerTagExtractContent(elementKey);
                 if (oldContent) {
                     const char *newContent = appRenderer->inputBuffer;
+
+                    // Prefix-based creation (from Ctrl+I/Ctrl+A in operator general)
+                    if (oldContent[0] == '\0' && appRenderer->prefixedInsertMode) {
+                        bool isFile = false, isDir = false;
+                        const char *name = NULL;
+                        if (newContent[0] == '-') {
+                            isFile = true;
+                            name = newContent + 1;
+                            while (*name == ' ') name++;
+                        } else if (newContent[0] == '+') {
+                            isDir = true;
+                            name = newContent + 1;
+                            while (*name == ' ') name++;
+                        }
+
+                        if ((!isFile && !isDir) || !name || name[0] == '\0') {
+                            setErrorMessage(appRenderer, "Start with '- name' for file or '+ name' for directory");
+                            free(oldContent);
+                            appRenderer->needsRedraw = true;
+                            return;  // stay in COORDINATE_OPERATOR_INSERT
+                        }
+
+                        bool success;
+                        if (isFile) {
+                            success = providerCreateFile(appRenderer, name);
+                        } else {
+                            success = providerCreateDirectory(appRenderer, name);
+                        }
+
+                        if (!success) {
+                            if (appRenderer->errorMessage[0] == '\0')
+                                setErrorMessage(appRenderer, "Failed to create item");
+                            free(oldContent);
+                            appRenderer->needsRedraw = true;
+                            return;  // stay in COORDINATE_OPERATOR_INSERT
+                        }
+
+                        if (isFile) {
+                            char *newKey = providerTagFormatKey(name);
+                            if (newKey) {
+                                free(elem->data.string);
+                                elem->data.string = newKey;
+                            }
+                        } else {
+                            char *newKey = providerTagFormatKey(name);
+                            FfonElement *dirElem = ffonElementCreateObject(newKey ? newKey : name);
+                            free(newKey);
+                            ffonElementDestroy(arr[idx]);
+                            arr[idx] = dirElem;
+                        }
+
+                        free(oldContent);
+                        appRenderer->prefixedInsertMode = false;
+                        appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
+                        appRenderer->previousCoordinate = COORDINATE_OPERATOR_GENERAL;
+                        accesskitSpeakModeChange(appRenderer, NULL);
+                        createListCurrentLayer(appRenderer);
+                        appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                        appRenderer->scrollOffset = 0;
+                        appRenderer->needsRedraw = true;
+                        appRenderer->lastKeypressTime = now;
+                        return;
+                    }
+
                     // Only commit if changed
                     if (strcmp(oldContent, newContent) != 0) {
                         bool success;
@@ -804,6 +868,90 @@ void handleFileDelete(AppRenderer *appRenderer) {
         updateState(appRenderer, TASK_DELETE, HISTORY_NONE);
         appRenderer->needsRedraw = true;
     }
+}
+
+static void insertOperatorPlaceholder(AppRenderer *appRenderer, int insertIdx) {
+    int depth = appRenderer->currentId.depth;
+
+    FfonElement *placeholder = ffonElementCreateString("<input></input>");
+    if (!placeholder) return;
+
+    if (depth == 1) {
+        if (appRenderer->ffonCount >= appRenderer->ffonCapacity) {
+            appRenderer->ffonCapacity *= 2;
+            FfonElement **newFfon = realloc(appRenderer->ffon,
+                appRenderer->ffonCapacity * sizeof(FfonElement*));
+            if (!newFfon) { ffonElementDestroy(placeholder); return; }
+            appRenderer->ffon = newFfon;
+        }
+        memmove(&appRenderer->ffon[insertIdx + 1],
+                &appRenderer->ffon[insertIdx],
+                (appRenderer->ffonCount - insertIdx) * sizeof(FfonElement*));
+        appRenderer->ffon[insertIdx] = placeholder;
+        appRenderer->ffonCount++;
+    } else {
+        IdArray parentId;
+        idArrayCopy(&parentId, &appRenderer->currentId);
+        idArrayPop(&parentId);
+        int parentCount;
+        FfonElement **parentArr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                              &parentId, &parentCount);
+        int parentIdx = parentId.ids[parentId.depth - 1];
+        if (!parentArr || parentIdx < 0 || parentIdx >= parentCount ||
+            parentArr[parentIdx]->type != FFON_OBJECT) {
+            ffonElementDestroy(placeholder);
+            return;
+        }
+        ffonObjectInsertElement(parentArr[parentIdx]->data.object, placeholder, insertIdx);
+    }
+
+    appRenderer->currentId.ids[depth - 1] = insertIdx;
+    appRenderer->prefixedInsertMode = true;
+
+    createListCurrentLayer(appRenderer);
+    appRenderer->listIndex = insertIdx;
+    appRenderer->scrollOffset = 0;
+    handleI(appRenderer);
+}
+
+void handleCtrlIOperator(AppRenderer *appRenderer) {
+    if (appRenderer->currentCoordinate != COORDINATE_OPERATOR_GENERAL) return;
+
+    int depth = appRenderer->currentId.depth;
+    int count;
+    getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId, &count);
+
+    int insertIdx;
+    if (count == 0 && depth > 1) {
+        // Empty directory: insert first child at index 0
+        insertIdx = 0;
+    } else if (count > 0) {
+        insertIdx = appRenderer->currentId.ids[depth - 1];
+    } else {
+        return;
+    }
+
+    insertOperatorPlaceholder(appRenderer, insertIdx);
+}
+
+void handleCtrlAOperator(AppRenderer *appRenderer) {
+    if (appRenderer->currentCoordinate != COORDINATE_OPERATOR_GENERAL) return;
+
+    int depth = appRenderer->currentId.depth;
+    int count;
+    getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId, &count);
+
+    int insertIdx;
+    if (count == 0 && depth > 1) {
+        // Empty directory: append first child at index 0
+        insertIdx = 0;
+    } else if (count > 0) {
+        insertIdx = appRenderer->currentId.ids[depth - 1] + 1;
+    } else {
+        return;
+    }
+
+    insertOperatorPlaceholder(appRenderer, insertIdx);
 }
 
 void handleColon(AppRenderer *appRenderer) {
@@ -1433,6 +1581,42 @@ void handleEscape(AppRenderer *appRenderer) {
         updateState(appRenderer, TASK_INPUT, HISTORY_NONE);
         appRenderer->currentCoordinate = COORDINATE_EDITOR_GENERAL;
     } else if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT) {
+        if (appRenderer->prefixedInsertMode) {
+            // Remove the empty placeholder element inserted by Ctrl+I/Ctrl+A
+            int depth = appRenderer->currentId.depth;
+            int idx = appRenderer->currentId.ids[depth - 1];
+
+            if (depth == 1) {
+                ffonElementDestroy(appRenderer->ffon[idx]);
+                memmove(&appRenderer->ffon[idx], &appRenderer->ffon[idx + 1],
+                        (appRenderer->ffonCount - idx - 1) * sizeof(FfonElement*));
+                appRenderer->ffonCount--;
+                if (appRenderer->ffonCount > 0 && idx >= appRenderer->ffonCount)
+                    appRenderer->currentId.ids[0] = appRenderer->ffonCount - 1;
+            } else {
+                IdArray parentId;
+                idArrayCopy(&parentId, &appRenderer->currentId);
+                idArrayPop(&parentId);
+                int parentCount;
+                FfonElement **parentArr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                                      &parentId, &parentCount);
+                int parentIdx = parentId.ids[parentId.depth - 1];
+                if (parentArr && parentIdx >= 0 && parentIdx < parentCount &&
+                    parentArr[parentIdx]->type == FFON_OBJECT) {
+                    FfonObject *parentObj = parentArr[parentIdx]->data.object;
+                    ffonElementDestroy(parentObj->elements[idx]);
+                    memmove(&parentObj->elements[idx], &parentObj->elements[idx + 1],
+                            (parentObj->count - idx - 1) * sizeof(FfonElement*));
+                    parentObj->count--;
+                    if (parentObj->count > 0 && idx >= parentObj->count)
+                        appRenderer->currentId.ids[depth - 1] = parentObj->count - 1;
+                }
+            }
+            appRenderer->prefixedInsertMode = false;
+            createListCurrentLayer(appRenderer);
+            appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+            appRenderer->scrollOffset = 0;
+        }
         // Operator mode: Escape discards changes
         appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
     } else if (appRenderer->currentCoordinate == COORDINATE_COMMAND) {
