@@ -39,6 +39,12 @@ static bool fbDeleteItem(const char *path, const char *name) {
     return filebrowserDelete(path, name);
 }
 
+// Copy a file or directory
+static bool fbCopyItem(const char *srcDir, const char *srcName,
+                       const char *destDir, const char *destName) {
+    return filebrowserCopy(srcDir, srcName, destDir, destName);
+}
+
 // Stored file path between handleCommand and executeCommand for "open with"
 static char fb_openWithPath[4096];
 
@@ -242,6 +248,14 @@ static SearchResultItem* fbCollectDeepSearchItems(const char *rootPath, int *out
 // Provider singleton
 static Provider *g_provider = NULL;
 
+// Custom init: chain the generic init (path setup) then clean up stale clipboard cache
+static void (*g_originalInit)(struct Provider *self) = NULL;
+
+static void fbInit(struct Provider *self) {
+    if (g_originalInit) g_originalInit(self);
+    filebrowserCleanupClipboardCache();
+}
+
 Provider* filebrowserGetProvider(void) {
     if (!g_provider) {
         static ProviderOps ops = {
@@ -252,6 +266,7 @@ Provider* filebrowserGetProvider(void) {
             .createDirectory = fbCreateDirectory,
             .createFile = fbCreateFile,
             .deleteItem = fbDeleteItem,
+            .copyItem = fbCopyItem,
             .getCommands = fbGetCommands,
             .handleCommand = fbHandleCommand,
             .getCommandListItems = fbGetCommandListItems,
@@ -259,6 +274,8 @@ Provider* filebrowserGetProvider(void) {
             .collectDeepSearchItems = fbCollectDeepSearchItems,
         };
         g_provider = providerCreate(&ops);
+        g_originalInit = g_provider->init;
+        g_provider->init = fbInit;
     }
     return g_provider;
 }

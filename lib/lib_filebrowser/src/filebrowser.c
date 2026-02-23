@@ -405,3 +405,114 @@ bool filebrowserDelete(const char *uri, const char *name) {
 #endif
 }
 
+// --- Copy, clipboard cache ---
+
+#if !defined(_WIN32)
+// Recursively copy src to dest (file or directory)
+static bool copyRecursive(const char *src, const char *dest) {
+    struct stat st;
+    if (lstat(src, &st) != 0) return false;
+
+    if (S_ISDIR(st.st_mode)) {
+        if (mkdir(dest, 0755) != 0) return false;
+        DIR *dir = opendir(src);
+        if (!dir) return false;
+        struct dirent *entry;
+        bool ok = true;
+        while ((entry = readdir(dir)) != NULL) {
+            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+            char childSrc[4096], childDest[4096];
+            snprintf(childSrc,  sizeof(childSrc),  "%s/%s", src,  entry->d_name);
+            snprintf(childDest, sizeof(childDest), "%s/%s", dest, entry->d_name);
+            if (!copyRecursive(childSrc, childDest)) ok = false;
+        }
+        closedir(dir);
+        return ok;
+    }
+
+    // Regular file (or symlink treated as file)
+    FILE *in  = fopen(src,  "rb");
+    if (!in)  return false;
+    FILE *out = fopen(dest, "wb");
+    if (!out) { fclose(in); return false; }
+
+    char buf[65536];
+    size_t n;
+    bool ok = true;
+    while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+        if (fwrite(buf, 1, n, out) != n) { ok = false; break; }
+    }
+    fclose(in);
+    fclose(out);
+    return ok;
+}
+
+// Create all components of path (mkdir -p)
+static void makeDirsRecursive(const char *path) {
+    char tmp[4096];
+    strncpy(tmp, path, sizeof(tmp) - 1);
+    tmp[sizeof(tmp) - 1] = '\0';
+    for (char *p = tmp + 1; *p; p++) {
+        if (*p == '/') {
+            *p = '\0';
+            mkdir(tmp, 0755);
+            *p = '/';
+        }
+    }
+    mkdir(tmp, 0755);
+}
+#endif
+
+static void getClipboardCacheDirInternal(char *out, int maxLen) {
+    const char *cacheHome = getenv("XDG_CACHE_HOME");
+    if (cacheHome && cacheHome[0] != '\0') {
+        snprintf(out, maxLen, "%s/sicompass/clipboard", cacheHome);
+    } else {
+        const char *home = getenv("HOME");
+        if (!home || home[0] == '\0') home = "/tmp";
+        snprintf(out, maxLen, "%s/.cache/sicompass/clipboard", home);
+    }
+}
+
+bool filebrowserCopy(const char *srcDir, const char *srcName,
+                     const char *destDir, const char *destName) {
+    if (!srcDir || !srcName || !destDir || !destName) return false;
+
+    char src[4096], dest[4096];
+#if defined(_WIN32)
+    snprintf(src,  sizeof(src),  "%s\\%s", srcDir,  srcName);
+    snprintf(dest, sizeof(dest), "%s\\%s", destDir, destName);
+    // Windows: use CopyFileEx for files; directories not supported here
+    return CopyFileA(src, dest, FALSE) != 0;
+#else
+    snprintf(src,  sizeof(src),  "%s/%s", srcDir,  srcName);
+    snprintf(dest, sizeof(dest), "%s/%s", destDir, destName);
+    return copyRecursive(src, dest);
+#endif
+}
+
+void filebrowserGetClipboardCacheDir(char *out, int maxLen) {
+    getClipboardCacheDirInternal(out, maxLen);
+#if !defined(_WIN32)
+    makeDirsRecursive(out);
+#endif
+}
+
+void filebrowserCleanupClipboardCache(void) {
+    char cacheDir[4096];
+    getClipboardCacheDirInternal(cacheDir, sizeof(cacheDir));
+
+#if !defined(_WIN32)
+    DIR *dir = opendir(cacheDir);
+    if (!dir) return;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+        char child[4096];
+        snprintf(child, sizeof(child), "%s/%s", cacheDir, entry->d_name);
+        deleteRecursive(child);
+    }
+    closedir(dir);
+#endif
+}
+

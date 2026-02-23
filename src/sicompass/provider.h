@@ -28,6 +28,8 @@ bool providerCommitEdit(AppRenderer *appRenderer, const char *oldContent, const 
 bool providerCreateDirectory(AppRenderer *appRenderer, const char *name);
 bool providerCreateFile(AppRenderer *appRenderer, const char *name);
 bool providerDeleteItem(AppRenderer *appRenderer, const char *name);
+bool providerCopyItem(AppRenderer *appRenderer, const char *srcDir, const char *srcName,
+                      const char *destDir, const char *destName);
 
 // Command operations
 const char** providerGetCommands(AppRenderer *appRenderer, int *outCount);

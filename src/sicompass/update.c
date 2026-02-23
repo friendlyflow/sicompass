@@ -1,4 +1,5 @@
 #include "view.h"
+#include "provider.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -888,6 +889,15 @@ void handleCtrlX(AppRenderer *appRenderer) {
         return;
     }
 
+    // File browser mode: real filesystem cut
+    if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
+        Provider *active = providerGetActive(appRenderer);
+        if (active && strcmp(active->name, "filebrowser") == 0) {
+            handleFileCut(appRenderer);
+            return;
+        }
+    }
+
     // Element mode: cut FFON element
     FfonElement **_ffon = appRenderer->ffon;
     int _ffon_count = appRenderer->ffonCount;
@@ -971,6 +981,15 @@ void handleCtrlC(AppRenderer *appRenderer) {
         return;
     }
 
+    // File browser mode: real filesystem copy
+    if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
+        Provider *active = providerGetActive(appRenderer);
+        if (active && strcmp(active->name, "filebrowser") == 0) {
+            handleFileCopy(appRenderer);
+            return;
+        }
+    }
+
     // Element mode: copy FFON element
     FfonElement **_ffon = appRenderer->ffon;
     int _ffon_count = appRenderer->ffonCount;
@@ -1050,6 +1069,15 @@ void handleCtrlV(AppRenderer *appRenderer) {
 
         appRenderer->needsRedraw = true;
         return;
+    }
+
+    // File browser mode: real filesystem paste
+    if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
+        Provider *active = providerGetActive(appRenderer);
+        if (active && strcmp(active->name, "filebrowser") == 0) {
+            handleFilePaste(appRenderer);
+            return;
+        }
     }
 
     // Element mode: paste FFON element
