@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 #include <SDL3/SDL.h>
 
 // UTF-8 helper functions
@@ -1831,5 +1832,123 @@ void handleCommand(AppRenderer *appRenderer) {
         }
     }
 
+    appRenderer->needsRedraw = true;
+}
+
+// --- File browser cut / copy / paste ---
+
+void handleFileCut(AppRenderer *appRenderer) {
+    int count;
+    FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                    &appRenderer->currentId, &count);
+    if (!arr || count == 0) return;
+    int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+    if (idx < 0 || idx >= count) return;
+
+    FfonElement *elem = arr[idx];
+    const char *elementKey = (elem->type == FFON_STRING) ?
+        elem->data.string : elem->data.object->key;
+
+    char *name = providerTagExtractContent(elementKey);
+    if (!name) return;
+
+    const char *srcDir = providerGetCurrentPath(appRenderer);
+    if (!srcDir) { free(name); return; }
+
+    char cacheDir[MAX_URI_LENGTH];
+    char *cacheBase = platformGetCacheHome();
+    snprintf(cacheDir, sizeof(cacheDir), "%ssicompass/clipboard",
+             cacheBase ? cacheBase : "/tmp/");
+    free(cacheBase);
+    platformMakeDirs(cacheDir);
+
+    if (!providerCopyItem(appRenderer, srcDir, name, cacheDir, name)) {
+        setErrorMessage(appRenderer, "Cut: failed to copy file to clipboard cache");
+        free(name);
+        return;
+    }
+
+    if (!providerDeleteItem(appRenderer, name)) {
+        setErrorMessage(appRenderer, "Cut: failed to delete original file");
+        free(name);
+        return;
+    }
+
+    snprintf(appRenderer->fileClipboardPath, sizeof(appRenderer->fileClipboardPath),
+             "%s/%s", cacheDir, name);
+    appRenderer->fileClipboardIsCut = true;
+    free(name);
+
+    updateState(appRenderer, TASK_DELETE, HISTORY_NONE);
+    appRenderer->needsRedraw = true;
+}
+
+void handleFileCopy(AppRenderer *appRenderer) {
+    int count;
+    FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                    &appRenderer->currentId, &count);
+    if (!arr || count == 0) return;
+    int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+    if (idx < 0 || idx >= count) return;
+
+    FfonElement *elem = arr[idx];
+    const char *elementKey = (elem->type == FFON_STRING) ?
+        elem->data.string : elem->data.object->key;
+
+    char *name = providerTagExtractContent(elementKey);
+    if (!name) return;
+
+    const char *srcDir = providerGetCurrentPath(appRenderer);
+    if (!srcDir) { free(name); return; }
+
+    snprintf(appRenderer->fileClipboardPath, sizeof(appRenderer->fileClipboardPath),
+             "%s/%s", srcDir, name);
+    appRenderer->fileClipboardIsCut = false;
+    free(name);
+
+    appRenderer->needsRedraw = true;
+}
+
+void handleFilePaste(AppRenderer *appRenderer) {
+    if (appRenderer->fileClipboardPath[0] == '\0') return;
+
+    // Extract srcName (last path component) and srcDir (everything before it)
+    const char *slash = strrchr(appRenderer->fileClipboardPath, '/');
+    if (!slash) return;
+
+    char srcDir[MAX_URI_LENGTH];
+    int dirLen = (int)(slash - appRenderer->fileClipboardPath);
+    strncpy(srcDir, appRenderer->fileClipboardPath, dirLen);
+    srcDir[dirLen] = '\0';
+
+    const char *srcName = slash + 1;
+    if (srcName[0] == '\0') return;
+
+    const char *destDir = providerGetCurrentPath(appRenderer);
+    if (!destDir) return;
+
+    // Resolve destination name — append " (copy N)" if name already exists
+    char destName[MAX_URI_LENGTH];
+    strncpy(destName, srcName, sizeof(destName) - 1);
+    destName[sizeof(destName) - 1] = '\0';
+
+    char destFull[MAX_URI_LENGTH];
+    snprintf(destFull, sizeof(destFull), "%s/%s", destDir, destName);
+
+    struct stat st;
+    int copyNum = 0;
+    while (stat(destFull, &st) == 0) {
+        copyNum++;
+        snprintf(destName, sizeof(destName), "%s (copy %d)", srcName, copyNum);
+        snprintf(destFull, sizeof(destFull), "%s/%s", destDir, destName);
+    }
+
+    if (!providerCopyItem(appRenderer, srcDir, srcName, destDir, destName)) {
+        setErrorMessage(appRenderer, "Paste: failed to copy file");
+        return;
+    }
+
+    providerRefreshCurrentDirectory(appRenderer);
+    createListCurrentLayer(appRenderer);
     appRenderer->needsRedraw = true;
 }

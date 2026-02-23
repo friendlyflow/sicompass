@@ -64,3 +64,20 @@ bool filebrowserCreateFile(const char *uri, const char *name);
  */
 bool filebrowserDelete(const char *uri, const char *name);
 
+/**
+ * Copy a file or directory (recursively) from srcDir/srcName to destDir/destName.
+ *
+ * @param srcDir  Source parent directory path
+ * @param srcName Source file or directory name
+ * @param destDir Destination parent directory path
+ * @param destName Destination file or directory name
+ * @return true on success, false on failure
+ */
+bool filebrowserCopy(const char *srcDir, const char *srcName,
+                     const char *destDir, const char *destName);
+
+/**
+ * Delete all files/directories inside the clipboard cache directory.
+ * Called at provider init to remove leftovers from crashed sessions.
+ */
+void filebrowserCleanupClipboardCache(void);

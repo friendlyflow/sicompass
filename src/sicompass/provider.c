@@ -102,6 +102,14 @@ bool providerDeleteItem(AppRenderer *appRenderer, const char *name) {
     return provider->deleteItem(provider, name);
 }
 
+// Copy a file or directory from srcDir/srcName to destDir/destName
+bool providerCopyItem(AppRenderer *appRenderer, const char *srcDir, const char *srcName,
+                      const char *destDir, const char *destName) {
+    Provider *provider = providerGetActive(appRenderer);
+    if (!provider || !provider->copyItem) return false;
+    return provider->copyItem(provider, srcDir, srcName, destDir, destName);
+}
+
 // Get commands from active provider
 const char** providerGetCommands(AppRenderer *appRenderer, int *outCount) {
     Provider *provider = providerGetActive(appRenderer);

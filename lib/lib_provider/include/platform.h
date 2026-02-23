@@ -37,6 +37,21 @@ char* platformGetConfigHome(void);
 char* platformGetHomeDir(void);
 
 /**
+ * Get the user's cache directory for the application.
+ * - Linux: $XDG_CACHE_HOME/ or ~/.cache/
+ * - macOS: ~/Library/Caches/
+ * - Windows: %LOCALAPPDATA%/
+ *
+ * @return Newly allocated path string ending with separator (caller must free), or NULL on failure
+ */
+char* platformGetCacheHome(void);
+
+/**
+ * Create all components of path (mkdir -p, cross-platform).
+ */
+void platformMakeDirs(const char *path);
+
+/**
  * Get the path separator for the current platform.
  * - Linux/macOS: "/"
  * - Windows: "\\"

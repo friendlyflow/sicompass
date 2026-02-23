@@ -124,6 +124,92 @@ char* platformGetHomeDir(void) {
 #endif
 }
 
+char* platformGetCacheHome(void) {
+#if defined(PLATFORM_WINDOWS)
+    const char *localAppData = getenv("LOCALAPPDATA");
+    if (!localAppData || localAppData[0] == '\0') {
+        return NULL;
+    }
+
+    size_t len = strlen(localAppData) + 2;
+    char *result = malloc(len);
+    if (!result) return NULL;
+
+    snprintf(result, len, "%s\\", localAppData);
+    return result;
+
+#elif defined(PLATFORM_MACOS)
+    const char *home = getenv("HOME");
+    if (!home || home[0] == '\0') {
+        return NULL;
+    }
+
+    const char *suffix = "/Library/Caches/";
+    size_t len = strlen(home) + strlen(suffix) + 1;
+    char *result = malloc(len);
+    if (!result) return NULL;
+
+    snprintf(result, len, "%s%s", home, suffix);
+    return result;
+
+#else
+    const char *cacheHome = getenv("XDG_CACHE_HOME");
+
+    if (cacheHome && cacheHome[0] != '\0') {
+        size_t len = strlen(cacheHome) + 2;
+        char *result = malloc(len);
+        if (!result) return NULL;
+
+        snprintf(result, len, "%s/", cacheHome);
+        return result;
+    }
+
+    const char *home = getenv("HOME");
+    if (!home || home[0] == '\0') {
+        return NULL;
+    }
+
+    const char *suffix = "/.cache/";
+    size_t len = strlen(home) + strlen(suffix) + 1;
+    char *result = malloc(len);
+    if (!result) return NULL;
+
+    snprintf(result, len, "%s%s", home, suffix);
+    return result;
+#endif
+}
+
+void platformMakeDirs(const char *path) {
+    if (!path || path[0] == '\0') return;
+
+#if defined(PLATFORM_WINDOWS)
+    char tmp[4096];
+    strncpy(tmp, path, sizeof(tmp) - 1);
+    tmp[sizeof(tmp) - 1] = '\0';
+    for (char *p = tmp + 1; *p; p++) {
+        if (*p == '\\' || *p == '/') {
+            char saved = *p;
+            *p = '\0';
+            CreateDirectoryA(tmp, NULL);
+            *p = saved;
+        }
+    }
+    CreateDirectoryA(tmp, NULL);
+#else
+    char tmp[4096];
+    strncpy(tmp, path, sizeof(tmp) - 1);
+    tmp[sizeof(tmp) - 1] = '\0';
+    for (char *p = tmp + 1; *p; p++) {
+        if (*p == '/') {
+            *p = '\0';
+            mkdir(tmp, 0755);
+            *p = '/';
+        }
+    }
+    mkdir(tmp, 0755);
+#endif
+}
+
 const char* platformGetPathSeparator(void) {
 #if defined(PLATFORM_WINDOWS)
     return "\\";

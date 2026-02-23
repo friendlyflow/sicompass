@@ -165,8 +165,15 @@ typedef struct AppRenderer {
     bool currentElementIsObject;  // Whether current element is an object (needs colon)
     char originalKey[MAX_LINE_LENGTH];  // Original key when editing an object in insert mode
 
-    // Cut/copy/paste buffer
+    // Cut/copy/paste buffer (FFON element level)
     FfonElement *clipboard;
+
+    // File clipboard for file browser cut/copy/paste (filesystem level)
+    // fileClipboardPath is empty string when no file is in the clipboard.
+    // For cut: full path to the cached copy in the clipboard cache dir.
+    // For copy: full path to the original source file/dir.
+    char fileClipboardPath[MAX_URI_LENGTH];
+    bool fileClipboardIsCut;
 
     // Flags
     bool running;
@@ -246,6 +253,9 @@ void handleCtrlIOperator(AppRenderer *appRenderer);
 void handleCtrlAOperator(AppRenderer *appRenderer);
 void handleDelete(AppRenderer *appRenderer, History history);
 void handleFileDelete(AppRenderer *appRenderer);
+void handleFileCut(AppRenderer *appRenderer);
+void handleFileCopy(AppRenderer *appRenderer);
+void handleFilePaste(AppRenderer *appRenderer);
 void handleColon(AppRenderer *appRenderer);
 void handleUp(AppRenderer *appRenderer);
 void handleDown(AppRenderer *appRenderer);
