@@ -55,6 +55,9 @@ static void loadProgram(const char *name, Provider *settingsProvider) {
             providerRegister(p);
             settingsAddSection(settingsProvider, "tutorial");
         }
+    } else if (strcmp(name, "sales demo") == 0) {
+        Provider *p = scriptProviderCreate("sales demo", "sales demo", SALES_DEMO_SCRIPT_PATH);
+        if (p) providerRegister(p);
     } else if (strcmp(name, "file browser") == 0) {
         Provider *p = providerFactoryCreate("file browser");
         providerRegister(p);
