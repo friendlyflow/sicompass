@@ -87,6 +87,11 @@ typedef struct Provider {
     // functionName: content between <button>...</button> tags in the FFON string
     void (*onButtonPress)(struct Provider *self, const char *functionName);
 
+    // Optional: Create a new element to insert into the FFON tree.
+    // Called when a <button> inside an "Add element:" section is pressed.
+    // Returns a freshly-allocated FfonElement (caller takes ownership), or NULL.
+    FfonElement* (*createElement)(struct Provider *self, const char *elementKey);
+
     // Optional: Set current path directly (for teleport navigation after deep search).
     void (*setCurrentPath)(struct Provider *self, const char *absolutePath);
 

@@ -385,6 +385,11 @@ static FfonElement** scriptFetch(Provider *self, int *outCount) {
     return elements;
 }
 
+static FfonElement* scriptCreateElement(Provider *self, const char *elementKey) {
+    (void)self;
+    return ffonElementCreateObject(elementKey);
+}
+
 Provider* scriptProviderCreate(const char *name, const char *displayName,
                                const char *scriptPath) {
     if (!name || !scriptPath) return NULL;
@@ -432,6 +437,7 @@ Provider* scriptProviderCreate(const char *name, const char *displayName,
     provider->createFile = NULL;
     provider->loadConfig = NULL;
     provider->saveConfig = NULL;
+    provider->createElement = scriptCreateElement;
 
     return provider;
 }

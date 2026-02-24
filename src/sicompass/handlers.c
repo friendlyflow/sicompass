@@ -560,6 +560,8 @@ void handleEnter(AppRenderer *appRenderer, History history) {
         }
         // Check for button press
         if (handleButtonPress(appRenderer, &appRenderer->currentId)) {
+            createListCurrentLayer(appRenderer);
+            appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
             appRenderer->needsRedraw = true;
             appRenderer->lastKeypressTime = now;
             return;
