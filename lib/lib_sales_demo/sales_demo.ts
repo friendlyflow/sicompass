@@ -36,9 +36,23 @@ function convertEquipmentEntry(key: string, raw: unknown[]): string | Section {
       return { key, children: [content] };
     }
     if (typeof content === "object") {
-      const children = Object.entries(
-        content as Record<string, unknown[]>
-      ).map(([k, v]) => convertEquipmentEntry(k, v));
+      const rawEntries = Object.entries(content as Record<string, unknown[]>);
+      const children = rawEntries.map(([k, v]) => convertEquipmentEntry(k, v));
+
+      const addOptions: string[] = [];
+      for (const [k, v] of rawEntries) {
+        const card = v[0];
+        if (card === "many opt") {
+          addOptions.push(k);
+        } else if (card === "one opt" && v[1] === undefined) {
+          addOptions.push(k);
+        }
+      }
+
+      if (addOptions.length > 0) {
+        children.push({ key: "<radio>Add element:", children: addOptions });
+      }
+
       return { key, children };
     }
     return key;
@@ -68,9 +82,22 @@ const equipmentRaw = await Bun.file(
   scriptDir + "../../assets/equipment1.json"
 ).json() as Record<string, unknown[]>;
 
-const sections: (string | Section)[] = Object.entries(equipmentRaw)
+const rootEntries = Object.entries(equipmentRaw);
+
+const sections: (string | Section)[] = rootEntries
   .filter(([_k, v]) => typeof v[0] === "string" && v[0].includes("mand"))
   .map(([k, v]) => convertEquipmentEntry(k, v));
+
+const rootAddOptions = rootEntries
+  .filter(([_k, v]) => {
+    const card = v[0];
+    return card === "many opt" || (card === "one opt" && v[1] === undefined);
+  })
+  .map(([k]) => k);
+
+if (rootAddOptions.length > 0) {
+  sections.push({ key: "<radio>Add element:", children: rootAddOptions });
+}
 
 function getChildrenAtPath(
   nodes: (string | Section)[],
