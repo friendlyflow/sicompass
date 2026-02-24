@@ -279,3 +279,8 @@ Provider* filebrowserGetProvider(void) {
     }
     return g_provider;
 }
+
+__attribute__((constructor))
+static void filebrowserRegisterFactory(void) {
+    providerFactoryRegister("file browser", filebrowserGetProvider);
+}

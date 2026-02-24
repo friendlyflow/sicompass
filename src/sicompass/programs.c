@@ -1,7 +1,6 @@
 #include "programs.h"
 #include "provider.h"
 #include <provider_interface.h>
-#include <filebrowser_provider.h>
 #include <settings_provider.h>
 #include <json-c/json.h>
 #include <stdlib.h>
@@ -57,7 +56,7 @@ static void loadProgram(const char *name, Provider *settingsProvider) {
             settingsAddSection(settingsProvider, "tutorial");
         }
     } else if (strcmp(name, "file browser") == 0) {
-        Provider *p = filebrowserGetProvider();
+        Provider *p = providerFactoryCreate("file browser");
         providerRegister(p);
         const char *sortOptions[] = {"alphanumerically", "chronologically"};
         settingsAddSectionRadio(settingsProvider, "file browser",

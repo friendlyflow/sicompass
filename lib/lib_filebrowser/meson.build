@@ -9,7 +9,7 @@ lib_filebrowser = library('filebrowser',
 )
 
 lib_filebrowser_dep = declare_dependency(
-  link_with: lib_filebrowser,
+  link_whole: lib_filebrowser,
   include_directories: lib_filebrowser_inc,
   dependencies: [lib_ffon_dep, lib_provider_dep],
 )
