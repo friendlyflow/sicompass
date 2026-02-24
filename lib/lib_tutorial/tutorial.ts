@@ -94,7 +94,7 @@ const sections: Section[] = [
     children: [
       "Links load external JSON or FFON files as children.",
       {
-        key: "<link>src/sicompass/json/sf.json</link>",
+        key: "<link>assets/sf.json</link>",
         children: [],
       },
     ],

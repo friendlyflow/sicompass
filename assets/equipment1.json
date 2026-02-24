@@ -1,0 +1,315 @@
+{
+    "version": [
+        [
+            "one mand",
+            "accoflo 0.1"
+        ]
+    ],
+    "settings": [
+        "one mand",
+        {
+            "<radio>language": [
+                "one mand",
+                [
+                    "Nederlands - Dutch",
+                    "Français - French",
+                    "English",
+                    "Deutsch - German"
+                ]
+            ],
+            "<radio>airflow": [
+                "one mand",
+                [
+                    "m³/h",
+                    "m³/s"
+                ]
+            ],
+            "<radio>air side pressure": [
+                "one mand",
+                [
+                    "Pa"
+                ]
+            ],
+            "<radio>water side pressure": [
+                "one mand",
+                [
+                    "kPa",
+                    "Pa"
+                ]
+            ],
+            "<radio>bla": [
+                "many opt",
+                [
+                    "bla1",
+                    "bla2"
+                ]
+            ]
+        }
+    ],
+    "project": [
+        "one mand",
+        {
+            "id": [
+                "one mand",
+                "<input></input>"
+            ]
+        }
+    ],
+    "air handling unit(s) (--> only working example in here <--)": [
+        "many opt",
+        {
+            "casing": [
+                "one mand",
+                {
+                    "<radio>type": [
+                        "one mand",
+                        [
+                            "xy",
+                            "xz"
+                        ]
+                    ],
+                    "<radio>paint": [
+                        "one opt",
+                        [
+                            "black",
+                            "grey"
+                        ]
+                    ],
+                    "dimensions: <input></input": [
+                        "one mand"
+                    ]
+                }
+            ],
+            "supply": [
+                "one opt",
+                {
+                    "airflow: <input></input> m³/h": [
+                        "one mand"
+                    ],
+                    "ext pressure: <input>400</input> Pa": [
+                        "one mand"
+                    ],
+                    "filter": [
+                        "many opt",
+                        {
+                            "G4": [
+                                "one opt",
+                                {
+                                    "calculated pressure drop: <input>50</input>%": [
+                                        "one mand"
+                                    ],
+                                    "maximal pressure drop: <input>20</input> Pa": [
+                                        "one mand"
+                                    ],
+                                    "minimal pressure drop: <input>100</input> Pa": [
+                                        "one mand"
+                                    ]
+                                }
+                            ],
+                            "F7": [
+                                "one opt",
+                                {
+                                    "calculated pressure drop: <input>50</input>%": [
+                                        "one mand"
+                                    ],
+                                    "maximal pressure drop: <input>50</input> Pa": [
+                                        "one mand"
+                                    ],
+                                    "minimal pressure drop: <input>200</input> Pa": [
+                                        "one mand"
+                                    ]
+                                }
+                            ],
+                            "F9": [
+                                "one opt",
+                                {
+                                    "calculated pressure drop: <input>50</input>%": [
+                                        "one mand"
+                                    ],
+                                    "maximal pressure drop: <input>75</input> Pa": [
+                                        "one mand"
+                                    ],
+                                    "minimal pressure drop: <input>250</input> Pa": [
+                                        "one mand"
+                                    ]
+                                }
+                            ],
+                            "H10": [
+                                "one opt",
+                                {
+                                    "calculated pressure drop: <input>50</input>%": [
+                                        "one mand"
+                                    ],
+                                    "maximal pressure drop: <input>200</input> Pa": [
+                                        "one mand"
+                                    ],
+                                    "minimal pressure drop: <input>500</input> Pa": [
+                                        "one mand"
+                                    ]
+                                }
+                            ]
+                        }
+                    ],
+                    "heating coil": [
+                        "many opt",
+                        {
+                            "<radio>medium": [
+                                "one mand",
+                                [
+                                    "water",
+                                    "R32"
+                                ]
+                            ],
+                            "temp in medium: <input></input> °c": [
+                                "one mand"
+                            ],
+                            "temp out medium: <input></input> °c": [
+                                "one mand"
+                            ],
+                            "temp in air: <input>-10</input> °C": [
+                                "one mand"
+                            ],
+                            "humidity in air: <input>90</input>%": [
+                                "one mand"
+                            ],
+                            "temp out air: <input></input> °C": [
+                                "one mand"
+                            ],
+                            "humidity out air: <input></input>%": [
+                                "one mand"
+                            ],
+                            "maximal pressure drop: <input>100</input> Pa": [
+                                "one opt"
+                            ]
+                        }
+                    ],
+                    "cooling coil": [
+                        "many opt",
+                        {
+                            "<radio>medium": [
+                                "one mand",
+                                [
+                                    "water",
+                                    "R32"
+                                ]
+                            ],
+                            "temp in medium: <input></input> °C": [
+                                "one mand"
+                            ],
+                            "temp out medium: <input></input> °C": [
+                                "one mand"
+                            ],
+                            "temp in air: <input>30</input> °C": [
+                                "one mand"
+                            ],
+                            "humidity in air: <input>50</input>%": [
+                                "one mand"
+                            ],
+                            "temp out air: <input></input> °C": [
+                                "one mand"
+                            ],
+                            "humidity out air: <input></input>%": [
+                                "one mand"
+                            ],
+                            "maximal pressure drop: <input>200</input> Pa": [
+                                "one opt"
+                            ]
+                        }
+                    ],
+                    "recovery wheel": [
+                        "one opt",
+                        {
+                            "energy efficiency: <input>80</input>%": [
+                                "one mand"
+                            ],
+                            "<radio>material": [
+                                "one mand",
+                                [
+                                    "aluminium",
+                                    "copper"
+                                ]
+                            ],
+                            "maximal pressure drop: <input>200</input> Pa": [
+                                "one opt"
+                            ]
+                        }
+                    ],
+                    "fan: <input></input>": [
+                        "one mand"
+                    ]
+                }
+            ],
+            "return": [
+                "one opt",
+                {
+                    "airflow: <input></input> m³/h": [
+                        "one mand"
+                    ],
+                    "ext pressure: <input>400</input> Pa": [
+                        "one mand"
+                    ],
+                    "filter": [
+                        "many opt",
+                        {
+                            "G4": [
+                                "one opt",
+                                {
+                                    "calculated pressure drop: <input>50</input>%": [
+                                        "one mand"
+                                    ],
+                                    "maximal pressure drop: <input>20</input> Pa": [
+                                        "one mand"
+                                    ],
+                                    "minimal pressure drop: <input>100</input> Pa": [
+                                        "one mand"
+                                    ]
+                                }
+                            ],
+                            "F7": [
+                                "one opt",
+                                {
+                                    "calculated pressure drop: <input>50</input>%": [
+                                        "one mand"
+                                    ],
+                                    "maximal pressure drop: <input>50</input> Pa": [
+                                        "one mand"
+                                    ],
+                                    "minimal pressure drop: <input>200</input> Pa": [
+                                        "one mand"
+                                    ]
+                                }
+                            ]
+                        }
+                    ],
+                    "recovery wheel": [
+                        "one opt",
+                        {
+                            "energy efficiency: <input>80</input>%": [
+                                "one mand"
+                            ],
+                            "<radio>material": [
+                                "one mand",
+                                [
+                                    "aluminium",
+                                    "copper"
+                                ]
+                            ],
+                            "maximal pressure drop: <input>200</input> Pa": [
+                                "one opt"
+                            ]
+                        }
+                    ],
+                    "fan: <input></input>": [
+                        "one mand"
+                    ]
+                }
+            ]
+        }
+    ],
+    "chiller(s)": [
+        "many opt"
+    ],
+    "fan coil unit(s)": [
+        "many opt"
+    ]
+}

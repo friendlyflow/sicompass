@@ -1,0 +1,138 @@
+{
+    "version": "accoflo 0.1",
+    "settings":
+    [
+        ["one", "mand"],
+        ["language", "one", "mand", "choice_arr", ["Dutch - Nederlands", "Francais - French", "English", "Deutsch - German"]],
+        ["airflow", "one", "mand", "choice_arr", ["m³/h", "m³/s"]],
+        ["air side pressure", "one", "mand", "choice_arr", ["Pa"]],
+        ["water side pressure", "one", "mand", "choice_arr", ["kPa", "Pa"]],
+        ["bla", "many", "opt", "choice_arr", ["bla1", "bla2"]]
+    ],
+    "project":
+    [
+        ["one", "mand"],
+        ["id", "one", "mand", "input", "", ""]
+    ],
+    "air handling unit(s) (--> only working example in here <--)":
+    [
+        ["many", "opt"],
+        {
+            "casing":
+            [
+                ["one", "mand"],
+                ["type", "one", "mand", "choice_arr", ["xy", "xz"]],
+                ["paint", "one", "opt", "choice_arr", ["black", "grey"]],
+                ["dimensions", "one", "mand", "input", "", ""]
+            ],
+            "supply":
+            [
+                ["one", "opt"],
+                ["airflow", "one", "mand", "input", "", "m³/h"],
+                ["ext pressure", "one", "mand", "input", "400", "Pa"],
+                ["filter", "many", "opt", "choice_obj",
+                    {
+                        "G4":
+                        [
+                            ["one", "opt"],
+                            ["calculated pressure drop", "one", "mand", "input", "50", "%"],
+                            ["maximal pressure drop", "one", "mand", "input", "20", "Pa"],
+                            ["minimal pressure drop", "one", "mand", "input", "100", "Pa"]
+                        ],
+                        "F7":
+                        [
+                            ["one", "opt"],
+                            ["calculated pressure drop", "one", "mand", "input", "50", "%"],
+                            ["maximal pressure drop", "one", "mand", "input", "50", "Pa"],
+                            ["minimal pressure drop", "one", "mand", "input", "200", "Pa"]
+                        ],
+                        "F9":
+                        [
+                            ["one", "opt"],
+                            ["calculated pressure drop", "one", "mand", "input", "50", "%"],
+                            ["maximal pressure drop", "one", "mand", "input", "75", "Pa"],
+                            ["minimal pressure drop", "one", "mand", "input", "250", "Pa"]
+                        ],
+                        "H10":
+                        [
+                            ["one", "opt"],
+                            ["calculated pressure drop", "one", "mand", "input", "50", "%"],
+                            ["maximal pressure drop", "one", "mand", "input", "200", "Pa"],
+                            ["minimal pressure drop", "one", "mand", "input", "500", "Pa"]
+                        ]
+                    }
+                ],
+                ["heating coil", "many", "opt", "choice_obj",
+                    [
+                        ["medium", "one", "mand", "choice_arr", ["water", "R32"]],
+                        ["temp in medium", "one", "mand", "input", "", "°C"],
+                        ["temp out medium", "one", "mand", "input", "", "°C"],
+                        ["temp in air", "one", "mand", "input", "-10", "°C"],
+                        ["humidity in air", "one", "mand", "input", "90", "%"],
+                        ["temp out air", "one", "mand", "input", "", "°C"],
+                        ["humidity out air", "one", "mand", "input", "", "%"],
+                        ["maximal pressure drop", "one", "opt", "input", "100", "Pa"]
+                    ]
+                ],
+                ["cooling coil", "many", "opt", "choice_obj",
+                    [
+                        ["medium", "one", "mand", "choice_arr", ["water", "R32"]],
+                        ["temp in medium", "one", "mand", "input", "", "°C"],
+                        ["temp out medium", "one", "mand", "input", "", "°C"],
+                        ["temp in air", "one", "mand", "input", "30", "°C"],
+                        ["humidity in air", "one", "mand", "input", "50", "%"],
+                        ["temp out air", "one", "mand", "input", "", "°C"],
+                        ["humidity out air", "one", "mand", "input", "", "%"],
+                        ["maximal pressure drop", "one", "opt", "input", "200", "Pa"]
+                    ]
+                ],
+                ["recovery wheel", "one", "opt", "choice_obj",
+                    [
+                        ["energy efficiency", "one", "mand", "input", "80", "%"],
+                        ["material", "one", "mand", "choice_arr", ["aluminium", "copper"]],
+                        ["maximal pressure drop", "one", "opt", "input", "200", "Pa"]
+                    ]
+                ],
+                ["fan", "one", "mand", "input", "", ""]
+            ],
+            "return":
+            [
+                ["one", "opt"],
+                ["airflow", "one", "mand", "input", "", "m³/h"],
+                ["ext pressure", "one", "mand", "input", "400", "Pa"],
+                ["filter", "many", "opt", "choice_obj",
+                    {
+                        "G4":
+                        [
+                            ["one", "opt"],
+                            ["calculated pressure drop", "one", "mand", "input", "50", "%"],
+                            ["maximal pressure drop", "one", "mand", "input", "20", "Pa"],
+                            ["minimal pressure drop", "one", "mand", "input", "100", "Pa"]
+                        ],
+                        "F7":
+                        [
+                            ["one", "opt"],
+                            ["calculated pressure drop", "one", "mand", "input", "50", "%"],
+                            ["maximal pressure drop", "one", "mand", "input", "50", "Pa"],
+                            ["minimal pressure drop", "one", "mand", "input", "200", "Pa"]
+                        ]
+                    }
+                ],
+                ["recovery wheel", "one", "mandif supply", "choice_obj",
+                    [
+                        ["maximal pressure drop", "one", "opt", "input", "200", "Pa"]
+                    ]
+                ],
+                ["fan", "one", "mand", "input", "", ""]
+            ]
+        }
+    ],
+    "chiller(s)":
+    [
+        ["many", "opt"]
+    ],
+    "fan coil unit(s)":
+    [
+        ["many", "opt"]
+    ]
+}
