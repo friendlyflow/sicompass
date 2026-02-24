@@ -69,9 +69,9 @@ const equipmentRaw = await Bun.file(
   scriptDir + "../../assets/equipment1.json"
 ).json() as Record<string, unknown[]>;
 
-const sections: (string | Section)[] = Object.entries(equipmentRaw).map(
-  ([k, v]) => convertEquipmentEntry(k, v)
-);
+const sections: (string | Section)[] = Object.entries(equipmentRaw)
+  .filter(([_k, v]) => typeof v[0] === "string" && v[0].includes("mand"))
+  .map(([k, v]) => convertEquipmentEntry(k, v));
 
 function getChildrenAtPath(
   nodes: (string | Section)[],
