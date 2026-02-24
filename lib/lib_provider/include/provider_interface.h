@@ -198,3 +198,14 @@ char* providerGetMainConfigPath(void);
  */
 Provider* scriptProviderCreate(const char *name, const char *displayName,
                                const char *scriptPath);
+
+/**
+ * Provider factory registry.
+ *
+ * Libraries register themselves (typically via a library constructor) so that
+ * src/sicompass can instantiate them by name without including library-specific
+ * headers.
+ */
+typedef Provider* (*ProviderCreateFn)(void);
+void providerFactoryRegister(const char *name, ProviderCreateFn fn);
+Provider* providerFactoryCreate(const char *name);

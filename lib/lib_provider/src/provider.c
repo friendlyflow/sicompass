@@ -200,6 +200,32 @@ Provider* providerCreate(const ProviderOps *ops) {
     return provider;
 }
 
+// Factory registry
+
+typedef struct {
+    const char *name;
+    ProviderCreateFn fn;
+} FactoryEntry;
+
+static FactoryEntry g_factories[16];
+static int g_factory_count = 0;
+
+void providerFactoryRegister(const char *name, ProviderCreateFn fn) {
+    if (g_factory_count < 16) {
+        g_factories[g_factory_count].name = name;
+        g_factories[g_factory_count].fn   = fn;
+        g_factory_count++;
+    }
+}
+
+Provider* providerFactoryCreate(const char *name) {
+    for (int i = 0; i < g_factory_count; i++) {
+        if (strcmp(g_factories[i].name, name) == 0)
+            return g_factories[i].fn();
+    }
+    return NULL;
+}
+
 void providerDestroy(Provider *provider) {
     if (!provider) return;
     free(provider->state);
