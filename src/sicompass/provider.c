@@ -579,7 +579,7 @@ int providerNavigateToPath(AppRenderer *appRenderer, int rootIdx,
 // elementId: ID of the activated <button> string element.
 void providerNotifyButtonPressed(AppRenderer *appRenderer, IdArray *elementId) {
     Provider *provider = providerGetActive(appRenderer);
-    if (!provider || !provider->onButtonPress) return;
+    if (!provider) return;
     int count;
     FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, elementId, &count);
     if (!arr) return;
@@ -588,10 +588,61 @@ void providerNotifyButtonPressed(AppRenderer *appRenderer, IdArray *elementId) {
     FfonElement *elem = arr[idx];
     if (elem->type != FFON_STRING) return;
     char *functionName = providerTagExtractButtonFunctionName(elem->data.string);
-    if (functionName) {
-        provider->onButtonPress(provider, functionName);
-        free(functionName);
+    if (!functionName) return;
+
+    bool handled = false;
+
+    // Check if this button is inside an "Add element:" section
+    if (provider->createElement && elementId->depth >= 3) {
+        IdArray parentId = *elementId;
+        parentId.depth--;
+        int parentCount;
+        FfonElement **parentArr = getFfonAtId(
+            appRenderer->ffon, appRenderer->ffonCount, &parentId, &parentCount);
+        int parentIdx = parentId.ids[parentId.depth - 1];
+        if (parentArr && parentIdx >= 0 && parentIdx < parentCount) {
+            FfonElement *parentElem = parentArr[parentIdx];
+            if (parentElem->type == FFON_OBJECT &&
+                strcmp(parentElem->data.object->key, "Add element:") == 0) {
+
+                // Grandparent = section containing "Add element:"
+                IdArray grandId = parentId;
+                grandId.depth--;
+                int grandCount;
+                FfonElement **grandArr = getFfonAtId(
+                    appRenderer->ffon, appRenderer->ffonCount, &grandId, &grandCount);
+                int grandIdx = grandId.ids[grandId.depth - 1];
+                if (grandArr && grandIdx >= 0 && grandIdx < grandCount) {
+                    FfonElement *grandElem = grandArr[grandIdx];
+                    if (grandElem->type == FFON_OBJECT) {
+                        FfonObject *grandObj = grandElem->data.object;
+                        // "Add element:" sits at parentId.ids[parentId.depth - 1] in grandObj
+                        int insertIdx = parentId.ids[parentId.depth - 1];
+
+                        FfonElement *newElem = provider->createElement(provider, functionName);
+                        if (newElem) {
+                            ffonObjectInsertElement(grandObj, newElem, insertIdx);
+                            // "Add element:" is now at insertIdx + 1
+
+                            // Pop "Add element:" from provider's path
+                            if (provider->popPath) provider->popPath(provider);
+
+                            // Set currentId to the newly inserted element
+                            appRenderer->currentId = grandId;
+                            idArrayPush(&appRenderer->currentId, insertIdx);
+
+                            handled = true;
+                        }
+                    }
+                }
+            }
+        }
     }
+
+    if (!handled && provider->onButtonPress) {
+        provider->onButtonPress(provider, functionName);
+    }
+    free(functionName);
 }
 
 // Notify the active provider that a radio item was selected.

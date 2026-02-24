@@ -50,7 +50,7 @@ function convertEquipmentEntry(key: string, raw: unknown[]): string | Section {
       }
 
       if (addOptions.length > 0) {
-        children.push({ key: "<radio>Add element:", children: addOptions });
+        children.push({ key: "Add element:", children: addOptions.map(k => `<button>${k}</button>${k}`) });
       }
 
       return { key, children };
@@ -76,10 +76,10 @@ function convertEquipmentEntry(key: string, raw: unknown[]): string | Section {
   return key;
 }
 
-// Load equipment2.json relative to this script file (top-level await, Bun supports this)
+// Load equipment1.json relative to this script file (top-level await, Bun supports this)
 const scriptDir = new URL(".", import.meta.url).pathname;
 const equipmentRaw = await Bun.file(
-  scriptDir + "../../assets/equipment2.json"
+  scriptDir + "../../assets/equipment1.json"
 ).json() as Record<string, unknown[]>;
 
 const rootEntries = Object.entries(equipmentRaw);
@@ -96,7 +96,7 @@ const rootAddOptions = rootEntries
   .map(([k]) => k);
 
 if (rootAddOptions.length > 0) {
-  sections.push({ key: "<radio>Add element:", children: rootAddOptions });
+  sections.push({ key: "Add element:", children: rootAddOptions.map(k => `<button>${k}</button>${k}`) });
 }
 
 function getChildrenAtPath(
