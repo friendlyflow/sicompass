@@ -867,6 +867,7 @@ void handleFileDelete(AppRenderer *appRenderer) {
 
     if (success) {
         updateState(appRenderer, TASK_DELETE, HISTORY_NONE);
+        appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
         appRenderer->needsRedraw = true;
     }
 }
@@ -1880,6 +1881,7 @@ void handleFileCut(AppRenderer *appRenderer) {
     free(name);
 
     updateState(appRenderer, TASK_DELETE, HISTORY_NONE);
+    appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
     appRenderer->needsRedraw = true;
 }
 
@@ -1950,5 +1952,29 @@ void handleFilePaste(AppRenderer *appRenderer) {
 
     providerRefreshCurrentDirectory(appRenderer);
     createListCurrentLayer(appRenderer);
+
+    // Move cursor to the pasted element
+    int pastedIdx = -1;
+    int listCount;
+    FfonElement **listArr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                        &appRenderer->currentId, &listCount);
+    if (listArr) {
+        for (int i = 0; i < listCount; i++) {
+            const char *key = (listArr[i]->type == FFON_STRING)
+                ? listArr[i]->data.string
+                : listArr[i]->data.object->key;
+            char *extracted = providerTagExtractContent(key);
+            if (extracted && strcmp(extracted, destName) == 0) {
+                pastedIdx = i;
+                free(extracted);
+                break;
+            }
+            free(extracted);
+        }
+    }
+    if (pastedIdx >= 0) {
+        appRenderer->currentId.ids[appRenderer->currentId.depth - 1] = pastedIdx;
+        appRenderer->listIndex = pastedIdx;
+    }
     appRenderer->needsRedraw = true;
 }
