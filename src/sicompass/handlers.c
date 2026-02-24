@@ -396,6 +396,20 @@ static bool handleCheckboxToggle(AppRenderer *appRenderer, IdArray *elementId) {
     return false;
 }
 
+// Returns true if the element at elementId is a button and the press was dispatched.
+static bool handleButtonPress(AppRenderer *appRenderer, IdArray *elementId) {
+    int count;
+    FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, elementId, &count);
+    if (!arr) return false;
+    int idx = elementId->ids[elementId->depth - 1];
+    if (idx < 0 || idx >= count) return false;
+    FfonElement *elem = arr[idx];
+    if (elem->type != FFON_STRING) return false;
+    if (!providerTagHasButton(elem->data.string)) return false;
+    providerNotifyButtonPressed(appRenderer, elementId);
+    return true;
+}
+
 void handleEnter(AppRenderer *appRenderer, History history) {
     if (appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH) return;
 
@@ -540,6 +554,12 @@ void handleEnter(AppRenderer *appRenderer, History history) {
             providerNotifyRadioChanged(appRenderer, &appRenderer->currentId);
             createListCurrentLayer(appRenderer);
             appRenderer->listIndex = savedIndex;
+            appRenderer->needsRedraw = true;
+            appRenderer->lastKeypressTime = now;
+            return;
+        }
+        // Check for button press
+        if (handleButtonPress(appRenderer, &appRenderer->currentId)) {
             appRenderer->needsRedraw = true;
             appRenderer->lastKeypressTime = now;
             return;

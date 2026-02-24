@@ -31,6 +31,12 @@ char* providerTagExtractContent(const char *taggedText) {
 char* providerTagStripDisplay(const char *text) {
     if (!text) return NULL;
 
+    // Button tags: <button>function_name</button>display_text
+    // Strip entirely: show only display_text (after </button>)
+    if (strstr(text, BUTTON_TAG_OPEN)) {
+        return providerTagExtractButtonDisplayText(text);
+    }
+
     const char *openTag = strstr(text, INPUT_TAG_OPEN);
     const char *closeTag = openTag ? strstr(text, INPUT_TAG_CLOSE) : NULL;
     size_t openLen = INPUT_TAG_OPEN_LEN;
@@ -299,4 +305,39 @@ char* providerTagExtractImageContent(const char *taggedText) {
     memcpy(result, start, len);
     result[len] = '\0';
     return result;
+}
+
+bool providerTagHasButton(const char *text) {
+    if (!text) return false;
+    return strstr(text, BUTTON_TAG_OPEN) != NULL && strstr(text, BUTTON_TAG_CLOSE) != NULL;
+}
+
+char* providerTagExtractButtonFunctionName(const char *taggedText) {
+    if (!taggedText) return NULL;
+
+    const char *start = strstr(taggedText, BUTTON_TAG_OPEN);
+    if (!start) return NULL;
+
+    start += BUTTON_TAG_OPEN_LEN;
+
+    const char *end = strstr(start, BUTTON_TAG_CLOSE);
+    if (!end) return NULL;
+
+    size_t len = end - start;
+    char *result = malloc(len + 1);
+    if (!result) return NULL;
+
+    memcpy(result, start, len);
+    result[len] = '\0';
+    return result;
+}
+
+char* providerTagExtractButtonDisplayText(const char *taggedText) {
+    if (!taggedText) return NULL;
+
+    const char *closeTag = strstr(taggedText, BUTTON_TAG_CLOSE);
+    if (!closeTag) return NULL;
+
+    const char *start = closeTag + BUTTON_TAG_CLOSE_LEN;
+    return strdup(start);
 }

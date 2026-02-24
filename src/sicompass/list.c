@@ -77,6 +77,7 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
                 bool hasCheckbox = providerTagHasCheckbox(elem->data.string);
                 bool hasChecked = providerTagHasChecked(elem->data.string);
                 bool hasInput = providerTagHasInput(elem->data.string);
+                bool hasButton = providerTagHasButton(elem->data.string);
                 const char *prefix;
                 char *stripped = NULL;
 
@@ -92,6 +93,9 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
                 } else if (hasChecked) {
                     prefix = "-rc";
                     stripped = providerTagExtractCheckedContent(elem->data.string);
+                } else if (hasButton) {
+                    prefix = "-b";
+                    stripped = providerTagExtractButtonDisplayText(elem->data.string);
                 } else if (hasInput) {
                     prefix = "-i";
                     stripped = providerTagStripDisplay(elem->data.string);
@@ -249,6 +253,7 @@ static void collectItemsRecursive(AppRenderer *appRenderer, FfonElement **elemen
             bool hasCheckboxChecked = providerTagHasCheckboxChecked(elem->data.string);
             bool hasCheckbox = providerTagHasCheckbox(elem->data.string);
             bool hasChecked = providerTagHasChecked(elem->data.string);
+            bool hasButton = providerTagHasButton(elem->data.string);
             bool hasInput = providerTagHasInput(elem->data.string);
             const char *prefix;
             char *stripped = NULL;
@@ -265,6 +270,9 @@ static void collectItemsRecursive(AppRenderer *appRenderer, FfonElement **elemen
             } else if (hasChecked) {
                 prefix = "-rc";
                 stripped = providerTagExtractCheckedContent(elem->data.string);
+            } else if (hasButton) {
+                prefix = "-b";
+                stripped = providerTagExtractButtonDisplayText(elem->data.string);
             } else if (hasInput) {
                 prefix = "-i";
                 stripped = providerTagExtractContent(elem->data.string);
