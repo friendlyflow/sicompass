@@ -83,6 +83,10 @@ typedef struct Provider {
     // selectedValue: stripped text of the newly checked child (e.g. "light")
     void (*onRadioChange)(struct Provider *self, const char *groupKey, const char *selectedValue);
 
+    // Optional: Called when a <button> element is activated (Enter pressed).
+    // functionName: content between <button>...</button> tags in the FFON string
+    void (*onButtonPress)(struct Provider *self, const char *functionName);
+
     // Optional: Set current path directly (for teleport navigation after deep search).
     void (*setCurrentPath)(struct Provider *self, const char *absolutePath);
 

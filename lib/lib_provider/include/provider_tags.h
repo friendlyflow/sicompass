@@ -141,3 +141,25 @@ bool providerTagHasImage(const char *text);
  * Caller must free the returned string.
  */
 char* providerTagExtractImageContent(const char *taggedText);
+
+#define BUTTON_TAG_OPEN "<button>"
+#define BUTTON_TAG_CLOSE "</button>"
+#define BUTTON_TAG_OPEN_LEN 8
+#define BUTTON_TAG_CLOSE_LEN 9
+
+/**
+ * Check if text contains <button>...</button> tags.
+ */
+bool providerTagHasButton(const char *text);
+
+/**
+ * Extract the function name between <button> and </button> tags.
+ * Caller must free the returned string.
+ */
+char* providerTagExtractButtonFunctionName(const char *taggedText);
+
+/**
+ * Extract the display text after </button>.
+ * Caller must free the returned string.
+ */
+char* providerTagExtractButtonDisplayText(const char *taggedText);

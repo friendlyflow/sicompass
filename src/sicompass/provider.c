@@ -575,6 +575,25 @@ int providerNavigateToPath(AppRenderer *appRenderer, int rootIdx,
     return -1;
 }
 
+// Notify the active provider that a button element was activated.
+// elementId: ID of the activated <button> string element.
+void providerNotifyButtonPressed(AppRenderer *appRenderer, IdArray *elementId) {
+    Provider *provider = providerGetActive(appRenderer);
+    if (!provider || !provider->onButtonPress) return;
+    int count;
+    FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, elementId, &count);
+    if (!arr) return;
+    int idx = elementId->ids[elementId->depth - 1];
+    if (idx < 0 || idx >= count) return;
+    FfonElement *elem = arr[idx];
+    if (elem->type != FFON_STRING) return;
+    char *functionName = providerTagExtractButtonFunctionName(elem->data.string);
+    if (functionName) {
+        provider->onButtonPress(provider, functionName);
+        free(functionName);
+    }
+}
+
 // Notify the active provider that a radio item was selected.
 // elementId: ID of the newly checked radio child element.
 void providerNotifyRadioChanged(AppRenderer *appRenderer, IdArray *elementId) {

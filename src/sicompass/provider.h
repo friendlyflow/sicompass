@@ -50,3 +50,7 @@ int providerNavigateToPath(AppRenderer *appRenderer, int rootIdx,
 // Notify the active provider that a radio item was selected.
 // elementId: ID of the newly checked radio child element.
 void providerNotifyRadioChanged(AppRenderer *appRenderer, IdArray *elementId);
+
+// Notify the active provider that a button element was activated.
+// elementId: ID of the activated <button> string element.
+void providerNotifyButtonPressed(AppRenderer *appRenderer, IdArray *elementId);
