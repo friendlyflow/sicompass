@@ -9,37 +9,37 @@
             "language": [
                 "one mand",
                 [
-                    "Nederlands - Dutch",
-                    "Français - French",
-                    "English",
-                    "Deutsch - German"
+                    "<button>language_dutch</button>Nederlands - Dutch",
+                    "<button>language_french</button>Français - French",
+                    "<button>language_english</button>English",
+                    "<button>language_german</button>Deutsch - German"
                 ]
             ],
             "airflow": [
                 "one mand",
                 [
-                    "m³/h",
-                    "m³/s"
+                    "<button>m3h</button>m³/h",
+                    "<button>m3s</button>m³/s"
                 ]
             ],
             "air side pressure": [
                 "one mand",
                 [
-                    "Pa"
+                    "<button>pa</button>Pa"
                 ]
             ],
-            "water side pressure": [
+            "<water side pressure": [
                 "one mand",
                 [
-                    "kPa",
-                    "Pa"
+                    "<button>kpa</button>kPa",
+                    "<button>pa</button>Pa"
                 ]
             ],
             "bla": [
                 "many opt",
                 [
-                    "bla1",
-                    "bla2"
+                    "<button>bla1</button>bla1",
+                    "<button>bla2</button>bla2"
                 ]
             ]
         }
@@ -62,15 +62,15 @@
                     "type": [
                         "one mand",
                         [
-                            "xy",
-                            "xz"
+                            "<button>type_xy</button>xy",
+                            "<button>type_xz</button>xz"
                         ]
                     ],
                     "paint": [
                         "one opt",
                         [
-                            "black",
-                            "grey"
+                            "<button>paint_black</button>black",
+                            "<button>paint_grey</button>grey"
                         ]
                     ],
                     "dimensions: <input></input": [
@@ -154,8 +154,8 @@
                             "medium": [
                                 "one mand",
                                 [
-                                    "water",
-                                    "R32"
+                                    "<button>water</button>water",
+                                    "<button>r32</button>R32"
                                 ]
                             ],
                             "temp in medium: <input></input> °c": [
@@ -187,8 +187,8 @@
                             "medium": [
                                 "one mand",
                                 [
-                                    "water",
-                                    "R32"
+                                    "<button>water</button>water",
+                                    "<button>r32</button>R32"
                                 ]
                             ],
                             "temp in medium: <input></input> °C": [
@@ -223,8 +223,8 @@
                             "material": [
                                 "one mand",
                                 [
-                                    "aluminium",
-                                    "copper"
+                                    "<button>ercovery_al</button>aluminium",
+                                    "<button>recovery_cu</button>copper"
                                 ]
                             ],
                             "maximal pressure drop: <input>200</input> Pa": [
@@ -288,8 +288,8 @@
                             "material": [
                                 "one mand",
                                 [
-                                    "aluminium",
-                                    "copper"
+                                    "<button>recovery_al</button>aluminium",
+                                    "<button>recovery_cu</button>copper"
                                 ]
                             ],
                             "maximal pressure drop: <input>200</input> Pa": [
