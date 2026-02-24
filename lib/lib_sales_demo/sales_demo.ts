@@ -76,10 +76,10 @@ function convertEquipmentEntry(key: string, raw: unknown[]): string | Section {
   return key;
 }
 
-// Load equipment1.json relative to this script file (top-level await, Bun supports this)
+// Load equipment2.json relative to this script file (top-level await, Bun supports this)
 const scriptDir = new URL(".", import.meta.url).pathname;
 const equipmentRaw = await Bun.file(
-  scriptDir + "../../assets/equipment1.json"
+  scriptDir + "../../assets/equipment2.json"
 ).json() as Record<string, unknown[]>;
 
 const rootEntries = Object.entries(equipmentRaw);
