@@ -33,8 +33,7 @@ function convertEquipmentEntry(key: string, raw: unknown[]): string | Section {
       return { key, children: content.map(String) };
     }
     if (typeof content === "string") {
-      // Leaf with inline value (e.g. contains <input> tags)
-      return key;
+      return { key, children: [content] };
     }
     if (typeof content === "object") {
       const children = Object.entries(
