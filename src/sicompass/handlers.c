@@ -500,7 +500,18 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                         if (oldContent[0] == '\0' && elem->type == FFON_OBJECT) {
                             success = providerCreateDirectory(appRenderer, newContent);
                         } else if (oldContent[0] == '\0' && elem->type == FFON_STRING) {
-                            success = providerCreateFile(appRenderer, newContent);
+                            Provider *p = providerGetActive(appRenderer);
+                            if (p && p->createFile) {
+                                success = providerCreateFile(appRenderer, newContent);
+                            } else {
+                                // Provider has no file creation: update FFON element directly
+                                char *newKey = providerTagFormatKey(newContent);
+                                if (newKey) {
+                                    free(elem->data.string);
+                                    elem->data.string = newKey;
+                                    success = true;
+                                }
+                            }
                         } else {
                             success = providerCommitEdit(appRenderer, oldContent, newContent);
                         }
@@ -931,6 +942,12 @@ static void insertOperatorPlaceholder(AppRenderer *appRenderer, int insertIdx) {
 
     appRenderer->currentId.ids[depth - 1] = insertIdx;
     appRenderer->prefixedInsertMode = true;
+
+    // Only use prefix mode (- for file, + for dir) if provider supports item creation
+    Provider *provider = providerGetActive(appRenderer);
+    if (!provider || (!provider->createFile && !provider->createDirectory)) {
+        appRenderer->prefixedInsertMode = false;
+    }
 
     createListCurrentLayer(appRenderer);
     appRenderer->listIndex = insertIdx;
