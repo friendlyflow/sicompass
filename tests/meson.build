@@ -15,5 +15,11 @@ test_example = executable('test_example',
 
 test('example', test_example)
 
+# Library tests
+subdir('lib_ffon')
+subdir('lib_provider')
+subdir('lib_filebrowser')
+subdir('lib_settings')
+
 # Sicompass tests
 subdir('sicompass')

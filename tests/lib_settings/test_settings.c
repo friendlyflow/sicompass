@@ -1,0 +1,336 @@
+/*
+ * Tests for settings provider library.
+ * Functions under test: settingsProviderCreate, settingsAddSection,
+ *                       settingsAddSectionRadio, fetch, onRadioChange,
+ *                       path management
+ */
+
+#include <unity.h>
+#include <settings_provider.h>
+#include <provider_tags.h>
+#include <ffon.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include <unistd.h>
+
+// Callback tracking
+static int callbackCount;
+static char lastCallbackKey[256];
+static char lastCallbackValue[256];
+static char callbackKeys[16][256];
+static char callbackValues[16][256];
+
+static void testApplyCallback(const char *key, const char *value, void *userdata) {
+    (void)userdata;
+    if (callbackCount < 16) {
+        strncpy(callbackKeys[callbackCount], key, 255);
+        strncpy(callbackValues[callbackCount], value, 255);
+    }
+    strncpy(lastCallbackKey, key, 255);
+    strncpy(lastCallbackValue, value, 255);
+    callbackCount++;
+}
+
+static char tmpDir[256];
+
+void setUp(void) {
+    callbackCount = 0;
+    memset(lastCallbackKey, 0, sizeof(lastCallbackKey));
+    memset(lastCallbackValue, 0, sizeof(lastCallbackValue));
+    memset(callbackKeys, 0, sizeof(callbackKeys));
+    memset(callbackValues, 0, sizeof(callbackValues));
+
+    // Set XDG_CONFIG_HOME to a temp dir so tests don't touch real config
+    snprintf(tmpDir, sizeof(tmpDir), "/tmp/sicompass_settings_test_XXXXXX");
+    mkdtemp(tmpDir);
+    setenv("XDG_CONFIG_HOME", tmpDir, 1);
+}
+
+void tearDown(void) {
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd), "rm -rf %s", tmpDir);
+    system(cmd);
+    // Restore XDG_CONFIG_HOME
+    unsetenv("XDG_CONFIG_HOME");
+}
+
+// --- settingsProviderCreate ---
+
+void test_create_with_callback(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+    TEST_ASSERT_NOT_NULL(p);
+    TEST_ASSERT_EQUAL_STRING("settings", p->name);
+    TEST_ASSERT_NOT_NULL(p->fetch);
+    TEST_ASSERT_NOT_NULL(p->init);
+    TEST_ASSERT_NOT_NULL(p->pushPath);
+    TEST_ASSERT_NOT_NULL(p->popPath);
+    TEST_ASSERT_NOT_NULL(p->getCurrentPath);
+    TEST_ASSERT_NOT_NULL(p->onRadioChange);
+    free(p->state);
+    free(p);
+}
+
+void test_create_with_null_callback(void) {
+    Provider *p = settingsProviderCreate(NULL, NULL);
+    TEST_ASSERT_NOT_NULL(p);
+    TEST_ASSERT_EQUAL_STRING("settings", p->name);
+    free(p->state);
+    free(p);
+}
+
+// --- settingsAddSection ---
+
+void test_addSection_one(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+
+    settingsAddSection(p, "file browser");
+
+    // Verify via fetch: should return sicompass + "file browser"
+    int count;
+    FfonElement **elems = p->fetch(p, &count);
+    TEST_ASSERT_EQUAL_INT(2, count);
+    TEST_ASSERT_EQUAL_STRING("sicompass", elems[0]->data.object->key);
+    TEST_ASSERT_EQUAL_STRING("file browser", elems[1]->data.object->key);
+
+    // "file browser" section has "no settings" placeholder
+    TEST_ASSERT_EQUAL_INT(1, elems[1]->data.object->count);
+    TEST_ASSERT_EQUAL_STRING("no settings",
+        elems[1]->data.object->elements[0]->data.string);
+
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+    free(p->state);
+    free(p);
+}
+
+void test_addSection_null_provider(void) {
+    settingsAddSection(NULL, "test");  // should not crash
+}
+
+void test_addSection_null_name(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+    settingsAddSection(p, NULL);  // should not crash
+
+    int count;
+    FfonElement **elems = p->fetch(p, &count);
+    TEST_ASSERT_EQUAL_INT(1, count);  // only sicompass, no extra section
+
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+    free(p->state);
+    free(p);
+}
+
+// --- settingsAddSectionRadio ---
+
+void test_addSectionRadio(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+
+    const char *options[] = { "alphabetical", "chronological" };
+    settingsAddSectionRadio(p, "file browser", "global sorting", "sortOrder",
+                            options, 2, "alphabetical");
+
+    int count;
+    FfonElement **elems = p->fetch(p, &count);
+    TEST_ASSERT_EQUAL_INT(2, count);  // sicompass + file browser
+
+    // file browser section should have a radio group
+    FfonObject *fbSection = elems[1]->data.object;
+    TEST_ASSERT_EQUAL_STRING("file browser", fbSection->key);
+    TEST_ASSERT_EQUAL_INT(1, fbSection->count);
+
+    FfonElement *radioElem = fbSection->elements[0];
+    TEST_ASSERT_EQUAL_INT(FFON_OBJECT, radioElem->type);
+    TEST_ASSERT_TRUE(providerTagHasRadio(radioElem->data.object->key));
+
+    // Verify options
+    FfonObject *radioGroup = radioElem->data.object;
+    TEST_ASSERT_EQUAL_INT(2, radioGroup->count);
+
+    // "alphabetical" should be checked (default)
+    TEST_ASSERT_TRUE(providerTagHasChecked(radioGroup->elements[0]->data.string));
+
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+    free(p->state);
+    free(p);
+}
+
+void test_addSectionRadio_auto_creates_section(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+
+    const char *options[] = { "a", "b" };
+    settingsAddSectionRadio(p, "auto section", "radio", "key",
+                            options, 2, "a");
+
+    int count;
+    FfonElement **elems = p->fetch(p, &count);
+    TEST_ASSERT_EQUAL_INT(2, count);  // sicompass + auto section
+    TEST_ASSERT_EQUAL_STRING("auto section", elems[1]->data.object->key);
+
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+    free(p->state);
+    free(p);
+}
+
+// --- Fetch: default color scheme ---
+
+void test_fetch_default_color_scheme(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+
+    int count;
+    FfonElement **elems = p->fetch(p, &count);
+    TEST_ASSERT_EQUAL_INT(1, count);
+
+    FfonObject *sicompass = elems[0]->data.object;
+    TEST_ASSERT_EQUAL_STRING("sicompass", sicompass->key);
+    TEST_ASSERT_EQUAL_INT(1, sicompass->count);
+
+    // Radio group for color scheme
+    FfonElement *radioElem = sicompass->elements[0];
+    TEST_ASSERT_EQUAL_INT(FFON_OBJECT, radioElem->type);
+    TEST_ASSERT_TRUE(providerTagHasRadio(radioElem->data.object->key));
+
+    FfonObject *radioGroup = radioElem->data.object;
+    TEST_ASSERT_EQUAL_INT(2, radioGroup->count);
+    // Default is dark, so dark should be checked
+    TEST_ASSERT_TRUE(providerTagHasChecked(radioGroup->elements[0]->data.string));
+    TEST_ASSERT_FALSE(providerTagHasChecked(radioGroup->elements[1]->data.string));
+
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+    free(p->state);
+    free(p);
+}
+
+// --- Path management ---
+
+void test_path_push_pop(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+
+    TEST_ASSERT_EQUAL_STRING("/", p->getCurrentPath(p));
+
+    p->pushPath(p, "sicompass");
+    TEST_ASSERT_EQUAL_STRING("/sicompass", p->getCurrentPath(p));
+
+    p->pushPath(p, "color scheme");
+    TEST_ASSERT_EQUAL_STRING("/sicompass/color scheme", p->getCurrentPath(p));
+
+    p->popPath(p);
+    TEST_ASSERT_EQUAL_STRING("/sicompass", p->getCurrentPath(p));
+
+    p->popPath(p);
+    TEST_ASSERT_EQUAL_STRING("/", p->getCurrentPath(p));
+
+    free(p->state);
+    free(p);
+}
+
+void test_path_popPath_at_root(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+    p->popPath(p);
+    TEST_ASSERT_EQUAL_STRING("/", p->getCurrentPath(p));
+    free(p->state);
+    free(p);
+}
+
+// --- onRadioChange ---
+
+void test_onRadioChange_color_scheme(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+
+    p->onRadioChange(p, "color scheme", "light");
+
+    TEST_ASSERT_EQUAL_INT(1, callbackCount);
+    TEST_ASSERT_EQUAL_STRING("colorScheme", lastCallbackKey);
+    TEST_ASSERT_EQUAL_STRING("light", lastCallbackValue);
+
+    // Verify fetch now reflects the change
+    int count;
+    FfonElement **elems = p->fetch(p, &count);
+    FfonObject *radioGroup = elems[0]->data.object->elements[0]->data.object;
+    // dark should not be checked, light should be checked
+    TEST_ASSERT_FALSE(providerTagHasChecked(radioGroup->elements[0]->data.string));
+    TEST_ASSERT_TRUE(providerTagHasChecked(radioGroup->elements[1]->data.string));
+
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+    free(p->state);
+    free(p);
+}
+
+void test_onRadioChange_custom_radio(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+
+    const char *options[] = { "alpha", "chrono" };
+    settingsAddSectionRadio(p, "file browser", "global sorting", "sortOrder",
+                            options, 2, "alpha");
+
+    p->onRadioChange(p, "global sorting", "chrono");
+
+    TEST_ASSERT_EQUAL_INT(1, callbackCount);
+    TEST_ASSERT_EQUAL_STRING("sortOrder", lastCallbackKey);
+    TEST_ASSERT_EQUAL_STRING("chrono", lastCallbackValue);
+
+    free(p->state);
+    free(p);
+}
+
+void test_onRadioChange_null_callback(void) {
+    Provider *p = settingsProviderCreate(NULL, NULL);
+    // Should not crash even with NULL callback
+    p->onRadioChange(p, "color scheme", "light");
+    free(p->state);
+    free(p);
+}
+
+// --- Init callback ---
+
+void test_init_calls_callback_for_defaults(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+
+    const char *options[] = { "alpha", "chrono" };
+    settingsAddSectionRadio(p, "file browser", "global sorting", "sortOrder",
+                            options, 2, "alpha");
+
+    p->init(p);
+
+    // Should have called callback for colorScheme and sortOrder
+    TEST_ASSERT_EQUAL_INT(2, callbackCount);
+    TEST_ASSERT_EQUAL_STRING("colorScheme", callbackKeys[0]);
+    TEST_ASSERT_EQUAL_STRING("dark", callbackValues[0]);
+    TEST_ASSERT_EQUAL_STRING("sortOrder", callbackKeys[1]);
+    TEST_ASSERT_EQUAL_STRING("alpha", callbackValues[1]);
+
+    free(p->state);
+    free(p);
+}
+
+int main(void) {
+    UNITY_BEGIN();
+
+    RUN_TEST(test_create_with_callback);
+    RUN_TEST(test_create_with_null_callback);
+
+    RUN_TEST(test_addSection_one);
+    RUN_TEST(test_addSection_null_provider);
+    RUN_TEST(test_addSection_null_name);
+
+    RUN_TEST(test_addSectionRadio);
+    RUN_TEST(test_addSectionRadio_auto_creates_section);
+
+    RUN_TEST(test_fetch_default_color_scheme);
+
+    RUN_TEST(test_path_push_pop);
+    RUN_TEST(test_path_popPath_at_root);
+
+    RUN_TEST(test_onRadioChange_color_scheme);
+    RUN_TEST(test_onRadioChange_custom_radio);
+    RUN_TEST(test_onRadioChange_null_callback);
+
+    RUN_TEST(test_init_calls_callback_for_defaults);
+
+    return UNITY_END();
+}
