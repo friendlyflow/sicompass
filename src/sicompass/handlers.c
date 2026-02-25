@@ -908,6 +908,74 @@ void handleFileDelete(AppRenderer *appRenderer) {
 static void insertOperatorPlaceholder(AppRenderer *appRenderer, int insertIdx) {
     int depth = appRenderer->currentId.depth;
 
+    // For script providers with createElement: clone "Add element:" instead
+    Provider *provider = providerGetActive(appRenderer);
+    if (provider && provider->createElement &&
+        !provider->createFile && !provider->createDirectory) {
+        // Find "Add element:" among siblings in the current layer
+        FfonElement *addElemSection = NULL;
+        if (depth == 1) {
+            for (int i = 0; i < appRenderer->ffonCount; i++) {
+                if (appRenderer->ffon[i]->type == FFON_OBJECT &&
+                    strcmp(appRenderer->ffon[i]->data.object->key, "Add element:") == 0) {
+                    addElemSection = appRenderer->ffon[i];
+                    break;
+                }
+            }
+        } else {
+            IdArray pid;
+            idArrayCopy(&pid, &appRenderer->currentId);
+            idArrayPop(&pid);
+            int pc;
+            FfonElement **pa = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &pid, &pc);
+            int pi = pid.ids[pid.depth - 1];
+            if (pa && pi >= 0 && pi < pc && pa[pi]->type == FFON_OBJECT) {
+                FfonObject *parentObj = pa[pi]->data.object;
+                for (int i = 0; i < parentObj->count; i++) {
+                    if (parentObj->elements[i]->type == FFON_OBJECT &&
+                        strcmp(parentObj->elements[i]->data.object->key, "Add element:") == 0) {
+                        addElemSection = parentObj->elements[i];
+                        break;
+                    }
+                }
+            }
+        }
+        if (!addElemSection) return;
+
+        FfonElement *clone = ffonElementClone(addElemSection);
+        if (!clone) return;
+
+        if (depth == 1) {
+            if (appRenderer->ffonCount >= appRenderer->ffonCapacity) {
+                appRenderer->ffonCapacity *= 2;
+                FfonElement **newFfon = realloc(appRenderer->ffon,
+                    appRenderer->ffonCapacity * sizeof(FfonElement*));
+                if (!newFfon) { ffonElementDestroy(clone); return; }
+                appRenderer->ffon = newFfon;
+            }
+            memmove(&appRenderer->ffon[insertIdx + 1],
+                    &appRenderer->ffon[insertIdx],
+                    (appRenderer->ffonCount - insertIdx) * sizeof(FfonElement*));
+            appRenderer->ffon[insertIdx] = clone;
+            appRenderer->ffonCount++;
+        } else {
+            IdArray pid;
+            idArrayCopy(&pid, &appRenderer->currentId);
+            idArrayPop(&pid);
+            int pc;
+            FfonElement **pa = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &pid, &pc);
+            int pi = pid.ids[pid.depth - 1];
+            ffonObjectInsertElement(pa[pi]->data.object, clone, insertIdx);
+        }
+
+        appRenderer->currentId.ids[depth - 1] = insertIdx;
+        createListCurrentLayer(appRenderer);
+        appRenderer->listIndex = insertIdx;
+        appRenderer->scrollOffset = 0;
+        appRenderer->needsRedraw = true;
+        return;
+    }
+
     FfonElement *placeholder = ffonElementCreateString("<input></input>");
     if (!placeholder) return;
 
@@ -944,7 +1012,6 @@ static void insertOperatorPlaceholder(AppRenderer *appRenderer, int insertIdx) {
     appRenderer->prefixedInsertMode = true;
 
     // Only use prefix mode (- for file, + for dir) if provider supports item creation
-    Provider *provider = providerGetActive(appRenderer);
     if (!provider || (!provider->createFile && !provider->createDirectory)) {
         appRenderer->prefixedInsertMode = false;
     }
