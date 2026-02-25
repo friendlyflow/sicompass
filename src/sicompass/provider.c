@@ -634,6 +634,26 @@ void providerNotifyButtonPressed(AppRenderer *appRenderer, IdArray *elementId) {
                             idArrayPush(&appRenderer->currentId, insertIdx);
 
                             handled = true;
+
+                            // For "one opt" items: remove the button so it can't be added again
+                            if (strncmp(functionName, "one-opt:", 8) == 0) {
+                                FfonObject *addElemObj = parentElem->data.object;
+                                for (int i = 0; i < addElemObj->count; i++) {
+                                    FfonElement *btnElem = addElemObj->elements[i];
+                                    if (btnElem->type != FFON_STRING) continue;
+                                    char *btnFn = providerTagExtractButtonFunctionName(btnElem->data.string);
+                                    bool match = btnFn && strcmp(btnFn, functionName) == 0;
+                                    free(btnFn);
+                                    if (match) {
+                                        ffonElementDestroy(ffonObjectRemoveElement(addElemObj, i));
+                                        break;
+                                    }
+                                }
+                                // If "Add element:" is now empty, remove it from grandObj
+                                if (addElemObj->count == 0) {
+                                    ffonElementDestroy(ffonObjectRemoveElement(grandObj, insertIdx + 1));
+                                }
+                            }
                         }
                     }
                 }
