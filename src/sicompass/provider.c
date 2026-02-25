@@ -306,7 +306,14 @@ bool providerNavigateRight(AppRenderer *appRenderer) {
 
     // Get active provider and extract path segment from key (strip display tags)
     Provider *provider = providerGetActive(appRenderer);
-    char *strippedKey = providerTagStripDisplay(key);
+    // Strip <one-opt> / <opt> tags before stripping display tags
+    const char *cleanKey = key;
+    if (providerTagHasOneOpt(key)) {
+        cleanKey = key + ONE_OPT_TAG_LEN;
+    } else if (providerTagHasOpt(key)) {
+        cleanKey = key + OPT_TAG_LEN;
+    }
+    char *strippedKey = providerTagStripDisplay(cleanKey);
     // Only push path when inside a provider (depth > 1), not when entering the provider root itself
     bool shouldPushPath = (appRenderer->currentId.depth > 1);
 

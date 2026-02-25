@@ -1,4 +1,5 @@
 #include <provider_interface.h>
+#include <provider_tags.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -388,13 +389,38 @@ static FfonElement** scriptFetch(Provider *self, int *outCount) {
 static FfonElement* scriptCreateElement(Provider *self, const char *elementKey) {
     (void)self;
     const char *key = elementKey;
-    if (strncmp(key, "one-opt:", 8) == 0) {
+    bool isOneOpt = strncmp(key, "one-opt:", 8) == 0;
+    if (isOneOpt) {
         key = key + 8;
     }
-    if (strstr(key, "<input>") != NULL) {
-        return ffonElementCreateString(key);
+    if (isOneOpt) {
+        // Prefix with <one-opt></one-opt> tag so deletion can restore the button
+        size_t taggedLen = ONE_OPT_TAG_LEN + strlen(key) + 1;
+        char *tagged = malloc(taggedLen);
+        if (!tagged) return NULL;
+        snprintf(tagged, taggedLen, ONE_OPT_TAG "%s", key);
+        FfonElement *elem;
+        if (strstr(key, "<input>") != NULL) {
+            elem = ffonElementCreateString(tagged);
+        } else {
+            elem = ffonElementCreateObject(tagged);
+        }
+        free(tagged);
+        return elem;
     }
-    return ffonElementCreateObject(key);
+    // Many-opt: prefix with <opt></opt> tag so deletion knows it's deletable
+    size_t taggedLen = OPT_TAG_LEN + strlen(key) + 1;
+    char *tagged = malloc(taggedLen);
+    if (!tagged) return NULL;
+    snprintf(tagged, taggedLen, OPT_TAG "%s", key);
+    FfonElement *elem;
+    if (strstr(key, "<input>") != NULL) {
+        elem = ffonElementCreateString(tagged);
+    } else {
+        elem = ffonElementCreateObject(tagged);
+    }
+    free(tagged);
+    return elem;
 }
 
 Provider* scriptProviderCreate(const char *name, const char *displayName,

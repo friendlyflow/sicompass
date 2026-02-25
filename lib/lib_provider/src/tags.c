@@ -307,6 +307,24 @@ char* providerTagExtractImageContent(const char *taggedText) {
     return result;
 }
 
+bool providerTagHasOpt(const char *text) {
+    if (!text) return false;
+    return strncmp(text, OPT_TAG, OPT_TAG_LEN) == 0;
+}
+
+bool providerTagHasOneOpt(const char *text) {
+    if (!text) return false;
+    return strncmp(text, ONE_OPT_TAG, ONE_OPT_TAG_LEN) == 0;
+}
+
+char* providerTagStripOneOpt(const char *text) {
+    if (!text) return NULL;
+    if (strncmp(text, ONE_OPT_TAG, ONE_OPT_TAG_LEN) == 0) {
+        return strdup(text + ONE_OPT_TAG_LEN);
+    }
+    return strdup(text);
+}
+
 bool providerTagHasButton(const char *text) {
     if (!text) return false;
     return strstr(text, BUTTON_TAG_OPEN) != NULL && strstr(text, BUTTON_TAG_CLOSE) != NULL;
