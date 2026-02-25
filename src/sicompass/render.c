@@ -277,21 +277,6 @@ static float renderCheckboxIndicator(SiCompassApplication *app,
     return boxSize + charWidth;
 }
 
-static bool isButtonItem(const char *label) {
-    return label && strncmp(label, "-b ", 3) == 0;
-}
-
-static float renderButtonIndicator(SiCompassApplication *app, int itemX, int itemYPos) {
-    float scale = getTextScale(app, FONT_SIZE_PT);
-    float lineH = getLineHeight(app, scale, TEXT_PADDING);
-    float boxSize = lineH * 0.5f;
-    float boxX = (float)itemX;
-    float lineTop = (float)itemYPos - app->fontRenderer->ascender * scale - TEXT_PADDING;
-    float boxY = lineTop + (lineH - boxSize) / 2.0f;
-    prepareRectangle(app, boxX, boxY, boxSize, boxSize, app->appRenderer->palette->selected, 0.0f);
-    float charWidth = getWidthEM(app, scale);
-    return boxSize + charWidth;
-}
 
 int renderText(SiCompassApplication *app, const char *text, int x, int y,
                uint32_t color, bool highlight) {
@@ -775,12 +760,6 @@ void renderInteraction(SiCompassApplication *app) {
             itemX += (int)boxWidth;
         }
 
-        // Render button indicator before text if this is a button item
-        if (isButtonItem(list[i].label)) {
-            float btnWidth = renderButtonIndicator(app, itemX, itemYPos);
-            itemX += (int)btnWidth;
-        }
-
         // Determine what text to display
         const char *displayText = list[i].label;
 
@@ -975,12 +954,6 @@ void renderSimpleSearch(SiCompassApplication *app) {
             itemX += (int)boxWidth;
         }
 
-        // Render button indicator before text if this is a button item
-        if (isButtonItem(list[i].label)) {
-            float btnWidth = renderButtonIndicator(app, itemX, itemYPos);
-            itemX += (int)btnWidth;
-        }
-
         // Render text (may be multiple lines)
         int textLines = renderText(app, list[i].label, itemX, itemYPos, app->appRenderer->palette->text, isSelected);
 
@@ -1131,12 +1104,6 @@ void renderExtendedSearch(SiCompassApplication *app) {
         if (checkboxType != CHECKBOX_NONE) {
             float boxWidth = renderCheckboxIndicator(app, checkboxType, itemX, itemYPos);
             itemX += (int)boxWidth;
-        }
-
-        // Render button indicator before text if this is a button item
-        if (isButtonItem(list[i].label)) {
-            float btnWidth = renderButtonIndicator(app, itemX, itemYPos);
-            itemX += (int)btnWidth;
         }
 
         // Render text (may be multiple lines)
