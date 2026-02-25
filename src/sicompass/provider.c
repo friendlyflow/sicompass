@@ -640,6 +640,28 @@ void providerNotifyButtonPressed(AppRenderer *appRenderer, IdArray *elementId) {
                             int addElemPos = insertIdx + 1;
                             if (addElemPos < grandObj->count - 1) {
                                 ffonElementDestroy(ffonObjectRemoveElement(grandObj, addElemPos));
+                                // Also remove one-opt button from original "Add element:"
+                                if (strncmp(functionName, "one-opt:", 8) == 0) {
+                                    FfonElement *lastChild = grandObj->elements[grandObj->count - 1];
+                                    if (lastChild->type == FFON_OBJECT &&
+                                        strcmp(lastChild->data.object->key, "Add element:") == 0) {
+                                        FfonObject *origAdd = lastChild->data.object;
+                                        for (int i = 0; i < origAdd->count; i++) {
+                                            FfonElement *btnElem = origAdd->elements[i];
+                                            if (btnElem->type != FFON_STRING) continue;
+                                            char *btnFn = providerTagExtractButtonFunctionName(btnElem->data.string);
+                                            bool match = btnFn && strcmp(btnFn, functionName) == 0;
+                                            free(btnFn);
+                                            if (match) {
+                                                ffonElementDestroy(ffonObjectRemoveElement(origAdd, i));
+                                                break;
+                                            }
+                                        }
+                                        if (origAdd->count == 0) {
+                                            ffonElementDestroy(ffonObjectRemoveElement(grandObj, grandObj->count - 1));
+                                        }
+                                    }
+                                }
                             } else {
                                 // Original "Add element:" — remove one-opt buttons
                                 if (strncmp(functionName, "one-opt:", 8) == 0) {
