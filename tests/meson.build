@@ -15,20 +15,5 @@ test_example = executable('test_example',
 
 test('example', test_example)
 
-# Clipboard tests (handleCtrlX, handleCtrlC, handleCtrlV)
-test_clipboard = executable('test_clipboard',
-  'test_clipboard.c',
-  include_directories: test_inc,
-  dependencies: [unity_dep],
-)
-
-test('clipboard', test_clipboard)
-
-# AccessKit accessibility tests
-test_accesskit = executable('test_accesskit',
-  'test_accesskit.c',
-  include_directories: test_inc,
-  dependencies: [unity_dep],
-)
-
-test('accesskit', test_accesskit)
+# Sicompass tests
+subdir('sicompass')
