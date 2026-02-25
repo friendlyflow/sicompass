@@ -12,7 +12,7 @@ interface Section {
   children: (string | Section)[];
 }
 
-// ─── Equipment JSON converter ────────────────────────────────────────────────
+// ─── Equipment JSON helpers ───────────────────────────────────────────────────
 
 const CARDINALITY = new Set(["one mand", "one opt", "many opt", "many mand"]);
 
@@ -20,40 +20,56 @@ function isCardinality(v: unknown): v is string {
   return typeof v === "string" && CARDINALITY.has(v);
 }
 
-function convertEquipmentEntry(key: string, raw: unknown[]): string | Section {
+// Navigate the raw equipment JSON to the object at pathParts.
+// Returns null if the path is not found or the target is not a nested object.
+function getRawAtPath(
+  raw: Record<string, unknown[]>,
+  pathParts: string[]
+): Record<string, unknown[]> | null {
+  if (pathParts.length === 0) return raw;
+  const [head, ...rest] = pathParts;
+  const entry = raw[head];
+  if (!entry || !isCardinality(entry[0])) return null;
+  const content = entry[1];
+  if (content === null || content === undefined || typeof content !== "object" || Array.isArray(content)) return null;
+  return getRawAtPath(content as Record<string, unknown[]>, rest);
+}
+
+// Build the display children for a raw JSON object:
+// mandatory items are shown directly; optional items go into "Add element:".
+function buildDisplayChildren(rawObj: Record<string, unknown[]>): (string | Section)[] {
+  const result: (string | Section)[] = [];
+  const addOptions: string[] = [];
+
+  for (const [k, v] of Object.entries(rawObj)) {
+    const card = v[0];
+    if (!isCardinality(card)) continue;
+    if ((card as string).includes("opt")) {
+      addOptions.push(k);
+    } else {
+      result.push(buildItem(k, v));
+    }
+  }
+
+  if (addOptions.length > 0) {
+    result.push({ key: "Add element:", children: addOptions.map(k => `<button>${k}</button>${k}`) });
+  }
+
+  return result;
+}
+
+// Convert a single equipment entry to its display item.
+function buildItem(key: string, raw: unknown[]): string | Section {
   if (raw.length === 0) return key;
 
   // Format A: ["cardinality", content?]
   if (isCardinality(raw[0])) {
     const content = raw[1];
     if (content === undefined || content === null) return key;
-
-    if (Array.isArray(content)) {
-      // Radio/select options list
-      return { key, children: content.map(String) };
-    }
-    if (typeof content === "string") {
-      return { key, children: [content] };
-    }
+    if (Array.isArray(content)) return { key, children: content.map(String) };
+    if (typeof content === "string") return { key, children: [content] };
     if (typeof content === "object") {
-      const rawEntries = Object.entries(content as Record<string, unknown[]>);
-      const children = rawEntries.map(([k, v]) => convertEquipmentEntry(k, v));
-
-      const addOptions: string[] = [];
-      for (const [k, v] of rawEntries) {
-        const card = v[0];
-        if (card === "many opt") {
-          addOptions.push(k);
-        } else if (card === "one opt" && v[1] === undefined) {
-          addOptions.push(k);
-        }
-      }
-
-      if (addOptions.length > 0) {
-        children.push({ key: "Add element:", children: addOptions.map(k => `<button>${k}</button>${k}`) });
-      }
-
-      return { key, children };
+      return { key, children: buildDisplayChildren(content as Record<string, unknown[]>) };
     }
     return key;
   }
@@ -62,11 +78,7 @@ function convertEquipmentEntry(key: string, raw: unknown[]): string | Section {
   if (Array.isArray(raw[0])) {
     const children: string[] = [];
     for (const entry of raw) {
-      if (
-        Array.isArray(entry) &&
-        isCardinality(entry[0]) &&
-        typeof entry[1] === "string"
-      ) {
+      if (Array.isArray(entry) && isCardinality(entry[0]) && typeof entry[1] === "string") {
         children.push(entry[1]);
       }
     }
@@ -76,73 +88,26 @@ function convertEquipmentEntry(key: string, raw: unknown[]): string | Section {
   return key;
 }
 
-// Load equipment1.json relative to this script file (top-level await, Bun supports this)
+function toJson(children: (string | Section)[]): unknown[] {
+  return children.map((child) => {
+    if (typeof child === "string") return child;
+    return { [child.key]: toJson(child.children) };
+  });
+}
+
+// ─── Main ─────────────────────────────────────────────────────────────────────
+
 const scriptDir = new URL(".", import.meta.url).pathname;
 const equipmentRaw = await Bun.file(
   scriptDir + "../../assets/equipment1.json"
 ).json() as Record<string, unknown[]>;
 
-const rootEntries = Object.entries(equipmentRaw);
-
-const sections: (string | Section)[] = rootEntries
-  .filter(([_k, v]) => typeof v[0] === "string" && v[0].includes("mand"))
-  .map(([k, v]) => convertEquipmentEntry(k, v));
-
-const allSections: (string | Section)[] = rootEntries
-  .map(([k, v]) => convertEquipmentEntry(k, v));
-
-const rootAddOptions = rootEntries
-  .filter(([_k, v]) => {
-    const card = v[0];
-    return card === "many opt" || (card === "one opt" && v[1] === undefined);
-  })
-  .map(([k]) => k);
-
-if (rootAddOptions.length > 0) {
-  sections.push({ key: "Add element:", children: rootAddOptions.map(k => `<button>${k}</button>${k}`) });
-}
-
-function getChildrenAtPath(
-  nodes: (string | Section)[],
-  pathParts: string[],
-  fallback?: (string | Section)[]
-): (string | Section)[] | null {
-  if (pathParts.length === 0) {
-    return nodes;
-  }
-
-  const [head, ...rest] = pathParts;
-  for (const node of nodes) {
-    if (typeof node !== "string" && node.key === head) {
-      return getChildrenAtPath(node.children, rest);
-    }
-  }
-
-  if (fallback) {
-    for (const node of fallback) {
-      if (typeof node !== "string" && node.key === head) {
-        return getChildrenAtPath(node.children, rest);
-      }
-    }
-  }
-
-  return null;
-}
-
-function toJson(children: (string | Section)[]): unknown[] {
-  return children.map((child) => {
-    if (typeof child === "string") {
-      return child;
-    }
-    return { [child.key]: toJson(child.children) };
-  });
-}
-
 // Parse path: "/" → [], "/Welcome" → ["Welcome"], "/Key Features/Modes" → ["Key Features", "Modes"]
 const rawPath = process.argv[2] || "/";
 const pathParts = rawPath === "/" ? [] : rawPath.split("/").filter(Boolean);
 
-const children = getChildrenAtPath(sections, pathParts, allSections);
+const rawObj = getRawAtPath(equipmentRaw, pathParts);
+const children = rawObj ? buildDisplayChildren(rawObj) : null;
 if (children) {
   console.log(JSON.stringify(toJson(children)));
 } else {
