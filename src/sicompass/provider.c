@@ -635,23 +635,30 @@ void providerNotifyButtonPressed(AppRenderer *appRenderer, IdArray *elementId) {
 
                             handled = true;
 
-                            // For "one opt" items: remove the button so it can't be added again
-                            if (strncmp(functionName, "one-opt:", 8) == 0) {
-                                FfonObject *addElemObj = parentElem->data.object;
-                                for (int i = 0; i < addElemObj->count; i++) {
-                                    FfonElement *btnElem = addElemObj->elements[i];
-                                    if (btnElem->type != FFON_STRING) continue;
-                                    char *btnFn = providerTagExtractButtonFunctionName(btnElem->data.string);
-                                    bool match = btnFn && strcmp(btnFn, functionName) == 0;
-                                    free(btnFn);
-                                    if (match) {
-                                        ffonElementDestroy(ffonObjectRemoveElement(addElemObj, i));
-                                        break;
+                            // If this "Add element:" is a clone (not the last child),
+                            // remove it entirely — the new element replaces it
+                            int addElemPos = insertIdx + 1;
+                            if (addElemPos < grandObj->count - 1) {
+                                ffonElementDestroy(ffonObjectRemoveElement(grandObj, addElemPos));
+                            } else {
+                                // Original "Add element:" — remove one-opt buttons
+                                if (strncmp(functionName, "one-opt:", 8) == 0) {
+                                    FfonObject *addElemObj = parentElem->data.object;
+                                    for (int i = 0; i < addElemObj->count; i++) {
+                                        FfonElement *btnElem = addElemObj->elements[i];
+                                        if (btnElem->type != FFON_STRING) continue;
+                                        char *btnFn = providerTagExtractButtonFunctionName(btnElem->data.string);
+                                        bool match = btnFn && strcmp(btnFn, functionName) == 0;
+                                        free(btnFn);
+                                        if (match) {
+                                            ffonElementDestroy(ffonObjectRemoveElement(addElemObj, i));
+                                            break;
+                                        }
                                     }
-                                }
-                                // If "Add element:" is now empty, remove it from grandObj
-                                if (addElemObj->count == 0) {
-                                    ffonElementDestroy(ffonObjectRemoveElement(grandObj, insertIdx + 1));
+                                    // If "Add element:" is now empty, remove it from grandObj
+                                    if (addElemObj->count == 0) {
+                                        ffonElementDestroy(ffonObjectRemoveElement(grandObj, addElemPos));
+                                    }
                                 }
                             }
                         }
