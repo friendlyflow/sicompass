@@ -88,6 +88,9 @@ const sections: (string | Section)[] = rootEntries
   .filter(([_k, v]) => typeof v[0] === "string" && v[0].includes("mand"))
   .map(([k, v]) => convertEquipmentEntry(k, v));
 
+const allSections: (string | Section)[] = rootEntries
+  .map(([k, v]) => convertEquipmentEntry(k, v));
+
 const rootAddOptions = rootEntries
   .filter(([_k, v]) => {
     const card = v[0];
@@ -101,7 +104,8 @@ if (rootAddOptions.length > 0) {
 
 function getChildrenAtPath(
   nodes: (string | Section)[],
-  pathParts: string[]
+  pathParts: string[],
+  fallback?: (string | Section)[]
 ): (string | Section)[] | null {
   if (pathParts.length === 0) {
     return nodes;
@@ -111,6 +115,14 @@ function getChildrenAtPath(
   for (const node of nodes) {
     if (typeof node !== "string" && node.key === head) {
       return getChildrenAtPath(node.children, rest);
+    }
+  }
+
+  if (fallback) {
+    for (const node of fallback) {
+      if (typeof node !== "string" && node.key === head) {
+        return getChildrenAtPath(node.children, rest);
+      }
     }
   }
 
@@ -130,7 +142,7 @@ function toJson(children: (string | Section)[]): unknown[] {
 const rawPath = process.argv[2] || "/";
 const pathParts = rawPath === "/" ? [] : rawPath.split("/").filter(Boolean);
 
-const children = getChildrenAtPath(sections, pathParts);
+const children = getChildrenAtPath(sections, pathParts, allSections);
 if (children) {
   console.log(JSON.stringify(toJson(children)));
 } else {
