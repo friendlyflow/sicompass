@@ -304,9 +304,11 @@ bool providerNavigateRight(AppRenderer *appRenderer) {
         return true;
     }
 
-    // Get active provider and extract content from tagged key
+    // Get active provider and extract path segment from key (strip display tags)
     Provider *provider = providerGetActive(appRenderer);
-    char *strippedKey = providerTagExtractContent(key);
+    char *strippedKey = providerTagStripDisplay(key);
+    // Only push path when inside a provider (depth > 1), not when entering the provider root itself
+    bool shouldPushPath = (appRenderer->currentId.depth > 1);
 
     // Validate radio group constraints before navigating in
     if (providerTagHasRadio(key) && obj->count > 0) {
@@ -334,7 +336,7 @@ bool providerNavigateRight(AppRenderer *appRenderer) {
 
     // If object already has children, just navigate into it
     if (obj->count > 0) {
-        if (provider && provider->pushPath && strippedKey) {
+        if (provider && provider->pushPath && strippedKey && shouldPushPath) {
             provider->pushPath(provider, strippedKey);
         }
         free(strippedKey);
@@ -349,7 +351,7 @@ bool providerNavigateRight(AppRenderer *appRenderer) {
     }
 
     // Update path before fetching
-    if (provider->pushPath && strippedKey) {
+    if (provider->pushPath && strippedKey && shouldPushPath) {
         provider->pushPath(provider, strippedKey);
         printf("providerNavigateRight: key='%s', path='%s'\n",
                strippedKey, provider->getCurrentPath ? provider->getCurrentPath(provider) : "?");
