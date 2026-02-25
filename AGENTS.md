@@ -29,7 +29,23 @@ Always use `#pragma once` as the include guard in header files. Do not use tradi
 
 ## Library Architecture
 
-Libraries communicate with `src/sicompass` through the `lib_provider` interface — do not depend on or call into Sicompass internals directly.
+Libraries (`lib/`) communicate with `src/sicompass` through the `lib_provider` interface.
+
+**Boundary rules (bidirectional):**
+- `lib/` code must NEVER `#include` headers from `src/sicompass/`
+- `src/sicompass/` must NEVER `#include` library-specific headers (e.g., `filebrowser.h`, `filebrowser_provider.h`, `settings_provider.h`)
+- `src/sicompass/` may only include these shared infrastructure headers from `lib/`:
+  - `provider_interface.h`, `provider_tags.h`, `platform.h` (from lib_provider)
+  - `ffon.h` (from lib_ffon)
+- Libraries may include: their own headers, other `lib/*/include/` public headers, and system/third-party headers
+
+## Testing
+
+- After implementing changes, always run relevant tests before finishing.
+- C tests: `ninja -C build test` (all), or `build/tests/test_<module>` (specific).
+- Bun tests (TypeScript providers): `bun test tests/lib_*/*.test.ts` (all), or `bun test tests/<module>/<name>.test.ts` (specific).
+- When adding new code, write or update tests in `tests/`.
+- If tests fail, fix the code — never leave a task with failing tests.
 
 ## GitHub Workflows
 
