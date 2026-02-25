@@ -387,10 +387,14 @@ static FfonElement** scriptFetch(Provider *self, int *outCount) {
 
 static FfonElement* scriptCreateElement(Provider *self, const char *elementKey) {
     (void)self;
-    if (strstr(elementKey, "<input>") != NULL) {
-        return ffonElementCreateString(elementKey);
+    const char *key = elementKey;
+    if (strncmp(key, "one-opt:", 8) == 0) {
+        key = key + 8;
     }
-    return ffonElementCreateObject(elementKey);
+    if (strstr(key, "<input>") != NULL) {
+        return ffonElementCreateString(key);
+    }
+    return ffonElementCreateObject(key);
 }
 
 Provider* scriptProviderCreate(const char *name, const char *displayName,

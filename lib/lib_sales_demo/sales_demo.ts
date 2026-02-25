@@ -39,20 +39,21 @@ function getRawAtPath(
 // mandatory items are shown directly; optional items go into "Add element:".
 function buildDisplayChildren(rawObj: Record<string, unknown[]>): (string | Section)[] {
   const result: (string | Section)[] = [];
-  const addOptions: string[] = [];
+  const addItems: string[] = [];
 
   for (const [k, v] of Object.entries(rawObj)) {
     const card = v[0];
     if (!isCardinality(card)) continue;
     if ((card as string).includes("opt")) {
-      addOptions.push(k);
+      const prefix = card === "one opt" ? "one-opt:" : "";
+      addItems.push(`<button>${prefix}${k}</button>${k}`);
     } else {
       result.push(buildItem(k, v));
     }
   }
 
-  if (addOptions.length > 0) {
-    result.push({ key: "Add element:", children: addOptions.map(k => `<button>${k}</button>${k}`) });
+  if (addItems.length > 0) {
+    result.push({ key: "Add element:", children: addItems });
   }
 
   return result;
