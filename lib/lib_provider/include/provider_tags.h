@@ -142,6 +142,28 @@ bool providerTagHasImage(const char *text);
  */
 char* providerTagExtractImageContent(const char *taggedText);
 
+#define OPT_TAG "<opt></opt>"
+#define OPT_TAG_LEN 11
+
+#define ONE_OPT_TAG "<one-opt></one-opt>"
+#define ONE_OPT_TAG_LEN 19
+
+/**
+ * Check if text starts with <opt></opt> tag (many-opt created element).
+ */
+bool providerTagHasOpt(const char *text);
+
+/**
+ * Check if text starts with <one-opt></one-opt> tag.
+ */
+bool providerTagHasOneOpt(const char *text);
+
+/**
+ * Return text after <one-opt></one-opt> prefix.
+ * Caller must free the returned string.
+ */
+char* providerTagStripOneOpt(const char *text);
+
 #define BUTTON_TAG_OPEN "<button>"
 #define BUTTON_TAG_CLOSE "</button>"
 #define BUTTON_TAG_OPEN_LEN 8

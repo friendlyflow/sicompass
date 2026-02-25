@@ -889,6 +889,125 @@ void handleFileDelete(AppRenderer *appRenderer) {
     if (idx < 0 || idx >= count) return;
 
     FfonElement *elem = arr[idx];
+
+    // Script provider: in-memory element deletion
+    Provider *provider = providerGetActive(appRenderer);
+    if (provider && provider->createElement &&
+        !provider->createFile && !provider->createDirectory) {
+
+        // "Add element:" section handling
+        if (elem->type == FFON_OBJECT &&
+            strcmp(elem->data.object->key, "Add element:") == 0) {
+            // Check if this is a clone (another "Add element:" exists after it)
+            bool isClone = false;
+            for (int i = idx + 1; i < count; i++) {
+                if (arr[i]->type == FFON_OBJECT &&
+                    strcmp(arr[i]->data.object->key, "Add element:") == 0) {
+                    isClone = true;
+                    break;
+                }
+            }
+            if (!isClone) return;  // Don't delete the original "Add element:"
+        } else {
+            // Only allow deletion of opt elements (tagged with <one-opt> or <opt>)
+            const char *ek = (elem->type == FFON_STRING) ?
+                elem->data.string : elem->data.object->key;
+            if (!providerTagHasOneOpt(ek) && !providerTagHasOpt(ek))
+                return;  // Mandatory element, don't delete
+        }
+
+        // Save one-opt key before deletion so we can restore the button
+        const char *elementKey = (elem->type == FFON_STRING) ?
+            elem->data.string : elem->data.object->key;
+        char *oneOptKey = NULL;
+        if (providerTagHasOneOpt(elementKey)) {
+            oneOptKey = providerTagStripOneOpt(elementKey);
+        }
+
+        // Remove the element
+        updateState(appRenderer, TASK_DELETE, HISTORY_NONE);
+
+        // Restore one-opt button in "Add element:" section
+        if (oneOptKey) {
+            int depth = appRenderer->currentId.depth;
+            FfonElement **siblings = NULL;
+            int sibCount = 0;
+            FfonObject *parentObj = NULL;
+
+            if (depth == 1) {
+                siblings = appRenderer->ffon;
+                sibCount = appRenderer->ffonCount;
+            } else {
+                IdArray pid;
+                idArrayCopy(&pid, &appRenderer->currentId);
+                idArrayPop(&pid);
+                int pc;
+                FfonElement **pa = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &pid, &pc);
+                int pi = pid.ids[pid.depth - 1];
+                if (pa && pi >= 0 && pi < pc && pa[pi]->type == FFON_OBJECT) {
+                    parentObj = pa[pi]->data.object;
+                    siblings = parentObj->elements;
+                    sibCount = parentObj->count;
+                }
+            }
+
+            if (siblings) {
+                // Find existing "Add element:" (the last one is the original)
+                FfonObject *addElemObj = NULL;
+                for (int i = sibCount - 1; i >= 0; i--) {
+                    if (siblings[i]->type == FFON_OBJECT &&
+                        strcmp(siblings[i]->data.object->key, "Add element:") == 0) {
+                        addElemObj = siblings[i]->data.object;
+                        break;
+                    }
+                }
+
+                // Reconstruct button string: <button>one-opt:KEY</button>KEY
+                size_t btnLen = BUTTON_TAG_OPEN_LEN + 8 + strlen(oneOptKey) +
+                                BUTTON_TAG_CLOSE_LEN + strlen(oneOptKey) + 1;
+                char *btnStr = malloc(btnLen);
+                if (btnStr) {
+                    snprintf(btnStr, btnLen, BUTTON_TAG_OPEN "one-opt:%s" BUTTON_TAG_CLOSE "%s",
+                             oneOptKey, oneOptKey);
+
+                    if (addElemObj) {
+                        // Add button back to existing "Add element:"
+                        FfonElement *btnElem = ffonElementCreateString(btnStr);
+                        if (btnElem) ffonObjectAddElement(addElemObj, btnElem);
+                    } else {
+                        // Recreate "Add element:" as last child
+                        FfonElement *addSection = ffonElementCreateObject("Add element:");
+                        if (addSection) {
+                            FfonElement *btnElem = ffonElementCreateString(btnStr);
+                            if (btnElem) ffonObjectAddElement(addSection->data.object, btnElem);
+                            if (parentObj) {
+                                ffonObjectAddElement(parentObj, addSection);
+                            } else if (depth == 1) {
+                                // Top-level: append to ffon array
+                                if (appRenderer->ffonCount >= appRenderer->ffonCapacity) {
+                                    appRenderer->ffonCapacity *= 2;
+                                    FfonElement **newFfon = realloc(appRenderer->ffon,
+                                        appRenderer->ffonCapacity * sizeof(FfonElement*));
+                                    if (newFfon) appRenderer->ffon = newFfon;
+                                }
+                                if (appRenderer->ffonCount < appRenderer->ffonCapacity) {
+                                    appRenderer->ffon[appRenderer->ffonCount++] = addSection;
+                                }
+                            }
+                        }
+                    }
+                    free(btnStr);
+                }
+            }
+            free(oneOptKey);
+        }
+
+        createListCurrentLayer(appRenderer);
+        appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+        appRenderer->needsRedraw = true;
+        return;
+    }
+
     const char *elementKey = (elem->type == FFON_STRING) ?
         elem->data.string : elem->data.object->key;
 
