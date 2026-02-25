@@ -387,6 +387,9 @@ static FfonElement** scriptFetch(Provider *self, int *outCount) {
 
 static FfonElement* scriptCreateElement(Provider *self, const char *elementKey) {
     (void)self;
+    if (strstr(elementKey, "<input>") != NULL) {
+        return ffonElementCreateString(elementKey);
+    }
     return ffonElementCreateObject(elementKey);
 }
 
