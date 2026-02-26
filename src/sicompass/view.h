@@ -182,6 +182,7 @@ typedef struct AppRenderer {
     bool inputDown;
     bool prefixedInsertMode;  // true when in OPERATOR_INSERT via Ctrl+I/Ctrl+A (prefix-based creation)
     bool pendingSaveAs;       // true when in COMMAND mode for "save as" filename input
+    bool pendingFileBrowserSaveAs; // true when in file browser for save-as flow
 
     // Application pointer for accessing window dimensions and font metrics
     SiCompassApplication *app;
@@ -214,6 +215,12 @@ typedef struct AppRenderer {
 
     // Configurable save/load folder path (resolved absolute path, set from settings)
     char saveFolderPath[4096];
+
+    // Remembered save file path (empty = no file loaded/saved yet)
+    char currentSavePath[MAX_URI_LENGTH];
+    // "Save as via file browser" state
+    int saveAsSourceRootIdx;              // Source provider index to save data from
+    IdArray saveAsReturnId;               // Navigation state to restore on return
 } AppRenderer;
 
 // AccessKit constants (defined in render.c)
