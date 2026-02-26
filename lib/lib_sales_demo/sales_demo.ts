@@ -107,10 +107,17 @@ const equipmentRaw = await Bun.file(
 const rawPath = process.argv[2] || "/";
 const pathParts = rawPath === "/" ? [] : rawPath.split("/").filter(Boolean);
 
+const dashboardImage = scriptDir + "assets/115-Draw-through-Air-Handling-Unit-Diagram-1.webp";
+
 const rawObj = getRawAtPath(equipmentRaw, pathParts);
 const children = rawObj ? buildDisplayChildren(rawObj) : null;
 if (children) {
-  console.log(JSON.stringify(toJson(children)));
+  const jsonChildren = toJson(children);
+  if (pathParts.length === 0) {
+    console.log(JSON.stringify({ children: jsonChildren, dashboardImage }));
+  } else {
+    console.log(JSON.stringify(jsonChildren));
+  }
 } else {
   console.log("[]");
 }

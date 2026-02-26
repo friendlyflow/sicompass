@@ -58,7 +58,6 @@ static void loadProgram(const char *name, Provider *settingsProvider) {
     } else if (strcmp(name, "sales demo") == 0) {
         Provider *p = scriptProviderCreate("sales demo", "sales demo", SALES_DEMO_SCRIPT_PATH);
         if (p) {
-            p->dashboardImagePath = SALES_DEMO_DASHBOARD_IMAGE;
             providerRegister(p);
             settingsAddSectionText(settingsProvider, "sales demo",
                                    "save folder (product configuration)",
