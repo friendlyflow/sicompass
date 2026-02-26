@@ -79,6 +79,10 @@ static void loadProgram(const char *name, Provider *settingsProvider) {
                                    "https://matrix.org");
             settingsAddSectionText(settingsProvider, "chat client",
                                    "access token", "chatAccessToken", "");
+            settingsAddSectionText(settingsProvider, "chat client",
+                                   "username", "chatUsername", "");
+            settingsAddSectionText(settingsProvider, "chat client",
+                                   "password", "chatPassword", "");
         }
     } else if (strcmp(name, "email client") == 0) {
         Provider *p = providerFactoryCreate("email client");

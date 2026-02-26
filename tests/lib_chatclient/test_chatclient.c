@@ -1,6 +1,7 @@
 #include <unity.h>
 #include <provider_interface.h>
 #include <provider_tags.h>
+#include <chatclient.h>
 #include <ffon.h>
 #include <stdlib.h>
 #include <string.h>
@@ -127,6 +128,113 @@ void test_handle_command_set_access_token(void) {
     TEST_ASSERT_NULL(r);
 }
 
+void test_handle_command_set_username(void) {
+    Provider *p = providerFactoryCreate("chat client");
+    p->init(p);
+    char err[256] = "";
+    FfonElement *r = p->handleCommand(p, "set username",
+        "testuser", FFON_STRING, err, sizeof(err));
+    TEST_ASSERT_NULL(r);
+}
+
+void test_handle_command_set_password(void) {
+    Provider *p = providerFactoryCreate("chat client");
+    p->init(p);
+    char err[256] = "";
+    FfonElement *r = p->handleCommand(p, "set password",
+        "testpass", FFON_STRING, err, sizeof(err));
+    TEST_ASSERT_NULL(r);
+}
+
+void test_get_commands_includes_login_and_register(void) {
+    Provider *p = providerFactoryCreate("chat client");
+    int count = 0;
+    const char **cmds = p->getCommands(p, &count);
+    TEST_ASSERT_TRUE(count >= 4);
+    bool hasLogin = false, hasRegister = false;
+    for (int i = 0; i < count; i++) {
+        if (strcmp(cmds[i], "login") == 0) hasLogin = true;
+        if (strcmp(cmds[i], "register") == 0) hasRegister = true;
+    }
+    TEST_ASSERT_TRUE(hasLogin);
+    TEST_ASSERT_TRUE(hasRegister);
+}
+
+void test_handle_command_login_without_credentials(void) {
+    Provider *p = providerFactoryCreate("chat client");
+    p->init(p);
+    char err[256] = "";
+    FfonElement *r = p->handleCommand(p, "login", NULL, FFON_STRING, err, sizeof(err));
+    TEST_ASSERT_NULL(r);
+    TEST_ASSERT_TRUE(strlen(err) > 0);
+}
+
+void test_handle_command_register_without_credentials(void) {
+    Provider *p = providerFactoryCreate("chat client");
+    p->init(p);
+    char err[256] = "";
+    FfonElement *r = p->handleCommand(p, "register", NULL, FFON_STRING, err, sizeof(err));
+    TEST_ASSERT_NULL(r);
+    TEST_ASSERT_TRUE(strlen(err) > 0);
+}
+
+void test_login_null_homeserver_fails(void) {
+    ChatAuthResult r = chatclientLogin(NULL, "user", "pass");
+    TEST_ASSERT_FALSE(r.success);
+    TEST_ASSERT_TRUE(strlen(r.error) > 0);
+}
+
+void test_login_empty_username_fails(void) {
+    ChatAuthResult r = chatclientLogin("https://example.com", "", "pass");
+    TEST_ASSERT_FALSE(r.success);
+    TEST_ASSERT_TRUE(strlen(r.error) > 0);
+}
+
+void test_register_null_homeserver_fails(void) {
+    ChatAuthResult r = chatclientRegister(NULL, "user", "pass");
+    TEST_ASSERT_FALSE(r.success);
+    TEST_ASSERT_TRUE(strlen(r.error) > 0);
+}
+
+void test_register_empty_password_fails(void) {
+    ChatAuthResult r = chatclientRegister("https://example.com", "user", "");
+    TEST_ASSERT_FALSE(r.success);
+    TEST_ASSERT_TRUE(strlen(r.error) > 0);
+}
+
+void test_register_complete_null_session_fails(void) {
+    ChatAuthResult r = chatclientRegisterComplete("https://example.com", NULL, "user", "pass");
+    TEST_ASSERT_FALSE(r.success);
+    TEST_ASSERT_TRUE(strlen(r.error) > 0);
+}
+
+void test_register_complete_empty_session_fails(void) {
+    ChatAuthResult r = chatclientRegisterComplete("https://example.com", "", "user", "pass");
+    TEST_ASSERT_FALSE(r.success);
+    TEST_ASSERT_TRUE(strlen(r.error) > 0);
+}
+
+void test_get_commands_includes_complete_registration(void) {
+    Provider *p = providerFactoryCreate("chat client");
+    int count = 0;
+    const char **cmds = p->getCommands(p, &count);
+    TEST_ASSERT_TRUE(count >= 5);
+    bool found = false;
+    for (int i = 0; i < count; i++) {
+        if (strcmp(cmds[i], "complete registration") == 0) found = true;
+    }
+    TEST_ASSERT_TRUE(found);
+}
+
+void test_handle_command_complete_registration_no_session(void) {
+    Provider *p = providerFactoryCreate("chat client");
+    p->init(p);
+    char err[256] = "";
+    FfonElement *r = p->handleCommand(p, "complete registration", NULL, FFON_STRING, err, sizeof(err));
+    TEST_ASSERT_NULL(r);
+    TEST_ASSERT_TRUE(strlen(err) > 0);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -146,6 +254,19 @@ int main(void) {
     RUN_TEST(test_handle_command_refresh_returns_null);
     RUN_TEST(test_handle_command_set_homeserver);
     RUN_TEST(test_handle_command_set_access_token);
+    RUN_TEST(test_handle_command_set_username);
+    RUN_TEST(test_handle_command_set_password);
+    RUN_TEST(test_get_commands_includes_login_and_register);
+    RUN_TEST(test_handle_command_login_without_credentials);
+    RUN_TEST(test_handle_command_register_without_credentials);
+    RUN_TEST(test_login_null_homeserver_fails);
+    RUN_TEST(test_login_empty_username_fails);
+    RUN_TEST(test_register_null_homeserver_fails);
+    RUN_TEST(test_register_empty_password_fails);
+    RUN_TEST(test_register_complete_null_session_fails);
+    RUN_TEST(test_register_complete_empty_session_fails);
+    RUN_TEST(test_get_commands_includes_complete_registration);
+    RUN_TEST(test_handle_command_complete_registration_no_session);
 
     return UNITY_END();
 }
