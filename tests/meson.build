@@ -10,6 +10,7 @@ test_inc = include_directories('../external', '../external/fff')
 subdir('lib_ffon')
 subdir('lib_provider')
 subdir('lib_filebrowser')
+subdir('lib_chatclient')
 subdir('lib_settings')
 
 # Sicompass tests

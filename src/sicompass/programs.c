@@ -70,6 +70,16 @@ static void loadProgram(const char *name, Provider *settingsProvider) {
         settingsAddSectionRadio(settingsProvider, "file browser",
                                 "global sorting", "sortOrder",
                                 sortOptions, 2, "alphanumerically");
+    } else if (strcmp(name, "chat client") == 0) {
+        Provider *p = providerFactoryCreate("chat client");
+        if (p) {
+            providerRegister(p);
+            settingsAddSectionText(settingsProvider, "chat client",
+                                   "homeserver URL", "chatHomeserver",
+                                   "https://matrix.org");
+            settingsAddSectionText(settingsProvider, "chat client",
+                                   "access token", "chatAccessToken", "");
+        }
     }
 }
 
