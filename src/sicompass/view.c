@@ -96,6 +96,26 @@ static void applySettings(const char *key, const char *value, void *userdata) {
         }
         return;
     }
+    // Email client settings dispatch
+    const char *emailKeys[][2] = {
+        {"emailImapUrl", "set imap url"},
+        {"emailSmtpUrl", "set smtp url"},
+        {"emailUsername", "set username"},
+        {"emailPassword", "set password"},
+    };
+    for (int k = 0; k < 4; k++) {
+        if (strcmp(key, emailKeys[k][0]) == 0) {
+            for (int i = 0; i < appRenderer->ffonCount; i++) {
+                if (strcmp(appRenderer->providers[i]->name, "emailclient") == 0) {
+                    Provider *ec = appRenderer->providers[i];
+                    if (ec->handleCommand)
+                        ec->handleCommand(ec, emailKeys[k][1], value, 0, NULL, 0);
+                    break;
+                }
+            }
+            return;
+        }
+    }
 }
 
 void mainLoop(SiCompassApplication* app) {

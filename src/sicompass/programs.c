@@ -80,6 +80,21 @@ static void loadProgram(const char *name, Provider *settingsProvider) {
             settingsAddSectionText(settingsProvider, "chat client",
                                    "access token", "chatAccessToken", "");
         }
+    } else if (strcmp(name, "email client") == 0) {
+        Provider *p = providerFactoryCreate("email client");
+        if (p) {
+            providerRegister(p);
+            settingsAddSectionText(settingsProvider, "email client",
+                                   "IMAP URL", "emailImapUrl",
+                                   "imaps://imap.example.com");
+            settingsAddSectionText(settingsProvider, "email client",
+                                   "SMTP URL", "emailSmtpUrl",
+                                   "smtps://smtp.example.com");
+            settingsAddSectionText(settingsProvider, "email client",
+                                   "username", "emailUsername", "");
+            settingsAddSectionText(settingsProvider, "email client",
+                                   "password", "emailPassword", "");
+        }
     }
 }
 
