@@ -55,6 +55,10 @@ FfonElement* ffonObjectRemoveElement(FfonObject *obj, int index);
 FfonElement* parseJsonValue(json_object *jobj);
 FfonElement** loadJsonFileToElements(const char *filename, int *out_count);
 
+// JSON serialization (inverse of parseJsonValue)
+json_object* ffonElementToJson(FfonElement *elem);
+json_object* ffonElementsToJsonArray(FfonElement **elements, int count);
+
 // Binary serialization (.ffon files)
 uint8_t* ffonSerializeBinary(FfonElement **ffon, int count, size_t *out_size);
 FfonElement** ffonDeserializeBinary(uint8_t *data, size_t size, int *out_count);

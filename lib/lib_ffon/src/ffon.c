@@ -294,6 +294,39 @@ FfonElement* parseJsonValue(json_object *jobj) {
     }
 }
 
+json_object* ffonElementToJson(FfonElement *elem) {
+    if (!elem) return NULL;
+
+    if (elem->type == FFON_STRING) {
+        return json_object_new_string(elem->data.string);
+    }
+
+    // FFON_OBJECT → { "key": [children...] }
+    FfonObject *obj = elem->data.object;
+    json_object *childArray = json_object_new_array();
+    for (int i = 0; i < obj->count; i++) {
+        json_object *child = ffonElementToJson(obj->elements[i]);
+        if (child) {
+            json_object_array_add(childArray, child);
+        }
+    }
+
+    json_object *wrapper = json_object_new_object();
+    json_object_object_add(wrapper, obj->key, childArray);
+    return wrapper;
+}
+
+json_object* ffonElementsToJsonArray(FfonElement **elements, int count) {
+    json_object *array = json_object_new_array();
+    for (int i = 0; i < count; i++) {
+        json_object *item = ffonElementToJson(elements[i]);
+        if (item) {
+            json_object_array_add(array, item);
+        }
+    }
+    return array;
+}
+
 FfonElement** loadJsonFileToElements(const char *filename, int *out_count) {
     *out_count = 0;
 
