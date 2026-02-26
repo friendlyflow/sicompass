@@ -72,6 +72,29 @@ static void applySettings(const char *key, const char *value, void *userdata) {
             }
         }
         appRenderer->needsRedraw = true;
+        return;
+    }
+    if (strcmp(key, "chatHomeserver") == 0) {
+        for (int i = 0; i < appRenderer->ffonCount; i++) {
+            if (strcmp(appRenderer->providers[i]->name, "chatclient") == 0) {
+                Provider *cc = appRenderer->providers[i];
+                if (cc->handleCommand)
+                    cc->handleCommand(cc, "set homeserver", value, 0, NULL, 0);
+                break;
+            }
+        }
+        return;
+    }
+    if (strcmp(key, "chatAccessToken") == 0) {
+        for (int i = 0; i < appRenderer->ffonCount; i++) {
+            if (strcmp(appRenderer->providers[i]->name, "chatclient") == 0) {
+                Provider *cc = appRenderer->providers[i];
+                if (cc->handleCommand)
+                    cc->handleCommand(cc, "set access token", value, 0, NULL, 0);
+                break;
+            }
+        }
+        return;
     }
 }
 

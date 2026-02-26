@@ -112,6 +112,7 @@
               harfbuzz
               uthash
               json_c
+              curl
               sdl3
               utf8proc
               # AccessKit for accessibility
@@ -169,6 +170,7 @@
               harfbuzz
               uthash
               json_c
+              curl
               sdl3
               utf8proc
               cppcheck
