@@ -100,7 +100,7 @@ function toJson(children: (string | Section)[]): unknown[] {
 
 const scriptDir = new URL(".", import.meta.url).pathname;
 const equipmentRaw = await Bun.file(
-  scriptDir + "../../assets/equipment1.json"
+  scriptDir + "assets/equipment1.json"
 ).json() as Record<string, unknown[]>;
 
 // Parse path: "/" → [], "/Welcome" → ["Welcome"], "/Key Features/Modes" → ["Key Features", "Modes"]
