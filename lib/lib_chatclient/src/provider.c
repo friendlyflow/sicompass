@@ -1,6 +1,7 @@
 #include <chatclient.h>
 #include <chatclient_provider.h>
 #include <provider_tags.h>
+#include <platform.h>
 #include <ffon.h>
 #include <json-c/json.h>
 #include <string.h>
@@ -8,7 +9,12 @@
 #include <stdio.h>
 
 // Shared config loaded from settings
-static ChatClientConfig g_config = { .homeserverUrl = "", .accessToken = "" };
+static ChatClientConfig g_config = {
+    .homeserverUrl = "", .accessToken = "", .username = "", .password = ""
+};
+
+// UIA session for multi-stage registration
+static char g_uiaSession[256] = "";
 
 // Room display name to room ID mapping
 #define MAX_ROOMS 256
@@ -42,12 +48,32 @@ static const char* ccLookupRoomId(const char *displayName) {
     return NULL;
 }
 
+static void ccSaveAccessToken(const char *accessToken) {
+    char *configPath = providerGetMainConfigPath();
+    if (!configPath) return;
+
+    json_object *root = json_object_from_file(configPath);
+    if (!root) root = json_object_new_object();
+
+    json_object *section = NULL;
+    if (!json_object_object_get_ex(root, "chat client", &section)) {
+        section = json_object_new_object();
+        json_object_object_add(root, "chat client", section);
+    }
+    json_object_object_del(section, "chatAccessToken");
+    json_object_object_add(section, "chatAccessToken",
+                           json_object_new_string(accessToken));
+    json_object_to_file_ext(configPath, root, JSON_C_TO_STRING_PRETTY);
+    json_object_put(root);
+    free(configPath);
+}
+
 static FfonElement** ccFetch(const char *path, int *outCount) {
     if (!g_config.homeserverUrl[0] || !g_config.accessToken[0]) {
         *outCount = 1;
         FfonElement **elems = malloc(sizeof(FfonElement*));
         elems[0] = ffonElementCreateString(
-            "configure homeserver URL and access token in settings");
+            "configure homeserver URL, username and password in settings, then run login command");
         return elems;
     }
 
@@ -118,11 +144,14 @@ static bool ccCommit(const char *path, const char *oldName, const char *newName)
 
 static const char *cc_commands[] = {
     "send message",
-    "refresh"
+    "refresh",
+    "login",
+    "register",
+    "complete registration"
 };
 
 static const char** ccGetCommands(int *outCount) {
-    *outCount = 2;
+    *outCount = 5;
     return cc_commands;
 }
 
@@ -151,6 +180,118 @@ static FfonElement* ccHandleCommand(const char *path, const char *command,
             strncpy(g_config.accessToken, elementKey, sizeof(g_config.accessToken) - 1);
             g_config.accessToken[sizeof(g_config.accessToken) - 1] = '\0';
         }
+        return NULL;
+    }
+    if (strcmp(command, "set username") == 0) {
+        if (elementKey) {
+            strncpy(g_config.username, elementKey, sizeof(g_config.username) - 1);
+            g_config.username[sizeof(g_config.username) - 1] = '\0';
+        }
+        return NULL;
+    }
+    if (strcmp(command, "set password") == 0) {
+        if (elementKey) {
+            strncpy(g_config.password, elementKey, sizeof(g_config.password) - 1);
+            g_config.password[sizeof(g_config.password) - 1] = '\0';
+        }
+        return NULL;
+    }
+    if (strcmp(command, "login") == 0) {
+        if (!g_config.homeserverUrl[0] || !g_config.username[0] || !g_config.password[0]) {
+            if (errorMsg && errorMsgSize > 0)
+                snprintf(errorMsg, errorMsgSize,
+                         "set homeserver, username, and password first");
+            return NULL;
+        }
+        ChatAuthResult auth = chatclientLogin(g_config.homeserverUrl,
+                                              g_config.username, g_config.password);
+        if (auth.success) {
+            strncpy(g_config.accessToken, auth.accessToken,
+                    sizeof(g_config.accessToken) - 1);
+            g_config.accessToken[sizeof(g_config.accessToken) - 1] = '\0';
+            ccSaveAccessToken(auth.accessToken);
+            char msg[512];
+            snprintf(msg, sizeof(msg), "logged in as %s", auth.userId);
+            return ffonElementCreateString(msg);
+        }
+        if (errorMsg && errorMsgSize > 0)
+            snprintf(errorMsg, errorMsgSize, "login failed: %s", auth.error);
+        return NULL;
+    }
+    if (strcmp(command, "register") == 0) {
+        if (!g_config.homeserverUrl[0] || !g_config.username[0] || !g_config.password[0]) {
+            if (errorMsg && errorMsgSize > 0)
+                snprintf(errorMsg, errorMsgSize,
+                         "set homeserver, username, and password first");
+            return NULL;
+        }
+        ChatAuthResult auth = chatclientRegister(g_config.homeserverUrl,
+                                                 g_config.username, g_config.password);
+        if (auth.success) {
+            strncpy(g_config.accessToken, auth.accessToken,
+                    sizeof(g_config.accessToken) - 1);
+            g_config.accessToken[sizeof(g_config.accessToken) - 1] = '\0';
+            ccSaveAccessToken(auth.accessToken);
+            g_uiaSession[0] = '\0';
+            char msg[512];
+            snprintf(msg, sizeof(msg), "registered as %s", auth.userId);
+            return ffonElementCreateString(msg);
+        }
+        if (auth.requiresAuth && auth.session[0]) {
+            strncpy(g_uiaSession, auth.session, sizeof(g_uiaSession) - 1);
+            g_uiaSession[sizeof(g_uiaSession) - 1] = '\0';
+            // Open fallback page in browser
+            char fallbackUrl[2048];
+            snprintf(fallbackUrl, sizeof(fallbackUrl),
+                     "%s/_matrix/client/v3/auth/%s/fallback/web?session=%s",
+                     g_config.homeserverUrl, auth.nextStage, auth.session);
+            platformOpenWithDefault(fallbackUrl);
+            char msg[512];
+            snprintf(msg, sizeof(msg),
+                     "complete %s in browser, then run complete registration",
+                     auth.nextStage);
+            return ffonElementCreateString(msg);
+        }
+        if (errorMsg && errorMsgSize > 0)
+            snprintf(errorMsg, errorMsgSize, "registration failed: %s", auth.error);
+        return NULL;
+    }
+    if (strcmp(command, "complete registration") == 0) {
+        if (!g_uiaSession[0]) {
+            if (errorMsg && errorMsgSize > 0)
+                snprintf(errorMsg, errorMsgSize, "no registration in progress");
+            return NULL;
+        }
+        ChatAuthResult auth = chatclientRegisterComplete(
+            g_config.homeserverUrl, g_uiaSession,
+            g_config.username, g_config.password);
+        if (auth.success) {
+            strncpy(g_config.accessToken, auth.accessToken,
+                    sizeof(g_config.accessToken) - 1);
+            g_config.accessToken[sizeof(g_config.accessToken) - 1] = '\0';
+            ccSaveAccessToken(auth.accessToken);
+            g_uiaSession[0] = '\0';
+            char msg[512];
+            snprintf(msg, sizeof(msg), "registered as %s", auth.userId);
+            return ffonElementCreateString(msg);
+        }
+        if (auth.requiresAuth && auth.session[0] && auth.nextStage[0]) {
+            strncpy(g_uiaSession, auth.session, sizeof(g_uiaSession) - 1);
+            g_uiaSession[sizeof(g_uiaSession) - 1] = '\0';
+            char fallbackUrl[2048];
+            snprintf(fallbackUrl, sizeof(fallbackUrl),
+                     "%s/_matrix/client/v3/auth/%s/fallback/web?session=%s",
+                     g_config.homeserverUrl, auth.nextStage, auth.session);
+            platformOpenWithDefault(fallbackUrl);
+            char msg[512];
+            snprintf(msg, sizeof(msg),
+                     "complete %s in browser, then run complete registration",
+                     auth.nextStage);
+            return ffonElementCreateString(msg);
+        }
+        g_uiaSession[0] = '\0';
+        if (errorMsg && errorMsgSize > 0)
+            snprintf(errorMsg, errorMsgSize, "registration failed: %s", auth.error);
         return NULL;
     }
 
@@ -195,6 +336,20 @@ static void ccInit(struct Provider *self) {
                     if (s) {
                         strncpy(g_config.accessToken, s, sizeof(g_config.accessToken) - 1);
                         g_config.accessToken[sizeof(g_config.accessToken) - 1] = '\0';
+                    }
+                }
+                if (json_object_object_get_ex(section, "chatUsername", &val)) {
+                    const char *s = json_object_get_string(val);
+                    if (s) {
+                        strncpy(g_config.username, s, sizeof(g_config.username) - 1);
+                        g_config.username[sizeof(g_config.username) - 1] = '\0';
+                    }
+                }
+                if (json_object_object_get_ex(section, "chatPassword", &val)) {
+                    const char *s = json_object_get_string(val);
+                    if (s) {
+                        strncpy(g_config.password, s, sizeof(g_config.password) - 1);
+                        g_config.password[sizeof(g_config.password) - 1] = '\0';
                     }
                 }
             }

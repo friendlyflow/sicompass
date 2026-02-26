@@ -96,6 +96,28 @@ static void applySettings(const char *key, const char *value, void *userdata) {
         }
         return;
     }
+    if (strcmp(key, "chatUsername") == 0) {
+        for (int i = 0; i < appRenderer->ffonCount; i++) {
+            if (strcmp(appRenderer->providers[i]->name, "chatclient") == 0) {
+                Provider *cc = appRenderer->providers[i];
+                if (cc->handleCommand)
+                    cc->handleCommand(cc, "set username", value, 0, NULL, 0);
+                break;
+            }
+        }
+        return;
+    }
+    if (strcmp(key, "chatPassword") == 0) {
+        for (int i = 0; i < appRenderer->ffonCount; i++) {
+            if (strcmp(appRenderer->providers[i]->name, "chatclient") == 0) {
+                Provider *cc = appRenderer->providers[i];
+                if (cc->handleCommand)
+                    cc->handleCommand(cc, "set password", value, 0, NULL, 0);
+                break;
+            }
+        }
+        return;
+    }
     // Email client settings dispatch
     const char *emailKeys[][2] = {
         {"emailImapUrl", "set imap url"},
