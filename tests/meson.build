@@ -11,6 +11,7 @@ subdir('lib_ffon')
 subdir('lib_provider')
 subdir('lib_filebrowser')
 subdir('lib_chatclient')
+subdir('lib_emailclient')
 subdir('lib_settings')
 
 # Sicompass tests
