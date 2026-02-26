@@ -809,6 +809,46 @@ void handleEnter(AppRenderer *appRenderer, History history) {
         appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
         appRenderer->scrollOffset = 0;
         appRenderer->needsRedraw = true;
+    } else if (appRenderer->currentCoordinate == COORDINATE_COMMAND && appRenderer->pendingSaveAs) {
+        // "Save as" mode: input buffer contains the filename
+        appRenderer->pendingSaveAs = false;
+        const char *filename = appRenderer->inputBuffer;
+        if (filename[0] == '\0') {
+            setErrorMessage(appRenderer, "No filename provided");
+        } else {
+            // Build save path
+            char *downloadsDir = platformGetDownloadsDir();
+            if (!downloadsDir) {
+                setErrorMessage(appRenderer, "Cannot determine Downloads directory");
+            } else {
+                char filepath[MAX_URI_LENGTH];
+                snprintf(filepath, sizeof(filepath), "%s/%s.json", downloadsDir, filename);
+                free(downloadsDir);
+
+                int rootIdx = appRenderer->currentId.ids[0];
+                FfonElement *rootElem = appRenderer->ffon[rootIdx];
+                if (rootElem && rootElem->type == FFON_OBJECT) {
+                    FfonObject *rootObj = rootElem->data.object;
+                    json_object *array = ffonElementsToJsonArray(rootObj->elements, rootObj->count);
+                    if (json_object_to_file_ext(filepath, array, JSON_C_TO_STRING_PRETTY) == 0) {
+                        char msg[512];
+                        snprintf(msg, sizeof(msg), "Saved to %s", filepath);
+                        setErrorMessage(appRenderer, msg);
+                    } else {
+                        setErrorMessage(appRenderer, "Failed to write file");
+                    }
+                    json_object_put(array);
+                }
+            }
+        }
+        appRenderer->currentCommand = COMMAND_NONE;
+        appRenderer->currentCoordinate = appRenderer->previousCoordinate;
+        appRenderer->previousCoordinate = appRenderer->currentCoordinate;
+        accesskitSpeakModeChange(appRenderer, NULL);
+        createListCurrentLayer(appRenderer);
+        appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+        appRenderer->scrollOffset = 0;
+        appRenderer->needsRedraw = true;
     } else if (appRenderer->currentCoordinate == COORDINATE_COMMAND) {
         ListItem *list = appRenderer->filteredListCount > 0 ?
                          appRenderer->filteredListCurrentLayer : appRenderer->totalListCurrentLayer;
@@ -1896,7 +1936,8 @@ void handleEscape(AppRenderer *appRenderer) {
         // Operator mode: Escape discards changes
         appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
     } else if (appRenderer->currentCoordinate == COORDINATE_COMMAND) {
-        // Cancel command mode (or open with)
+        // Cancel command mode (or open with / save as)
+        appRenderer->pendingSaveAs = false;
         appRenderer->currentCommand = COMMAND_NONE;
         appRenderer->currentCoordinate = appRenderer->previousCoordinate;
         appRenderer->previousCoordinate = appRenderer->currentCoordinate;
@@ -2221,5 +2262,162 @@ void handleDashboard(AppRenderer *appRenderer) {
     appRenderer->previousCoordinate = appRenderer->currentCoordinate;
     appRenderer->currentCoordinate = COORDINATE_DASHBOARD;
     accesskitSpeakModeChange(appRenderer, NULL);
+    appRenderer->needsRedraw = true;
+}
+
+// Sanitize a provider name for use as a filename (spaces → underscores, strip unsafe chars)
+static void sanitizeFilename(const char *name, char *out, size_t outSize) {
+    size_t j = 0;
+    for (size_t i = 0; name[i] && j < outSize - 1; i++) {
+        char c = name[i];
+        if (c == ' ') c = '_';
+        else if (c == '/' || c == '\\' || c == ':' || c == '*' ||
+                 c == '?' || c == '"' || c == '<' || c == '>' || c == '|')
+            continue;
+        out[j++] = c;
+    }
+    out[j] = '\0';
+}
+
+// Build the default save path: ~/Downloads/<sanitized_provider_name>.json
+// Returns true on success, false on failure (sets error message).
+static bool buildProviderSavePath(AppRenderer *appRenderer, char *filepath, size_t size) {
+    int rootIdx = appRenderer->currentId.ids[0];
+    if (rootIdx < 0 || rootIdx >= appRenderer->ffonCount) {
+        setErrorMessage(appRenderer, "No active provider");
+        return false;
+    }
+    Provider *provider = appRenderer->providers[rootIdx];
+    if (!provider) {
+        setErrorMessage(appRenderer, "No active provider");
+        return false;
+    }
+    char *downloadsDir = platformGetDownloadsDir();
+    if (!downloadsDir) {
+        setErrorMessage(appRenderer, "Cannot determine Downloads directory");
+        return false;
+    }
+    char safeName[256];
+    sanitizeFilename(provider->name, safeName, sizeof(safeName));
+    snprintf(filepath, size, "%s/%s.json", downloadsDir, safeName);
+    free(downloadsDir);
+    return true;
+}
+
+void handleSaveProviderConfig(AppRenderer *appRenderer) {
+    char filepath[MAX_URI_LENGTH];
+    if (!buildProviderSavePath(appRenderer, filepath, sizeof(filepath))) return;
+
+    int rootIdx = appRenderer->currentId.ids[0];
+    FfonElement *rootElem = appRenderer->ffon[rootIdx];
+    if (!rootElem || rootElem->type != FFON_OBJECT) {
+        setErrorMessage(appRenderer, "Nothing to save");
+        return;
+    }
+
+    FfonObject *rootObj = rootElem->data.object;
+    json_object *array = ffonElementsToJsonArray(rootObj->elements, rootObj->count);
+    if (json_object_to_file_ext(filepath, array, JSON_C_TO_STRING_PRETTY) == 0) {
+        char msg[256];
+        snprintf(msg, sizeof(msg), "Saved to %s", filepath);
+        setErrorMessage(appRenderer, msg);
+    } else {
+        setErrorMessage(appRenderer, "Failed to write file");
+    }
+    json_object_put(array);
+    appRenderer->needsRedraw = true;
+}
+
+void handleLoadProviderConfig(AppRenderer *appRenderer) {
+    char filepath[MAX_URI_LENGTH];
+    if (!buildProviderSavePath(appRenderer, filepath, sizeof(filepath))) return;
+
+    int rootIdx = appRenderer->currentId.ids[0];
+    FfonElement *rootElem = appRenderer->ffon[rootIdx];
+    if (!rootElem || rootElem->type != FFON_OBJECT) {
+        setErrorMessage(appRenderer, "No provider to load into");
+        return;
+    }
+
+    int count = 0;
+    FfonElement **newChildren = loadJsonFileToElements(filepath, &count);
+    if (!newChildren || count == 0) {
+        char msg[256];
+        snprintf(msg, sizeof(msg), "No file found: %s", filepath);
+        setErrorMessage(appRenderer, msg);
+        return;
+    }
+
+    // Replace children of root object
+    FfonObject *rootObj = rootElem->data.object;
+    for (int i = 0; i < rootObj->count; i++) {
+        ffonElementDestroy(rootObj->elements[i]);
+    }
+    rootObj->count = 0;
+    for (int i = 0; i < count; i++) {
+        ffonObjectAddElement(rootObj, newChildren[i]);
+    }
+    free(newChildren);
+
+    // Reset provider path
+    Provider *provider = appRenderer->providers[rootIdx];
+    if (provider && provider->setCurrentPath) {
+        provider->setCurrentPath(provider, "/");
+    }
+
+    // Reset navigation to first child of root
+    appRenderer->currentId.depth = 2;
+    appRenderer->currentId.ids[0] = rootIdx;
+    appRenderer->currentId.ids[1] = 0;
+
+    // Clear undo history
+    for (int i = 0; i < appRenderer->undoHistoryCount; i++) {
+        if (appRenderer->undoHistory[i].prevElement)
+            ffonElementDestroy(appRenderer->undoHistory[i].prevElement);
+        if (appRenderer->undoHistory[i].newElement)
+            ffonElementDestroy(appRenderer->undoHistory[i].newElement);
+    }
+    appRenderer->undoHistoryCount = 0;
+    appRenderer->undoPosition = 0;
+
+    createListCurrentLayer(appRenderer);
+    appRenderer->listIndex = 0;
+    appRenderer->scrollOffset = 0;
+
+    char msg[256];
+    snprintf(msg, sizeof(msg), "Loaded from %s", filepath);
+    setErrorMessage(appRenderer, msg);
+    appRenderer->needsRedraw = true;
+}
+
+void handleSaveAsProviderConfig(AppRenderer *appRenderer) {
+    // Enter command mode with pre-filled filename for "save as"
+    Provider *provider = providerGetActive(appRenderer);
+    if (!provider) {
+        setErrorMessage(appRenderer, "No active provider");
+        return;
+    }
+
+    appRenderer->pendingSaveAs = true;
+    appRenderer->previousCoordinate = appRenderer->currentCoordinate;
+    appRenderer->currentCoordinate = COORDINATE_COMMAND;
+    appRenderer->currentCommand = COMMAND_NONE;
+    accesskitSpeakModeChange(appRenderer, NULL);
+
+    // Pre-fill input buffer with sanitized provider name
+    char safeName[256];
+    sanitizeFilename(provider->name, safeName, sizeof(safeName));
+    int len = strlen(safeName);
+    if (len >= appRenderer->inputBufferCapacity) len = appRenderer->inputBufferCapacity - 1;
+    memcpy(appRenderer->inputBuffer, safeName, len);
+    appRenderer->inputBuffer[len] = '\0';
+    appRenderer->inputBufferSize = len;
+    appRenderer->cursorPosition = len;
+    appRenderer->selectionAnchor = -1;
+    appRenderer->scrollOffset = 0;
+    appRenderer->listIndex = 0;
+
+    // Clear the list so only the text input is shown
+    clearListCurrentLayer(appRenderer);
     appRenderer->needsRedraw = true;
 }

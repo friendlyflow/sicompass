@@ -181,6 +181,7 @@ typedef struct AppRenderer {
     bool needsRedraw;
     bool inputDown;
     bool prefixedInsertMode;  // true when in OPERATOR_INSERT via Ctrl+I/Ctrl+A (prefix-based creation)
+    bool pendingSaveAs;       // true when in COMMAND mode for "save as" filename input
 
     // Application pointer for accessing window dimensions and font metrics
     SiCompassApplication *app;
@@ -286,6 +287,9 @@ void handleSelectAll(AppRenderer *appRenderer);
 void handleShiftLeft(AppRenderer *appRenderer);
 void handleShiftRight(AppRenderer *appRenderer);
 void handleDashboard(AppRenderer *appRenderer);
+void handleSaveProviderConfig(AppRenderer *appRenderer);
+void handleLoadProviderConfig(AppRenderer *appRenderer);
+void handleSaveAsProviderConfig(AppRenderer *appRenderer);
 bool hasSelection(AppRenderer *appRenderer);
 void clearSelection(AppRenderer *appRenderer);
 void getSelectionRange(AppRenderer *appRenderer, int *start, int *end);

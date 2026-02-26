@@ -269,6 +269,21 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
         appRenderer->currentCommand = COMMAND_OPERATOR_MODE;
         handleCommand(appRenderer);
     }
+    // Ctrl+S in operator general — save provider config
+    else if (ctrl && !shift && !alt && key == SDLK_S &&
+             appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
+        handleSaveProviderConfig(appRenderer);
+    }
+    // Ctrl+Shift+S in operator general — save as (filename prompt)
+    else if (ctrl && shift && !alt && key == SDLK_S &&
+             appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
+        handleSaveAsProviderConfig(appRenderer);
+    }
+    // Ctrl+O in operator general — open/load provider config
+    else if (ctrl && !shift && !alt && key == SDLK_O &&
+             appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
+        handleLoadProviderConfig(appRenderer);
+    }
     // D (dashboard — show provider dashboard image)
     else if (!ctrl && !shift && !alt && key == SDLK_D &&
              appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {

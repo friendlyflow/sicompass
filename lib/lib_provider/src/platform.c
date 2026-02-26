@@ -547,3 +547,29 @@ bool platformOpenWith(const char *program, const char *filePath) {
     return result == 0;
 #endif
 }
+
+char* platformGetDownloadsDir(void) {
+#if defined(PLATFORM_WINDOWS)
+    const char *home = getenv("USERPROFILE");
+    if (!home || home[0] == '\0') return NULL;
+
+    const char *suffix = "\\Downloads";
+    size_t len = strlen(home) + strlen(suffix) + 1;
+    char *result = malloc(len);
+    if (!result) return NULL;
+
+    snprintf(result, len, "%s%s", home, suffix);
+    return result;
+#else
+    const char *home = getenv("HOME");
+    if (!home || home[0] == '\0') return NULL;
+
+    const char *suffix = "/Downloads";
+    size_t len = strlen(home) + strlen(suffix) + 1;
+    char *result = malloc(len);
+    if (!result) return NULL;
+
+    snprintf(result, len, "%s%s", home, suffix);
+    return result;
+#endif
+}

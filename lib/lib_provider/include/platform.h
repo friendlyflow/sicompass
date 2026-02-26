@@ -99,3 +99,12 @@ void platformFreeApplications(PlatformApplication *apps, int count);
  * @return true on success, false on failure
  */
 bool platformOpenWith(const char *program, const char *filePath);
+
+/**
+ * Get the user's Downloads directory.
+ * - Linux/macOS: $HOME/Downloads
+ * - Windows: %USERPROFILE%\Downloads
+ *
+ * @return Newly allocated path string (caller must free), or NULL on failure
+ */
+char* platformGetDownloadsDir(void);
