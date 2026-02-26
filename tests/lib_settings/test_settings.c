@@ -308,6 +308,151 @@ void test_init_calls_callback_for_defaults(void) {
     free(p);
 }
 
+// --- settingsAddSectionText ---
+
+void test_addSectionText(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+
+    settingsAddSectionText(p, "sales demo", "save folder", "saveFolder", "Downloads");
+
+    int count;
+    FfonElement **elems = p->fetch(p, &count);
+    TEST_ASSERT_EQUAL_INT(2, count);  // sicompass + sales demo
+
+    // sales demo section should have an object with the label
+    FfonObject *sdSection = elems[1]->data.object;
+    TEST_ASSERT_EQUAL_STRING("sales demo", sdSection->key);
+    TEST_ASSERT_EQUAL_INT(1, sdSection->count);
+
+    FfonElement *textObj = sdSection->elements[0];
+    TEST_ASSERT_EQUAL_INT(FFON_OBJECT, textObj->type);
+    TEST_ASSERT_EQUAL_STRING("save folder", textObj->data.object->key);
+
+    // Child should be an <input> string
+    TEST_ASSERT_EQUAL_INT(1, textObj->data.object->count);
+    FfonElement *inputElem = textObj->data.object->elements[0];
+    TEST_ASSERT_EQUAL_INT(FFON_STRING, inputElem->type);
+    TEST_ASSERT_TRUE(providerTagHasInput(inputElem->data.string));
+    char *content = providerTagExtractContent(inputElem->data.string);
+    TEST_ASSERT_EQUAL_STRING("Downloads", content);
+    free(content);
+
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+    free(p->state);
+    free(p);
+}
+
+void test_addSectionText_auto_creates_section(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+
+    settingsAddSectionText(p, "new section", "label", "key", "value");
+
+    int count;
+    FfonElement **elems = p->fetch(p, &count);
+    TEST_ASSERT_EQUAL_INT(2, count);  // sicompass + new section
+    TEST_ASSERT_EQUAL_STRING("new section", elems[1]->data.object->key);
+
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+    free(p->state);
+    free(p);
+}
+
+void test_init_calls_callback_for_text_entries(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+
+    settingsAddSectionText(p, "sales demo", "save folder", "saveFolder", "Downloads");
+
+    p->init(p);
+
+    // Should have called callback for colorScheme and saveFolder
+    TEST_ASSERT_EQUAL_INT(2, callbackCount);
+    TEST_ASSERT_EQUAL_STRING("colorScheme", callbackKeys[0]);
+    TEST_ASSERT_EQUAL_STRING("saveFolder", callbackKeys[1]);
+    TEST_ASSERT_EQUAL_STRING("Downloads", callbackValues[1]);
+
+    free(p->state);
+    free(p);
+}
+
+void test_commitEdit_text_entry(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+
+    settingsAddSectionText(p, "sales demo", "save folder", "saveFolder", "Downloads");
+
+    // Navigate into the text entry path
+    p->pushPath(p, "sales demo");
+    p->pushPath(p, "save folder");
+
+    // Simulate editing the text entry
+    TEST_ASSERT_NOT_NULL(p->commitEdit);
+    bool result = p->commitEdit(p, "Downloads", "Documents");
+    TEST_ASSERT_TRUE(result);
+
+    // Callback should have been fired
+    TEST_ASSERT_EQUAL_INT(1, callbackCount);
+    TEST_ASSERT_EQUAL_STRING("saveFolder", lastCallbackKey);
+    TEST_ASSERT_EQUAL_STRING("Documents", lastCallbackValue);
+
+    // Fetch should reflect updated value
+    int count;
+    FfonElement **elems = p->fetch(p, &count);
+    FfonObject *sdSection = elems[1]->data.object;
+    FfonElement *textObj = sdSection->elements[0];
+    FfonElement *inputElem = textObj->data.object->elements[0];
+    char *content = providerTagExtractContent(inputElem->data.string);
+    TEST_ASSERT_EQUAL_STRING("Documents", content);
+    free(content);
+
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+    free(p->state);
+    free(p);
+}
+
+void test_commitEdit_wrong_path_returns_false(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+
+    settingsAddSectionText(p, "sales demo", "save folder", "saveFolder", "Downloads");
+
+    // Don't navigate to the right path
+    p->pushPath(p, "sicompass");
+
+    bool result = p->commitEdit(p, "Downloads", "Documents");
+    TEST_ASSERT_FALSE(result);
+    TEST_ASSERT_EQUAL_INT(0, callbackCount);
+
+    free(p->state);
+    free(p);
+}
+
+void test_section_with_radio_and_text(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+
+    const char *options[] = { "a", "b" };
+    settingsAddSectionRadio(p, "mixed", "radio group", "radioKey", options, 2, "a");
+    settingsAddSectionText(p, "mixed", "text field", "textKey", "hello");
+
+    int count;
+    FfonElement **elems = p->fetch(p, &count);
+    TEST_ASSERT_EQUAL_INT(2, count);  // sicompass + mixed
+
+    FfonObject *section = elems[1]->data.object;
+    TEST_ASSERT_EQUAL_STRING("mixed", section->key);
+    TEST_ASSERT_EQUAL_INT(2, section->count);  // radio + text
+
+    // First child: radio group
+    TEST_ASSERT_TRUE(providerTagHasRadio(section->elements[0]->data.object->key));
+    // Second child: text entry object
+    TEST_ASSERT_EQUAL_STRING("text field", section->elements[1]->data.object->key);
+
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+    free(p->state);
+    free(p);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -331,6 +476,13 @@ int main(void) {
     RUN_TEST(test_onRadioChange_null_callback);
 
     RUN_TEST(test_init_calls_callback_for_defaults);
+
+    RUN_TEST(test_addSectionText);
+    RUN_TEST(test_addSectionText_auto_creates_section);
+    RUN_TEST(test_init_calls_callback_for_text_entries);
+    RUN_TEST(test_commitEdit_text_entry);
+    RUN_TEST(test_commitEdit_wrong_path_returns_false);
+    RUN_TEST(test_section_with_radio_and_text);
 
     return UNITY_END();
 }

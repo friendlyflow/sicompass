@@ -47,3 +47,17 @@ void settingsAddSectionRadio(Provider *provider,
                              const char **options,
                              int optionCount,
                              const char *defaultValue);
+
+/**
+ * Register a text input field as a direct child of a named section in the settings tree.
+ * The section is created automatically (no separate settingsAddSection call needed).
+ * label becomes the display label of the containing object (e.g. "save folder").
+ * configKey is used for JSON persistence and as the applyCallback key (e.g. "saveFolder").
+ * defaultValue is the initial text shown in the input field.
+ * Must be called before providerInitAll() / providerGetInitialElement().
+ */
+void settingsAddSectionText(Provider *provider,
+                            const char *sectionName,
+                            const char *label,
+                            const char *configKey,
+                            const char *defaultValue);

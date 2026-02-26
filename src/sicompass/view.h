@@ -211,6 +211,9 @@ typedef struct AppRenderer {
 
     // Dashboard image path (copied from active provider when entering dashboard mode)
     char dashboardImagePath[MAX_URI_LENGTH];
+
+    // Configurable save/load folder path (resolved absolute path, set from settings)
+    char saveFolderPath[4096];
 } AppRenderer;
 
 // AccessKit constants (defined in render.c)
