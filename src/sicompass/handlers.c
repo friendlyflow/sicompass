@@ -11,6 +11,7 @@
 
 // Forward declarations
 static char* resolveSaveFolder(AppRenderer *appRenderer);
+static void handleFileBrowserSaveAs(AppRenderer *appRenderer);
 
 // UTF-8 helper functions
 
@@ -497,6 +498,95 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                         return;
                     }
 
+                    // File-browser save-as: save source provider data to new file
+                    if (appRenderer->pendingFileBrowserSaveAs && oldContent[0] == '\0') {
+                        if (newContent[0] == '\0') {
+                            // Empty filename — do nothing, stay in insert mode
+                            free(oldContent);
+                            appRenderer->needsRedraw = true;
+                            return;
+                        }
+
+                        char *saveDir = resolveSaveFolder(appRenderer);
+                        if (!saveDir) {
+                            setErrorMessage(appRenderer, "Cannot determine save folder");
+                            free(oldContent);
+                            appRenderer->needsRedraw = true;
+                            return;
+                        }
+
+                        // Build filename with .json extension, handle duplicates
+                        char baseName[256];
+                        snprintf(baseName, sizeof(baseName), "%s", newContent);
+                        char destName[MAX_URI_LENGTH];
+                        snprintf(destName, sizeof(destName), "%s.json", baseName);
+                        char destFull[MAX_URI_LENGTH];
+                        snprintf(destFull, sizeof(destFull), "%s/%s", saveDir, destName);
+
+                        struct stat stCheck;
+                        int copyNum = 0;
+                        while (stat(destFull, &stCheck) == 0) {
+                            copyNum++;
+                            snprintf(destName, sizeof(destName), "%s (copy %d).json", baseName, copyNum);
+                            snprintf(destFull, sizeof(destFull), "%s/%s", saveDir, destName);
+                        }
+                        free(saveDir);
+
+                        // Save source provider data to the file
+                        int srcIdx = appRenderer->saveAsSourceRootIdx;
+                        FfonElement *srcRoot = appRenderer->ffon[srcIdx];
+                        if (srcRoot && srcRoot->type == FFON_OBJECT) {
+                            FfonObject *srcObj = srcRoot->data.object;
+                            json_object *array = ffonElementsToJsonArray(srcObj->elements, srcObj->count);
+                            if (json_object_to_file_ext(destFull, array, JSON_C_TO_STRING_PRETTY) == 0) {
+                                snprintf(appRenderer->currentSavePath, sizeof(appRenderer->currentSavePath), "%s", destFull);
+                                char msg[256];
+                                snprintf(msg, sizeof(msg), "Saved to %s", destFull);
+                                setErrorMessage(appRenderer, msg);
+                            } else {
+                                setErrorMessage(appRenderer, "Failed to write file");
+                            }
+                            json_object_put(array);
+                        }
+
+                        // Remove the placeholder element from file browser
+                        int depth = appRenderer->currentId.depth;
+                        int removeIdx = appRenderer->currentId.ids[depth - 1];
+                        IdArray parentId;
+                        idArrayCopy(&parentId, &appRenderer->currentId);
+                        idArrayPop(&parentId);
+                        int parentCount;
+                        FfonElement **parentArr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                                               &parentId, &parentCount);
+                        int parentIdx = parentId.ids[parentId.depth - 1];
+                        if (parentArr && parentIdx >= 0 && parentIdx < parentCount &&
+                            parentArr[parentIdx]->type == FFON_OBJECT) {
+                            FfonObject *parentObj = parentArr[parentIdx]->data.object;
+                            ffonElementDestroy(parentObj->elements[removeIdx]);
+                            memmove(&parentObj->elements[removeIdx], &parentObj->elements[removeIdx + 1],
+                                    (parentObj->count - removeIdx - 1) * sizeof(FfonElement*));
+                            parentObj->count--;
+                        }
+
+                        // Navigate back to source provider
+                        idArrayCopy(&appRenderer->currentId, &appRenderer->saveAsReturnId);
+                        appRenderer->pendingFileBrowserSaveAs = false;
+                        appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
+                        appRenderer->previousCoordinate = COORDINATE_OPERATOR_GENERAL;
+                        accesskitSpeakModeChange(appRenderer, NULL);
+                        char savedError[256];
+                        memcpy(savedError, appRenderer->errorMessage, sizeof(savedError));
+                        createListCurrentLayer(appRenderer);
+                        if (savedError[0] != '\0')
+                            memcpy(appRenderer->errorMessage, savedError, sizeof(appRenderer->errorMessage));
+                        appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                        appRenderer->scrollOffset = 0;
+                        appRenderer->needsRedraw = true;
+                        appRenderer->lastKeypressTime = now;
+                        free(oldContent);
+                        return;
+                    }
+
                     // Only commit if changed
                     if (strcmp(oldContent, newContent) != 0) {
                         bool success;
@@ -846,6 +936,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                         FfonObject *rootObj = rootElem->data.object;
                         json_object *array = ffonElementsToJsonArray(rootObj->elements, rootObj->count);
                         if (json_object_to_file_ext(filepath, array, JSON_C_TO_STRING_PRETTY) == 0) {
+                            snprintf(appRenderer->currentSavePath, sizeof(appRenderer->currentSavePath), "%s", filepath);
                             char msg[512];
                             snprintf(msg, sizeof(msg), "Saved to %s", filepath);
                             setErrorMessage(appRenderer, msg);
@@ -1913,6 +2004,38 @@ void handleEscape(AppRenderer *appRenderer) {
         updateState(appRenderer, TASK_INPUT, HISTORY_NONE);
         appRenderer->currentCoordinate = COORDINATE_EDITOR_GENERAL;
     } else if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT) {
+        if (appRenderer->pendingFileBrowserSaveAs) {
+            // Cancel file-browser save-as: remove placeholder and return to source provider
+            int depth = appRenderer->currentId.depth;
+            int idx = appRenderer->currentId.ids[depth - 1];
+            if (depth >= 2) {
+                IdArray parentId;
+                idArrayCopy(&parentId, &appRenderer->currentId);
+                idArrayPop(&parentId);
+                int parentCount;
+                FfonElement **parentArr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                                      &parentId, &parentCount);
+                int parentIdx = parentId.ids[parentId.depth - 1];
+                if (parentArr && parentIdx >= 0 && parentIdx < parentCount &&
+                    parentArr[parentIdx]->type == FFON_OBJECT) {
+                    FfonObject *parentObj = parentArr[parentIdx]->data.object;
+                    ffonElementDestroy(parentObj->elements[idx]);
+                    memmove(&parentObj->elements[idx], &parentObj->elements[idx + 1],
+                            (parentObj->count - idx - 1) * sizeof(FfonElement*));
+                    parentObj->count--;
+                }
+            }
+            idArrayCopy(&appRenderer->currentId, &appRenderer->saveAsReturnId);
+            appRenderer->pendingFileBrowserSaveAs = false;
+            appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
+            appRenderer->previousCoordinate = COORDINATE_OPERATOR_GENERAL;
+            accesskitSpeakModeChange(appRenderer, NULL);
+            createListCurrentLayer(appRenderer);
+            appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+            appRenderer->scrollOffset = 0;
+            appRenderer->needsRedraw = true;
+            return;
+        }
         if (appRenderer->prefixedInsertMode) {
             // Remove the empty placeholder element inserted by Ctrl+I/Ctrl+A
             int depth = appRenderer->currentId.depth;
@@ -2351,6 +2474,10 @@ static bool buildProviderSavePath(AppRenderer *appRenderer, char *filepath, size
 }
 
 void handleSaveProviderConfig(AppRenderer *appRenderer) {
+    if (appRenderer->currentSavePath[0] == '\0') {
+        handleFileBrowserSaveAs(appRenderer);
+        return;
+    }
     char filepath[MAX_URI_LENGTH];
     if (!buildProviderSavePath(appRenderer, filepath, sizeof(filepath))) return;
 
@@ -2364,6 +2491,7 @@ void handleSaveProviderConfig(AppRenderer *appRenderer) {
     FfonObject *rootObj = rootElem->data.object;
     json_object *array = ffonElementsToJsonArray(rootObj->elements, rootObj->count);
     if (json_object_to_file_ext(filepath, array, JSON_C_TO_STRING_PRETTY) == 0) {
+        snprintf(appRenderer->currentSavePath, sizeof(appRenderer->currentSavePath), "%s", filepath);
         char msg[256];
         snprintf(msg, sizeof(msg), "Saved to %s", filepath);
         setErrorMessage(appRenderer, msg);
@@ -2430,6 +2558,7 @@ void handleLoadProviderConfig(AppRenderer *appRenderer) {
     appRenderer->listIndex = 0;
     appRenderer->scrollOffset = 0;
 
+    snprintf(appRenderer->currentSavePath, sizeof(appRenderer->currentSavePath), "%s", filepath);
     char msg[256];
     snprintf(msg, sizeof(msg), "Loaded from %s", filepath);
     setErrorMessage(appRenderer, msg);
@@ -2466,4 +2595,74 @@ void handleSaveAsProviderConfig(AppRenderer *appRenderer) {
     // Clear the list so only the text input is shown
     clearListCurrentLayer(appRenderer);
     appRenderer->needsRedraw = true;
+}
+
+static void handleFileBrowserSaveAs(AppRenderer *appRenderer) {
+    // Save current navigation state to return to after save-as
+    appRenderer->saveAsSourceRootIdx = appRenderer->currentId.ids[0];
+    idArrayCopy(&appRenderer->saveAsReturnId, &appRenderer->currentId);
+
+    // Find file browser provider index
+    int fbIdx = -1;
+    for (int i = 0; i < appRenderer->ffonCount; i++) {
+        if (appRenderer->providers[i] &&
+            strcmp(appRenderer->providers[i]->name, "filebrowser") == 0) {
+            fbIdx = i;
+            break;
+        }
+    }
+    if (fbIdx < 0) {
+        setErrorMessage(appRenderer, "File browser not available");
+        return;
+    }
+
+    // Resolve save folder
+    char *saveDir = resolveSaveFolder(appRenderer);
+    if (!saveDir) {
+        setErrorMessage(appRenderer, "Cannot determine save folder");
+        return;
+    }
+    struct stat st;
+    if (stat(saveDir, &st) != 0 || !S_ISDIR(st.st_mode)) {
+        char msg[256];
+        snprintf(msg, sizeof(msg), "Save folder does not exist: %s", saveDir);
+        setErrorMessage(appRenderer, msg);
+        free(saveDir);
+        return;
+    }
+
+    // Navigate file browser to the save folder
+    providerNavigateToPath(appRenderer, fbIdx, saveDir, "");
+    free(saveDir);
+
+    // Build the list for the save folder
+    createListCurrentLayer(appRenderer);
+
+    // Insert <input></input> placeholder at position 0 for filename entry
+    int depth = appRenderer->currentId.depth;
+    if (depth >= 2) {
+        IdArray parentId;
+        idArrayCopy(&parentId, &appRenderer->currentId);
+        idArrayPop(&parentId);
+        int parentCount;
+        FfonElement **parentArr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                               &parentId, &parentCount);
+        int parentIdx = parentId.ids[parentId.depth - 1];
+        if (parentArr && parentIdx >= 0 && parentIdx < parentCount &&
+            parentArr[parentIdx]->type == FFON_OBJECT) {
+            FfonElement *inputElem = ffonElementCreateString("<input></input>");
+            ffonObjectInsertElement(parentArr[parentIdx]->data.object, inputElem, 0);
+        }
+    }
+
+    // Point cursor at the new placeholder element
+    appRenderer->currentId.ids[depth - 1] = 0;
+    appRenderer->pendingFileBrowserSaveAs = true;
+    appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
+    createListCurrentLayer(appRenderer);
+    appRenderer->listIndex = 0;
+    appRenderer->scrollOffset = 0;
+
+    // Enter insert mode on the placeholder
+    handleI(appRenderer);
 }
