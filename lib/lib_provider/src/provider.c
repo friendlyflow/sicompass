@@ -295,6 +295,7 @@ typedef struct ScriptProviderState {
     char currentPath[4096];
     const ProviderOps *ops;
     char scriptPath[4096];
+    char dashboardImagePath[4096];
 } ScriptProviderState;
 
 // Run script and parse JSON output into FFON elements
@@ -353,14 +354,35 @@ static FfonElement** scriptFetch(Provider *self, int *outCount) {
         return NULL;
     }
 
-    if (!json_object_is_type(root, json_type_array)) {
-        fprintf(stderr, "scriptProvider: expected JSON array from: %s\n", state->scriptPath);
+    // Accept JSON array (backward compat) or object with "children" array + optional metadata
+    json_object *childrenArr = NULL;
+    if (json_object_is_type(root, json_type_array)) {
+        childrenArr = root;
+    } else if (json_object_is_type(root, json_type_object)) {
+        json_object *cObj = NULL;
+        if (json_object_object_get_ex(root, "children", &cObj) &&
+            json_object_is_type(cObj, json_type_array)) {
+            childrenArr = cObj;
+        }
+        // Extract optional dashboardImage metadata
+        json_object *imgObj = NULL;
+        if (json_object_object_get_ex(root, "dashboardImage", &imgObj) &&
+            json_object_is_type(imgObj, json_type_string)) {
+            const char *imgPath = json_object_get_string(imgObj);
+            strncpy(state->dashboardImagePath, imgPath, sizeof(state->dashboardImagePath) - 1);
+            state->dashboardImagePath[sizeof(state->dashboardImagePath) - 1] = '\0';
+            self->dashboardImagePath = state->dashboardImagePath;
+        }
+    }
+
+    if (!childrenArr) {
+        fprintf(stderr, "scriptProvider: expected JSON array or object with 'children' from: %s\n", state->scriptPath);
         json_object_put(root);
         return NULL;
     }
 
     // Convert JSON array to FFON elements
-    int arrayLen = json_object_array_length(root);
+    int arrayLen = json_object_array_length(childrenArr);
     if (arrayLen == 0) {
         json_object_put(root);
         return NULL;
@@ -374,7 +396,7 @@ static FfonElement** scriptFetch(Provider *self, int *outCount) {
 
     int count = 0;
     for (int i = 0; i < arrayLen; i++) {
-        json_object *item = json_object_array_get_idx(root, i);
+        json_object *item = json_object_array_get_idx(childrenArr, i);
         FfonElement *elem = parseJsonValue(item);
         if (elem) {
             elements[count++] = elem;
