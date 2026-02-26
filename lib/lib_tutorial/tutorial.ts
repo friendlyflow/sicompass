@@ -100,6 +100,98 @@ const sections: Section[] = [
     ],
   },
   {
+    key: "Development",
+    children: [
+      {
+        key: "Provider Types",
+        children: [
+          "C Provider (ProviderOps): implement a ProviderOps struct, call providerCreate(ops)",
+          "Script Provider: write a TypeScript file, loaded via scriptProviderCreate(name, displayName, scriptPath)",
+          "Factory Provider: register with providerFactoryRegister(name, createFn), instantiate by name",
+        ],
+      },
+      {
+        key: "Data & Fetching",
+        children: [
+          "fetch: return an array of FFON elements for the current path (required)",
+          "dashboardImagePath: set a path to an image shown fullscreen via 'd' key",
+        ],
+      },
+      {
+        key: "Lifecycle",
+        children: [
+          "init: called once at startup before any operations",
+          "cleanup: called at shutdown to free resources",
+          "loadConfig: load persistent configuration from a file path",
+          "saveConfig: save persistent configuration to a file path",
+        ],
+      },
+      {
+        key: "Navigation",
+        children: [
+          "pushPath: append a segment to the current path (go deeper)",
+          "popPath: remove the last segment from the current path (go back)",
+          "getCurrentPath: return the current path string",
+          "setCurrentPath: jump directly to an absolute path (teleport after search)",
+        ],
+      },
+      {
+        key: "Editing",
+        children: [
+          "commitEdit: save an inline edit (e.g. rename a file or change a setting value)",
+        ],
+      },
+      {
+        key: "File Operations",
+        children: [
+          "createDirectory: create a new directory at the current path",
+          "createFile: create a new file at the current path",
+          "deleteItem: delete a file or directory (recursively for non-empty dirs)",
+          "copyItem: copy a file or directory from source to destination",
+        ],
+      },
+      {
+        key: "Command System",
+        children: [
+          "getCommands: return a list of command names this provider supports",
+          "handleCommand: prepare/validate a command and optionally return a UI element",
+          "getCommandListItems: return a list of selectable options for a command",
+          "executeCommand: execute a command with the user's selected option",
+        ],
+      },
+      {
+        key: "Event Handlers",
+        children: [
+          "onRadioChange: called when a radio group selection changes",
+          "onButtonPress: called when a <button> element is activated",
+          "createElement: create a new FFON element for 'Add element:' sections",
+        ],
+      },
+      {
+        key: "Search",
+        children: [
+          "collectDeepSearchItems: return all searchable items for extended search (Tab key)",
+          "If not implemented, the system falls back to FFON-tree traversal",
+        ],
+      },
+      {
+        key: "Element Tags",
+        children: [
+          "<input>content</input> - make an element editable inline",
+          "<radio>group name - parent object for mutually exclusive options",
+          "<checked>option - mark a radio option as selected",
+          "<checkbox>label - unchecked boolean toggle",
+          "<checkbox checked>label - checked boolean toggle",
+          "<link>path/to/file.json</link> - lazy-load external JSON/FFON as children",
+          "<image>path/to/image.jpg</image> - display an image",
+          "<button>functionName</button>Display Text - clickable button element",
+          "<opt></opt>key - many-option element, deletable after creation",
+          "<one-opt></one-opt>key - single-use button, replaced after creation",
+        ],
+      },
+    ],
+  },
+  {
     key: "Next Steps",
     children: [
       "Press Escape or h to go back to the root.",
