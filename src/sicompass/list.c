@@ -112,8 +112,10 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
                     stripped = providerTagStripDisplay(strKey);
                 } else if (parentHasRadio) {
                     prefix = "-r";
+                    stripped = providerTagStripDisplay(strKey);
                 } else {
                     prefix = "-";
+                    stripped = providerTagStripDisplay(strKey);
                 }
 
                 char prefixed[MAX_LINE_LENGTH];
@@ -302,6 +304,7 @@ static void collectItemsRecursive(AppRenderer *appRenderer, FfonElement **elemen
                 stripped = providerTagExtractContent(elem->data.string);
             } else {
                 prefix = "-";
+                stripped = providerTagStripDisplay(elem->data.string);
             }
 
             char prefixed[MAX_LINE_LENGTH];

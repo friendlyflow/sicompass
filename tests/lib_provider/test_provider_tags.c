@@ -369,6 +369,76 @@ void test_stripDisplay_button(void) {
     free(result);
 }
 
+// === Escape sequences ===
+
+void test_escaped_input_not_detected(void) {
+    TEST_ASSERT_FALSE(providerTagHasInput("\\<input>text\\</input>"));
+}
+
+void test_escaped_radio_not_detected(void) {
+    TEST_ASSERT_FALSE(providerTagHasRadio("\\<radio>group"));
+}
+
+void test_escaped_checked_not_detected(void) {
+    TEST_ASSERT_FALSE(providerTagHasChecked("\\<checked>option"));
+}
+
+void test_escaped_checkbox_not_detected(void) {
+    TEST_ASSERT_FALSE(providerTagHasCheckbox("\\<checkbox>label"));
+}
+
+void test_escaped_checkbox_checked_not_detected(void) {
+    TEST_ASSERT_FALSE(providerTagHasCheckboxChecked("\\<checkbox checked>label"));
+}
+
+void test_escaped_link_not_detected(void) {
+    TEST_ASSERT_FALSE(providerTagHasLink("\\<link>file.json\\</link>"));
+}
+
+void test_escaped_image_not_detected(void) {
+    TEST_ASSERT_FALSE(providerTagHasImage("\\<image>pic.jpg\\</image>"));
+}
+
+void test_escaped_button_not_detected(void) {
+    TEST_ASSERT_FALSE(providerTagHasButton("\\<button>fn\\</button>text"));
+}
+
+void test_stripDisplay_unescapes_input(void) {
+    char *result = providerTagStripDisplay("\\<input>content\\</input>");
+    TEST_ASSERT_EQUAL_STRING("<input>content</input>", result);
+    free(result);
+}
+
+void test_stripDisplay_unescapes_checkbox(void) {
+    char *result = providerTagStripDisplay("\\<checkbox>label");
+    TEST_ASSERT_EQUAL_STRING("<checkbox>label", result);
+    free(result);
+}
+
+void test_stripDisplay_unescapes_mixed(void) {
+    // Real tag + escaped text in same string
+    char *result = providerTagStripDisplay("prefix \\<b\\> <input>editable</input> suffix");
+    TEST_ASSERT_EQUAL_STRING("prefix <b> editable suffix", result);
+    free(result);
+}
+
+void test_stripDisplay_no_escape_passes_through(void) {
+    // Normal text without escapes still works
+    char *result = providerTagStripDisplay("plain text");
+    TEST_ASSERT_EQUAL_STRING("plain text", result);
+    free(result);
+}
+
+void test_real_tags_still_work(void) {
+    // Unescaped tags still detected
+    TEST_ASSERT_TRUE(providerTagHasInput("<input>test</input>"));
+    TEST_ASSERT_TRUE(providerTagHasRadio("<radio>group"));
+    TEST_ASSERT_TRUE(providerTagHasCheckbox("<checkbox>label"));
+    TEST_ASSERT_TRUE(providerTagHasLink("<link>f.json</link>"));
+    TEST_ASSERT_TRUE(providerTagHasImage("<image>p.jpg</image>"));
+    TEST_ASSERT_TRUE(providerTagHasButton("<button>fn</button>text"));
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -459,6 +529,21 @@ int main(void) {
     RUN_TEST(test_extractButtonDisplayText);
     RUN_TEST(test_extractButtonDisplayText_null);
     RUN_TEST(test_stripDisplay_button);
+
+    // Escape sequences
+    RUN_TEST(test_escaped_input_not_detected);
+    RUN_TEST(test_escaped_radio_not_detected);
+    RUN_TEST(test_escaped_checked_not_detected);
+    RUN_TEST(test_escaped_checkbox_not_detected);
+    RUN_TEST(test_escaped_checkbox_checked_not_detected);
+    RUN_TEST(test_escaped_link_not_detected);
+    RUN_TEST(test_escaped_image_not_detected);
+    RUN_TEST(test_escaped_button_not_detected);
+    RUN_TEST(test_stripDisplay_unescapes_input);
+    RUN_TEST(test_stripDisplay_unescapes_checkbox);
+    RUN_TEST(test_stripDisplay_unescapes_mixed);
+    RUN_TEST(test_stripDisplay_no_escape_passes_through);
+    RUN_TEST(test_real_tags_still_work);
 
     return UNITY_END();
 }
