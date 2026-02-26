@@ -19,10 +19,10 @@ async function runTutorial(path: string): Promise<unknown[]> {
 }
 
 describe("tutorial provider", () => {
-  test("root path returns 7 sections", async () => {
+  test("root path returns 8 sections", async () => {
     const result = await runTutorial("/");
     expect(result).toBeArray();
-    expect(result.length).toBe(7);
+    expect(result.length).toBe(8);
   });
 
   test("root sections have correct names", async () => {
@@ -37,6 +37,7 @@ describe("tutorial provider", () => {
     expect(keys).toContain("Commands");
     expect(keys).toContain("File Browser");
     expect(keys).toContain("Links");
+    expect(keys).toContain("Development");
     expect(keys).toContain("Next Steps");
   });
 
