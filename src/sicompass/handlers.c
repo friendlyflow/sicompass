@@ -12,6 +12,7 @@
 // Forward declarations
 static char* resolveSaveFolder(AppRenderer *appRenderer);
 static void handleFileBrowserSaveAs(AppRenderer *appRenderer);
+static bool loadProviderConfigFromFile(AppRenderer *appRenderer, const char *filepath, int rootIdx);
 
 // UTF-8 helper functions
 
@@ -683,9 +684,48 @@ void handleEnter(AppRenderer *appRenderer, History history) {
             if (idx >= 0 && idx < count) {
                 FfonElement *elem = arr[idx];
                 if (elem->type == FFON_STRING) {
-                    // Open file with default program
                     char *filename = providerTagExtractContent(elem->data.string);
                     const char *path = providerGetCurrentPath(appRenderer);
+
+                    // File-browser open: load selected .json into source provider
+                    if (appRenderer->pendingFileBrowserOpen && filename && path) {
+                        size_t len = strlen(filename);
+                        if (len < 5 || strcmp(filename + len - 5, ".json") != 0) {
+                            setErrorMessage(appRenderer, "Please select a .json file");
+                            free(filename);
+                            appRenderer->needsRedraw = true;
+                            appRenderer->lastKeypressTime = now;
+                            return;
+                        }
+                        const char *sep = platformGetPathSeparator();
+                        char fullPath[MAX_URI_LENGTH * 2 + 2];
+                        snprintf(fullPath, sizeof(fullPath), "%s%s%s", path, sep, filename);
+                        free(filename);
+
+                        int srcIdx = appRenderer->saveAsSourceRootIdx;
+                        if (loadProviderConfigFromFile(appRenderer, fullPath, srcIdx)) {
+                            // Restore navigation to source provider
+                            appRenderer->currentId.depth = 2;
+                            appRenderer->currentId.ids[0] = srcIdx;
+                            appRenderer->currentId.ids[1] = 0;
+                        } else {
+                            // Load failed — return to source provider anyway
+                            idArrayCopy(&appRenderer->currentId, &appRenderer->saveAsReturnId);
+                        }
+                        appRenderer->pendingFileBrowserOpen = false;
+                        char savedError[256];
+                        memcpy(savedError, appRenderer->errorMessage, sizeof(savedError));
+                        createListCurrentLayer(appRenderer);
+                        if (savedError[0] != '\0')
+                            memcpy(appRenderer->errorMessage, savedError, sizeof(appRenderer->errorMessage));
+                        appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                        appRenderer->scrollOffset = 0;
+                        appRenderer->needsRedraw = true;
+                        appRenderer->lastKeypressTime = now;
+                        return;
+                    }
+
+                    // Open file with default program
                     if (filename && path) {
                         const char *sep = platformGetPathSeparator();
                         char fullPath[MAX_URI_LENGTH * 2 + 2];
@@ -2131,6 +2171,16 @@ void handleEscape(AppRenderer *appRenderer) {
         accesskitSpeakModeChange(appRenderer, NULL);
         appRenderer->needsRedraw = true;
         return;
+    } else if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL &&
+               appRenderer->pendingFileBrowserOpen) {
+        // Cancel file-browser open: return to source provider
+        idArrayCopy(&appRenderer->currentId, &appRenderer->saveAsReturnId);
+        appRenderer->pendingFileBrowserOpen = false;
+        createListCurrentLayer(appRenderer);
+        appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+        appRenderer->scrollOffset = 0;
+        appRenderer->needsRedraw = true;
+        return;
     } else if (appRenderer->previousCoordinate == COORDINATE_OPERATOR_GENERAL ||
                appRenderer->previousCoordinate == COORDINATE_OPERATOR_INSERT) {
         appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
@@ -2502,15 +2552,12 @@ void handleSaveProviderConfig(AppRenderer *appRenderer) {
     appRenderer->needsRedraw = true;
 }
 
-void handleLoadProviderConfig(AppRenderer *appRenderer) {
-    char filepath[MAX_URI_LENGTH];
-    if (!buildProviderSavePath(appRenderer, filepath, sizeof(filepath))) return;
-
-    int rootIdx = appRenderer->currentId.ids[0];
+// Load a JSON config file into the provider at rootIdx. Returns true on success.
+static bool loadProviderConfigFromFile(AppRenderer *appRenderer, const char *filepath, int rootIdx) {
     FfonElement *rootElem = appRenderer->ffon[rootIdx];
     if (!rootElem || rootElem->type != FFON_OBJECT) {
         setErrorMessage(appRenderer, "No provider to load into");
-        return;
+        return false;
     }
 
     int count = 0;
@@ -2519,7 +2566,7 @@ void handleLoadProviderConfig(AppRenderer *appRenderer) {
         char msg[256];
         snprintf(msg, sizeof(msg), "No file found: %s", filepath);
         setErrorMessage(appRenderer, msg);
-        return;
+        return false;
     }
 
     // Replace children of root object
@@ -2539,11 +2586,6 @@ void handleLoadProviderConfig(AppRenderer *appRenderer) {
         provider->setCurrentPath(provider, "/");
     }
 
-    // Reset navigation to first child of root
-    appRenderer->currentId.depth = 2;
-    appRenderer->currentId.ids[0] = rootIdx;
-    appRenderer->currentId.ids[1] = 0;
-
     // Clear undo history
     for (int i = 0; i < appRenderer->undoHistoryCount; i++) {
         if (appRenderer->undoHistory[i].prevElement)
@@ -2554,15 +2596,17 @@ void handleLoadProviderConfig(AppRenderer *appRenderer) {
     appRenderer->undoHistoryCount = 0;
     appRenderer->undoPosition = 0;
 
-    createListCurrentLayer(appRenderer);
-    appRenderer->listIndex = 0;
-    appRenderer->scrollOffset = 0;
-
     snprintf(appRenderer->currentSavePath, sizeof(appRenderer->currentSavePath), "%s", filepath);
     char msg[256];
     snprintf(msg, sizeof(msg), "Loaded from %s", filepath);
     setErrorMessage(appRenderer, msg);
-    appRenderer->needsRedraw = true;
+    return true;
+}
+
+static void handleFileBrowserOpen(AppRenderer *appRenderer);
+
+void handleLoadProviderConfig(AppRenderer *appRenderer) {
+    handleFileBrowserOpen(appRenderer);
 }
 
 void handleSaveAsProviderConfig(AppRenderer *appRenderer) {
@@ -2665,4 +2709,49 @@ static void handleFileBrowserSaveAs(AppRenderer *appRenderer) {
 
     // Enter insert mode on the placeholder
     handleI(appRenderer);
+}
+
+static void handleFileBrowserOpen(AppRenderer *appRenderer) {
+    // Save current navigation state to return to after open
+    appRenderer->saveAsSourceRootIdx = appRenderer->currentId.ids[0];
+    idArrayCopy(&appRenderer->saveAsReturnId, &appRenderer->currentId);
+
+    // Find file browser provider index
+    int fbIdx = -1;
+    for (int i = 0; i < appRenderer->ffonCount; i++) {
+        if (appRenderer->providers[i] &&
+            strcmp(appRenderer->providers[i]->name, "filebrowser") == 0) {
+            fbIdx = i;
+            break;
+        }
+    }
+    if (fbIdx < 0) {
+        setErrorMessage(appRenderer, "File browser not available");
+        return;
+    }
+
+    // Resolve save folder
+    char *saveDir = resolveSaveFolder(appRenderer);
+    if (!saveDir) {
+        setErrorMessage(appRenderer, "Cannot determine save folder");
+        return;
+    }
+    struct stat st;
+    if (stat(saveDir, &st) != 0 || !S_ISDIR(st.st_mode)) {
+        char msg[256];
+        snprintf(msg, sizeof(msg), "Save folder does not exist: %s", saveDir);
+        setErrorMessage(appRenderer, msg);
+        free(saveDir);
+        return;
+    }
+
+    // Navigate file browser to the save folder
+    providerNavigateToPath(appRenderer, fbIdx, saveDir, "");
+    free(saveDir);
+
+    appRenderer->pendingFileBrowserOpen = true;
+    createListCurrentLayer(appRenderer);
+    appRenderer->listIndex = 0;
+    appRenderer->scrollOffset = 0;
+    appRenderer->needsRedraw = true;
 }
