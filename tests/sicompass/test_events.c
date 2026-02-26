@@ -76,7 +76,8 @@ typedef enum {
     COORDINATE_EXTENDED_SEARCH,
     COORDINATE_COMMAND,
     COORDINATE_SCROLL,
-    COORDINATE_SCROLL_SEARCH
+    COORDINATE_SCROLL_SEARCH,
+    COORDINATE_DASHBOARD
 } Coordinate;
 
 typedef enum {
@@ -144,6 +145,7 @@ FAKE_VOID_FUNC(handleCtrlV, AppRenderer*);
 FAKE_VOID_FUNC(handleCtrlF, AppRenderer*);
 FAKE_VOID_FUNC(handleEscape, AppRenderer*);
 FAKE_VOID_FUNC(handleCommand, AppRenderer*);
+FAKE_VOID_FUNC(handleDashboard, AppRenderer*);
 
 // Mocks for backspace/delete inline code
 FAKE_VALUE_FUNC(bool, hasSelection, AppRenderer*);
@@ -336,6 +338,11 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
     else if (!ctrl && !shift && !alt && key == SDLK_ESCAPE) {
         handleEscape(appRenderer);
     }
+    // D (dashboard — show provider dashboard image)
+    else if (!ctrl && !shift && !alt && key == SDLK_D &&
+             appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
+        handleDashboard(appRenderer);
+    }
     else if (!ctrl && !shift && !alt && key == SDLK_E &&
              (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL ||
               appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL)) {
@@ -437,6 +444,7 @@ void setUp(void) {
     RESET_FAKE(handleHistoryAction);
     RESET_FAKE(handleCtrlX); RESET_FAKE(handleCtrlC); RESET_FAKE(handleCtrlV);
     RESET_FAKE(handleCtrlF); RESET_FAKE(handleEscape); RESET_FAKE(handleCommand);
+    RESET_FAKE(handleDashboard);
     RESET_FAKE(hasSelection); RESET_FAKE(deleteSelection);
     RESET_FAKE(caretReset); RESET_FAKE(SDL_GetTicks);
     RESET_FAKE(populateListCurrentLayer); RESET_FAKE(clearSelection);
@@ -685,6 +693,22 @@ void test_handleKeys_o_operator_mode(void) {
     freeTestApp(&app);
 }
 
+void test_handleKeys_d_dashboard_in_operator(void) {
+    AppRenderer app = createTestApp(COORDINATE_OPERATOR_GENERAL);
+    SDL_Event e = makeKeyEvent(SDLK_D, 0);
+    handleKeys(&app, &e);
+    TEST_ASSERT_EQUAL_INT(1, handleDashboard_fake.call_count);
+    freeTestApp(&app);
+}
+
+void test_handleKeys_d_noop_in_editor(void) {
+    AppRenderer app = createTestApp(COORDINATE_EDITOR_GENERAL);
+    SDL_Event e = makeKeyEvent(SDLK_D, 0);
+    handleKeys(&app, &e);
+    TEST_ASSERT_EQUAL_INT(0, handleDashboard_fake.call_count);
+    freeTestApp(&app);
+}
+
 void test_handleKeys_ctrl_a_operator_appends(void) {
     AppRenderer app = createTestApp(COORDINATE_OPERATOR_GENERAL);
     SDL_Event e = makeKeyEvent(SDLK_A, SDL_KMOD_CTRL);
@@ -804,6 +828,8 @@ int main(void) {
     RUN_TEST(test_handleKeys_escape);
     RUN_TEST(test_handleKeys_e_editor_mode);
     RUN_TEST(test_handleKeys_o_operator_mode);
+    RUN_TEST(test_handleKeys_d_dashboard_in_operator);
+    RUN_TEST(test_handleKeys_d_noop_in_editor);
     RUN_TEST(test_handleKeys_ctrl_a_operator_appends);
 
     // handleInput

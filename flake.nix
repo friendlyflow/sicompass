@@ -37,7 +37,7 @@
 
           src = accesskit-c-src;
 
-          cargoHash = "sha256-KCZ4jpYoARRv7dg44ar228TJKmkz6hVRirkDPpKfsK8=";
+          cargoHash = "sha256-TF5rG5sZP2oS374/JJTv892zR4bM35C6Da/Le2paL7k=";
 
           nativeBuildInputs = with pkgs; [
             pkg-config
@@ -108,6 +108,7 @@
               freetype
               cglm
               stb
+              libwebp
               harfbuzz
               uthash
               json_c
@@ -164,6 +165,7 @@
               freetype
               cglm
               stb
+              libwebp
               harfbuzz
               uthash
               json_c
@@ -214,7 +216,7 @@
               echo "extension-layer: ${vulkan-extension-layer}"
 
               # Include system library path for Vulkan drivers (Debian/non-NixOS)
-              export LD_LIBRARY_PATH="${stb}/lib:${glfw}/lib:${freetype}/lib:${vulkan-loader}/lib:${vulkan-validation-layers}/lib:/usr/lib/x86_64-linux-gnu";
+              export LD_LIBRARY_PATH="${stb}/lib:${libwebp}/lib:${glfw}/lib:${freetype}/lib:${vulkan-loader}/lib:${vulkan-validation-layers}/lib:/usr/lib/x86_64-linux-gnu";
               export VULKAN_SDK="${vulkan-headers}";
               export VK_LAYER_PATH="${vulkan-validation-layers}/share/vulkan/explicit_layer.d";
 

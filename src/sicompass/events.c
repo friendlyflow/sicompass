@@ -269,6 +269,11 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
         appRenderer->currentCommand = COMMAND_OPERATOR_MODE;
         handleCommand(appRenderer);
     }
+    // D (dashboard — show provider dashboard image)
+    else if (!ctrl && !shift && !alt && key == SDLK_D &&
+             appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
+        handleDashboard(appRenderer);
+    }
     // Backspace in insert modes
     else if (!ctrl && !shift && !alt && key == SDLK_BACKSPACE &&
              (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||

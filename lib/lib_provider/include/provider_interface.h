@@ -107,6 +107,9 @@ typedef struct Provider {
 
     // Provider-private state (opaque pointer)
     void *state;
+
+    // Optional: Path to dashboard image (shown fullscreen via 'd' key in operator general)
+    const char *dashboardImagePath;
 } Provider;
 
 /**

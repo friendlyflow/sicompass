@@ -1926,6 +1926,12 @@ void handleEscape(AppRenderer *appRenderer) {
         appRenderer->scrollOffset = 0;
         appRenderer->needsRedraw = true;
         return;
+    } else if (appRenderer->currentCoordinate == COORDINATE_DASHBOARD) {
+        appRenderer->currentCoordinate = appRenderer->previousCoordinate;
+        appRenderer->previousCoordinate = appRenderer->currentCoordinate;
+        accesskitSpeakModeChange(appRenderer, NULL);
+        appRenderer->needsRedraw = true;
+        return;
     } else if (appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH) {
         appRenderer->currentCoordinate = COORDINATE_SCROLL;
         appRenderer->scrollSearchMatchCount = 0;
@@ -2201,5 +2207,19 @@ void handleFilePaste(AppRenderer *appRenderer) {
         appRenderer->currentId.ids[appRenderer->currentId.depth - 1] = pastedIdx;
         appRenderer->listIndex = pastedIdx;
     }
+    appRenderer->needsRedraw = true;
+}
+
+void handleDashboard(AppRenderer *appRenderer) {
+    Provider *provider = providerGetActive(appRenderer);
+    if (!provider || !provider->dashboardImagePath) return;
+
+    strncpy(appRenderer->dashboardImagePath, provider->dashboardImagePath,
+            sizeof(appRenderer->dashboardImagePath) - 1);
+    appRenderer->dashboardImagePath[sizeof(appRenderer->dashboardImagePath) - 1] = '\0';
+
+    appRenderer->previousCoordinate = appRenderer->currentCoordinate;
+    appRenderer->currentCoordinate = COORDINATE_DASHBOARD;
+    accesskitSpeakModeChange(appRenderer, NULL);
     appRenderer->needsRedraw = true;
 }

@@ -1,6 +1,8 @@
 #include "image.h"
 #include "main.h"
 #include <stb_image.h>
+#include <webp/decode.h>
+#include <string.h>
 
 // Forward declarations of helper functions from main.c
 extern void createBuffer(SiCompassApplication* app, VkDeviceSize size, VkBufferUsageFlags usage,
@@ -267,8 +269,32 @@ bool loadImageTexture(SiCompassApplication* app, const char* path) {
     CachedTexture* ct = &ir->cache[slot];
 
     // Load image from disk
-    int texWidth, texHeight, texChannels;
-    stbi_uc* pixels = stbi_load(path, &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+    int texWidth, texHeight;
+    uint8_t* pixels = NULL;
+    bool isWebp = false;
+
+    const char *ext = strrchr(path, '.');
+    if (ext && strcasecmp(ext, ".webp") == 0) {
+        FILE *f = fopen(path, "rb");
+        if (!f) {
+            fprintf(stderr, "Failed to open image: %s\n", path);
+            return false;
+        }
+        fseek(f, 0, SEEK_END);
+        long fileSize = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        uint8_t *fileData = malloc((size_t)fileSize);
+        if (!fileData) { fclose(f); return false; }
+        fread(fileData, 1, (size_t)fileSize, f);
+        fclose(f);
+        pixels = WebPDecodeRGBA(fileData, (size_t)fileSize, &texWidth, &texHeight);
+        free(fileData);
+        isWebp = true;
+    } else {
+        int texChannels;
+        pixels = stbi_load(path, &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+    }
+
     if (!pixels) {
         fprintf(stderr, "Failed to load image: %s\n", path);
         return false;
@@ -288,7 +314,10 @@ bool loadImageTexture(SiCompassApplication* app, const char* path) {
     memcpy(data, pixels, (size_t)imageSize);
     vkUnmapMemory(app->device, stagingBufferMemory);
 
-    stbi_image_free(pixels);
+    if (isWebp)
+        WebPFree(pixels);
+    else
+        stbi_image_free(pixels);
 
     // Create Vulkan image
     createImage(app, texWidth, texHeight, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,

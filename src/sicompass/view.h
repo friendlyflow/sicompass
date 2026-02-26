@@ -44,7 +44,8 @@ typedef enum {
     COORDINATE_EXTENDED_SEARCH,
     COORDINATE_COMMAND,
     COORDINATE_SCROLL,
-    COORDINATE_SCROLL_SEARCH
+    COORDINATE_SCROLL_SEARCH,
+    COORDINATE_DASHBOARD
 } Coordinate;
 
 typedef enum {
@@ -206,6 +207,9 @@ typedef struct AppRenderer {
 
     // Active color palette (points to PALETTE_DARK or PALETTE_LIGHT)
     const ColorPalette *palette;
+
+    // Dashboard image path (copied from active provider when entering dashboard mode)
+    char dashboardImagePath[MAX_URI_LENGTH];
 } AppRenderer;
 
 // AccessKit constants (defined in render.c)
@@ -281,6 +285,7 @@ void handleShiftEnd(AppRenderer *appRenderer);
 void handleSelectAll(AppRenderer *appRenderer);
 void handleShiftLeft(AppRenderer *appRenderer);
 void handleShiftRight(AppRenderer *appRenderer);
+void handleDashboard(AppRenderer *appRenderer);
 bool hasSelection(AppRenderer *appRenderer);
 void clearSelection(AppRenderer *appRenderer);
 void getSelectionRange(AppRenderer *appRenderer, int *start, int *end);
@@ -300,6 +305,7 @@ void renderScroll(SiCompassApplication *app);
 void renderScrollSearch(SiCompassApplication *app);
 // void renderHierarchy(SiCompassApplication *app);
 void renderInteraction(SiCompassApplication *app);
+void renderDashboard(SiCompassApplication *app);
 void renderLine(SiCompassApplication *app, FfonElement *elem, const IdArray *id, int indent, int *yPos);
 int renderText(SiCompassApplication *app, const char *text, int x, int y, uint32_t color, bool highlight);
 

@@ -34,6 +34,7 @@ jobs:
             libfreetype-dev \
             libharfbuzz-dev \
             libjson-c-dev \
+            libwebp-dev \
             libcglm-dev \
             glslang-tools \
             libwayland-dev \

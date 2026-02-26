@@ -24,7 +24,8 @@ typedef enum {
     COORDINATE_EXTENDED_SEARCH,
     COORDINATE_COMMAND,
     COORDINATE_SCROLL,
-    COORDINATE_SCROLL_SEARCH
+    COORDINATE_SCROLL_SEARCH,
+    COORDINATE_DASHBOARD
 } Coordinate;
 
 typedef enum {
@@ -66,6 +67,7 @@ const char* coordinateToString(Coordinate coord) {
         case COORDINATE_EXTENDED_SEARCH: return "ext search";
         case COORDINATE_SCROLL: return "scroll mode";
         case COORDINATE_SCROLL_SEARCH: return "scroll search";
+        case COORDINATE_DASHBOARD: return "dashboard";
         default: return "unknown";
     }
 }
@@ -153,6 +155,10 @@ void test_coordinateToString_scroll(void) {
 
 void test_coordinateToString_scroll_search(void) {
     TEST_ASSERT_EQUAL_STRING("scroll search", coordinateToString(COORDINATE_SCROLL_SEARCH));
+}
+
+void test_coordinateToString_dashboard(void) {
+    TEST_ASSERT_EQUAL_STRING("dashboard", coordinateToString(COORDINATE_DASHBOARD));
 }
 
 void test_coordinateToString_unknown(void) {
@@ -311,6 +317,7 @@ int main(void) {
     RUN_TEST(test_coordinateToString_command);
     RUN_TEST(test_coordinateToString_scroll);
     RUN_TEST(test_coordinateToString_scroll_search);
+    RUN_TEST(test_coordinateToString_dashboard);
     RUN_TEST(test_coordinateToString_unknown);
 
     // taskToString

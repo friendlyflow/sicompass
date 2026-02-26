@@ -1449,6 +1449,40 @@ void renderScrollSearch(SiCompassApplication *app) {
     free(stripped);
 }
 
+void renderDashboard(SiCompassApplication *app) {
+    const char *path = app->appRenderer->dashboardImagePath;
+    if (!path || path[0] == '\0') return;
+
+    if (!loadImageTexture(app, path)) return;
+
+    ImageRenderer *ir = app->imageRenderer;
+    float imgW = (float)ir->textureWidth;
+    float imgH = (float)ir->textureHeight;
+    float screenW = (float)app->swapChainExtent.width;
+    float screenH = (float)app->swapChainExtent.height;
+
+    float scale = getTextScale(app, FONT_SIZE_PT);
+    int lineHeight = (int)getLineHeight(app, scale, TEXT_PADDING);
+
+    // Available area below header
+    float availW = screenW - 100.0f;
+    float availH = screenH - (float)(lineHeight * 2);
+
+    // Fit image maintaining aspect ratio
+    float displayScale = 1.0f;
+    if (imgW > availW) displayScale = availW / imgW;
+    if (imgH * displayScale > availH) displayScale = availH / imgH;
+
+    float displayW = imgW * displayScale;
+    float displayH = imgH * displayScale;
+
+    // Center on screen below header
+    float imgX = (screenW - displayW) / 2.0f;
+    float imgY = (float)(lineHeight) + (availH - displayH) / 2.0f;
+
+    prepareImage(app, imgX, imgY, displayW, displayH);
+}
+
 void updateView(SiCompassApplication *app) {
     // Note: Screen clearing is handled by the Vulkan rendering pipeline in drawFrame()
 
@@ -1496,7 +1530,9 @@ void updateView(SiCompassApplication *app) {
     }
 
     // Render appropriate panel
-    if (app->appRenderer->currentCoordinate == COORDINATE_SCROLL) {
+    if (app->appRenderer->currentCoordinate == COORDINATE_DASHBOARD) {
+        renderDashboard(app);
+    } else if (app->appRenderer->currentCoordinate == COORDINATE_SCROLL) {
         renderScroll(app);
     } else if (app->appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH) {
         renderScrollSearch(app);

@@ -72,7 +72,8 @@ typedef enum {
     COORDINATE_EXTENDED_SEARCH,
     COORDINATE_COMMAND,
     COORDINATE_SCROLL,
-    COORDINATE_SCROLL_SEARCH
+    COORDINATE_SCROLL_SEARCH,
+    COORDINATE_DASHBOARD
 } Coordinate;
 
 typedef enum {
@@ -148,7 +149,12 @@ typedef struct AppRenderer {
     SiCompassApplication *app;
     char errorMessage[256];
     char providerCommandName[64];
+    char dashboardImagePath[MAX_URI_LENGTH];
 } AppRenderer;
+
+typedef struct {
+    const char *dashboardImagePath;
+} Provider;
 
 /* ============================================
  * FFF mocks for external dependencies
@@ -231,7 +237,8 @@ FfonElement *providerHandleCommand(AppRenderer *app, const char *cmd,
     return NULL;
 }
 
-void *providerGetActive(AppRenderer *app) { (void)app; return NULL; }
+static Provider *g_activeProvider = NULL;
+Provider *providerGetActive(AppRenderer *app) { (void)app; return g_activeProvider; }
 const char *providerGetCurrentPath(AppRenderer *app) { (void)app; return NULL; }
 
 static void idArrayCopy(IdArray *dst, const IdArray *src) {
@@ -428,6 +435,12 @@ void handleEscape(AppRenderer *appRenderer) {
         createListCurrentLayer(appRenderer);
         appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
         appRenderer->scrollOffset = 0;
+        appRenderer->needsRedraw = true;
+        return;
+    } else if (appRenderer->currentCoordinate == COORDINATE_DASHBOARD) {
+        appRenderer->currentCoordinate = appRenderer->previousCoordinate;
+        appRenderer->previousCoordinate = appRenderer->currentCoordinate;
+        accesskitSpeakModeChange(appRenderer, NULL);
         appRenderer->needsRedraw = true;
         return;
     } else if (appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH) {
@@ -633,6 +646,20 @@ void handleDown(AppRenderer *appRenderer) {
     appRenderer->needsRedraw = true;
 }
 
+void handleDashboard(AppRenderer *appRenderer) {
+    Provider *provider = providerGetActive(appRenderer);
+    if (!provider || !provider->dashboardImagePath) return;
+
+    strncpy(appRenderer->dashboardImagePath, provider->dashboardImagePath,
+            sizeof(appRenderer->dashboardImagePath) - 1);
+    appRenderer->dashboardImagePath[sizeof(appRenderer->dashboardImagePath) - 1] = '\0';
+
+    appRenderer->previousCoordinate = appRenderer->currentCoordinate;
+    appRenderer->currentCoordinate = COORDINATE_DASHBOARD;
+    accesskitSpeakModeChange(appRenderer, NULL);
+    appRenderer->needsRedraw = true;
+}
+
 /* ============================================
  * Test helpers
  * ============================================ */
@@ -704,6 +731,7 @@ void setUp(void) {
     RESET_FAKE(providerDeleteItem);
     RESET_FAKE(providerExecuteCommand);
     providerTagExtractContent_retval = NULL;
+    g_activeProvider = NULL;
     SDL_GetTicks_fake.return_val = 1000;
 }
 
@@ -1375,6 +1403,60 @@ void test_down_uses_filtered_count(void) {
 }
 
 /* ============================================
+ * handleDashboard tests
+ * ============================================ */
+
+void test_dashboard_with_provider(void) {
+    AppRenderer app = createTestApp();
+    app.currentCoordinate = COORDINATE_OPERATOR_GENERAL;
+    Provider prov = { .dashboardImagePath = "/path/to/image.webp" };
+    g_activeProvider = &prov;
+
+    handleDashboard(&app);
+
+    TEST_ASSERT_EQUAL(COORDINATE_DASHBOARD, app.currentCoordinate);
+    TEST_ASSERT_EQUAL(COORDINATE_OPERATOR_GENERAL, app.previousCoordinate);
+    TEST_ASSERT_EQUAL_STRING("/path/to/image.webp", app.dashboardImagePath);
+    TEST_ASSERT_EQUAL_INT(1, accesskitSpeakModeChange_fake.call_count);
+    TEST_ASSERT_TRUE(app.needsRedraw);
+}
+
+void test_dashboard_no_provider(void) {
+    AppRenderer app = createTestApp();
+    app.currentCoordinate = COORDINATE_OPERATOR_GENERAL;
+    g_activeProvider = NULL;
+
+    handleDashboard(&app);
+
+    TEST_ASSERT_EQUAL(COORDINATE_OPERATOR_GENERAL, app.currentCoordinate);
+    TEST_ASSERT_FALSE(app.needsRedraw);
+}
+
+void test_dashboard_null_image_path(void) {
+    AppRenderer app = createTestApp();
+    app.currentCoordinate = COORDINATE_OPERATOR_GENERAL;
+    Provider prov = { .dashboardImagePath = NULL };
+    g_activeProvider = &prov;
+
+    handleDashboard(&app);
+
+    TEST_ASSERT_EQUAL(COORDINATE_OPERATOR_GENERAL, app.currentCoordinate);
+    TEST_ASSERT_FALSE(app.needsRedraw);
+}
+
+void test_escape_from_dashboard(void) {
+    AppRenderer app = createTestApp();
+    app.currentCoordinate = COORDINATE_DASHBOARD;
+    app.previousCoordinate = COORDINATE_OPERATOR_GENERAL;
+
+    handleEscape(&app);
+
+    TEST_ASSERT_EQUAL(COORDINATE_OPERATOR_GENERAL, app.currentCoordinate);
+    TEST_ASSERT_EQUAL_INT(1, accesskitSpeakModeChange_fake.call_count);
+    TEST_ASSERT_TRUE(app.needsRedraw);
+}
+
+/* ============================================
  * Main
  * ============================================ */
 
@@ -1452,6 +1534,12 @@ int main(void) {
     RUN_TEST(test_down_in_general_calls_updateState);
     RUN_TEST(test_down_noop_in_operator_insert);
     RUN_TEST(test_down_uses_filtered_count);
+
+    // handleDashboard
+    RUN_TEST(test_dashboard_with_provider);
+    RUN_TEST(test_dashboard_no_provider);
+    RUN_TEST(test_dashboard_null_image_path);
+    RUN_TEST(test_escape_from_dashboard);
 
     return UNITY_END();
 }
