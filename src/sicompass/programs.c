@@ -60,6 +60,9 @@ static void loadProgram(const char *name, Provider *settingsProvider) {
         if (p) {
             p->dashboardImagePath = SALES_DEMO_DASHBOARD_IMAGE;
             providerRegister(p);
+            settingsAddSectionText(settingsProvider, "sales demo",
+                                   "save folder (product configuration)",
+                                   "saveFolder", "Downloads");
         }
     } else if (strcmp(name, "file browser") == 0) {
         Provider *p = providerFactoryCreate("file browser");

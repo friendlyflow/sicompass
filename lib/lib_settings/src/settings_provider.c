@@ -14,6 +14,8 @@
 #define SETTINGS_RADIO_KEY_MAX 64
 #define SETTINGS_RADIO_OPTION_MAX 64
 #define SETTINGS_MAX_RADIO_OPTIONS 8
+#define SETTINGS_MAX_TEXT_ENTRIES 8
+#define SETTINGS_TEXT_VALUE_MAX 256
 
 typedef struct {
     char sectionName[SETTINGS_SECTION_NAME_MAX];
@@ -25,6 +27,13 @@ typedef struct {
 } SettingsRadioEntry;
 
 typedef struct {
+    char sectionName[SETTINGS_SECTION_NAME_MAX];
+    char label[SETTINGS_RADIO_KEY_MAX];
+    char configKey[SETTINGS_RADIO_KEY_MAX];
+    char currentValue[SETTINGS_TEXT_VALUE_MAX];
+} SettingsTextEntry;
+
+typedef struct {
     char currentPath[4096];  // must be first field (layout-compatible with GenericProviderState)
     const ProviderOps *ops;  // must be second field (unused, kept for layout compat)
     char colorScheme[32];
@@ -34,6 +43,8 @@ typedef struct {
     int sectionCount;
     SettingsRadioEntry radioEntries[SETTINGS_MAX_RADIO_ENTRIES];
     int radioEntryCount;
+    SettingsTextEntry textEntries[SETTINGS_MAX_TEXT_ENTRIES];
+    int textEntryCount;
 } SettingsProviderState;
 
 // Build and return the full pre-populated settings tree.
@@ -58,32 +69,44 @@ static FfonElement** settingsFetch(Provider *self, int *outCount) {
     ffonObjectAddElement(sicompassObj->data.object, radioGroup);
     arr[n++] = sicompassObj;
 
-    // Registered sections — radio group if configured, otherwise placeholder
+    // Registered sections — radio groups, text entries, or placeholder
     for (int i = 0; i < state->sectionCount; i++) {
         FfonElement *sectionObj = ffonElementCreateObject(state->sections[i]);
+        bool hasContent = false;
 
-        // Look for a registered radio entry for this section
-        SettingsRadioEntry *radio = NULL;
+        // Look for registered radio entries for this section
         for (int j = 0; j < state->radioEntryCount; j++) {
             if (strcmp(state->radioEntries[j].sectionName, state->sections[i]) == 0) {
-                radio = &state->radioEntries[j];
-                break;
+                SettingsRadioEntry *radio = &state->radioEntries[j];
+                char radioKey[SETTINGS_RADIO_KEY_MAX + 8];
+                snprintf(radioKey, sizeof(radioKey), "<radio>%s", radio->radioKey);
+                FfonElement *radioGroup = ffonElementCreateObject(radioKey);
+                for (int k = 0; k < radio->optionCount; k++) {
+                    bool checked = (strcmp(radio->options[k], radio->currentValue) == 0);
+                    char optBuf[SETTINGS_RADIO_OPTION_MAX + 10];
+                    snprintf(optBuf, sizeof(optBuf), "%s%s",
+                             checked ? "<checked>" : "", radio->options[k]);
+                    ffonObjectAddElement(radioGroup->data.object, ffonElementCreateString(optBuf));
+                }
+                ffonObjectAddElement(sectionObj->data.object, radioGroup);
+                hasContent = true;
             }
         }
 
-        if (radio) {
-            char radioKey[SETTINGS_RADIO_KEY_MAX + 8];
-            snprintf(radioKey, sizeof(radioKey), "<radio>%s", radio->radioKey);
-            FfonElement *radioGroup = ffonElementCreateObject(radioKey);
-            for (int j = 0; j < radio->optionCount; j++) {
-                bool checked = (strcmp(radio->options[j], radio->currentValue) == 0);
-                char optBuf[SETTINGS_RADIO_OPTION_MAX + 10];
-                snprintf(optBuf, sizeof(optBuf), "%s%s",
-                         checked ? "<checked>" : "", radio->options[j]);
-                ffonObjectAddElement(radioGroup->data.object, ffonElementCreateString(optBuf));
+        // Look for registered text entries for this section
+        for (int j = 0; j < state->textEntryCount; j++) {
+            if (strcmp(state->textEntries[j].sectionName, state->sections[i]) == 0) {
+                SettingsTextEntry *text = &state->textEntries[j];
+                FfonElement *textObj = ffonElementCreateObject(text->label);
+                char inputBuf[SETTINGS_TEXT_VALUE_MAX + 20];
+                snprintf(inputBuf, sizeof(inputBuf), "<input>%s</input>", text->currentValue);
+                ffonObjectAddElement(textObj->data.object, ffonElementCreateString(inputBuf));
+                ffonObjectAddElement(sectionObj->data.object, textObj);
+                hasContent = true;
             }
-            ffonObjectAddElement(sectionObj->data.object, radioGroup);
-        } else {
+        }
+
+        if (!hasContent) {
             ffonObjectAddElement(sectionObj->data.object,
                 ffonElementCreateString("no settings"));
         }
@@ -143,6 +166,18 @@ static void settingsSaveConfig(SettingsProviderState *state, const char *configP
                                json_object_new_string(e->currentValue));
     }
 
+    // Per-section text entries namespaced by section name
+    for (int i = 0; i < state->textEntryCount; i++) {
+        SettingsTextEntry *e = &state->textEntries[i];
+        json_object *sectionObj = NULL;
+        if (!json_object_object_get_ex(root, e->sectionName, &sectionObj)) {
+            sectionObj = json_object_new_object();
+            json_object_object_add(root, e->sectionName, sectionObj);
+        }
+        json_object_object_add(sectionObj, e->configKey,
+                               json_object_new_string(e->currentValue));
+    }
+
     json_object_to_file_ext(configPath, root, JSON_C_TO_STRING_PRETTY);
     json_object_put(root);
 }
@@ -185,6 +220,22 @@ static void settingsLoadConfig(SettingsProviderState *state, const char *configP
         }
     }
 
+    // Per-section text entries namespaced by section name
+    for (int i = 0; i < state->textEntryCount; i++) {
+        SettingsTextEntry *e = &state->textEntries[i];
+        json_object *sectionObj;
+        if (json_object_object_get_ex(root, e->sectionName, &sectionObj)) {
+            json_object *obj;
+            if (json_object_object_get_ex(sectionObj, e->configKey, &obj)) {
+                const char *val = json_object_get_string(obj);
+                if (val && val[0] != '\0') {
+                    strncpy(e->currentValue, val, sizeof(e->currentValue) - 1);
+                    e->currentValue[sizeof(e->currentValue) - 1] = '\0';
+                }
+            }
+        }
+    }
+
     json_object_put(root);
 }
 
@@ -203,6 +254,11 @@ static void settingsInit(Provider *self) {
         for (int i = 0; i < state->radioEntryCount; i++) {
             state->applyCallback(state->radioEntries[i].configKey,
                                  state->radioEntries[i].currentValue,
+                                 state->userdata);
+        }
+        for (int i = 0; i < state->textEntryCount; i++) {
+            state->applyCallback(state->textEntries[i].configKey,
+                                 state->textEntries[i].currentValue,
                                  state->userdata);
         }
     }
@@ -246,6 +302,49 @@ static void settingsOnRadioChange(Provider *self, const char *groupKey,
             return;
         }
     }
+}
+
+// commitEdit: detect text entry edits based on current path and update state.
+static bool settingsCommitEdit(Provider *self, const char *oldContent __attribute__((unused)), const char *newContent) {
+    SettingsProviderState *state = (SettingsProviderState *)self->state;
+
+    // Path format: /<section>/<label> — extract the section and label
+    const char *path = state->currentPath;
+    if (path[0] != '/') return false;
+
+    // Find section from path: skip leading '/', extract up to next '/'
+    const char *sectionStart = path + 1;
+    const char *sectionEnd = strchr(sectionStart, '/');
+    if (!sectionEnd) return false;
+
+    char section[SETTINGS_SECTION_NAME_MAX];
+    int sectionLen = (int)(sectionEnd - sectionStart);
+    if (sectionLen >= (int)sizeof(section)) sectionLen = (int)sizeof(section) - 1;
+    strncpy(section, sectionStart, sectionLen);
+    section[sectionLen] = '\0';
+
+    // The label is everything after the second '/'
+    const char *label = sectionEnd + 1;
+
+    for (int i = 0; i < state->textEntryCount; i++) {
+        SettingsTextEntry *e = &state->textEntries[i];
+        if (strcmp(e->sectionName, section) == 0 && strcmp(e->label, label) == 0) {
+            strncpy(e->currentValue, newContent, sizeof(e->currentValue) - 1);
+            e->currentValue[sizeof(e->currentValue) - 1] = '\0';
+
+            char *configPath = providerGetMainConfigPath();
+            if (configPath) {
+                settingsSaveConfig(state, configPath);
+                free(configPath);
+            }
+
+            if (state->applyCallback) {
+                state->applyCallback(e->configKey, e->currentValue, state->userdata);
+            }
+            return true;
+        }
+    }
+    return false;
 }
 
 static void settingsPushPath(Provider *self, const char *segment) {
@@ -304,6 +403,7 @@ Provider* settingsProviderCreate(SettingsApplyFn applyCallback, void *userdata) 
     provider->popPath = settingsPopPath;
     provider->getCurrentPath = settingsGetCurrentPath;
     provider->onRadioChange = settingsOnRadioChange;
+    provider->commitEdit = settingsCommitEdit;
 
     return provider;
 }
@@ -345,6 +445,34 @@ void settingsAddSectionRadio(Provider *provider,
     strncpy(e->currentValue, defaultValue ? defaultValue : options[0], sizeof(e->currentValue) - 1);
     e->currentValue[sizeof(e->currentValue) - 1] = '\0';
     state->radioEntryCount++;
+
+    // Register the section if not already present
+    bool found = false;
+    for (int i = 0; i < state->sectionCount; i++) {
+        if (strcmp(state->sections[i], sectionName) == 0) { found = true; break; }
+    }
+    if (!found) settingsAddSection(provider, sectionName);
+}
+
+void settingsAddSectionText(Provider *provider,
+                            const char *sectionName,
+                            const char *label,
+                            const char *configKey,
+                            const char *defaultValue) {
+    if (!provider || !sectionName || !label || !configKey) return;
+    SettingsProviderState *state = (SettingsProviderState *)provider->state;
+    if (state->textEntryCount >= SETTINGS_MAX_TEXT_ENTRIES) return;
+
+    SettingsTextEntry *e = &state->textEntries[state->textEntryCount];
+    strncpy(e->sectionName, sectionName, sizeof(e->sectionName) - 1);
+    e->sectionName[sizeof(e->sectionName) - 1] = '\0';
+    strncpy(e->label, label, sizeof(e->label) - 1);
+    e->label[sizeof(e->label) - 1] = '\0';
+    strncpy(e->configKey, configKey, sizeof(e->configKey) - 1);
+    e->configKey[sizeof(e->configKey) - 1] = '\0';
+    strncpy(e->currentValue, defaultValue ? defaultValue : "", sizeof(e->currentValue) - 1);
+    e->currentValue[sizeof(e->currentValue) - 1] = '\0';
+    state->textEntryCount++;
 
     // Register the section if not already present
     bool found = false;

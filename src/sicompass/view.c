@@ -4,6 +4,8 @@
 #include <provider_interface.h>
 #include <settings_provider.h>
 #include <string.h>
+#include <stdlib.h>
+#include <sys/stat.h>
 
 // Palette definitions
 const ColorPalette PALETTE_DARK = {
@@ -32,6 +34,29 @@ static void applySettings(const char *key, const char *value, void *userdata) {
     if (strcmp(key, "colorScheme") == 0) {
         appRenderer->palette = (strcmp(value, "light") == 0) ? &PALETTE_LIGHT : &PALETTE_DARK;
         appRenderer->needsRedraw = true;
+        return;
+    }
+    if (strcmp(key, "saveFolder") == 0) {
+        strncpy(appRenderer->saveFolderPath, value, sizeof(appRenderer->saveFolderPath) - 1);
+        appRenderer->saveFolderPath[sizeof(appRenderer->saveFolderPath) - 1] = '\0';
+        // Validate that the resolved folder exists
+        char resolved[4096];
+        if (value[0] == '/') {
+            snprintf(resolved, sizeof(resolved), "%s", value);
+        } else {
+            const char *home = getenv("HOME");
+            if (home && home[0] != '\0')
+                snprintf(resolved, sizeof(resolved), "%s/%s", home, value);
+            else
+                resolved[0] = '\0';
+        }
+        if (resolved[0] != '\0') {
+            struct stat st;
+            if (stat(resolved, &st) != 0 || !S_ISDIR(st.st_mode))
+                setErrorMessage(appRenderer, "Save folder does not exist");
+            else
+                setErrorMessage(appRenderer, "");
+        }
         return;
     }
     if (strcmp(key, "sortOrder") == 0) {

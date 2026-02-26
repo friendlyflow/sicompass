@@ -9,6 +9,9 @@
 #include <sys/stat.h>
 #include <SDL3/SDL.h>
 
+// Forward declarations
+static char* resolveSaveFolder(AppRenderer *appRenderer);
+
 // UTF-8 helper functions
 
 // Get the length in bytes of a UTF-8 character starting at the given position
@@ -534,7 +537,12 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                     appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
                     appRenderer->previousCoordinate = COORDINATE_OPERATOR_GENERAL;
                     accesskitSpeakModeChange(appRenderer, NULL);
+                    // Preserve error set by commitEdit callback (createListCurrentLayer clears it)
+                    char savedError[256];
+                    memcpy(savedError, appRenderer->errorMessage, sizeof(savedError));
                     createListCurrentLayer(appRenderer);
+                    if (savedError[0] != '\0')
+                        memcpy(appRenderer->errorMessage, savedError, sizeof(appRenderer->errorMessage));
                     appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
                     appRenderer->scrollOffset = 0;
                     appRenderer->needsRedraw = true;
@@ -817,27 +825,35 @@ void handleEnter(AppRenderer *appRenderer, History history) {
             setErrorMessage(appRenderer, "No filename provided");
         } else {
             // Build save path
-            char *downloadsDir = platformGetDownloadsDir();
-            if (!downloadsDir) {
-                setErrorMessage(appRenderer, "Cannot determine Downloads directory");
+            char *saveDir = resolveSaveFolder(appRenderer);
+            if (!saveDir) {
+                setErrorMessage(appRenderer, "Cannot determine save folder");
             } else {
-                char filepath[MAX_URI_LENGTH];
-                snprintf(filepath, sizeof(filepath), "%s/%s.json", downloadsDir, filename);
-                free(downloadsDir);
+                struct stat st;
+                if (stat(saveDir, &st) != 0 || !S_ISDIR(st.st_mode)) {
+                    char msg[256];
+                    snprintf(msg, sizeof(msg), "Save folder does not exist: %s", saveDir);
+                    setErrorMessage(appRenderer, msg);
+                    free(saveDir);
+                } else {
+                    char filepath[MAX_URI_LENGTH];
+                    snprintf(filepath, sizeof(filepath), "%s/%s.json", saveDir, filename);
+                    free(saveDir);
 
-                int rootIdx = appRenderer->currentId.ids[0];
-                FfonElement *rootElem = appRenderer->ffon[rootIdx];
-                if (rootElem && rootElem->type == FFON_OBJECT) {
-                    FfonObject *rootObj = rootElem->data.object;
-                    json_object *array = ffonElementsToJsonArray(rootObj->elements, rootObj->count);
-                    if (json_object_to_file_ext(filepath, array, JSON_C_TO_STRING_PRETTY) == 0) {
-                        char msg[512];
-                        snprintf(msg, sizeof(msg), "Saved to %s", filepath);
-                        setErrorMessage(appRenderer, msg);
-                    } else {
-                        setErrorMessage(appRenderer, "Failed to write file");
+                    int rootIdx = appRenderer->currentId.ids[0];
+                    FfonElement *rootElem = appRenderer->ffon[rootIdx];
+                    if (rootElem && rootElem->type == FFON_OBJECT) {
+                        FfonObject *rootObj = rootElem->data.object;
+                        json_object *array = ffonElementsToJsonArray(rootObj->elements, rootObj->count);
+                        if (json_object_to_file_ext(filepath, array, JSON_C_TO_STRING_PRETTY) == 0) {
+                            char msg[512];
+                            snprintf(msg, sizeof(msg), "Saved to %s", filepath);
+                            setErrorMessage(appRenderer, msg);
+                        } else {
+                            setErrorMessage(appRenderer, "Failed to write file");
+                        }
+                        json_object_put(array);
                     }
-                    json_object_put(array);
                 }
             }
         }
@@ -2279,7 +2295,29 @@ static void sanitizeFilename(const char *name, char *out, size_t outSize) {
     out[j] = '\0';
 }
 
-// Build the default save path: ~/Downloads/<sanitized_provider_name>.json
+// Resolve the configured save folder to an absolute path.
+// Returns a newly allocated string (caller must free), or NULL on failure.
+static char* resolveSaveFolder(AppRenderer *appRenderer) {
+    const char *folder = appRenderer->saveFolderPath;
+    if (folder[0] == '\0') {
+        // No setting configured, fall back to Downloads
+        return platformGetDownloadsDir();
+    }
+    if (folder[0] == '/') {
+        // Absolute path
+        return strdup(folder);
+    }
+    // Relative to home directory
+    const char *home = getenv("HOME");
+    if (!home || home[0] == '\0') return NULL;
+    size_t len = strlen(home) + 1 + strlen(folder) + 1;
+    char *path = malloc(len);
+    if (!path) return NULL;
+    snprintf(path, len, "%s/%s", home, folder);
+    return path;
+}
+
+// Build the default save path: <saveFolder>/<sanitized_provider_name>.json
 // Returns true on success, false on failure (sets error message).
 static bool buildProviderSavePath(AppRenderer *appRenderer, char *filepath, size_t size) {
     int rootIdx = appRenderer->currentId.ids[0];
@@ -2292,15 +2330,23 @@ static bool buildProviderSavePath(AppRenderer *appRenderer, char *filepath, size
         setErrorMessage(appRenderer, "No active provider");
         return false;
     }
-    char *downloadsDir = platformGetDownloadsDir();
-    if (!downloadsDir) {
-        setErrorMessage(appRenderer, "Cannot determine Downloads directory");
+    char *saveDir = resolveSaveFolder(appRenderer);
+    if (!saveDir) {
+        setErrorMessage(appRenderer, "Cannot determine save folder");
+        return false;
+    }
+    struct stat st;
+    if (stat(saveDir, &st) != 0 || !S_ISDIR(st.st_mode)) {
+        char msg[256];
+        snprintf(msg, sizeof(msg), "Save folder does not exist: %s", saveDir);
+        setErrorMessage(appRenderer, msg);
+        free(saveDir);
         return false;
     }
     char safeName[256];
     sanitizeFilename(provider->name, safeName, sizeof(safeName));
-    snprintf(filepath, size, "%s/%s.json", downloadsDir, safeName);
-    free(downloadsDir);
+    snprintf(filepath, size, "%s/%s.json", saveDir, safeName);
+    free(saveDir);
     return true;
 }
 
