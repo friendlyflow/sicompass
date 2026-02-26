@@ -183,6 +183,7 @@ typedef struct AppRenderer {
     bool prefixedInsertMode;  // true when in OPERATOR_INSERT via Ctrl+I/Ctrl+A (prefix-based creation)
     bool pendingSaveAs;       // true when in COMMAND mode for "save as" filename input
     bool pendingFileBrowserSaveAs; // true when in file browser for save-as flow
+    bool pendingFileBrowserOpen;   // true when in file browser for open/load flow
 
     // Application pointer for accessing window dimensions and font metrics
     SiCompassApplication *app;
