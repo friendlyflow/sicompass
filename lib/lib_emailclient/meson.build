@@ -1,4 +1,4 @@
-lib_emailclient_src = files('src/emailclient.c', 'src/provider.c')
+lib_emailclient_src = files('src/emailclient.c', 'src/provider.c', 'src/oauth2.c')
 lib_emailclient_inc = include_directories('include')
 
 curl_dep = dependency('libcurl')

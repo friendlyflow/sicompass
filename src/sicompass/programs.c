@@ -90,14 +90,18 @@ static void loadProgram(const char *name, Provider *settingsProvider) {
             providerRegister(p);
             settingsAddSectionText(settingsProvider, "email client",
                                    "IMAP URL", "emailImapUrl",
-                                   "imaps://imap.example.com");
+                                   "imaps://imap.gmail.com");
             settingsAddSectionText(settingsProvider, "email client",
                                    "SMTP URL", "emailSmtpUrl",
-                                   "smtps://smtp.example.com");
+                                   "smtps://smtp.gmail.com");
             settingsAddSectionText(settingsProvider, "email client",
                                    "username", "emailUsername", "");
             settingsAddSectionText(settingsProvider, "email client",
                                    "password", "emailPassword", "");
+            settingsAddSectionText(settingsProvider, "email client",
+                                   "client ID", "emailClientId", "");
+            settingsAddSectionText(settingsProvider, "email client",
+                                   "client secret", "emailClientSecret", "");
         }
     }
 }
