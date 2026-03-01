@@ -19,10 +19,10 @@ async function runTutorial(path: string): Promise<unknown[]> {
 }
 
 describe("tutorial provider", () => {
-  test("root path returns 8 sections", async () => {
+  test("root path returns 9 sections", async () => {
     const result = await runTutorial("/");
     expect(result).toBeArray();
-    expect(result.length).toBe(8);
+    expect(result.length).toBe(9);
   });
 
   test("root sections have correct names", async () => {
@@ -35,31 +35,20 @@ describe("tutorial provider", () => {
     expect(keys).toContain("Navigation");
     expect(keys).toContain("Editing");
     expect(keys).toContain("Commands");
-    expect(keys).toContain("File Browser");
-    expect(keys).toContain("Links");
+    expect(keys).toContain("Programs");
+    expect(keys).toContain("Interactive Elements");
+    expect(keys).toContain("Configuration");
     expect(keys).toContain("Development");
     expect(keys).toContain("Next Steps");
   });
 
-  test("/Welcome returns children with checkbox and radio elements", async () => {
+  test("/Welcome returns 3 concise intro strings", async () => {
     const result = await runTutorial("/Welcome");
     expect(result).toBeArray();
-    expect(result.length).toBeGreaterThan(0);
-
-    // Should contain checkbox items
-    const strings = result.filter((item) => typeof item === "string") as string[];
-    const hasCheckbox = strings.some(
-      (s) => s.includes("<checkbox")
-    );
-    expect(hasCheckbox).toBe(true);
-
-    // Should contain radio parent object
-    const objects = result.filter((item) => typeof item === "object" && item !== null);
-    const hasRadio = objects.some((obj) => {
-      const key = Object.keys(obj as Record<string, unknown>)[0];
-      return key.includes("<radio>");
-    });
-    expect(hasRadio).toBe(true);
+    expect(result.length).toBe(3);
+    for (const item of result) {
+      expect(typeof item).toBe("string");
+    }
   });
 
   test("/Navigation returns 2 subsections", async () => {
@@ -79,7 +68,6 @@ describe("tutorial provider", () => {
     const result = await runTutorial("/Navigation/Modes");
     expect(result).toBeArray();
     expect(result.length).toBe(3);
-    // All items should be strings
     for (const item of result) {
       expect(typeof item).toBe("string");
     }
@@ -91,15 +79,39 @@ describe("tutorial provider", () => {
     expect(result.length).toBe(4);
   });
 
-  test("invalid path returns empty array", async () => {
-    const result = await runTutorial("/NonExistentSection");
+  test("/Programs lists provider subsections", async () => {
+    const result = await runTutorial("/Programs");
     expect(result).toBeArray();
-    expect(result.length).toBe(0);
+    const keys = result
+      .filter((item) => typeof item === "object" && item !== null)
+      .map((item) => Object.keys(item as Record<string, unknown>)[0]);
+    expect(keys).toContain("File Browser");
+    expect(keys).toContain("Chat Client");
+    expect(keys).toContain("Email Client");
+    expect(keys).toContain("Settings");
   });
 
-  test("/Links contains a link element", async () => {
-    const result = await runTutorial("/Links");
+  test("/Interactive Elements has checkbox and radio elements", async () => {
+    const result = await runTutorial("/Interactive Elements");
     expect(result).toBeArray();
+
+    const strings = result.filter((item) => typeof item === "string") as string[];
+    const hasCheckbox = strings.some((s) => s.includes("<checkbox"));
+    expect(hasCheckbox).toBe(true);
+
+    const objects = result.filter((item) => typeof item === "object" && item !== null);
+    const hasRadio = objects.some((obj) => {
+      const key = Object.keys(obj as Record<string, unknown>)[0];
+      return key.includes("<radio>");
+    });
+    expect(hasRadio).toBe(true);
+  });
+
+  test("/Interactive Elements contains image and link elements", async () => {
+    const result = await runTutorial("/Interactive Elements");
+    const strings = result.filter((item) => typeof item === "string") as string[];
+    const hasImage = strings.some((s) => s.includes("<image>"));
+    expect(hasImage).toBe(true);
 
     const objects = result.filter((item) => typeof item === "object" && item !== null);
     const hasLink = objects.some((obj) => {
@@ -109,10 +121,31 @@ describe("tutorial provider", () => {
     expect(hasLink).toBe(true);
   });
 
-  test("/Welcome contains image elements", async () => {
-    const result = await runTutorial("/Welcome");
-    const strings = result.filter((item) => typeof item === "string") as string[];
-    const hasImage = strings.some((s) => s.includes("<image>"));
-    expect(hasImage).toBe(true);
+  test("/Configuration returns save/load info", async () => {
+    const result = await runTutorial("/Configuration");
+    expect(result).toBeArray();
+    expect(result.length).toBe(5);
+    for (const item of result) {
+      expect(typeof item).toBe("string");
+    }
+  });
+
+  test("/Development contains 3 subsections", async () => {
+    const result = await runTutorial("/Development");
+    expect(result).toBeArray();
+    expect(result.length).toBe(3);
+    const keys = result.map((item) => {
+      if (typeof item === "string") return item;
+      return Object.keys(item as Record<string, unknown>)[0];
+    });
+    expect(keys).toContain("Provider Types");
+    expect(keys).toContain("ProviderOps Functions");
+    expect(keys).toContain("Element Tags");
+  });
+
+  test("invalid path returns empty array", async () => {
+    const result = await runTutorial("/NonExistentSection");
+    expect(result).toBeArray();
+    expect(result.length).toBe(0);
   });
 });
