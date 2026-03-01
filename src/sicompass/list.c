@@ -205,8 +205,8 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
             }
         } else {
             // List available commands: app commands + provider commands
-            const char *appCommands[] = {"editor mode", "operator mode"};
-            int numAppCommands = 2;
+            const char *appCommands[] = {NULL};
+            int numAppCommands = 0;
 
             // Get provider commands for current element
             int numProviderCommands = 0;

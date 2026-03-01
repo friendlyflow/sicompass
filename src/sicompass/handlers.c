@@ -1020,16 +1020,10 @@ void handleEnter(AppRenderer *appRenderer, History history) {
             } else {
                 // Execute selected command
                 const char *cmd = list[appRenderer->listIndex].label;
-                if (strcmp(cmd, "editor mode") == 0) {
-                    appRenderer->currentCommand = COMMAND_EDITOR_MODE;
-                } else if (strcmp(cmd, "operator mode") == 0) {
-                    appRenderer->currentCommand = COMMAND_OPERATOR_MODE;
-                } else {
-                    appRenderer->currentCommand = COMMAND_PROVIDER;
-                    strncpy(appRenderer->providerCommandName, cmd,
-                            sizeof(appRenderer->providerCommandName) - 1);
-                    appRenderer->providerCommandName[sizeof(appRenderer->providerCommandName) - 1] = '\0';
-                }
+                appRenderer->currentCommand = COMMAND_PROVIDER;
+                strncpy(appRenderer->providerCommandName, cmd,
+                        sizeof(appRenderer->providerCommandName) - 1);
+                appRenderer->providerCommandName[sizeof(appRenderer->providerCommandName) - 1] = '\0';
                 handleCommand(appRenderer);
             }
         }
@@ -2196,18 +2190,6 @@ void handleEscape(AppRenderer *appRenderer) {
 void handleCommand(AppRenderer *appRenderer) {
     switch (appRenderer->currentCommand) {
         case COMMAND_NONE:
-            break;
-
-        case COMMAND_EDITOR_MODE:
-            appRenderer->previousCoordinate = appRenderer->currentCoordinate;
-            appRenderer->currentCoordinate = COORDINATE_EDITOR_GENERAL;
-            accesskitSpeakModeChange(appRenderer, NULL);
-            break;
-
-        case COMMAND_OPERATOR_MODE:
-            appRenderer->previousCoordinate = appRenderer->currentCoordinate;
-            appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
-            accesskitSpeakModeChange(appRenderer, NULL);
             break;
 
         case COMMAND_PROVIDER: {

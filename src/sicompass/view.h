@@ -73,8 +73,6 @@ typedef enum {
 
 typedef enum {
     COMMAND_NONE,
-    COMMAND_EDITOR_MODE,
-    COMMAND_OPERATOR_MODE,
     COMMAND_PROVIDER,
 } Command;
 

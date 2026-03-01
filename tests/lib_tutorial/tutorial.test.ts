@@ -78,7 +78,7 @@ describe("tutorial provider", () => {
   test("/Navigation/Modes returns mode descriptions", async () => {
     const result = await runTutorial("/Navigation/Modes");
     expect(result).toBeArray();
-    expect(result.length).toBe(4);
+    expect(result.length).toBe(3);
     // All items should be strings
     for (const item of result) {
       expect(typeof item).toBe("string");
