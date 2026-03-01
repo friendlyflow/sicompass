@@ -124,8 +124,10 @@ static void applySettings(const char *key, const char *value, void *userdata) {
         {"emailSmtpUrl", "set smtp url"},
         {"emailUsername", "set username"},
         {"emailPassword", "set password"},
+        {"emailClientId", "set client id"},
+        {"emailClientSecret", "set client secret"},
     };
-    for (int k = 0; k < 4; k++) {
+    for (int k = 0; k < 6; k++) {
         if (strcmp(key, emailKeys[k][0]) == 0) {
             for (int i = 0; i < appRenderer->ffonCount; i++) {
                 if (strcmp(appRenderer->providers[i]->name, "emailclient") == 0) {

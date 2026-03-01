@@ -1,8 +1,10 @@
 #include "emailclient.h"
+#include "emailclient_oauth2.h"
 #include <curl/curl.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <time.h>
 
 typedef struct {
     char *data;
@@ -52,6 +54,36 @@ void emailclientGlobalInit(void) {
 
 void emailclientGlobalCleanup(void) {
     curl_global_cleanup();
+}
+
+// Refresh OAuth2 token if expired; no-op for password auth
+static bool ensureOAuth2Token(EmailClientConfig *config) {
+    if (!config->oauthAccessToken[0]) return true; // password mode
+    if (time(NULL) < config->tokenExpiry - 60) return true; // still valid
+    if (!config->oauthRefreshToken[0]) return false;
+
+    OAuth2TokenResult result = emailclientOAuth2RefreshToken(
+        config->clientId, config->clientSecret, config->oauthRefreshToken);
+    if (!result.success) return false;
+
+    strncpy(config->oauthAccessToken, result.accessToken,
+            sizeof(config->oauthAccessToken) - 1);
+    config->oauthAccessToken[sizeof(config->oauthAccessToken) - 1] = '\0';
+    config->tokenExpiry = time(NULL) + result.expiresIn;
+    return true;
+}
+
+// Apply authentication to a curl handle
+static void applyAuth(CURL *curl, const EmailClientConfig *config) {
+    curl_easy_setopt(curl, CURLOPT_USERNAME, config->username);
+    if (config->oauthAccessToken[0]) {
+        curl_easy_setopt(curl, CURLOPT_XOAUTH2_BEARER,
+                         config->oauthAccessToken);
+        curl_easy_setopt(curl, CURLOPT_SASL_IR, 1L);
+        curl_easy_setopt(curl, CURLOPT_LOGIN_OPTIONS, "AUTH=XOAUTH2");
+    } else {
+        curl_easy_setopt(curl, CURLOPT_PASSWORD, config->password);
+    }
 }
 
 // URL-encode a folder name for IMAP URLs (spaces, special chars)
@@ -115,10 +147,11 @@ static bool parseListLine(const char *line, char *outName, int outNameSize) {
     return outName[0] != '\0';
 }
 
-EmailFolder* emailclientListFolders(const EmailClientConfig *config,
+EmailFolder* emailclientListFolders(EmailClientConfig *config,
                                      int *outCount) {
     *outCount = 0;
     if (!config || !config->imapUrl[0] || !config->username[0]) return NULL;
+    if (!ensureOAuth2Token(config)) return NULL;
 
     CURL *curl = curl_easy_init();
     if (!curl) return NULL;
@@ -128,8 +161,7 @@ EmailFolder* emailclientListFolders(const EmailClientConfig *config,
 
     ResponseBuffer buf = {NULL, 0, 0};
     curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_USERNAME, config->username);
-    curl_easy_setopt(curl, CURLOPT_PASSWORD, config->password);
+    applyAuth(curl, config);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
@@ -231,12 +263,13 @@ static bool parseHeaderBlock(const char *block, int blockLen,
     return out->from[0] || out->subject[0];
 }
 
-EmailHeader* emailclientListMessages(const EmailClientConfig *config,
+EmailHeader* emailclientListMessages(EmailClientConfig *config,
                                       const char *folder, int limit,
                                       int *outCount) {
     *outCount = 0;
     if (!config || !config->imapUrl[0] || !config->username[0]) return NULL;
     if (!folder || !folder[0]) return NULL;
+    if (!ensureOAuth2Token(config)) return NULL;
 
     CURL *curl = curl_easy_init();
     if (!curl) return NULL;
@@ -249,8 +282,7 @@ EmailHeader* emailclientListMessages(const EmailClientConfig *config,
 
     ResponseBuffer buf = {NULL, 0, 0};
     curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_USERNAME, config->username);
-    curl_easy_setopt(curl, CURLOPT_PASSWORD, config->password);
+    applyAuth(curl, config);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
@@ -329,10 +361,11 @@ void emailclientFreeHeaders(EmailHeader *headers, int count) {
     free(headers);
 }
 
-EmailMessage* emailclientFetchMessage(const EmailClientConfig *config,
+EmailMessage* emailclientFetchMessage(EmailClientConfig *config,
                                        const char *folder, int uid) {
     if (!config || !config->imapUrl[0] || !config->username[0]) return NULL;
     if (!folder || !folder[0]) return NULL;
+    if (!ensureOAuth2Token(config)) return NULL;
 
     CURL *curl = curl_easy_init();
     if (!curl) return NULL;
@@ -347,8 +380,7 @@ EmailMessage* emailclientFetchMessage(const EmailClientConfig *config,
 
     ResponseBuffer buf = {NULL, 0, 0};
     curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_USERNAME, config->username);
-    curl_easy_setopt(curl, CURLOPT_PASSWORD, config->password);
+    applyAuth(curl, config);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
@@ -434,11 +466,12 @@ void emailclientFreeMessage(EmailMessage *msg) {
     free(msg);
 }
 
-bool emailclientSendMessage(const EmailClientConfig *config,
+bool emailclientSendMessage(EmailClientConfig *config,
                              const char *to, const char *subject,
                              const char *body) {
     if (!config || !config->smtpUrl[0] || !config->username[0]) return false;
     if (!to || !to[0] || !body) return false;
+    if (!ensureOAuth2Token(config)) return false;
 
     CURL *curl = curl_easy_init();
     if (!curl) return false;
@@ -459,8 +492,7 @@ bool emailclientSendMessage(const EmailClientConfig *config,
     recipients = curl_slist_append(recipients, to);
 
     curl_easy_setopt(curl, CURLOPT_URL, config->smtpUrl);
-    curl_easy_setopt(curl, CURLOPT_USERNAME, config->username);
-    curl_easy_setopt(curl, CURLOPT_PASSWORD, config->password);
+    applyAuth(curl, config);
     curl_easy_setopt(curl, CURLOPT_MAIL_FROM, config->username);
     curl_easy_setopt(curl, CURLOPT_MAIL_RCPT, recipients);
     curl_easy_setopt(curl, CURLOPT_READFUNCTION, curlReadCallback);
