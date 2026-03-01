@@ -101,8 +101,6 @@ typedef enum {
 
 typedef enum {
     COMMAND_NONE,
-    COMMAND_EDITOR_MODE,
-    COMMAND_OPERATOR_MODE,
     COMMAND_PROVIDER,
 } Command;
 
@@ -477,18 +475,6 @@ void handleEscape(AppRenderer *appRenderer) {
 void handleCommand(AppRenderer *appRenderer) {
     switch (appRenderer->currentCommand) {
         case COMMAND_NONE:
-            break;
-
-        case COMMAND_EDITOR_MODE:
-            appRenderer->previousCoordinate = appRenderer->currentCoordinate;
-            appRenderer->currentCoordinate = COORDINATE_EDITOR_GENERAL;
-            accesskitSpeakModeChange(appRenderer, NULL);
-            break;
-
-        case COMMAND_OPERATOR_MODE:
-            appRenderer->previousCoordinate = appRenderer->currentCoordinate;
-            appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
-            accesskitSpeakModeChange(appRenderer, NULL);
             break;
 
         case COMMAND_PROVIDER: {
@@ -976,7 +962,7 @@ void test_escape_from_command_mode(void) {
     AppRenderer app = createTestApp();
     app.currentCoordinate = COORDINATE_COMMAND;
     app.previousCoordinate = COORDINATE_OPERATOR_GENERAL;
-    app.currentCommand = COMMAND_EDITOR_MODE;
+    app.currentCommand = COMMAND_NONE;
     app.currentId.depth = 1;
     app.currentId.ids[0] = 2;
 
@@ -1091,29 +1077,6 @@ void test_command_none_noop(void) {
     TEST_ASSERT_EQUAL_INT(0, accesskitSpeakModeChange_fake.call_count);
 }
 
-void test_command_editor_mode(void) {
-    AppRenderer app = createTestApp();
-    app.currentCommand = COMMAND_EDITOR_MODE;
-    app.currentCoordinate = COORDINATE_COMMAND;
-
-    handleCommand(&app);
-
-    TEST_ASSERT_EQUAL(COORDINATE_EDITOR_GENERAL, app.currentCoordinate);
-    TEST_ASSERT_EQUAL(COORDINATE_COMMAND, app.previousCoordinate);
-    TEST_ASSERT_EQUAL_INT(1, accesskitSpeakModeChange_fake.call_count);
-}
-
-void test_command_operator_mode(void) {
-    AppRenderer app = createTestApp();
-    app.currentCommand = COMMAND_OPERATOR_MODE;
-    app.currentCoordinate = COORDINATE_COMMAND;
-
-    handleCommand(&app);
-
-    TEST_ASSERT_EQUAL(COORDINATE_OPERATOR_GENERAL, app.currentCoordinate);
-    TEST_ASSERT_EQUAL(COORDINATE_COMMAND, app.previousCoordinate);
-    TEST_ASSERT_EQUAL_INT(1, accesskitSpeakModeChange_fake.call_count);
-}
 
 /* ============================================
  * handleCtrlF tests
@@ -1503,8 +1466,6 @@ int main(void) {
 
     // handleCommand
     RUN_TEST(test_command_none_noop);
-    RUN_TEST(test_command_editor_mode);
-    RUN_TEST(test_command_operator_mode);
 
     // handleCtrlF
     RUN_TEST(test_ctrlF_from_scroll_enters_scroll_search);

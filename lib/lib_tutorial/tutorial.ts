@@ -53,8 +53,7 @@ const sections: Section[] = [
       {
         key: "Modes",
         children: [
-          "o: operator mode - navigate and perform actions",
-          "e: editor mode - edit text content",
+          "Space: toggle between operator and editor mode",
           ":: command mode - type commands",
           "Tab: search mode - filter items in current view",
         ],
@@ -66,7 +65,7 @@ const sections: Section[] = [
     children: [
       "Press i to enter insert mode on an editable item.",
       "Press a to enter append mode.",
-      "Press Escape to return to operator mode.",
+      "Press Escape to return to the previous mode.",
       "Press Enter to confirm your edit.",
     ],
   },
@@ -76,8 +75,6 @@ const sections: Section[] = [
       "Press : to enter command mode.",
       ":create file - create a new file (in file browser)",
       ":create directory - create a new directory",
-      ":editor mode - switch to editor mode",
-      ":operator mode - switch to operator mode",
     ],
   },
   {

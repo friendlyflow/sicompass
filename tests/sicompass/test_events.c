@@ -53,6 +53,7 @@ typedef uint64_t SDL_WindowID;
 #define SDLK_DELETE     0x0000007F
 #define SDLK_BACKSPACE  0x00000008
 #define SDLK_COLON     ':'
+#define SDLK_SPACE     ' '
 
 typedef struct {
     struct {
@@ -88,13 +89,12 @@ typedef enum {
 
 typedef enum {
     COMMAND_NONE,
-    COMMAND_EDITOR_MODE,
-    COMMAND_OPERATOR_MODE,
     COMMAND_PROVIDER,
 } Command;
 
 typedef struct {
     Coordinate currentCoordinate;
+    Coordinate previousCoordinate;
     Command currentCommand;
     char *inputBuffer;
     int inputBufferSize;
@@ -146,6 +146,7 @@ FAKE_VOID_FUNC(handleCtrlF, AppRenderer*);
 FAKE_VOID_FUNC(handleEscape, AppRenderer*);
 FAKE_VOID_FUNC(handleCommand, AppRenderer*);
 FAKE_VOID_FUNC(handleDashboard, AppRenderer*);
+FAKE_VOID_FUNC(accesskitSpeakModeChange, AppRenderer*, const char*);
 
 // Mocks for backspace/delete inline code
 FAKE_VALUE_FUNC(bool, hasSelection, AppRenderer*);
@@ -343,17 +344,16 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
              appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
         handleDashboard(appRenderer);
     }
-    else if (!ctrl && !shift && !alt && key == SDLK_E &&
+    else if (!ctrl && !shift && !alt && key == SDLK_SPACE &&
              (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL ||
               appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL)) {
-        appRenderer->currentCommand = COMMAND_EDITOR_MODE;
-        handleCommand(appRenderer);
-    }
-    else if (!ctrl && !shift && !alt && key == SDLK_O &&
-             (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL ||
-              appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL)) {
-        appRenderer->currentCommand = COMMAND_OPERATOR_MODE;
-        handleCommand(appRenderer);
+        appRenderer->previousCoordinate = appRenderer->currentCoordinate;
+        if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL)
+            appRenderer->currentCoordinate = COORDINATE_EDITOR_GENERAL;
+        else
+            appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
+        accesskitSpeakModeChange(appRenderer, NULL);
+        appRenderer->needsRedraw = true;
     }
 }
 
@@ -444,7 +444,7 @@ void setUp(void) {
     RESET_FAKE(handleHistoryAction);
     RESET_FAKE(handleCtrlX); RESET_FAKE(handleCtrlC); RESET_FAKE(handleCtrlV);
     RESET_FAKE(handleCtrlF); RESET_FAKE(handleEscape); RESET_FAKE(handleCommand);
-    RESET_FAKE(handleDashboard);
+    RESET_FAKE(handleDashboard); RESET_FAKE(accesskitSpeakModeChange);
     RESET_FAKE(hasSelection); RESET_FAKE(deleteSelection);
     RESET_FAKE(caretReset); RESET_FAKE(SDL_GetTicks);
     RESET_FAKE(populateListCurrentLayer); RESET_FAKE(clearSelection);
@@ -675,21 +675,33 @@ void test_handleKeys_escape(void) {
     freeTestApp(&app);
 }
 
-void test_handleKeys_e_editor_mode(void) {
+void test_handleKeys_space_toggles_to_editor(void) {
     AppRenderer app = createTestApp(COORDINATE_OPERATOR_GENERAL);
-    SDL_Event e = makeKeyEvent(SDLK_E, 0);
+    SDL_Event e = makeKeyEvent(SDLK_SPACE, 0);
     handleKeys(&app, &e);
-    TEST_ASSERT_EQUAL_INT(COMMAND_EDITOR_MODE, app.currentCommand);
-    TEST_ASSERT_EQUAL_INT(1, handleCommand_fake.call_count);
+    TEST_ASSERT_EQUAL_INT(COORDINATE_EDITOR_GENERAL, app.currentCoordinate);
+    TEST_ASSERT_EQUAL_INT(COORDINATE_OPERATOR_GENERAL, app.previousCoordinate);
+    TEST_ASSERT_TRUE(app.needsRedraw);
+    TEST_ASSERT_EQUAL_INT(1, accesskitSpeakModeChange_fake.call_count);
     freeTestApp(&app);
 }
 
-void test_handleKeys_o_operator_mode(void) {
+void test_handleKeys_space_toggles_to_operator(void) {
     AppRenderer app = createTestApp(COORDINATE_EDITOR_GENERAL);
-    SDL_Event e = makeKeyEvent(SDLK_O, 0);
+    SDL_Event e = makeKeyEvent(SDLK_SPACE, 0);
     handleKeys(&app, &e);
-    TEST_ASSERT_EQUAL_INT(COMMAND_OPERATOR_MODE, app.currentCommand);
-    TEST_ASSERT_EQUAL_INT(1, handleCommand_fake.call_count);
+    TEST_ASSERT_EQUAL_INT(COORDINATE_OPERATOR_GENERAL, app.currentCoordinate);
+    TEST_ASSERT_EQUAL_INT(COORDINATE_EDITOR_GENERAL, app.previousCoordinate);
+    TEST_ASSERT_TRUE(app.needsRedraw);
+    TEST_ASSERT_EQUAL_INT(1, accesskitSpeakModeChange_fake.call_count);
+    freeTestApp(&app);
+}
+
+void test_handleKeys_space_noop_in_insert(void) {
+    AppRenderer app = createTestApp(COORDINATE_EDITOR_INSERT);
+    SDL_Event e = makeKeyEvent(SDLK_SPACE, 0);
+    handleKeys(&app, &e);
+    TEST_ASSERT_EQUAL_INT(COORDINATE_EDITOR_INSERT, app.currentCoordinate);
     freeTestApp(&app);
 }
 
@@ -826,8 +838,9 @@ int main(void) {
     RUN_TEST(test_handleKeys_ctrl_v_paste);
     RUN_TEST(test_handleKeys_ctrl_f_find);
     RUN_TEST(test_handleKeys_escape);
-    RUN_TEST(test_handleKeys_e_editor_mode);
-    RUN_TEST(test_handleKeys_o_operator_mode);
+    RUN_TEST(test_handleKeys_space_toggles_to_editor);
+    RUN_TEST(test_handleKeys_space_toggles_to_operator);
+    RUN_TEST(test_handleKeys_space_noop_in_insert);
     RUN_TEST(test_handleKeys_d_dashboard_in_operator);
     RUN_TEST(test_handleKeys_d_noop_in_editor);
     RUN_TEST(test_handleKeys_ctrl_a_operator_appends);

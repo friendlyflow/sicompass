@@ -255,19 +255,17 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
     else if (!ctrl && !shift && !alt && key == SDLK_ESCAPE) {
         handleEscape(appRenderer);
     }
-    // E (editor mode)
-    else if (!ctrl && !shift && !alt && key == SDLK_E &&
+    // Space (toggle between operator and editor general modes)
+    else if (!ctrl && !shift && !alt && key == SDLK_SPACE &&
              (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL ||
               appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL)) {
-        appRenderer->currentCommand = COMMAND_EDITOR_MODE;
-        handleCommand(appRenderer);
-    }
-    // O (operator mode)
-    else if (!ctrl && !shift && !alt && key == SDLK_O &&
-             (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL ||
-              appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL)) {
-        appRenderer->currentCommand = COMMAND_OPERATOR_MODE;
-        handleCommand(appRenderer);
+        appRenderer->previousCoordinate = appRenderer->currentCoordinate;
+        if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL)
+            appRenderer->currentCoordinate = COORDINATE_EDITOR_GENERAL;
+        else
+            appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
+        accesskitSpeakModeChange(appRenderer, NULL);
+        appRenderer->needsRedraw = true;
     }
     // Ctrl+S in operator general — save provider config
     else if (ctrl && !shift && !alt && key == SDLK_S &&
