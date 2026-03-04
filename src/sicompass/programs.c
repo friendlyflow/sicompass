@@ -50,7 +50,7 @@ static void writeDefaultConfig(const char *configPath) {
 
 static void loadProgram(const char *name, Provider *settingsProvider) {
     if (strcmp(name, "tutorial") == 0) {
-        Provider *p = scriptProviderCreate("tutorial", "tutorial", TUTORIAL_SCRIPT_PATH);
+        Provider *p = scriptProviderCreate("tutorial", "tutorial --> if you're new to Sicompass, push the right key", TUTORIAL_SCRIPT_PATH);
         if (p) {
             providerRegister(p);
             settingsAddSection(settingsProvider, "tutorial");

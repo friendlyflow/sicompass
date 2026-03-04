@@ -9,11 +9,11 @@ interface Section {
 
 const sections: Section[] = [
   {
-    key: "Welcome",
+    key: "Welcome --> use Right key, Down, Up and Left key",
     children: [
-      "Sicompass is a keyboard-driven navigable structure.",
-      "Everything is a nested list -- navigate with Vim-like keys.",
-      "Use j/k to move, l or Enter to go deeper, h or Escape to go back.",
+      "Sicompass is a keyboard-driven interface for browsing and managing structured data.",
+      "It unifies file browsing, chat, email, and settings into a single navigable tree.",
+      "Each top-level item is a program (provider) that plugs into the same interface.",
     ],
   },
   {
@@ -22,18 +22,20 @@ const sections: Section[] = [
       {
         key: "Moving Around",
         children: [
-          "h or Left Arrow: go back (parent level)",
-          "j or Down Arrow: move down in list",
-          "k or Up Arrow: move up in list",
-          "l or Right Arrow / Enter: go into selected item",
+          "Left key: go back (parent level)",
+          "Down key: move down in list",
+          "Up key: move up in list",
+          "Right key / Enter: go into selected item",
         ],
       },
       {
         key: "Modes",
         children: [
           "Space: toggle between operator and editor mode",
-          ":: command mode - type commands",
-          "Tab: search mode - filter items in current view",
+          ": (colon): command mode - type commands",
+          "Tab: simple search mode - filter items in current view",
+          "Tab again: scroll mode - scroll in a long text body",
+          "Ctrl + f: extended search mode - filtem items in children",
         ],
       },
     ],
@@ -42,7 +44,7 @@ const sections: Section[] = [
     key: "Editing",
     children: [
       "Press i to enter insert mode on an editable item.",
-      "Press a to enter append mode.",
+      "Press a to enter append mode on an editable item.",
       "Press Escape to return to the previous mode.",
       "Press Enter to confirm your edit.",
     ],
@@ -50,7 +52,7 @@ const sections: Section[] = [
   {
     key: "Commands",
     children: [
-      "Press : to enter command mode.",
+      "Press : (colon) to enter command mode.",
       ":create file - create a new file (in file browser)",
       ":create directory - create a new directory",
     ],
@@ -70,7 +72,17 @@ const sections: Section[] = [
         ],
       },
       {
-        key: "Chat Client",
+        key: "Sales Demo",
+        children: [
+          "An interactive air handling unit (HVAC) product configurator.",
+          "Navigate supply and return air components like filters, coils, fans, and recovery wheels.",
+          "Edit parameters such as temperatures, pressures, and dimensions inline.",
+          "Add optional components (chillers, fan coil units) via 'Add element:' sections.",
+          "Press 'd' at the root to view the technical unit diagram.",
+        ],
+      },
+      {
+        key: "Chat Client (not yet functional)",
         children: [
           "A Matrix protocol chat client.",
           "Lists rooms and messages as a navigable tree.",
@@ -79,7 +91,7 @@ const sections: Section[] = [
         ],
       },
       {
-        key: "Email Client",
+        key: "Email Client (not yet functional)",
         children: [
           "Read and send email via IMAP and SMTP.",
           "Supports Google OAuth2 for Gmail accounts.",
@@ -225,8 +237,15 @@ const sections: Section[] = [
   {
     key: "Next Steps",
     children: [
-      "Press Escape or h to go back to the root.",
-      "Navigate down to the file browser to explore your files.",
+      "Sicompass is growing. Here's what's planned:",
+      "Web Browser — accessible web browsing within sicompass.",
+      "Store — an app ecosystem where others can build and publish providers.",
+      "Notebook — structured note-taking with server-side sync.",
+      "IDE — code as a navigable structure, with C code generation.",
+      "Terminal — a terminal emulator integrated as a provider.",
+      "Blog — publish content, with paid access, viewable in browsers too.",
+      "Mobile — Android and iOS versions.",
+      "Contributions welcome! Join us on Discord.",
       "Happy navigating!",
     ],
   },

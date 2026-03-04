@@ -31,7 +31,7 @@ describe("tutorial provider", () => {
       if (typeof item === "string") return item;
       return Object.keys(item as Record<string, unknown>)[0];
     });
-    expect(keys).toContain("Welcome");
+    expect(keys).toContain("Welcome --> use Right key, Down, Up and Left key");
     expect(keys).toContain("Navigation");
     expect(keys).toContain("Editing");
     expect(keys).toContain("Commands");
@@ -43,7 +43,7 @@ describe("tutorial provider", () => {
   });
 
   test("/Welcome returns 3 concise intro strings", async () => {
-    const result = await runTutorial("/Welcome");
+    const result = await runTutorial("/Welcome --> use Right key, Down, Up and Left key");
     expect(result).toBeArray();
     expect(result.length).toBe(3);
     for (const item of result) {
@@ -67,7 +67,7 @@ describe("tutorial provider", () => {
   test("/Navigation/Modes returns mode descriptions", async () => {
     const result = await runTutorial("/Navigation/Modes");
     expect(result).toBeArray();
-    expect(result.length).toBe(3);
+    expect(result.length).toBe(5);
     for (const item of result) {
       expect(typeof item).toBe("string");
     }
@@ -86,8 +86,7 @@ describe("tutorial provider", () => {
       .filter((item) => typeof item === "object" && item !== null)
       .map((item) => Object.keys(item as Record<string, unknown>)[0]);
     expect(keys).toContain("File Browser");
-    expect(keys).toContain("Chat Client");
-    expect(keys).toContain("Email Client");
+    expect(keys).toContain("Sales Demo");
     expect(keys).toContain("Settings");
   });
 
