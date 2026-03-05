@@ -12,7 +12,7 @@ const sections: Section[] = [
     key: "Welcome --> use Right key, Down, Up and Left key",
     children: [
       "Sicompass is a keyboard-driven interface for browsing and managing structured data.",
-      "It unifies file browsing, chat, email, and settings into a single navigable tree.",
+      "It consistently unifies file browsing, chat, email, and settings into a single navigable tree.",
       "Each top-level item is a program (provider) that plugs into the same interface.",
     ],
   },
