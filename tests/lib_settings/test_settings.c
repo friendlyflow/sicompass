@@ -453,6 +453,136 @@ void test_section_with_radio_and_text(void) {
     free(p);
 }
 
+// --- settingsAddPrioritySection ---
+
+void test_prioritySection_renders_first(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+
+    settingsAddSection(p, "other section");
+    settingsAddPrioritySection(p, "programs");
+
+    int count;
+    FfonElement **elems = p->fetch(p, &count);
+    TEST_ASSERT_EQUAL_INT(3, count);  // programs + sicompass + other section
+    TEST_ASSERT_EQUAL_STRING("programs", elems[0]->data.object->key);
+    TEST_ASSERT_EQUAL_STRING("sicompass", elems[1]->data.object->key);
+    TEST_ASSERT_EQUAL_STRING("other section", elems[2]->data.object->key);
+
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+    free(p->state);
+    free(p);
+}
+
+void test_prioritySection_not_duplicated(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+
+    settingsAddPrioritySection(p, "programs");
+    settingsAddSectionCheckbox(p, "programs", "tutorial", "enable_tutorial", true);
+
+    int count;
+    FfonElement **elems = p->fetch(p, &count);
+    // Only 2: programs (priority) + sicompass — not duplicated
+    TEST_ASSERT_EQUAL_INT(2, count);
+    TEST_ASSERT_EQUAL_STRING("programs", elems[0]->data.object->key);
+    TEST_ASSERT_EQUAL_STRING("sicompass", elems[1]->data.object->key);
+
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+    free(p->state);
+    free(p);
+}
+
+// --- settingsAddSectionCheckbox ---
+
+void test_checkbox_renders_checked(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+
+    settingsAddSectionCheckbox(p, "programs", "tutorial", "enable_tutorial", true);
+
+    int count;
+    FfonElement **elems = p->fetch(p, &count);
+    TEST_ASSERT_EQUAL_INT(2, count);  // sicompass + programs
+
+    FfonObject *section = elems[1]->data.object;
+    TEST_ASSERT_EQUAL_STRING("programs", section->key);
+    TEST_ASSERT_EQUAL_INT(1, section->count);
+
+    FfonElement *cbElem = section->elements[0];
+    TEST_ASSERT_EQUAL_INT(FFON_STRING, cbElem->type);
+    TEST_ASSERT_TRUE(providerTagHasCheckboxChecked(cbElem->data.string));
+
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+    free(p->state);
+    free(p);
+}
+
+void test_checkbox_renders_unchecked(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+
+    settingsAddSectionCheckbox(p, "programs", "tutorial", "enable_tutorial", false);
+
+    int count;
+    FfonElement **elems = p->fetch(p, &count);
+
+    FfonObject *section = elems[1]->data.object;
+    FfonElement *cbElem = section->elements[0];
+    TEST_ASSERT_TRUE(providerTagHasCheckbox(cbElem->data.string));
+    TEST_ASSERT_FALSE(providerTagHasCheckboxChecked(cbElem->data.string));
+
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+    free(p->state);
+    free(p);
+}
+
+void test_onCheckboxChange_updates_state(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+
+    settingsAddSectionCheckbox(p, "programs", "tutorial", "enable_tutorial", true);
+
+    // Simulate unchecking
+    p->onCheckboxChange(p, "tutorial", false);
+
+    TEST_ASSERT_EQUAL_INT(1, callbackCount);
+    TEST_ASSERT_EQUAL_STRING("enable_tutorial", lastCallbackKey);
+    TEST_ASSERT_EQUAL_STRING("false", lastCallbackValue);
+
+    // Fetch should now show unchecked
+    int count;
+    FfonElement **elems = p->fetch(p, &count);
+    FfonObject *section = elems[1]->data.object;
+    FfonElement *cbElem = section->elements[0];
+    TEST_ASSERT_TRUE(providerTagHasCheckbox(cbElem->data.string));
+    TEST_ASSERT_FALSE(providerTagHasCheckboxChecked(cbElem->data.string));
+
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+    free(p->state);
+    free(p);
+}
+
+void test_init_calls_callback_for_checkbox_entries(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+
+    settingsAddSectionCheckbox(p, "programs", "tutorial", "enable_tutorial", true);
+    settingsAddSectionCheckbox(p, "programs", "file browser", "enable_file browser", false);
+
+    p->init(p);
+
+    // colorScheme + 2 checkbox entries
+    TEST_ASSERT_EQUAL_INT(3, callbackCount);
+    TEST_ASSERT_EQUAL_STRING("colorScheme", callbackKeys[0]);
+    TEST_ASSERT_EQUAL_STRING("enable_tutorial", callbackKeys[1]);
+    TEST_ASSERT_EQUAL_STRING("true", callbackValues[1]);
+    TEST_ASSERT_EQUAL_STRING("enable_file browser", callbackKeys[2]);
+    TEST_ASSERT_EQUAL_STRING("false", callbackValues[2]);
+
+    free(p->state);
+    free(p);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -483,6 +613,13 @@ int main(void) {
     RUN_TEST(test_commitEdit_text_entry);
     RUN_TEST(test_commitEdit_wrong_path_returns_false);
     RUN_TEST(test_section_with_radio_and_text);
+
+    RUN_TEST(test_prioritySection_renders_first);
+    RUN_TEST(test_prioritySection_not_duplicated);
+    RUN_TEST(test_checkbox_renders_checked);
+    RUN_TEST(test_checkbox_renders_unchecked);
+    RUN_TEST(test_onCheckboxChange_updates_state);
+    RUN_TEST(test_init_calls_callback_for_checkbox_entries);
 
     return UNITY_END();
 }

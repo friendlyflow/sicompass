@@ -58,3 +58,20 @@ char* providerGetMainConfigPath(void) {
 
     return result;
 }
+
+char* providerGetPluginsDir(void) {
+    char *configHome = platformGetConfigHome();
+    if (!configHome) return NULL;
+
+    const char *sep = platformGetPathSeparator();
+    const char *subdir = "sicompass";
+    const char *plugins = "plugins";
+    size_t len = strlen(configHome) + strlen(subdir) + strlen(sep) +
+                 strlen(plugins) + strlen(sep) + 1;
+    char *result = malloc(len);
+    if (!result) { free(configHome); return NULL; }
+    snprintf(result, len, "%s%s%s%s%s", configHome, subdir, sep, plugins, sep);
+    free(configHome);
+
+    return result;
+}

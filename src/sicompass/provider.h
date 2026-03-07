@@ -57,3 +57,10 @@ void providerNotifyRadioChanged(AppRenderer *appRenderer, IdArray *elementId);
 // Notify the active provider that a button element was activated.
 // elementId: ID of the activated <button> string element.
 void providerNotifyButtonPressed(AppRenderer *appRenderer, IdArray *elementId);
+
+// Notify the active provider that a checkbox element was toggled.
+// elementId: ID of the toggled <checkbox> string element.
+void providerNotifyCheckboxChanged(AppRenderer *appRenderer, IdArray *elementId);
+
+// Remove a provider from the global registry.
+void providerUnregister(Provider *provider);

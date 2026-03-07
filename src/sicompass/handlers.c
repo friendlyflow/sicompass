@@ -655,6 +655,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
     } else if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
         // Check for checkbox toggle first
         if (handleCheckboxToggle(appRenderer, &appRenderer->currentId)) {
+            providerNotifyCheckboxChanged(appRenderer, &appRenderer->currentId);
             int savedIndex = appRenderer->listIndex;
             createListCurrentLayer(appRenderer);
             appRenderer->listIndex = savedIndex;
@@ -775,6 +776,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
             idArrayCopy(&selectedId, &list[appRenderer->listIndex].id);
 
             if (handleCheckboxToggle(appRenderer, &selectedId)) {
+                providerNotifyCheckboxChanged(appRenderer, &selectedId);
                 int savedIndex = appRenderer->listIndex;
                 createListCurrentLayer(appRenderer);
                 appRenderer->listIndex = savedIndex;
@@ -886,6 +888,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
             }
 
             if (handleCheckboxToggle(appRenderer, &selectedId)) {
+                providerNotifyCheckboxChanged(appRenderer, &selectedId);
                 int savedIndex = appRenderer->listIndex;
                 createListExtendedSearch(appRenderer);
                 appRenderer->listIndex = savedIndex;

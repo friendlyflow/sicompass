@@ -16,7 +16,7 @@ PROJECT_DIR="$CLAUDE_PROJECT_DIR"
 REL_PATH="${FILE_PATH#"$PROJECT_DIR"/}"
 
 # Whitelisted shared infrastructure headers that src/sicompass/ may include from lib/
-ALLOWED_LIB_HEADERS="provider_interface\.h|provider_tags\.h|platform\.h|ffon\.h"
+ALLOWED_LIB_HEADERS="provider_interface\.h|provider_tags\.h|platform\.h|ffon\.h|settings_provider\.h"
 
 # Known src/sicompass/ internal headers
 SICOMPASS_HEADERS="main\.h|view\.h|provider\.h|text\.h|image\.h|rectangle\.h|caret\.h|checkmark\.h|accesskit_sdl\.h|programs\.h|unicode_search\.h|handlers\.h|render\.h|list\.h"

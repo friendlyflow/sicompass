@@ -87,6 +87,11 @@ typedef struct Provider {
     // functionName: content between <button>...</button> tags in the FFON string
     void (*onButtonPress)(struct Provider *self, const char *functionName);
 
+    // Optional: Called when a <checkbox> element is toggled.
+    // label: stripped content of the checkbox element
+    // checked: true if the checkbox is now checked
+    void (*onCheckboxChange)(struct Provider *self, const char *label, bool checked);
+
     // Optional: Create a new element to insert into the FFON tree.
     // Called when a <button> inside an "Add element:" section is pressed.
     // Returns a freshly-allocated FfonElement (caller takes ownership), or NULL.
@@ -195,6 +200,12 @@ char* providerGetConfigPath(const char *providerName);
  * Returns: ~/.config/sicompass/settings.json (caller must free)
  */
 char* providerGetMainConfigPath(void);
+
+/**
+ * Get the plugins directory path for user-installed plugins.
+ * Returns: ~/.config/sicompass/plugins/ (caller must free)
+ */
+char* providerGetPluginsDir(void);
 
 /**
  * Create a provider backed by a script (e.g., TypeScript run with Bun).
