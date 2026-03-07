@@ -27,6 +27,14 @@ Do not use `make` - this project uses Meson + Ninja, not CMake or Makefiles.
 
 Always use `#pragma once` as the include guard in header files. Do not use traditional `#ifndef`/`#define`/`#endif` include guards.
 
+## Plugin SDK (git submodule)
+
+Public headers live in `sdk/include/` as a git submodule (`sicompass-plugin-sdk` repo). When modifying SDK headers (`provider_interface.h`, `provider_tags.h`, `platform.h`, `ffon.h`):
+
+1. Edit files in `sdk/include/`
+2. Commit and push inside the submodule: `cd sdk && git add -A && git commit && git push`
+3. Update the submodule ref in sicompass: `cd .. && git add sdk && git commit`
+
 ## Library Architecture
 
 Libraries (`lib/`) communicate with `src/sicompass` through the `lib_provider` interface.
@@ -34,9 +42,9 @@ Libraries (`lib/`) communicate with `src/sicompass` through the `lib_provider` i
 **Boundary rules (bidirectional):**
 - `lib/` code must NEVER `#include` headers from `src/sicompass/`
 - `src/sicompass/` must NEVER `#include` library-specific headers (e.g., `filebrowser.h`, `filebrowser_provider.h`, `settings_provider.h`)
-- `src/sicompass/` may only include these shared infrastructure headers from `lib/`:
-  - `provider_interface.h`, `provider_tags.h`, `platform.h` (from lib_provider)
-  - `ffon.h` (from lib_ffon)
+- `src/sicompass/` may only include these shared infrastructure headers from `sdk/include/`:
+  - `provider_interface.h`, `provider_tags.h`, `platform.h`
+  - `ffon.h`
 - Libraries may include: their own headers, other `lib/*/include/` public headers, and system/third-party headers
 
 ## Testing
