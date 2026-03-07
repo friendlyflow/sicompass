@@ -27,7 +27,7 @@ Navigate Sicompass using simple keyboard controls:
 
 - **Up/Down Arrows** — Navigate through list items
 - **Left/Right Arrows** — Move between hierarchical layers
-- **Enter** — Select/Right or confirm
+- **Enter** — Confirm or activate
 - **Tab** — Move between modes
 - **Escape** — Go a mode back or cancel
 
