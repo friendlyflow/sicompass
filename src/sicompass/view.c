@@ -192,6 +192,21 @@ void mainLoop(SiCompassApplication* app) {
             providerCount++;
         }
     }
+    // Sort providers alphabetically, keeping settings (last) in place
+    for (int i = 0; i < providerCount - 2; i++) {
+        for (int j = i + 1; j < providerCount - 1; j++) {
+            if (strcasecmp(app->appRenderer->providers[i]->name,
+                           app->appRenderer->providers[j]->name) > 0) {
+                Provider *tmpP = app->appRenderer->providers[i];
+                app->appRenderer->providers[i] = app->appRenderer->providers[j];
+                app->appRenderer->providers[j] = tmpP;
+                FfonElement *tmpF = app->appRenderer->ffon[i];
+                app->appRenderer->ffon[i] = app->appRenderer->ffon[j];
+                app->appRenderer->ffon[j] = tmpF;
+            }
+        }
+    }
+
     app->appRenderer->ffonCount = providerCount;
     if (providerCount == 0) {
         fprintf(stderr, "Failed to get initial elements from providers\n");
