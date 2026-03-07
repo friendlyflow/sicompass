@@ -25,7 +25,8 @@ const sections: Section[] = [
           "Left key: go back (parent level)",
           "Down key: move down in list",
           "Up key: move up in list",
-          "Right key / Enter: go into selected item",
+          "Right key: go into selected item",
+          "Enter: confirm or activate",
         ],
       },
       {
@@ -143,6 +144,19 @@ const sections: Section[] = [
       "This section demonstrates interactive element types.",
       "<checkbox checked>Try toggling this checkbox",
       "<checkbox>And this unchecked one",
+      {
+        key: "<checkbox checked>Navigable checkbox (go inside with Right key)",
+        children: [
+          "This is an object checkbox — it can be toggled AND navigated into.",
+          "Press Enter to toggle the checkbox, Right key to view children.",
+        ],
+      },
+      {
+        key: "<checkbox>Another navigable checkbox (unchecked)",
+        children: [
+          "Object checkboxes are useful for enabling a feature while also showing its settings.",
+        ],
+      },
       {
         key: "<radio>Pick a color",
         children: [

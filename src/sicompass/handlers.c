@@ -766,9 +766,6 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                         platformOpenWithDefault(fullPath);
                     }
                     free(filename);
-                } else if (elem->type == FFON_OBJECT) {
-                    // Navigate into the object
-                    handleRight(appRenderer);
                 }
             }
         }
@@ -807,22 +804,6 @@ void handleEnter(AppRenderer *appRenderer, History history) {
             }
 
             idArrayCopy(&appRenderer->currentId, &selectedId);
-
-            // If selected item is an object, try navigating into it
-            int ecount;
-            FfonElement **earr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
-                                              &appRenderer->currentId, &ecount);
-            if (earr) {
-                int eidx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
-                if (eidx >= 0 && eidx < ecount && earr[eidx]->type == FFON_OBJECT) {
-                    if (!providerNavigateRight(appRenderer)) {
-                        // Navigation rejected (e.g. invalid radio group) - stay in search mode
-                        appRenderer->needsRedraw = true;
-                        appRenderer->lastKeypressTime = now;
-                        return;
-                    }
-                }
-            }
         }
         appRenderer->currentCoordinate = appRenderer->previousCoordinate;
         accesskitSpeakModeChange(appRenderer, NULL);
@@ -934,20 +915,6 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                 int rootIdx = list[appRenderer->listIndex].id.ids[0];
                 providerNavigateToPath(appRenderer, rootIdx, parentDir, filename);
 
-                // currentId is now set by providerNavigateToPath.
-                // If the found item is a directory, navigate into it.
-                {
-                    int ecount;
-                    FfonElement **earr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
-                                                      &appRenderer->currentId, &ecount);
-                    if (earr) {
-                        int eidx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
-                        if (eidx >= 0 && eidx < ecount && earr[eidx]->type == FFON_OBJECT) {
-                            providerNavigateRight(appRenderer);
-                        }
-                    }
-                }
-
                 appRenderer->currentCoordinate = appRenderer->previousCoordinate;
                 accesskitSpeakModeChange(appRenderer, NULL);
                 createListCurrentLayer(appRenderer);
@@ -959,22 +926,6 @@ void handleEnter(AppRenderer *appRenderer, History history) {
             }
 
             idArrayCopy(&appRenderer->currentId, &selectedId);
-
-            // If selected item is an object, try navigating into it
-            int ecount;
-            FfonElement **earr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
-                                              &appRenderer->currentId, &ecount);
-            if (earr) {
-                int eidx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
-                if (eidx >= 0 && eidx < ecount && earr[eidx]->type == FFON_OBJECT) {
-                    if (!providerNavigateRight(appRenderer)) {
-                        // Navigation rejected (e.g. invalid radio group) - stay in search mode
-                        appRenderer->needsRedraw = true;
-                        appRenderer->lastKeypressTime = now;
-                        return;
-                    }
-                }
-            }
         }
         appRenderer->currentCoordinate = appRenderer->previousCoordinate;
         accesskitSpeakModeChange(appRenderer, NULL);
