@@ -103,6 +103,12 @@ static void loadProgram(const char *name, Provider *settingsProvider) {
             settingsAddSectionText(settingsProvider, "email client",
                                    "client secret", "emailClientSecret", "");
         }
+    } else if (strcmp(name, "web browser") == 0) {
+        Provider *p = providerFactoryCreate("web browser");
+        if (p) {
+            providerRegister(p);
+            settingsAddSection(settingsProvider, "web browser");
+        }
     }
 }
 

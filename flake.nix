@@ -7,9 +7,13 @@
       url = "github:AccessKit/accesskit-c";
       flake = false;
     };
+    lexbor-src = {
+      url = "github:lexbor/lexbor";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, accesskit-c-src }:
+  outputs = { self, nixpkgs, accesskit-c-src, lexbor-src }:
     let
       supportedSystems = [
         "aarch64-linux"
@@ -83,15 +87,59 @@
             maintainers = [];
           };
         };
+      # Lexbor HTML parser library
+      lexbor-for = system:
+        let
+          pkgs = nixpkgsFor.${system};
+        in
+        pkgs.stdenv.mkDerivation {
+          pname = "lexbor";
+          version = lexbor-src.shortRev or "dev";
+
+          src = lexbor-src;
+
+          nativeBuildInputs = with pkgs; [ cmake ];
+
+          cmakeFlags = [
+            "-DLEXBOR_BUILD_SHARED=ON"
+            "-DLEXBOR_BUILD_STATIC=OFF"
+            "-DLEXBOR_BUILD_TESTS=OFF"
+            "-DLEXBOR_BUILD_EXAMPLES=OFF"
+          ];
+
+          postInstall = ''
+            mkdir -p $out/lib/pkgconfig
+            cat > $out/lib/pkgconfig/lexbor.pc << 'PKGEOF'
+            prefix=LEXBOR_PREFIX
+            libdir=''${prefix}/lib
+            includedir=''${prefix}/include
+
+            Name: lexbor
+            Description: Lexbor HTML parser library
+            Version: dev
+            Libs: -L''${libdir} -llexbor
+            Cflags: -I''${includedir}
+            PKGEOF
+            sed -i "s|LEXBOR_PREFIX|$out|" $out/lib/pkgconfig/lexbor.pc
+          '';
+
+          meta = with pkgs.lib; {
+            description = "Open source HTML Renderer library";
+            homepage = "https://github.com/lexbor/lexbor";
+            license = licenses.asl20;
+          };
+        };
+
     in
     {
       packages = forAllSystems (system:
         let
           pkgs = nixpkgsFor.${system};
           accesskit-c = accesskit-c-for system;
+          lexbor = lexbor-for system;
         in
         {
-          inherit accesskit-c;
+          inherit accesskit-c lexbor;
 
           default = pkgs.stdenv.mkDerivation rec {
             pname = "sicompass";
@@ -117,6 +165,8 @@
               utf8proc
               # AccessKit for accessibility
               accesskit-c
+              # Lexbor HTML parser for web browser provider
+              lexbor
               # Runtime dependency for script providers (e.g., tutorial)
               bun
               # Testing
@@ -150,6 +200,7 @@
         let
           pkgs = nixpkgsFor.${system};
           accesskit-c = accesskit-c-for system;
+          lexbor = lexbor-for system;
         in
         {
           default = pkgs.mkShell {
@@ -177,6 +228,8 @@
               flawfinder
               # AccessKit for accessibility
               accesskit-c
+              # Lexbor HTML parser for web browser provider
+              lexbor
               # Runtime dependency for script providers (e.g., tutorial)
               bun
               # Testing

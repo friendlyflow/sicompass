@@ -16,6 +16,22 @@
         "type": "github"
       }
     },
+    "lexbor-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1772646743,
+        "narHash": "sha256-4zEfUME9PIg6fu2BV5HKQwXdSICm51sUsS7kYoC/ghI=",
+        "owner": "lexbor",
+        "repo": "lexbor",
+        "rev": "e82094607d345c639184e775d4b3ecbb2503b739",
+        "type": "github"
+      },
+      "original": {
+        "owner": "lexbor",
+        "repo": "lexbor",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1771848320,
@@ -35,6 +51,7 @@
     "root": {
       "inputs": {
         "accesskit-c-src": "accesskit-c-src",
+        "lexbor-src": "lexbor-src",
         "nixpkgs": "nixpkgs"
       }
     }

@@ -588,6 +588,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                         return;
                     }
 
+                    bool wasInput = providerTagHasInput(elementKey);
                     // Only commit if changed
                     if (strcmp(oldContent, newContent) != 0) {
                         bool success;
@@ -623,6 +624,9 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                             }
                         }
                     }
+                    // If this was an <input> element, refresh to pick up new provider data
+                    if (wasInput)
+                        providerRefreshCurrentDirectory(appRenderer);
                     free(oldContent);
                     // Return to operator general
                     appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
@@ -684,6 +688,25 @@ void handleEnter(AppRenderer *appRenderer, History history) {
             if (idx >= 0 && idx < count) {
                 FfonElement *elem = arr[idx];
                 if (elem->type == FFON_STRING) {
+                    // If element is an <input>, activate it (commit current content)
+                    if (providerTagHasInput(elem->data.string)) {
+                        char *content = providerTagExtractContent(elem->data.string);
+                        if (content) {
+                            providerCommitEdit(appRenderer, content, content);
+                            free(content);
+                        }
+                        providerRefreshCurrentDirectory(appRenderer);
+                        char savedError[256];
+                        memcpy(savedError, appRenderer->errorMessage, sizeof(savedError));
+                        createListCurrentLayer(appRenderer);
+                        if (savedError[0] != '\0')
+                            memcpy(appRenderer->errorMessage, savedError, sizeof(appRenderer->errorMessage));
+                        appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                        appRenderer->scrollOffset = 0;
+                        appRenderer->needsRedraw = true;
+                        appRenderer->lastKeypressTime = now;
+                        return;
+                    }
                     char *filename = providerTagExtractContent(elem->data.string);
                     const char *path = providerGetCurrentPath(appRenderer);
 
