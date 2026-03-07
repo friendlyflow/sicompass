@@ -13,6 +13,7 @@ subdir('lib_filebrowser')
 subdir('lib_chatclient')
 subdir('lib_emailclient')
 subdir('lib_settings')
+subdir('lib_webbrowser')
 
 # Sicompass tests
 subdir('sicompass')
