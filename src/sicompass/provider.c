@@ -6,10 +6,37 @@
 #include <string.h>
 
 #define MAX_PROVIDERS 16
+#define MAX_AUTH_ENTRIES 16
 
 // Provider registry
 static Provider *g_providers[MAX_PROVIDERS];
 static int g_providerCount = 0;
+
+// Auth registry: maps URL origins to API keys for Bearer auth
+static struct {
+    char origin[512];
+    char apiKey[512];
+} g_authEntries[MAX_AUTH_ENTRIES];
+static int g_authCount = 0;
+
+void providerRegisterAuth(const char *origin, const char *apiKey) {
+    if (!origin || !apiKey || g_authCount >= MAX_AUTH_ENTRIES) return;
+    strncpy(g_authEntries[g_authCount].origin, origin, sizeof(g_authEntries[0].origin) - 1);
+    g_authEntries[g_authCount].origin[sizeof(g_authEntries[0].origin) - 1] = '\0';
+    strncpy(g_authEntries[g_authCount].apiKey, apiKey, sizeof(g_authEntries[0].apiKey) - 1);
+    g_authEntries[g_authCount].apiKey[sizeof(g_authEntries[0].apiKey) - 1] = '\0';
+    g_authCount++;
+}
+
+static const char* findApiKeyForUrl(const char *url) {
+    if (!url) return NULL;
+    for (int i = 0; i < g_authCount; i++) {
+        if (strncmp(url, g_authEntries[i].origin, strlen(g_authEntries[i].origin)) == 0) {
+            return g_authEntries[i].apiKey;
+        }
+    }
+    return NULL;
+}
 
 // Register a provider
 void providerRegister(Provider *provider) {
@@ -145,8 +172,14 @@ bool providerExecuteCommand(AppRenderer *appRenderer, const char *command, const
 static FfonElement** fetchUrlToElements(const char *url, int *outCount) {
     *outCount = 0;
 
-    char command[4096 + 64];
-    snprintf(command, sizeof(command), "curl -sfL \"%s\"", url);
+    const char *apiKey = findApiKeyForUrl(url);
+    char command[4096 + 256];
+    if (apiKey && apiKey[0]) {
+        snprintf(command, sizeof(command),
+                 "curl -sfL -H \"Authorization: Bearer %s\" \"%s\"", apiKey, url);
+    } else {
+        snprintf(command, sizeof(command), "curl -sfL \"%s\"", url);
+    }
 
     FILE *pipe = popen(command, "r");
     if (!pipe) {

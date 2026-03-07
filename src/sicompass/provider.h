@@ -9,6 +9,9 @@ typedef struct AppRenderer AppRenderer;
 
 // Provider registry
 void providerRegister(Provider *provider);
+
+// Auth registry: register an API key for a URL origin (used for Bearer auth on <link> fetches)
+void providerRegisterAuth(const char *origin, const char *apiKey);
 Provider* providerFindByName(const char *name);
 int providerGetRegisteredCount(void);
 Provider* providerGetRegisteredAt(int i);
