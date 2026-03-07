@@ -1,5 +1,6 @@
 #include "programs.h"
 #include "provider.h"
+#include "view.h"
 #include <provider_interface.h>
 #include <settings_provider.h>
 #include <json-c/json.h>
@@ -7,9 +8,29 @@
 #include <string.h>
 #include <stdio.h>
 #include <sys/stat.h>
+#include <dirent.h>
+
+// Built-in program catalog
+static const char *ALL_KNOWN_PROGRAMS[] = {
+    "tutorial", "sales demo", "file browser",
+    "chat client", "email client", "web browser"
+};
+static const int ALL_KNOWN_PROGRAMS_COUNT = 6;
+
+// User-discovered plugins
+typedef struct {
+    char name[64];
+    char displayName[64];
+    char entryPath[4096];
+} UserPlugin;
+
+static UserPlugin s_userPlugins[32];
+static int s_userPluginCount = 0;
+
+// File-static references for hot enable/disable
+static Provider *s_settingsProvider = NULL;
 
 // Read a string value from settings.json for a given section and key.
-// Returns heap-allocated string or NULL. Caller must free.
 static char* readSettingsValue(const char *section, const char *key) {
     char *configPath = providerGetMainConfigPath();
     if (!configPath) return NULL;
@@ -55,7 +76,6 @@ static void ensureConfigDir(const char *configPath) {
 
 static void writeDefaultConfig(const char *configPath) {
     ensureConfigDir(configPath);
-    // Read-merge-write: preserve any existing settings in the file
     json_object *root = json_object_from_file(configPath);
     if (!root) root = json_object_new_object();
 
@@ -135,18 +155,28 @@ static void loadProgram(const char *name, Provider *settingsProvider) {
             settingsAddSection(settingsProvider, "web browser");
         }
     } else {
+        // Check if it's a user plugin
+        for (int i = 0; i < s_userPluginCount; i++) {
+            if (strcmp(name, s_userPlugins[i].name) == 0) {
+                Provider *p = scriptProviderCreate(s_userPlugins[i].name,
+                                                    s_userPlugins[i].displayName,
+                                                    s_userPlugins[i].entryPath);
+                if (p) {
+                    providerRegister(p);
+                    settingsAddSection(settingsProvider, s_userPlugins[i].name);
+                }
+                return;
+            }
+        }
+
         // Unknown program name: try loading as a remote FFON service.
-        // Check if settings.json has a remoteUrl for this program name.
         char *remoteUrl = readSettingsValue(name, "remoteUrl");
         if (remoteUrl && remoteUrl[0]) {
             #ifdef REMOTE_SCRIPT_PATH
             Provider *p = scriptProviderCreate(name, name, REMOTE_SCRIPT_PATH);
             if (p) {
-                // Set initial path to provider name so remote.ts can look up settings.
-                // currentPath is at offset 0 of the state struct (char[4096]).
                 snprintf((char*)p->state, 4096, "%s", name);
 
-                // Register auth for this origin
                 char *apiKey = readSettingsValue(name, "apiKey");
                 if (apiKey && apiKey[0]) {
                     providerRegisterAuth(remoteUrl, apiKey);
@@ -165,40 +195,285 @@ static void loadProgram(const char *name, Provider *settingsProvider) {
     }
 }
 
+// Discover user-installed plugins from ~/.config/sicompass/plugins/
+static void discoverUserPlugins(void) {
+    s_userPluginCount = 0;
+    char *pluginsDir = providerGetPluginsDir();
+    if (!pluginsDir) return;
+
+    DIR *dir = opendir(pluginsDir);
+    if (!dir) {
+        free(pluginsDir);
+        return;
+    }
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL && s_userPluginCount < 32) {
+        if (entry->d_name[0] == '.') continue;
+
+        // Build path to plugin.json
+        char manifestPath[4096];
+        snprintf(manifestPath, sizeof(manifestPath), "%s%s/plugin.json",
+                 pluginsDir, entry->d_name);
+
+        json_object *manifest = json_object_from_file(manifestPath);
+        if (!manifest) continue;
+
+        json_object *nameObj, *displayNameObj, *entryObj;
+        if (!json_object_object_get_ex(manifest, "name", &nameObj) ||
+            !json_object_object_get_ex(manifest, "displayName", &displayNameObj) ||
+            !json_object_object_get_ex(manifest, "entry", &entryObj)) {
+            json_object_put(manifest);
+            continue;
+        }
+
+        UserPlugin *up = &s_userPlugins[s_userPluginCount];
+        strncpy(up->name, json_object_get_string(nameObj), sizeof(up->name) - 1);
+        up->name[sizeof(up->name) - 1] = '\0';
+        strncpy(up->displayName, json_object_get_string(displayNameObj), sizeof(up->displayName) - 1);
+        up->displayName[sizeof(up->displayName) - 1] = '\0';
+        snprintf(up->entryPath, sizeof(up->entryPath), "%s%s/%s",
+                 pluginsDir, entry->d_name, json_object_get_string(entryObj));
+
+        json_object_put(manifest);
+        s_userPluginCount++;
+    }
+
+    closedir(dir);
+    free(pluginsDir);
+}
+
+// Check if a name is in the programsToLoad array
+static bool isInProgramsToLoad(const char *name, json_object *programsArr) {
+    if (!programsArr) return false;
+    int len = json_object_array_length(programsArr);
+    for (int i = 0; i < len; i++) {
+        const char *val = json_object_get_string(json_object_array_get_idx(programsArr, i));
+        if (val && strcmp(val, name) == 0) return true;
+    }
+    return false;
+}
+
+// Register the "programs" priority section with checkboxes for all known programs
+static void registerProgramsSection(Provider *settingsProvider, json_object *programsArr) {
+    settingsAddPrioritySection(settingsProvider, "Available programs:");
+
+    // Built-in programs
+    for (int i = 0; i < ALL_KNOWN_PROGRAMS_COUNT; i++) {
+        const char *name = ALL_KNOWN_PROGRAMS[i];
+        char configKey[80];
+        snprintf(configKey, sizeof(configKey), "enable_%s", name);
+        bool enabled = isInProgramsToLoad(name, programsArr);
+        settingsAddSectionCheckbox(settingsProvider, "Available programs:", name, configKey, enabled);
+    }
+
+    // User plugins
+    for (int i = 0; i < s_userPluginCount; i++) {
+        char configKey[80];
+        snprintf(configKey, sizeof(configKey), "enable_%s", s_userPlugins[i].name);
+        bool enabled = isInProgramsToLoad(s_userPlugins[i].name, programsArr);
+        settingsAddSectionCheckbox(settingsProvider, "Available programs:",
+                                   s_userPlugins[i].displayName, configKey, enabled);
+    }
+}
+
 void programsLoad(Provider *settingsProvider) {
+    s_settingsProvider = settingsProvider;
+
+    // Discover user plugins first
+    discoverUserPlugins();
+
     char *configPath = providerGetMainConfigPath();
     if (!configPath) return;
 
     json_object *root = json_object_from_file(configPath);
     if (!root) {
         writeDefaultConfig(configPath);
-        free(configPath);
-        for (int i = 0; i < DEFAULT_PROGRAMS_COUNT; i++) {
-            loadProgram(DEFAULT_PROGRAMS[i], settingsProvider);
-        }
-        return;
+        root = json_object_from_file(configPath);
     }
     free(configPath);
+    if (!root) return;
 
-    json_object *sicompassObj;
-    if (!json_object_object_get_ex(root, "sicompass", &sicompassObj)) {
-        json_object_put(root);
-        return;
+    json_object *sicompassObj = NULL;
+    json_object *programsArr = NULL;
+    if (json_object_object_get_ex(root, "sicompass", &sicompassObj)) {
+        json_object_object_get_ex(sicompassObj, "programsToLoad", &programsArr);
     }
 
-    json_object *arr;
-    if (!json_object_object_get_ex(sicompassObj, "programsToLoad", &arr) ||
-        !json_object_is_type(arr, json_type_array)) {
-        json_object_put(root);
-        return;
-    }
+    // Register store checkboxes BEFORE loading programs
+    registerProgramsSection(settingsProvider, programsArr);
 
-    int len = json_object_array_length(arr);
-    for (int i = 0; i < len; i++) {
-        json_object *item = json_object_array_get_idx(arr, i);
-        const char *name = json_object_get_string(item);
-        if (name) loadProgram(name, settingsProvider);
+    // Load enabled programs
+    if (programsArr && json_object_is_type(programsArr, json_type_array)) {
+        int len = json_object_array_length(programsArr);
+        for (int i = 0; i < len; i++) {
+            json_object *item = json_object_array_get_idx(programsArr, i);
+            const char *name = json_object_get_string(item);
+            if (name) loadProgram(name, settingsProvider);
+        }
     }
 
     json_object_put(root);
+}
+
+void programsUpdateEnabled(const char *name, bool enabled) {
+    char *configPath = providerGetMainConfigPath();
+    if (!configPath) return;
+
+    json_object *root = json_object_from_file(configPath);
+    if (!root) root = json_object_new_object();
+
+    json_object *sicompassObj = NULL;
+    if (!json_object_object_get_ex(root, "sicompass", &sicompassObj)) {
+        sicompassObj = json_object_new_object();
+        json_object_object_add(root, "sicompass", sicompassObj);
+    }
+
+    // Read existing programsToLoad
+    json_object *oldArr = NULL;
+    json_object_object_get_ex(sicompassObj, "programsToLoad", &oldArr);
+
+    // Build new array
+    json_object *newArr = json_object_new_array();
+    if (oldArr && json_object_is_type(oldArr, json_type_array)) {
+        int len = json_object_array_length(oldArr);
+        for (int i = 0; i < len; i++) {
+            const char *val = json_object_get_string(json_object_array_get_idx(oldArr, i));
+            if (val && strcmp(val, name) != 0) {
+                json_object_array_add(newArr, json_object_new_string(val));
+            }
+        }
+    }
+    if (enabled) {
+        json_object_array_add(newArr, json_object_new_string(name));
+    }
+
+    json_object_object_add(sicompassObj, "programsToLoad", newArr);
+    json_object_to_file_ext(configPath, root, JSON_C_TO_STRING_PRETTY);
+    json_object_put(root);
+    free(configPath);
+}
+
+// Rebuild the settings provider's FFON element after internal state changes
+// (e.g. after settingsRemoveSection or loadProgram adds new settings sections).
+static void refreshSettingsFfon(AppRenderer *appRenderer) {
+    if (!s_settingsProvider || !appRenderer || appRenderer->ffonCount == 0) return;
+    int settingsIdx = appRenderer->ffonCount - 1;
+    if (appRenderer->providers[settingsIdx] != s_settingsProvider) return;
+    ffonElementDestroy(appRenderer->ffon[settingsIdx]);
+    appRenderer->ffon[settingsIdx] = providerGetInitialElement(s_settingsProvider);
+}
+
+void programsEnableProvider(const char *name, AppRenderer *appRenderer) {
+    if (!s_settingsProvider || !appRenderer) return;
+
+    // Load the program (registers provider + settings sections)
+    loadProgram(name, s_settingsProvider);
+
+    // Find the newly registered provider
+    Provider *newProvider = providerFindByName(name);
+    if (!newProvider) return;
+
+    // Init the provider
+    if (newProvider->init) newProvider->init(newProvider);
+
+    // Get initial element
+    FfonElement *elem = providerGetInitialElement(newProvider);
+    if (!elem) return;
+
+    // Grow arrays if needed
+    if (appRenderer->ffonCount >= appRenderer->ffonCapacity) {
+        int newCap = appRenderer->ffonCapacity + 4;
+        FfonElement **newFfon = realloc(appRenderer->ffon, newCap * sizeof(FfonElement*));
+        Provider **newProviders = realloc(appRenderer->providers, newCap * sizeof(Provider*));
+        if (!newFfon || !newProviders) return;
+        appRenderer->ffon = newFfon;
+        appRenderer->providers = newProviders;
+        appRenderer->ffonCapacity = newCap;
+    }
+
+    // Insert before settings (last entry)
+    int insertIdx = appRenderer->ffonCount - 1;
+    if (insertIdx < 0) insertIdx = 0;
+
+    // Shift settings entry right
+    appRenderer->ffon[appRenderer->ffonCount] = appRenderer->ffon[insertIdx];
+    appRenderer->providers[appRenderer->ffonCount] = appRenderer->providers[insertIdx];
+    appRenderer->ffon[insertIdx] = elem;
+    appRenderer->providers[insertIdx] = newProvider;
+    appRenderer->ffonCount++;
+
+    // Rebuild settings FFON — new program may have registered settings sections
+    refreshSettingsFfon(appRenderer);
+
+    // Adjust navigation if pointing at settings
+    if (appRenderer->currentId.ids[0] >= insertIdx) {
+        appRenderer->currentId.ids[0]++;
+    }
+
+    createListCurrentLayer(appRenderer);
+    appRenderer->needsRedraw = true;
+}
+
+void programsDisableProvider(const char *name, AppRenderer *appRenderer) {
+    if (!appRenderer) return;
+
+    // Find provider index
+    int removeIdx = -1;
+    for (int i = 0; i < appRenderer->ffonCount; i++) {
+        if (appRenderer->providers[i] && strcmp(appRenderer->providers[i]->name, name) == 0) {
+            removeIdx = i;
+            break;
+        }
+    }
+    // Also try matching by looking up a provider whose name maps to a known display name
+    if (removeIdx < 0) {
+        // For factory providers, the provider name may differ (e.g. "filebrowser" vs "file browser")
+        Provider *p = providerFindByName(name);
+        if (p) {
+            for (int i = 0; i < appRenderer->ffonCount; i++) {
+                if (appRenderer->providers[i] == p) {
+                    removeIdx = i;
+                    break;
+                }
+            }
+        }
+    }
+    if (removeIdx < 0) return;
+
+    Provider *provider = appRenderer->providers[removeIdx];
+
+    // Free the FFON element
+    ffonElementDestroy(appRenderer->ffon[removeIdx]);
+
+    // Shift remaining entries left
+    for (int i = removeIdx; i < appRenderer->ffonCount - 1; i++) {
+        appRenderer->ffon[i] = appRenderer->ffon[i + 1];
+        appRenderer->providers[i] = appRenderer->providers[i + 1];
+    }
+    appRenderer->ffonCount--;
+
+    // Remove settings section for this program and rebuild settings FFON
+    if (s_settingsProvider) {
+        settingsRemoveSection(s_settingsProvider, name);
+        refreshSettingsFfon(appRenderer);
+    }
+
+    // Cleanup provider
+    providerUnregister(provider);
+    providerDestroy(provider);
+
+    // Adjust navigation
+    if (appRenderer->currentId.ids[0] == removeIdx) {
+        appRenderer->currentId.ids[0] = 0;
+        appRenderer->currentId.depth = 1;
+    } else if (appRenderer->currentId.ids[0] > removeIdx) {
+        appRenderer->currentId.ids[0]--;
+    }
+    if (appRenderer->currentId.ids[0] >= appRenderer->ffonCount) {
+        appRenderer->currentId.ids[0] = appRenderer->ffonCount - 1;
+    }
+
+    createListCurrentLayer(appRenderer);
+    appRenderer->needsRedraw = true;
 }

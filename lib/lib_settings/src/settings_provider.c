@@ -16,6 +16,7 @@
 #define SETTINGS_MAX_RADIO_OPTIONS 8
 #define SETTINGS_MAX_TEXT_ENTRIES 16
 #define SETTINGS_TEXT_VALUE_MAX 256
+#define SETTINGS_MAX_CHECKBOX_ENTRIES 32
 
 typedef struct {
     char sectionName[SETTINGS_SECTION_NAME_MAX];
@@ -34,6 +35,13 @@ typedef struct {
 } SettingsTextEntry;
 
 typedef struct {
+    char sectionName[SETTINGS_SECTION_NAME_MAX];
+    char label[SETTINGS_RADIO_KEY_MAX];
+    char configKey[SETTINGS_RADIO_KEY_MAX];
+    bool checked;
+} SettingsCheckboxEntry;
+
+typedef struct {
     char currentPath[4096];  // must be first field (layout-compatible with GenericProviderState)
     const ProviderOps *ops;  // must be second field (unused, kept for layout compat)
     char colorScheme[32];
@@ -45,7 +53,64 @@ typedef struct {
     int radioEntryCount;
     SettingsTextEntry textEntries[SETTINGS_MAX_TEXT_ENTRIES];
     int textEntryCount;
+    SettingsCheckboxEntry checkboxEntries[SETTINGS_MAX_CHECKBOX_ENTRIES];
+    int checkboxEntryCount;
+    char prioritySection[SETTINGS_SECTION_NAME_MAX];
+    bool hasPrioritySection;
 } SettingsProviderState;
+
+// Populate a section object with its radio, text, and checkbox entries.
+// Returns true if any content was added.
+static bool settingsPopulateSection(SettingsProviderState *state, FfonElement *sectionObj,
+                                     const char *sectionName) {
+    bool hasContent = false;
+
+    // Checkbox entries
+    for (int j = 0; j < state->checkboxEntryCount; j++) {
+        if (strcmp(state->checkboxEntries[j].sectionName, sectionName) == 0) {
+            SettingsCheckboxEntry *cb = &state->checkboxEntries[j];
+            char cbBuf[SETTINGS_RADIO_KEY_MAX + 20];
+            snprintf(cbBuf, sizeof(cbBuf), "%s%s",
+                     cb->checked ? "<checkbox checked>" : "<checkbox>", cb->label);
+            ffonObjectAddElement(sectionObj->data.object, ffonElementCreateString(cbBuf));
+            hasContent = true;
+        }
+    }
+
+    // Radio entries
+    for (int j = 0; j < state->radioEntryCount; j++) {
+        if (strcmp(state->radioEntries[j].sectionName, sectionName) == 0) {
+            SettingsRadioEntry *radio = &state->radioEntries[j];
+            char radioKey[SETTINGS_RADIO_KEY_MAX + 8];
+            snprintf(radioKey, sizeof(radioKey), "<radio>%s", radio->radioKey);
+            FfonElement *radioGroup = ffonElementCreateObject(radioKey);
+            for (int k = 0; k < radio->optionCount; k++) {
+                bool checked = (strcmp(radio->options[k], radio->currentValue) == 0);
+                char optBuf[SETTINGS_RADIO_OPTION_MAX + 10];
+                snprintf(optBuf, sizeof(optBuf), "%s%s",
+                         checked ? "<checked>" : "", radio->options[k]);
+                ffonObjectAddElement(radioGroup->data.object, ffonElementCreateString(optBuf));
+            }
+            ffonObjectAddElement(sectionObj->data.object, radioGroup);
+            hasContent = true;
+        }
+    }
+
+    // Text entries
+    for (int j = 0; j < state->textEntryCount; j++) {
+        if (strcmp(state->textEntries[j].sectionName, sectionName) == 0) {
+            SettingsTextEntry *text = &state->textEntries[j];
+            FfonElement *textObj = ffonElementCreateObject(text->label);
+            char inputBuf[SETTINGS_TEXT_VALUE_MAX + 20];
+            snprintf(inputBuf, sizeof(inputBuf), "<input>%s</input>", text->currentValue);
+            ffonObjectAddElement(textObj->data.object, ffonElementCreateString(inputBuf));
+            ffonObjectAddElement(sectionObj->data.object, textObj);
+            hasContent = true;
+        }
+    }
+
+    return hasContent;
+}
 
 // Build and return the full pre-populated settings tree.
 // Returns an array of top-level section objects with their children already attached.
@@ -56,6 +121,16 @@ static FfonElement** settingsFetch(Provider *self, int *outCount) {
     FfonElement **arr = malloc(total * sizeof(FfonElement *));
     if (!arr) { *outCount = 0; return NULL; }
     int n = 0;
+
+    // Priority section first (if set)
+    if (state->hasPrioritySection) {
+        FfonElement *prioObj = ffonElementCreateObject(state->prioritySection);
+        if (!settingsPopulateSection(state, prioObj, state->prioritySection)) {
+            ffonObjectAddElement(prioObj->data.object,
+                ffonElementCreateString("no settings"));
+        }
+        arr[n++] = prioObj;
+    }
 
     // sicompass section: color scheme radio group
     bool isDark = (strcmp(state->colorScheme, "dark") == 0);
@@ -69,48 +144,17 @@ static FfonElement** settingsFetch(Provider *self, int *outCount) {
     ffonObjectAddElement(sicompassObj->data.object, radioGroup);
     arr[n++] = sicompassObj;
 
-    // Registered sections — radio groups, text entries, or placeholder
+    // Registered sections (skip priority section — already rendered above)
     for (int i = 0; i < state->sectionCount; i++) {
+        if (state->hasPrioritySection &&
+            strcmp(state->sections[i], state->prioritySection) == 0)
+            continue;
+
         FfonElement *sectionObj = ffonElementCreateObject(state->sections[i]);
-        bool hasContent = false;
-
-        // Look for registered radio entries for this section
-        for (int j = 0; j < state->radioEntryCount; j++) {
-            if (strcmp(state->radioEntries[j].sectionName, state->sections[i]) == 0) {
-                SettingsRadioEntry *radio = &state->radioEntries[j];
-                char radioKey[SETTINGS_RADIO_KEY_MAX + 8];
-                snprintf(radioKey, sizeof(radioKey), "<radio>%s", radio->radioKey);
-                FfonElement *radioGroup = ffonElementCreateObject(radioKey);
-                for (int k = 0; k < radio->optionCount; k++) {
-                    bool checked = (strcmp(radio->options[k], radio->currentValue) == 0);
-                    char optBuf[SETTINGS_RADIO_OPTION_MAX + 10];
-                    snprintf(optBuf, sizeof(optBuf), "%s%s",
-                             checked ? "<checked>" : "", radio->options[k]);
-                    ffonObjectAddElement(radioGroup->data.object, ffonElementCreateString(optBuf));
-                }
-                ffonObjectAddElement(sectionObj->data.object, radioGroup);
-                hasContent = true;
-            }
-        }
-
-        // Look for registered text entries for this section
-        for (int j = 0; j < state->textEntryCount; j++) {
-            if (strcmp(state->textEntries[j].sectionName, state->sections[i]) == 0) {
-                SettingsTextEntry *text = &state->textEntries[j];
-                FfonElement *textObj = ffonElementCreateObject(text->label);
-                char inputBuf[SETTINGS_TEXT_VALUE_MAX + 20];
-                snprintf(inputBuf, sizeof(inputBuf), "<input>%s</input>", text->currentValue);
-                ffonObjectAddElement(textObj->data.object, ffonElementCreateString(inputBuf));
-                ffonObjectAddElement(sectionObj->data.object, textObj);
-                hasContent = true;
-            }
-        }
-
-        if (!hasContent) {
+        if (!settingsPopulateSection(state, sectionObj, state->sections[i])) {
             ffonObjectAddElement(sectionObj->data.object,
                 ffonElementCreateString("no settings"));
         }
-
         arr[n++] = sectionObj;
     }
 
@@ -178,6 +222,18 @@ static void settingsSaveConfig(SettingsProviderState *state, const char *configP
                                json_object_new_string(e->currentValue));
     }
 
+    // Per-section checkbox entries namespaced by section name
+    for (int i = 0; i < state->checkboxEntryCount; i++) {
+        SettingsCheckboxEntry *e = &state->checkboxEntries[i];
+        json_object *sectionObj = NULL;
+        if (!json_object_object_get_ex(root, e->sectionName, &sectionObj)) {
+            sectionObj = json_object_new_object();
+            json_object_object_add(root, e->sectionName, sectionObj);
+        }
+        json_object_object_add(sectionObj, e->configKey,
+                               json_object_new_boolean(e->checked));
+    }
+
     json_object_to_file_ext(configPath, root, JSON_C_TO_STRING_PRETTY);
     json_object_put(root);
 }
@@ -236,6 +292,18 @@ static void settingsLoadConfig(SettingsProviderState *state, const char *configP
         }
     }
 
+    // Per-section checkbox entries namespaced by section name
+    for (int i = 0; i < state->checkboxEntryCount; i++) {
+        SettingsCheckboxEntry *e = &state->checkboxEntries[i];
+        json_object *sectionObj;
+        if (json_object_object_get_ex(root, e->sectionName, &sectionObj)) {
+            json_object *obj;
+            if (json_object_object_get_ex(sectionObj, e->configKey, &obj)) {
+                e->checked = json_object_get_boolean(obj);
+            }
+        }
+    }
+
     json_object_put(root);
 }
 
@@ -259,6 +327,11 @@ static void settingsInit(Provider *self) {
         for (int i = 0; i < state->textEntryCount; i++) {
             state->applyCallback(state->textEntries[i].configKey,
                                  state->textEntries[i].currentValue,
+                                 state->userdata);
+        }
+        for (int i = 0; i < state->checkboxEntryCount; i++) {
+            state->applyCallback(state->checkboxEntries[i].configKey,
+                                 state->checkboxEntries[i].checked ? "true" : "false",
                                  state->userdata);
         }
     }
@@ -298,6 +371,29 @@ static void settingsOnRadioChange(Provider *self, const char *groupKey,
 
             if (state->applyCallback) {
                 state->applyCallback(e->configKey, e->currentValue, state->userdata);
+            }
+            return;
+        }
+    }
+}
+
+static void settingsOnCheckboxChange(Provider *self, const char *label, bool checked) {
+    SettingsProviderState *state = (SettingsProviderState *)self->state;
+
+    for (int i = 0; i < state->checkboxEntryCount; i++) {
+        SettingsCheckboxEntry *e = &state->checkboxEntries[i];
+        if (strcmp(e->label, label) == 0) {
+            e->checked = checked;
+
+            char *configPath = providerGetMainConfigPath();
+            if (configPath) {
+                settingsSaveConfig(state, configPath);
+                free(configPath);
+            }
+
+            if (state->applyCallback) {
+                state->applyCallback(e->configKey, checked ? "true" : "false",
+                                     state->userdata);
             }
             return;
         }
@@ -403,6 +499,7 @@ Provider* settingsProviderCreate(SettingsApplyFn applyCallback, void *userdata) 
     provider->popPath = settingsPopPath;
     provider->getCurrentPath = settingsGetCurrentPath;
     provider->onRadioChange = settingsOnRadioChange;
+    provider->onCheckboxChange = settingsOnCheckboxChange;
     provider->commitEdit = settingsCommitEdit;
 
     return provider;
@@ -416,6 +513,46 @@ void settingsAddSection(Provider *provider, const char *sectionName) {
             SETTINGS_SECTION_NAME_MAX - 1);
     state->sections[state->sectionCount][SETTINGS_SECTION_NAME_MAX - 1] = '\0';
     state->sectionCount++;
+}
+
+void settingsRemoveSection(Provider *provider, const char *sectionName) {
+    if (!provider || !sectionName) return;
+    SettingsProviderState *state = (SettingsProviderState *)provider->state;
+
+    // Remove section from sections array
+    for (int i = 0; i < state->sectionCount; i++) {
+        if (strcmp(state->sections[i], sectionName) == 0) {
+            for (int j = i; j < state->sectionCount - 1; j++) {
+                memcpy(state->sections[j], state->sections[j + 1], SETTINGS_SECTION_NAME_MAX);
+            }
+            state->sectionCount--;
+            break;
+        }
+    }
+
+    // Remove radio entries for this section
+    for (int i = 0; i < state->radioEntryCount; ) {
+        if (strcmp(state->radioEntries[i].sectionName, sectionName) == 0) {
+            for (int j = i; j < state->radioEntryCount - 1; j++) {
+                state->radioEntries[j] = state->radioEntries[j + 1];
+            }
+            state->radioEntryCount--;
+        } else {
+            i++;
+        }
+    }
+
+    // Remove text entries for this section
+    for (int i = 0; i < state->textEntryCount; ) {
+        if (strcmp(state->textEntries[i].sectionName, sectionName) == 0) {
+            for (int j = i; j < state->textEntryCount - 1; j++) {
+                state->textEntries[j] = state->textEntries[j + 1];
+            }
+            state->textEntryCount--;
+        } else {
+            i++;
+        }
+    }
 }
 
 void settingsAddSectionRadio(Provider *provider,
@@ -480,4 +617,46 @@ void settingsAddSectionText(Provider *provider,
         if (strcmp(state->sections[i], sectionName) == 0) { found = true; break; }
     }
     if (!found) settingsAddSection(provider, sectionName);
+}
+
+void settingsAddPrioritySection(Provider *provider, const char *sectionName) {
+    if (!provider || !sectionName) return;
+    SettingsProviderState *state = (SettingsProviderState *)provider->state;
+    strncpy(state->prioritySection, sectionName, sizeof(state->prioritySection) - 1);
+    state->prioritySection[sizeof(state->prioritySection) - 1] = '\0';
+    state->hasPrioritySection = true;
+
+    // Register the section if not already present
+    bool found = false;
+    for (int i = 0; i < state->sectionCount; i++) {
+        if (strcmp(state->sections[i], sectionName) == 0) { found = true; break; }
+    }
+    if (!found) settingsAddSection(provider, sectionName);
+}
+
+void settingsAddSectionCheckbox(Provider *provider,
+                                const char *sectionName,
+                                const char *label,
+                                const char *configKey,
+                                bool defaultChecked) {
+    if (!provider || !sectionName || !label || !configKey) return;
+    SettingsProviderState *state = (SettingsProviderState *)provider->state;
+    if (state->checkboxEntryCount >= SETTINGS_MAX_CHECKBOX_ENTRIES) return;
+
+    SettingsCheckboxEntry *e = &state->checkboxEntries[state->checkboxEntryCount];
+    strncpy(e->sectionName, sectionName, sizeof(e->sectionName) - 1);
+    e->sectionName[sizeof(e->sectionName) - 1] = '\0';
+    strncpy(e->label, label, sizeof(e->label) - 1);
+    e->label[sizeof(e->label) - 1] = '\0';
+    strncpy(e->configKey, configKey, sizeof(e->configKey) - 1);
+    e->configKey[sizeof(e->configKey) - 1] = '\0';
+    e->checked = defaultChecked;
+    state->checkboxEntryCount++;
+
+    // Register the section if not already present
+    bool found2 = false;
+    for (int i = 0; i < state->sectionCount; i++) {
+        if (strcmp(state->sections[i], sectionName) == 0) { found2 = true; break; }
+    }
+    if (!found2) settingsAddSection(provider, sectionName);
 }

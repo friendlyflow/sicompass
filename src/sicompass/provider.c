@@ -85,6 +85,20 @@ void providerCleanupAll(void) {
     }
 }
 
+// Remove a provider from the global registry
+void providerUnregister(Provider *provider) {
+    if (!provider) return;
+    for (int i = 0; i < g_providerCount; i++) {
+        if (g_providers[i] == provider) {
+            for (int j = i; j < g_providerCount - 1; j++) {
+                g_providers[j] = g_providers[j + 1];
+            }
+            g_providers[--g_providerCount] = NULL;
+            return;
+        }
+    }
+}
+
 // Get active provider from navigation context
 Provider* providerGetActive(AppRenderer *appRenderer) {
     if (!appRenderer || appRenderer->currentId.depth < 1) return NULL;
@@ -774,4 +788,27 @@ void providerNotifyRadioChanged(AppRenderer *appRenderer, IdArray *elementId) {
 
     free(groupKey);
     free(selectedValue);
+}
+
+void providerNotifyCheckboxChanged(AppRenderer *appRenderer, IdArray *elementId) {
+    Provider *provider = providerGetActive(appRenderer);
+    if (!provider || !provider->onCheckboxChange) return;
+    if (!elementId || elementId->depth < 1) return;
+
+    int count;
+    FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, elementId, &count);
+    if (!arr) return;
+    int idx = elementId->ids[elementId->depth - 1];
+    if (idx < 0 || idx >= count) return;
+    FfonElement *elem = arr[idx];
+    if (elem->type != FFON_STRING) return;
+
+    bool checked = providerTagHasCheckboxChecked(elem->data.string);
+    char *label = checked
+        ? providerTagExtractCheckboxCheckedContent(elem->data.string)
+        : providerTagExtractCheckboxContent(elem->data.string);
+    if (!label) return;
+
+    provider->onCheckboxChange(provider, label, checked);
+    free(label);
 }

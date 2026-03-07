@@ -31,6 +31,19 @@ const ColorPalette PALETTE_LIGHT = {
 static void applySettings(const char *key, const char *value, void *userdata) {
     AppRenderer *appRenderer = (AppRenderer *)userdata;
     if (!appRenderer) return;
+    if (strncmp(key, "enable_", 7) == 0) {
+        // Skip during init — programs are already loaded by programsLoad,
+        // and appRenderer arrays aren't populated yet.
+        if (appRenderer->ffonCount == 0) return;
+        const char *name = key + 7;
+        bool enabled = strcmp(value, "true") == 0;
+        programsUpdateEnabled(name, enabled);
+        if (enabled)
+            programsEnableProvider(name, appRenderer);
+        else
+            programsDisableProvider(name, appRenderer);
+        return;
+    }
     if (strcmp(key, "colorScheme") == 0) {
         appRenderer->palette = (strcmp(value, "light") == 0) ? &PALETTE_LIGHT : &PALETTE_DARK;
         appRenderer->needsRedraw = true;

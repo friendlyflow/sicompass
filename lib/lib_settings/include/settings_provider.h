@@ -33,6 +33,12 @@ Provider* settingsProviderCreate(SettingsApplyFn applyCallback, void *userdata);
 void settingsAddSection(Provider *provider, const char *sectionName);
 
 /**
+ * Remove a section and all its entries (radio, text, checkbox) from the settings tree.
+ * Used when hot-disabling a program to clean up its settings.
+ */
+void settingsRemoveSection(Provider *provider, const char *sectionName);
+
+/**
  * Register a radio group as a direct child of a named section in the settings tree.
  * The section is created automatically (no separate settingsAddSection call needed).
  * radioKey becomes the display label of the radio group (e.g. "global sorting").
@@ -61,3 +67,24 @@ void settingsAddSectionText(Provider *provider,
                             const char *label,
                             const char *configKey,
                             const char *defaultValue);
+
+/**
+ * Mark a section as "priority" so it renders before the sicompass section.
+ * The section is also registered automatically (no separate settingsAddSection call needed).
+ * Must be called before providerInitAll() / providerGetInitialElement().
+ */
+void settingsAddPrioritySection(Provider *provider, const char *sectionName);
+
+/**
+ * Register a checkbox entry as a direct child of a named section in the settings tree.
+ * The section is created automatically (no separate settingsAddSection call needed).
+ * label becomes the display text of the checkbox (e.g. "tutorial").
+ * configKey is used for JSON persistence and as the applyCallback key (e.g. "enable_tutorial").
+ * defaultChecked is the initial state when no config exists.
+ * Must be called before providerInitAll() / providerGetInitialElement().
+ */
+void settingsAddSectionCheckbox(Provider *provider,
+                                const char *sectionName,
+                                const char *label,
+                                const char *configKey,
+                                bool defaultChecked);
