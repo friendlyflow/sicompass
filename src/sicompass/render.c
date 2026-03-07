@@ -240,8 +240,8 @@ typedef enum { CHECKBOX_NONE, CHECKBOX_UNCHECKED, CHECKBOX_CHECKED } CheckboxTyp
 
 static CheckboxType getCheckboxType(const char *label) {
     if (!label) return CHECKBOX_NONE;
-    if (strncmp(label, "-cc ", 4) == 0) return CHECKBOX_CHECKED;
-    if (strncmp(label, "-c ", 3) == 0) return CHECKBOX_UNCHECKED;
+    if (strncmp(label, "-cc ", 4) == 0 || strncmp(label, "+cc ", 4) == 0) return CHECKBOX_CHECKED;
+    if (strncmp(label, "-c ", 3) == 0 || strncmp(label, "+c ", 3) == 0) return CHECKBOX_UNCHECKED;
     return CHECKBOX_NONE;
 }
 

@@ -138,13 +138,21 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
                     objKey = oneOptObj;
                 }
 
+                bool hasCheckboxChecked = providerTagHasCheckboxChecked(objKey);
+                bool hasCheckbox = providerTagHasCheckbox(objKey);
                 bool hasLink = providerTagHasLink(objKey);
                 bool hasRadio = providerTagHasRadio(objKey);
                 bool hasInput = providerTagHasInput(objKey);
                 const char *prefix;
                 char *stripped = NULL;
 
-                if (hasLink) {
+                if (hasCheckboxChecked) {
+                    prefix = "+cc";
+                    stripped = providerTagExtractCheckboxCheckedContent(objKey);
+                } else if (hasCheckbox) {
+                    prefix = "+c";
+                    stripped = providerTagExtractCheckboxContent(objKey);
+                } else if (hasLink) {
                     prefix = "+l";
                     stripped = providerTagExtractLinkContent(objKey);
                 } else if (hasRadio) {
@@ -313,13 +321,21 @@ static void collectItemsRecursive(AppRenderer *appRenderer, FfonElement **elemen
             appRenderer->totalListCurrentLayer[idx].label = strdup(prefixed);
             free(stripped);
         } else {
+            bool hasCheckboxChecked = providerTagHasCheckboxChecked(elem->data.object->key);
+            bool hasCheckbox = providerTagHasCheckbox(elem->data.object->key);
             bool hasLink = providerTagHasLink(elem->data.object->key);
             bool hasRadio = providerTagHasRadio(elem->data.object->key);
             bool hasInput = providerTagHasInput(elem->data.object->key);
             const char *prefix;
             char *stripped = NULL;
 
-            if (hasLink) {
+            if (hasCheckboxChecked) {
+                prefix = "+cc";
+                stripped = providerTagExtractCheckboxCheckedContent(elem->data.object->key);
+            } else if (hasCheckbox) {
+                prefix = "+c";
+                stripped = providerTagExtractCheckboxContent(elem->data.object->key);
+            } else if (hasLink) {
                 prefix = "+l";
                 stripped = providerTagExtractLinkContent(elem->data.object->key);
             } else if (hasRadio) {
