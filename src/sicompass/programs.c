@@ -392,13 +392,20 @@ void programsEnableProvider(const char *name, AppRenderer *appRenderer) {
         appRenderer->ffonCapacity = newCap;
     }
 
-    // Insert before settings (last entry)
-    int insertIdx = appRenderer->ffonCount - 1;
-    if (insertIdx < 0) insertIdx = 0;
+    // Find alphabetically sorted insertion point (before settings, which is last)
+    int settingsIdx = appRenderer->ffonCount - 1;
+    int insertIdx = 0;
+    for (int i = 0; i < settingsIdx; i++) {
+        if (strcasecmp(newProvider->name, appRenderer->providers[i]->name) > 0) {
+            insertIdx = i + 1;
+        }
+    }
 
-    // Shift settings entry right
-    appRenderer->ffon[appRenderer->ffonCount] = appRenderer->ffon[insertIdx];
-    appRenderer->providers[appRenderer->ffonCount] = appRenderer->providers[insertIdx];
+    // Shift entries right from insertIdx to make room
+    for (int i = appRenderer->ffonCount; i > insertIdx; i--) {
+        appRenderer->ffon[i] = appRenderer->ffon[i - 1];
+        appRenderer->providers[i] = appRenderer->providers[i - 1];
+    }
     appRenderer->ffon[insertIdx] = elem;
     appRenderer->providers[insertIdx] = newProvider;
     appRenderer->ffonCount++;
