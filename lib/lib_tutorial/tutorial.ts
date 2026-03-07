@@ -82,6 +82,34 @@ const sections: Section[] = [
         ],
       },
       {
+        key: "Web Browser",
+        children: [
+          "Browse the web directly inside sicompass.",
+          "Enter a URL in the address bar and press Enter to load a page.",
+          "HTML is converted into a navigable FFON tree based on heading hierarchy.",
+          "Headings (h1-h6) become nested sections; paragraphs, lists, tables, and links are preserved.",
+          "Navigate web content the same way you navigate files or settings.",
+        ],
+      },
+      {
+        key: "Plugin Store",
+        children: [
+          "The Plugin Store appears in Settings under 'Programs'.",
+          "Each provider has a checkbox to enable or disable it.",
+          "Toggling a checkbox hot-loads or unloads the provider instantly — no restart needed.",
+          "User plugins installed in ~/.config/sicompass/plugins/ are also listed here.",
+        ],
+      },
+      {
+        key: "Remote Services",
+        children: [
+          "Connect to remote FFON providers over HTTP.",
+          "Configure a remoteUrl and optional apiKey in Settings.",
+          "Remote content is lazily fetched and navigated like local data.",
+          "Providers can use the included server SDK with Stripe/LemonSqueezy billing.",
+        ],
+      },
+      {
         key: "Chat Client (not yet functional)",
         children: [
           "A Matrix protocol chat client.",
@@ -238,8 +266,6 @@ const sections: Section[] = [
     key: "Next Steps",
     children: [
       "Sicompass is growing. Here's what's planned:",
-      "Web Browser — accessible web browsing within sicompass.",
-      "Store — an app ecosystem where others can build and publish providers.",
       "Notebook — structured note-taking with server-side sync.",
       "IDE — code as a navigable structure, with C code generation.",
       "Terminal — a terminal emulator integrated as a provider.",
