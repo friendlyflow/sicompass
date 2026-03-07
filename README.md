@@ -12,11 +12,13 @@ This consistent unified interaction model means one consistent way to navigate e
 
 ## Key Features
 
+- **Flat Interface** — No popups, dialogs, or overlays — everything is navigated inline within the tree
 - **Keyboard-First Design** — Faster and handier navigation because your hands never leave the keyboard
 <!-- - **Native Accessibility** — Built-in support for screen readers on Linux, macOS, and Windows -->
 - **Cross-Platform** — Currently developed and tested on Ubuntu, with macOS and Windows releases planned for later
 - **High-Performance Rendering** — Vulkan-powered graphics with FreeType2/HarfBuzz text shaping
-- **Extensible Architecture** — Provider-based plugin system for different data sources
+- **Extensible Architecture** — Provider-based plugin system with a built-in plugin store for hot enable/disable
+- **Remote Services** — Connect to remote FFON providers with optional Stripe/LemonSqueezy billing
 - **Simpler UI Development** — Functionality over design means less complexity and faster development with minimal styling
 
 ## Usage
@@ -39,22 +41,28 @@ meson setup build
 ninja -C build
 ```
 
+## Built-in Providers
+
+- **File Browser** — Navigate your filesystem as a navigable tree with inline rename, copy, paste, and delete
+- **Web Browser** — Browse the web with HTML-to-FFON conversion, turning web pages into keyboard-navigable trees
+- **Sales Demo** — Interactive HVAC equipment configurator showcasing hierarchical data navigation
+- **Plugin Store** — Enable and disable providers on the fly with checkbox toggles, no restart needed
+
 ## The Vision
 
 Sicompass is the foundation for a unified, accessible platform. Future development includes:
 
-- **File Browser** — Navigate your filesystem with keyboard commands
-- **Sales Demo** — Interactive HVAC equipment configurator showcasing hierarchical data navigation with mandatory/optional elements
-- **Web Browser** — Accessible web browsing experience
 - **Email & Chat** — Integrated communication tools
-- **Notebook** — Structured note-taking
+- **Notebook** — Structured note-taking with server-side sync
+- **IDE** — Code as a navigable structure, with C code generation
+- **Terminal** — A terminal emulator integrated as a provider
 - **Mobile Support** — Android and iOS versions
 
 The goal is to provide a comprehensive environment where functionality and accessibility come first — an alternative approach that makes computing more accessible to everyone.
 
 ## Development
 
-Plugins generate simple JSON that feeds directly into Sicompass's user interface, making it easy to build extensions in any programming language.
+Plugins generate simple JSON that feeds directly into Sicompass's user interface, making it easy to build extensions in any programming language. Install user plugins in `~/.config/sicompass/plugins/<name>/` with a `plugin.json` manifest, or publish remote FFON services using the included TypeScript server SDK with optional billing support.
 
 ## Community
 
