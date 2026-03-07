@@ -1,5 +1,5 @@
 lib_provider_src = files('src/config.c', 'src/provider.c', 'src/platform.c', 'src/tags.c')
-lib_provider_inc = include_directories('include')
+lib_provider_inc = include_directories('../../sdk/include')
 
 # Windows needs shell32 for ShellExecuteA
 if host_machine.system() == 'windows'

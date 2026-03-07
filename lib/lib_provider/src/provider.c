@@ -298,6 +298,87 @@ typedef struct ScriptProviderState {
     char dashboardImagePath[4096];
 } ScriptProviderState;
 
+// Shell-escape a string by wrapping in single quotes.
+// Caller must free the returned string.
+static char* shellEscape(const char *str) {
+    if (!str) return strdup("''");
+    // Count single quotes in input
+    int quotes = 0;
+    for (const char *p = str; *p; p++) {
+        if (*p == '\'') quotes++;
+    }
+    // Escaped form: 'str' with each ' replaced by '\''
+    size_t len = strlen(str) + 2 + quotes * 3 + 1;
+    char *out = malloc(len);
+    if (!out) return NULL;
+    char *w = out;
+    *w++ = '\'';
+    for (const char *p = str; *p; p++) {
+        if (*p == '\'') {
+            *w++ = '\''; *w++ = '\\'; *w++ = '\''; *w++ = '\'';
+        } else {
+            *w++ = *p;
+        }
+    }
+    *w++ = '\'';
+    *w = '\0';
+    return out;
+}
+
+// Run a script subcommand and return parsed JSON, or NULL on failure.
+// Caller must json_object_put() the result.
+static json_object* scriptRunSubcommand(ScriptProviderState *state, const char *subcmd,
+                                         const char **args, int argCount) {
+    // Build command with shell-escaped arguments
+    char command[16384];
+    char *escaped = shellEscape(state->scriptPath);
+    int offset = snprintf(command, sizeof(command), "bun run %s %s", escaped, subcmd);
+    free(escaped);
+
+    for (int i = 0; i < argCount && offset < (int)sizeof(command) - 1; i++) {
+        escaped = shellEscape(args[i]);
+        offset += snprintf(command + offset, sizeof(command) - offset, " %s", escaped);
+        free(escaped);
+    }
+
+    FILE *pipe = popen(command, "r");
+    if (!pipe) return NULL;
+
+    size_t capacity = 4096, size = 0;
+    char *buffer = malloc(capacity);
+    if (!buffer) { pclose(pipe); return NULL; }
+
+    size_t bytesRead;
+    while ((bytesRead = fread(buffer + size, 1, capacity - size - 1, pipe)) > 0) {
+        size += bytesRead;
+        if (size + 1 >= capacity) {
+            capacity *= 2;
+            char *newBuf = realloc(buffer, capacity);
+            if (!newBuf) { free(buffer); pclose(pipe); return NULL; }
+            buffer = newBuf;
+        }
+    }
+    buffer[size] = '\0';
+    int status = pclose(pipe);
+    if (status != 0 || size == 0) { free(buffer); return NULL; }
+
+    json_object *result = json_tokener_parse(buffer);
+    free(buffer);
+    return result;
+}
+
+// Check if a JSON response indicates success (has "ok":true and no "error")
+static bool scriptResponseOk(json_object *resp) {
+    if (!resp) return false;
+    json_object *errObj = NULL;
+    if (json_object_object_get_ex(resp, "error", &errObj)) return false;
+    json_object *okObj = NULL;
+    if (json_object_object_get_ex(resp, "ok", &okObj)) {
+        return json_object_get_boolean(okObj);
+    }
+    return false;
+}
+
 // Run script and parse JSON output into FFON elements
 static FfonElement** scriptFetch(Provider *self, int *outCount) {
     *outCount = 0;
@@ -408,6 +489,170 @@ static FfonElement** scriptFetch(Provider *self, int *outCount) {
     return elements;
 }
 
+// Script commit: bun run <script> commit <path> <old> <new>
+static bool scriptCommitEdit(Provider *self, const char *oldContent, const char *newContent) {
+    ScriptProviderState *state = (ScriptProviderState*)self->state;
+    const char *args[] = { state->currentPath, oldContent, newContent };
+    json_object *resp = scriptRunSubcommand(state, "commit", args, 3);
+    bool ok = scriptResponseOk(resp);
+    if (resp) json_object_put(resp);
+    return ok;
+}
+
+// Script createDirectory: bun run <script> createDirectory <path> <name>
+static bool scriptCreateDirectory(Provider *self, const char *name) {
+    ScriptProviderState *state = (ScriptProviderState*)self->state;
+    const char *args[] = { state->currentPath, name };
+    json_object *resp = scriptRunSubcommand(state, "createDirectory", args, 2);
+    bool ok = scriptResponseOk(resp);
+    if (resp) json_object_put(resp);
+    return ok;
+}
+
+// Script createFile: bun run <script> createFile <path> <name>
+static bool scriptCreateFile(Provider *self, const char *name) {
+    ScriptProviderState *state = (ScriptProviderState*)self->state;
+    const char *args[] = { state->currentPath, name };
+    json_object *resp = scriptRunSubcommand(state, "createFile", args, 2);
+    bool ok = scriptResponseOk(resp);
+    if (resp) json_object_put(resp);
+    return ok;
+}
+
+// Script deleteItem: bun run <script> deleteItem <path> <name>
+static bool scriptDeleteItem(Provider *self, const char *name) {
+    ScriptProviderState *state = (ScriptProviderState*)self->state;
+    const char *args[] = { state->currentPath, name };
+    json_object *resp = scriptRunSubcommand(state, "deleteItem", args, 2);
+    bool ok = scriptResponseOk(resp);
+    if (resp) json_object_put(resp);
+    return ok;
+}
+
+// Script copyItem: bun run <script> copyItem <srcDir> <srcName> <destDir> <destName>
+static bool scriptCopyItem(Provider *self, const char *srcDir, const char *srcName,
+                            const char *destDir, const char *destName) {
+    ScriptProviderState *state = (ScriptProviderState*)self->state;
+    const char *args[] = { srcDir, srcName, destDir, destName };
+    json_object *resp = scriptRunSubcommand(state, "copyItem", args, 4);
+    bool ok = scriptResponseOk(resp);
+    if (resp) json_object_put(resp);
+    return ok;
+}
+
+// Script getCommands: bun run <script> commands
+static const char** scriptGetCommands(Provider *self, int *outCount) {
+    ScriptProviderState *state = (ScriptProviderState*)self->state;
+    json_object *resp = scriptRunSubcommand(state, "commands", NULL, 0);
+    *outCount = 0;
+    if (!resp || !json_object_is_type(resp, json_type_array)) {
+        if (resp) json_object_put(resp);
+        return NULL;
+    }
+    int len = json_object_array_length(resp);
+    if (len == 0) { json_object_put(resp); return NULL; }
+
+    const char **cmds = malloc(len * sizeof(const char*));
+    for (int i = 0; i < len; i++) {
+        cmds[i] = strdup(json_object_get_string(json_object_array_get_idx(resp, i)));
+    }
+    *outCount = len;
+    json_object_put(resp);
+    return cmds;
+}
+
+// Script handleCommand: bun run <script> handleCommand <path> <command> <key> <type>
+static FfonElement* scriptHandleCommand(Provider *self, const char *command,
+                                         const char *elementKey, int elementType,
+                                         char *errorMsg, int errorMsgSize) {
+    ScriptProviderState *state = (ScriptProviderState*)self->state;
+    char typeStr[16];
+    snprintf(typeStr, sizeof(typeStr), "%d", elementType);
+    const char *args[] = { state->currentPath, command, elementKey ? elementKey : "", typeStr };
+    json_object *resp = scriptRunSubcommand(state, "handleCommand", args, 4);
+    if (!resp) return NULL;
+
+    json_object *errObj = NULL;
+    if (json_object_object_get_ex(resp, "error", &errObj)) {
+        if (errorMsg && errorMsgSize > 0) {
+            strncpy(errorMsg, json_object_get_string(errObj), errorMsgSize - 1);
+            errorMsg[errorMsgSize - 1] = '\0';
+        }
+        json_object_put(resp);
+        return NULL;
+    }
+
+    FfonElement *elem = parseJsonValue(resp);
+    json_object_put(resp);
+    return elem;
+}
+
+// Script getCommandListItems: bun run <script> commandListItems <path> <command>
+static ProviderListItem* scriptGetCommandListItems(Provider *self, const char *command, int *outCount) {
+    ScriptProviderState *state = (ScriptProviderState*)self->state;
+    const char *args[] = { state->currentPath, command };
+    json_object *resp = scriptRunSubcommand(state, "commandListItems", args, 2);
+    *outCount = 0;
+    if (!resp || !json_object_is_type(resp, json_type_array)) {
+        if (resp) json_object_put(resp);
+        return NULL;
+    }
+    int len = json_object_array_length(resp);
+    if (len == 0) { json_object_put(resp); return NULL; }
+
+    ProviderListItem *items = malloc(len * sizeof(ProviderListItem));
+    for (int i = 0; i < len; i++) {
+        json_object *item = json_object_array_get_idx(resp, i);
+        json_object *labelObj = NULL, *dataObj = NULL;
+        json_object_object_get_ex(item, "label", &labelObj);
+        json_object_object_get_ex(item, "data", &dataObj);
+        items[i].label = labelObj ? strdup(json_object_get_string(labelObj)) : strdup("");
+        items[i].data = dataObj ? strdup(json_object_get_string(dataObj)) : strdup("");
+    }
+    *outCount = len;
+    json_object_put(resp);
+    return items;
+}
+
+// Script executeCommand: bun run <script> executeCommand <path> <command> <selection>
+static bool scriptExecuteCommand(Provider *self, const char *command, const char *selection) {
+    ScriptProviderState *state = (ScriptProviderState*)self->state;
+    const char *args[] = { state->currentPath, command, selection ? selection : "" };
+    json_object *resp = scriptRunSubcommand(state, "executeCommand", args, 3);
+    bool ok = scriptResponseOk(resp);
+    if (resp) json_object_put(resp);
+    return ok;
+}
+
+// Script collectDeepSearchItems: bun run <script> deepSearch <path>
+static SearchResultItem* scriptCollectDeepSearchItems(Provider *self, int *outCount) {
+    ScriptProviderState *state = (ScriptProviderState*)self->state;
+    const char *args[] = { state->currentPath };
+    json_object *resp = scriptRunSubcommand(state, "deepSearch", args, 1);
+    *outCount = 0;
+    if (!resp || !json_object_is_type(resp, json_type_array)) {
+        if (resp) json_object_put(resp);
+        return NULL;
+    }
+    int len = json_object_array_length(resp);
+    if (len == 0) { json_object_put(resp); return NULL; }
+
+    SearchResultItem *items = malloc(len * sizeof(SearchResultItem));
+    for (int i = 0; i < len; i++) {
+        json_object *item = json_object_array_get_idx(resp, i);
+        json_object *labelObj = NULL, *bcObj = NULL, *navObj = NULL;
+        json_object_object_get_ex(item, "label", &labelObj);
+        json_object_object_get_ex(item, "breadcrumb", &bcObj);
+        json_object_object_get_ex(item, "navPath", &navObj);
+        items[i].label = labelObj ? strdup(json_object_get_string(labelObj)) : strdup("");
+        items[i].breadcrumb = bcObj ? strdup(json_object_get_string(bcObj)) : strdup("");
+        items[i].navPath = navObj ? strdup(json_object_get_string(navObj)) : strdup("");
+    }
+    *outCount = len;
+    json_object_put(resp);
+    return items;
+}
+
 static FfonElement* scriptCreateElement(Provider *self, const char *elementKey) {
     (void)self;
     const char *key = elementKey;
@@ -490,14 +735,22 @@ Provider* scriptProviderCreate(const char *name, const char *displayName,
 
     // Wire up: custom fetch, reuse generic path management
     provider->fetch = scriptFetch;
-    provider->commitEdit = NULL;
+    provider->commitEdit = scriptCommitEdit;
     provider->init = genericInit;
     provider->cleanup = NULL;
     provider->pushPath = genericPushPath;
     provider->popPath = genericPopPath;
     provider->getCurrentPath = genericGetCurrentPath;
-    provider->createDirectory = NULL;
-    provider->createFile = NULL;
+    provider->setCurrentPath = genericSetCurrentPath;
+    provider->createDirectory = scriptCreateDirectory;
+    provider->createFile = scriptCreateFile;
+    provider->deleteItem = scriptDeleteItem;
+    provider->copyItem = scriptCopyItem;
+    provider->getCommands = scriptGetCommands;
+    provider->handleCommand = scriptHandleCommand;
+    provider->getCommandListItems = scriptGetCommandListItems;
+    provider->executeCommand = scriptExecuteCommand;
+    provider->collectDeepSearchItems = scriptCollectDeepSearchItems;
     provider->loadConfig = NULL;
     provider->saveConfig = NULL;
     provider->createElement = scriptCreateElement;

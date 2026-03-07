@@ -1,5 +1,5 @@
 lib_ffon_src = files('src/ffon.c')
-lib_ffon_inc = include_directories('include')
+lib_ffon_inc = include_directories('../../sdk/include')
 
 json_c_dep = dependency('json-c')
 
