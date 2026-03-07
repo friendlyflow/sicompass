@@ -3,11 +3,11 @@
     "accesskit-c-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1772058558,
-        "narHash": "sha256-sDrTCHHzw3Iej3ZiBkDu6mHNBv3Dvc7ET6mxGtpilJk=",
+        "lastModified": 1772489217,
+        "narHash": "sha256-o0+0HWo4nQsY5xEvCjnzFUU0WfFQiVyzKk/CsIOUuq0=",
         "owner": "AccessKit",
         "repo": "accesskit-c",
-        "rev": "c42e2d9d754ef190ef9b11d393a52dc10db05028",
+        "rev": "66b1d074c50ebb26a9014ae943c207f2b587b33e",
         "type": "github"
       },
       "original": {
@@ -34,11 +34,11 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1771848320,
-        "narHash": "sha256-0MAd+0mun3K/Ns8JATeHT1sX28faLII5hVLq0L3BdZU=",
+        "lastModified": 1772773019,
+        "narHash": "sha256-E1bxHxNKfDoQUuvriG71+f+s/NT0qWkImXsYZNFFfCs=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "2fc6539b481e1d2569f25f8799236694180c0993",
+        "rev": "aca4d95fce4914b3892661bcb80b8087293536c6",
         "type": "github"
       },
       "original": {
