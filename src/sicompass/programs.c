@@ -8,6 +8,31 @@
 #include <stdio.h>
 #include <sys/stat.h>
 
+// Read a string value from settings.json for a given section and key.
+// Returns heap-allocated string or NULL. Caller must free.
+static char* readSettingsValue(const char *section, const char *key) {
+    char *configPath = providerGetMainConfigPath();
+    if (!configPath) return NULL;
+    json_object *root = json_object_from_file(configPath);
+    free(configPath);
+    if (!root) return NULL;
+
+    json_object *sectionObj;
+    if (!json_object_object_get_ex(root, section, &sectionObj)) {
+        json_object_put(root);
+        return NULL;
+    }
+    json_object *valObj;
+    if (!json_object_object_get_ex(sectionObj, key, &valObj)) {
+        json_object_put(root);
+        return NULL;
+    }
+    const char *str = json_object_get_string(valObj);
+    char *result = str ? strdup(str) : NULL;
+    json_object_put(root);
+    return result;
+}
+
 static const char *DEFAULT_PROGRAMS[] = {"tutorial", "file browser"};
 static const int DEFAULT_PROGRAMS_COUNT = 2;
 
@@ -109,6 +134,34 @@ static void loadProgram(const char *name, Provider *settingsProvider) {
             providerRegister(p);
             settingsAddSection(settingsProvider, "web browser");
         }
+    } else {
+        // Unknown program name: try loading as a remote FFON service.
+        // Check if settings.json has a remoteUrl for this program name.
+        char *remoteUrl = readSettingsValue(name, "remoteUrl");
+        if (remoteUrl && remoteUrl[0]) {
+            #ifdef REMOTE_SCRIPT_PATH
+            Provider *p = scriptProviderCreate(name, name, REMOTE_SCRIPT_PATH);
+            if (p) {
+                // Set initial path to provider name so remote.ts can look up settings.
+                // currentPath is at offset 0 of the state struct (char[4096]).
+                snprintf((char*)p->state, 4096, "%s", name);
+
+                // Register auth for this origin
+                char *apiKey = readSettingsValue(name, "apiKey");
+                if (apiKey && apiKey[0]) {
+                    providerRegisterAuth(remoteUrl, apiKey);
+                }
+                free(apiKey);
+
+                providerRegister(p);
+                settingsAddSectionText(settingsProvider, name,
+                                       "remote URL", "remoteUrl", "");
+                settingsAddSectionText(settingsProvider, name,
+                                       "API key", "apiKey", "");
+            }
+            #endif
+        }
+        free(remoteUrl);
     }
 }
 
