@@ -465,8 +465,16 @@ Provider* scriptProviderCreate(const char *name, const char *displayName,
         free(provider);
         return NULL;
     }
-    ops->name = name;
-    ops->displayName = displayName;
+    ops->name = strdup(name);
+    ops->displayName = displayName ? strdup(displayName) : NULL;
+    if (!ops->name || (displayName && !ops->displayName)) {
+        free((char*)ops->name);
+        free((char*)ops->displayName);
+        free(ops);
+        free(state);
+        free(provider);
+        return NULL;
+    }
     ops->fetch = NULL;
     ops->commit = NULL;
     ops->createDirectory = NULL;
@@ -477,7 +485,7 @@ Provider* scriptProviderCreate(const char *name, const char *displayName,
     state->scriptPath[sizeof(state->scriptPath) - 1] = '\0';
     state->ops = ops;
 
-    provider->name = name;
+    provider->name = ops->name;
     provider->state = state;
 
     // Wire up: custom fetch, reuse generic path management
