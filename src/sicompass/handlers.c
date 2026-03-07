@@ -372,28 +372,37 @@ static bool handleCheckboxToggle(AppRenderer *appRenderer, IdArray *elementId) {
     int idx = elementId->ids[elementId->depth - 1];
     if (idx < 0 || idx >= count) return false;
     FfonElement *elem = arr[idx];
-    if (elem->type != FFON_STRING) return false;
 
-    if (providerTagHasCheckboxChecked(elem->data.string)) {
+    // Get pointer to the tag string (string value or object key)
+    char **tagPtr = NULL;
+    if (elem->type == FFON_STRING) {
+        tagPtr = &elem->data.string;
+    } else if (elem->type == FFON_OBJECT) {
+        tagPtr = &elem->data.object->key;
+    } else {
+        return false;
+    }
+
+    if (providerTagHasCheckboxChecked(*tagPtr)) {
         // Uncheck: <checkbox checked>content -> <checkbox>content
-        char *content = providerTagExtractCheckboxCheckedContent(elem->data.string);
+        char *content = providerTagExtractCheckboxCheckedContent(*tagPtr);
         if (!content) return false;
         char *newKey = providerTagFormatCheckboxKey(content);
         free(content);
         if (newKey) {
-            free(elem->data.string);
-            elem->data.string = newKey;
+            free(*tagPtr);
+            *tagPtr = newKey;
         }
         return true;
-    } else if (providerTagHasCheckbox(elem->data.string)) {
+    } else if (providerTagHasCheckbox(*tagPtr)) {
         // Check: <checkbox>content -> <checkbox checked>content
-        char *content = providerTagExtractCheckboxContent(elem->data.string);
+        char *content = providerTagExtractCheckboxContent(*tagPtr);
         if (!content) return false;
         char *newKey = providerTagFormatCheckboxCheckedKey(content);
         free(content);
         if (newKey) {
-            free(elem->data.string);
-            elem->data.string = newKey;
+            free(*tagPtr);
+            *tagPtr = newKey;
         }
         return true;
     }

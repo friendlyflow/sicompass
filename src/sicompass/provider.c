@@ -801,12 +801,20 @@ void providerNotifyCheckboxChanged(AppRenderer *appRenderer, IdArray *elementId)
     int idx = elementId->ids[elementId->depth - 1];
     if (idx < 0 || idx >= count) return;
     FfonElement *elem = arr[idx];
-    if (elem->type != FFON_STRING) return;
 
-    bool checked = providerTagHasCheckboxChecked(elem->data.string);
+    const char *tagStr = NULL;
+    if (elem->type == FFON_STRING) {
+        tagStr = elem->data.string;
+    } else if (elem->type == FFON_OBJECT) {
+        tagStr = elem->data.object->key;
+    } else {
+        return;
+    }
+
+    bool checked = providerTagHasCheckboxChecked(tagStr);
     char *label = checked
-        ? providerTagExtractCheckboxCheckedContent(elem->data.string)
-        : providerTagExtractCheckboxContent(elem->data.string);
+        ? providerTagExtractCheckboxCheckedContent(tagStr)
+        : providerTagExtractCheckboxContent(tagStr);
     if (!label) return;
 
     provider->onCheckboxChange(provider, label, checked);
