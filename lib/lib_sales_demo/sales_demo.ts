@@ -14,7 +14,7 @@ interface Section {
 
 // ─── Equipment JSON helpers ───────────────────────────────────────────────────
 
-const CARDINALITY = new Set(["one mand", "one opt", "many opt", "many mand"]);
+const CARDINALITY = new Set(["one mand", "one opt", "many opt"]);
 
 function isCardinality(v: unknown): v is string {
   return typeof v === "string" && CARDINALITY.has(v);
