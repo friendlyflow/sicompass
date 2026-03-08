@@ -664,8 +664,8 @@ void handleEnter(AppRenderer *appRenderer, History history) {
     } else if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
         // Check for checkbox toggle first
         if (handleCheckboxToggle(appRenderer, &appRenderer->currentId)) {
-            providerNotifyCheckboxChanged(appRenderer, &appRenderer->currentId);
             int savedIndex = appRenderer->listIndex;
+            providerNotifyCheckboxChanged(appRenderer, &appRenderer->currentId);
             createListCurrentLayer(appRenderer);
             appRenderer->listIndex = savedIndex;
             appRenderer->needsRedraw = true;
