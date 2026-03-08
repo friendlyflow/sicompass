@@ -177,6 +177,67 @@ void providerCleanupAll(void) {
     }
 }
 
+// Remove a provider from the global registry (from provider.c)
+void providerUnregister(Provider *provider) {
+    if (!provider) return;
+    for (int i = 0; i < g_providerCount; i++) {
+        if (g_providers[i] == provider) {
+            for (int j = i; j < g_providerCount - 1; j++) {
+                g_providers[j] = g_providers[j + 1];
+            }
+            g_providers[--g_providerCount] = NULL;
+            return;
+        }
+    }
+}
+
+/* ============================================
+ * Auth registry (from provider.c)
+ * ============================================ */
+
+#define MAX_AUTH_ENTRIES 16
+
+static struct {
+    char origin[512];
+    char apiKey[512];
+} g_authEntries[MAX_AUTH_ENTRIES];
+static int g_authCount = 0;
+
+void providerRegisterAuth(const char *origin, const char *apiKey) {
+    if (!origin || !apiKey || g_authCount >= MAX_AUTH_ENTRIES) return;
+    strncpy(g_authEntries[g_authCount].origin, origin, sizeof(g_authEntries[0].origin) - 1);
+    g_authEntries[g_authCount].origin[sizeof(g_authEntries[0].origin) - 1] = '\0';
+    strncpy(g_authEntries[g_authCount].apiKey, apiKey, sizeof(g_authEntries[0].apiKey) - 1);
+    g_authEntries[g_authCount].apiKey[sizeof(g_authEntries[0].apiKey) - 1] = '\0';
+    g_authCount++;
+}
+
+static const char* findApiKeyForUrl(const char *url) {
+    if (!url) return NULL;
+    for (int i = 0; i < g_authCount; i++) {
+        if (strncmp(url, g_authEntries[i].origin, strlen(g_authEntries[i].origin)) == 0) {
+            return g_authEntries[i].apiKey;
+        }
+    }
+    return NULL;
+}
+
+/* ============================================
+ * nameMatchesProvider (from programs.c)
+ * ============================================ */
+
+static bool nameMatchesProvider(const char *displayName, const char *providerName) {
+    if (strcmp(displayName, providerName) == 0) return true;
+    const char *d = displayName, *p = providerName;
+    while (*d && *p) {
+        if (*d == ' ') { d++; continue; }
+        if (*d != *p) return false;
+        d++; p++;
+    }
+    while (*d == ' ') d++;
+    return *d == '\0' && *p == '\0';
+}
+
 /* ============================================
  * Provider dispatch (from provider.c)
  * ============================================ */
@@ -313,6 +374,8 @@ static void destroyElem(FfonElement *e) {
 
 void setUp(void) {
     resetRegistry();
+    g_authCount = 0;
+    memset(g_authEntries, 0, sizeof(g_authEntries));
     RESET_FAKE(setErrorMessage);
     RESET_FAKE(mock_getCurrentPath);
     RESET_FAKE(mock_commitEdit);
@@ -658,6 +721,134 @@ void test_providerNavigateLeft_no_popPath(void) {
 }
 
 /* ============================================
+ * providerUnregister tests
+ * ============================================ */
+
+void test_providerUnregister_middle(void) {
+    Provider a = createMockProvider("a");
+    Provider b = createMockProvider("b");
+    Provider c = createMockProvider("c");
+    providerRegister(&a);
+    providerRegister(&b);
+    providerRegister(&c);
+    providerUnregister(&b);
+    TEST_ASSERT_EQUAL_INT(2, providerGetRegisteredCount());
+    TEST_ASSERT_EQUAL_PTR(&a, providerGetRegisteredAt(0));
+    TEST_ASSERT_EQUAL_PTR(&c, providerGetRegisteredAt(1));
+}
+
+void test_providerUnregister_first(void) {
+    Provider a = createMockProvider("a");
+    Provider b = createMockProvider("b");
+    providerRegister(&a);
+    providerRegister(&b);
+    providerUnregister(&a);
+    TEST_ASSERT_EQUAL_INT(1, providerGetRegisteredCount());
+    TEST_ASSERT_EQUAL_PTR(&b, providerGetRegisteredAt(0));
+}
+
+void test_providerUnregister_last(void) {
+    Provider a = createMockProvider("a");
+    Provider b = createMockProvider("b");
+    providerRegister(&a);
+    providerRegister(&b);
+    providerUnregister(&b);
+    TEST_ASSERT_EQUAL_INT(1, providerGetRegisteredCount());
+    TEST_ASSERT_EQUAL_PTR(&a, providerGetRegisteredAt(0));
+}
+
+void test_providerUnregister_null(void) {
+    Provider a = createMockProvider("a");
+    providerRegister(&a);
+    providerUnregister(NULL);
+    TEST_ASSERT_EQUAL_INT(1, providerGetRegisteredCount());
+}
+
+void test_providerUnregister_not_found(void) {
+    Provider a = createMockProvider("a");
+    Provider b = createMockProvider("b");
+    providerRegister(&a);
+    providerUnregister(&b);
+    TEST_ASSERT_EQUAL_INT(1, providerGetRegisteredCount());
+}
+
+void test_providerUnregister_clears_slot(void) {
+    Provider a = createMockProvider("a");
+    Provider b = createMockProvider("b");
+    providerRegister(&a);
+    providerRegister(&b);
+    providerUnregister(&b);
+    TEST_ASSERT_NULL(providerGetRegisteredAt(1));
+}
+
+/* ============================================
+ * Auth registry tests
+ * ============================================ */
+
+void test_registerAuth_and_find(void) {
+    providerRegisterAuth("https://example.com", "secret123");
+    const char *key = findApiKeyForUrl("https://example.com/api/data");
+    TEST_ASSERT_NOT_NULL(key);
+    TEST_ASSERT_EQUAL_STRING("secret123", key);
+}
+
+void test_findApiKeyForUrl_no_match(void) {
+    providerRegisterAuth("https://example.com", "secret");
+    TEST_ASSERT_NULL(findApiKeyForUrl("https://other.com/foo"));
+}
+
+void test_findApiKeyForUrl_null(void) {
+    TEST_ASSERT_NULL(findApiKeyForUrl(NULL));
+}
+
+void test_registerAuth_null_params(void) {
+    providerRegisterAuth(NULL, "key");
+    providerRegisterAuth("origin", NULL);
+    TEST_ASSERT_EQUAL_INT(0, g_authCount);
+}
+
+void test_registerAuth_multiple(void) {
+    providerRegisterAuth("https://a.com", "key_a");
+    providerRegisterAuth("https://b.com", "key_b");
+    TEST_ASSERT_EQUAL_STRING("key_a", findApiKeyForUrl("https://a.com/path"));
+    TEST_ASSERT_EQUAL_STRING("key_b", findApiKeyForUrl("https://b.com/path"));
+}
+
+void test_registerAuth_prefix_match(void) {
+    providerRegisterAuth("https://api.example.com", "bearer_token");
+    TEST_ASSERT_NOT_NULL(findApiKeyForUrl("https://api.example.com/v1/data"));
+    TEST_ASSERT_NULL(findApiKeyForUrl("https://example.com/v1/data"));
+}
+
+/* ============================================
+ * nameMatchesProvider tests
+ * ============================================ */
+
+void test_nameMatchesProvider_exact(void) {
+    TEST_ASSERT_TRUE(nameMatchesProvider("tutorial", "tutorial"));
+}
+
+void test_nameMatchesProvider_with_spaces(void) {
+    TEST_ASSERT_TRUE(nameMatchesProvider("chat client", "chatclient"));
+}
+
+void test_nameMatchesProvider_no_match(void) {
+    TEST_ASSERT_FALSE(nameMatchesProvider("chat client", "emailclient"));
+}
+
+void test_nameMatchesProvider_web_browser(void) {
+    TEST_ASSERT_TRUE(nameMatchesProvider("web browser", "webbrowser"));
+}
+
+void test_nameMatchesProvider_empty_strings(void) {
+    TEST_ASSERT_TRUE(nameMatchesProvider("", ""));
+}
+
+void test_nameMatchesProvider_trailing_spaces(void) {
+    TEST_ASSERT_TRUE(nameMatchesProvider("chat ", "chat"));
+}
+
+/* ============================================
  * Main
  * ============================================ */
 
@@ -708,6 +899,30 @@ int main(void) {
     RUN_TEST(test_providerNavigateLeft_at_root);
     RUN_TEST(test_providerNavigateLeft_pops_depth);
     RUN_TEST(test_providerNavigateLeft_no_popPath);
+
+    // providerUnregister
+    RUN_TEST(test_providerUnregister_middle);
+    RUN_TEST(test_providerUnregister_first);
+    RUN_TEST(test_providerUnregister_last);
+    RUN_TEST(test_providerUnregister_null);
+    RUN_TEST(test_providerUnregister_not_found);
+    RUN_TEST(test_providerUnregister_clears_slot);
+
+    // Auth registry
+    RUN_TEST(test_registerAuth_and_find);
+    RUN_TEST(test_findApiKeyForUrl_no_match);
+    RUN_TEST(test_findApiKeyForUrl_null);
+    RUN_TEST(test_registerAuth_null_params);
+    RUN_TEST(test_registerAuth_multiple);
+    RUN_TEST(test_registerAuth_prefix_match);
+
+    // nameMatchesProvider
+    RUN_TEST(test_nameMatchesProvider_exact);
+    RUN_TEST(test_nameMatchesProvider_with_spaces);
+    RUN_TEST(test_nameMatchesProvider_no_match);
+    RUN_TEST(test_nameMatchesProvider_web_browser);
+    RUN_TEST(test_nameMatchesProvider_empty_strings);
+    RUN_TEST(test_nameMatchesProvider_trailing_spaces);
 
     return UNITY_END();
 }

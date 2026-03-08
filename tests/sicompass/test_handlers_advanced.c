@@ -200,8 +200,10 @@ char *providerTagExtractContent(const char *key) {
 
 bool providerTagHasRadio(const char *key) { (void)key; return false; }
 bool providerTagHasChecked(const char *key) { (void)key; return false; }
-bool providerTagHasCheckbox(const char *key) { (void)key; return false; }
-bool providerTagHasCheckboxChecked(const char *key) { (void)key; return false; }
+static bool providerTagHasCheckbox_retval = false;
+bool providerTagHasCheckbox(const char *key) { (void)key; return providerTagHasCheckbox_retval; }
+static bool providerTagHasCheckboxChecked_retval = false;
+bool providerTagHasCheckboxChecked(const char *key) { (void)key; return providerTagHasCheckboxChecked_retval; }
 bool providerTagHasButton(const char *key) { (void)key; return false; }
 bool providerTagHasInput(const char *key) { (void)key; return false; }
 bool providerTagHasOneOpt(const char *key) { (void)key; return false; }
@@ -210,16 +212,38 @@ char *providerTagFormatKey(const char *content) { (void)content; return NULL; }
 char *providerTagStripDisplay(const char *key) { (void)key; return NULL; }
 char *providerTagExtractCheckedContent(const char *key) { (void)key; return NULL; }
 char *providerTagFormatCheckedKey(const char *content) { (void)content; return NULL; }
-char *providerTagExtractCheckboxContent(const char *key) { (void)key; return NULL; }
-char *providerTagExtractCheckboxCheckedContent(const char *key) { (void)key; return NULL; }
-char *providerTagFormatCheckboxKey(const char *content) { (void)content; return NULL; }
-char *providerTagFormatCheckboxCheckedKey(const char *content) { (void)content; return NULL; }
+static char *providerTagExtractCheckboxContent_retval = NULL;
+char *providerTagExtractCheckboxContent(const char *key) {
+    (void)key;
+    if (providerTagExtractCheckboxContent_retval) return strdup(providerTagExtractCheckboxContent_retval);
+    return NULL;
+}
+static char *providerTagExtractCheckboxCheckedContent_retval = NULL;
+char *providerTagExtractCheckboxCheckedContent(const char *key) {
+    (void)key;
+    if (providerTagExtractCheckboxCheckedContent_retval) return strdup(providerTagExtractCheckboxCheckedContent_retval);
+    return NULL;
+}
+static char *providerTagFormatCheckboxKey_retval = NULL;
+char *providerTagFormatCheckboxKey(const char *content) {
+    (void)content;
+    if (providerTagFormatCheckboxKey_retval) return strdup(providerTagFormatCheckboxKey_retval);
+    return NULL;
+}
+static char *providerTagFormatCheckboxCheckedKey_retval = NULL;
+char *providerTagFormatCheckboxCheckedKey(const char *content) {
+    (void)content;
+    if (providerTagFormatCheckboxCheckedKey_retval) return strdup(providerTagFormatCheckboxCheckedKey_retval);
+    return NULL;
+}
 
 // FFON helpers
+static FfonElement **getFfonAtId_retval = NULL;
+static int getFfonAtId_retcount = 0;
 FfonElement **getFfonAtId(FfonElement **ffon, int count, IdArray *id, int *outCount) {
     (void)ffon; (void)count; (void)id;
-    *outCount = 0;
-    return NULL;
+    *outCount = getFfonAtId_retcount;
+    return getFfonAtId_retval;
 }
 
 int getFfonMaxIdAtPath(FfonElement **ffon, int count, IdArray *id) {
@@ -717,6 +741,14 @@ void setUp(void) {
     RESET_FAKE(providerDeleteItem);
     RESET_FAKE(providerExecuteCommand);
     providerTagExtractContent_retval = NULL;
+    providerTagHasCheckbox_retval = false;
+    providerTagHasCheckboxChecked_retval = false;
+    providerTagExtractCheckboxContent_retval = NULL;
+    providerTagExtractCheckboxCheckedContent_retval = NULL;
+    providerTagFormatCheckboxKey_retval = NULL;
+    providerTagFormatCheckboxCheckedKey_retval = NULL;
+    getFfonAtId_retval = NULL;
+    getFfonAtId_retcount = 0;
     g_activeProvider = NULL;
     SDL_GetTicks_fake.return_val = 1000;
 }
@@ -1420,6 +1452,115 @@ void test_escape_from_dashboard(void) {
 }
 
 /* ============================================
+ * handleCheckboxToggle (copied from handlers.c)
+ * ============================================ */
+
+static bool handleCheckboxToggle(AppRenderer *appRenderer, IdArray *elementId) {
+    int count;
+    FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, elementId, &count);
+    if (!arr) return false;
+    int idx = elementId->ids[elementId->depth - 1];
+    if (idx < 0 || idx >= count) return false;
+    FfonElement *elem = arr[idx];
+
+    // Get pointer to the tag string (string value or object key)
+    char **tagPtr = NULL;
+    if (elem->type == FFON_STRING) {
+        tagPtr = &elem->data.string;
+    } else if (elem->type == FFON_OBJECT) {
+        tagPtr = &elem->data.object->key;
+    } else {
+        return false;
+    }
+
+    if (providerTagHasCheckboxChecked(*tagPtr)) {
+        char *content = providerTagExtractCheckboxCheckedContent(*tagPtr);
+        if (!content) return false;
+        char *newKey = providerTagFormatCheckboxKey(content);
+        free(content);
+        if (newKey) {
+            free(*tagPtr);
+            *tagPtr = newKey;
+        }
+        return true;
+    } else if (providerTagHasCheckbox(*tagPtr)) {
+        char *content = providerTagExtractCheckboxContent(*tagPtr);
+        if (!content) return false;
+        char *newKey = providerTagFormatCheckboxCheckedKey(content);
+        free(content);
+        if (newKey) {
+            free(*tagPtr);
+            *tagPtr = newKey;
+        }
+        return true;
+    }
+
+    return false;
+}
+
+/* ============================================
+ * handleCheckboxToggle tests
+ * ============================================ */
+
+void test_checkboxToggle_object_check(void) {
+    // Toggle unchecked FFON_OBJECT checkbox -> checked
+    AppRenderer app = createTestApp();
+    FfonObject obj = { .key = strdup("<checkbox>Enable"), .elements = NULL, .count = 0, .capacity = 0 };
+    FfonElement elem = { .type = FFON_OBJECT, .data.object = &obj };
+    FfonElement *elems[] = { &elem };
+    getFfonAtId_retval = elems;
+    getFfonAtId_retcount = 1;
+    providerTagHasCheckbox_retval = true;
+    providerTagExtractCheckboxContent_retval = "Enable";
+    providerTagFormatCheckboxCheckedKey_retval = "<checkbox checked>Enable";
+
+    IdArray id = { .ids = {0}, .depth = 1 };
+    bool result = handleCheckboxToggle(&app, &id);
+
+    TEST_ASSERT_TRUE(result);
+    TEST_ASSERT_EQUAL_STRING("<checkbox checked>Enable", obj.key);
+    free(obj.key);
+}
+
+void test_checkboxToggle_object_uncheck(void) {
+    // Toggle checked FFON_OBJECT checkbox -> unchecked
+    AppRenderer app = createTestApp();
+    FfonObject obj = { .key = strdup("<checkbox checked>Enable"), .elements = NULL, .count = 0, .capacity = 0 };
+    FfonElement elem = { .type = FFON_OBJECT, .data.object = &obj };
+    FfonElement *elems[] = { &elem };
+    getFfonAtId_retval = elems;
+    getFfonAtId_retcount = 1;
+    providerTagHasCheckboxChecked_retval = true;
+    providerTagExtractCheckboxCheckedContent_retval = "Enable";
+    providerTagFormatCheckboxKey_retval = "<checkbox>Enable";
+
+    IdArray id = { .ids = {0}, .depth = 1 };
+    bool result = handleCheckboxToggle(&app, &id);
+
+    TEST_ASSERT_TRUE(result);
+    TEST_ASSERT_EQUAL_STRING("<checkbox>Enable", obj.key);
+    free(obj.key);
+}
+
+void test_checkboxToggle_object_no_checkbox(void) {
+    // Non-checkbox FFON_OBJECT returns false
+    AppRenderer app = createTestApp();
+    FfonObject obj = { .key = strdup("Just a label"), .elements = NULL, .count = 0, .capacity = 0 };
+    FfonElement elem = { .type = FFON_OBJECT, .data.object = &obj };
+    FfonElement *elems[] = { &elem };
+    getFfonAtId_retval = elems;
+    getFfonAtId_retcount = 1;
+    // providerTagHasCheckbox and providerTagHasCheckboxChecked both default false
+
+    IdArray id = { .ids = {0}, .depth = 1 };
+    bool result = handleCheckboxToggle(&app, &id);
+
+    TEST_ASSERT_FALSE(result);
+    TEST_ASSERT_EQUAL_STRING("Just a label", obj.key);
+    free(obj.key);
+}
+
+/* ============================================
  * Main
  * ============================================ */
 
@@ -1501,6 +1642,11 @@ int main(void) {
     RUN_TEST(test_dashboard_no_provider);
     RUN_TEST(test_dashboard_null_image_path);
     RUN_TEST(test_escape_from_dashboard);
+
+    // handleCheckboxToggle
+    RUN_TEST(test_checkboxToggle_object_check);
+    RUN_TEST(test_checkboxToggle_object_uncheck);
+    RUN_TEST(test_checkboxToggle_object_no_checkbox);
 
     return UNITY_END();
 }

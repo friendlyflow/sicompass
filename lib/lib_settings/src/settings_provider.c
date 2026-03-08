@@ -553,6 +553,18 @@ void settingsRemoveSection(Provider *provider, const char *sectionName) {
             i++;
         }
     }
+
+    // Remove checkbox entries for this section
+    for (int i = 0; i < state->checkboxEntryCount; ) {
+        if (strcmp(state->checkboxEntries[i].sectionName, sectionName) == 0) {
+            for (int j = i; j < state->checkboxEntryCount - 1; j++) {
+                state->checkboxEntries[j] = state->checkboxEntries[j + 1];
+            }
+            state->checkboxEntryCount--;
+        } else {
+            i++;
+        }
+    }
 }
 
 void settingsAddSectionRadio(Provider *provider,
