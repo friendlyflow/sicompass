@@ -207,7 +207,7 @@ bool providerTagHasCheckboxChecked(const char *key) { (void)key; return provider
 bool providerTagHasButton(const char *key) { (void)key; return false; }
 bool providerTagHasInput(const char *key) { (void)key; return false; }
 bool providerTagHasOneOpt(const char *key) { (void)key; return false; }
-bool providerTagHasOpt(const char *key) { (void)key; return false; }
+bool providerTagHasManyOpt(const char *key) { (void)key; return false; }
 char *providerTagFormatKey(const char *content) { (void)content; return NULL; }
 char *providerTagStripDisplay(const char *key) { (void)key; return NULL; }
 char *providerTagExtractCheckedContent(const char *key) { (void)key; return NULL; }

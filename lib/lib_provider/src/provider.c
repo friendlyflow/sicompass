@@ -675,11 +675,11 @@ static FfonElement* scriptCreateElement(Provider *self, const char *elementKey) 
         free(tagged);
         return elem;
     }
-    // Many-opt: prefix with <opt></opt> tag so deletion knows it's deletable
-    size_t taggedLen = OPT_TAG_LEN + strlen(key) + 1;
+    // Many-opt: prefix with <many-opt></many-opt> tag so deletion knows it's deletable
+    size_t taggedLen = MANY_OPT_TAG_LEN + strlen(key) + 1;
     char *tagged = malloc(taggedLen);
     if (!tagged) return NULL;
-    snprintf(tagged, taggedLen, OPT_TAG "%s", key);
+    snprintf(tagged, taggedLen, MANY_OPT_TAG "%s", key);
     FfonElement *elem;
     if (strstr(key, "<input>") != NULL) {
         elem = ffonElementCreateString(tagged);

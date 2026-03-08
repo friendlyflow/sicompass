@@ -1089,10 +1089,10 @@ void handleFileDelete(AppRenderer *appRenderer) {
             }
             if (!isClone) return;  // Don't delete the original "Add element:"
         } else {
-            // Only allow deletion of opt elements (tagged with <one-opt> or <opt>)
+            // Only allow deletion of opt elements (tagged with <one-opt> or <many-opt>)
             const char *ek = (elem->type == FFON_STRING) ?
                 elem->data.string : elem->data.object->key;
-            if (!providerTagHasOneOpt(ek) && !providerTagHasOpt(ek))
+            if (!providerTagHasOneOpt(ek) && !providerTagHasManyOpt(ek))
                 return;  // Mandatory element, don't delete
         }
 

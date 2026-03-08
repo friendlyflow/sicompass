@@ -289,16 +289,16 @@ void test_stripDisplay_image(void) {
 
 // === Opt tags ===
 
-void test_hasOpt_with_tag(void) {
-    TEST_ASSERT_TRUE(providerTagHasOpt("<opt></opt>some content"));
+void test_hasManyOpt_with_tag(void) {
+    TEST_ASSERT_TRUE(providerTagHasManyOpt("<many-opt></many-opt>some content"));
 }
 
-void test_hasOpt_without_tag(void) {
-    TEST_ASSERT_FALSE(providerTagHasOpt("no opt"));
+void test_hasManyOpt_without_tag(void) {
+    TEST_ASSERT_FALSE(providerTagHasManyOpt("no opt"));
 }
 
-void test_hasOpt_null(void) {
-    TEST_ASSERT_FALSE(providerTagHasOpt(NULL));
+void test_hasManyOpt_null(void) {
+    TEST_ASSERT_FALSE(providerTagHasManyOpt(NULL));
 }
 
 void test_hasOneOpt_with_tag(void) {
@@ -510,9 +510,9 @@ int main(void) {
     RUN_TEST(test_stripDisplay_image);
 
     // Opt tags
-    RUN_TEST(test_hasOpt_with_tag);
-    RUN_TEST(test_hasOpt_without_tag);
-    RUN_TEST(test_hasOpt_null);
+    RUN_TEST(test_hasManyOpt_with_tag);
+    RUN_TEST(test_hasManyOpt_without_tag);
+    RUN_TEST(test_hasManyOpt_null);
     RUN_TEST(test_hasOneOpt_with_tag);
     RUN_TEST(test_hasOneOpt_without_tag);
     RUN_TEST(test_hasOneOpt_null);

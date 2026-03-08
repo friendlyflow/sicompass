@@ -271,7 +271,7 @@ const sections: Section[] = [
           "\\<link>path/to/file.json\\</link> - lazy-load external JSON/FFON as children",
           "\\<image>path/to/image.jpg\\</image> - display an image",
           "\\<button>functionName\\</button>Display Text - clickable button element",
-          "\\<opt>\\</opt>key - many-option element, deletable after creation",
+          "\\<many-opt>\\</many-opt>key - many-option element, deletable after creation",
           "\\<one-opt>\\</one-opt>key - single-use button, replaced after creation",
         ],
       },
