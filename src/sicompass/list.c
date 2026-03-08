@@ -72,14 +72,14 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
             idArrayCopy(&appRenderer->totalListCurrentLayer[appRenderer->totalListCount].id, &thisId);
 
             if (elem->type == FFON_STRING) {
-                // Strip <one-opt> or <opt> tag before other tag processing
+                // Strip <one-opt> or <many-opt> tag before other tag processing
                 const char *strKey = elem->data.string;
                 char *oneOptStr = NULL;
                 if (providerTagHasOneOpt(strKey)) {
                     oneOptStr = providerTagStripOneOpt(strKey);
                     strKey = oneOptStr;
-                } else if (providerTagHasOpt(strKey)) {
-                    oneOptStr = strdup(strKey + OPT_TAG_LEN);
+                } else if (providerTagHasManyOpt(strKey)) {
+                    oneOptStr = strdup(strKey + MANY_OPT_TAG_LEN);
                     strKey = oneOptStr;
                 }
 
@@ -127,14 +127,14 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
                 free(stripped);
                 free(oneOptStr);
             } else {
-                // Strip <one-opt> or <opt> tag before other tag processing
+                // Strip <one-opt> or <many-opt> tag before other tag processing
                 const char *objKey = elem->data.object->key;
                 char *oneOptObj = NULL;
                 if (providerTagHasOneOpt(objKey)) {
                     oneOptObj = providerTagStripOneOpt(objKey);
                     objKey = oneOptObj;
-                } else if (providerTagHasOpt(objKey)) {
-                    oneOptObj = strdup(objKey + OPT_TAG_LEN);
+                } else if (providerTagHasManyOpt(objKey)) {
+                    oneOptObj = strdup(objKey + MANY_OPT_TAG_LEN);
                     objKey = oneOptObj;
                 }
 

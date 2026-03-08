@@ -339,9 +339,9 @@ char* providerTagExtractImageContent(const char *taggedText) {
     return result;
 }
 
-bool providerTagHasOpt(const char *text) {
+bool providerTagHasManyOpt(const char *text) {
     if (!text) return false;
-    return strncmp(text, OPT_TAG, OPT_TAG_LEN) == 0;
+    return strncmp(text, MANY_OPT_TAG, MANY_OPT_TAG_LEN) == 0;
 }
 
 bool providerTagHasOneOpt(const char *text) {
