@@ -157,6 +157,7 @@ const sections: Section[] = [
           "Object checkboxes are useful for enabling a feature while also showing its settings.",
         ],
       },
+      "Edit this text --> <input>hello world</input> <-- press i or a",
       {
         key: "<radio>Pick a color",
         children: [

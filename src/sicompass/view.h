@@ -135,6 +135,8 @@ typedef struct AppRenderer {
     int inputBufferCapacity;
     int cursorPosition;
     int selectionAnchor;  // -1 = no selection; byte offset of anchor otherwise
+    char inputPrefix[MAX_LINE_LENGTH];   // non-editable text before <input>
+    char inputSuffix[MAX_LINE_LENGTH];   // non-editable text after </input>
     int scrollOffset;
     int textScrollOffset;      // Line offset for scroll mode text viewing
     int textScrollLineCount;   // Total wrapped lines from last renderScroll (for clamping)

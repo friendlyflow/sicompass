@@ -599,42 +599,55 @@ void handleEnter(AppRenderer *appRenderer, History history) {
 
                     bool wasInput = providerTagHasInput(elementKey);
                     // Only commit if changed
+                    bool commitSucceeded = false;
                     if (strcmp(oldContent, newContent) != 0) {
-                        bool success;
                         if (oldContent[0] == '\0' && elem->type == FFON_OBJECT) {
-                            success = providerCreateDirectory(appRenderer, newContent);
+                            commitSucceeded = providerCreateDirectory(appRenderer, newContent);
                         } else if (oldContent[0] == '\0' && elem->type == FFON_STRING) {
                             Provider *p = providerGetActive(appRenderer);
                             if (p && p->createFile) {
-                                success = providerCreateFile(appRenderer, newContent);
+                                commitSucceeded = providerCreateFile(appRenderer, newContent);
                             } else {
                                 // Provider has no file creation: update FFON element directly
                                 char *newKey = providerTagFormatKey(newContent);
                                 if (newKey) {
                                     free(elem->data.string);
                                     elem->data.string = newKey;
-                                    success = true;
+                                    commitSucceeded = true;
                                 }
                             }
                         } else {
-                            success = providerCommitEdit(appRenderer, oldContent, newContent);
+                            commitSucceeded = providerCommitEdit(appRenderer, oldContent, newContent);
                         }
-                        if (success) {
-                            // Update element with new key
+                        // Update element with new key, preserving prefix/suffix
+                        {
                             char *newKey = providerTagFormatKey(newContent);
                             if (newKey) {
+                                char *fullKey;
+                                if (appRenderer->inputPrefix[0] != '\0' || appRenderer->inputSuffix[0] != '\0') {
+                                    size_t fullLen = strlen(appRenderer->inputPrefix) + strlen(newKey) + strlen(appRenderer->inputSuffix) + 1;
+                                    fullKey = malloc(fullLen);
+                                    if (fullKey) {
+                                        snprintf(fullKey, fullLen, "%s%s%s", appRenderer->inputPrefix, newKey, appRenderer->inputSuffix);
+                                        free(newKey);
+                                    } else {
+                                        fullKey = newKey;
+                                    }
+                                } else {
+                                    fullKey = newKey;
+                                }
                                 if (elem->type == FFON_STRING) {
                                     free(elem->data.string);
-                                    elem->data.string = newKey;
+                                    elem->data.string = fullKey;
                                 } else {
                                     free(elem->data.object->key);
-                                    elem->data.object->key = newKey;
+                                    elem->data.object->key = fullKey;
                                 }
                             }
                         }
                     }
-                    // If this was an <input> element, refresh to pick up new provider data
-                    if (wasInput)
+                    // If commit succeeded, refresh to pick up new provider data
+                    if (wasInput && commitSucceeded)
                         providerRefreshCurrentDirectory(appRenderer);
                     free(oldContent);
                     // Return to operator general
@@ -1818,16 +1831,39 @@ void handleI(AppRenderer *appRenderer) {
                            appRenderer->inputBufferCapacity - 1);
                     appRenderer->inputBufferSize = strlen(appRenderer->inputBuffer);
                     free(content);
+                    // Extract prefix (text before <input>) and suffix (text after </input>)
+                    const char *openTag = strstr(elementKey, INPUT_TAG_OPEN);
+                    if (openTag) {
+                        size_t prefixLen = openTag - elementKey;
+                        if (prefixLen >= MAX_LINE_LENGTH) prefixLen = MAX_LINE_LENGTH - 1;
+                        memcpy(appRenderer->inputPrefix, elementKey, prefixLen);
+                        appRenderer->inputPrefix[prefixLen] = '\0';
+                        const char *closeTag = strstr(openTag, INPUT_TAG_CLOSE);
+                        if (closeTag) {
+                            strncpy(appRenderer->inputSuffix, closeTag + INPUT_TAG_CLOSE_LEN,
+                                    MAX_LINE_LENGTH - 1);
+                            appRenderer->inputSuffix[MAX_LINE_LENGTH - 1] = '\0';
+                        } else {
+                            appRenderer->inputSuffix[0] = '\0';
+                        }
+                    } else {
+                        appRenderer->inputPrefix[0] = '\0';
+                        appRenderer->inputSuffix[0] = '\0';
+                    }
                 } else if (elem->type == FFON_STRING) {
                     // Default: use raw string
                     strncpy(appRenderer->inputBuffer, elem->data.string,
                            appRenderer->inputBufferCapacity - 1);
                     appRenderer->inputBufferSize = strlen(appRenderer->inputBuffer);
+                    appRenderer->inputPrefix[0] = '\0';
+                    appRenderer->inputSuffix[0] = '\0';
                 } else {
                     // For objects, include the colon
                     snprintf(appRenderer->inputBuffer, appRenderer->inputBufferCapacity,
                             "%s:", elem->data.object->key);
                     appRenderer->inputBufferSize = strlen(appRenderer->inputBuffer);
+                    appRenderer->inputPrefix[0] = '\0';
+                    appRenderer->inputSuffix[0] = '\0';
                 }
             }
         }
@@ -1891,16 +1927,39 @@ void handleA(AppRenderer *appRenderer) {
                            appRenderer->inputBufferCapacity - 1);
                     appRenderer->inputBufferSize = strlen(appRenderer->inputBuffer);
                     free(content);
+                    // Extract prefix (text before <input>) and suffix (text after </input>)
+                    const char *openTag = strstr(elementKey, INPUT_TAG_OPEN);
+                    if (openTag) {
+                        size_t prefixLen = openTag - elementKey;
+                        if (prefixLen >= MAX_LINE_LENGTH) prefixLen = MAX_LINE_LENGTH - 1;
+                        memcpy(appRenderer->inputPrefix, elementKey, prefixLen);
+                        appRenderer->inputPrefix[prefixLen] = '\0';
+                        const char *closeTag = strstr(openTag, INPUT_TAG_CLOSE);
+                        if (closeTag) {
+                            strncpy(appRenderer->inputSuffix, closeTag + INPUT_TAG_CLOSE_LEN,
+                                    MAX_LINE_LENGTH - 1);
+                            appRenderer->inputSuffix[MAX_LINE_LENGTH - 1] = '\0';
+                        } else {
+                            appRenderer->inputSuffix[0] = '\0';
+                        }
+                    } else {
+                        appRenderer->inputPrefix[0] = '\0';
+                        appRenderer->inputSuffix[0] = '\0';
+                    }
                 } else if (elem->type == FFON_STRING) {
                     // Default: use raw string
                     strncpy(appRenderer->inputBuffer, elem->data.string,
                            appRenderer->inputBufferCapacity - 1);
                     appRenderer->inputBufferSize = strlen(appRenderer->inputBuffer);
+                    appRenderer->inputPrefix[0] = '\0';
+                    appRenderer->inputSuffix[0] = '\0';
                 } else {
                     // For objects, include the colon
                     snprintf(appRenderer->inputBuffer, appRenderer->inputBufferCapacity,
                             "%s:", elem->data.object->key);
                     appRenderer->inputBufferSize = strlen(appRenderer->inputBuffer);
+                    appRenderer->inputPrefix[0] = '\0';
+                    appRenderer->inputSuffix[0] = '\0';
                 }
             }
         }
