@@ -247,6 +247,108 @@ void test_factory_create_unknown(void) {
     TEST_ASSERT_NULL(p);
 }
 
+/* ============================================
+ * shellEscape (from provider.c, static)
+ * ============================================ */
+
+static char* shellEscape(const char *str) {
+    if (!str) return strdup("''");
+    int quotes = 0;
+    for (const char *p = str; *p; p++) {
+        if (*p == '\'') quotes++;
+    }
+    size_t len = strlen(str) + 2 + quotes * 3 + 1;
+    char *out = malloc(len);
+    if (!out) return NULL;
+    char *w = out;
+    *w++ = '\'';
+    for (const char *p = str; *p; p++) {
+        if (*p == '\'') {
+            *w++ = '\''; *w++ = '\\'; *w++ = '\''; *w++ = '\'';
+        } else {
+            *w++ = *p;
+        }
+    }
+    *w++ = '\'';
+    *w = '\0';
+    return out;
+}
+
+void test_shellEscape_simple(void) {
+    char *r = shellEscape("hello");
+    TEST_ASSERT_EQUAL_STRING("'hello'", r);
+    free(r);
+}
+
+void test_shellEscape_single_quote(void) {
+    char *r = shellEscape("it's");
+    TEST_ASSERT_EQUAL_STRING("'it'\\''s'", r);
+    free(r);
+}
+
+void test_shellEscape_empty(void) {
+    char *r = shellEscape("");
+    TEST_ASSERT_EQUAL_STRING("''", r);
+    free(r);
+}
+
+void test_shellEscape_null(void) {
+    char *r = shellEscape(NULL);
+    TEST_ASSERT_EQUAL_STRING("''", r);
+    free(r);
+}
+
+void test_shellEscape_special_chars(void) {
+    char *r = shellEscape("$PATH;rm -rf");
+    TEST_ASSERT_EQUAL_STRING("'$PATH;rm -rf'", r);
+    free(r);
+}
+
+void test_shellEscape_spaces(void) {
+    char *r = shellEscape("hello world");
+    TEST_ASSERT_EQUAL_STRING("'hello world'", r);
+    free(r);
+}
+
+/* ============================================
+ * scriptResponseOk (from provider.c, static)
+ * ============================================ */
+
+#include <json-c/json.h>
+
+static bool scriptResponseOk(json_object *resp) {
+    if (!resp) return false;
+    json_object *errObj = NULL;
+    if (json_object_object_get_ex(resp, "error", &errObj)) return false;
+    json_object *okObj = NULL;
+    if (json_object_object_get_ex(resp, "ok", &okObj)) {
+        return json_object_get_boolean(okObj);
+    }
+    return false;
+}
+
+void test_scriptResponseOk_true(void) {
+    json_object *resp = json_tokener_parse("{\"ok\": true}");
+    TEST_ASSERT_TRUE(scriptResponseOk(resp));
+    json_object_put(resp);
+}
+
+void test_scriptResponseOk_false(void) {
+    json_object *resp = json_tokener_parse("{\"ok\": false}");
+    TEST_ASSERT_FALSE(scriptResponseOk(resp));
+    json_object_put(resp);
+}
+
+void test_scriptResponseOk_error(void) {
+    json_object *resp = json_tokener_parse("{\"ok\": true, \"error\": \"fail\"}");
+    TEST_ASSERT_FALSE(scriptResponseOk(resp));
+    json_object_put(resp);
+}
+
+void test_scriptResponseOk_null(void) {
+    TEST_ASSERT_FALSE(scriptResponseOk(NULL));
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -275,6 +377,20 @@ int main(void) {
 
     RUN_TEST(test_factory_register_and_create);
     RUN_TEST(test_factory_create_unknown);
+
+    // shellEscape
+    RUN_TEST(test_shellEscape_simple);
+    RUN_TEST(test_shellEscape_single_quote);
+    RUN_TEST(test_shellEscape_empty);
+    RUN_TEST(test_shellEscape_null);
+    RUN_TEST(test_shellEscape_special_chars);
+    RUN_TEST(test_shellEscape_spaces);
+
+    // scriptResponseOk
+    RUN_TEST(test_scriptResponseOk_true);
+    RUN_TEST(test_scriptResponseOk_false);
+    RUN_TEST(test_scriptResponseOk_error);
+    RUN_TEST(test_scriptResponseOk_null);
 
     return UNITY_END();
 }

@@ -583,6 +583,138 @@ void test_init_calls_callback_for_checkbox_entries(void) {
     free(p);
 }
 
+// --- settingsRemoveSection ---
+
+void test_removeSection_removes_from_fetch(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+
+    settingsAddSection(p, "file browser");
+    settingsRemoveSection(p, "file browser");
+
+    int count;
+    FfonElement **elems = p->fetch(p, &count);
+    TEST_ASSERT_EQUAL_INT(1, count);  // only sicompass remains
+    TEST_ASSERT_EQUAL_STRING("sicompass", elems[0]->data.object->key);
+
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+    free(p->state);
+    free(p);
+}
+
+void test_removeSection_removes_radio_entries(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+
+    const char *options[] = { "alpha", "chrono" };
+    settingsAddSectionRadio(p, "file browser", "sorting", "sortOrder",
+                            options, 2, "alpha");
+    settingsRemoveSection(p, "file browser");
+
+    // Re-add the section empty to verify radio entries are gone
+    settingsAddSection(p, "file browser");
+    int count;
+    FfonElement **elems = p->fetch(p, &count);
+    TEST_ASSERT_EQUAL_INT(2, count);
+    FfonObject *fb = elems[1]->data.object;
+    TEST_ASSERT_EQUAL_STRING("file browser", fb->key);
+    TEST_ASSERT_EQUAL_INT(1, fb->count);
+    TEST_ASSERT_EQUAL_STRING("no settings", fb->elements[0]->data.string);
+
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+    free(p->state);
+    free(p);
+}
+
+void test_removeSection_removes_text_entries(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+
+    settingsAddSectionText(p, "sales demo", "save folder", "saveFolder", "Downloads");
+    settingsRemoveSection(p, "sales demo");
+
+    // Re-add section to verify text entries are gone
+    settingsAddSection(p, "sales demo");
+    int count;
+    FfonElement **elems = p->fetch(p, &count);
+    FfonObject *sd = elems[1]->data.object;
+    TEST_ASSERT_EQUAL_STRING("sales demo", sd->key);
+    TEST_ASSERT_EQUAL_INT(1, sd->count);
+    TEST_ASSERT_EQUAL_STRING("no settings", sd->elements[0]->data.string);
+
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+    free(p->state);
+    free(p);
+}
+
+void test_removeSection_removes_checkbox_entries(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+
+    settingsAddSectionCheckbox(p, "programs", "tutorial", "enable_tutorial", true);
+    settingsRemoveSection(p, "programs");
+
+    // Re-add section to verify checkbox entries are gone
+    settingsAddSection(p, "programs");
+    int count;
+    FfonElement **elems = p->fetch(p, &count);
+    FfonObject *section = elems[1]->data.object;
+    TEST_ASSERT_EQUAL_STRING("programs", section->key);
+    TEST_ASSERT_EQUAL_INT(1, section->count);
+    TEST_ASSERT_EQUAL_STRING("no settings", section->elements[0]->data.string);
+
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+    free(p->state);
+    free(p);
+}
+
+void test_removeSection_null_params(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+    settingsRemoveSection(NULL, "test");      // should not crash
+    settingsRemoveSection(p, NULL);           // should not crash
+    free(p->state);
+    free(p);
+}
+
+void test_removeSection_nonexistent(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+
+    settingsAddSection(p, "file browser");
+    settingsRemoveSection(p, "nonexistent");
+
+    int count;
+    FfonElement **elems = p->fetch(p, &count);
+    TEST_ASSERT_EQUAL_INT(2, count);  // sicompass + file browser still present
+
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+    free(p->state);
+    free(p);
+}
+
+void test_removeSection_leaves_other_sections(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+
+    const char *options[] = { "a", "b" };
+    settingsAddSectionRadio(p, "section A", "radio", "key", options, 2, "a");
+    settingsAddSectionText(p, "section B", "label", "textKey", "value");
+    settingsRemoveSection(p, "section A");
+
+    int count;
+    FfonElement **elems = p->fetch(p, &count);
+    TEST_ASSERT_EQUAL_INT(2, count);  // sicompass + section B
+    TEST_ASSERT_EQUAL_STRING("section B", elems[1]->data.object->key);
+    // section B should still have its text entry
+    FfonObject *sectionB = elems[1]->data.object;
+    TEST_ASSERT_EQUAL_INT(1, sectionB->count);
+    TEST_ASSERT_EQUAL_STRING("label", sectionB->elements[0]->data.object->key);
+
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+    free(p->state);
+    free(p);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -620,6 +752,14 @@ int main(void) {
     RUN_TEST(test_checkbox_renders_unchecked);
     RUN_TEST(test_onCheckboxChange_updates_state);
     RUN_TEST(test_init_calls_callback_for_checkbox_entries);
+
+    RUN_TEST(test_removeSection_removes_from_fetch);
+    RUN_TEST(test_removeSection_removes_radio_entries);
+    RUN_TEST(test_removeSection_removes_text_entries);
+    RUN_TEST(test_removeSection_removes_checkbox_entries);
+    RUN_TEST(test_removeSection_null_params);
+    RUN_TEST(test_removeSection_nonexistent);
+    RUN_TEST(test_removeSection_leaves_other_sections);
 
     return UNITY_END();
 }
