@@ -154,9 +154,9 @@ static Provider* loadProgram(const char *name, Provider *settingsProvider) {
             settingsAddSectionText(settingsProvider, "email client",
                                    "password", "emailPassword", "");
             settingsAddSectionText(settingsProvider, "email client",
-                                   "client ID", "emailClientId", "");
+                                   "client ID (OAuth)", "emailClientId", "");
             settingsAddSectionText(settingsProvider, "email client",
-                                   "client secret", "emailClientSecret", "");
+                                   "client secret (OAuth)", "emailClientSecret", "");
         }
         return p;
     } else if (strcmp(name, "web browser") == 0) {
