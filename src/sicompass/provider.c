@@ -119,7 +119,12 @@ const char* providerGetCurrentPath(AppRenderer *appRenderer) {
 bool providerCommitEdit(AppRenderer *appRenderer, const char *oldContent, const char *newContent) {
     Provider *provider = providerGetActive(appRenderer);
     if (!provider || !provider->commitEdit) return false;
-    return provider->commitEdit(provider, oldContent, newContent);
+    bool result = provider->commitEdit(provider, oldContent, newContent);
+    if (!result && provider->errorMessage[0] != '\0') {
+        setErrorMessage(appRenderer, provider->errorMessage);
+        provider->errorMessage[0] = '\0';
+    }
+    return result;
 }
 
 // Create a directory

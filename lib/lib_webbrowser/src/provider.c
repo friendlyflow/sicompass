@@ -15,6 +15,7 @@ typedef struct {
 
 static CachedPage g_cachedPage = {0};
 static char g_currentUrl[4096] = "";
+static Provider *g_provider = NULL;
 
 static void wbClearCache(void) {
     if (g_cachedPage.elements) {
@@ -30,46 +31,24 @@ static void wbClearCache(void) {
 static FfonElement** wbFetch(const char *path, int *outCount) {
     (void)path;
 
-    if (g_currentUrl[0] == '\0') {
-        *outCount = 1;
-        FfonElement **elems = malloc(sizeof(FfonElement*));
-        elems[0] = ffonElementCreateString("<input>https://</input>");
-        return elems;
-    }
-
-    // Fetch and cache if needed
-    if (!g_cachedPage.elements || strcmp(g_cachedPage.url, g_currentUrl) != 0) {
-        wbClearCache();
-        char *html = webbrowserFetchUrl(g_currentUrl);
-        if (html) {
-            int count = 0;
-            FfonElement **parsed = webbrowserHtmlToFfon(html, g_currentUrl, &count);
-            free(html);
-            if (parsed && count > 0) {
-                strncpy(g_cachedPage.url, g_currentUrl, sizeof(g_cachedPage.url) - 1);
-                g_cachedPage.url[sizeof(g_cachedPage.url) - 1] = '\0';
-                g_cachedPage.elements = parsed;
-                g_cachedPage.elementCount = count;
-            } else {
-                free(parsed);
-            }
-        }
-    }
-
     // URL bar
     char urlBuf[4200];
-    snprintf(urlBuf, sizeof(urlBuf), "<input>%s</input>", g_currentUrl);
+    if (g_currentUrl[0] == '\0')
+        snprintf(urlBuf, sizeof(urlBuf), "<input>https://</input>");
+    else
+        snprintf(urlBuf, sizeof(urlBuf), "<input>%s</input>", g_currentUrl);
 
     *outCount = 1;
     FfonElement **elems = malloc(sizeof(FfonElement*));
-    elems[0] = ffonElementCreateObject(urlBuf);
 
     if (!g_cachedPage.elements) {
-        ffonObjectAddElement(elems[0]->data.object, ffonElementCreateString("failed to fetch URL"));
+        // No page content: return as string so it can't be navigated into
+        elems[0] = ffonElementCreateString(urlBuf);
         return elems;
     }
 
-    // Page content as children of URL bar
+    // Page loaded: return as object with page content as children
+    elems[0] = ffonElementCreateObject(urlBuf);
     for (int i = 0; i < g_cachedPage.elementCount; i++)
         ffonObjectAddElement(elems[0]->data.object, ffonElementClone(g_cachedPage.elements[i]));
     return elems;
@@ -82,6 +61,28 @@ static bool wbCommit(const char *path, const char *oldName, const char *newName)
         strncpy(g_currentUrl, newName, sizeof(g_currentUrl) - 1);
         g_currentUrl[sizeof(g_currentUrl) - 1] = '\0';
         wbClearCache();
+
+        // Fetch eagerly so errors surface immediately
+        char *html = webbrowserFetchUrl(g_currentUrl);
+        if (!html) {
+            snprintf(g_provider->errorMessage, sizeof(g_provider->errorMessage),
+                     "failed to fetch URL");
+            return false;
+        }
+        int count = 0;
+        FfonElement **parsed = webbrowserHtmlToFfon(html, g_currentUrl, &count);
+        free(html);
+        if (parsed && count > 0) {
+            strncpy(g_cachedPage.url, g_currentUrl, sizeof(g_cachedPage.url) - 1);
+            g_cachedPage.url[sizeof(g_cachedPage.url) - 1] = '\0';
+            g_cachedPage.elements = parsed;
+            g_cachedPage.elementCount = count;
+        } else {
+            free(parsed);
+            snprintf(g_provider->errorMessage, sizeof(g_provider->errorMessage),
+                     "failed to fetch URL");
+            return false;
+        }
     }
     return true;
 }
@@ -119,9 +120,6 @@ static bool wbExecuteCommand(const char *path, const char *command,
     (void)selection;
     return true;
 }
-
-// Provider singleton
-static Provider *g_provider = NULL;
 
 Provider* webbrowserGetProvider(void) {
     if (!g_provider) {
