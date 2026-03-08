@@ -765,15 +765,37 @@ void renderInteraction(SiCompassApplication *app) {
 
         // In insert mode, show inputBuffer for selected item
         if (isSelected && inInsertMode) {
+            // Render prefix without highlight
+            if (app->appRenderer->inputPrefix[0] != '\0') {
+                renderText(app, app->appRenderer->inputPrefix, itemX, itemYPos,
+                           app->appRenderer->palette->text, false);
+                float pfxMinX, pfxMinY, pfxMaxX, pfxMaxY;
+                calculateTextBounds(app, app->appRenderer->inputPrefix,
+                                   (float)itemX, (float)itemYPos, scale,
+                                   &pfxMinX, &pfxMinY, &pfxMaxX, &pfxMaxY);
+                itemX = (int)(pfxMaxX);
+            }
             displayText = app->appRenderer->inputBuffer;
 
-            // Store position for caret rendering
+            // Store position for caret rendering (after prefix)
             app->appRenderer->currentElementX = itemX;
             app->appRenderer->currentElementY = itemYPos;
         }
 
-        // Render text (may be multiple lines)
-        int textLines = renderText(app, displayText, itemX, itemYPos, app->appRenderer->palette->text, isSelected);
+        // Render text — highlight only the editable part in insert mode
+        int textLines = renderText(app, displayText, itemX, itemYPos, app->appRenderer->palette->text,
+                                   isSelected);
+
+        // Render non-editable suffix without highlight
+        if (isSelected && inInsertMode && app->appRenderer->inputSuffix[0] != '\0') {
+            float sfxMinX, sfxMinY, sfxMaxX, sfxMaxY;
+            calculateTextBounds(app, displayText,
+                               (float)itemX, (float)itemYPos, scale,
+                               &sfxMinX, &sfxMinY, &sfxMaxX, &sfxMaxY);
+            int suffixX = (int)(sfxMaxX);
+            renderText(app, app->appRenderer->inputSuffix, suffixX, itemYPos,
+                       app->appRenderer->palette->text, false);
+        }
 
         yPos += lineHeight * textLines;
     }

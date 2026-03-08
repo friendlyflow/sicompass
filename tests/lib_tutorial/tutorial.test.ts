@@ -31,7 +31,7 @@ describe("tutorial provider", () => {
       if (typeof item === "string") return item;
       return Object.keys(item as Record<string, unknown>)[0];
     });
-    expect(keys).toContain("Welcome --> use Right key, Down, Up and Left key");
+    expect(keys).toContain("Welcome --> here you can go up, down, right or left");
     expect(keys).toContain("Navigation");
     expect(keys).toContain("Editing");
     expect(keys).toContain("Commands");
@@ -43,7 +43,7 @@ describe("tutorial provider", () => {
   });
 
   test("/Welcome returns 3 concise intro strings", async () => {
-    const result = await runTutorial("/Welcome --> use Right key, Down, Up and Left key");
+    const result = await runTutorial("/Welcome --> here you can go up, down, right or left");
     expect(result).toBeArray();
     expect(result.length).toBe(3);
     for (const item of result) {

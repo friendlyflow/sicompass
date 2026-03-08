@@ -22,6 +22,8 @@ SiCompassApplication* appRendererCreate(SiCompassApplication* app) {
         free(appRenderer);
         return NULL;
     }
+    appRenderer->inputPrefix[0] = '\0';
+    appRenderer->inputSuffix[0] = '\0';
 
     // Initialize undo history
     appRenderer->undoHistory = calloc(UNDO_HISTORY_SIZE, sizeof(UndoEntry));
