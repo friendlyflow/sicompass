@@ -93,13 +93,28 @@ static void writeDefaultConfig(const char *configPath) {
     json_object_put(root);
 }
 
-static void loadProgram(const char *name, Provider *settingsProvider) {
+// Match display name to provider name, ignoring spaces.
+// e.g., "chat client" matches "chatclient".
+static bool nameMatchesProvider(const char *displayName, const char *providerName) {
+    if (strcmp(displayName, providerName) == 0) return true;
+    const char *d = displayName, *p = providerName;
+    while (*d && *p) {
+        if (*d == ' ') { d++; continue; }
+        if (*d != *p) return false;
+        d++; p++;
+    }
+    while (*d == ' ') d++;
+    return *d == '\0' && *p == '\0';
+}
+
+static Provider* loadProgram(const char *name, Provider *settingsProvider) {
     if (strcmp(name, "tutorial") == 0) {
-        Provider *p = scriptProviderCreate("tutorial", "tutorial --> if you're new to Sicompass, push the right key", TUTORIAL_SCRIPT_PATH);
+        Provider *p = scriptProviderCreate("tutorial", "tutorial --> here you can go up, down or right", TUTORIAL_SCRIPT_PATH);
         if (p) {
             providerRegister(p);
             settingsAddSection(settingsProvider, "tutorial");
         }
+        return p;
     } else if (strcmp(name, "sales demo") == 0) {
         Provider *p = scriptProviderCreate("sales demo", "sales demo", SALES_DEMO_SCRIPT_PATH);
         if (p) {
@@ -108,6 +123,7 @@ static void loadProgram(const char *name, Provider *settingsProvider) {
                                    "save folder (product configuration)",
                                    "saveFolder", "Downloads");
         }
+        return p;
     } else if (strcmp(name, "chat client") == 0) {
         Provider *p = providerFactoryCreate("chat client");
         if (p) {
@@ -122,6 +138,7 @@ static void loadProgram(const char *name, Provider *settingsProvider) {
             settingsAddSectionText(settingsProvider, "chat client",
                                    "password", "chatPassword", "");
         }
+        return p;
     } else if (strcmp(name, "email client") == 0) {
         Provider *p = providerFactoryCreate("email client");
         if (p) {
@@ -141,12 +158,14 @@ static void loadProgram(const char *name, Provider *settingsProvider) {
             settingsAddSectionText(settingsProvider, "email client",
                                    "client secret", "emailClientSecret", "");
         }
+        return p;
     } else if (strcmp(name, "web browser") == 0) {
         Provider *p = providerFactoryCreate("web browser");
         if (p) {
             providerRegister(p);
             settingsAddSection(settingsProvider, "web browser");
         }
+        return p;
     } else {
         // Check if it's a user plugin
         for (int i = 0; i < s_userPluginCount; i++) {
@@ -158,7 +177,7 @@ static void loadProgram(const char *name, Provider *settingsProvider) {
                     providerRegister(p);
                     settingsAddSection(settingsProvider, s_userPlugins[i].name);
                 }
-                return;
+                return p;
             }
         }
 
@@ -182,10 +201,13 @@ static void loadProgram(const char *name, Provider *settingsProvider) {
                 settingsAddSectionText(settingsProvider, name,
                                        "API key", "apiKey", "");
             }
+            free(remoteUrl);
+            return p;
             #endif
         }
         free(remoteUrl);
     }
+    return NULL;
 }
 
 // Discover user-installed plugins from ~/.config/sicompass/plugins/
@@ -383,10 +405,7 @@ void programsEnableProvider(const char *name, AppRenderer *appRenderer) {
     if (!s_settingsProvider || !appRenderer) return;
 
     // Load the program (registers provider + settings sections)
-    loadProgram(name, s_settingsProvider);
-
-    // Find the newly registered provider
-    Provider *newProvider = providerFindByName(name);
+    Provider *newProvider = loadProgram(name, s_settingsProvider);
     if (!newProvider) return;
 
     // Init the provider
@@ -443,59 +462,50 @@ void programsDisableProvider(const char *name, AppRenderer *appRenderer) {
     // Find provider index
     int removeIdx = -1;
     for (int i = 0; i < appRenderer->ffonCount; i++) {
-        if (appRenderer->providers[i] && strcmp(appRenderer->providers[i]->name, name) == 0) {
+        if (appRenderer->providers[i] && nameMatchesProvider(name, appRenderer->providers[i]->name)) {
             removeIdx = i;
             break;
         }
     }
-    // Also try matching by looking up a provider whose name maps to a known display name
-    if (removeIdx < 0) {
-        // For factory providers, the provider name may differ (e.g. "filebrowser" vs "file browser")
-        Provider *p = providerFindByName(name);
-        if (p) {
-            for (int i = 0; i < appRenderer->ffonCount; i++) {
-                if (appRenderer->providers[i] == p) {
-                    removeIdx = i;
-                    break;
-                }
-            }
+
+    if (removeIdx >= 0) {
+        Provider *provider = appRenderer->providers[removeIdx];
+
+        // Free the FFON element
+        ffonElementDestroy(appRenderer->ffon[removeIdx]);
+
+        // Shift remaining entries left
+        for (int i = removeIdx; i < appRenderer->ffonCount - 1; i++) {
+            appRenderer->ffon[i] = appRenderer->ffon[i + 1];
+            appRenderer->providers[i] = appRenderer->providers[i + 1];
+        }
+        appRenderer->ffonCount--;
+
+        // Cleanup provider
+        providerUnregister(provider);
+        providerDestroy(provider);
+
+        // Adjust navigation
+        if (appRenderer->currentId.ids[0] == removeIdx) {
+            appRenderer->currentId.ids[0] = 0;
+            appRenderer->currentId.depth = 1;
+        } else if (appRenderer->currentId.ids[0] > removeIdx) {
+            appRenderer->currentId.ids[0]--;
+        }
+        if (appRenderer->currentId.ids[0] >= appRenderer->ffonCount) {
+            appRenderer->currentId.ids[0] = appRenderer->ffonCount - 1;
         }
     }
-    if (removeIdx < 0) return;
 
-    Provider *provider = appRenderer->providers[removeIdx];
-
-    // Free the FFON element
-    ffonElementDestroy(appRenderer->ffon[removeIdx]);
-
-    // Shift remaining entries left
-    for (int i = removeIdx; i < appRenderer->ffonCount - 1; i++) {
-        appRenderer->ffon[i] = appRenderer->ffon[i + 1];
-        appRenderer->providers[i] = appRenderer->providers[i + 1];
-    }
-    appRenderer->ffonCount--;
-
-    // Remove settings section for this program and rebuild settings FFON
+    // Always remove settings section and rebuild settings FFON,
+    // even if the provider wasn't in the UI arrays (handles orphaned sections).
     if (s_settingsProvider) {
         settingsRemoveSection(s_settingsProvider, name);
         refreshSettingsFfon(appRenderer);
     }
 
-    // Cleanup provider
-    providerUnregister(provider);
-    providerDestroy(provider);
-
-    // Adjust navigation
-    if (appRenderer->currentId.ids[0] == removeIdx) {
-        appRenderer->currentId.ids[0] = 0;
-        appRenderer->currentId.depth = 1;
-    } else if (appRenderer->currentId.ids[0] > removeIdx) {
-        appRenderer->currentId.ids[0]--;
+    if (removeIdx >= 0) {
+        createListCurrentLayer(appRenderer);
+        appRenderer->needsRedraw = true;
     }
-    if (appRenderer->currentId.ids[0] >= appRenderer->ffonCount) {
-        appRenderer->currentId.ids[0] = appRenderer->ffonCount - 1;
-    }
-
-    createListCurrentLayer(appRenderer);
-    appRenderer->needsRedraw = true;
 }
