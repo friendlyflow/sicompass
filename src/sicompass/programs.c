@@ -12,10 +12,10 @@
 
 // Built-in program catalog
 static const char *ALL_KNOWN_PROGRAMS[] = {
-    "tutorial", "sales demo", "file browser",
+    "tutorial", "sales demo",
     "chat client", "email client", "web browser"
 };
-static const int ALL_KNOWN_PROGRAMS_COUNT = 6;
+static const int ALL_KNOWN_PROGRAMS_COUNT = 5;
 
 // User-discovered plugins
 typedef struct {
@@ -54,8 +54,8 @@ static char* readSettingsValue(const char *section, const char *key) {
     return result;
 }
 
-static const char *DEFAULT_PROGRAMS[] = {"tutorial", "file browser"};
-static const int DEFAULT_PROGRAMS_COUNT = 2;
+static const char *DEFAULT_PROGRAMS[] = {"tutorial"};
+static const int DEFAULT_PROGRAMS_COUNT = 1;
 
 static void ensureConfigDir(const char *configPath) {
     char *dir = strdup(configPath);
@@ -108,13 +108,6 @@ static void loadProgram(const char *name, Provider *settingsProvider) {
                                    "save folder (product configuration)",
                                    "saveFolder", "Downloads");
         }
-    } else if (strcmp(name, "file browser") == 0) {
-        Provider *p = providerFactoryCreate("file browser");
-        providerRegister(p);
-        const char *sortOptions[] = {"alphanumerically", "chronologically"};
-        settingsAddSectionRadio(settingsProvider, "file browser",
-                                "global sorting", "sortOrder",
-                                sortOptions, 2, "alphanumerically");
     } else if (strcmp(name, "chat client") == 0) {
         Provider *p = providerFactoryCreate("chat client");
         if (p) {
@@ -291,8 +284,7 @@ void programsLoad(Provider *settingsProvider) {
         writeDefaultConfig(configPath);
         root = json_object_from_file(configPath);
     }
-    free(configPath);
-    if (!root) return;
+    if (!root) { free(configPath); return; }
 
     json_object *sicompassObj = NULL;
     json_object *programsArr = NULL;
@@ -302,6 +294,27 @@ void programsLoad(Provider *settingsProvider) {
 
     // Register store checkboxes BEFORE loading programs
     registerProgramsSection(settingsProvider, programsArr);
+
+    // Remove "file browser" from programsToLoad if present (now always loaded separately)
+    if (programsArr && json_object_is_type(programsArr, json_type_array)) {
+        int len = json_object_array_length(programsArr);
+        bool found = false;
+        for (int i = 0; i < len; i++) {
+            const char *val = json_object_get_string(json_object_array_get_idx(programsArr, i));
+            if (val && strcmp(val, "file browser") == 0) { found = true; break; }
+        }
+        if (found) {
+            json_object *newArr = json_object_new_array();
+            for (int i = 0; i < len; i++) {
+                const char *val = json_object_get_string(json_object_array_get_idx(programsArr, i));
+                if (val && strcmp(val, "file browser") != 0)
+                    json_object_array_add(newArr, json_object_new_string(val));
+            }
+            json_object_object_add(sicompassObj, "programsToLoad", newArr);
+            programsArr = newArr;
+            json_object_to_file_ext(configPath, root, JSON_C_TO_STRING_PRETTY);
+        }
+    }
 
     // Load enabled programs
     if (programsArr && json_object_is_type(programsArr, json_type_array)) {
@@ -314,9 +327,11 @@ void programsLoad(Provider *settingsProvider) {
     }
 
     json_object_put(root);
+    free(configPath);
 }
 
 void programsUpdateEnabled(const char *name, bool enabled) {
+    if (strcmp(name, "file browser") == 0) return;  // always present
     char *configPath = providerGetMainConfigPath();
     if (!configPath) return;
 
