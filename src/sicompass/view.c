@@ -36,6 +36,7 @@ static void applySettings(const char *key, const char *value, void *userdata) {
         // and appRenderer arrays aren't populated yet.
         if (appRenderer->ffonCount == 0) return;
         const char *name = key + 7;
+        if (strcmp(name, "file browser") == 0) return;  // always present
         bool enabled = strcmp(value, "true") == 0;
         programsUpdateEnabled(name, enabled);
         if (enabled)
@@ -168,6 +169,14 @@ void mainLoop(SiCompassApplication* app) {
 
     // Create settings before programs so they can register their settings sections
     Provider *settingsProvider = settingsProviderCreate(applySettings, app->appRenderer);
+
+    // File browser — always present, not user-configurable
+    Provider *fileBrowserProvider = providerFactoryCreate("file browser");
+    providerRegister(fileBrowserProvider);
+    const char *sortOptions[] = {"alphanumerically", "chronologically"};
+    settingsAddSectionRadio(settingsProvider, "file browser",
+                            "global sorting", "sortOrder",
+                            sortOptions, 2, "alphanumerically");
 
     // Load programs from config - registers providers and their settings
     programsLoad(settingsProvider);
