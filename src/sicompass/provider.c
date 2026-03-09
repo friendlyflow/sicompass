@@ -518,10 +518,13 @@ void providerRefreshCurrentDirectory(AppRenderer *appRenderer) {
     }
 }
 
-// Refresh the nearest ancestor link tag by clearing its cached children.
-// Cursor is moved back to the link element itself (user presses right to re-enter).
+// Refresh the nearest link tag (current element or ancestor) by clearing and
+// re-resolving its children. Cursor stays at current depth (indices clamped).
 // Returns true if a link was found and refreshed, false otherwise.
 bool providerRefreshLink(AppRenderer *appRenderer) {
+    FfonObject *linkObj = NULL;
+    int linkDepth = 0; // depth of the link element in currentId
+
     // First check if cursor is directly ON a link element
     if (appRenderer->currentId.depth >= 2) {
         int count;
@@ -532,57 +535,98 @@ bool providerRefreshLink(AppRenderer *appRenderer) {
             if (idx >= 0 && idx < count &&
                 arr[idx]->type == FFON_OBJECT &&
                 providerTagHasLink(arr[idx]->data.object->key)) {
-                // Clear cached children, cursor stays on the link
-                FfonObject *obj = arr[idx]->data.object;
-                for (int i = 0; i < obj->count; i++) {
-                    ffonElementDestroy(obj->elements[i]);
-                    obj->elements[i] = NULL;
-                }
-                obj->count = 0;
-                return true;
+                linkObj = arr[idx]->data.object;
+                linkDepth = appRenderer->currentId.depth;
             }
         }
     }
 
     // Walk up from current position to find the nearest ancestor link
-    IdArray testId;
-    idArrayCopy(&testId, &appRenderer->currentId);
+    if (!linkObj) {
+        IdArray testId;
+        idArrayCopy(&testId, &appRenderer->currentId);
 
-    while (testId.depth >= 2) {
-        // Get the container element at this level
-        IdArray parentId;
-        idArrayCopy(&parentId, &testId);
-        idArrayPop(&parentId);
+        while (testId.depth >= 2) {
+            IdArray parentId;
+            idArrayCopy(&parentId, &testId);
+            idArrayPop(&parentId);
 
-        int parentCount;
-        FfonElement **parentArr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
-                                               &parentId, &parentCount);
-        if (!parentArr) break;
+            int parentCount;
+            FfonElement **parentArr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                                   &parentId, &parentCount);
+            if (!parentArr) break;
 
-        int idx = parentId.ids[parentId.depth - 1];
-        if (idx < 0 || idx >= parentCount) break;
+            int idx = parentId.ids[parentId.depth - 1];
+            if (idx < 0 || idx >= parentCount) break;
 
-        FfonElement *elem = parentArr[idx];
-        if (elem->type == FFON_OBJECT &&
-            providerTagHasLink(elem->data.object->key)) {
-            // Found the nearest link — clear its cached children
-            FfonObject *obj = elem->data.object;
-            for (int i = 0; i < obj->count; i++) {
-                ffonElementDestroy(obj->elements[i]);
-                obj->elements[i] = NULL;
+            FfonElement *elem = parentArr[idx];
+            if (elem->type == FFON_OBJECT &&
+                providerTagHasLink(elem->data.object->key)) {
+                linkObj = elem->data.object;
+                linkDepth = parentId.depth;
+                break;
             }
-            obj->count = 0;
 
-            // Move cursor to the link element itself
-            idArrayCopy(&appRenderer->currentId, &parentId);
-            return true;
+            idArrayPop(&testId);
         }
-
-        // Move one level up
-        idArrayPop(&testId);
     }
 
-    return false;
+    if (!linkObj) return false;
+
+    // Clear cached children
+    for (int i = 0; i < linkObj->count; i++) {
+        ffonElementDestroy(linkObj->elements[i]);
+        linkObj->elements[i] = NULL;
+    }
+    linkObj->count = 0;
+
+    // Re-resolve the link immediately
+    char *url = providerTagExtractLinkContent(linkObj->key);
+    if (url) {
+        int childCount = 0;
+        FfonElement **children = resolveLinkToElements(url, &childCount);
+        free(url);
+        if (children) {
+            for (int i = 0; i < childCount; i++)
+                ffonObjectAddElement(linkObj, children[i]);
+            free(children);
+        }
+    }
+
+    // Clamp cursor indices from link depth downward
+    // Walk the FFON tree from linkDepth, clamping each level's index
+    for (int d = linkDepth; d < appRenderer->currentId.depth; d++) {
+        // Get the array at this depth
+        IdArray tempId;
+        tempId.depth = d + 1;
+        for (int j = 0; j < d + 1; j++)
+            tempId.ids[j] = appRenderer->currentId.ids[j];
+
+        int arrCount;
+        FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                         &tempId, &arrCount);
+        if (!arr || arrCount == 0) {
+            // Tree ended here — truncate currentId to this depth
+            appRenderer->currentId.depth = d;
+            if (appRenderer->currentId.depth < 2)
+                appRenderer->currentId.depth = 2;
+            break;
+        }
+
+        // Clamp the index at this level
+        if (appRenderer->currentId.ids[d] >= arrCount)
+            appRenderer->currentId.ids[d] = arrCount - 1;
+
+        // Check if the element at this level is an object we can descend into
+        FfonElement *elem = arr[appRenderer->currentId.ids[d]];
+        if (d + 1 < appRenderer->currentId.depth && elem->type != FFON_OBJECT) {
+            // Can't go deeper — truncate
+            appRenderer->currentId.depth = d + 1;
+            break;
+        }
+    }
+
+    return true;
 }
 
 // Navigate left out of an object
