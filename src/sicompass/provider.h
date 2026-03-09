@@ -45,6 +45,10 @@ bool providerExecuteCommand(AppRenderer *appRenderer, const char *command, const
 // Refresh the current directory listing by clearing the cached children and re-fetching
 void providerRefreshCurrentDirectory(AppRenderer *appRenderer);
 
+// Refresh the nearest ancestor <link> tag by clearing its cached children.
+// Returns true if a link was found and refreshed, false if not inside a link.
+bool providerRefreshLink(AppRenderer *appRenderer);
+
 // Teleport a provider to absoluteDir: set its path, clear root FFON children, re-fetch.
 // Returns the index of targetFilename in the new listing, or -1 if not found.
 int providerNavigateToPath(AppRenderer *appRenderer, int rootIdx,

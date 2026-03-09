@@ -298,6 +298,7 @@ void handleSelectAll(AppRenderer *appRenderer);
 void handleShiftLeft(AppRenderer *appRenderer);
 void handleShiftRight(AppRenderer *appRenderer);
 void handleDashboard(AppRenderer *appRenderer);
+void handleF5(AppRenderer *appRenderer);
 void handleSaveProviderConfig(AppRenderer *appRenderer);
 void handleLoadProviderConfig(AppRenderer *appRenderer);
 void handleSaveAsProviderConfig(AppRenderer *appRenderer);
