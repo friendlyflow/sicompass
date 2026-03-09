@@ -784,21 +784,6 @@ void renderInteraction(SiCompassApplication *app) {
         if (isSelected && inInsertMode) {
             int baseItemX = itemX;
 
-            // Calculate continuation X: after list prefix (e.g., "-i ")
-            int continuationX = baseItemX;
-            const char *firstSpace = strchr(list[i].label, ' ');
-            if (firstSpace) {
-                int prefixCharLen = (int)(firstSpace - list[i].label + 1);
-                char prefixChars[16];
-                if (prefixCharLen > 15) prefixCharLen = 15;
-                strncpy(prefixChars, list[i].label, prefixCharLen);
-                prefixChars[prefixCharLen] = '\0';
-                float pMinX, pMinY, pMaxX, pMaxY;
-                calculateTextBounds(app, prefixChars, (float)baseItemX, (float)itemYPos, scale,
-                                   &pMinX, &pMinY, &pMaxX, &pMaxY);
-                continuationX = (int)pMaxX;
-            }
-
             // Render prefix without highlight
             if (app->appRenderer->inputPrefix[0] != '\0') {
                 renderText(app, app->appRenderer->inputPrefix, itemX, itemYPos,
@@ -813,7 +798,7 @@ void renderInteraction(SiCompassApplication *app) {
 
             // Store positions for caret rendering
             app->appRenderer->currentElementX = itemX;
-            app->appRenderer->currentElementBaseX = continuationX;
+            app->appRenderer->currentElementBaseX = baseItemX;
             app->appRenderer->currentElementY = itemYPos;
 
             // Multi-line input: split on \n, render first line at itemX, rest at baseItemX
@@ -828,15 +813,16 @@ void renderInteraction(SiCompassApplication *app) {
                 int textLines1 = renderText(app, firstLen > 0 ? firstLine : " ", itemX, itemYPos,
                                             app->appRenderer->palette->text, isSelected);
 
-                // Render remaining lines at continuationX (after list prefix)
+                // Render remaining lines at baseItemX
                 const char *rest = nl + 1;
                 int restY = itemYPos + lineHeight * textLines1;
                 int textLinesRest = 0;
                 if (*rest != '\0') {
-                    textLinesRest = renderText(app, rest, continuationX, restY,
+                    textLinesRest = renderText(app, rest, baseItemX, restY,
                                                app->appRenderer->palette->text, isSelected);
                 } else {
-                    textLinesRest = 1;  // trailing newline creates an empty line
+                    textLinesRest = renderText(app, " ", baseItemX, restY,
+                                               app->appRenderer->palette->text, isSelected);
                 }
 
                 // Render suffix after the last line
@@ -845,10 +831,10 @@ void renderInteraction(SiCompassApplication *app) {
                     const char *lastNl = strrchr(displayText, '\n');
                     const char *lastLine = lastNl ? lastNl + 1 : displayText;
                     int lastLineY = restY + (textLinesRest > 1 ? lineHeight * (textLinesRest - 1) : 0);
-                    int suffixBaseX = continuationX;
+                    int suffixBaseX = baseItemX;
                     if (textLinesRest == 0) {
                         lastLineY = itemYPos + lineHeight * (textLines1 - 1);
-                        suffixBaseX = continuationX;
+                        suffixBaseX = baseItemX;
                     }
                     float sfxMinX, sfxMinY, sfxMaxX, sfxMaxY;
                     calculateTextBounds(app, *lastLine ? lastLine : " ",
