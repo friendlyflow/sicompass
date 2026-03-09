@@ -16,6 +16,7 @@ void caretUpdate(CaretState* caret, uint64_t currentTime);
 void caretReset(CaretState* caret, uint64_t currentTime);
 
 // Render the caret at the specified position
+// baseX: X position for lines after the first (for multi-line input with prefix)
 void caretRender(SiCompassApplication* app, CaretState* caret,
-                 const char* text, int x, int y, int cursorPosition,
-                 uint32_t color);
+                 const char* text, int x, int y, int baseX,
+                 int cursorPosition, uint32_t color);

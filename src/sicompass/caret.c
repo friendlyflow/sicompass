@@ -47,8 +47,8 @@ void caretReset(CaretState* caret, uint64_t currentTime) {
 }
 
 void caretRender(SiCompassApplication* app, CaretState* caret,
-                 const char* text, int x, int y, int cursorPosition,
-                 uint32_t color) {
+                 const char* text, int x, int y, int baseX,
+                 int cursorPosition, uint32_t color) {
     if (!caret || !app) {
         return;
     }
@@ -59,39 +59,50 @@ void caretRender(SiCompassApplication* app, CaretState* caret,
 
     // Get text scale
     float scale = getTextScale(app, FONT_SIZE_PT);
+    float lineHeight = getLineHeight(app, scale, TEXT_PADDING);
 
-    // Calculate the X position of the caret based on cursor position
-    float caretX = (float)x;
+    // Find cursor line and column by counting newlines before cursor position
+    int cursorLine = 0;
+    int lineStartOffset = 0;  // byte offset of the start of the cursor's line
+    if (text) {
+        int len = strlen(text);
+        int pos = cursorPosition < len ? cursorPosition : len;
+        for (int i = 0; i < pos; i++) {
+            if (text[i] == '\n') {
+                cursorLine++;
+                lineStartOffset = i + 1;
+            }
+        }
+    }
+
+    // X origin: first line uses x (after prefix), subsequent lines use baseX
+    int lineX = (cursorLine == 0) ? x : baseX;
+
+    // Calculate the X position of the caret based on column within current line
+    float caretX = (float)lineX;
 
     if (text && cursorPosition > 0) {
         int len = strlen(text);
+        int pos = cursorPosition < len ? cursorPosition : len;
+        int colLen = pos - lineStartOffset;
 
-        if (len > 0) {
-            // Extract the substring up to the cursor position
-            int pos = cursorPosition < len ? cursorPosition : len;
-
-            // Create a temporary string with characters before cursor
+        if (colLen > 0) {
             char tempStr[MAX_LINE_LENGTH];
-            strncpy(tempStr, text, pos);
-            tempStr[pos] = '\0';
+            if (colLen >= MAX_LINE_LENGTH) colLen = MAX_LINE_LENGTH - 1;
+            strncpy(tempStr, text + lineStartOffset, colLen);
+            tempStr[colLen] = '\0';
 
-            // Calculate bounds of text before cursor
             float minX, minY, maxX, maxY;
-            calculateTextBounds(app, tempStr, (float)x, (float)y, scale,
+            calculateTextBounds(app, tempStr, (float)lineX, (float)y, scale,
                               &minX, &minY, &maxX, &maxY);
-
-            // Position caret at the end of the text before cursor
             caretX = maxX;
         }
     }
 
-    // Get line height for caret height
-    float lineHeight = getLineHeight(app, scale, TEXT_PADDING);
-
     // Caret dimensions
     float caretWidth = 2.0f;
     float caretHeight = lineHeight - (2.0f * TEXT_PADDING);
-    float caretY = (float)y;
+    float caretY = (float)y + cursorLine * lineHeight;
 
     // Render caret as a thin rectangle with no corner radius
     prepareRectangle(app, caretX, caretY, caretWidth, caretHeight,

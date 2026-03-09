@@ -161,7 +161,8 @@ typedef struct AppRenderer {
 
     // Caret state
     CaretState *caretState;
-    int currentElementX;  // X position of current element during rendering
+    int currentElementX;  // X position of current element during rendering (after prefix)
+    int currentElementBaseX;  // X position before prefix (for multi-line newline rendering)
     int currentElementY;  // Y position of current element during rendering
     bool currentElementIsObject;  // Whether current element is an object (needs colon)
     char originalKey[MAX_LINE_LENGTH];  // Original key when editing an object in insert mode
@@ -331,8 +332,8 @@ void caretDestroy(CaretState* caret);
 void caretUpdate(CaretState* caret, uint64_t currentTime);
 void caretReset(CaretState* caret, uint64_t currentTime);
 void caretRender(SiCompassApplication* app, CaretState* caret,
-                 const char* text, int x, int y, int cursorPosition,
-                 uint32_t color);
+                 const char* text, int x, int y, int baseX,
+                 int cursorPosition, uint32_t color);
 
 // Utility functions
 const char* coordinateToString(Coordinate coord);
