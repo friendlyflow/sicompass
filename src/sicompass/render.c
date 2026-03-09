@@ -1764,12 +1764,15 @@ void updateView(SiCompassApplication *app) {
     if (hasSelection(app->appRenderer)) {
         int selStart, selEnd;
         getSelectionRange(app->appRenderer, &selStart, &selEnd);
+        const char *buf = app->appRenderer->inputBuffer;
+        uint32_t selColor = app->appRenderer->palette->scrollsearch;
+        float selHeight = getLineHeight(app, scale, TEXT_PADDING) - (2.0f * TEXT_PADDING);
 
         int baseX, baseY;
-        if (app->appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
-            app->appRenderer->currentCoordinate == COORDINATE_COMMAND ||
-            app->appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH ||
-            app->appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH) {
+        bool isInsertMode = (app->appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+                             app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT);
+
+        if (!isInsertMode) {
             // Search/command modes: account for search prefix
             const char *selPrefix = (app->appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH)
                 ? "ext search: " : "search: ";
@@ -1780,45 +1783,77 @@ void updateView(SiCompassApplication *app) {
             baseX = 50 + (int)(pfxMaxX - pfxMinX);
             baseY = searchTextYPos;
         } else {
-            // Insert modes: use stored element position
             baseX = app->appRenderer->currentElementX;
             baseY = app->appRenderer->currentElementY;
         }
 
-        // Get proper Y from text bounds
-        float tMinX, tMinY, tMaxX, tMaxY;
-        calculateTextBounds(app, " ", (float)baseX, (float)baseY, scale,
-                            &tMinX, &tMinY, &tMaxX, &tMaxY);
-        float selY = tMinY;
-
-        // Calculate X start of selection
-        float selXStart = (float)baseX;
-        if (selStart > 0) {
-            char tempStr[MAX_LINE_LENGTH];
-            int copyLen = selStart < MAX_LINE_LENGTH - 1 ? selStart : MAX_LINE_LENGTH - 1;
-            strncpy(tempStr, app->appRenderer->inputBuffer, copyLen);
-            tempStr[copyLen] = '\0';
-            float sMinX, sMinY, sMaxX, sMaxY;
-            calculateTextBounds(app, tempStr, (float)baseX, (float)baseY, scale,
-                                &sMinX, &sMinY, &sMaxX, &sMaxY);
-            selXStart = sMaxX;
+        // Find line boundaries for selStart and selEnd
+        // Build line start offsets
+        int lineStarts[1000];
+        int numLines = 0;
+        lineStarts[numLines++] = 0;
+        for (int i = 0; i < app->appRenderer->inputBufferSize && numLines < 1000; i++) {
+            if (buf[i] == '\n') lineStarts[numLines++] = i + 1;
         }
 
-        // Calculate X end of selection
-        char tempStr2[MAX_LINE_LENGTH];
-        int copyLen2 = selEnd < MAX_LINE_LENGTH - 1 ? selEnd : MAX_LINE_LENGTH - 1;
-        strncpy(tempStr2, app->appRenderer->inputBuffer, copyLen2);
-        tempStr2[copyLen2] = '\0';
-        float eMinX, eMinY, eMaxX, eMaxY;
-        calculateTextBounds(app, tempStr2, (float)baseX, (float)baseY, scale,
-                            &eMinX, &eMinY, &eMaxX, &eMaxY);
-        float selXEnd = eMaxX;
+        // Find which line selStart and selEnd are on
+        int startLine = 0, endLine = 0;
+        for (int l = numLines - 1; l >= 0; l--) {
+            if (lineStarts[l] <= selStart) { startLine = l; break; }
+        }
+        for (int l = numLines - 1; l >= 0; l--) {
+            if (lineStarts[l] <= selEnd) { endLine = l; break; }
+        }
 
-        // Render selection rectangle
-        float selWidth = selXEnd - selXStart;
-        float selHeight = getLineHeight(app, scale, TEXT_PADDING) - (2.0f * TEXT_PADDING);
-        prepareRectangle(app, selXStart, selY, selWidth, selHeight,
-                         app->appRenderer->palette->selected, 0.0f);
+        int elementX = app->appRenderer->currentElementX;
+        int elementBaseX = app->appRenderer->currentElementBaseX;
+
+        for (int line = startLine; line <= endLine; line++) {
+            int lineX = isInsertMode ? ((line == 0) ? elementX : elementBaseX) : baseX;
+            int lineY = baseY + line * lineHeight;
+            int lineStartOff = lineStarts[line];
+            int lineEndOff = (line + 1 < numLines) ? lineStarts[line + 1] - 1 : app->appRenderer->inputBufferSize;
+
+            // Clamp selection to this line
+            int clampStart = (selStart > lineStartOff) ? selStart : lineStartOff;
+            int clampEnd = (selEnd < lineEndOff) ? selEnd : lineEndOff;
+
+            // Calculate X start
+            float xStart = (float)lineX;
+            if (clampStart > lineStartOff) {
+                int len = clampStart - lineStartOff;
+                char tmp[MAX_LINE_LENGTH];
+                if (len >= MAX_LINE_LENGTH) len = MAX_LINE_LENGTH - 1;
+                strncpy(tmp, buf + lineStartOff, len);
+                tmp[len] = '\0';
+                float minX, minY, maxX, maxY;
+                calculateTextBounds(app, tmp, (float)lineX, (float)lineY, scale,
+                                    &minX, &minY, &maxX, &maxY);
+                xStart = maxX;
+            }
+
+            // Calculate X end
+            float xEnd = xStart;
+            int len2 = clampEnd - lineStartOff;
+            if (len2 > 0) {
+                char tmp2[MAX_LINE_LENGTH];
+                if (len2 >= MAX_LINE_LENGTH) len2 = MAX_LINE_LENGTH - 1;
+                strncpy(tmp2, buf + lineStartOff, len2);
+                tmp2[len2] = '\0';
+                float minX, minY, maxX, maxY;
+                calculateTextBounds(app, tmp2, (float)lineX, (float)lineY, scale,
+                                    &minX, &minY, &maxX, &maxY);
+                xEnd = maxX;
+            }
+
+            float selW = xEnd - xStart;
+            if (selW > 0.0f) {
+                float tMinX, tMinY, tMaxX, tMaxY;
+                calculateTextBounds(app, " ", (float)lineX, (float)lineY, scale,
+                                    &tMinX, &tMinY, &tMaxX, &tMaxY);
+                prepareRectangle(app, xStart, tMinY, selW, selHeight, selColor, 0.0f);
+            }
+        }
     }
 
     if (app->appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||

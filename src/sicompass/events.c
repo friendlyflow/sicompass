@@ -87,6 +87,30 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
              appRenderer->currentCoordinate != COORDINATE_EDITOR_INSERT) {
         handleColon(appRenderer);
     }
+    // Up arrow in insert mode (multiline navigation)
+    else if (!ctrl && !shift && !alt && key == SDLK_UP &&
+             (appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
+              appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT)) {
+        handleUpInsert(appRenderer);
+    }
+    // Down arrow in insert mode (multiline navigation)
+    else if (!ctrl && !shift && !alt && key == SDLK_DOWN &&
+             (appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
+              appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT)) {
+        handleDownInsert(appRenderer);
+    }
+    // Shift+Up in insert mode (extend selection up)
+    else if (!ctrl && shift && !alt && key == SDLK_UP &&
+             (appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
+              appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT)) {
+        handleShiftUpInsert(appRenderer);
+    }
+    // Shift+Down in insert mode (extend selection down)
+    else if (!ctrl && shift && !alt && key == SDLK_DOWN &&
+             (appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
+              appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT)) {
+        handleShiftDownInsert(appRenderer);
+    }
     // K or Up arrow
     else if (!ctrl && !shift && !alt &&
              ((key == SDLK_K && (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL ||
