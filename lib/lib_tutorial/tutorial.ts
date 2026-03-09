@@ -7,6 +7,16 @@ interface Section {
   children: (string | Section)[];
 }
 
+function makeLoremIpsum(): string {
+  const base =
+    "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. " +
+    "Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. " +
+    "Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. " +
+    "Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. " +
+    "Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium. ";
+  return Array.from({ length: 10 }, () => base).join("");
+}
+
 const sections: Section[] = [
   {
     key: "Welcome --> here you can go up, down, right or left",
@@ -172,6 +182,8 @@ const sections: Section[] = [
         key: "<link>assets/sf.json</link>",
         children: [],
       },
+      "You can test scroll mode on the text below: press Tab twice from operator general",
+      makeLoremIpsum(),
     ],
   },
   {
