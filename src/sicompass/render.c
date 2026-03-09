@@ -356,7 +356,7 @@ int renderText(SiCompassApplication *app, const char *text, int x, int y,
 
         // Extract line to render
         size_t lineLen = lineEnd - lineStart;
-        if (lineLen == 0 && *lineStart != '\0') {
+        if (lineLen == 0 && *lineStart != '\0' && *lineStart != '\n') {
             lineLen = 1; // Take at least one character
             lineEnd = lineStart + 1;
         }
@@ -381,6 +381,14 @@ int renderText(SiCompassApplication *app, const char *text, int x, int y,
         else if (*lineStart == ' ') {
             lineStart++;
         }
+    }
+
+    // Trailing newline means an empty line follows
+    size_t textLen = strlen(text);
+    if (textLen > 0 && text[textLen - 1] == '\n' && lineCount < 1000) {
+        lines[lineCount].start = text + textLen;
+        lines[lineCount].len = 0;
+        lineCount++;
     }
 
     // Second pass: calculate overall bounding box and render highlight if needed
@@ -435,8 +443,8 @@ int renderText(SiCompassApplication *app, const char *text, int x, int y,
             if (clipY <= 0 || currentY >= clipY) {
                 prepareTextForRendering(app, lineText, (float)x, (float)currentY, scale, color);
             }
-            currentY += lineHeight;
         }
+        currentY += lineHeight;
     }
 
     return lineCount;
@@ -811,6 +819,8 @@ void renderInteraction(SiCompassApplication *app) {
                 if (*rest != '\0') {
                     textLinesRest = renderText(app, rest, baseItemX, restY,
                                                app->appRenderer->palette->text, isSelected);
+                } else {
+                    textLinesRest = 1;  // trailing newline creates an empty line
                 }
 
                 // Render suffix after the last line
