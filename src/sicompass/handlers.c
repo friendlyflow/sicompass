@@ -75,6 +75,40 @@ static int utf8_move_forward(const char *str, int cursorPos, int bufferSize) {
     return newPos;
 }
 
+// Line boundary helpers for multiline input
+
+static int findLineStart(const char *buf, int cursorPos) {
+    for (int i = cursorPos - 1; i >= 0; i--)
+        if (buf[i] == '\n') return i + 1;
+    return 0;
+}
+
+static int findLineEnd(const char *buf, int cursorPos, int bufferSize) {
+    for (int i = cursorPos; i < bufferSize; i++)
+        if (buf[i] == '\n') return i;
+    return bufferSize;
+}
+
+// Count UTF-8 characters between two byte offsets
+static int utf8CountChars(const char *buf, int from, int to) {
+    int count = 0;
+    int p = from;
+    while (p < to) {
+        p += utf8_char_length(buf, p);
+        count++;
+    }
+    return count;
+}
+
+// Move forward by n UTF-8 characters from a byte offset, clamped to limit
+static int utf8AdvanceN(const char *buf, int from, int n, int limit) {
+    int p = from;
+    for (int i = 0; i < n && p < limit; i++) {
+        p += utf8_char_length(buf, p);
+    }
+    return p < limit ? p : limit;
+}
+
 // Selection helpers
 
 bool hasSelection(AppRenderer *appRenderer) {
@@ -103,6 +137,84 @@ void deleteSelection(AppRenderer *appRenderer) {
     appRenderer->inputBufferSize -= (end - start);
     appRenderer->cursorPosition = start;
     clearSelection(appRenderer);
+}
+
+// Multiline insert mode navigation
+
+void handleUpInsert(AppRenderer *appRenderer) {
+    const char *buf = appRenderer->inputBuffer;
+    int pos = appRenderer->cursorPosition;
+
+    int curLineStart = findLineStart(buf, pos);
+    if (curLineStart == 0) return;  // already on first line
+
+    int col = utf8CountChars(buf, curLineStart, pos);
+    int prevLineEnd = curLineStart - 1;  // \n position
+    int prevLineStart = findLineStart(buf, prevLineEnd);
+    appRenderer->cursorPosition = utf8AdvanceN(buf, prevLineStart, col, prevLineEnd);
+
+    clearSelection(appRenderer);
+    caretReset(appRenderer->caretState, SDL_GetTicks());
+    appRenderer->needsRedraw = true;
+}
+
+void handleDownInsert(AppRenderer *appRenderer) {
+    const char *buf = appRenderer->inputBuffer;
+    int pos = appRenderer->cursorPosition;
+    int size = appRenderer->inputBufferSize;
+
+    int curLineEnd = findLineEnd(buf, pos, size);
+    if (curLineEnd >= size) return;  // already on last line
+
+    int curLineStart = findLineStart(buf, pos);
+    int col = utf8CountChars(buf, curLineStart, pos);
+    int nextLineStart = curLineEnd + 1;
+    int nextLineEnd = findLineEnd(buf, nextLineStart, size);
+    appRenderer->cursorPosition = utf8AdvanceN(buf, nextLineStart, col, nextLineEnd);
+
+    clearSelection(appRenderer);
+    caretReset(appRenderer->caretState, SDL_GetTicks());
+    appRenderer->needsRedraw = true;
+}
+
+void handleShiftUpInsert(AppRenderer *appRenderer) {
+    const char *buf = appRenderer->inputBuffer;
+    int pos = appRenderer->cursorPosition;
+
+    int curLineStart = findLineStart(buf, pos);
+    if (curLineStart == 0) return;
+
+    if (appRenderer->selectionAnchor == -1)
+        appRenderer->selectionAnchor = pos;
+
+    int col = utf8CountChars(buf, curLineStart, pos);
+    int prevLineEnd = curLineStart - 1;
+    int prevLineStart = findLineStart(buf, prevLineEnd);
+    appRenderer->cursorPosition = utf8AdvanceN(buf, prevLineStart, col, prevLineEnd);
+
+    caretReset(appRenderer->caretState, SDL_GetTicks());
+    appRenderer->needsRedraw = true;
+}
+
+void handleShiftDownInsert(AppRenderer *appRenderer) {
+    const char *buf = appRenderer->inputBuffer;
+    int pos = appRenderer->cursorPosition;
+    int size = appRenderer->inputBufferSize;
+
+    int curLineEnd = findLineEnd(buf, pos, size);
+    if (curLineEnd >= size) return;
+
+    if (appRenderer->selectionAnchor == -1)
+        appRenderer->selectionAnchor = pos;
+
+    int curLineStart = findLineStart(buf, pos);
+    int col = utf8CountChars(buf, curLineStart, pos);
+    int nextLineStart = curLineEnd + 1;
+    int nextLineEnd = findLineEnd(buf, nextLineStart, size);
+    appRenderer->cursorPosition = utf8AdvanceN(buf, nextLineStart, col, nextLineEnd);
+
+    caretReset(appRenderer->caretState, SDL_GetTicks());
+    appRenderer->needsRedraw = true;
 }
 
 // Selection-extending handlers
@@ -164,9 +276,9 @@ void handleHome(AppRenderer *appRenderer) {
         appRenderer->needsRedraw = true;
         return;
     }
-    // Text cursor: move to start (existing behavior)
+    // Text cursor: move to start of current line
     clearSelection(appRenderer);
-    appRenderer->cursorPosition = 0;
+    appRenderer->cursorPosition = findLineStart(appRenderer->inputBuffer, appRenderer->cursorPosition);
     caretReset(appRenderer->caretState, SDL_GetTicks());
     appRenderer->needsRedraw = true;
 }
@@ -175,7 +287,7 @@ void handleShiftHome(AppRenderer *appRenderer) {
     if (appRenderer->selectionAnchor == -1) {
         appRenderer->selectionAnchor = appRenderer->cursorPosition;
     }
-    appRenderer->cursorPosition = 0;
+    appRenderer->cursorPosition = findLineStart(appRenderer->inputBuffer, appRenderer->cursorPosition);
     caretReset(appRenderer->caretState, SDL_GetTicks());
     appRenderer->needsRedraw = true;
 }
@@ -212,9 +324,9 @@ void handleEnd(AppRenderer *appRenderer) {
         appRenderer->needsRedraw = true;
         return;
     }
-    // Text cursor: move to end (existing behavior)
+    // Text cursor: move to end of current line
     clearSelection(appRenderer);
-    appRenderer->cursorPosition = appRenderer->inputBufferSize;
+    appRenderer->cursorPosition = findLineEnd(appRenderer->inputBuffer, appRenderer->cursorPosition, appRenderer->inputBufferSize);
     caretReset(appRenderer->caretState, SDL_GetTicks());
     appRenderer->needsRedraw = true;
 }
@@ -223,7 +335,7 @@ void handleShiftEnd(AppRenderer *appRenderer) {
     if (appRenderer->selectionAnchor == -1) {
         appRenderer->selectionAnchor = appRenderer->cursorPosition;
     }
-    appRenderer->cursorPosition = appRenderer->inputBufferSize;
+    appRenderer->cursorPosition = findLineEnd(appRenderer->inputBuffer, appRenderer->cursorPosition, appRenderer->inputBufferSize);
     caretReset(appRenderer->caretState, SDL_GetTicks());
     appRenderer->needsRedraw = true;
 }
