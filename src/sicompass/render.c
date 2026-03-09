@@ -782,7 +782,23 @@ void renderInteraction(SiCompassApplication *app) {
 
         // In insert mode, show inputBuffer for selected item
         if (isSelected && inInsertMode) {
-            int baseItemX = itemX;  // X before prefix (for multi-line newlines)
+            int baseItemX = itemX;
+
+            // Calculate continuation X: after list prefix (e.g., "-i ")
+            int continuationX = baseItemX;
+            const char *firstSpace = strchr(list[i].label, ' ');
+            if (firstSpace) {
+                int prefixCharLen = (int)(firstSpace - list[i].label + 1);
+                char prefixChars[16];
+                if (prefixCharLen > 15) prefixCharLen = 15;
+                strncpy(prefixChars, list[i].label, prefixCharLen);
+                prefixChars[prefixCharLen] = '\0';
+                float pMinX, pMinY, pMaxX, pMaxY;
+                calculateTextBounds(app, prefixChars, (float)baseItemX, (float)itemYPos, scale,
+                                   &pMinX, &pMinY, &pMaxX, &pMaxY);
+                continuationX = (int)pMaxX;
+            }
+
             // Render prefix without highlight
             if (app->appRenderer->inputPrefix[0] != '\0') {
                 renderText(app, app->appRenderer->inputPrefix, itemX, itemYPos,
@@ -797,7 +813,7 @@ void renderInteraction(SiCompassApplication *app) {
 
             // Store positions for caret rendering
             app->appRenderer->currentElementX = itemX;
-            app->appRenderer->currentElementBaseX = baseItemX;
+            app->appRenderer->currentElementBaseX = continuationX;
             app->appRenderer->currentElementY = itemYPos;
 
             // Multi-line input: split on \n, render first line at itemX, rest at baseItemX
@@ -812,12 +828,12 @@ void renderInteraction(SiCompassApplication *app) {
                 int textLines1 = renderText(app, firstLen > 0 ? firstLine : " ", itemX, itemYPos,
                                             app->appRenderer->palette->text, isSelected);
 
-                // Render remaining lines at baseItemX
+                // Render remaining lines at continuationX (after list prefix)
                 const char *rest = nl + 1;
                 int restY = itemYPos + lineHeight * textLines1;
                 int textLinesRest = 0;
                 if (*rest != '\0') {
-                    textLinesRest = renderText(app, rest, baseItemX, restY,
+                    textLinesRest = renderText(app, rest, continuationX, restY,
                                                app->appRenderer->palette->text, isSelected);
                 } else {
                     textLinesRest = 1;  // trailing newline creates an empty line
@@ -829,10 +845,10 @@ void renderInteraction(SiCompassApplication *app) {
                     const char *lastNl = strrchr(displayText, '\n');
                     const char *lastLine = lastNl ? lastNl + 1 : displayText;
                     int lastLineY = restY + (textLinesRest > 1 ? lineHeight * (textLinesRest - 1) : 0);
-                    int suffixBaseX = baseItemX;
+                    int suffixBaseX = continuationX;
                     if (textLinesRest == 0) {
                         lastLineY = itemYPos + lineHeight * (textLines1 - 1);
-                        suffixBaseX = baseItemX;
+                        suffixBaseX = continuationX;
                     }
                     float sfxMinX, sfxMinY, sfxMaxX, sfxMaxY;
                     calculateTextBounds(app, *lastLine ? lastLine : " ",
@@ -849,8 +865,49 @@ void renderInteraction(SiCompassApplication *app) {
         }
 
         // Render text — highlight only the editable part in insert mode
-        int textLines = renderText(app, displayText, itemX, itemYPos, app->appRenderer->palette->text,
-                                   isSelected);
+        // For multiline labels, indent continuation lines past the list prefix
+        const char *generalNl = strchr(displayText, '\n');
+        int textLines;
+        if (generalNl) {
+            // Calculate continuation X from list prefix (e.g., "-i ")
+            int contX = itemX;
+            const char *sp = strchr(displayText, ' ');
+            if (sp) {
+                int pLen = (int)(sp - displayText + 1);
+                char pStr[16];
+                if (pLen > 15) pLen = 15;
+                strncpy(pStr, displayText, pLen);
+                pStr[pLen] = '\0';
+                float pMinX, pMinY, pMaxX, pMaxY;
+                calculateTextBounds(app, pStr, (float)itemX, (float)itemYPos, scale,
+                                   &pMinX, &pMinY, &pMaxX, &pMaxY);
+                contX = (int)pMaxX;
+            }
+
+            // Render first line at itemX
+            char firstLine[MAX_LINE_LENGTH];
+            size_t firstLen = generalNl - displayText;
+            if (firstLen >= MAX_LINE_LENGTH) firstLen = MAX_LINE_LENGTH - 1;
+            strncpy(firstLine, displayText, firstLen);
+            firstLine[firstLen] = '\0';
+            int textLines1 = renderText(app, firstLen > 0 ? firstLine : " ", itemX, itemYPos,
+                                        app->appRenderer->palette->text, isSelected);
+
+            // Render continuation lines at contX
+            const char *rest = generalNl + 1;
+            int restY = itemYPos + lineHeight * textLines1;
+            int textLinesRest = 0;
+            if (*rest != '\0') {
+                textLinesRest = renderText(app, rest, contX, restY,
+                                           app->appRenderer->palette->text, isSelected);
+            } else {
+                textLinesRest = 1;
+            }
+            textLines = textLines1 + textLinesRest;
+        } else {
+            textLines = renderText(app, displayText, itemX, itemYPos, app->appRenderer->palette->text,
+                                       isSelected);
+        }
 
         // Render non-editable suffix without highlight
         if (isSelected && inInsertMode && app->appRenderer->inputSuffix[0] != '\0') {
