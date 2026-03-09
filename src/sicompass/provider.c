@@ -518,6 +518,73 @@ void providerRefreshCurrentDirectory(AppRenderer *appRenderer) {
     }
 }
 
+// Refresh the nearest ancestor link tag by clearing its cached children.
+// Cursor is moved back to the link element itself (user presses right to re-enter).
+// Returns true if a link was found and refreshed, false otherwise.
+bool providerRefreshLink(AppRenderer *appRenderer) {
+    // First check if cursor is directly ON a link element
+    if (appRenderer->currentId.depth >= 2) {
+        int count;
+        FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                         &appRenderer->currentId, &count);
+        if (arr) {
+            int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+            if (idx >= 0 && idx < count &&
+                arr[idx]->type == FFON_OBJECT &&
+                providerTagHasLink(arr[idx]->data.object->key)) {
+                // Clear cached children, cursor stays on the link
+                FfonObject *obj = arr[idx]->data.object;
+                for (int i = 0; i < obj->count; i++) {
+                    ffonElementDestroy(obj->elements[i]);
+                    obj->elements[i] = NULL;
+                }
+                obj->count = 0;
+                return true;
+            }
+        }
+    }
+
+    // Walk up from current position to find the nearest ancestor link
+    IdArray testId;
+    idArrayCopy(&testId, &appRenderer->currentId);
+
+    while (testId.depth >= 2) {
+        // Get the container element at this level
+        IdArray parentId;
+        idArrayCopy(&parentId, &testId);
+        idArrayPop(&parentId);
+
+        int parentCount;
+        FfonElement **parentArr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                               &parentId, &parentCount);
+        if (!parentArr) break;
+
+        int idx = parentId.ids[parentId.depth - 1];
+        if (idx < 0 || idx >= parentCount) break;
+
+        FfonElement *elem = parentArr[idx];
+        if (elem->type == FFON_OBJECT &&
+            providerTagHasLink(elem->data.object->key)) {
+            // Found the nearest link — clear its cached children
+            FfonObject *obj = elem->data.object;
+            for (int i = 0; i < obj->count; i++) {
+                ffonElementDestroy(obj->elements[i]);
+                obj->elements[i] = NULL;
+            }
+            obj->count = 0;
+
+            // Move cursor to the link element itself
+            idArrayCopy(&appRenderer->currentId, &parentId);
+            return true;
+        }
+
+        // Move one level up
+        idArrayPop(&testId);
+    }
+
+    return false;
+}
+
 // Navigate left out of an object
 bool providerNavigateLeft(AppRenderer *appRenderer) {
     if (appRenderer->currentId.depth <= 1) {

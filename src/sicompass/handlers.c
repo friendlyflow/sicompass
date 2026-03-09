@@ -2481,6 +2481,14 @@ void handleDashboard(AppRenderer *appRenderer) {
     appRenderer->needsRedraw = true;
 }
 
+void handleF5(AppRenderer *appRenderer) {
+    if (!providerRefreshLink(appRenderer)) {
+        providerRefreshCurrentDirectory(appRenderer);
+    }
+    createListCurrentLayer(appRenderer);
+    appRenderer->needsRedraw = true;
+}
+
 // Sanitize a provider name for use as a filename (spaces → underscores, strip unsafe chars)
 static void sanitizeFilename(const char *name, char *out, size_t outSize) {
     size_t j = 0;

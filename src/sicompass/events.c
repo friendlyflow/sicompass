@@ -282,6 +282,12 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
              appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
         handleLoadProviderConfig(appRenderer);
     }
+    // F5 (refresh — reload link or current directory)
+    else if (!ctrl && !shift && !alt && key == SDLK_F5 &&
+             (appRenderer->currentCoordinate == COORDINATE_EDITOR_GENERAL ||
+              appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL)) {
+        handleF5(appRenderer);
+    }
     // D (dashboard — show provider dashboard image)
     else if (!ctrl && !shift && !alt && key == SDLK_D &&
              appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
