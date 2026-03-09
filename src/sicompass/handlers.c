@@ -1032,11 +1032,9 @@ void handleEnter(AppRenderer *appRenderer, History history) {
 }
 
 void handleCtrlEnter(AppRenderer *appRenderer, History history) {
-    if (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT) {
-        updateState(appRenderer, TASK_INPUT, HISTORY_NONE);
-        appRenderer->currentCoordinate = COORDINATE_EDITOR_GENERAL;
-        handleEscape(appRenderer);
-        handleCtrlA(appRenderer, HISTORY_NONE);
+    if (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||
+        appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT) {
+        handleInput(appRenderer, "\n");
     }
 }
 

@@ -309,6 +309,11 @@ int renderText(SiCompassApplication *app, const char *text, int x, int y,
         int currentY = y + lineCount * lineHeight;
 
         while (*lineEnd != '\0') {
+            // Force line break on newline character
+            if (*lineEnd == '\n') {
+                break;
+            }
+
             // Build substring from lineStart to lineEnd (inclusive)
             size_t testLen = lineEnd - lineStart + 1;
             if (testLen >= MAX_LINE_LENGTH) {
@@ -368,8 +373,12 @@ int renderText(SiCompassApplication *app, const char *text, int x, int y,
         // Move to next line
         lineStart = lineEnd;
 
+        // Skip newline character
+        if (*lineStart == '\n') {
+            lineStart++;
+        }
         // Skip trailing space if we broke at one
-        if (*lineStart == ' ') {
+        else if (*lineStart == ' ') {
             lineStart++;
         }
     }
@@ -765,6 +774,7 @@ void renderInteraction(SiCompassApplication *app) {
 
         // In insert mode, show inputBuffer for selected item
         if (isSelected && inInsertMode) {
+            int baseItemX = itemX;  // X before prefix (for multi-line newlines)
             // Render prefix without highlight
             if (app->appRenderer->inputPrefix[0] != '\0') {
                 renderText(app, app->appRenderer->inputPrefix, itemX, itemYPos,
@@ -777,9 +787,55 @@ void renderInteraction(SiCompassApplication *app) {
             }
             displayText = app->appRenderer->inputBuffer;
 
-            // Store position for caret rendering (after prefix)
+            // Store positions for caret rendering
             app->appRenderer->currentElementX = itemX;
+            app->appRenderer->currentElementBaseX = baseItemX;
             app->appRenderer->currentElementY = itemYPos;
+
+            // Multi-line input: split on \n, render first line at itemX, rest at baseItemX
+            const char *nl = strchr(displayText, '\n');
+            if (nl) {
+                // Render first line at itemX (after prefix)
+                char firstLine[MAX_LINE_LENGTH];
+                size_t firstLen = nl - displayText;
+                if (firstLen >= MAX_LINE_LENGTH) firstLen = MAX_LINE_LENGTH - 1;
+                strncpy(firstLine, displayText, firstLen);
+                firstLine[firstLen] = '\0';
+                int textLines1 = renderText(app, firstLen > 0 ? firstLine : " ", itemX, itemYPos,
+                                            app->appRenderer->palette->text, isSelected);
+
+                // Render remaining lines at baseItemX
+                const char *rest = nl + 1;
+                int restY = itemYPos + lineHeight * textLines1;
+                int textLinesRest = 0;
+                if (*rest != '\0') {
+                    textLinesRest = renderText(app, rest, baseItemX, restY,
+                                               app->appRenderer->palette->text, isSelected);
+                }
+
+                // Render suffix after the last line
+                if (app->appRenderer->inputSuffix[0] != '\0') {
+                    // Find the last line of content for suffix positioning
+                    const char *lastNl = strrchr(displayText, '\n');
+                    const char *lastLine = lastNl ? lastNl + 1 : displayText;
+                    int lastLineY = restY + (textLinesRest > 1 ? lineHeight * (textLinesRest - 1) : 0);
+                    int suffixBaseX = baseItemX;
+                    if (textLinesRest == 0) {
+                        lastLineY = itemYPos + lineHeight * (textLines1 - 1);
+                        suffixBaseX = baseItemX;
+                    }
+                    float sfxMinX, sfxMinY, sfxMaxX, sfxMaxY;
+                    calculateTextBounds(app, *lastLine ? lastLine : " ",
+                                       (float)suffixBaseX, (float)lastLineY, scale,
+                                       &sfxMinX, &sfxMinY, &sfxMaxX, &sfxMaxY);
+                    int suffixX = (int)(sfxMaxX);
+                    renderText(app, app->appRenderer->inputSuffix, suffixX, lastLineY,
+                               app->appRenderer->palette->text, false);
+                }
+
+                yPos += lineHeight * (textLines1 + textLinesRest);
+                continue;  // skip normal rendering below
+            }
         }
 
         // Render text — highlight only the editable part in insert mode
@@ -1587,6 +1643,7 @@ void updateView(SiCompassApplication *app) {
         caretRender(app, app->appRenderer->caretState,
                    app->appRenderer->inputBuffer,
                    50 + searchPrefixWidth, (int)minY,
+                   50 + searchPrefixWidth,
                    app->appRenderer->cursorPosition,
                    app->appRenderer->palette->text);
     }
@@ -1671,6 +1728,7 @@ void updateView(SiCompassApplication *app) {
         caretRender(app, app->appRenderer->caretState,
                    textForCaret,
                    caretX, caretY,
+                   app->appRenderer->currentElementBaseX,
                    app->appRenderer->cursorPosition,
                    app->appRenderer->palette->text);
     }
