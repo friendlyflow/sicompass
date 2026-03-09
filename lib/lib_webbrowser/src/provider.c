@@ -54,35 +54,40 @@ static FfonElement** wbFetch(const char *path, int *outCount) {
     return elems;
 }
 
+// Fetch and parse the current URL into the cache. Returns true on success.
+static bool wbFetchPage(void) {
+    if (g_currentUrl[0] == '\0') return false;
+    wbClearCache();
+
+    char *html = webbrowserFetchUrl(g_currentUrl);
+    if (!html) {
+        snprintf(g_provider->errorMessage, sizeof(g_provider->errorMessage),
+                 "failed to fetch URL");
+        return false;
+    }
+    int count = 0;
+    FfonElement **parsed = webbrowserHtmlToFfon(html, g_currentUrl, &count);
+    free(html);
+    if (parsed && count > 0) {
+        strncpy(g_cachedPage.url, g_currentUrl, sizeof(g_cachedPage.url) - 1);
+        g_cachedPage.url[sizeof(g_cachedPage.url) - 1] = '\0';
+        g_cachedPage.elements = parsed;
+        g_cachedPage.elementCount = count;
+        return true;
+    }
+    free(parsed);
+    snprintf(g_provider->errorMessage, sizeof(g_provider->errorMessage),
+             "failed to fetch URL");
+    return false;
+}
+
 static bool wbCommit(const char *path, const char *oldName, const char *newName) {
     (void)oldName;
     (void)path;
     if (newName && newName[0]) {
         strncpy(g_currentUrl, newName, sizeof(g_currentUrl) - 1);
         g_currentUrl[sizeof(g_currentUrl) - 1] = '\0';
-        wbClearCache();
-
-        // Fetch eagerly so errors surface immediately
-        char *html = webbrowserFetchUrl(g_currentUrl);
-        if (!html) {
-            snprintf(g_provider->errorMessage, sizeof(g_provider->errorMessage),
-                     "failed to fetch URL");
-            return false;
-        }
-        int count = 0;
-        FfonElement **parsed = webbrowserHtmlToFfon(html, g_currentUrl, &count);
-        free(html);
-        if (parsed && count > 0) {
-            strncpy(g_cachedPage.url, g_currentUrl, sizeof(g_cachedPage.url) - 1);
-            g_cachedPage.url[sizeof(g_cachedPage.url) - 1] = '\0';
-            g_cachedPage.elements = parsed;
-            g_cachedPage.elementCount = count;
-        } else {
-            free(parsed);
-            snprintf(g_provider->errorMessage, sizeof(g_provider->errorMessage),
-                     "failed to fetch URL");
-            return false;
-        }
+        return wbFetchPage();
     }
     return true;
 }
@@ -104,7 +109,7 @@ static FfonElement* wbHandleCommand(const char *path, const char *command,
     (void)errorMsgSize;
 
     if (strcmp(command, "refresh") == 0) {
-        wbClearCache();
+        wbFetchPage();
         return NULL;
     }
 

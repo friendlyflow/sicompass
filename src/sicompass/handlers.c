@@ -2482,9 +2482,38 @@ void handleDashboard(AppRenderer *appRenderer) {
 }
 
 void handleF5(AppRenderer *appRenderer) {
-    if (!providerRefreshLink(appRenderer)) {
-        providerRefreshCurrentDirectory(appRenderer);
+    // 1. Try link refresh first (nearest ancestor link tag)
+    if (providerRefreshLink(appRenderer)) {
+        createListCurrentLayer(appRenderer);
+        appRenderer->needsRedraw = true;
+        return;
     }
+
+    // 2. Try provider "refresh" command if available (e.g. web browser re-fetches page)
+    int cmdCount = 0;
+    const char **cmds = providerGetCommands(appRenderer, &cmdCount);
+    bool hasRefresh = false;
+    for (int i = 0; i < cmdCount; i++) {
+        if (strcmp(cmds[i], "refresh") == 0) {
+            hasRefresh = true;
+            char errMsg[256] = "";
+            providerHandleCommand(appRenderer, "refresh", NULL, 0, errMsg, sizeof(errMsg));
+            break;
+        }
+    }
+
+    // Navigate to provider root (depth 2) so full content reloads
+    if (hasRefresh && appRenderer->currentId.depth > 2) {
+        Provider *provider = providerGetActive(appRenderer);
+        while (appRenderer->currentId.depth > 2) {
+            if (provider && provider->popPath)
+                provider->popPath(provider);
+            idArrayPop(&appRenderer->currentId);
+        }
+    }
+
+    // 3. Refresh the current directory (re-fetches from provider)
+    providerRefreshCurrentDirectory(appRenderer);
     createListCurrentLayer(appRenderer);
     appRenderer->needsRedraw = true;
 }
