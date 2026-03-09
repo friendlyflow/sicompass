@@ -884,14 +884,14 @@ void renderInteraction(SiCompassApplication *app) {
                 contX = (int)pMaxX;
             }
 
-            // Render first line at itemX
+            // Render first line at itemX (no highlight — unified rect drawn below)
             char firstLine[MAX_LINE_LENGTH];
             size_t firstLen = generalNl - displayText;
             if (firstLen >= MAX_LINE_LENGTH) firstLen = MAX_LINE_LENGTH - 1;
             strncpy(firstLine, displayText, firstLen);
             firstLine[firstLen] = '\0';
             int textLines1 = renderText(app, firstLen > 0 ? firstLine : " ", itemX, itemYPos,
-                                        app->appRenderer->palette->text, isSelected);
+                                        app->appRenderer->palette->text, false);
 
             // Render continuation lines at contX
             const char *rest = generalNl + 1;
@@ -899,10 +899,49 @@ void renderInteraction(SiCompassApplication *app) {
             int textLinesRest = 0;
             if (*rest != '\0') {
                 textLinesRest = renderText(app, rest, contX, restY,
-                                           app->appRenderer->palette->text, isSelected);
+                                           app->appRenderer->palette->text, false);
             } else {
                 textLinesRest = 1;
             }
+
+            // Draw unified selection rectangle across all lines
+            if (isSelected) {
+                int totalLines = textLines1 + textLinesRest;
+                float minX1, minY1, maxX1, maxY1;
+                calculateTextBounds(app, firstLen > 0 ? firstLine : " ",
+                                   (float)itemX, (float)itemYPos, scale,
+                                   &minX1, &minY1, &maxX1, &maxY1);
+                float oMinX = minX1, oMaxX = maxX1;
+
+                // Measure continuation lines for max width
+                if (*rest != '\0') {
+                    const char *line = rest;
+                    for (int li = 0; li < textLinesRest && *line; li++) {
+                        const char *lnl = strchr(line, '\n');
+                        char lineBuf[MAX_LINE_LENGTH];
+                        size_t ll = lnl ? (size_t)(lnl - line) : strlen(line);
+                        if (ll >= MAX_LINE_LENGTH) ll = MAX_LINE_LENGTH - 1;
+                        strncpy(lineBuf, line, ll);
+                        lineBuf[ll] = '\0';
+                        if (ll > 0) {
+                            float lMinX, lMinY, lMaxX, lMaxY;
+                            calculateTextBounds(app, lineBuf, (float)contX,
+                                               (float)(restY + li * lineHeight), scale,
+                                               &lMinX, &lMinY, &lMaxX, &lMaxY);
+                            if (lMinX < oMinX) oMinX = lMinX;
+                            if (lMaxX > oMaxX) oMaxX = lMaxX;
+                        }
+                        line = lnl ? lnl + 1 : line + ll;
+                    }
+                }
+
+                float rectY = minY1 - TEXT_PADDING;
+                float rectH = (float)(totalLines * lineHeight);
+                prepareRectangle(app, oMinX - TEXT_PADDING, rectY,
+                                 oMaxX - oMinX + 2 * TEXT_PADDING, rectH,
+                                 app->appRenderer->palette->selected, 5.0f);
+            }
+
             textLines = textLines1 + textLinesRest;
         } else {
             textLines = renderText(app, displayText, itemX, itemYPos, app->appRenderer->palette->text,
