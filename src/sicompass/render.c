@@ -813,13 +813,33 @@ void renderInteraction(SiCompassApplication *app) {
                 int textLines1 = renderText(app, firstLen > 0 ? firstLine : " ", itemX, itemYPos,
                                             app->appRenderer->palette->text, isSelected);
 
-                // Render remaining lines at baseItemX
+                // Render remaining lines at baseItemX, one line at a time
                 const char *rest = nl + 1;
                 int restY = itemYPos + lineHeight * textLines1;
                 int textLinesRest = 0;
                 if (*rest != '\0') {
-                    textLinesRest = renderText(app, rest, baseItemX, restY,
-                                               app->appRenderer->palette->text, isSelected);
+                    const char *linePtr = rest;
+                    while (*linePtr != '\0') {
+                        const char *lineNl = strchr(linePtr, '\n');
+                        char lineBuf[MAX_LINE_LENGTH];
+                        size_t lineLen = lineNl ? (size_t)(lineNl - linePtr) : strlen(linePtr);
+                        if (lineLen >= MAX_LINE_LENGTH) lineLen = MAX_LINE_LENGTH - 1;
+                        strncpy(lineBuf, linePtr, lineLen);
+                        lineBuf[lineLen] = '\0';
+                        int curY = restY + lineHeight * textLinesRest;
+                        textLinesRest += renderText(app, lineLen > 0 ? lineBuf : " ", baseItemX, curY,
+                                                    app->appRenderer->palette->text, isSelected);
+                        if (lineNl) {
+                            linePtr = lineNl + 1;
+                            if (*linePtr == '\0') {
+                                curY = restY + lineHeight * textLinesRest;
+                                textLinesRest += renderText(app, " ", baseItemX, curY,
+                                                            app->appRenderer->palette->text, isSelected);
+                            }
+                        } else {
+                            break;
+                        }
+                    }
                 } else {
                     textLinesRest = renderText(app, " ", baseItemX, restY,
                                                app->appRenderer->palette->text, isSelected);
