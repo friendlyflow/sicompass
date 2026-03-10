@@ -752,10 +752,17 @@ void renderInteraction(SiCompassApplication *app) {
         if (listIndex < count - 1) {
             int nextLines = getItemLineCount(&list[listIndex + 1], app, charWidth, lineHeight, headerLines);
             int totalWithNext = linesToSelected + nextLines;
+            int savedStartIndex = startIndex;
+            int savedLinesToSelected = linesToSelected;
             while (totalWithNext > availableLines && startIndex < listIndex) {
                 totalWithNext -= getItemLineCount(&list[startIndex], app, charWidth, lineHeight, headerLines);
                 linesToSelected -= getItemLineCount(&list[startIndex], app, charWidth, lineHeight, headerLines);
                 startIndex++;
+            }
+            // If the next item still doesn't fit, undo — don't sacrifice context above
+            if (totalWithNext > availableLines) {
+                startIndex = savedStartIndex;
+                linesToSelected = savedLinesToSelected;
             }
         }
         // Try to show 1 item above selected if possible (scrolloff)
@@ -1210,10 +1217,17 @@ void renderSimpleSearch(SiCompassApplication *app) {
         if (listIndex < count - 1) {
             int nextLines = getItemLineCount(&list[listIndex + 1], app, charWidth, lineHeight, headerLines);
             int totalWithNext = linesToSelected + nextLines;
+            int savedStartIndex = startIndex;
+            int savedLinesToSelected = linesToSelected;
             while (totalWithNext > availableLines && startIndex < listIndex) {
                 totalWithNext -= getItemLineCount(&list[startIndex], app, charWidth, lineHeight, headerLines);
                 linesToSelected -= getItemLineCount(&list[startIndex], app, charWidth, lineHeight, headerLines);
                 startIndex++;
+            }
+            // If the next item still doesn't fit, undo — don't sacrifice context above
+            if (totalWithNext > availableLines) {
+                startIndex = savedStartIndex;
+                linesToSelected = savedLinesToSelected;
             }
         }
         // Try to show 1 item above selected if possible (scrolloff)
@@ -1435,10 +1449,17 @@ void renderExtendedSearch(SiCompassApplication *app) {
         if (listIndex < count - 1) {
             int nextLines = getItemLineCount(&list[listIndex + 1], app, charWidth, lineHeight, headerLines);
             int totalWithNext = linesToSelected + nextLines;
+            int savedStartIndex = startIndex;
+            int savedLinesToSelected = linesToSelected;
             while (totalWithNext > availableLines && startIndex < listIndex) {
                 totalWithNext -= getItemLineCount(&list[startIndex], app, charWidth, lineHeight, headerLines);
                 linesToSelected -= getItemLineCount(&list[startIndex], app, charWidth, lineHeight, headerLines);
                 startIndex++;
+            }
+            // If the next item still doesn't fit, undo — don't sacrifice context above
+            if (totalWithNext > availableLines) {
+                startIndex = savedStartIndex;
+                linesToSelected = savedLinesToSelected;
             }
         }
         // Try to show 1 item above selected if possible (scrolloff)
