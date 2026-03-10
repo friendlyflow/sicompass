@@ -329,6 +329,46 @@ void test_stripOneOpt_null(void) {
     TEST_ASSERT_NULL(providerTagStripOneOpt(NULL));
 }
 
+void test_stripManyOpt_with_tag(void) {
+    char *result = providerTagStripManyOpt("<many-opt></many-opt>content here");
+    TEST_ASSERT_EQUAL_STRING("content here", result);
+    free(result);
+}
+
+void test_stripManyOpt_without_tag(void) {
+    char *result = providerTagStripManyOpt("no tag");
+    TEST_ASSERT_EQUAL_STRING("no tag", result);
+    free(result);
+}
+
+void test_stripManyOpt_null(void) {
+    TEST_ASSERT_NULL(providerTagStripManyOpt(NULL));
+}
+
+void test_stripDisplay_with_oneOpt_prefix(void) {
+    char *result = providerTagStripDisplay("<one-opt></one-opt>some text");
+    TEST_ASSERT_EQUAL_STRING("some text", result);
+    free(result);
+}
+
+void test_stripDisplay_with_manyOpt_prefix(void) {
+    char *result = providerTagStripDisplay("<many-opt></many-opt>some text");
+    TEST_ASSERT_EQUAL_STRING("some text", result);
+    free(result);
+}
+
+void test_stripDisplay_with_oneOpt_and_input(void) {
+    char *result = providerTagStripDisplay("<one-opt></one-opt><input>value</input>");
+    TEST_ASSERT_EQUAL_STRING("value", result);
+    free(result);
+}
+
+void test_stripDisplay_with_manyOpt_and_checkbox(void) {
+    char *result = providerTagStripDisplay("<many-opt></many-opt><checkbox>task</checkbox>");
+    TEST_ASSERT_EQUAL_STRING("task", result);
+    free(result);
+}
+
 // === Button tags ===
 
 void test_hasButton_with_tags(void) {
@@ -519,6 +559,13 @@ int main(void) {
     RUN_TEST(test_stripOneOpt_with_tag);
     RUN_TEST(test_stripOneOpt_without_tag);
     RUN_TEST(test_stripOneOpt_null);
+    RUN_TEST(test_stripManyOpt_with_tag);
+    RUN_TEST(test_stripManyOpt_without_tag);
+    RUN_TEST(test_stripManyOpt_null);
+    RUN_TEST(test_stripDisplay_with_oneOpt_prefix);
+    RUN_TEST(test_stripDisplay_with_manyOpt_prefix);
+    RUN_TEST(test_stripDisplay_with_oneOpt_and_input);
+    RUN_TEST(test_stripDisplay_with_manyOpt_and_checkbox);
 
     // Button tags
     RUN_TEST(test_hasButton_with_tags);

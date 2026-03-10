@@ -58,6 +58,20 @@ char* providerTagExtractContent(const char *taggedText) {
 char* providerTagStripDisplay(const char *text) {
     if (!text) return NULL;
 
+    // Strip opt-tag prefixes before any other processing
+    if (providerTagHasOneOpt(text)) {
+        char *stripped = providerTagStripOneOpt(text);
+        char *result = providerTagStripDisplay(stripped);
+        free(stripped);
+        return result;
+    }
+    if (providerTagHasManyOpt(text)) {
+        char *stripped = providerTagStripManyOpt(text);
+        char *result = providerTagStripDisplay(stripped);
+        free(stripped);
+        return result;
+    }
+
     // Button tags: <button>function_name</button>display_text
     // Strip entirely: show only display_text (after </button>)
     if (tagFindUnescaped(text, BUTTON_TAG_OPEN)) {
@@ -353,6 +367,14 @@ char* providerTagStripOneOpt(const char *text) {
     if (!text) return NULL;
     if (strncmp(text, ONE_OPT_TAG, ONE_OPT_TAG_LEN) == 0) {
         return strdup(text + ONE_OPT_TAG_LEN);
+    }
+    return strdup(text);
+}
+
+char* providerTagStripManyOpt(const char *text) {
+    if (!text) return NULL;
+    if (strncmp(text, MANY_OPT_TAG, MANY_OPT_TAG_LEN) == 0) {
+        return strdup(text + MANY_OPT_TAG_LEN);
     }
     return strdup(text);
 }

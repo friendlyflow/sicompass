@@ -283,76 +283,100 @@ static void collectItemsRecursive(AppRenderer *appRenderer, FfonElement **elemen
         idArrayCopy(&appRenderer->totalListCurrentLayer[idx].id, &itemId);
 
         if (elem->type == FFON_STRING) {
-            bool hasImage = providerTagHasImage(elem->data.string);
-            bool hasCheckboxChecked = providerTagHasCheckboxChecked(elem->data.string);
-            bool hasCheckbox = providerTagHasCheckbox(elem->data.string);
-            bool hasChecked = providerTagHasChecked(elem->data.string);
-            bool hasButton = providerTagHasButton(elem->data.string);
-            bool hasInput = providerTagHasInput(elem->data.string);
+            // Strip <one-opt> or <many-opt> tag before other tag processing
+            const char *strKey = elem->data.string;
+            char *optStripped = NULL;
+            if (providerTagHasOneOpt(strKey)) {
+                optStripped = providerTagStripOneOpt(strKey);
+                strKey = optStripped;
+            } else if (providerTagHasManyOpt(strKey)) {
+                optStripped = providerTagStripManyOpt(strKey);
+                strKey = optStripped;
+            }
+
+            bool hasImage = providerTagHasImage(strKey);
+            bool hasCheckboxChecked = providerTagHasCheckboxChecked(strKey);
+            bool hasCheckbox = providerTagHasCheckbox(strKey);
+            bool hasChecked = providerTagHasChecked(strKey);
+            bool hasButton = providerTagHasButton(strKey);
+            bool hasInput = providerTagHasInput(strKey);
             const char *prefix;
             char *stripped = NULL;
 
             if (hasImage) {
                 prefix = "-p";
-                stripped = providerTagExtractImageContent(elem->data.string);
+                stripped = providerTagExtractImageContent(strKey);
             } else if (hasCheckboxChecked) {
                 prefix = "-cc";
-                stripped = providerTagExtractCheckboxCheckedContent(elem->data.string);
+                stripped = providerTagExtractCheckboxCheckedContent(strKey);
             } else if (hasCheckbox) {
                 prefix = "-c";
-                stripped = providerTagExtractCheckboxContent(elem->data.string);
+                stripped = providerTagExtractCheckboxContent(strKey);
             } else if (hasChecked) {
                 prefix = "-rc";
-                stripped = providerTagExtractCheckedContent(elem->data.string);
+                stripped = providerTagExtractCheckedContent(strKey);
             } else if (hasButton) {
                 prefix = "-b";
-                stripped = providerTagExtractButtonDisplayText(elem->data.string);
+                stripped = providerTagExtractButtonDisplayText(strKey);
             } else if (hasInput) {
                 prefix = "-i";
-                stripped = providerTagExtractContent(elem->data.string);
+                stripped = providerTagExtractContent(strKey);
             } else {
                 prefix = "-";
-                stripped = providerTagStripDisplay(elem->data.string);
+                stripped = providerTagStripDisplay(strKey);
             }
 
             char prefixed[MAX_LINE_LENGTH];
             snprintf(prefixed, sizeof(prefixed), "%s %s",
-                     prefix, stripped ? stripped : elem->data.string);
+                     prefix, stripped ? stripped : strKey);
             appRenderer->totalListCurrentLayer[idx].label = strdup(prefixed);
             free(stripped);
+            free(optStripped);
         } else {
-            bool hasCheckboxChecked = providerTagHasCheckboxChecked(elem->data.object->key);
-            bool hasCheckbox = providerTagHasCheckbox(elem->data.object->key);
-            bool hasLink = providerTagHasLink(elem->data.object->key);
-            bool hasRadio = providerTagHasRadio(elem->data.object->key);
-            bool hasInput = providerTagHasInput(elem->data.object->key);
+            // Strip <one-opt> or <many-opt> tag before other tag processing
+            const char *objKey = elem->data.object->key;
+            char *optStripped = NULL;
+            if (providerTagHasOneOpt(objKey)) {
+                optStripped = providerTagStripOneOpt(objKey);
+                objKey = optStripped;
+            } else if (providerTagHasManyOpt(objKey)) {
+                optStripped = providerTagStripManyOpt(objKey);
+                objKey = optStripped;
+            }
+
+            bool hasCheckboxChecked = providerTagHasCheckboxChecked(objKey);
+            bool hasCheckbox = providerTagHasCheckbox(objKey);
+            bool hasLink = providerTagHasLink(objKey);
+            bool hasRadio = providerTagHasRadio(objKey);
+            bool hasInput = providerTagHasInput(objKey);
             const char *prefix;
             char *stripped = NULL;
 
             if (hasCheckboxChecked) {
                 prefix = "+cc";
-                stripped = providerTagExtractCheckboxCheckedContent(elem->data.object->key);
+                stripped = providerTagExtractCheckboxCheckedContent(objKey);
             } else if (hasCheckbox) {
                 prefix = "+c";
-                stripped = providerTagExtractCheckboxContent(elem->data.object->key);
+                stripped = providerTagExtractCheckboxContent(objKey);
             } else if (hasLink) {
                 prefix = "+l";
-                stripped = providerTagExtractLinkContent(elem->data.object->key);
+                stripped = providerTagExtractLinkContent(objKey);
             } else if (hasRadio) {
                 prefix = "+R";
-                stripped = providerTagExtractRadioContent(elem->data.object->key);
+                stripped = providerTagExtractRadioContent(objKey);
             } else if (hasInput) {
                 prefix = "+i";
-                stripped = providerTagExtractContent(elem->data.object->key);
+                stripped = providerTagExtractContent(objKey);
             } else {
                 prefix = "+";
             }
 
             char prefixed[MAX_LINE_LENGTH];
             snprintf(prefixed, sizeof(prefixed), "%s %s",
-                     prefix, stripped ? stripped : elem->data.object->key);
+                     prefix, stripped ? stripped : objKey);
             appRenderer->totalListCurrentLayer[idx].label = strdup(prefixed);
             free(stripped);
+            free(optStripped);
         }
 
         // Store breadcrumb in data field
