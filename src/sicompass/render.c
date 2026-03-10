@@ -582,7 +582,28 @@ static int getItemLineCount(const char *label, SiCompassApplication *app,
             return imageLines > 1 ? imageLines : 1;
         }
     }
-    return 1;
+    if (!label || *label == '\0') return 1;
+
+    // Count lines from \n breaks and word wrapping (120 char max width)
+    int lines = 0;
+    const char *seg = label;
+    while (*seg != '\0') {
+        const char *nl = strchr(seg, '\n');
+        size_t segLen = nl ? (size_t)(nl - seg) : strlen(seg);
+        // Each segment takes at least 1 line; long segments wrap at ~120 chars
+        if (segLen <= 120) {
+            lines += 1;
+        } else {
+            lines += (int)((segLen + 119) / 120);  // ceil(segLen / 120)
+        }
+        if (nl) {
+            seg = nl + 1;
+            if (*seg == '\0') lines++;  // trailing \n = empty line
+        } else {
+            break;
+        }
+    }
+    return lines > 0 ? lines : 1;
 }
 
 void renderInteraction(SiCompassApplication *app) {
@@ -670,28 +691,54 @@ void renderInteraction(SiCompassApplication *app) {
         app->appRenderer->listIndex = listIndex;
     }
 
-    // Ensure startIndex <= listIndex
-    if (listIndex < startIndex) {
+    int linesToSelected;
+
+    if (startIndex < 0) {
+        // Sentinel: position listIndex as second-to-last by working backward
+        int linesFromBottom = getItemLineCount(list[listIndex].label, app, charWidth, lineHeight, headerLines);
+        if (listIndex < count - 1) {
+            linesFromBottom += getItemLineCount(list[listIndex + 1].label, app, charWidth, lineHeight, headerLines);
+        }
         startIndex = listIndex;
-    }
-
-    // Accumulate lines from startIndex to listIndex (inclusive) to check if it fits
-    int linesToSelected = 0;
-    for (int i = startIndex; i <= listIndex; i++) {
-        linesToSelected += getItemLineCount(list[i].label, app, charWidth, lineHeight, headerLines);
-    }
-
-    // If selected item extends past viewport, scroll forward
-    while (linesToSelected > availableLines && startIndex < listIndex) {
-        linesToSelected -= getItemLineCount(list[startIndex].label, app, charWidth, lineHeight, headerLines);
-        startIndex++;
-    }
-
-    // Try to show 1 item above selected if possible (scrolloff)
-    if (startIndex > 0 && startIndex == listIndex) {
-        int prevLines = getItemLineCount(list[startIndex - 1].label, app, charWidth, lineHeight, headerLines);
-        if (linesToSelected + prevLines <= availableLines) {
+        while (startIndex > 0) {
+            int prevLines = getItemLineCount(list[startIndex - 1].label, app, charWidth, lineHeight, headerLines);
+            if (linesFromBottom + prevLines > availableLines) break;
+            linesFromBottom += prevLines;
             startIndex--;
+        }
+        linesToSelected = 0;
+        for (int i = startIndex; i <= listIndex; i++) {
+            linesToSelected += getItemLineCount(list[i].label, app, charWidth, lineHeight, headerLines);
+        }
+    } else {
+        // Normal scroll-into-view
+        if (listIndex < startIndex) {
+            startIndex = listIndex;
+        }
+        linesToSelected = 0;
+        for (int i = startIndex; i <= listIndex; i++) {
+            linesToSelected += getItemLineCount(list[i].label, app, charWidth, lineHeight, headerLines);
+        }
+        while (linesToSelected > availableLines && startIndex < listIndex) {
+            linesToSelected -= getItemLineCount(list[startIndex].label, app, charWidth, lineHeight, headerLines);
+            startIndex++;
+        }
+        // Try to show 1 item below selected if possible (scrolloff)
+        if (listIndex < count - 1) {
+            int nextLines = getItemLineCount(list[listIndex + 1].label, app, charWidth, lineHeight, headerLines);
+            int totalWithNext = linesToSelected + nextLines;
+            while (totalWithNext > availableLines && startIndex < listIndex) {
+                totalWithNext -= getItemLineCount(list[startIndex].label, app, charWidth, lineHeight, headerLines);
+                linesToSelected -= getItemLineCount(list[startIndex].label, app, charWidth, lineHeight, headerLines);
+                startIndex++;
+            }
+        }
+        // Try to show 1 item above selected if possible (scrolloff)
+        if (startIndex > 0 && startIndex == listIndex) {
+            int prevLines = getItemLineCount(list[startIndex - 1].label, app, charWidth, lineHeight, headerLines);
+            if (linesToSelected + prevLines <= availableLines) {
+                startIndex--;
+            }
         }
     }
 
@@ -1046,28 +1093,54 @@ void renderSimpleSearch(SiCompassApplication *app) {
         app->appRenderer->listIndex = listIndex;
     }
 
-    // Ensure startIndex <= listIndex
-    if (listIndex < startIndex) {
+    int linesToSelected;
+
+    if (startIndex < 0) {
+        // Sentinel: position listIndex as second-to-last by working backward
+        int linesFromBottom = getItemLineCount(list[listIndex].label, app, charWidth, lineHeight, headerLines);
+        if (listIndex < count - 1) {
+            linesFromBottom += getItemLineCount(list[listIndex + 1].label, app, charWidth, lineHeight, headerLines);
+        }
         startIndex = listIndex;
-    }
-
-    // Accumulate lines from startIndex to listIndex (inclusive) to check if it fits
-    int linesToSelected = 0;
-    for (int i = startIndex; i <= listIndex; i++) {
-        linesToSelected += getItemLineCount(list[i].label, app, charWidth, lineHeight, headerLines);
-    }
-
-    // If selected item extends past viewport, scroll forward
-    while (linesToSelected > availableLines && startIndex < listIndex) {
-        linesToSelected -= getItemLineCount(list[startIndex].label, app, charWidth, lineHeight, headerLines);
-        startIndex++;
-    }
-
-    // Try to show 1 item above selected if possible (scrolloff)
-    if (startIndex > 0 && startIndex == listIndex) {
-        int prevLines = getItemLineCount(list[startIndex - 1].label, app, charWidth, lineHeight, headerLines);
-        if (linesToSelected + prevLines <= availableLines) {
+        while (startIndex > 0) {
+            int prevLines = getItemLineCount(list[startIndex - 1].label, app, charWidth, lineHeight, headerLines);
+            if (linesFromBottom + prevLines > availableLines) break;
+            linesFromBottom += prevLines;
             startIndex--;
+        }
+        linesToSelected = 0;
+        for (int i = startIndex; i <= listIndex; i++) {
+            linesToSelected += getItemLineCount(list[i].label, app, charWidth, lineHeight, headerLines);
+        }
+    } else {
+        // Normal scroll-into-view
+        if (listIndex < startIndex) {
+            startIndex = listIndex;
+        }
+        linesToSelected = 0;
+        for (int i = startIndex; i <= listIndex; i++) {
+            linesToSelected += getItemLineCount(list[i].label, app, charWidth, lineHeight, headerLines);
+        }
+        while (linesToSelected > availableLines && startIndex < listIndex) {
+            linesToSelected -= getItemLineCount(list[startIndex].label, app, charWidth, lineHeight, headerLines);
+            startIndex++;
+        }
+        // Try to show 1 item below selected if possible (scrolloff)
+        if (listIndex < count - 1) {
+            int nextLines = getItemLineCount(list[listIndex + 1].label, app, charWidth, lineHeight, headerLines);
+            int totalWithNext = linesToSelected + nextLines;
+            while (totalWithNext > availableLines && startIndex < listIndex) {
+                totalWithNext -= getItemLineCount(list[startIndex].label, app, charWidth, lineHeight, headerLines);
+                linesToSelected -= getItemLineCount(list[startIndex].label, app, charWidth, lineHeight, headerLines);
+                startIndex++;
+            }
+        }
+        // Try to show 1 item above selected if possible (scrolloff)
+        if (startIndex > 0 && startIndex == listIndex) {
+            int prevLines = getItemLineCount(list[startIndex - 1].label, app, charWidth, lineHeight, headerLines);
+            if (linesToSelected + prevLines <= availableLines) {
+                startIndex--;
+            }
         }
     }
 
@@ -1189,28 +1262,54 @@ void renderExtendedSearch(SiCompassApplication *app) {
         app->appRenderer->listIndex = listIndex;
     }
 
-    // Ensure startIndex <= listIndex
-    if (listIndex < startIndex) {
+    int linesToSelected;
+
+    if (startIndex < 0) {
+        // Sentinel: position listIndex as second-to-last by working backward
+        int linesFromBottom = getItemLineCount(list[listIndex].label, app, charWidth, lineHeight, headerLines);
+        if (listIndex < count - 1) {
+            linesFromBottom += getItemLineCount(list[listIndex + 1].label, app, charWidth, lineHeight, headerLines);
+        }
         startIndex = listIndex;
-    }
-
-    // Accumulate lines from startIndex to listIndex (inclusive) to check if it fits
-    int linesToSelected = 0;
-    for (int i = startIndex; i <= listIndex; i++) {
-        linesToSelected += getItemLineCount(list[i].label, app, charWidth, lineHeight, headerLines);
-    }
-
-    // If selected item extends past viewport, scroll forward
-    while (linesToSelected > availableLines && startIndex < listIndex) {
-        linesToSelected -= getItemLineCount(list[startIndex].label, app, charWidth, lineHeight, headerLines);
-        startIndex++;
-    }
-
-    // Try to show 1 item above selected if possible (scrolloff)
-    if (startIndex > 0 && startIndex == listIndex) {
-        int prevLines = getItemLineCount(list[startIndex - 1].label, app, charWidth, lineHeight, headerLines);
-        if (linesToSelected + prevLines <= availableLines) {
+        while (startIndex > 0) {
+            int prevLines = getItemLineCount(list[startIndex - 1].label, app, charWidth, lineHeight, headerLines);
+            if (linesFromBottom + prevLines > availableLines) break;
+            linesFromBottom += prevLines;
             startIndex--;
+        }
+        linesToSelected = 0;
+        for (int i = startIndex; i <= listIndex; i++) {
+            linesToSelected += getItemLineCount(list[i].label, app, charWidth, lineHeight, headerLines);
+        }
+    } else {
+        // Normal scroll-into-view
+        if (listIndex < startIndex) {
+            startIndex = listIndex;
+        }
+        linesToSelected = 0;
+        for (int i = startIndex; i <= listIndex; i++) {
+            linesToSelected += getItemLineCount(list[i].label, app, charWidth, lineHeight, headerLines);
+        }
+        while (linesToSelected > availableLines && startIndex < listIndex) {
+            linesToSelected -= getItemLineCount(list[startIndex].label, app, charWidth, lineHeight, headerLines);
+            startIndex++;
+        }
+        // Try to show 1 item below selected if possible (scrolloff)
+        if (listIndex < count - 1) {
+            int nextLines = getItemLineCount(list[listIndex + 1].label, app, charWidth, lineHeight, headerLines);
+            int totalWithNext = linesToSelected + nextLines;
+            while (totalWithNext > availableLines && startIndex < listIndex) {
+                totalWithNext -= getItemLineCount(list[startIndex].label, app, charWidth, lineHeight, headerLines);
+                linesToSelected -= getItemLineCount(list[startIndex].label, app, charWidth, lineHeight, headerLines);
+                startIndex++;
+            }
+        }
+        // Try to show 1 item above selected if possible (scrolloff)
+        if (startIndex > 0 && startIndex == listIndex) {
+            int prevLines = getItemLineCount(list[startIndex - 1].label, app, charWidth, lineHeight, headerLines);
+            if (linesToSelected + prevLines <= availableLines) {
+                startIndex--;
+            }
         }
     }
 

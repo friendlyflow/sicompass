@@ -937,7 +937,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
         createListCurrentLayer(appRenderer);
         // Sync listIndex with current position (after createListCurrentLayer which resets it)
         appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
-        appRenderer->scrollOffset = 0;
+        appRenderer->scrollOffset = -1;
         appRenderer->needsRedraw = true;
     } else if (appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
         // Get selected item from list
@@ -998,7 +998,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                 createListCurrentLayer(appRenderer);
                 setErrorMessage(appRenderer, blockedError);
                 appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
-                appRenderer->scrollOffset = 0;
+                appRenderer->scrollOffset = -1;
                 appRenderer->needsRedraw = true;
                 appRenderer->lastKeypressTime = now;
                 return;
@@ -1046,7 +1046,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                 accesskitSpeakModeChange(appRenderer, NULL);
                 createListCurrentLayer(appRenderer);
                 appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
-                appRenderer->scrollOffset = 0;
+                appRenderer->scrollOffset = -1;
                 appRenderer->needsRedraw = true;
                 appRenderer->lastKeypressTime = now;
                 return;
@@ -1058,7 +1058,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
         accesskitSpeakModeChange(appRenderer, NULL);
         createListCurrentLayer(appRenderer);
         appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
-        appRenderer->scrollOffset = 0;
+        appRenderer->scrollOffset = -1;
         appRenderer->needsRedraw = true;
     } else if (appRenderer->currentCoordinate == COORDINATE_COMMAND && appRenderer->pendingSaveAs) {
         // "Save as" mode: input buffer contains the filename
