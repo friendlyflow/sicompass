@@ -653,8 +653,71 @@ static SearchResultItem* scriptCollectDeepSearchItems(Provider *self, int *outCo
     return items;
 }
 
+// Fetch children from the script provider for a given path.
+// Returns the number of children added to the object, or 0 on failure.
+static int scriptFetchChildren(ScriptProviderState *state, const char *path, FfonElement *objElem) {
+    char command[16384];
+    char *escaped = shellEscape(state->scriptPath);
+    char *escapedPath = shellEscape(path);
+    snprintf(command, sizeof(command), "bun run %s %s", escaped, escapedPath);
+    free(escaped);
+    free(escapedPath);
+
+    FILE *pipe = popen(command, "r");
+    if (!pipe) return 0;
+
+    size_t capacity = 4096, size = 0;
+    char *buffer = malloc(capacity);
+    if (!buffer) { pclose(pipe); return 0; }
+
+    size_t bytesRead;
+    while ((bytesRead = fread(buffer + size, 1, capacity - size - 1, pipe)) > 0) {
+        size += bytesRead;
+        if (size + 1 >= capacity) {
+            capacity *= 2;
+            char *newBuf = realloc(buffer, capacity);
+            if (!newBuf) { free(buffer); pclose(pipe); return 0; }
+            buffer = newBuf;
+        }
+    }
+    buffer[size] = '\0';
+    int status = pclose(pipe);
+    if (status != 0 || size == 0) { free(buffer); return 0; }
+
+    json_object *root = json_tokener_parse(buffer);
+    free(buffer);
+    if (!root) return 0;
+
+    json_object *childrenArr = NULL;
+    if (json_object_is_type(root, json_type_array)) {
+        childrenArr = root;
+    } else if (json_object_is_type(root, json_type_object)) {
+        json_object *cObj = NULL;
+        if (json_object_object_get_ex(root, "children", &cObj) &&
+            json_object_is_type(cObj, json_type_array)) {
+            childrenArr = cObj;
+        }
+    }
+
+    int added = 0;
+    if (childrenArr) {
+        int arrayLen = json_object_array_length(childrenArr);
+        for (int i = 0; i < arrayLen; i++) {
+            json_object *item = json_object_array_get_idx(childrenArr, i);
+            FfonElement *child = parseJsonValue(item);
+            if (child) {
+                ffonObjectAddElement(objElem->data.object, child);
+                added++;
+            }
+        }
+    }
+
+    json_object_put(root);
+    return added;
+}
+
 static FfonElement* scriptCreateElement(Provider *self, const char *elementKey) {
-    (void)self;
+    ScriptProviderState *state = (ScriptProviderState*)self->state;
     const char *key = elementKey;
     bool isOneOpt = strncmp(key, "one-opt:", 8) == 0;
     if (isOneOpt) {
@@ -671,6 +734,13 @@ static FfonElement* scriptCreateElement(Provider *self, const char *elementKey) 
             elem = ffonElementCreateString(tagged);
         } else {
             elem = ffonElementCreateObject(tagged);
+            // Fetch children from the script provider
+            char childPath[4096];
+            snprintf(childPath, sizeof(childPath), "%s%s%s",
+                     state->currentPath,
+                     (state->currentPath[strlen(state->currentPath) - 1] == '/') ? "" : "/",
+                     key);
+            scriptFetchChildren(state, childPath, elem);
         }
         free(tagged);
         return elem;
@@ -685,6 +755,13 @@ static FfonElement* scriptCreateElement(Provider *self, const char *elementKey) 
         elem = ffonElementCreateString(tagged);
     } else {
         elem = ffonElementCreateObject(tagged);
+        // Fetch children from the script provider
+        char childPath[4096];
+        snprintf(childPath, sizeof(childPath), "%s%s%s",
+                 state->currentPath,
+                 (state->currentPath[strlen(state->currentPath) - 1] == '/') ? "" : "/",
+                 key);
+        scriptFetchChildren(state, childPath, elem);
     }
     free(tagged);
     return elem;
