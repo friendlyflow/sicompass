@@ -180,10 +180,13 @@ jobs:
 
       - name: Prepare artifacts
         run: |
-          mkdir -p artifact/fonts artifact/shaders artifact/lib
+          mkdir -p artifact/fonts artifact/shaders artifact/scripts artifact/lib
           cp build/sicompass artifact/
           cp fonts/Consolas-Regular.ttf artifact/fonts/
           cp shaders/*.spv artifact/shaders/
+          cp lib/lib_tutorial/tutorial.ts artifact/scripts/
+          cp lib/lib_sales_demo/sales_demo.ts artifact/scripts/
+          cp lib/lib_remote/remote.ts artifact/scripts/
           cp -a /usr/local/lib/libSDL3.so* artifact/lib/
           cp /usr/local/lib/libaccesskit.so artifact/lib/
 
