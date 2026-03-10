@@ -561,17 +561,59 @@ int renderText(SiCompassApplication *app, const char *text, int x, int y,
 //     }
 // }
 
-static int getItemLineCount(const char *label, SiCompassApplication *app,
+static int countTextLines(const char *text) {
+    if (!text || *text == '\0') return 1;
+    int lines = 0;
+    const char *seg = text;
+    while (*seg != '\0') {
+        const char *nl = strchr(seg, '\n');
+        size_t segLen = nl ? (size_t)(nl - seg) : strlen(seg);
+        if (segLen <= 120) {
+            lines += 1;
+        } else {
+            lines += (int)((segLen + 119) / 120);
+        }
+        if (nl) {
+            seg = nl + 1;
+            if (*seg == '\0') lines++;
+        } else {
+            break;
+        }
+    }
+    return lines > 0 ? lines : 1;
+}
+
+static int getItemLineCount(const ListItem *item, SiCompassApplication *app,
                             float charWidth, int lineHeight, int headerLines) {
+    const char *label = item->label;
     if (label && strncmp(label, "-p ", 3) == 0) {
-        const char *imagePath = label + 3;
+        const char *imagePath = item->data ? item->data : label + 3;
+        const char *displayText = label + 3;
+        // Split display text into prefix and suffix around imagePath
+        const char *pathInDisplay = item->data ? strstr(displayText, item->data) : NULL;
+        int prefixLines = 0;
+        int suffixLines = 0;
+        if (pathInDisplay) {
+            if (pathInDisplay > displayText) {
+                char prefix[MAX_LINE_LENGTH] = {0};
+                size_t prefixLen = pathInDisplay - displayText;
+                if (prefixLen >= MAX_LINE_LENGTH) prefixLen = MAX_LINE_LENGTH - 1;
+                strncpy(prefix, displayText, prefixLen);
+                prefixLines = countTextLines(prefix);
+            }
+            const char *suffix = pathInDisplay + strlen(item->data);
+            if (suffix[0] != '\0') {
+                suffixLines = countTextLines(suffix);
+            }
+        }
+
         if (loadImageTexture(app, imagePath)) {
             ImageRenderer *ir = app->imageRenderer;
             float imgW = (float)ir->textureWidth;
             float imgH = (float)ir->textureHeight;
 
             float maxW = charWidth * 120.0f;
-            float maxH = (float)app->swapChainExtent.height - (float)(lineHeight * headerLines);
+            float maxH = (float)app->swapChainExtent.height - (float)(lineHeight * (headerLines + prefixLines + suffixLines));
 
             float displayScale = 1.0f;
             if (imgW > maxW) displayScale = maxW / imgW;
@@ -579,31 +621,12 @@ static int getItemLineCount(const char *label, SiCompassApplication *app,
 
             float displayH = imgH * displayScale;
             int imageLines = (int)ceilf(displayH / (float)lineHeight);
-            return imageLines > 1 ? imageLines : 1;
-        }
-    }
-    if (!label || *label == '\0') return 1;
+            if (imageLines < 1) imageLines = 1;
 
-    // Count lines from \n breaks and word wrapping (120 char max width)
-    int lines = 0;
-    const char *seg = label;
-    while (*seg != '\0') {
-        const char *nl = strchr(seg, '\n');
-        size_t segLen = nl ? (size_t)(nl - seg) : strlen(seg);
-        // Each segment takes at least 1 line; long segments wrap at ~120 chars
-        if (segLen <= 120) {
-            lines += 1;
-        } else {
-            lines += (int)((segLen + 119) / 120);  // ceil(segLen / 120)
-        }
-        if (nl) {
-            seg = nl + 1;
-            if (*seg == '\0') lines++;  // trailing \n = empty line
-        } else {
-            break;
+            return prefixLines + imageLines + suffixLines;
         }
     }
-    return lines > 0 ? lines : 1;
+    return countTextLines(label);
 }
 
 void renderInteraction(SiCompassApplication *app) {
@@ -695,20 +718,20 @@ void renderInteraction(SiCompassApplication *app) {
 
     if (startIndex < 0) {
         // Sentinel: position listIndex as second-to-last by working backward
-        int linesFromBottom = getItemLineCount(list[listIndex].label, app, charWidth, lineHeight, headerLines);
+        int linesFromBottom = getItemLineCount(&list[listIndex], app, charWidth, lineHeight, headerLines);
         if (listIndex < count - 1) {
-            linesFromBottom += getItemLineCount(list[listIndex + 1].label, app, charWidth, lineHeight, headerLines);
+            linesFromBottom += getItemLineCount(&list[listIndex + 1], app, charWidth, lineHeight, headerLines);
         }
         startIndex = listIndex;
         while (startIndex > 0) {
-            int prevLines = getItemLineCount(list[startIndex - 1].label, app, charWidth, lineHeight, headerLines);
+            int prevLines = getItemLineCount(&list[startIndex - 1], app, charWidth, lineHeight, headerLines);
             if (linesFromBottom + prevLines > availableLines) break;
             linesFromBottom += prevLines;
             startIndex--;
         }
         linesToSelected = 0;
         for (int i = startIndex; i <= listIndex; i++) {
-            linesToSelected += getItemLineCount(list[i].label, app, charWidth, lineHeight, headerLines);
+            linesToSelected += getItemLineCount(&list[i], app, charWidth, lineHeight, headerLines);
         }
     } else {
         // Normal scroll-into-view
@@ -717,25 +740,25 @@ void renderInteraction(SiCompassApplication *app) {
         }
         linesToSelected = 0;
         for (int i = startIndex; i <= listIndex; i++) {
-            linesToSelected += getItemLineCount(list[i].label, app, charWidth, lineHeight, headerLines);
+            linesToSelected += getItemLineCount(&list[i], app, charWidth, lineHeight, headerLines);
         }
         while (linesToSelected > availableLines && startIndex < listIndex) {
-            linesToSelected -= getItemLineCount(list[startIndex].label, app, charWidth, lineHeight, headerLines);
+            linesToSelected -= getItemLineCount(&list[startIndex], app, charWidth, lineHeight, headerLines);
             startIndex++;
         }
         // Try to show 1 item below selected if possible (scrolloff)
         if (listIndex < count - 1) {
-            int nextLines = getItemLineCount(list[listIndex + 1].label, app, charWidth, lineHeight, headerLines);
+            int nextLines = getItemLineCount(&list[listIndex + 1], app, charWidth, lineHeight, headerLines);
             int totalWithNext = linesToSelected + nextLines;
             while (totalWithNext > availableLines && startIndex < listIndex) {
-                totalWithNext -= getItemLineCount(list[startIndex].label, app, charWidth, lineHeight, headerLines);
-                linesToSelected -= getItemLineCount(list[startIndex].label, app, charWidth, lineHeight, headerLines);
+                totalWithNext -= getItemLineCount(&list[startIndex], app, charWidth, lineHeight, headerLines);
+                linesToSelected -= getItemLineCount(&list[startIndex], app, charWidth, lineHeight, headerLines);
                 startIndex++;
             }
         }
         // Try to show 1 item above selected if possible (scrolloff)
         if (startIndex > 0 && startIndex == listIndex) {
-            int prevLines = getItemLineCount(list[startIndex - 1].label, app, charWidth, lineHeight, headerLines);
+            int prevLines = getItemLineCount(&list[startIndex - 1], app, charWidth, lineHeight, headerLines);
             if (linesToSelected + prevLines <= availableLines) {
                 startIndex--;
             }
@@ -750,7 +773,7 @@ void renderInteraction(SiCompassApplication *app) {
     int endIndex = startIndex;
     while (endIndex < count) {
         if (totalLines >= availableLines) break;
-        totalLines += getItemLineCount(list[endIndex].label, app, charWidth, lineHeight, headerLines);
+        totalLines += getItemLineCount(&list[endIndex], app, charWidth, lineHeight, headerLines);
         endIndex++;
     }
     if (endIndex > count) endIndex = count;
@@ -762,16 +785,42 @@ void renderInteraction(SiCompassApplication *app) {
 
         // Check if this is an image item
         if (list[i].label && strncmp(list[i].label, "-p ", 3) == 0) {
-            const char *imagePath = list[i].label + 3;
+            const char *imagePath = list[i].data ? list[i].data : list[i].label + 3;
+            const char *displayText = list[i].label + 3;
+
+            // Split display text into prefix and suffix around imagePath
+            const char *pathInDisplay = list[i].data ? strstr(displayText, list[i].data) : NULL;
+            char imagePrefix[MAX_LINE_LENGTH] = {0};
+            const char *imageSuffix = NULL;
+            if (pathInDisplay) {
+                size_t prefixLen = pathInDisplay - displayText;
+                if (prefixLen > 0 && prefixLen < MAX_LINE_LENGTH) {
+                    strncpy(imagePrefix, displayText, prefixLen);
+                }
+                const char *afterPath = pathInDisplay + strlen(list[i].data);
+                if (afterPath[0] != '\0') imageSuffix = afterPath;
+            }
+
+            // Count prefix/suffix lines for maxH calculation
+            int prefixLineCount = imagePrefix[0] ? countTextLines(imagePrefix) : 0;
+            int suffixLineCount = imageSuffix ? countTextLines(imageSuffix) : 0;
+
+            // Render prefix above image
+            if (imagePrefix[0]) {
+                int prefixLines = renderText(app, imagePrefix, itemX, itemYPos,
+                                             app->appRenderer->palette->text, isSelected);
+                yPos += lineHeight * prefixLines;
+                itemYPos = yPos;
+            }
 
             if (loadImageTexture(app, imagePath)) {
                 ImageRenderer *ir = app->imageRenderer;
                 float imgW = (float)ir->textureWidth;
                 float imgH = (float)ir->textureHeight;
 
-                // Calculate max display dimensions
+                // Calculate max display dimensions (accounting for prefix/suffix)
                 float maxW = charWidth * 120.0f;
-                float maxH = (float)app->swapChainExtent.height - (float)(lineHeight * headerLines);
+                float maxH = (float)app->swapChainExtent.height - (float)(lineHeight * (headerLines + prefixLineCount + suffixLineCount));
 
                 // Scale to fit within constraints, maintaining aspect ratio
                 float displayScale = 1.0f;
@@ -799,13 +848,18 @@ void renderInteraction(SiCompassApplication *app) {
 
                 prepareImage(app, imgX, imgY, displayW, displayH);
 
-                int imageLines = (int)ceilf(displayH / (float)lineHeight);
-                if (imageLines < 1) imageLines = 1;
-                yPos += lineHeight * imageLines;
+                yPos = itemYPos + (int)ceilf(displayH);
             } else {
                 // Failed to load image, show path as text
-                int textLines = renderText(app, imagePath, itemX, itemYPos, app->appRenderer->palette->text, isSelected);
+                int textLines = renderText(app, displayText, itemX, itemYPos, app->appRenderer->palette->text, isSelected);
                 yPos += lineHeight * textLines;
+            }
+
+            // Render suffix below image
+            if (imageSuffix) {
+                int suffixLines = renderText(app, imageSuffix, itemX, yPos,
+                                             app->appRenderer->palette->text, isSelected);
+                yPos += lineHeight * suffixLines;
             }
             continue;
         }
@@ -1097,20 +1151,20 @@ void renderSimpleSearch(SiCompassApplication *app) {
 
     if (startIndex < 0) {
         // Sentinel: position listIndex as second-to-last by working backward
-        int linesFromBottom = getItemLineCount(list[listIndex].label, app, charWidth, lineHeight, headerLines);
+        int linesFromBottom = getItemLineCount(&list[listIndex], app, charWidth, lineHeight, headerLines);
         if (listIndex < count - 1) {
-            linesFromBottom += getItemLineCount(list[listIndex + 1].label, app, charWidth, lineHeight, headerLines);
+            linesFromBottom += getItemLineCount(&list[listIndex + 1], app, charWidth, lineHeight, headerLines);
         }
         startIndex = listIndex;
         while (startIndex > 0) {
-            int prevLines = getItemLineCount(list[startIndex - 1].label, app, charWidth, lineHeight, headerLines);
+            int prevLines = getItemLineCount(&list[startIndex - 1], app, charWidth, lineHeight, headerLines);
             if (linesFromBottom + prevLines > availableLines) break;
             linesFromBottom += prevLines;
             startIndex--;
         }
         linesToSelected = 0;
         for (int i = startIndex; i <= listIndex; i++) {
-            linesToSelected += getItemLineCount(list[i].label, app, charWidth, lineHeight, headerLines);
+            linesToSelected += getItemLineCount(&list[i], app, charWidth, lineHeight, headerLines);
         }
     } else {
         // Normal scroll-into-view
@@ -1119,25 +1173,25 @@ void renderSimpleSearch(SiCompassApplication *app) {
         }
         linesToSelected = 0;
         for (int i = startIndex; i <= listIndex; i++) {
-            linesToSelected += getItemLineCount(list[i].label, app, charWidth, lineHeight, headerLines);
+            linesToSelected += getItemLineCount(&list[i], app, charWidth, lineHeight, headerLines);
         }
         while (linesToSelected > availableLines && startIndex < listIndex) {
-            linesToSelected -= getItemLineCount(list[startIndex].label, app, charWidth, lineHeight, headerLines);
+            linesToSelected -= getItemLineCount(&list[startIndex], app, charWidth, lineHeight, headerLines);
             startIndex++;
         }
         // Try to show 1 item below selected if possible (scrolloff)
         if (listIndex < count - 1) {
-            int nextLines = getItemLineCount(list[listIndex + 1].label, app, charWidth, lineHeight, headerLines);
+            int nextLines = getItemLineCount(&list[listIndex + 1], app, charWidth, lineHeight, headerLines);
             int totalWithNext = linesToSelected + nextLines;
             while (totalWithNext > availableLines && startIndex < listIndex) {
-                totalWithNext -= getItemLineCount(list[startIndex].label, app, charWidth, lineHeight, headerLines);
-                linesToSelected -= getItemLineCount(list[startIndex].label, app, charWidth, lineHeight, headerLines);
+                totalWithNext -= getItemLineCount(&list[startIndex], app, charWidth, lineHeight, headerLines);
+                linesToSelected -= getItemLineCount(&list[startIndex], app, charWidth, lineHeight, headerLines);
                 startIndex++;
             }
         }
         // Try to show 1 item above selected if possible (scrolloff)
         if (startIndex > 0 && startIndex == listIndex) {
-            int prevLines = getItemLineCount(list[startIndex - 1].label, app, charWidth, lineHeight, headerLines);
+            int prevLines = getItemLineCount(&list[startIndex - 1], app, charWidth, lineHeight, headerLines);
             if (linesToSelected + prevLines <= availableLines) {
                 startIndex--;
             }
@@ -1152,7 +1206,7 @@ void renderSimpleSearch(SiCompassApplication *app) {
     int endIndex = startIndex;
     while (endIndex < count) {
         if (totalLines >= availableLines) break;
-        totalLines += getItemLineCount(list[endIndex].label, app, charWidth, lineHeight, headerLines);
+        totalLines += getItemLineCount(&list[endIndex], app, charWidth, lineHeight, headerLines);
         endIndex++;
     }
     if (endIndex > count) endIndex = count;
@@ -1164,7 +1218,29 @@ void renderSimpleSearch(SiCompassApplication *app) {
 
         // Check if this is an image item
         if (list[i].label && strncmp(list[i].label, "-p ", 3) == 0) {
-            const char *imagePath = list[i].label + 3;
+            const char *imagePath = list[i].data ? list[i].data : list[i].label + 3;
+            const char *displayText = list[i].label + 3;
+
+            // Split display text into prefix and suffix around imagePath
+            const char *pathInDisplay = list[i].data ? strstr(displayText, list[i].data) : NULL;
+            char imagePrefix[MAX_LINE_LENGTH] = {0};
+            const char *imageSuffix = NULL;
+            if (pathInDisplay) {
+                size_t prefixLen = pathInDisplay - displayText;
+                if (prefixLen > 0 && prefixLen < MAX_LINE_LENGTH) {
+                    strncpy(imagePrefix, displayText, prefixLen);
+                }
+                const char *afterPath = pathInDisplay + strlen(list[i].data);
+                if (afterPath[0] != '\0') imageSuffix = afterPath;
+            }
+
+            // Render prefix above image
+            if (imagePrefix[0]) {
+                int prefixLines = renderText(app, imagePrefix, itemX, itemYPos,
+                                             app->appRenderer->palette->text, isSelected);
+                yPos += lineHeight * prefixLines;
+                itemYPos = yPos;
+            }
 
             if (loadImageTexture(app, imagePath)) {
                 ImageRenderer *ir = app->imageRenderer;
@@ -1193,12 +1269,17 @@ void renderSimpleSearch(SiCompassApplication *app) {
 
                 prepareImage(app, imgX, imgY, displayW, displayH);
 
-                int imageLines = (int)ceilf(displayH / (float)lineHeight);
-                if (imageLines < 1) imageLines = 1;
-                yPos += lineHeight * imageLines;
+                yPos = itemYPos + (int)ceilf(displayH);
             } else {
-                int textLines = renderText(app, imagePath, itemX, itemYPos, app->appRenderer->palette->text, isSelected);
+                int textLines = renderText(app, displayText, itemX, itemYPos, app->appRenderer->palette->text, isSelected);
                 yPos += lineHeight * textLines;
+            }
+
+            // Render suffix below image
+            if (imageSuffix) {
+                int suffixLines = renderText(app, imageSuffix, itemX, yPos,
+                                             app->appRenderer->palette->text, isSelected);
+                yPos += lineHeight * suffixLines;
             }
             continue;
         }
@@ -1266,20 +1347,20 @@ void renderExtendedSearch(SiCompassApplication *app) {
 
     if (startIndex < 0) {
         // Sentinel: position listIndex as second-to-last by working backward
-        int linesFromBottom = getItemLineCount(list[listIndex].label, app, charWidth, lineHeight, headerLines);
+        int linesFromBottom = getItemLineCount(&list[listIndex], app, charWidth, lineHeight, headerLines);
         if (listIndex < count - 1) {
-            linesFromBottom += getItemLineCount(list[listIndex + 1].label, app, charWidth, lineHeight, headerLines);
+            linesFromBottom += getItemLineCount(&list[listIndex + 1], app, charWidth, lineHeight, headerLines);
         }
         startIndex = listIndex;
         while (startIndex > 0) {
-            int prevLines = getItemLineCount(list[startIndex - 1].label, app, charWidth, lineHeight, headerLines);
+            int prevLines = getItemLineCount(&list[startIndex - 1], app, charWidth, lineHeight, headerLines);
             if (linesFromBottom + prevLines > availableLines) break;
             linesFromBottom += prevLines;
             startIndex--;
         }
         linesToSelected = 0;
         for (int i = startIndex; i <= listIndex; i++) {
-            linesToSelected += getItemLineCount(list[i].label, app, charWidth, lineHeight, headerLines);
+            linesToSelected += getItemLineCount(&list[i], app, charWidth, lineHeight, headerLines);
         }
     } else {
         // Normal scroll-into-view
@@ -1288,25 +1369,25 @@ void renderExtendedSearch(SiCompassApplication *app) {
         }
         linesToSelected = 0;
         for (int i = startIndex; i <= listIndex; i++) {
-            linesToSelected += getItemLineCount(list[i].label, app, charWidth, lineHeight, headerLines);
+            linesToSelected += getItemLineCount(&list[i], app, charWidth, lineHeight, headerLines);
         }
         while (linesToSelected > availableLines && startIndex < listIndex) {
-            linesToSelected -= getItemLineCount(list[startIndex].label, app, charWidth, lineHeight, headerLines);
+            linesToSelected -= getItemLineCount(&list[startIndex], app, charWidth, lineHeight, headerLines);
             startIndex++;
         }
         // Try to show 1 item below selected if possible (scrolloff)
         if (listIndex < count - 1) {
-            int nextLines = getItemLineCount(list[listIndex + 1].label, app, charWidth, lineHeight, headerLines);
+            int nextLines = getItemLineCount(&list[listIndex + 1], app, charWidth, lineHeight, headerLines);
             int totalWithNext = linesToSelected + nextLines;
             while (totalWithNext > availableLines && startIndex < listIndex) {
-                totalWithNext -= getItemLineCount(list[startIndex].label, app, charWidth, lineHeight, headerLines);
-                linesToSelected -= getItemLineCount(list[startIndex].label, app, charWidth, lineHeight, headerLines);
+                totalWithNext -= getItemLineCount(&list[startIndex], app, charWidth, lineHeight, headerLines);
+                linesToSelected -= getItemLineCount(&list[startIndex], app, charWidth, lineHeight, headerLines);
                 startIndex++;
             }
         }
         // Try to show 1 item above selected if possible (scrolloff)
         if (startIndex > 0 && startIndex == listIndex) {
-            int prevLines = getItemLineCount(list[startIndex - 1].label, app, charWidth, lineHeight, headerLines);
+            int prevLines = getItemLineCount(&list[startIndex - 1], app, charWidth, lineHeight, headerLines);
             if (linesToSelected + prevLines <= availableLines) {
                 startIndex--;
             }
@@ -1321,7 +1402,7 @@ void renderExtendedSearch(SiCompassApplication *app) {
     int endIndex = startIndex;
     while (endIndex < count) {
         if (totalLines >= availableLines) break;
-        totalLines += getItemLineCount(list[endIndex].label, app, charWidth, lineHeight, headerLines);
+        totalLines += getItemLineCount(&list[endIndex], app, charWidth, lineHeight, headerLines);
         endIndex++;
     }
     if (endIndex > count) endIndex = count;
@@ -1342,7 +1423,29 @@ void renderExtendedSearch(SiCompassApplication *app) {
 
         // Check if this is an image item
         if (list[i].label && strncmp(list[i].label, "-p ", 3) == 0) {
-            const char *imagePath = list[i].label + 3;
+            const char *imagePath = list[i].data ? list[i].data : list[i].label + 3;
+            const char *displayText = list[i].label + 3;
+
+            // Split display text into prefix and suffix around imagePath
+            const char *pathInDisplay = list[i].data ? strstr(displayText, list[i].data) : NULL;
+            char imagePrefix[MAX_LINE_LENGTH] = {0};
+            const char *imageSuffix = NULL;
+            if (pathInDisplay) {
+                size_t prefixLen = pathInDisplay - displayText;
+                if (prefixLen > 0 && prefixLen < MAX_LINE_LENGTH) {
+                    strncpy(imagePrefix, displayText, prefixLen);
+                }
+                const char *afterPath = pathInDisplay + strlen(list[i].data);
+                if (afterPath[0] != '\0') imageSuffix = afterPath;
+            }
+
+            // Render prefix above image
+            if (imagePrefix[0]) {
+                int prefixLines = renderText(app, imagePrefix, itemX, itemYPos,
+                                             app->appRenderer->palette->text, isSelected);
+                yPos += lineHeight * prefixLines;
+                itemYPos = yPos;
+            }
 
             if (loadImageTexture(app, imagePath)) {
                 ImageRenderer *ir = app->imageRenderer;
@@ -1371,12 +1474,17 @@ void renderExtendedSearch(SiCompassApplication *app) {
 
                 prepareImage(app, imgX, imgY, displayW, displayH);
 
-                int imageLines = (int)ceilf(displayH / (float)lineHeight);
-                if (imageLines < 1) imageLines = 1;
-                yPos += lineHeight * imageLines;
+                yPos = itemYPos + (int)ceilf(displayH);
             } else {
-                int textLines = renderText(app, imagePath, itemX, itemYPos, app->appRenderer->palette->text, isSelected);
+                int textLines = renderText(app, displayText, itemX, itemYPos, app->appRenderer->palette->text, isSelected);
                 yPos += lineHeight * textLines;
+            }
+
+            // Render suffix below image
+            if (imageSuffix) {
+                int suffixLines = renderText(app, imageSuffix, itemX, yPos,
+                                             app->appRenderer->palette->text, isSelected);
+                yPos += lineHeight * suffixLines;
             }
             continue;
         }

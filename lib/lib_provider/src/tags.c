@@ -72,9 +72,23 @@ char* providerTagStripDisplay(const char *text) {
         return result;
     }
 
-    // Button tags: <button>function_name</button>display_text
-    // Strip entirely: show only display_text (after </button>)
+    // Button tags: prefix<button>function_name</button>display_text suffix
+    // Preserve text before <button> and display text after </button>
     if (tagFindUnescaped(text, BUTTON_TAG_OPEN)) {
+        const char *btnOpen = tagFindUnescaped(text, BUTTON_TAG_OPEN);
+        const char *btnClose = btnOpen ? strstr(btnOpen, BUTTON_TAG_CLOSE) : NULL;
+        if (btnClose) {
+            size_t beforeLen = btnOpen - text;
+            const char *displayStart = btnClose + BUTTON_TAG_CLOSE_LEN;
+            size_t afterLen = strlen(displayStart);
+            char *result = malloc(beforeLen + afterLen + 1);
+            if (result) {
+                memcpy(result, text, beforeLen);
+                memcpy(result + beforeLen, displayStart, afterLen + 1);
+                tagUnescape(result);
+            }
+            return result;
+        }
         char *result = providerTagExtractButtonDisplayText(text);
         tagUnescape(result);
         return result;
