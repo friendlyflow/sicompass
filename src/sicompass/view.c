@@ -38,7 +38,6 @@ static void applySettings(const char *key, const char *value, void *userdata) {
         const char *name = key + 7;
         if (strcmp(name, "file browser") == 0) return;  // always present
         bool enabled = strcmp(value, "true") == 0;
-        programsUpdateEnabled(name, enabled);
         if (enabled)
             programsEnableProvider(name, appRenderer);
         else

@@ -185,7 +185,7 @@ static void settingsEnsureConfigDir(void) {
 
 static void settingsSaveConfig(SettingsProviderState *state, const char *configPath) {
     settingsEnsureConfigDir();
-    // Read existing file so we preserve fields we don't own (e.g. programsToLoad)
+    // Read existing file so we preserve fields we don't own
     json_object *root = json_object_from_file(configPath);
     if (!root) root = json_object_new_object();
 

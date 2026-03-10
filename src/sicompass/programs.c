@@ -135,40 +135,24 @@ static char* readSettingsValue(const char *section, const char *key) {
 static const char *DEFAULT_PROGRAMS[] = {"tutorial"};
 static const int DEFAULT_PROGRAMS_COUNT = 1;
 
-static void ensureConfigDir(const char *configPath) {
-    char *dir = strdup(configPath);
-    if (!dir) return;
-    char *lastSep = strrchr(dir, '/');
-    if (lastSep) *lastSep = '\0';
-    for (char *p = dir + 1; *p; p++) {
-        if (*p == '/') {
-            char c = *p;
-            *p = '\0';
-            mkdir(dir, 0755);
-            *p = c;
-        }
+static bool isInDefaultPrograms(const char *name) {
+    for (int i = 0; i < DEFAULT_PROGRAMS_COUNT; i++) {
+        if (strcmp(name, DEFAULT_PROGRAMS[i]) == 0) return true;
     }
-    mkdir(dir, 0755);
-    free(dir);
+    return false;
 }
 
-static void writeDefaultConfig(const char *configPath) {
-    ensureConfigDir(configPath);
-    json_object *root = json_object_from_file(configPath);
-    if (!root) root = json_object_new_object();
-
-    json_object *sicompassObj = NULL;
-    if (!json_object_object_get_ex(root, "sicompass", &sicompassObj)) {
-        sicompassObj = json_object_new_object();
-        json_object_object_add(root, "sicompass", sicompassObj);
+// Check if a program is enabled in the "Available programs:" config section.
+// Falls back to DEFAULT_PROGRAMS if no config entry exists.
+static bool isEnabledInConfig(const char *name, json_object *availableSection) {
+    if (!availableSection) return isInDefaultPrograms(name);
+    char key[80];
+    snprintf(key, sizeof(key), "enable_%s", name);
+    json_object *val;
+    if (json_object_object_get_ex(availableSection, key, &val)) {
+        return json_object_get_boolean(val);
     }
-    json_object *arr = json_object_new_array();
-    for (int i = 0; i < DEFAULT_PROGRAMS_COUNT; i++) {
-        json_object_array_add(arr, json_object_new_string(DEFAULT_PROGRAMS[i]));
-    }
-    json_object_object_add(sicompassObj, "programsToLoad", arr);
-    json_object_to_file_ext(configPath, root, JSON_C_TO_STRING_PRETTY);
-    json_object_put(root);
+    return isInDefaultPrograms(name);
 }
 
 // Match display name to provider name, ignoring spaces.
@@ -394,19 +378,8 @@ static void discoverUserPlugins(void) {
     free(pluginsDir);
 }
 
-// Check if a name is in the programsToLoad array
-static bool isInProgramsToLoad(const char *name, json_object *programsArr) {
-    if (!programsArr) return false;
-    int len = json_object_array_length(programsArr);
-    for (int i = 0; i < len; i++) {
-        const char *val = json_object_get_string(json_object_array_get_idx(programsArr, i));
-        if (val && strcmp(val, name) == 0) return true;
-    }
-    return false;
-}
-
 // Register the "programs" priority section with checkboxes for all known programs
-static void registerProgramsSection(Provider *settingsProvider, json_object *programsArr) {
+static void registerProgramsSection(Provider *settingsProvider, json_object *availableSection) {
     settingsAddPrioritySection(settingsProvider, "Available programs:");
 
     // Built-in programs
@@ -414,7 +387,7 @@ static void registerProgramsSection(Provider *settingsProvider, json_object *pro
         const char *name = BUILTIN_MANIFESTS[i].name;
         char configKey[80];
         snprintf(configKey, sizeof(configKey), "enable_%s", name);
-        bool enabled = isInProgramsToLoad(name, programsArr);
+        bool enabled = isEnabledInConfig(name, availableSection);
         settingsAddSectionCheckbox(settingsProvider, "Available programs:", name, configKey, enabled);
     }
 
@@ -422,7 +395,7 @@ static void registerProgramsSection(Provider *settingsProvider, json_object *pro
     for (int i = 0; i < s_userPluginCount; i++) {
         char configKey[80];
         snprintf(configKey, sizeof(configKey), "enable_%s", s_userPlugins[i].name);
-        bool enabled = isInProgramsToLoad(s_userPlugins[i].name, programsArr);
+        bool enabled = isEnabledInConfig(s_userPlugins[i].name, availableSection);
         settingsAddSectionCheckbox(settingsProvider, "Available programs:",
                                    s_userPlugins[i].displayName, configKey, enabled);
     }
@@ -434,97 +407,41 @@ void programsLoad(Provider *settingsProvider) {
     // Discover user plugins first
     discoverUserPlugins();
 
+    // Read existing config to get enable_* state
     char *configPath = providerGetMainConfigPath();
-    if (!configPath) return;
-
-    json_object *root = json_object_from_file(configPath);
-    if (!root) {
-        writeDefaultConfig(configPath);
+    json_object *root = NULL;
+    json_object *availableSection = NULL;
+    if (configPath) {
         root = json_object_from_file(configPath);
-    }
-    if (!root) { free(configPath); return; }
+        if (root) {
+            json_object_object_get_ex(root, "Available programs:", &availableSection);
 
-    json_object *sicompassObj = NULL;
-    json_object *programsArr = NULL;
-    if (json_object_object_get_ex(root, "sicompass", &sicompassObj)) {
-        json_object_object_get_ex(sicompassObj, "programsToLoad", &programsArr);
+            // Migration: remove obsolete programsToLoad
+            json_object *sicompassObj;
+            if (json_object_object_get_ex(root, "sicompass", &sicompassObj)) {
+                if (json_object_object_get_ex(sicompassObj, "programsToLoad", NULL)) {
+                    json_object_object_del(sicompassObj, "programsToLoad");
+                    json_object_to_file_ext(configPath, root, JSON_C_TO_STRING_PRETTY);
+                }
+            }
+        }
+        free(configPath);
     }
 
     // Register store checkboxes BEFORE loading programs
-    registerProgramsSection(settingsProvider, programsArr);
-
-    // Remove "file browser" from programsToLoad if present (now always loaded separately)
-    if (programsArr && json_object_is_type(programsArr, json_type_array)) {
-        int len = json_object_array_length(programsArr);
-        bool found = false;
-        for (int i = 0; i < len; i++) {
-            const char *val = json_object_get_string(json_object_array_get_idx(programsArr, i));
-            if (val && strcmp(val, "file browser") == 0) { found = true; break; }
-        }
-        if (found) {
-            json_object *newArr = json_object_new_array();
-            for (int i = 0; i < len; i++) {
-                const char *val = json_object_get_string(json_object_array_get_idx(programsArr, i));
-                if (val && strcmp(val, "file browser") != 0)
-                    json_object_array_add(newArr, json_object_new_string(val));
-            }
-            json_object_object_add(sicompassObj, "programsToLoad", newArr);
-            programsArr = newArr;
-            json_object_to_file_ext(configPath, root, JSON_C_TO_STRING_PRETTY);
-        }
-    }
+    registerProgramsSection(settingsProvider, availableSection);
 
     // Load enabled programs
-    if (programsArr && json_object_is_type(programsArr, json_type_array)) {
-        int len = json_object_array_length(programsArr);
-        for (int i = 0; i < len; i++) {
-            json_object *item = json_object_array_get_idx(programsArr, i);
-            const char *name = json_object_get_string(item);
-            if (name) loadProgram(name, settingsProvider);
-        }
+    for (int i = 0; i < BUILTIN_MANIFEST_COUNT; i++) {
+        if (isEnabledInConfig(BUILTIN_MANIFESTS[i].name, availableSection))
+            loadProgram(BUILTIN_MANIFESTS[i].name, settingsProvider);
+    }
+    for (int i = 0; i < s_userPluginCount; i++) {
+        if (isEnabledInConfig(s_userPlugins[i].name, availableSection))
+            loadProgram(s_userPlugins[i].name, settingsProvider);
     }
 
-    json_object_put(root);
-    free(configPath);
-}
-
-void programsUpdateEnabled(const char *name, bool enabled) {
-    if (strcmp(name, "file browser") == 0) return;  // always present
-    char *configPath = providerGetMainConfigPath();
-    if (!configPath) return;
-
-    json_object *root = json_object_from_file(configPath);
-    if (!root) root = json_object_new_object();
-
-    json_object *sicompassObj = NULL;
-    if (!json_object_object_get_ex(root, "sicompass", &sicompassObj)) {
-        sicompassObj = json_object_new_object();
-        json_object_object_add(root, "sicompass", sicompassObj);
-    }
-
-    // Read existing programsToLoad
-    json_object *oldArr = NULL;
-    json_object_object_get_ex(sicompassObj, "programsToLoad", &oldArr);
-
-    // Build new array
-    json_object *newArr = json_object_new_array();
-    if (oldArr && json_object_is_type(oldArr, json_type_array)) {
-        int len = json_object_array_length(oldArr);
-        for (int i = 0; i < len; i++) {
-            const char *val = json_object_get_string(json_object_array_get_idx(oldArr, i));
-            if (val && strcmp(val, name) != 0) {
-                json_object_array_add(newArr, json_object_new_string(val));
-            }
-        }
-    }
-    if (enabled) {
-        json_object_array_add(newArr, json_object_new_string(name));
-    }
-
-    json_object_object_add(sicompassObj, "programsToLoad", newArr);
-    json_object_to_file_ext(configPath, root, JSON_C_TO_STRING_PRETTY);
-    json_object_put(root);
-    free(configPath);
+    if (root) json_object_put(root);
 }
 
 // Rebuild the settings provider's FFON element after internal state changes
