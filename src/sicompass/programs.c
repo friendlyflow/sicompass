@@ -11,23 +11,98 @@
 #include <dirent.h>
 #include <dlfcn.h>
 
-// Built-in program catalog
-static const char *ALL_KNOWN_PROGRAMS[] = {
-    "tutorial", "sales demo",
-    "chat client", "email client", "web browser"
-};
-static const int ALL_KNOWN_PROGRAMS_COUNT = 5;
+// Plugin manifest types
+typedef enum { PLUGIN_SCRIPT, PLUGIN_FACTORY, PLUGIN_NATIVE } PluginType;
+typedef enum { SETTING_TEXT, SETTING_CHECKBOX, SETTING_RADIO } SettingType;
 
-// User-discovered plugins
+typedef struct {
+    SettingType type;
+    char label[128];
+    char key[64];
+    char defaultValue[256];
+    char options[8][64];  // radio only
+    int optionCount;
+    bool defaultChecked;  // checkbox only
+} PluginSetting;
+
 typedef struct {
     char name[64];
     char displayName[64];
     char entryPath[4096];
+    PluginType type;
     bool supportsConfigFiles;
-    bool isNative;
-} UserPlugin;
+    PluginSetting settings[16];
+    int settingCount;
+} PluginManifest;
 
-static UserPlugin s_userPlugins[32];
+// Built-in program manifests
+static const PluginManifest BUILTIN_MANIFESTS[] = {
+    {
+        .name = "tutorial",
+        .displayName = "tutorial --> here you can go up, down or right",
+        .entryPath = TUTORIAL_SCRIPT_PATH,
+        .type = PLUGIN_SCRIPT,
+    },
+    {
+        .name = "sales demo",
+        .displayName = "sales demo",
+        .entryPath = SALES_DEMO_SCRIPT_PATH,
+        .type = PLUGIN_SCRIPT,
+        .supportsConfigFiles = true,
+        .settings = {{
+            .type = SETTING_TEXT,
+            .label = "save folder (product configuration)",
+            .key = "saveFolder",
+            .defaultValue = "Downloads",
+        }},
+        .settingCount = 1,
+    },
+    {
+        .name = "chat client",
+        .displayName = "chat client",
+        .type = PLUGIN_FACTORY,
+        .settings = {
+            { .type = SETTING_TEXT, .label = "homeserver URL",
+              .key = "chatHomeserver", .defaultValue = "https://matrix.org" },
+            { .type = SETTING_TEXT, .label = "access token",
+              .key = "chatAccessToken" },
+            { .type = SETTING_TEXT, .label = "username",
+              .key = "chatUsername" },
+            { .type = SETTING_TEXT, .label = "password",
+              .key = "chatPassword" },
+        },
+        .settingCount = 4,
+    },
+    {
+        .name = "email client",
+        .displayName = "email client",
+        .type = PLUGIN_FACTORY,
+        .settings = {
+            { .type = SETTING_TEXT, .label = "IMAP URL",
+              .key = "emailImapUrl", .defaultValue = "imaps://imap.gmail.com" },
+            { .type = SETTING_TEXT, .label = "SMTP URL",
+              .key = "emailSmtpUrl", .defaultValue = "smtps://smtp.gmail.com" },
+            { .type = SETTING_TEXT, .label = "username",
+              .key = "emailUsername" },
+            { .type = SETTING_TEXT, .label = "password",
+              .key = "emailPassword" },
+            { .type = SETTING_TEXT, .label = "client ID (OAuth)",
+              .key = "emailClientId" },
+            { .type = SETTING_TEXT, .label = "client secret (OAuth)",
+              .key = "emailClientSecret" },
+        },
+        .settingCount = 6,
+    },
+    {
+        .name = "web browser",
+        .displayName = "web browser",
+        .type = PLUGIN_FACTORY,
+    },
+};
+static const int BUILTIN_MANIFEST_COUNT = 5;
+
+// User-discovered plugins
+static PluginManifest s_userPlugins[32];
 static int s_userPluginCount = 0;
 
 // File-static references for hot enable/disable
@@ -110,121 +185,104 @@ static bool nameMatchesProvider(const char *displayName, const char *providerNam
     return *d == '\0' && *p == '\0';
 }
 
+static const PluginManifest* findManifest(const char *name) {
+    for (int i = 0; i < BUILTIN_MANIFEST_COUNT; i++) {
+        if (strcmp(name, BUILTIN_MANIFESTS[i].name) == 0)
+            return &BUILTIN_MANIFESTS[i];
+    }
+    for (int i = 0; i < s_userPluginCount; i++) {
+        if (strcmp(name, s_userPlugins[i].name) == 0)
+            return &s_userPlugins[i];
+    }
+    return NULL;
+}
+
+static void applyManifestSettings(Provider *settingsProvider, const PluginManifest *m) {
+    if (m->settingCount == 0) {
+        settingsAddSection(settingsProvider, m->name);
+        return;
+    }
+    for (int i = 0; i < m->settingCount; i++) {
+        const PluginSetting *s = &m->settings[i];
+        switch (s->type) {
+        case SETTING_TEXT:
+            settingsAddSectionText(settingsProvider, m->name,
+                                   s->label, s->key, s->defaultValue);
+            break;
+        case SETTING_CHECKBOX:
+            settingsAddSectionCheckbox(settingsProvider, m->name,
+                                       s->label, s->key, s->defaultChecked);
+            break;
+        case SETTING_RADIO: {
+            const char *opts[8];
+            for (int j = 0; j < s->optionCount && j < 8; j++)
+                opts[j] = s->options[j];
+            settingsAddSectionRadio(settingsProvider, m->name,
+                                    s->label, s->key,
+                                    opts, s->optionCount, s->defaultValue);
+            break;
+        }
+        }
+    }
+}
+
 static Provider* loadProgram(const char *name, Provider *settingsProvider) {
-    if (strcmp(name, "tutorial") == 0) {
-        Provider *p = scriptProviderCreate("tutorial", "tutorial --> here you can go up, down or right", TUTORIAL_SCRIPT_PATH);
+    const PluginManifest *m = findManifest(name);
+    if (m) {
+        Provider *p = NULL;
+        switch (m->type) {
+        case PLUGIN_SCRIPT:
+            p = scriptProviderCreate(m->name, m->displayName, m->entryPath);
+            break;
+        case PLUGIN_FACTORY:
+            p = providerFactoryCreate(m->name);
+            break;
+        case PLUGIN_NATIVE: {
+            void *handle = dlopen(m->entryPath, RTLD_NOW);
+            if (!handle) return NULL;
+            typedef const ProviderOps* (*InitFn)(void);
+            InitFn initFn;
+            *(void **)&initFn = dlsym(handle, "sicompass_plugin_init");
+            if (!initFn) { dlclose(handle); return NULL; }
+            const ProviderOps *ops = initFn();
+            if (!ops) { dlclose(handle); return NULL; }
+            p = providerCreate(ops);
+            break;
+        }
+        }
         if (p) {
+            p->supportsConfigFiles = m->supportsConfigFiles;
             providerRegister(p);
-            settingsAddSection(settingsProvider, "tutorial");
+            applyManifestSettings(settingsProvider, m);
         }
         return p;
-    } else if (strcmp(name, "sales demo") == 0) {
-        Provider *p = scriptProviderCreate("sales demo", "sales demo", SALES_DEMO_SCRIPT_PATH);
+    }
+
+    // Unknown program name: try loading as a remote FFON service.
+    char *remoteUrl = readSettingsValue(name, "remoteUrl");
+    if (remoteUrl && remoteUrl[0]) {
+        #ifdef REMOTE_SCRIPT_PATH
+        Provider *p = scriptProviderCreate(name, name, REMOTE_SCRIPT_PATH);
         if (p) {
-            p->supportsConfigFiles = true;
-            providerRegister(p);
-            settingsAddSectionText(settingsProvider, "sales demo",
-                                   "save folder (product configuration)",
-                                   "saveFolder", "Downloads");
-        }
-        return p;
-    } else if (strcmp(name, "chat client") == 0) {
-        Provider *p = providerFactoryCreate("chat client");
-        if (p) {
-            providerRegister(p);
-            settingsAddSectionText(settingsProvider, "chat client",
-                                   "homeserver URL", "chatHomeserver",
-                                   "https://matrix.org");
-            settingsAddSectionText(settingsProvider, "chat client",
-                                   "access token", "chatAccessToken", "");
-            settingsAddSectionText(settingsProvider, "chat client",
-                                   "username", "chatUsername", "");
-            settingsAddSectionText(settingsProvider, "chat client",
-                                   "password", "chatPassword", "");
-        }
-        return p;
-    } else if (strcmp(name, "email client") == 0) {
-        Provider *p = providerFactoryCreate("email client");
-        if (p) {
-            providerRegister(p);
-            settingsAddSectionText(settingsProvider, "email client",
-                                   "IMAP URL", "emailImapUrl",
-                                   "imaps://imap.gmail.com");
-            settingsAddSectionText(settingsProvider, "email client",
-                                   "SMTP URL", "emailSmtpUrl",
-                                   "smtps://smtp.gmail.com");
-            settingsAddSectionText(settingsProvider, "email client",
-                                   "username", "emailUsername", "");
-            settingsAddSectionText(settingsProvider, "email client",
-                                   "password", "emailPassword", "");
-            settingsAddSectionText(settingsProvider, "email client",
-                                   "client ID (OAuth)", "emailClientId", "");
-            settingsAddSectionText(settingsProvider, "email client",
-                                   "client secret (OAuth)", "emailClientSecret", "");
-        }
-        return p;
-    } else if (strcmp(name, "web browser") == 0) {
-        Provider *p = providerFactoryCreate("web browser");
-        if (p) {
-            providerRegister(p);
-            settingsAddSection(settingsProvider, "web browser");
-        }
-        return p;
-    } else {
-        // Check if it's a user plugin
-        for (int i = 0; i < s_userPluginCount; i++) {
-            if (strcmp(name, s_userPlugins[i].name) == 0) {
-                Provider *p = NULL;
-                if (s_userPlugins[i].isNative) {
-                    void *handle = dlopen(s_userPlugins[i].entryPath, RTLD_NOW);
-                    if (!handle) return NULL;
-                    typedef const ProviderOps* (*InitFn)(void);
-                    InitFn initFn;
-                    *(void **)&initFn = dlsym(handle, "sicompass_plugin_init");
-                    if (!initFn) { dlclose(handle); return NULL; }
-                    const ProviderOps *ops = initFn();
-                    if (!ops) { dlclose(handle); return NULL; }
-                    p = providerCreate(ops);
-                } else {
-                    p = scriptProviderCreate(s_userPlugins[i].name,
-                                             s_userPlugins[i].displayName,
-                                             s_userPlugins[i].entryPath);
-                }
-                if (p) {
-                    p->supportsConfigFiles = s_userPlugins[i].supportsConfigFiles;
-                    providerRegister(p);
-                    settingsAddSection(settingsProvider, s_userPlugins[i].name);
-                }
-                return p;
+            snprintf((char*)p->state, 4096, "%s", name);
+
+            char *apiKey = readSettingsValue(name, "apiKey");
+            if (apiKey && apiKey[0]) {
+                providerRegisterAuth(remoteUrl, apiKey);
             }
-        }
+            free(apiKey);
 
-        // Unknown program name: try loading as a remote FFON service.
-        char *remoteUrl = readSettingsValue(name, "remoteUrl");
-        if (remoteUrl && remoteUrl[0]) {
-            #ifdef REMOTE_SCRIPT_PATH
-            Provider *p = scriptProviderCreate(name, name, REMOTE_SCRIPT_PATH);
-            if (p) {
-                snprintf((char*)p->state, 4096, "%s", name);
-
-                char *apiKey = readSettingsValue(name, "apiKey");
-                if (apiKey && apiKey[0]) {
-                    providerRegisterAuth(remoteUrl, apiKey);
-                }
-                free(apiKey);
-
-                providerRegister(p);
-                settingsAddSectionText(settingsProvider, name,
-                                       "remote URL", "remoteUrl", "");
-                settingsAddSectionText(settingsProvider, name,
-                                       "API key", "apiKey", "");
-            }
-            free(remoteUrl);
-            return p;
-            #endif
+            providerRegister(p);
+            settingsAddSectionText(settingsProvider, name,
+                                   "remote URL", "remoteUrl", "");
+            settingsAddSectionText(settingsProvider, name,
+                                   "API key", "apiKey", "");
         }
         free(remoteUrl);
+        return p;
+        #endif
     }
+    free(remoteUrl);
     return NULL;
 }
 
@@ -260,11 +318,10 @@ static void discoverUserPlugins(void) {
             continue;
         }
 
-        UserPlugin *up = &s_userPlugins[s_userPluginCount];
+        PluginManifest *up = &s_userPlugins[s_userPluginCount];
+        memset(up, 0, sizeof(*up));
         strncpy(up->name, json_object_get_string(nameObj), sizeof(up->name) - 1);
-        up->name[sizeof(up->name) - 1] = '\0';
         strncpy(up->displayName, json_object_get_string(displayNameObj), sizeof(up->displayName) - 1);
-        up->displayName[sizeof(up->displayName) - 1] = '\0';
         snprintf(up->entryPath, sizeof(up->entryPath), "%s%s/%s",
                  pluginsDir, entry->d_name, json_object_get_string(entryObj));
 
@@ -273,8 +330,61 @@ static void discoverUserPlugins(void) {
                                   && json_object_get_boolean(configFilesObj);
 
         json_object *typeObj;
-        up->isNative = json_object_object_get_ex(manifest, "type", &typeObj)
-                       && strcmp(json_object_get_string(typeObj), "native") == 0;
+        if (json_object_object_get_ex(manifest, "type", &typeObj)) {
+            const char *typeStr = json_object_get_string(typeObj);
+            if (strcmp(typeStr, "native") == 0)
+                up->type = PLUGIN_NATIVE;
+            else if (strcmp(typeStr, "factory") == 0)
+                up->type = PLUGIN_FACTORY;
+        }
+
+        // Parse optional settings array
+        json_object *settingsArr;
+        if (json_object_object_get_ex(manifest, "settings", &settingsArr)
+            && json_object_is_type(settingsArr, json_type_array)) {
+            int slen = json_object_array_length(settingsArr);
+            if (slen > 16) slen = 16;
+            for (int s = 0; s < slen; s++) {
+                json_object *sObj = json_object_array_get_idx(settingsArr, s);
+                PluginSetting *ps = &up->settings[up->settingCount];
+
+                json_object *sType, *sLabel, *sKey, *sDefault;
+                if (!json_object_object_get_ex(sObj, "type", &sType) ||
+                    !json_object_object_get_ex(sObj, "label", &sLabel) ||
+                    !json_object_object_get_ex(sObj, "key", &sKey))
+                    continue;
+
+                const char *typeStr = json_object_get_string(sType);
+                if (strcmp(typeStr, "text") == 0)
+                    ps->type = SETTING_TEXT;
+                else if (strcmp(typeStr, "checkbox") == 0) {
+                    ps->type = SETTING_CHECKBOX;
+                    json_object *checked;
+                    ps->defaultChecked = json_object_object_get_ex(sObj, "defaultChecked", &checked)
+                                         && json_object_get_boolean(checked);
+                } else if (strcmp(typeStr, "radio") == 0) {
+                    ps->type = SETTING_RADIO;
+                    json_object *optsArr;
+                    if (json_object_object_get_ex(sObj, "options", &optsArr)) {
+                        int olen = json_object_array_length(optsArr);
+                        if (olen > 8) olen = 8;
+                        for (int o = 0; o < olen; o++) {
+                            strncpy(ps->options[o],
+                                    json_object_get_string(json_object_array_get_idx(optsArr, o)),
+                                    sizeof(ps->options[o]) - 1);
+                        }
+                        ps->optionCount = olen;
+                    }
+                } else continue;
+
+                strncpy(ps->label, json_object_get_string(sLabel), sizeof(ps->label) - 1);
+                strncpy(ps->key, json_object_get_string(sKey), sizeof(ps->key) - 1);
+                if (json_object_object_get_ex(sObj, "default", &sDefault))
+                    strncpy(ps->defaultValue, json_object_get_string(sDefault), sizeof(ps->defaultValue) - 1);
+
+                up->settingCount++;
+            }
+        }
 
         json_object_put(manifest);
         s_userPluginCount++;
@@ -300,8 +410,8 @@ static void registerProgramsSection(Provider *settingsProvider, json_object *pro
     settingsAddPrioritySection(settingsProvider, "Available programs:");
 
     // Built-in programs
-    for (int i = 0; i < ALL_KNOWN_PROGRAMS_COUNT; i++) {
-        const char *name = ALL_KNOWN_PROGRAMS[i];
+    for (int i = 0; i < BUILTIN_MANIFEST_COUNT; i++) {
+        const char *name = BUILTIN_MANIFESTS[i].name;
         char configKey[80];
         snprintf(configKey, sizeof(configKey), "enable_%s", name);
         bool enabled = isInProgramsToLoad(name, programsArr);
