@@ -842,12 +842,22 @@ void renderInteraction(SiCompassApplication *app) {
 
                 // Draw tight-fitting selection background
                 if (isSelected) {
+                    float bgLeft = (float)itemX - TEXT_PADDING;
                     float bgRight = imgX + displayW;
                     float bgBottom = imgY + displayH + (float)(suffixLineCount * lineHeight);
-                    prepareRectangle(app, (float)itemX - TEXT_PADDING, bgTop,
-                                     bgRight - ((float)itemX - TEXT_PADDING),
-                                     bgBottom - bgTop,
-                                     app->appRenderer->palette->selected, 0.0f);
+                    float bgW = bgRight - bgLeft;
+                    float bgH = bgBottom - bgTop;
+                    prepareRectangle(app, bgLeft, bgTop, bgW, bgH,
+                                     app->appRenderer->palette->selected, 5.0f);
+                    // Square off right corners where image edge meets background
+                    if (prefixLineCount == 0) {
+                        prepareRectangle(app, bgRight - 5.0f, bgTop, 5.0f, 5.0f,
+                                         app->appRenderer->palette->selected, 0.0f);
+                    }
+                    if (suffixLineCount == 0) {
+                        prepareRectangle(app, bgRight - 5.0f, bgTop + bgH - 5.0f, 5.0f, 5.0f,
+                                         app->appRenderer->palette->selected, 0.0f);
+                    }
                 }
 
                 // Render prefix above image, or bare "-p" inline with image
@@ -1283,12 +1293,22 @@ void renderSimpleSearch(SiCompassApplication *app) {
 
                 // Draw tight-fitting selection background
                 if (isSelected) {
+                    float bgLeft = (float)itemX - TEXT_PADDING;
                     float bgRight = imgX + displayW;
                     float bgBottom = imgY + displayH + (float)(suffixLineCount * lineHeight);
-                    prepareRectangle(app, (float)itemX - TEXT_PADDING, bgTop,
-                                     bgRight - ((float)itemX - TEXT_PADDING),
-                                     bgBottom - bgTop,
-                                     app->appRenderer->palette->selected, 0.0f);
+                    float bgW = bgRight - bgLeft;
+                    float bgH = bgBottom - bgTop;
+                    prepareRectangle(app, bgLeft, bgTop, bgW, bgH,
+                                     app->appRenderer->palette->selected, 5.0f);
+                    // Square off right corners where image edge meets background
+                    if (prefixLineCount == 0) {
+                        prepareRectangle(app, bgRight - 5.0f, bgTop, 5.0f, 5.0f,
+                                         app->appRenderer->palette->selected, 0.0f);
+                    }
+                    if (suffixLineCount == 0) {
+                        prepareRectangle(app, bgRight - 5.0f, bgTop + bgH - 5.0f, 5.0f, 5.0f,
+                                         app->appRenderer->palette->selected, 0.0f);
+                    }
                 }
 
                 // Render prefix above image, or bare "-p" inline with image
@@ -1507,12 +1527,22 @@ void renderExtendedSearch(SiCompassApplication *app) {
 
                 // Draw tight-fitting selection background
                 if (isSelected) {
+                    float bgLeft = (float)itemX - TEXT_PADDING;
                     float bgRight = imgX + displayW;
                     float bgBottom = imgY + displayH + (float)(suffixLineCount * lineHeight);
-                    prepareRectangle(app, (float)itemX - TEXT_PADDING, bgTop,
-                                     bgRight - ((float)itemX - TEXT_PADDING),
-                                     bgBottom - bgTop,
-                                     app->appRenderer->palette->selected, 0.0f);
+                    float bgW = bgRight - bgLeft;
+                    float bgH = bgBottom - bgTop;
+                    prepareRectangle(app, bgLeft, bgTop, bgW, bgH,
+                                     app->appRenderer->palette->selected, 5.0f);
+                    // Square off right corners where image edge meets background
+                    if (prefixLineCount == 0) {
+                        prepareRectangle(app, bgRight - 5.0f, bgTop, 5.0f, 5.0f,
+                                         app->appRenderer->palette->selected, 0.0f);
+                    }
+                    if (suffixLineCount == 0) {
+                        prepareRectangle(app, bgRight - 5.0f, bgTop + bgH - 5.0f, 5.0f, 5.0f,
+                                         app->appRenderer->palette->selected, 0.0f);
+                    }
                 }
 
                 // Render prefix above image, or bare "-p" inline with image
