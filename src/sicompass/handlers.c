@@ -317,7 +317,7 @@ void handleEnd(AppRenderer *appRenderer) {
                 appRenderer->currentId.ids[appRenderer->currentId.depth - 1] = maxId;
                 createListCurrentLayer(appRenderer);
                 appRenderer->listIndex = maxId;
-                appRenderer->scrollOffset = maxId;
+                appRenderer->scrollOffset = -1;
                 accesskitSpeakCurrentElement(appRenderer);
             }
         }
@@ -356,7 +356,7 @@ void handleCtrlEnd(AppRenderer *appRenderer) {
                  appRenderer->filteredListCount : appRenderer->totalListCount;
     if (count > 0) {
         appRenderer->listIndex = count - 1;
-        appRenderer->scrollOffset = count - 1;
+        appRenderer->scrollOffset = -1;
         accesskitSpeakCurrentElement(appRenderer);
     }
     appRenderer->needsRedraw = true;
@@ -1744,7 +1744,7 @@ void handlePageDown(AppRenderer *appRenderer) {
             if (appRenderer->listIndex >= count) {
                 appRenderer->listIndex = count - 1;
             }
-            appRenderer->scrollOffset = appRenderer->listIndex;
+            appRenderer->scrollOffset = -1;
             accesskitSpeakCurrentElement(appRenderer);
         }
     } else if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL ||
@@ -1760,7 +1760,7 @@ void handlePageDown(AppRenderer *appRenderer) {
                 // Rebuild list and sync listIndex
                 createListCurrentLayer(appRenderer);
                 appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
-                appRenderer->scrollOffset = appRenderer->listIndex;
+                appRenderer->scrollOffset = -1;
                 accesskitSpeakCurrentElement(appRenderer);
             }
         }

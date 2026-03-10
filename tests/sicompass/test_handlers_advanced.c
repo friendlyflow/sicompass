@@ -378,7 +378,7 @@ void handleCtrlEnd(AppRenderer *appRenderer) {
                  appRenderer->filteredListCount : appRenderer->totalListCount;
     if (count > 0) {
         appRenderer->listIndex = count - 1;
-        appRenderer->scrollOffset = count - 1;
+        appRenderer->scrollOffset = -1;
         accesskitSpeakCurrentElement(appRenderer);
     }
     appRenderer->needsRedraw = true;
@@ -909,7 +909,7 @@ void test_ctrlEnd_total_list(void) {
     handleCtrlEnd(&app);
 
     TEST_ASSERT_EQUAL_INT(4, app.listIndex);
-    TEST_ASSERT_EQUAL_INT(4, app.scrollOffset);
+    TEST_ASSERT_EQUAL_INT(-1, app.scrollOffset);
     TEST_ASSERT_TRUE(app.needsRedraw);
     TEST_ASSERT_EQUAL_INT(1, accesskitSpeakCurrentElement_fake.call_count);
 }
@@ -922,7 +922,7 @@ void test_ctrlEnd_filtered_list(void) {
     handleCtrlEnd(&app);
 
     TEST_ASSERT_EQUAL_INT(2, app.listIndex);  // filteredListCount - 1
-    TEST_ASSERT_EQUAL_INT(2, app.scrollOffset);
+    TEST_ASSERT_EQUAL_INT(-1, app.scrollOffset);
 }
 
 void test_ctrlEnd_empty_list(void) {
