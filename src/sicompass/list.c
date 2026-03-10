@@ -94,7 +94,7 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
 
                 if (hasImage) {
                     prefix = "-p";
-                    stripped = providerTagExtractImageContent(strKey);
+                    stripped = providerTagStripDisplay(strKey);
                 } else if (hasCheckboxChecked) {
                     prefix = "-cc";
                     stripped = providerTagExtractCheckboxCheckedContent(strKey);
@@ -106,7 +106,7 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
                     stripped = providerTagExtractCheckedContent(strKey);
                 } else if (hasButton) {
                     prefix = "-b";
-                    stripped = providerTagExtractButtonDisplayText(strKey);
+                    stripped = providerTagStripDisplay(strKey);
                 } else if (hasInput) {
                     prefix = "-i";
                     stripped = providerTagStripDisplay(strKey);
@@ -124,6 +124,10 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
                          stripped ? stripped : strKey);
                 appRenderer->totalListCurrentLayer[appRenderer->totalListCount].label =
                     strdup(prefixed);
+                if (hasImage) {
+                    appRenderer->totalListCurrentLayer[appRenderer->totalListCount].data =
+                        providerTagExtractImageContent(strKey);
+                }
                 free(stripped);
                 free(oneOptStr);
             } else {
@@ -154,7 +158,7 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
                     stripped = providerTagExtractCheckboxContent(objKey);
                 } else if (hasLink) {
                     prefix = "+l";
-                    stripped = providerTagExtractLinkContent(objKey);
+                    stripped = providerTagStripDisplay(objKey);
                 } else if (hasRadio) {
                     prefix = "+R";
                     stripped = providerTagExtractRadioContent(objKey);
@@ -360,7 +364,7 @@ static void collectItemsRecursive(AppRenderer *appRenderer, FfonElement **elemen
                 stripped = providerTagExtractCheckboxContent(objKey);
             } else if (hasLink) {
                 prefix = "+l";
-                stripped = providerTagExtractLinkContent(objKey);
+                stripped = providerTagStripDisplay(objKey);
             } else if (hasRadio) {
                 prefix = "+R";
                 stripped = providerTagExtractRadioContent(objKey);

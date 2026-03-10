@@ -409,6 +409,12 @@ void test_stripDisplay_button(void) {
     free(result);
 }
 
+void test_stripDisplay_button_with_prefix(void) {
+    char *result = providerTagStripDisplay("Label: <button>func</button>Click Me (hint)");
+    TEST_ASSERT_EQUAL_STRING("Label: Click Me (hint)", result);
+    free(result);
+}
+
 // === Escape sequences ===
 
 void test_escaped_input_not_detected(void) {
@@ -576,6 +582,7 @@ int main(void) {
     RUN_TEST(test_extractButtonDisplayText);
     RUN_TEST(test_extractButtonDisplayText_null);
     RUN_TEST(test_stripDisplay_button);
+    RUN_TEST(test_stripDisplay_button_with_prefix);
 
     // Escape sequences
     RUN_TEST(test_escaped_input_not_detected);
