@@ -834,8 +834,11 @@ void renderInteraction(SiCompassApplication *app) {
                 float displayW = imgW * displayScale;
                 float displayH = imgH * displayScale;
 
-                // Position image at current item location
-                float imgX = (float)itemX;
+                // Position image at end of "-p " list prefix
+                float ipMinX, ipMinY, ipMaxX, ipMaxY;
+                calculateTextBounds(app, "-p ", (float)itemX, (float)itemYPos, scale,
+                                   &ipMinX, &ipMinY, &ipMaxX, &ipMaxY);
+                float imgX = ipMaxX;
                 float imgY = (float)itemYPos - app->fontRenderer->ascender * scale - TEXT_PADDING;
 
                 // Render dark green border around image when selected
@@ -1257,7 +1260,10 @@ void renderSimpleSearch(SiCompassApplication *app) {
                 float displayW = imgW * displayScale;
                 float displayH = imgH * displayScale;
 
-                float imgX = (float)itemX;
+                float ipMinX, ipMinY, ipMaxX, ipMaxY;
+                calculateTextBounds(app, "-p ", (float)itemX, (float)itemYPos, scale,
+                                   &ipMinX, &ipMinY, &ipMaxX, &ipMaxY);
+                float imgX = ipMaxX;
                 float imgY = (float)itemYPos - app->fontRenderer->ascender * scale - TEXT_PADDING;
 
                 if (isSelected) {
@@ -1462,7 +1468,10 @@ void renderExtendedSearch(SiCompassApplication *app) {
                 float displayW = imgW * displayScale;
                 float displayH = imgH * displayScale;
 
-                float imgX = (float)itemX;
+                float ipMinX, ipMinY, ipMaxX, ipMaxY;
+                calculateTextBounds(app, "-p ", (float)itemX, (float)itemYPos, scale,
+                                   &ipMinX, &ipMinY, &ipMaxX, &ipMaxY);
+                float imgX = ipMaxX;
                 float imgY = (float)itemYPos - app->fontRenderer->ascender * scale - TEXT_PADDING;
 
                 if (isSelected) {
