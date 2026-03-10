@@ -1184,8 +1184,7 @@ void handleFileDelete(AppRenderer *appRenderer) {
 
     // Script provider: in-memory element deletion
     Provider *provider = providerGetActive(appRenderer);
-    if (provider && provider->createElement &&
-        !provider->createFile && !provider->createDirectory) {
+    if (provider && provider->createElement) {
 
         // "Add element:" section handling
         if (elem->type == FFON_OBJECT &&
@@ -1319,10 +1318,9 @@ void handleFileDelete(AppRenderer *appRenderer) {
 static void insertOperatorPlaceholder(AppRenderer *appRenderer, int insertIdx) {
     int depth = appRenderer->currentId.depth;
 
-    // For script providers with createElement: clone "Add element:" instead
+    // For providers with createElement: clone "Add element:" instead
     Provider *provider = providerGetActive(appRenderer);
-    if (provider && provider->createElement &&
-        !provider->createFile && !provider->createDirectory) {
+    if (provider && provider->createElement) {
         // Find "Add element:" among siblings in the current layer
         FfonElement *addElemSection = NULL;
         if (depth == 1) {
