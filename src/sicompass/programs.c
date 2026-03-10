@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <dlfcn.h>
 
 // Built-in program catalog
 static const char *ALL_KNOWN_PROGRAMS[] = {
@@ -23,6 +24,7 @@ typedef struct {
     char displayName[64];
     char entryPath[4096];
     bool supportsConfigFiles;
+    bool isNative;
 } UserPlugin;
 
 static UserPlugin s_userPlugins[32];
@@ -172,9 +174,22 @@ static Provider* loadProgram(const char *name, Provider *settingsProvider) {
         // Check if it's a user plugin
         for (int i = 0; i < s_userPluginCount; i++) {
             if (strcmp(name, s_userPlugins[i].name) == 0) {
-                Provider *p = scriptProviderCreate(s_userPlugins[i].name,
-                                                    s_userPlugins[i].displayName,
-                                                    s_userPlugins[i].entryPath);
+                Provider *p = NULL;
+                if (s_userPlugins[i].isNative) {
+                    void *handle = dlopen(s_userPlugins[i].entryPath, RTLD_NOW);
+                    if (!handle) return NULL;
+                    typedef const ProviderOps* (*InitFn)(void);
+                    InitFn initFn;
+                    *(void **)&initFn = dlsym(handle, "sicompass_plugin_init");
+                    if (!initFn) { dlclose(handle); return NULL; }
+                    const ProviderOps *ops = initFn();
+                    if (!ops) { dlclose(handle); return NULL; }
+                    p = providerCreate(ops);
+                } else {
+                    p = scriptProviderCreate(s_userPlugins[i].name,
+                                             s_userPlugins[i].displayName,
+                                             s_userPlugins[i].entryPath);
+                }
                 if (p) {
                     p->supportsConfigFiles = s_userPlugins[i].supportsConfigFiles;
                     providerRegister(p);
@@ -256,6 +271,10 @@ static void discoverUserPlugins(void) {
         json_object *configFilesObj;
         up->supportsConfigFiles = json_object_object_get_ex(manifest, "supportsConfigFiles", &configFilesObj)
                                   && json_object_get_boolean(configFilesObj);
+
+        json_object *typeObj;
+        up->isNative = json_object_object_get_ex(manifest, "type", &typeObj)
+                       && strcmp(json_object_get_string(typeObj), "native") == 0;
 
         json_object_put(manifest);
         s_userPluginCount++;

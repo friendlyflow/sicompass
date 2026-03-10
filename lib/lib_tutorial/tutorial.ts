@@ -213,6 +213,18 @@ const sections: Section[] = [
         ],
       },
       {
+        key: "Creating a C Plugin",
+        children: [
+          "1. Create a folder: ~/.config/sicompass/plugins/my-c-plugin/",
+          "2. Create plugin.json: { \"name\": \"my-c-plugin\", \"displayName\": \"my C plugin\", \"type\": \"native\", \"entry\": \"plugin.so\" }",
+          "3. Write a C file that exports: const ProviderOps* sicompass_plugin_init(void)",
+          "4. Return a static ProviderOps struct with at least name, displayName, and fetch.",
+          "5. Compile as a shared library: cc -shared -fPIC -o plugin.so plugin.c -I<sdk/include>",
+          "6. Enable your plugin in Settings under 'Available programs'.",
+          "See sdk/examples/c/ for a complete working example.",
+        ],
+      },
+      {
         key: "Provider Types",
         children: [
           "C Provider (ProviderOps): implement a ProviderOps struct, call providerCreate(ops)",

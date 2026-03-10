@@ -38,6 +38,7 @@ xdg_shell_h = custom_target('xdg-shell-protocol.h',
   command: [wayland_scanner, 'server-header', '@INPUT@', '@OUTPUT@'])
 cc = meson.get_compiler('c')
 m_dep = cc.find_library('m', required : false)
+dl_dep = cc.find_library('dl', required : false)
 ft_dep = dependency('freetype2')
 
 r = run_command('glslangValidator', '--quiet', '-V', 'shaders/image.vert', '-o', 'shaders/image_vert.spv', check: true)
@@ -89,7 +90,7 @@ tutorial_script_path = meson.project_source_root() / 'lib' / 'lib_tutorial' / 't
 sales_demo_script_path = meson.project_source_root() / 'lib' / 'lib_sales_demo' / 'sales_demo.ts'
 remote_script_path = meson.project_source_root() / 'lib' / 'lib_remote' / 'remote.ts'
 
-exe_sc = executable('sicompass', [sources_sc], dependencies: [vulkan_dep, sdl3_dep, xkbcommon_dep, m_dep, ft_dep, hb_dep, stb_dep, webp_dep, jsonc_dep, accesskit_dep, utf8proc_dep, cglm_dep, lib_ffon_dep, lib_provider_dep, lib_filebrowser_dep, lib_chatclient_dep, lib_emailclient_dep, lib_webbrowser_dep, lib_settings_dep],
+exe_sc = executable('sicompass', [sources_sc], dependencies: [vulkan_dep, sdl3_dep, xkbcommon_dep, m_dep, dl_dep, ft_dep, hb_dep, stb_dep, webp_dep, jsonc_dep, accesskit_dep, utf8proc_dep, cglm_dep, lib_ffon_dep, lib_provider_dep, lib_filebrowser_dep, lib_chatclient_dep, lib_emailclient_dep, lib_webbrowser_dep, lib_settings_dep],
                     c_args: ['-DTUTORIAL_SCRIPT_PATH="' + tutorial_script_path + '"',
                              '-DSALES_DEMO_SCRIPT_PATH="' + sales_demo_script_path + '"',
                              '-DREMOTE_SCRIPT_PATH="' + remote_script_path + '"'],
