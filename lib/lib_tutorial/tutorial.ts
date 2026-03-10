@@ -178,6 +178,7 @@ const sections: Section[] = [
       },
       "<image>textures/texture.jpg</image>",
       "Image with prefix: <image>textures/texture.jpg</image> and suffix",
+      "<image>textures/texture.jpg</image> and suffix",
       "Links load external JSON or FFON files as children:",
       {
         key: "Link with prefix: <link>lib/lib_tutorial/assets/sf.json</link> and suffix",

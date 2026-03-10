@@ -595,11 +595,13 @@ static int getItemLineCount(const ListItem *item, SiCompassApplication *app,
         int suffixLines = 0;
         if (pathInDisplay) {
             if (pathInDisplay > displayText) {
-                char prefix[MAX_LINE_LENGTH] = {0};
                 size_t prefixLen = pathInDisplay - displayText;
-                if (prefixLen >= MAX_LINE_LENGTH) prefixLen = MAX_LINE_LENGTH - 1;
-                strncpy(prefix, displayText, prefixLen);
-                prefixLines = countTextLines(prefix);
+                if (prefixLen > 3) {  // Skip prefix line for bare "-p " marker
+                    char prefix[MAX_LINE_LENGTH] = {0};
+                    if (prefixLen >= MAX_LINE_LENGTH) prefixLen = MAX_LINE_LENGTH - 1;
+                    strncpy(prefix, displayText, prefixLen);
+                    prefixLines = countTextLines(prefix);
+                }
             }
             const char *suffix = pathInDisplay + strlen(item->data);
             if (suffix[0] != '\0') {
@@ -802,15 +804,17 @@ void renderInteraction(SiCompassApplication *app) {
             }
 
             // Count prefix/suffix lines for maxH calculation
-            int prefixLineCount = imagePrefix[0] ? countTextLines(imagePrefix) : 0;
+            int prefixLineCount = (imagePrefix[0] && strlen(imagePrefix) > 3) ? countTextLines(imagePrefix) : 0;
             int suffixLineCount = imageSuffix ? countTextLines(imageSuffix) : 0;
 
-            // Render prefix above image
-            if (imagePrefix[0]) {
+            // Render prefix above image, or bare "-p" inline with image
+            if (imagePrefix[0] && strlen(imagePrefix) > 3) {
                 int prefixLines = renderText(app, imagePrefix, itemX, itemYPos,
                                              app->appRenderer->palette->text, isSelected);
                 yPos += lineHeight * prefixLines;
                 itemYPos = yPos;
+            } else {
+                renderText(app, "-p", itemX, itemYPos, app->appRenderer->palette->text, isSelected);
             }
 
             if (loadImageTexture(app, imagePath)) {
@@ -1237,12 +1241,14 @@ void renderSimpleSearch(SiCompassApplication *app) {
                 if (afterPath[0] != '\0') imageSuffix = afterPath;
             }
 
-            // Render prefix above image
-            if (imagePrefix[0]) {
+            // Render prefix above image, or bare "-p" inline with image
+            if (imagePrefix[0] && strlen(imagePrefix) > 3) {
                 int prefixLines = renderText(app, imagePrefix, itemX, itemYPos,
                                              app->appRenderer->palette->text, isSelected);
                 yPos += lineHeight * prefixLines;
                 itemYPos = yPos;
+            } else {
+                renderText(app, "-p", itemX, itemYPos, app->appRenderer->palette->text, isSelected);
             }
 
             if (loadImageTexture(app, imagePath)) {
@@ -1445,12 +1451,14 @@ void renderExtendedSearch(SiCompassApplication *app) {
                 if (afterPath[0] != '\0') imageSuffix = afterPath;
             }
 
-            // Render prefix above image
-            if (imagePrefix[0]) {
+            // Render prefix above image, or bare "-p" inline with image
+            if (imagePrefix[0] && strlen(imagePrefix) > 3) {
                 int prefixLines = renderText(app, imagePrefix, itemX, itemYPos,
                                              app->appRenderer->palette->text, isSelected);
                 yPos += lineHeight * prefixLines;
                 itemYPos = yPos;
+            } else {
+                renderText(app, "-p", itemX, itemYPos, app->appRenderer->palette->text, isSelected);
             }
 
             if (loadImageTexture(app, imagePath)) {
