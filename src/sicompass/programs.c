@@ -22,6 +22,7 @@ typedef struct {
     char name[64];
     char displayName[64];
     char entryPath[4096];
+    bool supportsConfigFiles;
 } UserPlugin;
 
 static UserPlugin s_userPlugins[32];
@@ -118,6 +119,7 @@ static Provider* loadProgram(const char *name, Provider *settingsProvider) {
     } else if (strcmp(name, "sales demo") == 0) {
         Provider *p = scriptProviderCreate("sales demo", "sales demo", SALES_DEMO_SCRIPT_PATH);
         if (p) {
+            p->supportsConfigFiles = true;
             providerRegister(p);
             settingsAddSectionText(settingsProvider, "sales demo",
                                    "save folder (product configuration)",
@@ -174,6 +176,7 @@ static Provider* loadProgram(const char *name, Provider *settingsProvider) {
                                                     s_userPlugins[i].displayName,
                                                     s_userPlugins[i].entryPath);
                 if (p) {
+                    p->supportsConfigFiles = s_userPlugins[i].supportsConfigFiles;
                     providerRegister(p);
                     settingsAddSection(settingsProvider, s_userPlugins[i].name);
                 }
@@ -249,6 +252,10 @@ static void discoverUserPlugins(void) {
         up->displayName[sizeof(up->displayName) - 1] = '\0';
         snprintf(up->entryPath, sizeof(up->entryPath), "%s%s/%s",
                  pluginsDir, entry->d_name, json_object_get_string(entryObj));
+
+        json_object *configFilesObj;
+        up->supportsConfigFiles = json_object_object_get_ex(manifest, "supportsConfigFiles", &configFilesObj)
+                                  && json_object_get_boolean(configFilesObj);
 
         json_object_put(manifest);
         s_userPluginCount++;

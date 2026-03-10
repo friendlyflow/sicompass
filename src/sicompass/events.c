@@ -298,20 +298,26 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
         accesskitSpeakModeChange(appRenderer, NULL);
         appRenderer->needsRedraw = true;
     }
-    // Ctrl+S in operator general — save provider config
+    // Ctrl+S in operator general — save provider config (only for providers that support it)
     else if (ctrl && !shift && !alt && key == SDLK_S &&
              appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
-        handleSaveProviderConfig(appRenderer);
+        Provider *active = providerGetActive(appRenderer);
+        if (active && active->supportsConfigFiles)
+            handleSaveProviderConfig(appRenderer);
     }
-    // Ctrl+Shift+S in operator general — save as (filename prompt)
+    // Ctrl+Shift+S in operator general — save as (only for providers that support it)
     else if (ctrl && shift && !alt && key == SDLK_S &&
              appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
-        handleSaveAsProviderConfig(appRenderer);
+        Provider *active = providerGetActive(appRenderer);
+        if (active && active->supportsConfigFiles)
+            handleSaveAsProviderConfig(appRenderer);
     }
-    // Ctrl+O in operator general — open/load provider config
+    // Ctrl+O in operator general — open/load provider config (only for providers that support it)
     else if (ctrl && !shift && !alt && key == SDLK_O &&
              appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
-        handleLoadProviderConfig(appRenderer);
+        Provider *active = providerGetActive(appRenderer);
+        if (active && active->supportsConfigFiles)
+            handleLoadProviderConfig(appRenderer);
     }
     // F5 (refresh — reload link or current directory)
     else if (!ctrl && !shift && !alt && key == SDLK_F5 &&

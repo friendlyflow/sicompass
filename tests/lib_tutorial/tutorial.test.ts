@@ -123,20 +123,21 @@ describe("tutorial provider", () => {
   test("/Configuration returns save/load info", async () => {
     const result = await runTutorial("/Configuration");
     expect(result).toBeArray();
-    expect(result.length).toBe(5);
+    expect(result.length).toBe(6);
     for (const item of result) {
       expect(typeof item).toBe("string");
     }
   });
 
-  test("/Development contains 3 subsections", async () => {
+  test("/Development contains 4 subsections", async () => {
     const result = await runTutorial("/Development");
     expect(result).toBeArray();
-    expect(result.length).toBe(3);
+    expect(result.length).toBe(4);
     const keys = result.map((item) => {
       if (typeof item === "string") return item;
       return Object.keys(item as Record<string, unknown>)[0];
     });
+    expect(keys).toContain("Creating a Plugin");
     expect(keys).toContain("Provider Types");
     expect(keys).toContain("ProviderOps Functions");
     expect(keys).toContain("Element Tags");
