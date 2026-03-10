@@ -129,15 +129,16 @@ describe("tutorial provider", () => {
     }
   });
 
-  test("/Development contains 4 subsections", async () => {
+  test("/Development contains 5 subsections", async () => {
     const result = await runTutorial("/Development");
     expect(result).toBeArray();
-    expect(result.length).toBe(4);
+    expect(result.length).toBe(5);
     const keys = result.map((item) => {
       if (typeof item === "string") return item;
       return Object.keys(item as Record<string, unknown>)[0];
     });
     expect(keys).toContain("Creating a Plugin");
+    expect(keys).toContain("Creating a C Plugin");
     expect(keys).toContain("Provider Types");
     expect(keys).toContain("ProviderOps Functions");
     expect(keys).toContain("Element Tags");
