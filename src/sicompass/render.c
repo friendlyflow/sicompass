@@ -1639,6 +1639,239 @@ void renderScrollSearch(SiCompassApplication *app) {
     free(stripped);
 }
 
+void renderInputSearch(SiCompassApplication *app) {
+    float scale = getTextScale(app, FONT_SIZE_PT);
+    int lineHeight = (int)getLineHeight(app, scale, TEXT_PADDING);
+    float charWidth = getWidthEM(app, scale);
+    float maxWidth = charWidth * 120.0f;
+
+    // Text source is the saved input buffer
+    const char *text = app->appRenderer->savedInputBuffer;
+    if (!text || text[0] == '\0') {
+        char searchDisplay[MAX_LINE_LENGTH];
+        snprintf(searchDisplay, sizeof(searchDisplay), "search: %s [0 items]",
+                 app->appRenderer->inputBuffer);
+        renderText(app, searchDisplay, 50, lineHeight * 2, app->appRenderer->palette->text, false);
+        app->appRenderer->inputSearchMatchCount = 0;
+        app->appRenderer->inputSearchCurrentMatch = 0;
+        return;
+    }
+
+    // Line-wrap the text
+    typedef struct {
+        const char *start;
+        size_t len;
+        int byteOffset;
+    } LineInfo;
+
+    LineInfo lines[1000];
+    int lineCount = 0;
+    const char *lineStart = text;
+
+    while (*lineStart != '\0' && lineCount < 1000) {
+        // Handle explicit newlines
+        if (*lineStart == '\n') {
+            lines[lineCount].start = lineStart;
+            lines[lineCount].len = 0;
+            lines[lineCount].byteOffset = (int)(lineStart - text);
+            lineCount++;
+            lineStart++;
+            continue;
+        }
+
+        const char *lineEnd = lineStart;
+        const char *lastSpace = NULL;
+        const char *lastFit = lineStart;
+        int currentY = lineHeight * 3 + lineCount * lineHeight;
+
+        while (*lineEnd != '\0' && *lineEnd != '\n') {
+            size_t testLen = lineEnd - lineStart + 1;
+            if (testLen >= MAX_LINE_LENGTH) testLen = MAX_LINE_LENGTH - 1;
+
+            char testText[MAX_LINE_LENGTH];
+            strncpy(testText, lineStart, testLen);
+            testText[testLen] = '\0';
+
+            float minX, minY, maxX, maxY;
+            calculateTextBounds(app, testText, 50.0f, (float)currentY, scale,
+                              &minX, &minY, &maxX, &maxY);
+            float width = maxX - minX;
+
+            if (width > maxWidth) {
+                if (lastSpace != NULL && lastSpace > lineStart) {
+                    lineEnd = lastSpace;
+                } else {
+                    lineEnd = lastFit;
+                }
+                break;
+            }
+
+            if (*lineEnd == ' ') lastSpace = lineEnd;
+            lineEnd++;
+            lastFit = lineEnd;
+        }
+
+        size_t lineLen = lineEnd - lineStart;
+        if (lineLen == 0 && *lineStart != '\0' && *lineStart != '\n') {
+            lineLen = 1;
+            lineEnd = lineStart + 1;
+        }
+        if (lineLen >= MAX_LINE_LENGTH) lineLen = MAX_LINE_LENGTH - 1;
+
+        lines[lineCount].start = lineStart;
+        lines[lineCount].len = lineLen;
+        lines[lineCount].byteOffset = (int)(lineStart - text);
+        lineCount++;
+
+        lineStart = lineEnd;
+        if (*lineStart == ' ') lineStart++;
+    }
+
+    app->appRenderer->inputSearchScrollLineCount = lineCount;
+
+    // Find all matches
+    typedef struct {
+        int byteOffset;
+        int length;
+        int wrappedLine;
+        int lineLocalByte;
+    } MatchInfo;
+
+    MatchInfo matches[500];
+    int matchCount = 0;
+    const char *searchTerm = app->appRenderer->inputBuffer;
+    int searchLen = app->appRenderer->inputBufferSize;
+
+    if (searchLen > 0) {
+        const char *pos = text;
+        while (pos && *pos && matchCount < 500) {
+            const char *found = utf8_stristr_pos(pos, searchTerm);
+            if (!found) break;
+
+            int byteOffset = (int)(found - text);
+            int matchLen = searchLen;
+
+            matches[matchCount].byteOffset = byteOffset;
+            matches[matchCount].length = matchLen;
+            matches[matchCount].wrappedLine = 0;
+            matches[matchCount].lineLocalByte = 0;
+
+            for (int line = 0; line < lineCount; line++) {
+                int lStart = lines[line].byteOffset;
+                int lEnd = lStart + (int)lines[line].len;
+                if (byteOffset >= lStart && byteOffset < lEnd) {
+                    matches[matchCount].wrappedLine = line;
+                    matches[matchCount].lineLocalByte = byteOffset - lStart;
+                    break;
+                }
+            }
+
+            matchCount++;
+            pos = found + 1;
+        }
+    }
+
+    app->appRenderer->inputSearchMatchCount = matchCount;
+    if (app->appRenderer->inputSearchCurrentMatch >= matchCount) {
+        app->appRenderer->inputSearchCurrentMatch = matchCount > 0 ? matchCount - 1 : 0;
+    }
+
+    // Auto-scroll to current match
+    if (matchCount > 0) {
+        int currentIdx = app->appRenderer->inputSearchCurrentMatch;
+        int matchLine = matches[currentIdx].wrappedLine;
+
+        int headerLines = 3;
+        int availableHeight = (int)app->swapChainExtent.height - (lineHeight * headerLines);
+        int visibleLines = availableHeight / lineHeight;
+        if (visibleLines < 1) visibleLines = 1;
+
+        if (matchLine < app->appRenderer->inputSearchScrollOffset) {
+            app->appRenderer->inputSearchScrollOffset = matchLine;
+        } else if (matchLine >= app->appRenderer->inputSearchScrollOffset + visibleLines) {
+            app->appRenderer->inputSearchScrollOffset = matchLine - visibleLines + 1;
+        }
+
+        int maxOffset = lineCount - visibleLines;
+        if (maxOffset < 0) maxOffset = 0;
+        if (app->appRenderer->inputSearchScrollOffset > maxOffset)
+            app->appRenderer->inputSearchScrollOffset = maxOffset;
+        if (app->appRenderer->inputSearchScrollOffset < 0)
+            app->appRenderer->inputSearchScrollOffset = 0;
+    }
+
+    // Render search bar
+    char searchDisplay[MAX_LINE_LENGTH];
+    snprintf(searchDisplay, sizeof(searchDisplay), "search: %s [%d items]",
+             app->appRenderer->inputBuffer, matchCount);
+    renderText(app, searchDisplay, 50, lineHeight * 2, app->appRenderer->palette->text, false);
+
+    // Render text with highlights
+    int textStartY = lineHeight * 3;
+    app->appRenderer->renderClipTopY = textStartY;
+
+    for (int i = 0; i < lineCount; i++) {
+        int currentY = textStartY + (i - app->appRenderer->inputSearchScrollOffset) * lineHeight;
+
+        if (currentY + lineHeight < textStartY) continue;
+        if (currentY > (int)app->swapChainExtent.height) break;
+
+        // Render match highlight rectangles for this line
+        for (int m = 0; m < matchCount; m++) {
+            if (matches[m].wrappedLine != i) continue;
+            if (currentY < textStartY) continue;
+
+            int localStart = matches[m].lineLocalByte;
+            int localEnd = localStart + matches[m].length;
+            if (localEnd > (int)lines[i].len) localEnd = (int)lines[i].len;
+
+            float matchX = 50.0f;
+            if (localStart > 0) {
+                char prefix[MAX_LINE_LENGTH];
+                strncpy(prefix, lines[i].start, localStart);
+                prefix[localStart] = '\0';
+
+                float pMinX, pMinY, pMaxX, pMaxY;
+                calculateTextBounds(app, prefix, 50.0f, (float)currentY, scale,
+                                    &pMinX, &pMinY, &pMaxX, &pMaxY);
+                matchX = pMaxX;
+            }
+
+            int matchLen = localEnd - localStart;
+            char matchStr[MAX_LINE_LENGTH];
+            strncpy(matchStr, lines[i].start + localStart, matchLen);
+            matchStr[matchLen] = '\0';
+
+            float mMinX, mMinY, mMaxX, mMaxY;
+            calculateTextBounds(app, matchStr, matchX, (float)currentY, scale,
+                                &mMinX, &mMinY, &mMaxX, &mMaxY);
+
+            uint32_t highlightColor = (m == app->appRenderer->inputSearchCurrentMatch)
+                ? app->appRenderer->palette->scrollsearch : app->appRenderer->palette->selected;
+
+            float rectY = mMinY - TEXT_PADDING;
+            float rectH = getLineHeight(app, scale, TEXT_PADDING);
+            float rectW = mMaxX - matchX;
+            prepareRectangle(app, matchX, rectY, rectW, rectH, highlightColor, 3.0f);
+        }
+
+        // Render the text itself
+        char lineText[MAX_LINE_LENGTH];
+        if (lines[i].len > 0) {
+            strncpy(lineText, lines[i].start, lines[i].len);
+            lineText[lines[i].len] = '\0';
+        } else {
+            lineText[0] = '\0';
+        }
+
+        if (lines[i].len > 0 && currentY >= textStartY) {
+            prepareTextForRendering(app, lineText, 50.0f, (float)currentY, scale, app->appRenderer->palette->text);
+        }
+    }
+
+    app->appRenderer->renderClipTopY = 0;
+}
+
 void renderDashboard(SiCompassApplication *app) {
     const char *path = app->appRenderer->dashboardImagePath;
     if (!path || path[0] == '\0') return;
@@ -1726,6 +1959,8 @@ void updateView(SiCompassApplication *app) {
         renderScroll(app);
     } else if (app->appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH) {
         renderScrollSearch(app);
+    } else if (app->appRenderer->currentCoordinate == COORDINATE_INPUT_SEARCH) {
+        renderInputSearch(app);
     } else if (app->appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
         app->appRenderer->currentCoordinate == COORDINATE_COMMAND) {
         renderSimpleSearch(app);
@@ -1739,7 +1974,8 @@ void updateView(SiCompassApplication *app) {
     if (app->appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
         app->appRenderer->currentCoordinate == COORDINATE_COMMAND ||
         app->appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH ||
-        app->appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH) {
+        app->appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH ||
+        app->appRenderer->currentCoordinate == COORDINATE_INPUT_SEARCH) {
         // Caret in search field
         int searchTextYPos = lineHeight * 2;
 
