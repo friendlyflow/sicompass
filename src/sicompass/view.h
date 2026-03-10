@@ -45,6 +45,7 @@ typedef enum {
     COORDINATE_COMMAND,
     COORDINATE_SCROLL,
     COORDINATE_SCROLL_SEARCH,
+    COORDINATE_INPUT_SEARCH,
     COORDINATE_DASHBOARD
 } Coordinate;
 
@@ -143,6 +144,20 @@ typedef struct AppRenderer {
     int renderClipTopY;        // Skip rendering lines with Y < this value (0 = no clipping)
     int scrollSearchMatchCount;    // Total number of search matches in scroll text
     int scrollSearchCurrentMatch;  // Index of currently-focused match (0-based)
+
+    // Input search state (Ctrl+F in insert mode)
+    char *savedInputBuffer;
+    int savedInputBufferSize;
+    int savedInputBufferCapacity;
+    int savedCursorPosition;
+    int savedSelectionAnchor;
+    char savedInputPrefix[MAX_LINE_LENGTH];
+    char savedInputSuffix[MAX_LINE_LENGTH];
+    Coordinate savedInsertCoordinate;
+    int inputSearchMatchCount;
+    int inputSearchCurrentMatch;
+    int inputSearchScrollOffset;
+    int inputSearchScrollLineCount;
 
     // Right panel
     ListItem *totalListCurrentLayer;

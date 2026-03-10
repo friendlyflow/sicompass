@@ -373,7 +373,8 @@ void handleSelectAll(AppRenderer *appRenderer) {
 
 void handleTab(AppRenderer *appRenderer) {
     if (appRenderer->currentCoordinate == COORDINATE_SCROLL ||
-        appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH) {
+        appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH ||
+        appRenderer->currentCoordinate == COORDINATE_INPUT_SEARCH) {
         return;
     }
 
@@ -537,7 +538,8 @@ static bool handleButtonPress(AppRenderer *appRenderer, IdArray *elementId) {
 }
 
 void handleEnter(AppRenderer *appRenderer, History history) {
-    if (appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH) return;
+    if (appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH ||
+        appRenderer->currentCoordinate == COORDINATE_INPUT_SEARCH) return;
 
     uint64_t now = SDL_GetTicks();
 
@@ -1500,6 +1502,17 @@ void handleUp(AppRenderer *appRenderer) {
         appRenderer->needsRedraw = true;
         return;
     }
+    if (appRenderer->currentCoordinate == COORDINATE_INPUT_SEARCH) {
+        // Previous match
+        if (appRenderer->inputSearchMatchCount > 0) {
+            if (appRenderer->inputSearchCurrentMatch > 0)
+                appRenderer->inputSearchCurrentMatch--;
+            else
+                appRenderer->inputSearchCurrentMatch = appRenderer->inputSearchMatchCount - 1;
+        }
+        appRenderer->needsRedraw = true;
+        return;
+    }
     if (appRenderer->currentCoordinate == COORDINATE_SCROLL) {
         // Text scroll mode: scroll up one line
         if (appRenderer->textScrollOffset > 0) {
@@ -1542,6 +1555,17 @@ void handleDown(AppRenderer *appRenderer) {
                 appRenderer->scrollSearchCurrentMatch++;
             else
                 appRenderer->scrollSearchCurrentMatch = 0;
+        }
+        appRenderer->needsRedraw = true;
+        return;
+    }
+    if (appRenderer->currentCoordinate == COORDINATE_INPUT_SEARCH) {
+        // Next match
+        if (appRenderer->inputSearchMatchCount > 0) {
+            if (appRenderer->inputSearchCurrentMatch < appRenderer->inputSearchMatchCount - 1)
+                appRenderer->inputSearchCurrentMatch++;
+            else
+                appRenderer->inputSearchCurrentMatch = 0;
         }
         appRenderer->needsRedraw = true;
         return;
@@ -1606,6 +1630,14 @@ void handlePageUp(AppRenderer *appRenderer) {
     int pageSize = lineHeight > 0 ? (int)appRenderer->app->swapChainExtent.height / lineHeight - 3 : 10;
     if (pageSize < 1) pageSize = 1;
 
+    if (appRenderer->currentCoordinate == COORDINATE_INPUT_SEARCH) {
+        appRenderer->inputSearchScrollOffset -= pageSize;
+        if (appRenderer->inputSearchScrollOffset < 0)
+            appRenderer->inputSearchScrollOffset = 0;
+        appRenderer->needsRedraw = true;
+        return;
+    }
+
     if (appRenderer->currentCoordinate == COORDINATE_SCROLL ||
         appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH) {
         // Text scroll mode: scroll up by page
@@ -1667,6 +1699,20 @@ void handlePageDown(AppRenderer *appRenderer) {
     int lineHeight = (int)getLineHeight(appRenderer->app, scale, TEXT_PADDING);
     int pageSize = lineHeight > 0 ? (int)appRenderer->app->swapChainExtent.height / lineHeight - 3 : 10;
     if (pageSize < 1) pageSize = 1;
+
+    if (appRenderer->currentCoordinate == COORDINATE_INPUT_SEARCH) {
+        int headerLines = 3;
+        int availableHeight = (int)appRenderer->app->swapChainExtent.height - (lineHeight * headerLines);
+        int visibleLines = availableHeight / lineHeight;
+        if (visibleLines < 1) visibleLines = 1;
+        int maxOffset = appRenderer->inputSearchScrollLineCount - visibleLines;
+        if (maxOffset < 0) maxOffset = 0;
+        appRenderer->inputSearchScrollOffset += pageSize;
+        if (appRenderer->inputSearchScrollOffset > maxOffset)
+            appRenderer->inputSearchScrollOffset = maxOffset;
+        appRenderer->needsRedraw = true;
+        return;
+    }
 
     if (appRenderer->currentCoordinate == COORDINATE_SCROLL ||
         appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH) {
@@ -1735,7 +1781,8 @@ void handleLeft(AppRenderer *appRenderer) {
         appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
         appRenderer->currentCoordinate == COORDINATE_COMMAND ||
         appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH ||
-        appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH) {
+        appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH ||
+        appRenderer->currentCoordinate == COORDINATE_INPUT_SEARCH) {
         // If selection active, jump to selection start and clear
         if (hasSelection(appRenderer)) {
             int start, end;
@@ -1795,7 +1842,8 @@ void handleRight(AppRenderer *appRenderer) {
         appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
         appRenderer->currentCoordinate == COORDINATE_COMMAND ||
         appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH ||
-        appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH) {
+        appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH ||
+        appRenderer->currentCoordinate == COORDINATE_INPUT_SEARCH) {
         // If selection active, jump to selection end and clear
         if (hasSelection(appRenderer)) {
             int start, end;
@@ -1870,6 +1918,7 @@ void handleRight(AppRenderer *appRenderer) {
                 }
             }
         } else if (appRenderer->currentCoordinate != COORDINATE_SCROLL_SEARCH &&
+                   appRenderer->currentCoordinate != COORDINATE_INPUT_SEARCH &&
                    providerNavigateRight(appRenderer)) {
             createListCurrentLayer(appRenderer);
             appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
@@ -2102,8 +2151,44 @@ void handleCtrlF(AppRenderer *appRenderer) {
         return;
     }
 
-    // SCROLL_SEARCH: Ctrl+F does nothing (no double-tap)
-    if (appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH) {
+    // SCROLL_SEARCH / INPUT_SEARCH: Ctrl+F does nothing
+    if (appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH ||
+        appRenderer->currentCoordinate == COORDINATE_INPUT_SEARCH) {
+        return;
+    }
+
+    // INSERT modes: Ctrl+F enters INPUT_SEARCH
+    if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
+        appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT) {
+        appRenderer->savedInsertCoordinate = appRenderer->currentCoordinate;
+        // Save input buffer contents
+        if (appRenderer->inputBufferSize >= appRenderer->savedInputBufferCapacity) {
+            int newCap = appRenderer->inputBufferSize + 1;
+            char *newBuf = realloc(appRenderer->savedInputBuffer, newCap);
+            if (!newBuf) return;
+            appRenderer->savedInputBuffer = newBuf;
+            appRenderer->savedInputBufferCapacity = newCap;
+        }
+        memcpy(appRenderer->savedInputBuffer, appRenderer->inputBuffer, appRenderer->inputBufferSize + 1);
+        appRenderer->savedInputBufferSize = appRenderer->inputBufferSize;
+        appRenderer->savedCursorPosition = appRenderer->cursorPosition;
+        appRenderer->savedSelectionAnchor = appRenderer->selectionAnchor;
+        strncpy(appRenderer->savedInputPrefix, appRenderer->inputPrefix, MAX_LINE_LENGTH - 1);
+        appRenderer->savedInputPrefix[MAX_LINE_LENGTH - 1] = '\0';
+        strncpy(appRenderer->savedInputSuffix, appRenderer->inputSuffix, MAX_LINE_LENGTH - 1);
+        appRenderer->savedInputSuffix[MAX_LINE_LENGTH - 1] = '\0';
+        // Switch to input search mode
+        appRenderer->currentCoordinate = COORDINATE_INPUT_SEARCH;
+        appRenderer->inputBuffer[0] = '\0';
+        appRenderer->inputBufferSize = 0;
+        appRenderer->cursorPosition = 0;
+        appRenderer->selectionAnchor = -1;
+        appRenderer->inputSearchMatchCount = 0;
+        appRenderer->inputSearchCurrentMatch = 0;
+        appRenderer->inputSearchScrollOffset = 0;
+        appRenderer->inputSearchScrollLineCount = 0;
+        accesskitSpeakModeChange(appRenderer, NULL);
+        appRenderer->needsRedraw = true;
         return;
     }
 
@@ -2298,6 +2383,30 @@ void handleEscape(AppRenderer *appRenderer) {
     } else if (appRenderer->currentCoordinate == COORDINATE_DASHBOARD) {
         appRenderer->currentCoordinate = appRenderer->previousCoordinate;
         appRenderer->previousCoordinate = appRenderer->currentCoordinate;
+        accesskitSpeakModeChange(appRenderer, NULL);
+        appRenderer->needsRedraw = true;
+        return;
+    } else if (appRenderer->currentCoordinate == COORDINATE_INPUT_SEARCH) {
+        // Restore saved insert mode state
+        if (appRenderer->savedInputBufferSize >= appRenderer->inputBufferCapacity) {
+            int newCap = appRenderer->savedInputBufferSize + 1;
+            char *newBuf = realloc(appRenderer->inputBuffer, newCap);
+            if (newBuf) {
+                appRenderer->inputBuffer = newBuf;
+                appRenderer->inputBufferCapacity = newCap;
+            }
+        }
+        memcpy(appRenderer->inputBuffer, appRenderer->savedInputBuffer, appRenderer->savedInputBufferSize + 1);
+        appRenderer->inputBufferSize = appRenderer->savedInputBufferSize;
+        appRenderer->cursorPosition = appRenderer->savedCursorPosition;
+        appRenderer->selectionAnchor = appRenderer->savedSelectionAnchor;
+        strncpy(appRenderer->inputPrefix, appRenderer->savedInputPrefix, MAX_LINE_LENGTH - 1);
+        appRenderer->inputPrefix[MAX_LINE_LENGTH - 1] = '\0';
+        strncpy(appRenderer->inputSuffix, appRenderer->savedInputSuffix, MAX_LINE_LENGTH - 1);
+        appRenderer->inputSuffix[MAX_LINE_LENGTH - 1] = '\0';
+        appRenderer->currentCoordinate = appRenderer->savedInsertCoordinate;
+        appRenderer->inputSearchMatchCount = 0;
+        appRenderer->inputSearchCurrentMatch = 0;
         accesskitSpeakModeChange(appRenderer, NULL);
         appRenderer->needsRedraw = true;
         return;

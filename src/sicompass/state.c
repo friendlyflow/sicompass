@@ -25,6 +25,16 @@ SiCompassApplication* appRendererCreate(SiCompassApplication* app) {
     appRenderer->inputPrefix[0] = '\0';
     appRenderer->inputSuffix[0] = '\0';
 
+    // Initialize saved input buffer (for input search mode)
+    appRenderer->savedInputBufferCapacity = 1024;
+    appRenderer->savedInputBuffer = calloc(appRenderer->savedInputBufferCapacity, sizeof(char));
+    if (!appRenderer->savedInputBuffer) {
+        free(appRenderer->inputBuffer);
+        free(appRenderer->ffon);
+        free(appRenderer);
+        return NULL;
+    }
+
     // Initialize undo history
     appRenderer->undoHistory = calloc(UNDO_HISTORY_SIZE, sizeof(UndoEntry));
     if (!appRenderer->undoHistory) {
@@ -80,6 +90,9 @@ void appRendererDestroy(AppRenderer *appRenderer) {
     // Free input buffer
     free(appRenderer->inputBuffer);
 
+    // Free saved input buffer
+    free(appRenderer->savedInputBuffer);
+
     // Free undo history
     for (int i = 0; i < appRenderer->undoHistoryCount; i++) {
         if (appRenderer->undoHistory[i].prevElement) {
@@ -121,6 +134,7 @@ const char* coordinateToString(Coordinate coord) {
         case COORDINATE_EXTENDED_SEARCH: return "ext search";
         case COORDINATE_SCROLL: return "scroll mode";
         case COORDINATE_SCROLL_SEARCH: return "scroll search";
+        case COORDINATE_INPUT_SEARCH: return "input search";
         case COORDINATE_DASHBOARD: return "dashboard";
         default: return "unknown";
     }

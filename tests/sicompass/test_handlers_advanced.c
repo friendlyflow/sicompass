@@ -73,6 +73,7 @@ typedef enum {
     COORDINATE_COMMAND,
     COORDINATE_SCROLL,
     COORDINATE_SCROLL_SEARCH,
+    COORDINATE_INPUT_SEARCH,
     COORDINATE_DASHBOARD
 } Coordinate;
 
@@ -130,6 +131,23 @@ typedef struct AppRenderer {
     int textScrollLineCount;
     int scrollSearchMatchCount;
     int scrollSearchCurrentMatch;
+
+    // Input search state (Ctrl+F in insert mode)
+    char *savedInputBuffer;
+    int savedInputBufferSize;
+    int savedInputBufferCapacity;
+    int savedCursorPosition;
+    int savedSelectionAnchor;
+    char savedInputPrefix[MAX_LINE_LENGTH];
+    char savedInputSuffix[MAX_LINE_LENGTH];
+    Coordinate savedInsertCoordinate;
+    int inputSearchMatchCount;
+    int inputSearchCurrentMatch;
+    int inputSearchScrollOffset;
+    int inputSearchScrollLineCount;
+
+    char inputPrefix[MAX_LINE_LENGTH];
+    char inputSuffix[MAX_LINE_LENGTH];
 
     ListItem *totalListCurrentLayer;
     int totalListCount;
@@ -389,7 +407,8 @@ void handleColon(AppRenderer *appRenderer) {
 
 void handleTab(AppRenderer *appRenderer) {
     if (appRenderer->currentCoordinate == COORDINATE_SCROLL ||
-        appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH) {
+        appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH ||
+        appRenderer->currentCoordinate == COORDINATE_INPUT_SEARCH) {
         return;
     }
 
@@ -465,6 +484,30 @@ void handleEscape(AppRenderer *appRenderer) {
         accesskitSpeakModeChange(appRenderer, NULL);
         appRenderer->needsRedraw = true;
         return;
+    } else if (appRenderer->currentCoordinate == COORDINATE_INPUT_SEARCH) {
+        // Restore saved insert mode state
+        if (appRenderer->savedInputBufferSize >= appRenderer->inputBufferCapacity) {
+            int newCap = appRenderer->savedInputBufferSize + 1;
+            char *newBuf = realloc(appRenderer->inputBuffer, newCap);
+            if (newBuf) {
+                appRenderer->inputBuffer = newBuf;
+                appRenderer->inputBufferCapacity = newCap;
+            }
+        }
+        memcpy(appRenderer->inputBuffer, appRenderer->savedInputBuffer, appRenderer->savedInputBufferSize + 1);
+        appRenderer->inputBufferSize = appRenderer->savedInputBufferSize;
+        appRenderer->cursorPosition = appRenderer->savedCursorPosition;
+        appRenderer->selectionAnchor = appRenderer->savedSelectionAnchor;
+        strncpy(appRenderer->inputPrefix, appRenderer->savedInputPrefix, MAX_LINE_LENGTH - 1);
+        appRenderer->inputPrefix[MAX_LINE_LENGTH - 1] = '\0';
+        strncpy(appRenderer->inputSuffix, appRenderer->savedInputSuffix, MAX_LINE_LENGTH - 1);
+        appRenderer->inputSuffix[MAX_LINE_LENGTH - 1] = '\0';
+        appRenderer->currentCoordinate = appRenderer->savedInsertCoordinate;
+        appRenderer->inputSearchMatchCount = 0;
+        appRenderer->inputSearchCurrentMatch = 0;
+        accesskitSpeakModeChange(appRenderer, NULL);
+        appRenderer->needsRedraw = true;
+        return;
     } else if (appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH) {
         appRenderer->currentCoordinate = COORDINATE_SCROLL;
         appRenderer->scrollSearchMatchCount = 0;
@@ -529,7 +572,41 @@ void handleCtrlF(AppRenderer *appRenderer) {
         return;
     }
 
-    if (appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH) {
+    if (appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH ||
+        appRenderer->currentCoordinate == COORDINATE_INPUT_SEARCH) {
+        return;
+    }
+
+    // INSERT modes: Ctrl+F enters INPUT_SEARCH
+    if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_INSERT ||
+        appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT) {
+        appRenderer->savedInsertCoordinate = appRenderer->currentCoordinate;
+        if (appRenderer->inputBufferSize >= appRenderer->savedInputBufferCapacity) {
+            int newCap = appRenderer->inputBufferSize + 1;
+            char *newBuf = realloc(appRenderer->savedInputBuffer, newCap);
+            if (!newBuf) return;
+            appRenderer->savedInputBuffer = newBuf;
+            appRenderer->savedInputBufferCapacity = newCap;
+        }
+        memcpy(appRenderer->savedInputBuffer, appRenderer->inputBuffer, appRenderer->inputBufferSize + 1);
+        appRenderer->savedInputBufferSize = appRenderer->inputBufferSize;
+        appRenderer->savedCursorPosition = appRenderer->cursorPosition;
+        appRenderer->savedSelectionAnchor = appRenderer->selectionAnchor;
+        strncpy(appRenderer->savedInputPrefix, appRenderer->inputPrefix, MAX_LINE_LENGTH - 1);
+        appRenderer->savedInputPrefix[MAX_LINE_LENGTH - 1] = '\0';
+        strncpy(appRenderer->savedInputSuffix, appRenderer->inputSuffix, MAX_LINE_LENGTH - 1);
+        appRenderer->savedInputSuffix[MAX_LINE_LENGTH - 1] = '\0';
+        appRenderer->currentCoordinate = COORDINATE_INPUT_SEARCH;
+        appRenderer->inputBuffer[0] = '\0';
+        appRenderer->inputBufferSize = 0;
+        appRenderer->cursorPosition = 0;
+        appRenderer->selectionAnchor = -1;
+        appRenderer->inputSearchMatchCount = 0;
+        appRenderer->inputSearchCurrentMatch = 0;
+        appRenderer->inputSearchScrollOffset = 0;
+        appRenderer->inputSearchScrollLineCount = 0;
+        accesskitSpeakModeChange(appRenderer, NULL);
+        appRenderer->needsRedraw = true;
         return;
     }
 
@@ -580,6 +657,16 @@ void handleUp(AppRenderer *appRenderer) {
         appRenderer->needsRedraw = true;
         return;
     }
+    if (appRenderer->currentCoordinate == COORDINATE_INPUT_SEARCH) {
+        if (appRenderer->inputSearchMatchCount > 0) {
+            if (appRenderer->inputSearchCurrentMatch > 0)
+                appRenderer->inputSearchCurrentMatch--;
+            else
+                appRenderer->inputSearchCurrentMatch = appRenderer->inputSearchMatchCount - 1;
+        }
+        appRenderer->needsRedraw = true;
+        return;
+    }
     if (appRenderer->currentCoordinate == COORDINATE_SCROLL) {
         if (appRenderer->textScrollOffset > 0) {
             appRenderer->textScrollOffset--;
@@ -619,6 +706,16 @@ void handleDown(AppRenderer *appRenderer) {
                 appRenderer->scrollSearchCurrentMatch++;
             else
                 appRenderer->scrollSearchCurrentMatch = 0;
+        }
+        appRenderer->needsRedraw = true;
+        return;
+    }
+    if (appRenderer->currentCoordinate == COORDINATE_INPUT_SEARCH) {
+        if (appRenderer->inputSearchMatchCount > 0) {
+            if (appRenderer->inputSearchCurrentMatch < appRenderer->inputSearchMatchCount - 1)
+                appRenderer->inputSearchCurrentMatch++;
+            else
+                appRenderer->inputSearchCurrentMatch = 0;
         }
         appRenderer->needsRedraw = true;
         return;
@@ -685,6 +782,10 @@ static AppRenderer createTestApp(void) {
     app.inputBufferSize = 0;
     app.cursorPosition = 0;
     app.selectionAnchor = -1;
+    app.savedInputBuffer = malloc(1024);
+    app.savedInputBufferCapacity = 1024;
+    app.savedInputBufferSize = 0;
+    app.savedInputBuffer[0] = '\0';
     app.currentId.depth = 1;
     app.currentId.ids[0] = 0;
     return app;
