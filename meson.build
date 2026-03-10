@@ -86,9 +86,9 @@ subdir('lib/lib_remote')
 
 subdir('src')
 
-tutorial_script_path = meson.project_source_root() / 'lib' / 'lib_tutorial' / 'tutorial.ts'
-sales_demo_script_path = meson.project_source_root() / 'lib' / 'lib_sales_demo' / 'sales_demo.ts'
-remote_script_path = meson.project_source_root() / 'lib' / 'lib_remote' / 'remote.ts'
+tutorial_script_path = 'scripts/tutorial.ts'
+sales_demo_script_path = 'scripts/sales_demo.ts'
+remote_script_path = 'scripts/remote.ts'
 
 exe_sc = executable('sicompass', [sources_sc], dependencies: [vulkan_dep, sdl3_dep, xkbcommon_dep, m_dep, dl_dep, ft_dep, hb_dep, stb_dep, webp_dep, jsonc_dep, accesskit_dep, utf8proc_dep, cglm_dep, lib_ffon_dep, lib_provider_dep, lib_filebrowser_dep, lib_chatclient_dep, lib_emailclient_dep, lib_webbrowser_dep, lib_settings_dep],
                     c_args: ['-DTUTORIAL_SCRIPT_PATH="' + tutorial_script_path + '"',
@@ -103,4 +103,10 @@ exe_dc = executable('desicompass', [sources_dc, xdg_shell_c, xdg_shell_h],
 
 subdir('tests')
 
-
+install_data(
+  'lib/lib_tutorial/tutorial.ts',
+  'lib/lib_sales_demo/sales_demo.ts',
+  'lib/lib_remote/remote.ts',
+  rename: ['tutorial.ts', 'sales_demo.ts', 'remote.ts'],
+  install_dir: get_option('datadir') / 'sicompass' / 'scripts',
+)
