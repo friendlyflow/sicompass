@@ -179,7 +179,7 @@ const sections: Section[] = [
       "<image>textures/texture.jpg</image>",
       "Links load external JSON or FFON files as children:",
       {
-        key: "<link>assets/sf.json</link>",
+        key: "<link>lib/lib_tutorial/assets/sf.json</link>",
         children: [],
       },
       "You can test scroll mode on the text below: press Tab twice from operator general",
