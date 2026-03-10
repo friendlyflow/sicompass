@@ -47,9 +47,8 @@
     "project": [
         "one mand",
         {
-            "id": [
-                "one mand",
-                "<input></input>"
+            "id: <input></input>": [
+                "one mand"
             ]
         }
     ],
@@ -73,7 +72,7 @@
                             "grey"
                         ]
                     ],
-                    "dimensions: <input></input": [
+                    "dimensions: <input></input>": [
                         "one mand"
                     ]
                 }
