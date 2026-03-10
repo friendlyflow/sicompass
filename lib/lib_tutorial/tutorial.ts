@@ -176,6 +176,7 @@ const sections: Section[] = [
           "red",
         ],
       },
+      "<image>textures/texture.jpg</image>",
       "Image with prefix: <image>textures/texture.jpg</image> and suffix",
       "Links load external JSON or FFON files as children:",
       {

@@ -588,7 +588,7 @@ static int getItemLineCount(const ListItem *item, SiCompassApplication *app,
     const char *label = item->label;
     if (label && strncmp(label, "-p ", 3) == 0) {
         const char *imagePath = item->data ? item->data : label + 3;
-        const char *displayText = label + 3;
+        const char *displayText = label;
         // Split display text into prefix and suffix around imagePath
         const char *pathInDisplay = item->data ? strstr(displayText, item->data) : NULL;
         int prefixLines = 0;
@@ -786,7 +786,7 @@ void renderInteraction(SiCompassApplication *app) {
         // Check if this is an image item
         if (list[i].label && strncmp(list[i].label, "-p ", 3) == 0) {
             const char *imagePath = list[i].data ? list[i].data : list[i].label + 3;
-            const char *displayText = list[i].label + 3;
+            const char *displayText = list[i].label;
 
             // Split display text into prefix and suffix around imagePath
             const char *pathInDisplay = list[i].data ? strstr(displayText, list[i].data) : NULL;
@@ -1219,7 +1219,7 @@ void renderSimpleSearch(SiCompassApplication *app) {
         // Check if this is an image item
         if (list[i].label && strncmp(list[i].label, "-p ", 3) == 0) {
             const char *imagePath = list[i].data ? list[i].data : list[i].label + 3;
-            const char *displayText = list[i].label + 3;
+            const char *displayText = list[i].label;
 
             // Split display text into prefix and suffix around imagePath
             const char *pathInDisplay = list[i].data ? strstr(displayText, list[i].data) : NULL;
@@ -1424,7 +1424,7 @@ void renderExtendedSearch(SiCompassApplication *app) {
         // Check if this is an image item
         if (list[i].label && strncmp(list[i].label, "-p ", 3) == 0) {
             const char *imagePath = list[i].data ? list[i].data : list[i].label + 3;
-            const char *displayText = list[i].label + 3;
+            const char *displayText = list[i].label;
 
             // Split display text into prefix and suffix around imagePath
             const char *pathInDisplay = list[i].data ? strstr(displayText, list[i].data) : NULL;
