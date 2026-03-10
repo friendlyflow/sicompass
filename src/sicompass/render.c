@@ -845,15 +845,15 @@ void renderInteraction(SiCompassApplication *app) {
                 float imgX = ipMaxX;
                 float imgY = (float)itemYPos - app->fontRenderer->ascender * scale - TEXT_PADDING;
 
-                // Render dark green border around image when selected
+                // Border at outer edge, image inset by border thickness
+                float border = 2.0f;
                 if (isSelected) {
-                    float border = 2.0f;
-                    prepareRectangle(app, imgX - border, imgY - border,
-                                     displayW + border * 2.0f, displayH + border * 2.0f,
+                    prepareRectangle(app, imgX, imgY, displayW, displayH,
                                      app->appRenderer->palette->selected, 0.0f);
                 }
 
-                prepareImage(app, imgX, imgY, displayW, displayH);
+                prepareImage(app, imgX + border, imgY + border,
+                             displayW - border * 2.0f, displayH - border * 2.0f);
 
                 yPos = itemYPos + (int)ceilf(displayH);
             } else {
@@ -1272,14 +1272,14 @@ void renderSimpleSearch(SiCompassApplication *app) {
                 float imgX = ipMaxX;
                 float imgY = (float)itemYPos - app->fontRenderer->ascender * scale - TEXT_PADDING;
 
+                float border = 2.0f;
                 if (isSelected) {
-                    float border = 2.0f;
-                    prepareRectangle(app, imgX - border, imgY - border,
-                                     displayW + border * 2.0f, displayH + border * 2.0f,
+                    prepareRectangle(app, imgX, imgY, displayW, displayH,
                                      app->appRenderer->palette->selected, 0.0f);
                 }
 
-                prepareImage(app, imgX, imgY, displayW, displayH);
+                prepareImage(app, imgX + border, imgY + border,
+                             displayW - border * 2.0f, displayH - border * 2.0f);
 
                 yPos = itemYPos + (int)ceilf(displayH);
             } else {
@@ -1482,14 +1482,14 @@ void renderExtendedSearch(SiCompassApplication *app) {
                 float imgX = ipMaxX;
                 float imgY = (float)itemYPos - app->fontRenderer->ascender * scale - TEXT_PADDING;
 
+                float border = 2.0f;
                 if (isSelected) {
-                    float border = 2.0f;
-                    prepareRectangle(app, imgX - border, imgY - border,
-                                     displayW + border * 2.0f, displayH + border * 2.0f,
+                    prepareRectangle(app, imgX, imgY, displayW, displayH,
                                      app->appRenderer->palette->selected, 0.0f);
                 }
 
-                prepareImage(app, imgX, imgY, displayW, displayH);
+                prepareImage(app, imgX + border, imgY + border,
+                             displayW - border * 2.0f, displayH - border * 2.0f);
 
                 yPos = itemYPos + (int)ceilf(displayH);
             } else {
