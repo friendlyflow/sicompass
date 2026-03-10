@@ -189,9 +189,10 @@ const sections: Section[] = [
   {
     key: "Configuration",
     children: [
-      "Ctrl+S: save the current provider's configuration.",
-      "Ctrl+Shift+S: save as (enter a filename).",
-      "Ctrl+O: open/load a configuration file.",
+      "Ctrl+S: save the active provider's data (only if supportsConfigFiles is true).",
+      "Ctrl+Shift+S: save as with a custom filename (same restriction).",
+      "Ctrl+O: open/load a saved configuration file (same restriction).",
+      "Plugins enable this via \"supportsConfigFiles\": true in plugin.json.",
       "Config is stored in ~/.config/sicompass/settings.json.",
       "The programsToLoad array controls which providers are loaded.",
     ],
@@ -199,6 +200,18 @@ const sections: Section[] = [
   {
     key: "Development",
     children: [
+      {
+        key: "Creating a Plugin",
+        children: [
+          "1. Create a folder: ~/.config/sicompass/plugins/my-plugin/",
+          "2. Create plugin.json: { \"name\": \"my-plugin\", \"displayName\": \"my plugin\", \"entry\": \"plugin.ts\" }",
+          "3. Write plugin.ts: read the path from process.argv, output a JSON array to stdout.",
+          "4. Objects become navigable folders, strings become leaf items.",
+          "5. Enable your plugin in Settings under 'Available programs'.",
+          "Optional: add \"supportsConfigFiles\": true to plugin.json to enable Ctrl+S/O save/load.",
+          "See sdk/examples/typescript/ for a complete working example.",
+        ],
+      },
       {
         key: "Provider Types",
         children: [
@@ -216,6 +229,7 @@ const sections: Section[] = [
               "fetch: return an array of FFON elements for the current path (required)",
               "commitEdit: save an inline edit (e.g. rename a file or change a setting value)",
               "dashboardImagePath: set a path to an image shown fullscreen via 'd' key",
+              "supportsConfigFiles: enable Ctrl+S/Shift+S/O for save/load (plugin.json: \"supportsConfigFiles\": true)",
             ],
           },
           {
