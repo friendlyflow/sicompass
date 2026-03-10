@@ -803,19 +803,14 @@ void renderInteraction(SiCompassApplication *app) {
                 if (afterPath[0] != '\0') imageSuffix = afterPath;
             }
 
-            // Count prefix/suffix lines for maxH calculation
-            int prefixLineCount = (imagePrefix[0] && strlen(imagePrefix) > 3) ? countTextLines(imagePrefix) : 0;
+            // Compute image position before drawing
             int suffixLineCount = imageSuffix ? countTextLines(imageSuffix) : 0;
-
-            // Render prefix above image, or bare "-p" inline with image
-            if (imagePrefix[0] && strlen(imagePrefix) > 3) {
-                int prefixLines = renderText(app, imagePrefix, itemX, itemYPos,
-                                             app->appRenderer->palette->text, isSelected);
-                yPos += lineHeight * prefixLines;
-                itemYPos = yPos;
-            } else {
-                renderText(app, "-p", itemX, itemYPos, app->appRenderer->palette->text, isSelected);
-            }
+            int prefixLineCount = (imagePrefix[0] && strlen(imagePrefix) > 3) ? countTextLines(imagePrefix) : 0;
+            float ipMinX, ipMinY, ipMaxX, ipMaxY;
+            calculateTextBounds(app, "-p ", (float)itemX, (float)itemYPos, scale,
+                               &ipMinX, &ipMinY, &ipMaxX, &ipMaxY);
+            float imgX = ipMaxX;
+            float bgTop = (float)itemYPos - app->fontRenderer->ascender * scale - TEXT_PADDING;
 
             if (loadImageTexture(app, imagePath)) {
                 ImageRenderer *ir = app->imageRenderer;
@@ -838,20 +833,35 @@ void renderInteraction(SiCompassApplication *app) {
                 float displayW = imgW * displayScale;
                 float displayH = imgH * displayScale;
 
-                // Position image at end of "-p " list prefix
-                float ipMinX, ipMinY, ipMaxX, ipMaxY;
-                calculateTextBounds(app, "-p ", (float)itemX, (float)itemYPos, scale,
-                                   &ipMinX, &ipMinY, &ipMaxX, &ipMaxY);
-                float imgX = ipMaxX;
-                float imgY = (float)itemYPos - app->fontRenderer->ascender * scale - TEXT_PADDING;
+                // Compute image Y after prefix lines advance itemYPos
+                int renderItemYPos = itemYPos;
+                if (prefixLineCount > 0) {
+                    renderItemYPos = itemYPos + lineHeight * prefixLineCount;
+                }
+                float imgY = (float)renderItemYPos - app->fontRenderer->ascender * scale - TEXT_PADDING;
 
-                // Border at outer edge, image inset by border thickness
-                float border = 2.0f;
+                // Draw tight-fitting selection background
                 if (isSelected) {
-                    prepareRectangle(app, imgX, imgY, displayW, displayH,
+                    float bgRight = imgX + displayW;
+                    float bgBottom = imgY + displayH + (float)(suffixLineCount * lineHeight);
+                    prepareRectangle(app, (float)itemX - TEXT_PADDING, bgTop,
+                                     bgRight - ((float)itemX - TEXT_PADDING),
+                                     bgBottom - bgTop,
                                      app->appRenderer->palette->selected, 0.0f);
                 }
 
+                // Render prefix above image, or bare "-p" inline with image
+                if (imagePrefix[0] && strlen(imagePrefix) > 3) {
+                    int prefixLines = renderText(app, imagePrefix, itemX, itemYPos,
+                                                 app->appRenderer->palette->text, false);
+                    yPos += lineHeight * prefixLines;
+                    itemYPos = yPos;
+                } else {
+                    renderText(app, "-p", itemX, itemYPos, app->appRenderer->palette->text, false);
+                }
+
+                // Image inset by border thickness
+                float border = 2.0f;
                 prepareImage(app, imgX + border, imgY + border,
                              displayW - border * 2.0f, displayH - border * 2.0f);
 
@@ -865,7 +875,7 @@ void renderInteraction(SiCompassApplication *app) {
             // Render suffix below image
             if (imageSuffix) {
                 int suffixLines = renderText(app, imageSuffix, itemX, yPos,
-                                             app->appRenderer->palette->text, isSelected);
+                                             app->appRenderer->palette->text, false);
                 yPos += lineHeight * suffixLines;
             }
             continue;
@@ -1241,15 +1251,14 @@ void renderSimpleSearch(SiCompassApplication *app) {
                 if (afterPath[0] != '\0') imageSuffix = afterPath;
             }
 
-            // Render prefix above image, or bare "-p" inline with image
-            if (imagePrefix[0] && strlen(imagePrefix) > 3) {
-                int prefixLines = renderText(app, imagePrefix, itemX, itemYPos,
-                                             app->appRenderer->palette->text, isSelected);
-                yPos += lineHeight * prefixLines;
-                itemYPos = yPos;
-            } else {
-                renderText(app, "-p", itemX, itemYPos, app->appRenderer->palette->text, isSelected);
-            }
+            // Compute image position before drawing
+            int suffixLineCount = imageSuffix ? countTextLines(imageSuffix) : 0;
+            int prefixLineCount = (imagePrefix[0] && strlen(imagePrefix) > 3) ? countTextLines(imagePrefix) : 0;
+            float ipMinX, ipMinY, ipMaxX, ipMaxY;
+            calculateTextBounds(app, "-p ", (float)itemX, (float)itemYPos, scale,
+                               &ipMinX, &ipMinY, &ipMaxX, &ipMaxY);
+            float imgX = ipMaxX;
+            float bgTop = (float)itemYPos - app->fontRenderer->ascender * scale - TEXT_PADDING;
 
             if (loadImageTexture(app, imagePath)) {
                 ImageRenderer *ir = app->imageRenderer;
@@ -1257,7 +1266,7 @@ void renderSimpleSearch(SiCompassApplication *app) {
                 float imgH = (float)ir->textureHeight;
 
                 float maxW = charWidth * 120.0f;
-                float maxH = (float)app->swapChainExtent.height - (float)(lineHeight * headerLines);
+                float maxH = (float)app->swapChainExtent.height - (float)(lineHeight * (headerLines + prefixLineCount + suffixLineCount));
 
                 float displayScale = 1.0f;
                 if (imgW > maxW) displayScale = maxW / imgW;
@@ -1266,18 +1275,33 @@ void renderSimpleSearch(SiCompassApplication *app) {
                 float displayW = imgW * displayScale;
                 float displayH = imgH * displayScale;
 
-                float ipMinX, ipMinY, ipMaxX, ipMaxY;
-                calculateTextBounds(app, "-p ", (float)itemX, (float)itemYPos, scale,
-                                   &ipMinX, &ipMinY, &ipMaxX, &ipMaxY);
-                float imgX = ipMaxX;
-                float imgY = (float)itemYPos - app->fontRenderer->ascender * scale - TEXT_PADDING;
+                int renderItemYPos = itemYPos;
+                if (prefixLineCount > 0) {
+                    renderItemYPos = itemYPos + lineHeight * prefixLineCount;
+                }
+                float imgY = (float)renderItemYPos - app->fontRenderer->ascender * scale - TEXT_PADDING;
 
-                float border = 2.0f;
+                // Draw tight-fitting selection background
                 if (isSelected) {
-                    prepareRectangle(app, imgX, imgY, displayW, displayH,
+                    float bgRight = imgX + displayW;
+                    float bgBottom = imgY + displayH + (float)(suffixLineCount * lineHeight);
+                    prepareRectangle(app, (float)itemX - TEXT_PADDING, bgTop,
+                                     bgRight - ((float)itemX - TEXT_PADDING),
+                                     bgBottom - bgTop,
                                      app->appRenderer->palette->selected, 0.0f);
                 }
 
+                // Render prefix above image, or bare "-p" inline with image
+                if (imagePrefix[0] && strlen(imagePrefix) > 3) {
+                    int prefixLines = renderText(app, imagePrefix, itemX, itemYPos,
+                                                 app->appRenderer->palette->text, false);
+                    yPos += lineHeight * prefixLines;
+                    itemYPos = yPos;
+                } else {
+                    renderText(app, "-p", itemX, itemYPos, app->appRenderer->palette->text, false);
+                }
+
+                float border = 2.0f;
                 prepareImage(app, imgX + border, imgY + border,
                              displayW - border * 2.0f, displayH - border * 2.0f);
 
@@ -1290,7 +1314,7 @@ void renderSimpleSearch(SiCompassApplication *app) {
             // Render suffix below image
             if (imageSuffix) {
                 int suffixLines = renderText(app, imageSuffix, itemX, yPos,
-                                             app->appRenderer->palette->text, isSelected);
+                                             app->appRenderer->palette->text, false);
                 yPos += lineHeight * suffixLines;
             }
             continue;
@@ -1451,15 +1475,14 @@ void renderExtendedSearch(SiCompassApplication *app) {
                 if (afterPath[0] != '\0') imageSuffix = afterPath;
             }
 
-            // Render prefix above image, or bare "-p" inline with image
-            if (imagePrefix[0] && strlen(imagePrefix) > 3) {
-                int prefixLines = renderText(app, imagePrefix, itemX, itemYPos,
-                                             app->appRenderer->palette->text, isSelected);
-                yPos += lineHeight * prefixLines;
-                itemYPos = yPos;
-            } else {
-                renderText(app, "-p", itemX, itemYPos, app->appRenderer->palette->text, isSelected);
-            }
+            // Compute image position before drawing
+            int suffixLineCount = imageSuffix ? countTextLines(imageSuffix) : 0;
+            int prefixLineCount = (imagePrefix[0] && strlen(imagePrefix) > 3) ? countTextLines(imagePrefix) : 0;
+            float ipMinX, ipMinY, ipMaxX, ipMaxY;
+            calculateTextBounds(app, "-p ", (float)itemX, (float)itemYPos, scale,
+                               &ipMinX, &ipMinY, &ipMaxX, &ipMaxY);
+            float imgX = ipMaxX;
+            float bgTop = (float)itemYPos - app->fontRenderer->ascender * scale - TEXT_PADDING;
 
             if (loadImageTexture(app, imagePath)) {
                 ImageRenderer *ir = app->imageRenderer;
@@ -1467,7 +1490,7 @@ void renderExtendedSearch(SiCompassApplication *app) {
                 float imgH = (float)ir->textureHeight;
 
                 float maxW = charWidth * 120.0f;
-                float maxH = (float)app->swapChainExtent.height - (float)(lineHeight * headerLines);
+                float maxH = (float)app->swapChainExtent.height - (float)(lineHeight * (headerLines + prefixLineCount + suffixLineCount));
 
                 float displayScale = 1.0f;
                 if (imgW > maxW) displayScale = maxW / imgW;
@@ -1476,18 +1499,33 @@ void renderExtendedSearch(SiCompassApplication *app) {
                 float displayW = imgW * displayScale;
                 float displayH = imgH * displayScale;
 
-                float ipMinX, ipMinY, ipMaxX, ipMaxY;
-                calculateTextBounds(app, "-p ", (float)itemX, (float)itemYPos, scale,
-                                   &ipMinX, &ipMinY, &ipMaxX, &ipMaxY);
-                float imgX = ipMaxX;
-                float imgY = (float)itemYPos - app->fontRenderer->ascender * scale - TEXT_PADDING;
+                int renderItemYPos = itemYPos;
+                if (prefixLineCount > 0) {
+                    renderItemYPos = itemYPos + lineHeight * prefixLineCount;
+                }
+                float imgY = (float)renderItemYPos - app->fontRenderer->ascender * scale - TEXT_PADDING;
 
-                float border = 2.0f;
+                // Draw tight-fitting selection background
                 if (isSelected) {
-                    prepareRectangle(app, imgX, imgY, displayW, displayH,
+                    float bgRight = imgX + displayW;
+                    float bgBottom = imgY + displayH + (float)(suffixLineCount * lineHeight);
+                    prepareRectangle(app, (float)itemX - TEXT_PADDING, bgTop,
+                                     bgRight - ((float)itemX - TEXT_PADDING),
+                                     bgBottom - bgTop,
                                      app->appRenderer->palette->selected, 0.0f);
                 }
 
+                // Render prefix above image, or bare "-p" inline with image
+                if (imagePrefix[0] && strlen(imagePrefix) > 3) {
+                    int prefixLines = renderText(app, imagePrefix, itemX, itemYPos,
+                                                 app->appRenderer->palette->text, false);
+                    yPos += lineHeight * prefixLines;
+                    itemYPos = yPos;
+                } else {
+                    renderText(app, "-p", itemX, itemYPos, app->appRenderer->palette->text, false);
+                }
+
+                float border = 2.0f;
                 prepareImage(app, imgX + border, imgY + border,
                              displayW - border * 2.0f, displayH - border * 2.0f);
 
@@ -1500,7 +1538,7 @@ void renderExtendedSearch(SiCompassApplication *app) {
             // Render suffix below image
             if (imageSuffix) {
                 int suffixLines = renderText(app, imageSuffix, itemX, yPos,
-                                             app->appRenderer->palette->text, isSelected);
+                                             app->appRenderer->palette->text, false);
                 yPos += lineHeight * suffixLines;
             }
             continue;
