@@ -826,7 +826,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                 FfonElement *elem = arr[idx];
                 if (elem->type == FFON_STRING) {
                     // If element is an <input>, activate it (commit current content)
-                    if (providerTagHasInput(elem->data.string)) {
+                    if (providerTagHasInput(elem->data.string) && !appRenderer->pendingFileBrowserOpen) {
                         char *content = providerTagExtractContent(elem->data.string);
                         if (content) {
                             providerCommitEdit(appRenderer, content, content);
