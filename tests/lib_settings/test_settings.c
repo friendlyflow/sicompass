@@ -583,6 +583,54 @@ void test_init_calls_callback_for_checkbox_entries(void) {
     free(p);
 }
 
+// --- settingsSetCheckboxState ---
+
+void test_setCheckboxState_updates_without_callback(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+
+    settingsAddSectionCheckbox(p, "sicompass", "maximized", "maximized", false);
+
+    callbackCount = 0;
+    settingsSetCheckboxState(p, "maximized", true);
+
+    // Should NOT have called the apply callback
+    TEST_ASSERT_EQUAL_INT(0, callbackCount);
+
+    // Fetch should show checked
+    int count;
+    FfonElement **elems = p->fetch(p, &count);
+    FfonObject *section = elems[0]->data.object;  // sicompass section
+    // Find the checkbox element
+    bool foundChecked = false;
+    for (int i = 0; i < section->count; i++) {
+        if (section->elements[i]->type == FFON_STRING &&
+            providerTagHasCheckboxChecked(section->elements[i]->data.string)) {
+            foundChecked = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE(foundChecked);
+
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+    free(p->state);
+    free(p);
+}
+
+void test_setCheckboxState_no_change_skips(void) {
+    Provider *p = settingsProviderCreate(testApplyCallback, NULL);
+
+    settingsAddSectionCheckbox(p, "sicompass", "maximized", "maximized", false);
+
+    callbackCount = 0;
+    settingsSetCheckboxState(p, "maximized", false);  // already false
+
+    TEST_ASSERT_EQUAL_INT(0, callbackCount);
+
+    free(p->state);
+    free(p);
+}
+
 // --- settingsRemoveSection ---
 
 void test_removeSection_removes_from_fetch(void) {
@@ -752,6 +800,8 @@ int main(void) {
     RUN_TEST(test_checkbox_renders_unchecked);
     RUN_TEST(test_onCheckboxChange_updates_state);
     RUN_TEST(test_init_calls_callback_for_checkbox_entries);
+    RUN_TEST(test_setCheckboxState_updates_without_callback);
+    RUN_TEST(test_setCheckboxState_no_change_skips);
 
     RUN_TEST(test_removeSection_removes_from_fetch);
     RUN_TEST(test_removeSection_removes_radio_entries);

@@ -88,3 +88,13 @@ void settingsAddSectionCheckbox(Provider *provider,
                                 const char *label,
                                 const char *configKey,
                                 bool defaultChecked);
+
+/**
+ * Programmatically update a checkbox's state by its configKey.
+ * Updates internal state and saves config, but does NOT call applyCallback.
+ * Use this to sync checkbox state from external events (e.g. window state changes)
+ * without triggering feedback loops.
+ */
+void settingsSetCheckboxState(Provider *provider,
+                              const char *configKey,
+                              bool checked);
