@@ -142,6 +142,7 @@ static FfonElement** settingsFetch(Provider *self, int *outCount) {
 
     FfonElement *sicompassObj = ffonElementCreateObject("sicompass");
     ffonObjectAddElement(sicompassObj->data.object, radioGroup);
+    settingsPopulateSection(state, sicompassObj, "sicompass");
     arr[n++] = sicompassObj;
 
     // Registered sections (skip priority section — already rendered above)
@@ -671,4 +672,26 @@ void settingsAddSectionCheckbox(Provider *provider,
         if (strcmp(state->sections[i], sectionName) == 0) { found2 = true; break; }
     }
     if (!found2) settingsAddSection(provider, sectionName);
+}
+
+void settingsSetCheckboxState(Provider *provider,
+                              const char *configKey,
+                              bool checked) {
+    if (!provider || !configKey) return;
+    SettingsProviderState *state = (SettingsProviderState *)provider->state;
+
+    for (int i = 0; i < state->checkboxEntryCount; i++) {
+        SettingsCheckboxEntry *e = &state->checkboxEntries[i];
+        if (strcmp(e->configKey, configKey) == 0) {
+            if (e->checked == checked) return;  // no change
+            e->checked = checked;
+
+            char *configPath = providerGetMainConfigPath();
+            if (configPath) {
+                settingsSaveConfig(state, configPath);
+                free(configPath);
+            }
+            return;
+        }
+    }
 }

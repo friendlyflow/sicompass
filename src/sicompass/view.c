@@ -44,6 +44,14 @@ static void applySettings(const char *key, const char *value, void *userdata) {
             programsDisableProvider(name, appRenderer);
         return;
     }
+    if (strcmp(key, "maximized") == 0) {
+        SDL_Window *window = appRenderer->app->window;
+        if (strcmp(value, "true") == 0)
+            SDL_MaximizeWindow(window);
+        else
+            SDL_RestoreWindow(window);
+        return;
+    }
     if (strcmp(key, "colorScheme") == 0) {
         appRenderer->palette = (strcmp(value, "light") == 0) ? &PALETTE_LIGHT : &PALETTE_DARK;
         appRenderer->needsRedraw = true;
@@ -168,6 +176,7 @@ void mainLoop(SiCompassApplication* app) {
 
     // Create settings before programs so they can register their settings sections
     Provider *settingsProvider = settingsProviderCreate(applySettings, app->appRenderer);
+    settingsAddSectionCheckbox(settingsProvider, "sicompass", "maximized", "maximized", false);
 
     // File browser — always present, not user-configurable
     Provider *fileBrowserProvider = providerFactoryCreate("file browser");
@@ -276,8 +285,19 @@ void mainLoop(SiCompassApplication* app) {
                     }
                     break;
 
-                case SDL_EVENT_WINDOW_RESIZED:
                 case SDL_EVENT_WINDOW_MAXIMIZED:
+                    if (event.window.windowID != app->windowId) break;
+                    app->framebufferResized = true;
+                    app->appRenderer->needsRedraw = true;
+                    settingsSetCheckboxState(settingsProvider, "maximized", true);
+                    break;
+                case SDL_EVENT_WINDOW_RESTORED:
+                    if (event.window.windowID != app->windowId) break;
+                    app->framebufferResized = true;
+                    app->appRenderer->needsRedraw = true;
+                    settingsSetCheckboxState(settingsProvider, "maximized", false);
+                    break;
+                case SDL_EVENT_WINDOW_RESIZED:
                 case SDL_EVENT_WINDOW_EXPOSED:
                     if (event.window.windowID != app->windowId) break;
                     app->framebufferResized = true;
