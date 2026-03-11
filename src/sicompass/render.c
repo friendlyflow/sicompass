@@ -1636,6 +1636,32 @@ void renderScroll(SiCompassApplication *app) {
 
             if (providerTagHasImage(text)) {
                 char *imagePath = providerTagExtractImageContent(text);
+
+                // Extract prefix (text before <image>) and suffix (text after </image>)
+                const char *imgTagOpen = strstr(text, IMAGE_TAG_OPEN);
+                const char *imgTagClose = imgTagOpen ? strstr(imgTagOpen, IMAGE_TAG_CLOSE) : NULL;
+                char imagePrefix[MAX_LINE_LENGTH] = {0};
+                const char *imageSuffix = NULL;
+                int prefixLines = 0;
+                int suffixLines = 0;
+                if (imgTagOpen && imgTagClose) {
+                    size_t prefixLen = imgTagOpen - text;
+                    if (prefixLen > 0 && prefixLen < MAX_LINE_LENGTH) {
+                        strncpy(imagePrefix, text, prefixLen);
+                        char *stripped = providerTagStripDisplay(imagePrefix);
+                        if (stripped) {
+                            strncpy(imagePrefix, stripped, MAX_LINE_LENGTH - 1);
+                            free(stripped);
+                        }
+                        if (imagePrefix[0]) prefixLines = countTextLines(imagePrefix);
+                    }
+                    const char *afterClose = imgTagClose + IMAGE_TAG_CLOSE_LEN;
+                    if (afterClose[0] != '\0') {
+                        imageSuffix = afterClose;
+                        suffixLines = countTextLines(imageSuffix);
+                    }
+                }
+
                 if (imagePath && loadImageTexture(app, imagePath)) {
                     ImageRenderer *ir = app->imageRenderer;
                     float imgW = (float)ir->textureWidth;
@@ -1650,8 +1676,16 @@ void renderScroll(SiCompassApplication *app) {
                     float displayW = imgW * displayScale;
                     float displayH = imgH * displayScale;
 
+                    // Render prefix text above image
+                    if (prefixLines > 0) {
+                        renderText(app, imagePrefix, 50, yPos, app->appRenderer->palette->text, false);
+                    }
+
                     float imgX = 50.0f;
                     float imgY = 1.5f * (float)lineHeight - (float)(app->appRenderer->textScrollOffset * lineHeight);
+                    if (prefixLines > 0) {
+                        imgY += (float)(prefixLines * lineHeight);
+                    }
 
                     prepareImage(app, imgX, imgY, displayW, displayH);
 
@@ -1668,10 +1702,21 @@ void renderScroll(SiCompassApplication *app) {
                         dc->vertices[3].texCoord[1] = uvTop;
                     }
 
+                    // Render suffix text below image (match prefix-to-image gap)
+                    if (imageSuffix) {
+                        float textImageGap = 0.5f * (app->fontRenderer->ascender + app->fontRenderer->descender) * scale;
+                        int suffixYPos = (int)(imgY + displayH + textImageGap) + (int)(app->fontRenderer->ascender * scale) + TEXT_PADDING;
+                        char *strippedSuffix = providerTagStripDisplay(imageSuffix);
+                        renderText(app, strippedSuffix ? strippedSuffix : imageSuffix, 50, suffixYPos, app->appRenderer->palette->text, false);
+                        free(strippedSuffix);
+                    }
+
                     int imageLines = (int)ceilf(displayH / (float)lineHeight);
-                    app->appRenderer->textScrollLineCount = imageLines > 1 ? imageLines : 1;
+                    if (imageLines < 1) imageLines = 1;
+                    int totalLines = prefixLines + imageLines + suffixLines;
+                    app->appRenderer->textScrollLineCount = totalLines;
                 } else {
-                    int lines = renderText(app, imagePath ? imagePath : text, 50, yPos, app->appRenderer->palette->text, true);
+                    int lines = renderText(app, imagePath ? imagePath : text, 50, yPos, app->appRenderer->palette->text, false);
                     app->appRenderer->textScrollLineCount = lines;
                 }
                 free(imagePath);
@@ -1708,37 +1753,60 @@ void renderScrollSearch(SiCompassApplication *app) {
         }
     }
 
-    // Handle image elements: show search bar with 0 matches and render image
-    if (providerTagHasImage(rawText)) {
-        char searchDisplay[MAX_LINE_LENGTH];
-        snprintf(searchDisplay, sizeof(searchDisplay), "search: %s [0 items]",
-                 app->appRenderer->inputBuffer);
-        renderText(app, searchDisplay, 50, lineHeight * 2, app->appRenderer->palette->text, false);
-        app->appRenderer->scrollSearchMatchCount = 0;
-        app->appRenderer->scrollSearchCurrentMatch = 0;
+    // Build searchable text: for images, combine prefix+suffix; otherwise strip tags
+    char *imagePath = NULL;
+    int imagePixelLines = 0;
+    float imageDisplayW = 0, imageDisplayH = 0;
+    int prefixWrappedLineCount = 0;
+    bool hasImage = providerTagHasImage(rawText);
 
-        // Render the image below the search bar
-        char *imagePath = providerTagExtractImageContent(rawText);
+    if (hasImage) {
+        imagePath = providerTagExtractImageContent(rawText);
+
+        // Extract prefix/suffix and build combined searchable text
+        const char *imgTagOpen = strstr(rawText, IMAGE_TAG_OPEN);
+        const char *imgTagClose = imgTagOpen ? strstr(imgTagOpen, IMAGE_TAG_CLOSE) : NULL;
+        char combinedText[MAX_LINE_LENGTH * 2] = {0};
+
+        if (imgTagOpen && imgTagClose) {
+            size_t prefixLen = imgTagOpen - rawText;
+            if (prefixLen > 0 && prefixLen < MAX_LINE_LENGTH) {
+                char prefixBuf[MAX_LINE_LENGTH] = {0};
+                strncpy(prefixBuf, rawText, prefixLen);
+                char *strippedPfx = providerTagStripDisplay(prefixBuf);
+                const char *pfx = strippedPfx ? strippedPfx : prefixBuf;
+                if (pfx[0]) {
+                    strcpy(combinedText, pfx);
+                    strcat(combinedText, "\n");
+                }
+                free(strippedPfx);
+            }
+            const char *afterClose = imgTagClose + IMAGE_TAG_CLOSE_LEN;
+            if (afterClose[0] != '\0') {
+                char *strippedSfx = providerTagStripDisplay(afterClose);
+                strcat(combinedText, strippedSfx ? strippedSfx : afterClose);
+                free(strippedSfx);
+            }
+        }
+
+        stripped = strdup(combinedText);
+
+        // Load image dimensions
         if (imagePath && loadImageTexture(app, imagePath)) {
             ImageRenderer *ir = app->imageRenderer;
             float imgW = (float)ir->textureWidth;
             float imgH = (float)ir->textureHeight;
             float imgMaxW = charWidth * 120.0f;
-            float displayScale = 1.0f;
-            if (imgW > imgMaxW) displayScale = imgMaxW / imgW;
-            float displayW = imgW * displayScale;
-            float displayH = imgH * displayScale;
-            float imgX = 50.0f;
-            float imgY = (float)(lineHeight * 3) - (float)(app->appRenderer->textScrollOffset * lineHeight);
-            prepareImage(app, imgX, imgY, displayW, displayH);
-            int imageLines = (int)ceilf(displayH / (float)lineHeight);
-            app->appRenderer->textScrollLineCount = imageLines > 1 ? imageLines : 1;
+            float ds = 1.0f;
+            if (imgW > imgMaxW) ds = imgMaxW / imgW;
+            imageDisplayW = imgW * ds;
+            imageDisplayH = imgH * ds;
+            imagePixelLines = (int)ceilf(imageDisplayH / (float)lineHeight);
+            if (imagePixelLines < 1) imagePixelLines = 1;
         }
-        free(imagePath);
-        return;
+    } else {
+        stripped = providerTagStripDisplay(rawText);
     }
-
-    stripped = providerTagStripDisplay(rawText);
     const char *text = stripped ? stripped : rawText;
 
     // Line-wrap the text (same algorithm as renderText first pass)
@@ -1759,6 +1827,8 @@ void renderScrollSearch(SiCompassApplication *app) {
         int currentY = lineHeight * 3 + lineCount * lineHeight;
 
         while (*lineEnd != '\0') {
+            if (*lineEnd == '\n') break;
+
             size_t testLen = lineEnd - lineStart + 1;
             if (testLen >= MAX_LINE_LENGTH) testLen = MAX_LINE_LENGTH - 1;
 
@@ -1786,7 +1856,7 @@ void renderScrollSearch(SiCompassApplication *app) {
         }
 
         size_t lineLen = lineEnd - lineStart;
-        if (lineLen == 0 && *lineStart != '\0') {
+        if (lineLen == 0 && *lineStart != '\0' && *lineStart != '\n') {
             lineLen = 1;
             lineEnd = lineStart + 1;
         }
@@ -1798,10 +1868,27 @@ void renderScrollSearch(SiCompassApplication *app) {
         lineCount++;
 
         lineStart = lineEnd;
-        if (*lineStart == ' ') lineStart++;
+        if (*lineStart == '\n') lineStart++;
+        else if (*lineStart == ' ') lineStart++;
     }
 
-    app->appRenderer->textScrollLineCount = lineCount;
+    // For images, determine which wrapped lines are prefix vs suffix
+    if (hasImage) {
+        for (int i = 0; i < lineCount; i++) {
+            // Lines whose content ends at or before the newline separator are prefix
+            if (lines[i].byteOffset < (int)strlen(text) &&
+                (lines[i].start + lines[i].len <= strchr(text, '\n') || strchr(text, '\n') == NULL)) {
+                prefixWrappedLineCount = i + 1;
+            } else {
+                break;
+            }
+        }
+        // If no newline found (prefix only or suffix only), all lines are prefix
+        if (!strchr(text, '\n')) prefixWrappedLineCount = lineCount;
+        app->appRenderer->textScrollLineCount = lineCount + imagePixelLines;
+    } else {
+        app->appRenderer->textScrollLineCount = lineCount;
+    }
 
     // Find all matches
     typedef struct {
@@ -1855,23 +1942,29 @@ void renderScrollSearch(SiCompassApplication *app) {
         app->appRenderer->scrollSearchCurrentMatch = matchCount > 0 ? matchCount - 1 : 0;
     }
 
-    // Auto-scroll to current match
+    // Auto-scroll to current match (account for image lines in virtual line space)
     if (matchCount > 0) {
         int currentIdx = app->appRenderer->scrollSearchCurrentMatch;
         int matchLine = matches[currentIdx].wrappedLine;
+        // Convert to virtual line (offset suffix lines by image height)
+        int virtualLine = matchLine;
+        if (hasImage && matchLine >= prefixWrappedLineCount) {
+            virtualLine = matchLine + imagePixelLines;
+        }
 
         int headerLines = 3;
         int availableHeight = (int)app->swapChainExtent.height - (lineHeight * headerLines);
         int visibleLines = availableHeight / lineHeight;
         if (visibleLines < 1) visibleLines = 1;
 
-        if (matchLine < app->appRenderer->textScrollOffset) {
-            app->appRenderer->textScrollOffset = matchLine;
-        } else if (matchLine >= app->appRenderer->textScrollOffset + visibleLines) {
-            app->appRenderer->textScrollOffset = matchLine - visibleLines + 1;
+        if (virtualLine < app->appRenderer->textScrollOffset) {
+            app->appRenderer->textScrollOffset = virtualLine;
+        } else if (virtualLine >= app->appRenderer->textScrollOffset + visibleLines) {
+            app->appRenderer->textScrollOffset = virtualLine - visibleLines + 1;
         }
 
-        int maxOffset = lineCount - visibleLines;
+        int totalVirtualLines = hasImage ? lineCount + imagePixelLines : lineCount;
+        int maxOffset = totalVirtualLines - visibleLines;
         if (maxOffset < 0) maxOffset = 0;
         if (app->appRenderer->textScrollOffset > maxOffset)
             app->appRenderer->textScrollOffset = maxOffset;
@@ -1885,12 +1978,46 @@ void renderScrollSearch(SiCompassApplication *app) {
              app->appRenderer->inputBuffer, matchCount);
     renderText(app, searchDisplay, 50, lineHeight * 2, app->appRenderer->palette->text, false);
 
-    // Render text with highlights
+    // Render text with highlights (and image for image elements)
     int textStartY = lineHeight * 3;
     app->appRenderer->renderClipTopY = textStartY;
 
+    // Render image between prefix and suffix lines
+    if (hasImage && imagePath && imagePixelLines > 0) {
+        float imgX = 50.0f;
+        float imgY = (float)textStartY + (float)(prefixWrappedLineCount - app->appRenderer->textScrollOffset) * (float)lineHeight;
+        if (prefixWrappedLineCount > 0) {
+            imgY -= 0.5f * (float)lineHeight;
+        }
+        prepareImage(app, imgX, imgY, imageDisplayW, imageDisplayH);
+
+        // Clip top edge at bottom of search bar line
+        float clipTop = 2.5f * (float)lineHeight;
+        if (imgY < clipTop && app->imageRenderer->drawCallCount > 0) {
+            float uvTop = (clipTop - imgY) / imageDisplayH;
+            ImageDrawCall *dc = &app->imageRenderer->drawCalls[app->imageRenderer->drawCallCount - 1];
+            dc->vertices[0].pos[1] = clipTop;
+            dc->vertices[0].texCoord[1] = uvTop;
+            dc->vertices[1].pos[1] = clipTop;
+            dc->vertices[1].texCoord[1] = uvTop;
+            dc->vertices[3].pos[1] = clipTop;
+            dc->vertices[3].texCoord[1] = uvTop;
+        }
+    }
+    free(imagePath);
+
     for (int i = 0; i < lineCount; i++) {
-        int currentY = textStartY + (i - app->appRenderer->textScrollOffset) * lineHeight;
+        // Compute Y position: suffix lines positioned relative to actual image bottom
+        int currentY;
+        if (hasImage && i >= prefixWrappedLineCount) {
+            float imgYBase = (float)textStartY + (float)(prefixWrappedLineCount - app->appRenderer->textScrollOffset) * (float)lineHeight;
+            if (prefixWrappedLineCount > 0) imgYBase -= 0.5f * (float)lineHeight;
+            float textImageGap = 0.5f * (app->fontRenderer->ascender + app->fontRenderer->descender) * scale;
+            int suffixBaseY = (int)(imgYBase + imageDisplayH + textImageGap) + (int)(app->fontRenderer->ascender * scale) + TEXT_PADDING;
+            currentY = suffixBaseY + (i - prefixWrappedLineCount) * lineHeight;
+        } else {
+            currentY = textStartY + (i - app->appRenderer->textScrollOffset) * lineHeight;
+        }
 
         // Skip lines above viewport
         if (currentY + lineHeight < textStartY) continue;
