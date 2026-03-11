@@ -1,6 +1,6 @@
 # Silicon's Compass
 
-Another structure for people who like structure, but tangible.
+Another structure for people who like structure, but tangible compared to web technology e.g.
 
 ## What is Sicompass?
 
