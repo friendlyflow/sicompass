@@ -42,19 +42,19 @@ describe("tutorial provider", () => {
     expect(keys).toContain("Next Steps");
   });
 
-  test("/Welcome returns 3 concise intro strings", async () => {
+  test("/Welcome returns intro strings", async () => {
     const result = await runTutorial("/Welcome --> here you can go up, down, right or left");
     expect(result).toBeArray();
-    expect(result.length).toBe(3);
+    expect(result.length).toBe(6);
     for (const item of result) {
       expect(typeof item).toBe("string");
     }
   });
 
-  test("/Navigation returns 2 subsections", async () => {
+  test("/Navigation returns intro text and 2 subsections", async () => {
     const result = await runTutorial("/Navigation");
     expect(result).toBeArray();
-    expect(result.length).toBe(2);
+    expect(result.length).toBe(3);
 
     const keys = result.map((item) => {
       if (typeof item === "string") return item;
@@ -67,7 +67,7 @@ describe("tutorial provider", () => {
   test("/Navigation/Modes returns mode descriptions", async () => {
     const result = await runTutorial("/Navigation/Modes");
     expect(result).toBeArray();
-    expect(result.length).toBe(5);
+    expect(result.length).toBe(7);
     for (const item of result) {
       expect(typeof item).toBe("string");
     }
@@ -76,7 +76,7 @@ describe("tutorial provider", () => {
   test("/Editing returns editing instructions", async () => {
     const result = await runTutorial("/Editing");
     expect(result).toBeArray();
-    expect(result.length).toBe(4);
+    expect(result.length).toBe(7);
   });
 
   test("/Programs lists provider subsections", async () => {
@@ -123,21 +123,18 @@ describe("tutorial provider", () => {
   test("/Configuration returns save/load info", async () => {
     const result = await runTutorial("/Configuration");
     expect(result).toBeArray();
-    expect(result.length).toBe(6);
-    for (const item of result) {
-      expect(typeof item).toBe("string");
-    }
+    expect(result.length).toBe(4);
   });
 
-  test("/Development contains 5 subsections", async () => {
+  test("/Development contains intro text and 5 subsections", async () => {
     const result = await runTutorial("/Development");
     expect(result).toBeArray();
-    expect(result.length).toBe(5);
+    expect(result.length).toBe(7);
     const keys = result.map((item) => {
       if (typeof item === "string") return item;
       return Object.keys(item as Record<string, unknown>)[0];
     });
-    expect(keys).toContain("Creating a Plugin");
+    expect(keys).toContain("Creating a TypeScript Plugin");
     expect(keys).toContain("Creating a C Plugin");
     expect(keys).toContain("Provider Types");
     expect(keys).toContain("ProviderOps Functions");
