@@ -722,9 +722,9 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                     // Only commit if changed
                     bool commitSucceeded = false;
                     if (strcmp(oldContent, newContent) != 0) {
-                        if (oldContent[0] == '\0' && elem->type == FFON_OBJECT) {
+                        if (oldContent[0] == '\0' && appRenderer->inputPrefix[0] == '\0' && elem->type == FFON_OBJECT) {
                             commitSucceeded = providerCreateDirectory(appRenderer, newContent);
-                        } else if (oldContent[0] == '\0' && elem->type == FFON_STRING) {
+                        } else if (oldContent[0] == '\0' && appRenderer->inputPrefix[0] == '\0' && elem->type == FFON_STRING) {
                             Provider *p = providerGetActive(appRenderer);
                             if (p && p->createFile) {
                                 commitSucceeded = providerCreateFile(appRenderer, newContent);
