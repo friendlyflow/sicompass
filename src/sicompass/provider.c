@@ -393,14 +393,23 @@ bool providerNavigateRight(AppRenderer *appRenderer) {
         }
     }
 
-    // If object already has children, just navigate into it
+    // If object already has children, navigate into it (using cache unless noCache is set)
     if (obj->count > 0) {
-        if (provider && provider->pushPath && strippedKey && shouldPushPath) {
-            provider->pushPath(provider, strippedKey);
+        if (provider && provider->noCache) {
+            // Discard stale children and fall through to re-fetch below
+            for (int i = 0; i < obj->count; i++) {
+                ffonElementDestroy(obj->elements[i]);
+                obj->elements[i] = NULL;
+            }
+            obj->count = 0;
+        } else {
+            if (provider && provider->pushPath && strippedKey && shouldPushPath) {
+                provider->pushPath(provider, strippedKey);
+            }
+            free(strippedKey);
+            idArrayPush(&appRenderer->currentId, 0);
+            return true;
         }
-        free(strippedKey);
-        idArrayPush(&appRenderer->currentId, 0);
-        return true;
     }
 
     // Fetch children from provider

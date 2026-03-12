@@ -514,6 +514,7 @@ Provider* emailclientGetProvider(void) {
         g_originalInit = g_provider->init;
         g_provider->init = ecInit;
         g_provider->cleanup = ecCleanup;
+        g_provider->noCache = true;
     }
     return g_provider;
 }
