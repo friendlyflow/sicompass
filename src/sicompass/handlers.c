@@ -2495,33 +2495,62 @@ void handleCommand(AppRenderer *appRenderer) {
                 appRenderer->providerCommandName, elementKey, elem->type, errorMsg, sizeof(errorMsg));
 
             if (newElem) {
-                // Insert after current position
-                int insertIdx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1] + 1;
+                // If the current element is an empty placeholder, replace it in-place;
+                // otherwise insert after the current position.
+                char *existingContent = providerTagExtractContent(elementKey);
+                bool isPlaceholder = existingContent && existingContent[0] == '\0';
+                if (existingContent) free(existingContent);
 
-                if (appRenderer->currentId.depth == 1) {
-                    // Root level: insert into appRenderer->ffon[]
-                    if (appRenderer->ffonCount >= appRenderer->ffonCapacity) {
-                        appRenderer->ffonCapacity *= 2;
-                        appRenderer->ffon = realloc(appRenderer->ffon,
-                            appRenderer->ffonCapacity * sizeof(FfonElement*));
+                int insertIdx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+
+                if (isPlaceholder) {
+                    // Replace placeholder in-place
+                    if (appRenderer->currentId.depth == 1) {
+                        ffonElementDestroy(appRenderer->ffon[insertIdx]);
+                        appRenderer->ffon[insertIdx] = newElem;
+                    } else {
+                        IdArray parentId;
+                        idArrayCopy(&parentId, &appRenderer->currentId);
+                        idArrayPop(&parentId);
+                        int parentCount;
+                        FfonElement **parentArr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                                               &parentId, &parentCount);
+                        int parentIdx = parentId.ids[parentId.depth - 1];
+                        if (parentArr && parentIdx >= 0 && parentIdx < parentCount &&
+                            parentArr[parentIdx]->type == FFON_OBJECT) {
+                            FfonObject *parentObj = parentArr[parentIdx]->data.object;
+                            ffonElementDestroy(parentObj->elements[insertIdx]);
+                            parentObj->elements[insertIdx] = newElem;
+                        }
                     }
-                    memmove(&appRenderer->ffon[insertIdx + 1],
-                            &appRenderer->ffon[insertIdx],
-                            (appRenderer->ffonCount - insertIdx) * sizeof(FfonElement*));
-                    appRenderer->ffon[insertIdx] = newElem;
-                    appRenderer->ffonCount++;
                 } else {
-                    // Nested: get parent object and insert
-                    IdArray parentId;
-                    idArrayCopy(&parentId, &appRenderer->currentId);
-                    idArrayPop(&parentId);
-                    int parentCount;
-                    FfonElement **parentArr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
-                                                           &parentId, &parentCount);
-                    int parentIdx = parentId.ids[parentId.depth - 1];
-                    if (parentArr && parentIdx >= 0 && parentIdx < parentCount &&
-                        parentArr[parentIdx]->type == FFON_OBJECT) {
-                        ffonObjectInsertElement(parentArr[parentIdx]->data.object, newElem, insertIdx);
+                    // Insert after current position
+                    insertIdx += 1;
+                    if (appRenderer->currentId.depth == 1) {
+                        // Root level: insert into appRenderer->ffon[]
+                        if (appRenderer->ffonCount >= appRenderer->ffonCapacity) {
+                            appRenderer->ffonCapacity *= 2;
+                            appRenderer->ffon = realloc(appRenderer->ffon,
+                                appRenderer->ffonCapacity * sizeof(FfonElement*));
+                        }
+                        memmove(&appRenderer->ffon[insertIdx + 1],
+                                &appRenderer->ffon[insertIdx],
+                                (appRenderer->ffonCount - insertIdx) * sizeof(FfonElement*));
+                        appRenderer->ffon[insertIdx] = newElem;
+                        appRenderer->ffonCount++;
+                    } else {
+                        // Nested: get parent object and insert
+                        IdArray parentId;
+                        idArrayCopy(&parentId, &appRenderer->currentId);
+                        idArrayPop(&parentId);
+                        int parentCount;
+                        FfonElement **parentArr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                                               &parentId, &parentCount);
+                        int parentIdx = parentId.ids[parentId.depth - 1];
+                        if (parentArr && parentIdx >= 0 && parentIdx < parentCount &&
+                            parentArr[parentIdx]->type == FFON_OBJECT) {
+                            ffonObjectInsertElement(parentArr[parentIdx]->data.object, newElem, insertIdx);
+                        }
                     }
                 }
 
