@@ -1812,6 +1812,9 @@ void handleLeft(AppRenderer *appRenderer) {
                 createListExtendedSearch(appRenderer);
             } else {
                 createListCurrentLayer(appRenderer);
+                appRenderer->inputBuffer[0] = '\0';
+                appRenderer->inputBufferSize = 0;
+                appRenderer->cursorPosition = 0;
             }
             appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
             accesskitSpeakCurrentElement(appRenderer);
@@ -1909,6 +1912,9 @@ void handleRight(AppRenderer *appRenderer) {
                 idArrayCopy(&appRenderer->currentId, &list[appRenderer->listIndex].id);
                 if (providerNavigateRight(appRenderer)) {
                     createListCurrentLayer(appRenderer);
+                    appRenderer->inputBuffer[0] = '\0';
+                    appRenderer->inputBufferSize = 0;
+                    appRenderer->cursorPosition = 0;
                     appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
                     appRenderer->scrollOffset = appRenderer->listIndex;
                     accesskitSpeakCurrentElement(appRenderer);
