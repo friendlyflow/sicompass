@@ -6,7 +6,44 @@
 #include <stdlib.h>
 #include <string.h>
 
-void setUp(void) {}
+// --- Linker wraps for mocking ---
+
+static OAuth2TokenResult g_mockAuthResult;
+static OAuth2TokenResult g_mockRefreshResult;
+
+OAuth2TokenResult __wrap_emailclientOAuth2Authorize(const char *clientId,
+                                                      const char *clientSecret,
+                                                      int timeoutSeconds) {
+    (void)clientId;
+    (void)clientSecret;
+    (void)timeoutSeconds;
+    return g_mockAuthResult;
+}
+
+OAuth2TokenResult __wrap_emailclientOAuth2RefreshToken(const char *clientId,
+                                                        const char *clientSecret,
+                                                        const char *refreshToken) {
+    (void)clientId;
+    (void)clientSecret;
+    (void)refreshToken;
+    return g_mockRefreshResult;
+}
+
+char* __wrap_providerGetMainConfigPath(void) {
+    return NULL;
+}
+
+extern OAuth2TokenResult __real_emailclientOAuth2Authorize(const char *clientId,
+                                                            const char *clientSecret,
+                                                            int timeoutSeconds);
+extern OAuth2TokenResult __real_emailclientOAuth2RefreshToken(const char *clientId,
+                                                               const char *clientSecret,
+                                                               const char *refreshToken);
+
+void setUp(void) {
+    memset(&g_mockAuthResult, 0, sizeof(g_mockAuthResult));
+    memset(&g_mockRefreshResult, 0, sizeof(g_mockRefreshResult));
+}
 void tearDown(void) {}
 
 // --- Factory registration ---
@@ -233,28 +270,75 @@ void test_handle_command_set_client_secret(void) {
     TEST_ASSERT_NULL(r);
 }
 
+// --- OAuth2 login mocked ---
+
+void test_handle_command_login_success(void) {
+    Provider *p = providerFactoryCreate("email client");
+    p->init(p);
+    p->handleCommand(p, "set client id", "test-id.apps.googleusercontent.com",
+                     FFON_STRING, NULL, 0);
+    p->handleCommand(p, "set client secret", "GOCSPX-test-secret",
+                     FFON_STRING, NULL, 0);
+
+    g_mockAuthResult.success = true;
+    strncpy(g_mockAuthResult.accessToken, "mock-access-token",
+            sizeof(g_mockAuthResult.accessToken) - 1);
+    strncpy(g_mockAuthResult.refreshToken, "mock-refresh-token",
+            sizeof(g_mockAuthResult.refreshToken) - 1);
+    g_mockAuthResult.expiresIn = 3600;
+
+    char err[256] = "";
+    FfonElement *r = p->handleCommand(p, "login", NULL, FFON_STRING,
+                                       err, sizeof(err));
+    TEST_ASSERT_NOT_NULL(r);
+    TEST_ASSERT_EQUAL_INT(FFON_STRING, r->type);
+    TEST_ASSERT_NOT_NULL(strstr(r->data.string, "successful"));
+    TEST_ASSERT_EQUAL_STRING("", err);
+    ffonElementDestroy(r);
+}
+
+void test_handle_command_login_oauth_fails(void) {
+    Provider *p = providerFactoryCreate("email client");
+    p->init(p);
+    p->handleCommand(p, "set client id", "test-id.apps.googleusercontent.com",
+                     FFON_STRING, NULL, 0);
+    p->handleCommand(p, "set client secret", "GOCSPX-test-secret",
+                     FFON_STRING, NULL, 0);
+
+    g_mockAuthResult.success = false;
+    strncpy(g_mockAuthResult.error, "user_denied",
+            sizeof(g_mockAuthResult.error) - 1);
+
+    char err[256] = "";
+    FfonElement *r = p->handleCommand(p, "login", NULL, FFON_STRING,
+                                       err, sizeof(err));
+    TEST_ASSERT_NULL(r);
+    TEST_ASSERT_NOT_NULL(strstr(err, "OAuth2 failed"));
+    TEST_ASSERT_NOT_NULL(strstr(err, "user_denied"));
+}
+
 // --- OAuth2 function validation ---
 
 void test_oauth2_authorize_null_params_fails(void) {
-    OAuth2TokenResult r = emailclientOAuth2Authorize(NULL, "secret", 1);
+    OAuth2TokenResult r = __real_emailclientOAuth2Authorize(NULL, "secret", 1);
     TEST_ASSERT_FALSE(r.success);
     TEST_ASSERT_TRUE(strlen(r.error) > 0);
 }
 
 void test_oauth2_authorize_empty_secret_fails(void) {
-    OAuth2TokenResult r = emailclientOAuth2Authorize("id", "", 1);
+    OAuth2TokenResult r = __real_emailclientOAuth2Authorize("id", "", 1);
     TEST_ASSERT_FALSE(r.success);
     TEST_ASSERT_TRUE(strlen(r.error) > 0);
 }
 
 void test_oauth2_refresh_empty_token_fails(void) {
-    OAuth2TokenResult r = emailclientOAuth2RefreshToken("id", "secret", "");
+    OAuth2TokenResult r = __real_emailclientOAuth2RefreshToken("id", "secret", "");
     TEST_ASSERT_FALSE(r.success);
     TEST_ASSERT_TRUE(strlen(r.error) > 0);
 }
 
 void test_oauth2_refresh_null_token_fails(void) {
-    OAuth2TokenResult r = emailclientOAuth2RefreshToken("id", "secret", NULL);
+    OAuth2TokenResult r = __real_emailclientOAuth2RefreshToken("id", "secret", NULL);
     TEST_ASSERT_FALSE(r.success);
     TEST_ASSERT_TRUE(strlen(r.error) > 0);
 }
@@ -289,6 +373,9 @@ int main(void) {
     RUN_TEST(test_handle_command_logout);
     RUN_TEST(test_handle_command_set_client_id);
     RUN_TEST(test_handle_command_set_client_secret);
+
+    RUN_TEST(test_handle_command_login_success);
+    RUN_TEST(test_handle_command_login_oauth_fails);
 
     RUN_TEST(test_oauth2_authorize_null_params_fails);
     RUN_TEST(test_oauth2_authorize_empty_secret_fails);
