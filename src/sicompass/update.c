@@ -636,6 +636,21 @@ void updateFfon(AppRenderer *appRenderer, const char *line, bool isKey, Task tas
                     if (appRenderer->currentId.ids[appRenderer->currentId.depth - 1] > 0) {
                         appRenderer->currentId.ids[appRenderer->currentId.depth - 1]--;
                     }
+
+                    // Insert placeholder if directory is now empty
+                    if (_ffon_count == 0) {
+                        FfonElement *placeholder = ffonElementCreateString("<input></input>");
+                        if (placeholder) {
+                            if (_parentObj) {
+                                ffonObjectInsertElement(_parentObj, placeholder, 0);
+                            } else if (i == 0) {
+                                // Root level: array capacity is still ≥ 1, reuse slot 0
+                                _ffon[0] = placeholder;
+                                appRenderer->ffonCount = 1;
+                            }
+                            appRenderer->currentId.ids[appRenderer->currentId.depth - 1] = 0;
+                        }
+                    }
                 }
                 break;
             }
