@@ -2534,6 +2534,15 @@ void handleCommand(AppRenderer *appRenderer) {
                 appRenderer->listIndex = insertIdx;
                 appRenderer->scrollOffset = 0;
                 handleI(appRenderer);
+
+                // Pre-populate create prefix so user only needs to type the name
+                if (appRenderer->prefixedInsertMode) {
+                    const char *prefix = (newElem->type == FFON_OBJECT) ? "+ " : "- ";
+                    strncpy(appRenderer->inputBuffer, prefix, appRenderer->inputBufferCapacity - 1);
+                    appRenderer->inputBufferSize = (int)strlen(prefix);
+                    appRenderer->cursorPosition = appRenderer->inputBufferSize;
+                    appRenderer->needsRedraw = true;
+                }
             } else if (errorMsg[0]) {
                 setErrorMessage(appRenderer, errorMsg);
                 appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
