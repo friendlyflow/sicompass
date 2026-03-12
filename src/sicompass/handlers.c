@@ -2860,39 +2860,6 @@ static char* resolveSaveFolder(AppRenderer *appRenderer) {
     return path;
 }
 
-// Build the default save path: <saveFolder>/<sanitized_provider_name>.json
-// Returns true on success, false on failure (sets error message).
-static bool buildProviderSavePath(AppRenderer *appRenderer, char *filepath, size_t size) {
-    int rootIdx = appRenderer->currentId.ids[0];
-    if (rootIdx < 0 || rootIdx >= appRenderer->ffonCount) {
-        setErrorMessage(appRenderer, "No active provider");
-        return false;
-    }
-    Provider *provider = appRenderer->providers[rootIdx];
-    if (!provider) {
-        setErrorMessage(appRenderer, "No active provider");
-        return false;
-    }
-    char *saveDir = resolveSaveFolder(appRenderer);
-    if (!saveDir) {
-        setErrorMessage(appRenderer, "Cannot determine save folder");
-        return false;
-    }
-    struct stat st;
-    if (stat(saveDir, &st) != 0 || !S_ISDIR(st.st_mode)) {
-        char msg[256];
-        snprintf(msg, sizeof(msg), "Save folder does not exist: %s", saveDir);
-        setErrorMessage(appRenderer, msg);
-        free(saveDir);
-        return false;
-    }
-    char safeName[256];
-    sanitizeFilename(provider->name, safeName, sizeof(safeName));
-    snprintf(filepath, size, "%s/%s.json", saveDir, safeName);
-    free(saveDir);
-    return true;
-}
-
 // Reset filebrowser path and clear cached tree after save-as/open flows
 // so that re-entering the filebrowser doesn't use a stale currentPath.
 // Must be called while currentId still points to the filebrowser.
@@ -2909,6 +2876,17 @@ static void resetFileBrowserState(AppRenderer *appRenderer) {
             ffonElementDestroy(fbObj->elements[i]);
         }
         fbObj->count = 0;
+        // Re-fetch so the tree isn't left empty
+        if (fbProvider && fbProvider->fetch) {
+            int childCount = 0;
+            FfonElement **children = fbProvider->fetch(fbProvider, &childCount);
+            if (children) {
+                for (int i = 0; i < childCount; i++) {
+                    ffonObjectAddElement(fbObj, children[i]);
+                }
+                free(children);
+            }
+        }
     }
 }
 
@@ -2918,7 +2896,7 @@ void handleSaveProviderConfig(AppRenderer *appRenderer) {
         return;
     }
     char filepath[MAX_URI_LENGTH];
-    if (!buildProviderSavePath(appRenderer, filepath, sizeof(filepath))) return;
+    snprintf(filepath, sizeof(filepath), "%s", appRenderer->currentSavePath);
 
     int rootIdx = appRenderer->currentId.ids[0];
     FfonElement *rootElem = appRenderer->ffon[rootIdx];
