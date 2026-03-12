@@ -738,7 +738,29 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                                 }
                             }
                         } else {
+                            // If editing a flat "label: <input>value</input>" item, temporarily
+                            // push the prefix label onto the provider path so commit can find the entry
+                            bool prefixPathPushed = false;
+                            if (appRenderer->inputPrefix[0] != '\0') {
+                                char labelBuf[MAX_LINE_LENGTH];
+                                strncpy(labelBuf, appRenderer->inputPrefix, sizeof(labelBuf) - 1);
+                                labelBuf[sizeof(labelBuf) - 1] = '\0';
+                                size_t labelLen = strlen(labelBuf);
+                                if (labelLen >= 2 && labelBuf[labelLen-2] == ':' && labelBuf[labelLen-1] == ' ')
+                                    labelBuf[labelLen-2] = '\0';
+                                else if (labelLen >= 1 && labelBuf[labelLen-1] == ':')
+                                    labelBuf[labelLen-1] = '\0';
+                                Provider *pp = providerGetActive(appRenderer);
+                                if (pp && pp->pushPath && labelBuf[0] != '\0') {
+                                    pp->pushPath(pp, labelBuf);
+                                    prefixPathPushed = true;
+                                }
+                            }
                             commitSucceeded = providerCommitEdit(appRenderer, oldContent, newContent);
+                            if (prefixPathPushed) {
+                                Provider *pp = providerGetActive(appRenderer);
+                                if (pp && pp->popPath) pp->popPath(pp);
+                            }
                         }
                         // Update element with new key, preserving prefix/suffix
                         {
@@ -1425,12 +1447,10 @@ static void insertOperatorPlaceholder(AppRenderer *appRenderer, int insertIdx) {
     }
 
     appRenderer->currentId.ids[depth - 1] = insertIdx;
-    appRenderer->prefixedInsertMode = true;
 
-    // Only use prefix mode (- for file, + for dir) if provider supports item creation
-    if (!provider || (!provider->createFile && !provider->createDirectory)) {
-        appRenderer->prefixedInsertMode = false;
-    }
+    // Only use prefix mode (- for file, + for dir) in the file browser
+    appRenderer->prefixedInsertMode =
+        provider && provider->name && strcmp(provider->name, "filebrowser") == 0;
 
     createListCurrentLayer(appRenderer);
     appRenderer->listIndex = insertIdx;
@@ -1970,7 +1990,7 @@ void handleI(AppRenderer *appRenderer) {
                     if (!content) return;
                     if (content[0] == '\0') {
                         Provider *p = providerGetActive(appRenderer);
-                        if (p && (p->createFile || p->createDirectory))
+                        if (p && p->name && strcmp(p->name, "filebrowser") == 0)
                             appRenderer->prefixedInsertMode = true;
                     }
                     free(content);
@@ -2071,7 +2091,7 @@ void handleA(AppRenderer *appRenderer) {
                     if (!content) return;
                     if (content[0] == '\0') {
                         Provider *p = providerGetActive(appRenderer);
-                        if (p && (p->createFile || p->createDirectory))
+                        if (p && p->name && strcmp(p->name, "filebrowser") == 0)
                             appRenderer->prefixedInsertMode = true;
                     }
                     free(content);

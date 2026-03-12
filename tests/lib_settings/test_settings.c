@@ -324,16 +324,11 @@ void test_addSectionText(void) {
     TEST_ASSERT_EQUAL_STRING("sales demo", sdSection->key);
     TEST_ASSERT_EQUAL_INT(1, sdSection->count);
 
-    FfonElement *textObj = sdSection->elements[0];
-    TEST_ASSERT_EQUAL_INT(FFON_OBJECT, textObj->type);
-    TEST_ASSERT_EQUAL_STRING("save folder", textObj->data.object->key);
-
-    // Child should be an <input> string
-    TEST_ASSERT_EQUAL_INT(1, textObj->data.object->count);
-    FfonElement *inputElem = textObj->data.object->elements[0];
-    TEST_ASSERT_EQUAL_INT(FFON_STRING, inputElem->type);
-    TEST_ASSERT_TRUE(providerTagHasInput(inputElem->data.string));
-    char *content = providerTagExtractContent(inputElem->data.string);
+    // Text entry should be a flat string "save folder: <input>Downloads</input>"
+    FfonElement *textElem = sdSection->elements[0];
+    TEST_ASSERT_EQUAL_INT(FFON_STRING, textElem->type);
+    TEST_ASSERT_TRUE(providerTagHasInput(textElem->data.string));
+    char *content = providerTagExtractContent(textElem->data.string);
     TEST_ASSERT_EQUAL_STRING("Downloads", content);
     free(content);
 
@@ -399,9 +394,8 @@ void test_commitEdit_text_entry(void) {
     int count;
     FfonElement **elems = p->fetch(p, &count);
     FfonObject *sdSection = elems[1]->data.object;
-    FfonElement *textObj = sdSection->elements[0];
-    FfonElement *inputElem = textObj->data.object->elements[0];
-    char *content = providerTagExtractContent(inputElem->data.string);
+    FfonElement *textElem = sdSection->elements[0];
+    char *content = providerTagExtractContent(textElem->data.string);
     TEST_ASSERT_EQUAL_STRING("Documents", content);
     free(content);
 
@@ -444,8 +438,9 @@ void test_section_with_radio_and_text(void) {
 
     // First child: radio group
     TEST_ASSERT_TRUE(providerTagHasRadio(section->elements[0]->data.object->key));
-    // Second child: text entry object
-    TEST_ASSERT_EQUAL_STRING("text field", section->elements[1]->data.object->key);
+    // Second child: flat text entry string
+    TEST_ASSERT_EQUAL_INT(FFON_STRING, section->elements[1]->type);
+    TEST_ASSERT_TRUE(providerTagHasInput(section->elements[1]->data.string));
 
     for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
     free(elems);
@@ -755,7 +750,8 @@ void test_removeSection_leaves_other_sections(void) {
     // section B should still have its text entry
     FfonObject *sectionB = elems[1]->data.object;
     TEST_ASSERT_EQUAL_INT(1, sectionB->count);
-    TEST_ASSERT_EQUAL_STRING("label", sectionB->elements[0]->data.object->key);
+    TEST_ASSERT_EQUAL_INT(FFON_STRING, sectionB->elements[0]->type);
+    TEST_ASSERT_TRUE(providerTagHasInput(sectionB->elements[0]->data.string));
 
     for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
     free(elems);
