@@ -100,11 +100,10 @@ static bool settingsPopulateSection(SettingsProviderState *state, FfonElement *s
     for (int j = 0; j < state->textEntryCount; j++) {
         if (strcmp(state->textEntries[j].sectionName, sectionName) == 0) {
             SettingsTextEntry *text = &state->textEntries[j];
-            FfonElement *textObj = ffonElementCreateObject(text->label);
-            char inputBuf[SETTINGS_TEXT_VALUE_MAX + 20];
-            snprintf(inputBuf, sizeof(inputBuf), "<input>%s</input>", text->currentValue);
-            ffonObjectAddElement(textObj->data.object, ffonElementCreateString(inputBuf));
-            ffonObjectAddElement(sectionObj->data.object, textObj);
+            char itemBuf[SETTINGS_RADIO_KEY_MAX + SETTINGS_TEXT_VALUE_MAX + 30];
+            snprintf(itemBuf, sizeof(itemBuf), "%s: <input>%s</input>",
+                     text->label, text->currentValue);
+            ffonObjectAddElement(sectionObj->data.object, ffonElementCreateString(itemBuf));
             hasContent = true;
         }
     }
@@ -145,10 +144,12 @@ static FfonElement** settingsFetch(Provider *self, int *outCount) {
     settingsPopulateSection(state, sicompassObj, "sicompass");
     arr[n++] = sicompassObj;
 
-    // Registered sections (skip priority section — already rendered above)
+    // Registered sections (skip priority section and "sicompass" — already rendered above)
     for (int i = 0; i < state->sectionCount; i++) {
         if (state->hasPrioritySection &&
             strcmp(state->sections[i], state->prioritySection) == 0)
+            continue;
+        if (strcmp(state->sections[i], "sicompass") == 0)
             continue;
 
         FfonElement *sectionObj = ffonElementCreateObject(state->sections[i]);
