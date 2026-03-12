@@ -789,9 +789,6 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                             }
                         }
                     }
-                    // If commit succeeded, refresh to pick up new provider data
-                    if (wasInput && commitSucceeded)
-                        providerRefreshCurrentDirectory(appRenderer);
                     free(oldContent);
                     // Return to operator general
                     appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
