@@ -605,8 +605,15 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                             char *newKey = providerTagFormatKey(name);
                             FfonElement *dirElem = ffonElementCreateObject(newKey ? newKey : name);
                             free(newKey);
+                            FfonElement *childPlaceholder = ffonElementCreateString("<input></input>");
+                            if (childPlaceholder)
+                                ffonObjectInsertElement(dirElem->data.object, childPlaceholder, 0);
                             ffonElementDestroy(arr[idx]);
                             arr[idx] = dirElem;
+                            Provider *pActive = providerGetActive(appRenderer);
+                            if (pActive && pActive->pushPath)
+                                pActive->pushPath(pActive, name);
+                            idArrayPush(&appRenderer->currentId, 0);
                         }
 
                         free(oldContent);
@@ -1961,6 +1968,11 @@ void handleI(AppRenderer *appRenderer) {
                         elem->data.string : elem->data.object->key;
                     char *content = providerTagExtractContent(elementKey);
                     if (!content) return;
+                    if (content[0] == '\0') {
+                        Provider *p = providerGetActive(appRenderer);
+                        if (p && (p->createFile || p->createDirectory))
+                            appRenderer->prefixedInsertMode = true;
+                    }
                     free(content);
                 }
             }
@@ -2057,6 +2069,11 @@ void handleA(AppRenderer *appRenderer) {
                         elem->data.string : elem->data.object->key;
                     char *content = providerTagExtractContent(elementKey);
                     if (!content) return;
+                    if (content[0] == '\0') {
+                        Provider *p = providerGetActive(appRenderer);
+                        if (p && (p->createFile || p->createDirectory))
+                            appRenderer->prefixedInsertMode = true;
+                    }
                     free(content);
                 }
             }
@@ -2343,6 +2360,8 @@ void handleEscape(AppRenderer *appRenderer) {
                     parentObj->count--;
                     if (parentObj->count > 0 && idx >= parentObj->count)
                         appRenderer->currentId.ids[depth - 1] = parentObj->count - 1;
+                    else if (parentObj->count == 0)
+                        idArrayPop(&appRenderer->currentId);
                 }
             }
             appRenderer->prefixedInsertMode = false;

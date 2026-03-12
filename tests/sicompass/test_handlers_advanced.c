@@ -772,6 +772,7 @@ void handleDashboard(AppRenderer *appRenderer) {
  * ============================================ */
 
 static char g_inputBuf[4096];
+static char g_savedInputBuf[1024];
 
 static AppRenderer createTestApp(void) {
     AppRenderer app;
@@ -782,8 +783,8 @@ static AppRenderer createTestApp(void) {
     app.inputBufferSize = 0;
     app.cursorPosition = 0;
     app.selectionAnchor = -1;
-    app.savedInputBuffer = malloc(1024);
-    app.savedInputBufferCapacity = 1024;
+    app.savedInputBuffer = g_savedInputBuf;
+    app.savedInputBufferCapacity = sizeof(g_savedInputBuf);
     app.savedInputBufferSize = 0;
     app.savedInputBuffer[0] = '\0';
     app.currentId.depth = 1;

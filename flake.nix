@@ -271,7 +271,7 @@
               echo "extension-layer: ${vulkan-extension-layer}"
 
               # Include system library path for Vulkan drivers (Debian/non-NixOS)
-              export LD_LIBRARY_PATH="${stb}/lib:${libwebp}/lib:${glfw}/lib:${freetype}/lib:${vulkan-loader}/lib:${vulkan-validation-layers}/lib:/usr/lib/x86_64-linux-gnu";
+              export LD_LIBRARY_PATH="${stb}/lib:${libwebp}/lib:${glfw}/lib:${freetype}/lib:${vulkan-loader}/lib:${vulkan-validation-layers}/lib:${harfbuzz}/lib:${json_c}/lib:${curl}/lib:${utf8proc}/lib:${lexbor}/lib:/usr/lib/x86_64-linux-gnu";
               export VULKAN_SDK="${vulkan-headers}";
               export VK_LAYER_PATH="${vulkan-validation-layers}/share/vulkan/explicit_layer.d";
 
