@@ -14,6 +14,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 static char tmpDir[256];
@@ -250,6 +251,134 @@ void test_copy_directory(void) {
     TEST_ASSERT_TRUE(isDirectory(tmpDir, "cpdir"));
 }
 
+// --- Edge cases: executable filtering ---
+
+void test_listDirectory_executable_excluded(void) {
+    filebrowserCreateFile(tmpDir, "script.sh");
+    char path[512];
+    snprintf(path, sizeof(path), "%s/script.sh", tmpDir);
+    chmod(path, 0755);  // make executable
+
+    filebrowserCreateFile(tmpDir, "data.txt");
+
+    int count;
+    FfonElement **elems = filebrowserListDirectory(tmpDir, false, false,
+                                                    FILEBROWSER_SORT_ALPHA, &count);
+    TEST_ASSERT_NOT_NULL(elems);
+    // With commands=false, executable should be excluded
+    TEST_ASSERT_EQUAL_INT(1, count);
+    char *name = providerTagExtractContent(elems[0]->data.string);
+    TEST_ASSERT_EQUAL_STRING("data.txt", name);
+    free(name);
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+}
+
+void test_listDirectory_executable_included(void) {
+    filebrowserCreateFile(tmpDir, "script.sh");
+    char path[512];
+    snprintf(path, sizeof(path), "%s/script.sh", tmpDir);
+    chmod(path, 0755);
+
+    filebrowserCreateFile(tmpDir, "data.txt");
+
+    int count;
+    FfonElement **elems = filebrowserListDirectory(tmpDir, true, false,
+                                                    FILEBROWSER_SORT_ALPHA, &count);
+    TEST_ASSERT_NOT_NULL(elems);
+    // With commands=true, both should be present
+    TEST_ASSERT_EQUAL_INT(2, count);
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+}
+
+// --- Edge cases: chronological sort ---
+
+void test_listDirectory_chrono_sort(void) {
+    filebrowserCreateFile(tmpDir, "oldest.txt");
+    filebrowserCreateFile(tmpDir, "newest.txt");
+    filebrowserCreateFile(tmpDir, "middle.txt");
+
+    char path[512];
+    struct timeval times[2];
+
+    snprintf(path, sizeof(path), "%s/oldest.txt", tmpDir);
+    times[0].tv_sec = 1000000; times[0].tv_usec = 0;
+    times[1].tv_sec = 1000000; times[1].tv_usec = 0;
+    utimes(path, times);
+
+    snprintf(path, sizeof(path), "%s/middle.txt", tmpDir);
+    times[0].tv_sec = 2000000; times[0].tv_usec = 0;
+    times[1].tv_sec = 2000000; times[1].tv_usec = 0;
+    utimes(path, times);
+
+    snprintf(path, sizeof(path), "%s/newest.txt", tmpDir);
+    times[0].tv_sec = 3000000; times[0].tv_usec = 0;
+    times[1].tv_sec = 3000000; times[1].tv_usec = 0;
+    utimes(path, times);
+
+    int count;
+    FfonElement **elems = filebrowserListDirectory(tmpDir, false, false,
+                                                    FILEBROWSER_SORT_CHRONO, &count);
+    TEST_ASSERT_NOT_NULL(elems);
+    TEST_ASSERT_EQUAL_INT(3, count);
+
+    char *name0 = providerTagExtractContent(elems[0]->data.string);
+    char *name1 = providerTagExtractContent(elems[1]->data.string);
+    char *name2 = providerTagExtractContent(elems[2]->data.string);
+    TEST_ASSERT_EQUAL_STRING("newest.txt", name0);
+    TEST_ASSERT_EQUAL_STRING("middle.txt", name1);
+    TEST_ASSERT_EQUAL_STRING("oldest.txt", name2);
+    free(name0); free(name1); free(name2);
+
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+}
+
+// --- Edge cases: symlinks ---
+
+void test_listDirectory_symlink(void) {
+    filebrowserCreateFile(tmpDir, "target.txt");
+    char linkPath[512], targetPath[512];
+    snprintf(targetPath, sizeof(targetPath), "%s/target.txt", tmpDir);
+    snprintf(linkPath, sizeof(linkPath), "%s/link.txt", tmpDir);
+    symlink(targetPath, linkPath);
+
+    int count;
+    FfonElement **elems = filebrowserListDirectory(tmpDir, false, false,
+                                                    FILEBROWSER_SORT_ALPHA, &count);
+    TEST_ASSERT_NOT_NULL(elems);
+    TEST_ASSERT_EQUAL_INT(2, count);  // target.txt + link.txt
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+}
+
+// --- Edge cases: special characters ---
+
+void test_listDirectory_special_chars(void) {
+    filebrowserCreateFile(tmpDir, "my file (1).txt");
+    filebrowserCreateFile(tmpDir, "hello world.txt");
+
+    int count;
+    FfonElement **elems = filebrowserListDirectory(tmpDir, false, false,
+                                                    FILEBROWSER_SORT_ALPHA, &count);
+    TEST_ASSERT_NOT_NULL(elems);
+    TEST_ASSERT_EQUAL_INT(2, count);
+
+    // Verify names are correctly wrapped in <input> tags
+    for (int i = 0; i < count; i++) {
+        TEST_ASSERT_EQUAL_INT(FFON_STRING, elems[i]->type);
+        TEST_ASSERT_TRUE(providerTagHasInput(elems[i]->data.string));
+        char *name = providerTagExtractContent(elems[i]->data.string);
+        TEST_ASSERT_NOT_NULL(name);
+        TEST_ASSERT_TRUE(strlen(name) > 0);
+        free(name);
+    }
+
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+}
+
 // --- filebrowserCleanupClipboardCache ---
 
 void test_cleanupClipboardCache_no_crash(void) {
@@ -283,6 +412,12 @@ int main(void) {
     RUN_TEST(test_copy_directory);
 
     RUN_TEST(test_cleanupClipboardCache_no_crash);
+
+    RUN_TEST(test_listDirectory_executable_excluded);
+    RUN_TEST(test_listDirectory_executable_included);
+    RUN_TEST(test_listDirectory_chrono_sort);
+    RUN_TEST(test_listDirectory_symlink);
+    RUN_TEST(test_listDirectory_special_chars);
 
     return UNITY_END();
 }
