@@ -560,7 +560,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                     const char *newContent = appRenderer->inputBuffer;
 
                     // Prefix-based creation (from Ctrl+I/Ctrl+A in operator general)
-                    if (oldContent[0] == '\0' && appRenderer->prefixedInsertMode) {
+                    if (oldContent[0] == '\0' && appRenderer->prefixedInsertMode && !appRenderer->pendingFileBrowserSaveAs) {
                         bool isFile = false, isDir = false;
                         const char *name = NULL;
                         if (newContent[0] == '-') {
@@ -2971,39 +2971,7 @@ void handleLoadProviderConfig(AppRenderer *appRenderer) {
 }
 
 void handleSaveAsProviderConfig(AppRenderer *appRenderer) {
-    if (appRenderer->currentSavePath[0] == '\0') {
-        handleFileBrowserSaveAs(appRenderer);
-        return;
-    }
-    // Enter command mode with pre-filled filename for "save as"
-    Provider *provider = providerGetActive(appRenderer);
-    if (!provider) {
-        setErrorMessage(appRenderer, "No active provider");
-        return;
-    }
-
-    appRenderer->pendingSaveAs = true;
-    appRenderer->previousCoordinate = appRenderer->currentCoordinate;
-    appRenderer->currentCoordinate = COORDINATE_COMMAND;
-    appRenderer->currentCommand = COMMAND_NONE;
-    accesskitSpeakModeChange(appRenderer, NULL);
-
-    // Pre-fill input buffer with sanitized provider name
-    char safeName[256];
-    sanitizeFilename(provider->name, safeName, sizeof(safeName));
-    int len = strlen(safeName);
-    if (len >= appRenderer->inputBufferCapacity) len = appRenderer->inputBufferCapacity - 1;
-    memcpy(appRenderer->inputBuffer, safeName, len);
-    appRenderer->inputBuffer[len] = '\0';
-    appRenderer->inputBufferSize = len;
-    appRenderer->cursorPosition = len;
-    appRenderer->selectionAnchor = -1;
-    appRenderer->scrollOffset = 0;
-    appRenderer->listIndex = 0;
-
-    // Clear the list so only the text input is shown
-    clearListCurrentLayer(appRenderer);
-    appRenderer->needsRedraw = true;
+    handleFileBrowserSaveAs(appRenderer);
 }
 
 static void handleFileBrowserSaveAs(AppRenderer *appRenderer) {
@@ -3074,6 +3042,9 @@ static void handleFileBrowserSaveAs(AppRenderer *appRenderer) {
 
     // Enter insert mode on the placeholder
     handleI(appRenderer);
+
+    // Save-as uses plain filename, not the +/- prefix convention
+    appRenderer->prefixedInsertMode = false;
 }
 
 static void handleFileBrowserOpen(AppRenderer *appRenderer) {
