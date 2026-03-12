@@ -537,6 +537,8 @@ static bool handleButtonPress(AppRenderer *appRenderer, IdArray *elementId) {
     return true;
 }
 
+static void resetFileBrowserState(AppRenderer *appRenderer);
+
 void handleEnter(AppRenderer *appRenderer, History history) {
     if (appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH ||
         appRenderer->currentCoordinate == COORDINATE_INPUT_SEARCH) return;
@@ -698,6 +700,8 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                                     (parentObj->count - removeIdx - 1) * sizeof(FfonElement*));
                             parentObj->count--;
                         }
+
+                        resetFileBrowserState(appRenderer);
 
                         // Navigate back to source provider
                         idArrayCopy(&appRenderer->currentId, &appRenderer->saveAsReturnId);
@@ -887,6 +891,8 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                         char fullPath[MAX_URI_LENGTH * 2 + 2];
                         snprintf(fullPath, sizeof(fullPath), "%s%s%s", path, sep, filename);
                         free(filename);
+
+                        resetFileBrowserState(appRenderer);
 
                         int srcIdx = appRenderer->saveAsSourceRootIdx;
                         if (loadProviderConfigFromFile(appRenderer, fullPath, srcIdx)) {
@@ -2337,6 +2343,8 @@ void handleEscape(AppRenderer *appRenderer) {
                     parentObj->count--;
                 }
             }
+            resetFileBrowserState(appRenderer);
+
             idArrayCopy(&appRenderer->currentId, &appRenderer->saveAsReturnId);
             appRenderer->pendingFileBrowserSaveAs = false;
             appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
@@ -2472,6 +2480,7 @@ void handleEscape(AppRenderer *appRenderer) {
     } else if (appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL &&
                appRenderer->pendingFileBrowserOpen) {
         // Cancel file-browser open: return to source provider
+        resetFileBrowserState(appRenderer);
         idArrayCopy(&appRenderer->currentId, &appRenderer->saveAsReturnId);
         appRenderer->pendingFileBrowserOpen = false;
         createListCurrentLayer(appRenderer);
@@ -2882,6 +2891,25 @@ static bool buildProviderSavePath(AppRenderer *appRenderer, char *filepath, size
     snprintf(filepath, size, "%s/%s.json", saveDir, safeName);
     free(saveDir);
     return true;
+}
+
+// Reset filebrowser path and clear cached tree after save-as/open flows
+// so that re-entering the filebrowser doesn't use a stale currentPath.
+// Must be called while currentId still points to the filebrowser.
+static void resetFileBrowserState(AppRenderer *appRenderer) {
+    int fbRootIdx = appRenderer->currentId.ids[0];
+    Provider *fbProvider = appRenderer->providers[fbRootIdx];
+    if (fbProvider && fbProvider->setCurrentPath) {
+        fbProvider->setCurrentPath(fbProvider, "/");
+    }
+    FfonElement *fbRoot = appRenderer->ffon[fbRootIdx];
+    if (fbRoot && fbRoot->type == FFON_OBJECT) {
+        FfonObject *fbObj = fbRoot->data.object;
+        for (int i = 0; i < fbObj->count; i++) {
+            ffonElementDestroy(fbObj->elements[i]);
+        }
+        fbObj->count = 0;
+    }
 }
 
 void handleSaveProviderConfig(AppRenderer *appRenderer) {
