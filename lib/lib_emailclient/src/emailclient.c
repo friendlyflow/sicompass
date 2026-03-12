@@ -219,48 +219,112 @@ void emailclientFreeFolders(EmailFolder *folders, int count) {
     free(folders);
 }
 
-// Parse a FETCH response to extract headers.
-// libcurl IMAP FETCH returns raw response data with header fields.
-static bool parseHeaderBlock(const char *block, int blockLen,
-                              EmailHeader *out) {
-    out->uid = 0;
-    out->from[0] = '\0';
-    out->subject[0] = '\0';
-    out->date[0] = '\0';
+// --- IMAP ENVELOPE response parsers ---
+// ENVELOPE returns all fields inline as quoted strings (no literals),
+// so libcurl delivers the complete line to our write callback.
 
-    const char *end = block + blockLen;
-    const char *p = block;
+static const char *envSkipWs(const char *p) {
+    while (*p == ' ' || *p == '\t') p++;
+    return p;
+}
 
-    while (p < end) {
-        const char *eol = memchr(p, '\n', end - p);
-        if (!eol) eol = end;
-
-        int lineLen = eol - p;
-        // Trim \r
-        if (lineLen > 0 && p[lineLen - 1] == '\r') lineLen--;
-
-        if (lineLen > 6 && strncasecmp(p, "From: ", 6) == 0) {
-            int len = lineLen - 6;
-            if (len >= (int)sizeof(out->from)) len = sizeof(out->from) - 1;
-            memcpy(out->from, p + 6, len);
-            out->from[len] = '\0';
-        } else if (lineLen > 9 && strncasecmp(p, "Subject: ", 9) == 0) {
-            int len = lineLen - 9;
-            if (len >= (int)sizeof(out->subject))
-                len = sizeof(out->subject) - 1;
-            memcpy(out->subject, p + 9, len);
-            out->subject[len] = '\0';
-        } else if (lineLen > 6 && strncasecmp(p, "Date: ", 6) == 0) {
-            int len = lineLen - 6;
-            if (len >= (int)sizeof(out->date)) len = sizeof(out->date) - 1;
-            memcpy(out->date, p + 6, len);
-            out->date[len] = '\0';
+// Parse a quoted string or NIL into out[outSize]. Returns pointer past field.
+static const char *envParseStr(const char *p, char *out, int outSize) {
+    p = envSkipWs(p);
+    if (*p == '"') {
+        p++;
+        int len = 0;
+        while (*p && *p != '"') {
+            if (*p == '\\' && *(p + 1)) p++;
+            if (out && len < outSize - 1) out[len++] = *p;
+            p++;
         }
-
-        p = eol + 1;
+        if (out) out[len] = '\0';
+        if (*p == '"') p++;
+    } else {
+        if (out && outSize > 0) out[0] = '\0';
+        while (*p && *p != ' ' && *p != ')' && *p != '(') p++;
     }
+    return p;
+}
 
-    return out->from[0] || out->subject[0];
+// Skip one field: quoted string, NIL/token, or parenthesized group.
+static const char *envSkipField(const char *p) {
+    p = envSkipWs(p);
+    if (*p == '"') {
+        p++;
+        while (*p && *p != '"') { if (*p == '\\' && *(p + 1)) p++; p++; }
+        if (*p == '"') p++;
+    } else if (*p == '(') {
+        int depth = 1; p++;
+        while (*p && depth > 0) {
+            if (*p == '"') {
+                p++;
+                while (*p && *p != '"') { if (*p == '\\' && *(p+1)) p++; p++; }
+                if (*p == '"') p++;
+            } else if (*p == '(') { depth++; p++; }
+            else if (*p == ')') { depth--; p++; }
+            else p++;
+        }
+    } else {
+        while (*p && *p != ' ' && *p != ')') p++;
+    }
+    return p;
+}
+
+// Parse first address from IMAP address list ((name adl mailbox host) ...) or NIL.
+static const char *envParseFrom(const char *p, char *out, int outSize) {
+    p = envSkipWs(p);
+    if (strncmp(p, "NIL", 3) == 0) {
+        if (out && outSize > 0) out[0] = '\0';
+        return p + 3;
+    }
+    if (*p != '(') { if (out && outSize > 0) out[0] = '\0'; return p; }
+    p++; // outer (
+    p = envSkipWs(p);
+    if (*p != '(') {
+        while (*p && *p != ')') p++;
+        if (*p == ')') p++;
+        if (out && outSize > 0) out[0] = '\0';
+        return p;
+    }
+    p++; // first address (
+    char name[256] = ""; char mailbox[256] = ""; char host[256] = "";
+    p = envParseStr(p, name, sizeof(name));
+    p = envSkipField(p);  // adl (usually NIL)
+    p = envParseStr(p, mailbox, sizeof(mailbox));
+    p = envParseStr(p, host, sizeof(host));
+    p = envSkipWs(p);
+    if (*p == ')') p++;  // first address )
+    // skip remaining addresses in the list
+    p = envSkipWs(p);
+    while (*p && *p != ')') {
+        const char *prev = p;
+        p = envSkipField(p);
+        if (p == prev) break;
+        p = envSkipWs(p);
+    }
+    if (*p == ')') p++;  // outer )
+    if (out) {
+        if (name[0] && mailbox[0] && host[0])
+            snprintf(out, outSize, "%s <%s@%s>", name, mailbox, host);
+        else if (mailbox[0] && host[0])
+            snprintf(out, outSize, "%s@%s", mailbox, host);
+        else
+            strncpy(out, name, outSize - 1);
+    }
+    return p;
+}
+
+// Parse IMAP ENVELOPE ("date" "subject" from ...) into EmailHeader.
+// p must point to the opening '(' of the ENVELOPE.
+static void parseEnvelope(const char *p, EmailHeader *out) {
+    p = envSkipWs(p);
+    if (*p != '(') return;
+    p++;
+    p = envParseStr(p, out->date, sizeof(out->date));
+    p = envParseStr(p, out->subject, sizeof(out->subject));
+    envParseFrom(p, out->from, sizeof(out->from));
 }
 
 EmailHeader* emailclientListMessages(EmailClientConfig *config,
@@ -289,8 +353,11 @@ EmailHeader* emailclientListMessages(EmailClientConfig *config,
 
     // FETCH headers and UIDs for messages
     char fetchCmd[256];
-    snprintf(fetchCmd, sizeof(fetchCmd),
-             "FETCH 1:%d (UID BODY[HEADER.FIELDS (FROM SUBJECT DATE)])", limit);
+    // Use ENVELOPE: returns all fields inline as quoted strings (no IMAP
+    // literals), so libcurl delivers the complete response line to our
+    // write callback. BODY[HEADER.FIELDS] uses literals which libcurl
+    // silently discards when using CURLOPT_CUSTOMREQUEST.
+    snprintf(fetchCmd, sizeof(fetchCmd), "FETCH 1:%d (UID ENVELOPE)", limit);
     curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, fetchCmd);
 
     CURLcode res = curl_easy_perform(curl);
@@ -301,8 +368,7 @@ EmailHeader* emailclientListMessages(EmailClientConfig *config,
         return NULL;
     }
 
-    // Parse FETCH response: each message block starts with "* N FETCH"
-    // and contains UID and header fields
+    // Parse FETCH response: each * N FETCH line contains UID and ENVELOPE.
     EmailHeader *headers = calloc(limit, sizeof(EmailHeader));
     if (!headers) {
         free(buf.data);
@@ -310,39 +376,31 @@ EmailHeader* emailclientListMessages(EmailClientConfig *config,
     }
 
     int count = 0;
-    char *line = buf.data;
-    while (line && *line && count < limit) {
-        // Look for "* N FETCH" lines
-        if (line[0] == '*' && line[1] == ' ') {
-            // Try to extract UID from the response
-            char *uidStr = strstr(line, "UID ");
-            int uid = 0;
-            if (uidStr) uid = atoi(uidStr + 4);
-
-            // Find the header block (between { and the next *)
-            char *headerStart = strchr(line, '\n');
-            if (headerStart) {
-                headerStart++;
-                // Find end of this fetch response (next "* " or end)
-                char *headerEnd = strstr(headerStart, "\r\n* ");
-                if (!headerEnd) headerEnd = strstr(headerStart, "\n* ");
-                if (!headerEnd) headerEnd = buf.data + buf.size;
-
-                EmailHeader hdr;
-                if (parseHeaderBlock(headerStart, headerEnd - headerStart,
-                                     &hdr)) {
-                    hdr.uid = uid;
-                    headers[count++] = hdr;
-                }
-
-                line = headerEnd;
-                continue;
-            }
+    char *pos = buf.data;
+    while (pos && *pos && count < limit) {
+        if (pos[0] != '*' || pos[1] != ' ') {
+            char *eol = strchr(pos, '\n');
+            pos = eol ? eol + 1 : NULL;
+            continue;
         }
 
-        // Advance to next line
-        char *eol = strchr(line, '\n');
-        line = eol ? eol + 1 : NULL;
+        char *lineEnd = strchr(pos, '\n');
+        if (!lineEnd) break;
+
+        char *uidStr = strstr(pos, "UID ");
+        int uid = (uidStr && uidStr < lineEnd) ? atoi(uidStr + 4) : 0;
+
+        char *envMarker = strstr(pos, "ENVELOPE ");
+        if (envMarker && envMarker < lineEnd && uid > 0) {
+            EmailHeader hdr;
+            memset(&hdr, 0, sizeof(hdr));
+            hdr.uid = uid;
+            parseEnvelope(envMarker + 9, &hdr);
+            headers[count++] = hdr;
+        }
+
+        char *eol = strchr(pos, '\n');
+        pos = eol ? eol + 1 : NULL;
     }
 
     free(buf.data);
@@ -406,12 +464,6 @@ EmailMessage* emailclientFetchMessage(EmailClientConfig *config,
     if (!bodyStart) bodyStart = strstr(buf.data, "\n\n");
 
     if (bodyStart) {
-        // Parse headers before the blank line
-        int headerLen = bodyStart - buf.data;
-        parseHeaderBlock(buf.data, headerLen, &(EmailHeader){
-            .uid = uid, .from = "", .subject = "", .date = ""
-        });
-
         // Extract From, Subject, Date from header portion
         char *headerBlock = buf.data;
         char *p = headerBlock;

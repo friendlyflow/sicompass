@@ -41,6 +41,11 @@ void test_provider_has_commit(void) {
     TEST_ASSERT_NOT_NULL(p->commitEdit);
 }
 
+void test_provider_has_no_cache_set(void) {
+    Provider *p = providerFactoryCreate("email client");
+    TEST_ASSERT_TRUE(p->noCache);
+}
+
 // --- Path management ---
 
 void test_init_sets_root_path(void) {
@@ -74,7 +79,6 @@ void test_push_two_levels(void) {
 
 void test_fetch_unconfigured_returns_help_message(void) {
     Provider *p = providerFactoryCreate("email client");
-    p->init(p);
 
     int count = 0;
     FfonElement **elems = p->fetch(p, &count);
@@ -189,6 +193,9 @@ void test_get_commands_includes_login_and_logout(void) {
 void test_handle_command_login_without_credentials(void) {
     Provider *p = providerFactoryCreate("email client");
     p->init(p);
+    // Clear any credentials loaded from settings so we test the unconfigured path
+    p->handleCommand(p, "set client id", "", FFON_STRING, NULL, 0);
+    p->handleCommand(p, "set client secret", "", FFON_STRING, NULL, 0);
     char err[256] = "";
     FfonElement *r = p->handleCommand(p, "login", NULL, FFON_STRING,
                                        err, sizeof(err));
@@ -260,12 +267,13 @@ int main(void) {
 
     RUN_TEST(test_provider_has_required_functions);
     RUN_TEST(test_provider_has_commit);
+    RUN_TEST(test_provider_has_no_cache_set);
+
+    RUN_TEST(test_fetch_unconfigured_returns_help_message);
 
     RUN_TEST(test_init_sets_root_path);
     RUN_TEST(test_push_pop_path);
     RUN_TEST(test_push_two_levels);
-
-    RUN_TEST(test_fetch_unconfigured_returns_help_message);
 
     RUN_TEST(test_get_commands_returns_expected);
     RUN_TEST(test_handle_command_compose_returns_input);
