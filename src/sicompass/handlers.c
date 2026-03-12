@@ -2891,6 +2891,10 @@ void handleLoadProviderConfig(AppRenderer *appRenderer) {
 }
 
 void handleSaveAsProviderConfig(AppRenderer *appRenderer) {
+    if (appRenderer->currentSavePath[0] == '\0') {
+        handleFileBrowserSaveAs(appRenderer);
+        return;
+    }
     // Enter command mode with pre-filled filename for "save as"
     Provider *provider = providerGetActive(appRenderer);
     if (!provider) {
