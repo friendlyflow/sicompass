@@ -17,25 +17,27 @@ jsonc_dep = dependency('json-c')
 accesskit_dep = dependency('accesskit')
 utf8proc_dep = dependency('libutf8proc')
 cglm_dep = dependency('cglm')
-wlroots_dep = dependency('wlroots-0.19')
-wayland_server_dep = dependency('wayland-server')
-wayland_protocols_dep = dependency('wayland-protocols')
-xkbcommon_dep = dependency('xkbcommon')
-pixman_dep = dependency('pixman-1')
+if host_machine.system() == 'linux'
+  xkbcommon_dep = dependency('xkbcommon')
+  wlroots_dep = dependency('wlroots-0.19')
+  wayland_server_dep = dependency('wayland-server')
+  wayland_protocols_dep = dependency('wayland-protocols')
+  pixman_dep = dependency('pixman-1')
 
-# Wayland protocol generation for desicompass
-wayland_scanner = find_program('wayland-scanner')
-wayland_protocols_dir = wayland_protocols_dep.get_variable('pkgdatadir')
+  # Wayland protocol generation for desicompass
+  wayland_scanner = find_program('wayland-scanner')
+  wayland_protocols_dir = wayland_protocols_dep.get_variable('pkgdatadir')
 
-xdg_shell_xml = wayland_protocols_dir / 'stable/xdg-shell/xdg-shell.xml'
-xdg_shell_c = custom_target('xdg-shell-protocol.c',
-  input: xdg_shell_xml,
-  output: 'xdg-shell-protocol.c',
-  command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'])
-xdg_shell_h = custom_target('xdg-shell-protocol.h',
-  input: xdg_shell_xml,
-  output: 'xdg-shell-protocol.h',
-  command: [wayland_scanner, 'server-header', '@INPUT@', '@OUTPUT@'])
+  xdg_shell_xml = wayland_protocols_dir / 'stable/xdg-shell/xdg-shell.xml'
+  xdg_shell_c = custom_target('xdg-shell-protocol.c',
+    input: xdg_shell_xml,
+    output: 'xdg-shell-protocol.c',
+    command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'])
+  xdg_shell_h = custom_target('xdg-shell-protocol.h',
+    input: xdg_shell_xml,
+    output: 'xdg-shell-protocol.h',
+    command: [wayland_scanner, 'server-header', '@INPUT@', '@OUTPUT@'])
+endif
 cc = meson.get_compiler('c')
 m_dep = cc.find_library('m', required : false)
 dl_dep = cc.find_library('dl', required : false)
@@ -90,16 +92,26 @@ tutorial_script_path = 'scripts/tutorial.ts'
 sales_demo_script_path = 'scripts/sales_demo.ts'
 remote_script_path = 'scripts/remote.ts'
 
-exe_sc = executable('sicompass', [sources_sc], dependencies: [vulkan_dep, sdl3_dep, xkbcommon_dep, m_dep, dl_dep, ft_dep, hb_dep, stb_dep, webp_dep, jsonc_dep, accesskit_dep, utf8proc_dep, cglm_dep, lib_ffon_dep, lib_provider_dep, lib_filebrowser_dep, lib_chatclient_dep, lib_emailclient_dep, lib_webbrowser_dep, lib_settings_dep],
-                    c_args: ['-DTUTORIAL_SCRIPT_PATH="' + tutorial_script_path + '"',
-                             '-DSALES_DEMO_SCRIPT_PATH="' + sales_demo_script_path + '"',
-                             '-DREMOTE_SCRIPT_PATH="' + remote_script_path + '"'],
-                    include_directories: [], install : true)
+if host_machine.system() == 'linux'
+  exe_sc = executable('sicompass', [sources_sc], dependencies: [vulkan_dep, sdl3_dep, xkbcommon_dep, m_dep, dl_dep, ft_dep, hb_dep, stb_dep, webp_dep, jsonc_dep, accesskit_dep, utf8proc_dep, cglm_dep, lib_ffon_dep, lib_provider_dep, lib_filebrowser_dep, lib_chatclient_dep, lib_emailclient_dep, lib_webbrowser_dep, lib_settings_dep],
+                      c_args: ['-DTUTORIAL_SCRIPT_PATH="' + tutorial_script_path + '"',
+                               '-DSALES_DEMO_SCRIPT_PATH="' + sales_demo_script_path + '"',
+                               '-DREMOTE_SCRIPT_PATH="' + remote_script_path + '"'],
+                      include_directories: [], install : true)
+else
+  exe_sc = executable('sicompass', [sources_sc], dependencies: [vulkan_dep, sdl3_dep, m_dep, dl_dep, ft_dep, hb_dep, stb_dep, webp_dep, jsonc_dep, accesskit_dep, utf8proc_dep, cglm_dep, lib_ffon_dep, lib_provider_dep, lib_filebrowser_dep, lib_chatclient_dep, lib_emailclient_dep, lib_webbrowser_dep, lib_settings_dep],
+                      c_args: ['-DTUTORIAL_SCRIPT_PATH="' + tutorial_script_path + '"',
+                               '-DSALES_DEMO_SCRIPT_PATH="' + sales_demo_script_path + '"',
+                               '-DREMOTE_SCRIPT_PATH="' + remote_script_path + '"'],
+                      include_directories: [], install : true)
+endif
 
-exe_dc = executable('desicompass', [sources_dc, xdg_shell_c, xdg_shell_h],
-                    dependencies: [wlroots_dep, wayland_server_dep, xkbcommon_dep, pixman_dep, m_dep],
-                    c_args: ['-DWLR_USE_UNSTABLE'],
-                    include_directories: [], install : true)
+if host_machine.system() == 'linux'
+  exe_dc = executable('desicompass', [sources_dc, xdg_shell_c, xdg_shell_h],
+                      dependencies: [wlroots_dep, wayland_server_dep, xkbcommon_dep, pixman_dep, m_dep],
+                      c_args: ['-DWLR_USE_UNSTABLE'],
+                      include_directories: [], install : true)
+endif
 
 subdir('tests')
 
