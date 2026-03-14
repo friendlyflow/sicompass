@@ -1,2 +1,4 @@
 subdir('sicompass')
-subdir('desicompass')
+if host_machine.system() == 'linux'
+  subdir('desicompass')
+endif
