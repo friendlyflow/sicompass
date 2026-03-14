@@ -1,6 +1,5 @@
 #include "programs.h"
-#include "provider.h"
-#include "view.h"
+#include "app_state.h"
 #include <provider_interface.h>
 #include <settings_provider.h>
 #include <json-c/json.h>

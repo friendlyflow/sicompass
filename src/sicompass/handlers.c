@@ -1,6 +1,4 @@
-#include "view.h"
-#include "provider.h"
-#include "text.h"
+#include "app_state.h"
 #include <provider_tags.h>
 #include <platform.h>
 #include <stdio.h>
@@ -295,10 +293,10 @@ void handleShiftHome(AppRenderer *appRenderer) {
 void handleEnd(AppRenderer *appRenderer) {
     if (appRenderer->currentCoordinate == COORDINATE_SCROLL) {
         // Text scroll mode: go to bottom of text
-        float scale = getTextScale(appRenderer->app, FONT_SIZE_PT);
-        int lineHeight = (int)getLineHeight(appRenderer->app, scale, TEXT_PADDING);
+        int lineHeight = appRenderer->cachedLineHeight;
+        if (lineHeight < 1) lineHeight = 1;
         int headerLines = 2;  // header line + gap
-        int availableHeight = (int)appRenderer->app->swapChainExtent.height - (lineHeight * headerLines);
+        int availableHeight = appRenderer->windowHeight - (lineHeight * headerLines);
         int visibleLines = availableHeight / lineHeight;
         if (visibleLines < 1) visibleLines = 1;
 
@@ -1601,10 +1599,10 @@ void handleDown(AppRenderer *appRenderer) {
     if (appRenderer->currentCoordinate == COORDINATE_SCROLL) {
         // Text scroll mode: scroll down one line
         // Calculate visible lines from window height
-        float scale = getTextScale(appRenderer->app, FONT_SIZE_PT);
-        int lineHeight = (int)getLineHeight(appRenderer->app, scale, TEXT_PADDING);
+        int lineHeight = appRenderer->cachedLineHeight;
+        if (lineHeight < 1) lineHeight = 1;
         int headerLines = 2;  // header line + gap
-        int availableHeight = (int)appRenderer->app->swapChainExtent.height - (lineHeight * headerLines);
+        int availableHeight = appRenderer->windowHeight - (lineHeight * headerLines);
         int visibleLines = availableHeight / lineHeight;
         if (visibleLines < 1) visibleLines = 1;
 
@@ -1653,9 +1651,9 @@ void handlePageUp(AppRenderer *appRenderer) {
     }
 
     // Calculate page size from window height and line height
-    float scale = getTextScale(appRenderer->app, FONT_SIZE_PT);
-    int lineHeight = (int)getLineHeight(appRenderer->app, scale, TEXT_PADDING);
-    int pageSize = lineHeight > 0 ? (int)appRenderer->app->swapChainExtent.height / lineHeight - 3 : 10;
+    int lineHeight = appRenderer->cachedLineHeight;
+    if (lineHeight < 1) lineHeight = 1;
+    int pageSize = appRenderer->windowHeight / lineHeight - 3;
     if (pageSize < 1) pageSize = 1;
 
     if (appRenderer->currentCoordinate == COORDINATE_INPUT_SEARCH) {
@@ -1723,14 +1721,14 @@ void handlePageDown(AppRenderer *appRenderer) {
     }
 
     // Calculate page size from window height and line height
-    float scale = getTextScale(appRenderer->app, FONT_SIZE_PT);
-    int lineHeight = (int)getLineHeight(appRenderer->app, scale, TEXT_PADDING);
-    int pageSize = lineHeight > 0 ? (int)appRenderer->app->swapChainExtent.height / lineHeight - 3 : 10;
+    int lineHeight = appRenderer->cachedLineHeight;
+    if (lineHeight < 1) lineHeight = 1;
+    int pageSize = appRenderer->windowHeight / lineHeight - 3;
     if (pageSize < 1) pageSize = 1;
 
     if (appRenderer->currentCoordinate == COORDINATE_INPUT_SEARCH) {
         int headerLines = 3;
-        int availableHeight = (int)appRenderer->app->swapChainExtent.height - (lineHeight * headerLines);
+        int availableHeight = appRenderer->windowHeight - (lineHeight * headerLines);
         int visibleLines = availableHeight / lineHeight;
         if (visibleLines < 1) visibleLines = 1;
         int maxOffset = appRenderer->inputSearchScrollLineCount - visibleLines;
@@ -1746,7 +1744,7 @@ void handlePageDown(AppRenderer *appRenderer) {
         appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH) {
         // Text scroll mode: scroll down by page
         int headerLines = 2;  // header line + gap
-        int availableHeight = (int)appRenderer->app->swapChainExtent.height - (lineHeight * headerLines);
+        int availableHeight = appRenderer->windowHeight - (lineHeight * headerLines);
         int visibleLines = availableHeight / lineHeight;
         if (visibleLines < 1) visibleLines = 1;
 

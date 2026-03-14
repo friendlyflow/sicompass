@@ -17,3 +17,6 @@ subdir('lib_webbrowser')
 
 # Sicompass tests
 subdir('sicompass')
+
+# Integration tests
+subdir('integration')
