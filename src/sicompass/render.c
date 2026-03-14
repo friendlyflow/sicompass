@@ -2374,6 +2374,10 @@ void updateView(SiCompassApplication *app) {
              lastId + 1, maxId + 1);
     int lineHeight = (int)getLineHeight(app, scale, TEXT_PADDING);
 
+    // Cache layout metrics for handler use (scroll, page up/down)
+    app->appRenderer->windowHeight = (int)app->swapChainExtent.height;
+    app->appRenderer->cachedLineHeight = lineHeight;
+
     // Calculate text bounds for vertical centering
     float minX, minY, maxX, maxY;
     calculateTextBounds(app, header, 50.0f, (float)lineHeight, scale,

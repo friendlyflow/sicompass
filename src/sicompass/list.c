@@ -1,7 +1,7 @@
-#include "view.h"
-#include "provider.h"
+#include "app_state.h"
 #include "unicode_search.h"
 #include <provider_tags.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 

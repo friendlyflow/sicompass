@@ -1,5 +1,5 @@
-#include "view.h"
-#include "provider.h"
+#include "app_state.h"
+#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 

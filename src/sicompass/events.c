@@ -1,4 +1,4 @@
-#include "view.h"
+#include "app_state.h"
 #include <string.h>
 
 void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
