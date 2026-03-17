@@ -675,6 +675,9 @@ jobs:
   #   steps:
   #     - uses: actions/checkout@v4
 
+  #     - name: Install Bun
+  #       uses: oven-sh/setup-bun@v2
+
   #     - name: Setup Python
   #       uses: actions/setup-python@v5
   #       with:
@@ -829,9 +832,13 @@ jobs:
   #         New-Item -ItemType Directory -Force -Path "dist"
   #         New-Item -ItemType Directory -Force -Path "dist\fonts"
   #         New-Item -ItemType Directory -Force -Path "dist\shaders"
+  #         New-Item -ItemType Directory -Force -Path "dist\scripts"
   #         Copy-Item "build\sicompass.exe" "dist\"
   #         Copy-Item "fonts\Consolas-Regular.ttf" "dist\fonts\"
   #         Copy-Item "shaders\*.spv" "dist\shaders\"
+  #         Copy-Item "lib\lib_tutorial\tutorial.ts" "dist\scripts\"
+  #         Copy-Item "lib\lib_sales_demo\sales_demo.ts" "dist\scripts\"
+  #         Copy-Item "lib\lib_remote\remote.ts" "dist\scripts\"
 
   #         # Copy DLLs from vcpkg (includes SDL3, freetype, harfbuzz, etc.)
   #         Copy-Item "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin\*.dll" "dist\" -ErrorAction SilentlyContinue

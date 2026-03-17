@@ -327,6 +327,9 @@ jobs:
   #   steps:
   #     - uses: actions/checkout@v4
 
+  #     - name: Install Bun
+  #       uses: oven-sh/setup-bun@v2
+
   #     - name: Setup Python
   #       uses: actions/setup-python@v5
   #       with:
@@ -468,9 +471,13 @@ jobs:
   #       run: |
   #         New-Item -ItemType Directory -Force -Path "artifact\fonts"
   #         New-Item -ItemType Directory -Force -Path "artifact\shaders"
+  #         New-Item -ItemType Directory -Force -Path "artifact\scripts"
   #         Copy-Item "build\sicompass.exe" "artifact\"
   #         Copy-Item "fonts\Consolas-Regular.ttf" "artifact\fonts\"
   #         Copy-Item "shaders\*.spv" "artifact\shaders\"
+  #         Copy-Item "lib\lib_tutorial\tutorial.ts" "artifact\scripts\"
+  #         Copy-Item "lib\lib_sales_demo\sales_demo.ts" "artifact\scripts\"
+  #         Copy-Item "lib\lib_remote\remote.ts" "artifact\scripts\"
   #         Copy-Item "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin\*.dll" "artifact\" -ErrorAction SilentlyContinue
 
   #     - name: Smoke test (verify runtime files)

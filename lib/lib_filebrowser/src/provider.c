@@ -255,6 +255,15 @@ static void (*g_originalInit)(struct Provider *self) = NULL;
 static void fbInit(struct Provider *self) {
     if (g_originalInit) g_originalInit(self);
     filebrowserCleanupClipboardCache();
+#ifdef _WIN32
+    // genericInit sets currentPath to "/" which is invalid on Windows (strlen < 2).
+    // Override with the user's home directory so the initial fetch succeeds.
+    char *homeDir = platformGetHomeDir();
+    if (homeDir && self->setCurrentPath) {
+        self->setCurrentPath(self, homeDir);
+        free(homeDir);
+    }
+#endif
 }
 
 Provider* filebrowserGetProvider(void) {

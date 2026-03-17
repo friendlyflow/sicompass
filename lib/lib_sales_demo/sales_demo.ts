@@ -98,7 +98,9 @@ function toJson(children: (string | Section)[]): unknown[] {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-const scriptDir = new URL(".", import.meta.url).pathname;
+// On Windows, URL.pathname returns "/C:/..." — strip the leading slash so file paths work
+let scriptDir = new URL(".", import.meta.url).pathname;
+if (/^\/[A-Za-z]:\//.test(scriptDir)) scriptDir = scriptDir.slice(1);
 const equipmentRaw = await Bun.file(
   scriptDir + "assets/equipment1.json"
 ).json() as Record<string, unknown[]>;
