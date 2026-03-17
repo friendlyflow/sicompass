@@ -257,11 +257,9 @@ static void fbInit(struct Provider *self) {
     filebrowserCleanupClipboardCache();
 #ifdef _WIN32
     // genericInit sets currentPath to "/" which is invalid on Windows (strlen < 2).
-    // Override with the user's home directory so the initial fetch succeeds.
-    char *homeDir = platformGetHomeDir();
-    if (homeDir && self->setCurrentPath) {
-        self->setCurrentPath(self, homeDir);
-        free(homeDir);
+    // Start at the root of C: instead.
+    if (self->setCurrentPath) {
+        self->setCurrentPath(self, "C:\\");
     }
 #endif
 }
