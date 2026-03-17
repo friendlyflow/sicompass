@@ -1,3 +1,4 @@
+#include <win_compat.h>
 #include "emailclient.h"
 #include "emailclient_oauth2.h"
 #include <curl/curl.h>

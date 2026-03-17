@@ -16,8 +16,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <sys/stat.h>
-#include <sys/time.h>
-#include <unistd.h>
+#include <test_compat.h>
 
 static char tmpDir[256];
 static Provider *provider = NULL;
@@ -69,7 +68,11 @@ static void createFile(const char *dir, const char *name) {
 static void createDir(const char *dir, const char *name) {
     char path[512];
     snprintf(path, sizeof(path), "%s/%s", dir, name);
+#ifdef _WIN32
+    _mkdir(path);
+#else
     mkdir(path, 0755);
+#endif
 }
 
 static void resetMockState(void) {
@@ -80,8 +83,14 @@ static void resetMockState(void) {
 }
 
 void setUp(void) {
+#ifdef _WIN32
+    snprintf(tmpDir, sizeof(tmpDir), "%s\\sicompass_fbprov_test",
+             getenv("TEMP") ? getenv("TEMP") : "C:\\Temp");
+    _mkdir(tmpDir);
+#else
     snprintf(tmpDir, sizeof(tmpDir), "/tmp/sicompass_fbprov_test_XXXXXX");
     mkdtemp(tmpDir);
+#endif
 
     provider = filebrowserGetProvider();
     provider->setCurrentPath(provider, tmpDir);
@@ -95,7 +104,11 @@ void setUp(void) {
 
 void tearDown(void) {
     char cmd[512];
+#ifdef _WIN32
+    snprintf(cmd, sizeof(cmd), "rmdir /s /q \"%s\"", tmpDir);
+#else
     snprintf(cmd, sizeof(cmd), "rm -rf %s", tmpDir);
+#endif
     system(cmd);
 }
 
@@ -373,6 +386,7 @@ void test_deepSearch_nested_dirs(void) {
 }
 
 void test_deepSearch_symlink_not_followed(void) {
+#ifndef _WIN32
     // Create a circular symlink: tmpDir/loop -> tmpDir
     char linkPath[512];
     snprintf(linkPath, sizeof(linkPath), "%s/loop", tmpDir);
@@ -401,6 +415,7 @@ void test_deepSearch_symlink_not_followed(void) {
         free(items[i].navPath);
     }
     free(items);
+#endif /* _WIN32 */
 }
 
 // --- Provider wrappers (fetch, commit, create, delete) ---
@@ -460,6 +475,7 @@ void test_getCommandListItems_non_open_with(void) {
 }
 
 void test_getCommandListItems_open_with(void) {
+#ifndef _WIN32
     g_mockAppCount = 2;
     g_mockApps[0].name = "Firefox";
     g_mockApps[0].exec = "firefox";
@@ -476,18 +492,22 @@ void test_getCommandListItems_open_with(void) {
     TEST_ASSERT_EQUAL_STRING("vlc", items[1].data);
 
     providerFreeCommandListItems(items, count);
+#endif
 }
 
 void test_getCommandListItems_open_with_no_apps(void) {
+#ifndef _WIN32
     g_mockAppCount = 0;
 
     int count = 99;
     ProviderListItem *items = provider->getCommandListItems(provider, "open file with", &count);
     TEST_ASSERT_NULL(items);
     TEST_ASSERT_EQUAL_INT(0, count);
+#endif
 }
 
 void test_executeCommand_open_with(void) {
+#ifndef _WIN32
     // First store a path via handleCommand
     char err[256] = {0};
     provider->handleCommand(provider, "open file with",
@@ -502,6 +522,7 @@ void test_executeCommand_open_with(void) {
     // Path should contain tmpDir/test.txt
     TEST_ASSERT_NOT_NULL(strstr(g_openWithPath, tmpDir));
     TEST_ASSERT_NOT_NULL(strstr(g_openWithPath, "test.txt"));
+#endif
 }
 
 void test_executeCommand_unknown(void) {

@@ -1,3 +1,4 @@
+#include <win_compat.h>
 #include <webbrowser.h>
 #include <webbrowser_provider.h>
 #include <provider_tags.h>
@@ -148,7 +149,6 @@ Provider* webbrowserGetProvider(void) {
     return g_provider;
 }
 
-__attribute__((constructor))
-static void webbrowserRegisterFactory(void) {
+GCC_CONSTRUCTOR(webbrowserRegisterFactory) {
     providerFactoryRegister("web browser", webbrowserGetProvider);
 }

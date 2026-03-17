@@ -103,7 +103,7 @@ test_text_math = executable('test_text_math',
 test('text_math', test_text_math)
 
 # Checkmark geometry tests (prepareCheckmark)
-m_dep = meson.get_compiler('c').find_library('m', required: true)
+m_dep = meson.get_compiler('c').find_library('m', required: false)
 test_checkmark = executable('test_checkmark',
   'test_checkmark.c',
   include_directories: sicompass_test_inc,

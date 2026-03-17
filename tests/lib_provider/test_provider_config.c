@@ -32,7 +32,8 @@ void test_getConfigDir_ends_with_separator(void) {
     TEST_ASSERT_NOT_NULL(dir);
     size_t len = strlen(dir);
     TEST_ASSERT_TRUE(len > 0);
-    TEST_ASSERT_EQUAL_CHAR('/', dir[len - 1]);
+    char sep = dir[len - 1];
+    TEST_ASSERT_TRUE(sep == '/' || sep == '\\');
     free(dir);
 }
 

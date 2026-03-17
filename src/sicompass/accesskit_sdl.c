@@ -2,8 +2,6 @@
 
 #if defined(__APPLE__)
 #include <SDL3/SDL_syswm.h>
-#elif defined(_WIN32)
-#include <SDL3/SDL_syswm.h>
 #endif
 
 void accesskit_sdl_adapter_init(

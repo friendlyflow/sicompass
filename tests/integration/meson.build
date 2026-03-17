@@ -17,30 +17,38 @@ integration_sources = files(
   '../../src/sicompass/unicode_search.c',
 )
 
-test_integration = executable('test_integration',
-  'test_integration.c',
-  'harness.c',
-  integration_sources,
-  include_directories: integration_test_inc,
-  dependencies: [
-    unity_dep,
-    sdl3_dep,
-    xkbcommon_dep,
-    jsonc_dep,
-    accesskit_dep,
-    utf8proc_dep,
-    lib_ffon_dep,
-    lib_provider_dep,
-    lib_filebrowser_dep,
-    lib_settings_dep,
-  ],
-  link_args: [
+integration_deps = [
+  unity_dep,
+  sdl3_dep,
+  jsonc_dep,
+  accesskit_dep,
+  utf8proc_dep,
+  lib_ffon_dep,
+  lib_provider_dep,
+  lib_filebrowser_dep,
+  lib_settings_dep,
+]
+
+integration_link_args = []
+
+if host_machine.system() == 'linux'
+  integration_deps += [xkbcommon_dep]
+  integration_link_args += [
     '-Wl,--wrap=SDL_GetClipboardText',
     '-Wl,--wrap=SDL_SetClipboardText',
     '-Wl,--wrap=SDL_HasClipboardText',
     '-Wl,--wrap=SDL_free',
     '-Wl,--wrap=platformOpenWithDefault',
-  ],
+  ]
+endif
+
+test_integration = executable('test_integration',
+  'test_integration.c',
+  'harness.c',
+  integration_sources,
+  include_directories: integration_test_inc,
+  dependencies: integration_deps,
+  link_args: integration_link_args,
 )
 
 test('integration', test_integration)

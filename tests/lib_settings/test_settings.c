@@ -12,7 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-#include <unistd.h>
+#include <test_compat.h>
 
 // Callback tracking
 static int callbackCount;
@@ -42,17 +42,29 @@ void setUp(void) {
     memset(callbackValues, 0, sizeof(callbackValues));
 
     // Set XDG_CONFIG_HOME to a temp dir so tests don't touch real config
+
+#ifdef _WIN32
+    snprintf(tmpDir, sizeof(tmpDir), "%s\\sicompass_settings_test",
+             getenv("TEMP") ? getenv("TEMP") : "C:\\Temp");
+    _mkdir(tmpDir);
+#else
     snprintf(tmpDir, sizeof(tmpDir), "/tmp/sicompass_settings_test_XXXXXX");
     mkdtemp(tmpDir);
+#endif
     setenv("XDG_CONFIG_HOME", tmpDir, 1);
 }
 
 void tearDown(void) {
     char cmd[512];
+#ifdef _WIN32
+    snprintf(cmd, sizeof(cmd), "rmdir /s /q \"%s\"", tmpDir);
+#else
     snprintf(cmd, sizeof(cmd), "rm -rf %s", tmpDir);
+#endif
     system(cmd);
-    // Restore XDG_CONFIG_HOME
+#ifndef _WIN32
     unsetenv("XDG_CONFIG_HOME");
+#endif
 }
 
 // --- settingsProviderCreate ---

@@ -1,3 +1,4 @@
+#include <win_compat.h>
 #include <emailclient.h>
 #include <emailclient_oauth2.h>
 #include <emailclient_provider.h>
@@ -519,7 +520,6 @@ Provider* emailclientGetProvider(void) {
     return g_provider;
 }
 
-__attribute__((constructor))
-static void emailclientRegisterFactory(void) {
+GCC_CONSTRUCTOR(emailclientRegisterFactory) {
     providerFactoryRegister("email client", emailclientGetProvider);
 }

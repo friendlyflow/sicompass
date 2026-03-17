@@ -1,5 +1,5 @@
 lib_chatclient_src = files('src/chatclient.c', 'src/provider.c')
-lib_chatclient_inc = include_directories('include')
+lib_chatclient_inc = include_directories('include', '../../external')
 
 curl_dep = dependency('libcurl')
 

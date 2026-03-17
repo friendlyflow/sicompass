@@ -1,3 +1,4 @@
+#include <win_compat.h>
 #include <chatclient.h>
 #include <chatclient_provider.h>
 #include <provider_tags.h>
@@ -389,7 +390,6 @@ Provider* chatclientGetProvider(void) {
     return g_provider;
 }
 
-__attribute__((constructor))
-static void chatclientRegisterFactory(void) {
+GCC_CONSTRUCTOR(chatclientRegisterFactory) {
     providerFactoryRegister("chat client", chatclientGetProvider);
 }

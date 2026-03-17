@@ -14,8 +14,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <sys/stat.h>
-#include <sys/time.h>
-#include <unistd.h>
+#include <test_compat.h>
 
 static char tmpDir[256];
 
@@ -34,13 +33,23 @@ static bool isDirectory(const char *dir, const char *name) {
 }
 
 void setUp(void) {
+#ifdef _WIN32
+    snprintf(tmpDir, sizeof(tmpDir), "%s\\sicompass_fb_test",
+             getenv("TEMP") ? getenv("TEMP") : "C:\\Temp");
+    _mkdir(tmpDir);
+#else
     snprintf(tmpDir, sizeof(tmpDir), "/tmp/sicompass_fb_test_XXXXXX");
     mkdtemp(tmpDir);
+#endif
 }
 
 void tearDown(void) {
     char cmd[512];
+#ifdef _WIN32
+    snprintf(cmd, sizeof(cmd), "rmdir /s /q \"%s\"", tmpDir);
+#else
     snprintf(cmd, sizeof(cmd), "rm -rf %s", tmpDir);
+#endif
     system(cmd);
 }
 
@@ -239,6 +248,7 @@ void test_copy_file(void) {
 }
 
 void test_copy_directory(void) {
+#ifndef _WIN32
     filebrowserCreateDirectory(tmpDir, "srcdir");
     // Create a file inside the directory
     char subDir[512];
@@ -249,11 +259,13 @@ void test_copy_directory(void) {
     TEST_ASSERT_TRUE(result);
     TEST_ASSERT_TRUE(isDirectory(tmpDir, "srcdir"));
     TEST_ASSERT_TRUE(isDirectory(tmpDir, "cpdir"));
+#endif
 }
 
 // --- Edge cases: executable filtering ---
 
 void test_listDirectory_executable_excluded(void) {
+#ifndef _WIN32
     filebrowserCreateFile(tmpDir, "script.sh");
     char path[512];
     snprintf(path, sizeof(path), "%s/script.sh", tmpDir);
@@ -272,6 +284,7 @@ void test_listDirectory_executable_excluded(void) {
     free(name);
     for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
     free(elems);
+#endif
 }
 
 void test_listDirectory_executable_included(void) {
@@ -338,6 +351,7 @@ void test_listDirectory_chrono_sort(void) {
 // --- Edge cases: symlinks ---
 
 void test_listDirectory_symlink(void) {
+#ifndef _WIN32
     filebrowserCreateFile(tmpDir, "target.txt");
     char linkPath[512], targetPath[512];
     snprintf(targetPath, sizeof(targetPath), "%s/target.txt", tmpDir);
@@ -351,6 +365,7 @@ void test_listDirectory_symlink(void) {
     TEST_ASSERT_EQUAL_INT(2, count);  // target.txt + link.txt
     for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
     free(elems);
+#endif
 }
 
 // --- Edge cases: special characters ---

@@ -1,5 +1,5 @@
 lib_emailclient_src = files('src/emailclient.c', 'src/provider.c', 'src/oauth2.c')
-lib_emailclient_inc = include_directories('include')
+lib_emailclient_inc = include_directories('include', '../../external')
 
 curl_dep = dependency('libcurl')
 

@@ -148,7 +148,7 @@ void initWindow(SiCompassApplication* app) {
         exit(EXIT_FAILURE);
     }
 
-    app->window = SDL_CreateWindow(WINDOW_TITLE, WIDTH, HEIGHT, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
+    app->window = SDL_CreateWindow(WINDOW_TITLE, WIDTH, HEIGHT, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN);
     if (!app->window) {
         fprintf(stderr, "Failed to create window: %s\n", SDL_GetError());
         SDL_Quit();

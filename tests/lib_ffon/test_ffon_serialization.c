@@ -11,18 +11,31 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#ifdef _WIN32
+#include <direct.h>
+#else
 #include <unistd.h>
+#endif
 
 static char tmpDir[256];
 
 void setUp(void) {
+#ifdef _WIN32
+    snprintf(tmpDir, sizeof(tmpDir), "%s\\sicompass_ffon_test", getenv("TEMP") ? getenv("TEMP") : "C:\\Temp");
+    _mkdir(tmpDir);
+#else
     snprintf(tmpDir, sizeof(tmpDir), "/tmp/sicompass_ffon_test_XXXXXX");
     mkdtemp(tmpDir);
+#endif
 }
 
 void tearDown(void) {
     char cmd[512];
+#ifdef _WIN32
+    snprintf(cmd, sizeof(cmd), "rmdir /s /q \"%s\"", tmpDir);
+#else
     snprintf(cmd, sizeof(cmd), "rm -rf %s", tmpDir);
+#endif
     system(cmd);
 }
 
