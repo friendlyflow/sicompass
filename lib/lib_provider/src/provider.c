@@ -299,6 +299,38 @@ typedef struct ScriptProviderState {
     char dashboardImagePath[4096];
 } ScriptProviderState;
 
+// On Windows, bun is installed to %USERPROFILE%\.bun\bin\bun.exe but the
+// current process may not have it in PATH (PATH registry changes only take
+// effect in new login sessions). Inject the bun bin directory into the
+// process PATH so popen("bun run ...") finds it in child processes.
+static const char* getBunExecutable(void) {
+#ifdef _WIN32
+    static int s_done = 0;
+    if (!s_done) {
+        s_done = 1;
+        const char *userProfile = getenv("USERPROFILE");
+        if (userProfile) {
+            char bunExe[2048];
+            snprintf(bunExe, sizeof(bunExe), "%s\\.bun\\bin\\bun.exe", userProfile);
+            FILE *f = fopen(bunExe, "rb");
+            if (f) {
+                fclose(f);
+                char bunDir[2048];
+                snprintf(bunDir, sizeof(bunDir), "%s\\.bun\\bin", userProfile);
+                const char *existing = getenv("PATH");
+                char newPath[8192];
+                snprintf(newPath, sizeof(newPath), "%s;%s",
+                         bunDir, existing ? existing : "");
+                _putenv_s("PATH", newPath);
+            }
+        }
+    }
+    return "bun";
+#else
+    return "bun";
+#endif
+}
+
 // Shell-escape a string by wrapping in single quotes.
 // Caller must free the returned string.
 static char* shellEscape(const char *str) {
@@ -333,7 +365,7 @@ static json_object* scriptRunSubcommand(ScriptProviderState *state, const char *
     // Build command with shell-escaped arguments
     char command[16384];
     char *escaped = shellEscape(state->scriptPath);
-    int offset = snprintf(command, sizeof(command), "bun run %s %s", escaped, subcmd);
+    int offset = snprintf(command, sizeof(command), "%s run %s %s", getBunExecutable(), escaped, subcmd);
     free(escaped);
 
     for (int i = 0; i < argCount && offset < (int)sizeof(command) - 1; i++) {
@@ -387,8 +419,8 @@ static FfonElement** scriptFetch(Provider *self, int *outCount) {
 
     // Build command: bun run <scriptPath> <currentPath>
     char command[8192 + 64];
-    snprintf(command, sizeof(command), "bun run \"%s\" \"%s\"",
-             state->scriptPath, state->currentPath);
+    snprintf(command, sizeof(command), "%s run \"%s\" \"%s\"",
+             getBunExecutable(), state->scriptPath, state->currentPath);
 
     FILE *pipe = popen(command, "r");
     if (!pipe) {

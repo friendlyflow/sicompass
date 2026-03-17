@@ -99,9 +99,20 @@ subdir('lib/lib_remote')
 
 subdir('src')
 
-tutorial_script_path = 'scripts/tutorial.ts'
-sales_demo_script_path = 'scripts/sales_demo.ts'
-remote_script_path = 'scripts/remote.ts'
+# On Windows, scripts/ contains git symlink stubs (plain text files), so point
+# directly to the real source files using an absolute path (the app may be run
+# from the build directory, not the project root). On Linux, the symlinks work
+# correctly and the installed wrapper cd's to the app directory first.
+if host_machine.system() == 'windows'
+  _src = meson.project_source_root()
+  tutorial_script_path = _src / 'lib/lib_tutorial/tutorial.ts'
+  sales_demo_script_path = _src / 'lib/lib_sales_demo/sales_demo.ts'
+  remote_script_path = _src / 'lib/lib_remote/remote.ts'
+else
+  tutorial_script_path = 'scripts/tutorial.ts'
+  sales_demo_script_path = 'scripts/sales_demo.ts'
+  remote_script_path = 'scripts/remote.ts'
+endif
 
 if host_machine.system() == 'linux'
   exe_sc = executable('sicompass', [sources_sc], dependencies: [vulkan_dep, sdl3_dep, xkbcommon_dep, m_dep, dl_dep, ft_dep, hb_dep, stb_dep, webp_dep, jsonc_dep, accesskit_dep, utf8proc_dep, cglm_dep, lib_ffon_dep, lib_provider_dep, lib_filebrowser_dep, lib_chatclient_dep, lib_emailclient_dep, lib_webbrowser_dep, lib_settings_dep],
