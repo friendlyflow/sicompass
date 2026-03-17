@@ -24,7 +24,7 @@ accesskit_node *buildElement(const FfonElement *ffon) {
 
 accesskit_node *buildAnnouncement(const char *text) {
     accesskit_node *node = accesskit_node_new(ACCESSKIT_ROLE_LIST_ITEM);
-    accesskit_node_set_value(node, text);
+    accesskit_node_set_label(node, text);
     accesskit_node_set_live(node, ACCESSKIT_LIVE_POLITE);
     return node;
 }
@@ -143,7 +143,15 @@ void windowStateUnlock(struct windowState *state) {
 // Factory function for tree updates when speaking
 static struct accesskit_tree_update* accesskitSpeakUpdateOnFocus(void *userdata) {
     struct windowState *state = userdata;
-    accesskit_tree_update *update = accesskit_tree_update_with_focus(state->focus);
+    size_t capacity = (state->announcement != NULL) ? 2 : 1;
+    accesskit_tree_update *update =
+        accesskit_tree_update_with_capacity_and_focus(capacity, state->focus);
+    accesskit_node *root = windowStateBuildRoot(state);
+    accesskit_tree_update_push_node(update, ROOT_ID, root);
+    if (state->announcement != NULL) {
+        accesskit_node *ann = buildAnnouncement(state->announcement);
+        accesskit_tree_update_push_node(update, ANNOUNCEMENT_ID, ann);
+    }
     return update;
 }
 
@@ -159,6 +167,8 @@ void accesskitSpeak(AppRenderer *appRenderer, const char *text) {
         accesskitSpeakUpdateOnFocus,
         &appRenderer->state
     );
+
+    appRenderer->state.announcement = NULL;
 
     windowStateUnlock(&appRenderer->state);
 }
@@ -186,18 +196,20 @@ void accesskitSpeakCurrentElement(AppRenderer *appRenderer) {
 }
 
 void accesskitSpeakModeChange(AppRenderer *appRenderer, const char *context) {
-    char announcement[512];
     const char *modeName = coordinateToString(appRenderer->currentCoordinate);
 
     if (context && context[0] != '\0') {
-        snprintf(announcement, sizeof(announcement), "%s - %s", modeName, context);
+        snprintf(appRenderer->state.announcementBuf,
+                 sizeof(appRenderer->state.announcementBuf),
+                 "%s - %s", modeName, context);
     } else {
-        snprintf(announcement, sizeof(announcement), "%s", modeName);
+        snprintf(appRenderer->state.announcementBuf,
+                 sizeof(appRenderer->state.announcementBuf),
+                 "%s", modeName);
     }
 
-    // appRenderer->state.focus = focus;
-    appRenderer->state.announcement = announcement;
-    accesskitSpeak(appRenderer, announcement);
+    appRenderer->state.announcement = appRenderer->state.announcementBuf;
+    accesskitSpeak(appRenderer, appRenderer->state.announcementBuf);
 }
 
 typedef enum { RADIO_NONE, RADIO_UNCHECKED, RADIO_CHECKED } RadioType;

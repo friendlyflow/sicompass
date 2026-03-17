@@ -95,6 +95,7 @@ struct AppRenderer;
 struct windowState {
     accesskit_node_id focus;
     const char *announcement;
+    char announcementBuf[512];
     SDL_Mutex *mutex;
     struct AppRenderer *appRenderer;  // Pointer to access list data for accessibility tree
 };
