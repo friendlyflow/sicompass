@@ -1,5 +1,5 @@
 lib_webbrowser_src = files('src/webbrowser.c', 'src/provider.c')
-lib_webbrowser_inc = include_directories('include')
+lib_webbrowser_inc = include_directories('include', '../../external')
 
 lexbor_dep = dependency('lexbor')
 webbrowser_curl_dep = dependency('libcurl')

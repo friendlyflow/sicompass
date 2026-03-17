@@ -1,3 +1,4 @@
+#include <win_compat.h>
 #include <settings_provider.h>
 #include <provider_interface.h>
 #include <provider_tags.h>

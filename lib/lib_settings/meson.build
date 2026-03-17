@@ -1,5 +1,5 @@
 lib_settings_src = files('src/settings_provider.c')
-lib_settings_inc = include_directories('include')
+lib_settings_inc = include_directories('include', '../../external')
 
 lib_settings = library('settings',
   lib_settings_src,

@@ -26,7 +26,8 @@ void test_getConfigHome_ends_with_separator(void) {
     TEST_ASSERT_NOT_NULL(path);
     size_t len = strlen(path);
     TEST_ASSERT_TRUE(len > 0);
-    TEST_ASSERT_EQUAL_CHAR('/', path[len - 1]);
+    char sep = path[len - 1];
+    TEST_ASSERT_TRUE(sep == '/' || sep == '\\');
     free(path);
 }
 
@@ -41,7 +42,13 @@ void test_getHomeDir_returns_non_null(void) {
 void test_getHomeDir_starts_with_slash(void) {
     char *home = platformGetHomeDir();
     TEST_ASSERT_NOT_NULL(home);
+    TEST_ASSERT_TRUE(strlen(home) > 0);
+#ifdef _WIN32
+    /* Windows paths start with a drive letter (e.g. "C:\") */
+    TEST_ASSERT_TRUE(home[1] == ':' || home[0] == '/' || home[0] == '\\');
+#else
     TEST_ASSERT_EQUAL_CHAR('/', home[0]);
+#endif
     free(home);
 }
 
@@ -58,21 +65,28 @@ void test_getCacheHome_ends_with_separator(void) {
     TEST_ASSERT_NOT_NULL(path);
     size_t len = strlen(path);
     TEST_ASSERT_TRUE(len > 0);
-    TEST_ASSERT_EQUAL_CHAR('/', path[len - 1]);
+    char sep = path[len - 1];
+    TEST_ASSERT_TRUE(sep == '/' || sep == '\\');
     free(path);
 }
 
 // --- platformGetPathSeparator ---
 
 void test_getPathSeparator_linux(void) {
+#ifndef _WIN32
     const char *sep = platformGetPathSeparator();
     TEST_ASSERT_EQUAL_STRING("/", sep);
+#endif
 }
 
 // --- platformIsWindows ---
 
 void test_isWindows_returns_false_on_linux(void) {
+#ifndef _WIN32
     TEST_ASSERT_FALSE(platformIsWindows());
+#else
+    TEST_ASSERT_TRUE(platformIsWindows());
+#endif
 }
 
 // --- platformFreeApplications ---

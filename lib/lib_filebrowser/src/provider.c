@@ -1,3 +1,4 @@
+#include <win_compat.h>
 #include <filebrowser.h>
 #include <filebrowser_provider.h>
 #include <provider_tags.h>
@@ -280,7 +281,6 @@ Provider* filebrowserGetProvider(void) {
     return g_provider;
 }
 
-__attribute__((constructor))
-static void filebrowserRegisterFactory(void) {
+GCC_CONSTRUCTOR(filebrowserRegisterFactory) {
     providerFactoryRegister("file browser", filebrowserGetProvider);
 }

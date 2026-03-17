@@ -5,9 +5,16 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+#define close(s) closesocket(s)
+#else
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
+#endif
 
 static const char *GOOGLE_AUTH_URL =
     "https://accounts.google.com/o/oauth2/v2/auth";

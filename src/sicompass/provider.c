@@ -712,8 +712,44 @@ int providerNavigateToPath(AppRenderer *appRenderer, int rootIdx,
     strncpy(pathBuf, absoluteDir, sizeof(pathBuf) - 1);
     pathBuf[sizeof(pathBuf) - 1] = '\0';
     char *saveptr = NULL;
+    /* On Windows, absolute paths start with a drive letter (e.g. "C:\...") or
+     * a UNC path ("\\..."). Use the full path directly instead of navigating
+     * component-by-component from root. */
+    bool isWindowsAbsolute = (pathBuf[0] != '\0' && pathBuf[1] == ':') ||
+                             (pathBuf[0] == '\\' && pathBuf[1] == '\\');
+    if (isWindowsAbsolute) {
+        /* Jump directly to the target directory */
+        provider->setCurrentPath(provider, absoluteDir);
+        for (int i = 0; i < rootObj->count; i++) ffonElementDestroy(rootObj->elements[i]);
+        rootObj->count = 0;
+        cc = 0;
+        ch = provider->fetch(provider, &cc);
+        for (int i = 0; i < cc; i++) ffonObjectAddElement(rootObj, ch[i]);
+        free(ch);
+        /* Treat the directory as a single navigation step */
+        appRenderer->currentId.ids[0] = rootIdx;
+        appRenderer->currentId.ids[1] = 0;
+        appRenderer->currentId.depth = 2;
+        /* Find targetFilename in the fresh listing */
+        int finalCount;
+        FfonElement **finalArr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                              &appRenderer->currentId, &finalCount);
+        if (!finalArr) return -1;
+        for (int i = 0; i < finalCount; i++) {
+            FfonElement *e = finalArr[i];
+            const char *raw = (e->type == FFON_STRING) ? e->data.string : e->data.object->key;
+            char *name = providerTagExtractContent(raw);
+            bool match = name && strcmp(name, targetFilename) == 0;
+            free(name);
+            if (match) {
+                appRenderer->currentId.ids[appRenderer->currentId.depth - 1] = i;
+                return i;
+            }
+        }
+        return (targetFilename[0] == '\0') ? 0 : -1;
+    }
     char *start = pathBuf + (pathBuf[0] == '/' ? 1 : 0);
-    char *component = strtok_r(start, "/", &saveptr);
+    char *component = strtok_r(start, "/\\", &saveptr);
     while (component && *component != '\0') {
         int levelCount;
         FfonElement **levelArr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
@@ -733,7 +769,7 @@ int providerNavigateToPath(AppRenderer *appRenderer, int rootIdx,
         appRenderer->currentId.ids[appRenderer->currentId.depth - 1] = idx;
         if (!providerNavigateRight(appRenderer)) return -1;
 
-        component = strtok_r(NULL, "/", &saveptr);
+        component = strtok_r(NULL, "/\\", &saveptr);
     }
 
     // Now inside absoluteDir — find targetFilename

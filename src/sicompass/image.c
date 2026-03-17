@@ -1,3 +1,6 @@
+#ifdef _WIN32
+#include <win_compat.h>
+#endif
 #include "image.h"
 #include "main.h"
 #include <stb_image.h>

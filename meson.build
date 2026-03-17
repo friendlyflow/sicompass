@@ -72,7 +72,18 @@ if host_machine.system() == 'linux'
 elif host_machine.system() == 'darwin'
   add_project_arguments('-DVK_USE_PLATFORM_MACOS_MVK', language: 'c')
 elif host_machine.system() == 'windows'
-  add_project_arguments('-DVK_USE_PLATFORM_WIN32_KHR', language: 'c')
+  add_project_arguments('-DVK_USE_PLATFORM_WIN32_KHR', '-DWIN32_LEAN_AND_MEAN', language: 'c')
+  # Prepend debug DLL directory so debug builds use the debug CRT DLLs (prevents heap corruption)
+  _win_test_env = environment()
+  _win_test_env.prepend('PATH', 'C:/vcpkg/installed/x64-windows/debug/bin')
+  add_test_setup('default', env: _win_test_env, is_default: true)
+  # Copy runtime DLLs to the build directory so sicompass.exe can be run directly
+  _copy_dlls = custom_target('copy_dlls',
+    output: 'SDL3.dll',
+    command: [find_program('python3'), files('scripts/copy_dlls.py'),
+              meson.current_build_dir()],
+    build_by_default: true,
+  )
 endif
 
 subdir('lib/lib_ffon')
@@ -103,7 +114,7 @@ else
                       c_args: ['-DTUTORIAL_SCRIPT_PATH="' + tutorial_script_path + '"',
                                '-DSALES_DEMO_SCRIPT_PATH="' + sales_demo_script_path + '"',
                                '-DREMOTE_SCRIPT_PATH="' + remote_script_path + '"'],
-                      include_directories: [], install : true)
+                      include_directories: [include_directories('external')], install : true)
 endif
 
 if host_machine.system() == 'linux'

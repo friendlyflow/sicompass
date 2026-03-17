@@ -2844,12 +2844,14 @@ static char* resolveSaveFolder(AppRenderer *appRenderer) {
         // No setting configured, fall back to Downloads
         return platformGetDownloadsDir();
     }
-    if (folder[0] == '/') {
-        // Absolute path
+    if (folder[0] == '/' || folder[0] == '\\' ||
+        (folder[0] != '\0' && folder[1] == ':')) {
+        // Absolute path (POSIX or Windows drive-letter)
         return strdup(folder);
     }
     // Relative to home directory
     const char *home = getenv("HOME");
+    if (!home || home[0] == '\0') home = getenv("USERPROFILE");
     if (!home || home[0] == '\0') return NULL;
     size_t len = strlen(home) + 1 + strlen(folder) + 1;
     char *path = malloc(len);

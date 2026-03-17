@@ -17,7 +17,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <sys/stat.h>
-#include <unistd.h>
+#include <test_compat.h>
 
 static char tmpDir[256];
 static AppRenderer *app = NULL;
@@ -45,15 +45,25 @@ static bool fileExists(const char *dir, const char *name) {
 
 static void rmrf(const char *path) {
     char cmd[600];
+#ifdef _WIN32
+    snprintf(cmd, sizeof(cmd), "rd /s /q \"%s\"", path);
+#else
     snprintf(cmd, sizeof(cmd), "rm -rf '%s'", path);
+#endif
     system(cmd);
 }
 
 // --- setUp / tearDown ---
 
 void setUp(void) {
+#ifdef _WIN32
+    snprintf(tmpDir, sizeof(tmpDir), "%s\\sicompass_integration",
+             getenv("TEMP") ? getenv("TEMP") : "C:\\Temp");
+    char *result = (_mkdir(tmpDir) == 0) ? tmpDir : NULL;
+#else
     snprintf(tmpDir, sizeof(tmpDir), "/tmp/sicompass_integration_XXXXXX");
     char *result = mkdtemp(tmpDir);
+#endif
     TEST_ASSERT_NOT_NULL_MESSAGE(result, "Failed to create temp directory");
 
     // Pre-populate with test files and directories

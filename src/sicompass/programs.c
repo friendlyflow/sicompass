@@ -8,7 +8,11 @@
 #include <stdio.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#ifdef _WIN32
+#include <win_compat.h>
+#else
 #include <dlfcn.h>
+#endif
 
 // Plugin manifest types
 typedef enum { PLUGIN_SCRIPT, PLUGIN_FACTORY, PLUGIN_NATIVE } PluginType;

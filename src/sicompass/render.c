@@ -74,7 +74,7 @@ static void accesskitActionHandler(accesskit_action_request *request, void *user
     SDL_zero(event);
     event.type = state->eventType;
     event.user.windowID = state->windowId;
-    event.user.data1 = (void *)((uintptr_t)(request->target_node));
+    event.user.data1 = (void *)((uintptr_t)(request->target));
     if (request->action == ACCESSKIT_ACTION_FOCUS) {
         event.user.code = SET_FOCUS_MSG;
         SDL_PushEvent(&event);

@@ -33,12 +33,18 @@ char* __wrap_providerGetMainConfigPath(void) {
     return NULL;
 }
 
+#ifdef _WIN32
+/* No linker wrapping on Windows — __real_* calls go directly to the real functions */
+#define __real_emailclientOAuth2Authorize   emailclientOAuth2Authorize
+#define __real_emailclientOAuth2RefreshToken emailclientOAuth2RefreshToken
+#else
 extern OAuth2TokenResult __real_emailclientOAuth2Authorize(const char *clientId,
                                                             const char *clientSecret,
                                                             int timeoutSeconds);
 extern OAuth2TokenResult __real_emailclientOAuth2RefreshToken(const char *clientId,
                                                                const char *clientSecret,
                                                                const char *refreshToken);
+#endif
 
 void setUp(void) {
     memset(&g_mockAuthResult, 0, sizeof(g_mockAuthResult));
@@ -273,6 +279,8 @@ void test_handle_command_set_client_secret(void) {
 // --- OAuth2 login mocked ---
 
 void test_handle_command_login_success(void) {
+#ifndef _WIN32
+    /* Requires --wrap=emailclientOAuth2Authorize linker mock (Linux only) */
     Provider *p = providerFactoryCreate("email client");
     p->init(p);
     p->handleCommand(p, "set client id", "test-id.apps.googleusercontent.com",
@@ -295,9 +303,12 @@ void test_handle_command_login_success(void) {
     TEST_ASSERT_NOT_NULL(strstr(r->data.string, "successful"));
     TEST_ASSERT_EQUAL_STRING("", err);
     ffonElementDestroy(r);
+#endif
 }
 
 void test_handle_command_login_oauth_fails(void) {
+#ifndef _WIN32
+    /* Requires --wrap=emailclientOAuth2Authorize linker mock (Linux only) */
     Provider *p = providerFactoryCreate("email client");
     p->init(p);
     p->handleCommand(p, "set client id", "test-id.apps.googleusercontent.com",
@@ -315,6 +326,7 @@ void test_handle_command_login_oauth_fails(void) {
     TEST_ASSERT_NULL(r);
     TEST_ASSERT_NOT_NULL(strstr(err, "OAuth2 failed"));
     TEST_ASSERT_NOT_NULL(strstr(err, "user_denied"));
+#endif
 }
 
 // --- OAuth2 function validation ---
