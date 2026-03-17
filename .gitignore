@@ -5,3 +5,6 @@ build
 PLAN.md
 *.spv
 .claude/settings.local.json
+subprojects/packagecache/
+subprojects/Unity-2.6.1/
+subprojects/.wraplock
