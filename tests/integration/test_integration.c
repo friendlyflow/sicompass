@@ -705,6 +705,80 @@ void test_full_workflow(void) {
 }
 
 // ============================================================
+// Test: Web browser Enter on URL bar commits the input
+// ============================================================
+
+void test_webbrowser_enter_commits_url(void) {
+    int wbIdx = findProviderIndex("webbrowser");
+    TEST_ASSERT_NOT_EQUAL_MESSAGE(-1, wbIdx, "web browser provider not found");
+
+    // Navigate to web browser and enter it
+    navigateToProvider(wbIdx);
+    pressRight(app);
+    TEST_ASSERT_EQUAL(2, app->currentId.depth);
+
+    // The first element should be the URL bar <input>
+    FfonObject *wbObj = app->ffon[wbIdx]->data.object;
+    TEST_ASSERT_NOT_NULL(wbObj);
+    TEST_ASSERT_TRUE(wbObj->count >= 1);
+
+    FfonElement *urlBar = wbObj->elements[0];
+    TEST_ASSERT_NOT_NULL(urlBar);
+    // URL bar is a string element with <input> tag
+    const char *urlBarStr = (urlBar->type == FFON_STRING) ?
+        urlBar->data.string : urlBar->data.object->key;
+    TEST_ASSERT_TRUE_MESSAGE(providerTagHasInput(urlBarStr),
+        "First element of web browser should be an <input> URL bar");
+
+    // Navigate to the URL bar element (should be at index 0)
+    app->currentId.ids[app->currentId.depth - 1] = 0;
+    createListCurrentLayer(app);
+
+    // No provider error before pressing Enter
+    TEST_ASSERT_EQUAL('\0', app->providers[wbIdx]->errorMessage[0]);
+
+    // Press Enter on the URL bar in operator mode — this should trigger commit.
+    // The default URL "https://" is invalid, so wbCommit will try to fetch
+    // and fail, setting the error message. This proves the commit path was
+    // taken (without the fix, Enter would be a no-op).
+    pressEnter(app);
+
+    // The error message proves wbCommit was called and curl attempted the fetch
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("failed to fetch URL",
+        app->errorMessage,
+        "Enter on web browser URL bar should trigger commit (fetch attempt)");
+}
+
+// ============================================================
+// Test: File browser Enter on file does NOT commit (no rename)
+// ============================================================
+
+void test_filebrowser_enter_does_not_commit_input(void) {
+    int fbIdx = findProviderIndex("filebrowser");
+    TEST_ASSERT_NOT_EQUAL(-1, fbIdx);
+
+    // Navigate to file browser and enter it
+    navigateToProvider(fbIdx);
+    pressRight(app);
+    TEST_ASSERT_EQUAL(2, app->currentId.depth);
+
+    // Find alpha.txt in the listing
+    FfonObject *fbObj = app->ffon[fbIdx]->data.object;
+    int alphaIdx = findChildIndex(fbObj, "alpha.txt");
+    TEST_ASSERT_NOT_EQUAL_MESSAGE(-1, alphaIdx, "alpha.txt not found");
+
+    // Navigate to alpha.txt
+    while (app->currentId.ids[1] != alphaIdx) pressDown(app);
+
+    // Press Enter — should NOT trigger a commit/rename, the file should keep its name
+    pressEnter(app);
+
+    // The file should still be named alpha.txt on disk
+    TEST_ASSERT_TRUE_MESSAGE(fileExists(tmpDir, "alpha.txt"),
+        "alpha.txt should still exist after pressing Enter (no accidental rename)");
+}
+
+// ============================================================
 
 int main(void) {
     UNITY_BEGIN();
@@ -722,5 +796,7 @@ int main(void) {
     RUN_TEST(test_file_deletion);
     RUN_TEST(test_mode_transitions);
     RUN_TEST(test_full_workflow);
+    RUN_TEST(test_webbrowser_enter_commits_url);
+    RUN_TEST(test_filebrowser_enter_does_not_commit_input);
     return UNITY_END();
 }

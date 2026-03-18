@@ -26,6 +26,7 @@ integration_deps = [
   lib_ffon_dep,
   lib_provider_dep,
   lib_filebrowser_dep,
+  lib_webbrowser_dep,
   lib_settings_dep,
 ]
 
