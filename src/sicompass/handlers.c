@@ -791,6 +791,11 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                             }
                         }
                     }
+                    // Refresh to pick up structural changes from commit
+                    // (e.g. web browser page content after URL fetch)
+                    if (wasInput) {
+                        providerRefreshCurrentDirectory(appRenderer);
+                    }
                     free(oldContent);
                     // Return to operator general
                     appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
@@ -854,7 +859,9 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                 FfonElement *elem = arr[idx];
                 if (elem->type == FFON_STRING) {
                     // If element is an <input>, activate it (commit current content)
-                    if (providerTagHasInput(elem->data.string) && !appRenderer->pendingFileBrowserOpen && !providerGetCurrentPath(appRenderer)) {
+                    Provider *activeProvider = providerGetActive(appRenderer);
+                    bool isFileBrowser = activeProvider && activeProvider->name && strcmp(activeProvider->name, "filebrowser") == 0;
+                    if (providerTagHasInput(elem->data.string) && !appRenderer->pendingFileBrowserOpen && !isFileBrowser) {
                         char *content = providerTagExtractContent(elem->data.string);
                         if (content) {
                             providerCommitEdit(appRenderer, content, content);

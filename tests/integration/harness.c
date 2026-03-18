@@ -266,6 +266,10 @@ bool harnessSetupProviders(AppRenderer *appRenderer, const char *fbTmpDir) {
     if (!fb) return false;
     providerRegister(fb);
 
+    // Create web browser
+    Provider *wb = providerFactoryCreate("web browser");
+    if (wb) providerRegister(wb);
+
     // Create mock "sales demo" provider with config file support
     Provider *salesDemo = providerCreate(&salesDemoOps);
     if (!salesDemo) return false;
