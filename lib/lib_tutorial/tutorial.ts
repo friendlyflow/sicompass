@@ -59,6 +59,16 @@ const sections: Section[] = [
     ],
   },
   {
+    key: "Accessibility",
+    children: [
+      "Sicompass has built-in screen reader support powered by AccessKit. If you use a screen reader, Sicompass works with it out of the box — no configuration needed.",
+      "Screen reader support is available on all platforms: Linux (AT-SPI), macOS (VoiceOver), and Windows (Narrator, NVDA, JAWS).",
+      "When you navigate up, down, or into items, the current element is automatically announced by your screen reader.",
+      "Mode changes are also announced. For example, switching to insert mode announces 'editor insert', entering search announces 'search', and returning to normal navigation announces 'operator mode'.",
+      "Screen reader support activates automatically when a screen reader is detected. There is nothing to enable or configure.",
+    ],
+  },
+  {
     key: "Editing",
     children: [
       "Some items in Sicompass are editable. You can tell because they contain an <input> tag. For example, file names in the file browser or setting values can be edited inline.",
