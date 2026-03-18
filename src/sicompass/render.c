@@ -47,7 +47,9 @@ static struct accesskit_tree_update* accesskitActivationHandler(void *userdata) 
     windowStateLock((struct windowState *)state);
 
     accesskit_node *root = windowStateBuildRoot(state);
-    accesskit_node *element = buildElement(appRenderer->ffon[0]);
+    accesskit_node *element = (appRenderer->ffonCount > 0 && appRenderer->ffon[0])
+        ? buildElement(appRenderer->ffon[0])
+        : accesskit_node_new(ACCESSKIT_ROLE_LIST_ITEM);
     accesskit_tree_update *result = accesskit_tree_update_with_capacity_and_focus(
         (state->announcement != NULL) ? 4 : 3, state->focus);
 
@@ -74,7 +76,7 @@ static void accesskitActionHandler(accesskit_action_request *request, void *user
     SDL_zero(event);
     event.type = state->eventType;
     event.user.windowID = state->windowId;
-    event.user.data1 = (void *)((uintptr_t)(request->target));
+    event.user.data1 = (void *)((uintptr_t)(request->target_node));
     if (request->action == ACCESSKIT_ACTION_FOCUS) {
         event.user.code = SET_FOCUS_MSG;
         SDL_PushEvent(&event);
