@@ -50,7 +50,8 @@ Libraries (`lib/`) communicate with `src/sicompass` through the `lib_provider` i
 ## Testing
 
 - After implementing changes, always run relevant tests before finishing.
-- C tests: `ninja -C build test` (all), or `build/tests/test_<module>` (specific).
+- C unit tests: `build/tests/<module>/test_<name>` (specific), or run all via the test binaries in `build/tests/`.
+- C integration tests: `build/tests/integration/test_integration` — headless end-to-end tests that link real handlers, providers (filebrowser, webbrowser, settings), and simulate key presses. Add integration tests for cross-provider or full-workflow behavior.
 - Bun tests (TypeScript providers): `bun test tests/lib_*/*.test.ts` (all), or `bun test tests/<module>/<name>.test.ts` (specific).
 - When adding new code, write or update tests in `tests/`.
 - If tests fail, fix the code — never leave a task with failing tests.
