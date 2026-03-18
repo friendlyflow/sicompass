@@ -1,15 +1,11 @@
 #!/bin/bash
-# Reminds Claude to write/update tests when new source code is added.
-# Triggers on new .c, .h, or .ts files (not test files themselves).
+# Reminds Claude to write/update tests when source code is added or modified.
+# - Write (new file): remind to create tests
+# - Edit (handlers/provider): remind to add integration tests
 
 INPUT=$(cat)
 TOOL=$(echo "$INPUT" | jq -r '.tool_name')
 FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path')
-
-# Only check Write tool (new file creation)
-if [[ "$TOOL" != "Write" ]]; then
-  exit 0
-fi
 
 # Only check source files
 if [[ ! "$FILE_PATH" =~ \.(c|h|ts)$ ]]; then
@@ -26,6 +22,23 @@ if [[ "$FILE_PATH" =~ /.claude/ ]]; then
   exit 0
 fi
 
-echo "REMINDER: You created a new source file: $FILE_PATH" >&2
-echo "Make sure to write or update corresponding tests in tests/." >&2
-exit 2
+# New file creation: remind to write tests
+if [[ "$TOOL" == "Write" ]]; then
+  echo "REMINDER: You created a new source file: $FILE_PATH" >&2
+  echo "Make sure to write or update corresponding tests in tests/." >&2
+  exit 2
+fi
+
+# Edits to handler/provider code: remind about integration tests
+if [[ "$TOOL" == "Edit" ]]; then
+  if [[ "$FILE_PATH" =~ src/sicompass/handlers\.c ]] || \
+     [[ "$FILE_PATH" =~ src/sicompass/provider\.c ]] || \
+     [[ "$FILE_PATH" =~ src/sicompass/events\.c ]] || \
+     [[ "$FILE_PATH" =~ lib/lib_.*/src/provider\.c ]]; then
+    echo "REMINDER: You edited $FILE_PATH" >&2
+    echo "Consider adding/updating integration tests in tests/integration/test_integration.c for cross-provider or full-workflow behavior." >&2
+    exit 2
+  fi
+fi
+
+exit 0
