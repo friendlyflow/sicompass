@@ -828,6 +828,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
             providerNotifyCheckboxChanged(appRenderer, &appRenderer->currentId);
             createListCurrentLayer(appRenderer);
             appRenderer->listIndex = savedIndex;
+            accesskitSpeakCurrentElement(appRenderer);
             appRenderer->needsRedraw = true;
             appRenderer->lastKeypressTime = now;
             return;
@@ -838,6 +839,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
             providerNotifyRadioChanged(appRenderer, &appRenderer->currentId);
             createListCurrentLayer(appRenderer);
             appRenderer->listIndex = savedIndex;
+            accesskitSpeakCurrentElement(appRenderer);
             appRenderer->needsRedraw = true;
             appRenderer->lastKeypressTime = now;
             return;
@@ -950,6 +952,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                 int savedIndex = appRenderer->listIndex;
                 createListCurrentLayer(appRenderer);
                 appRenderer->listIndex = savedIndex;
+                accesskitSpeakCurrentElement(appRenderer);
                 appRenderer->needsRedraw = true;
                 appRenderer->lastKeypressTime = now;
                 return;
@@ -962,6 +965,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                 providerNotifyRadioChanged(appRenderer, &appRenderer->currentId);
                 createListCurrentLayer(appRenderer);
                 appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                accesskitSpeakCurrentElement(appRenderer);
                 appRenderer->needsRedraw = true;
                 appRenderer->lastKeypressTime = now;
                 return;
@@ -1046,6 +1050,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                 int savedIndex = appRenderer->listIndex;
                 createListExtendedSearch(appRenderer);
                 appRenderer->listIndex = savedIndex;
+                accesskitSpeakCurrentElement(appRenderer);
                 appRenderer->needsRedraw = true;
                 appRenderer->lastKeypressTime = now;
                 return;
@@ -1058,6 +1063,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                 providerNotifyRadioChanged(appRenderer, &appRenderer->currentId);
                 createListCurrentLayer(appRenderer);
                 appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                accesskitSpeakCurrentElement(appRenderer);
                 appRenderer->needsRedraw = true;
                 appRenderer->lastKeypressTime = now;
                 return;
@@ -2071,8 +2077,8 @@ void handleI(AppRenderer *appRenderer) {
             }
         }
 
-        // Speak mode change with current item as context
-        accesskitSpeakModeChange(appRenderer, context);
+        // Speak mode change with current input value as context
+        accesskitSpeakModeChange(appRenderer, appRenderer->inputBuffer[0] != '\0' ? appRenderer->inputBuffer : NULL);
 
         appRenderer->cursorPosition = 0;
         appRenderer->selectionAnchor = -1;
@@ -2172,8 +2178,8 @@ void handleA(AppRenderer *appRenderer) {
             }
         }
 
-        // Speak mode change with current item as context
-        accesskitSpeakModeChange(appRenderer, context);
+        // Speak mode change with current input value as context
+        accesskitSpeakModeChange(appRenderer, appRenderer->inputBuffer[0] != '\0' ? appRenderer->inputBuffer : NULL);
 
         appRenderer->cursorPosition = appRenderer->inputBufferSize;
         appRenderer->selectionAnchor = -1;
@@ -2187,7 +2193,6 @@ void handleCtrlF(AppRenderer *appRenderer) {
 
     // SCROLL mode: Ctrl+F enters SCROLL_SEARCH
     if (appRenderer->currentCoordinate == COORDINATE_SCROLL) {
-        appRenderer->previousCoordinate = COORDINATE_SCROLL;
         appRenderer->currentCoordinate = COORDINATE_SCROLL_SEARCH;
         appRenderer->inputBuffer[0] = '\0';
         appRenderer->inputBufferSize = 0;

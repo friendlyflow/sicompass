@@ -185,21 +185,62 @@ void accesskitUpdateWindowFocus(AppRenderer *appRenderer, bool isFocused) {
         &appRenderer->accesskitAdapter, isFocused);
 }
 
+static const char *listPrefixToWord(const char *prefix) {
+    if (strcmp(prefix, "-") == 0)   return "minus";
+    if (strcmp(prefix, "-p") == 0)  return "minus p";
+    if (strcmp(prefix, "-cc") == 0) return "minus cc";
+    if (strcmp(prefix, "-c") == 0)  return "minus c";
+    if (strcmp(prefix, "-rc") == 0) return "minus rc";
+    if (strcmp(prefix, "-b") == 0)  return "minus b";
+    if (strcmp(prefix, "-i") == 0)  return "minus i";
+    if (strcmp(prefix, "-r") == 0)  return "minus r";
+    if (strcmp(prefix, "+") == 0)   return "plus";
+    if (strcmp(prefix, "+cc") == 0) return "plus cc";
+    if (strcmp(prefix, "+c") == 0)  return "plus c";
+    if (strcmp(prefix, "+l") == 0)  return "plus l";
+    if (strcmp(prefix, "+R") == 0)  return "plus R";
+    if (strcmp(prefix, "+i") == 0)  return "plus i";
+    return "";
+}
+
+static void labelToSpeech(const char *label, char *buf, size_t bufsize) {
+    const char *space = strchr(label, ' ');
+    if (!space) {
+        snprintf(buf, bufsize, "%s", label);
+        return;
+    }
+    char prefix[16];
+    size_t prefixLen = (size_t)(space - label);
+    if (prefixLen >= sizeof(prefix)) prefixLen = sizeof(prefix) - 1;
+    memcpy(prefix, label, prefixLen);
+    prefix[prefixLen] = '\0';
+
+    const char *content = space + 1;
+    const char *word = listPrefixToWord(prefix);
+    if (word[0] == '\0') {
+        snprintf(buf, bufsize, "%s", content);
+    } else {
+        snprintf(buf, bufsize, "%s %s", word, content);
+    }
+}
+
 void accesskitSpeakCurrentElement(AppRenderer *appRenderer) {
-    int count;
-    FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount, &appRenderer->currentId, &count);
-    if (!arr || count == 0) return;
+    ListItem *list = appRenderer->filteredListCount > 0
+        ? appRenderer->filteredListCurrentLayer
+        : appRenderer->totalListCurrentLayer;
+    int count = appRenderer->filteredListCount > 0
+        ? appRenderer->filteredListCount
+        : appRenderer->totalListCount;
 
-    int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
-    if (idx < 0 || idx >= count) return;
+    if (!list || appRenderer->listIndex < 0 || appRenderer->listIndex >= count) return;
 
-    FfonElement *elem = arr[idx];
-    const char *announcement = (elem->type == FFON_OBJECT) ?
-        elem->data.object->key : elem->data.string;
+    const char *label = list[appRenderer->listIndex].label;
+    if (!label) return;
 
-    // appRenderer->state.focus = focus;
-    appRenderer->state.announcement = announcement;
-    accesskitSpeak(appRenderer, announcement);
+    labelToSpeech(label, appRenderer->state.announcementBuf, sizeof(appRenderer->state.announcementBuf));
+
+    appRenderer->state.announcement = appRenderer->state.announcementBuf;
+    accesskitSpeak(appRenderer, appRenderer->state.announcementBuf);
 }
 
 void accesskitSpeakModeChange(AppRenderer *appRenderer, const char *context) {

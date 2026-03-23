@@ -144,3 +144,9 @@ install_data(
   rename: ['tutorial.ts', 'sales_demo.ts', 'remote.ts'],
   install_dir: get_option('datadir') / 'sicompass' / 'scripts',
 )
+
+install_data(
+  'lib/lib_tutorial/assets/sf.json',
+  'lib/lib_tutorial/assets/texture.jpg',
+  install_dir: get_option('datadir') / 'sicompass' / 'scripts' / 'assets',
+)
