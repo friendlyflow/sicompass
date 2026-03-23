@@ -2,6 +2,11 @@
 // Run with: bun run tutorial.ts <path>
 // Outputs JSON array of children at the given path to stdout
 
+import { resolve } from "path";
+const scriptDir = import.meta.dir;
+const TEXTURE_JPG = resolve(scriptDir, "assets/texture.jpg").replaceAll("\\", "/");
+const SF_JSON = resolve(scriptDir, "assets/sf.json").replaceAll("\\", "/");
+
 interface Section {
   key: string;
   children: (string | Section)[];
@@ -218,14 +223,14 @@ const sections: Section[] = [
       },
       "Radio groups let you pick exactly one option from a set. Navigate into the radio group above and press Enter on an option to select it. Only one option can be selected at a time.",
       "Images can be displayed inline within the tree. The image below is loaded from a file path:",
-      "<image>textures/texture.jpg</image>",
+      `<image>${TEXTURE_JPG}</image>`,
       "Images also support prefix and suffix text around them:",
-      "Image with prefix: <image>textures/texture.jpg</image> and suffix",
-      "<image>textures/texture.jpg</image> and suffix",
-      "Image with prefix: <image>textures/texture.jpg</image>",
+      `Image with prefix: <image>${TEXTURE_JPG}</image> and suffix`,
+      `<image>${TEXTURE_JPG}</image> and suffix`,
+      `Image with prefix: <image>${TEXTURE_JPG}</image>`,
       "Links lazy-load external JSON or FFON files as children. Navigate into the link below to load its content:",
       {
-        key: "Link with prefix: <link>lib/lib_tutorial/assets/sf.json</link> and suffix",
+        key: `Link with prefix: <link>${SF_JSON}</link> and suffix`,
         children: [],
       },
       "Scroll mode: when a text item is too long to fit on screen, you can scroll through it. Press Tab twice from operator mode to enter scroll mode, then use Up/Down to scroll the text below:",

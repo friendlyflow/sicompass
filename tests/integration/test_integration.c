@@ -469,6 +469,33 @@ void test_file_deletion(void) {
 }
 
 // ============================================================
+// Test: Esc from scroll search chains back to operator
+// ============================================================
+
+void test_scroll_search_esc_chain(void) {
+    // Navigate into a provider so Tab enters scroll mode
+    pressTab(app);
+    pressTab(app);
+    TEST_ASSERT_EQUAL(COORDINATE_SCROLL, app->currentCoordinate);
+
+    // Ctrl+F enters scroll search
+    pressCtrl(app, SDLK_F);
+    TEST_ASSERT_EQUAL(COORDINATE_SCROLL_SEARCH, app->currentCoordinate);
+
+    // Esc -> scroll
+    pressEscape(app);
+    TEST_ASSERT_EQUAL(COORDINATE_SCROLL, app->currentCoordinate);
+
+    // Esc -> simple search
+    pressEscape(app);
+    TEST_ASSERT_EQUAL(COORDINATE_SIMPLE_SEARCH, app->currentCoordinate);
+
+    // Esc -> operator general (was broken: looped back to scroll)
+    pressEscape(app);
+    TEST_ASSERT_EQUAL(COORDINATE_OPERATOR_GENERAL, app->currentCoordinate);
+}
+
+// ============================================================
 // Test: Multiple mode transitions
 // ============================================================
 
@@ -779,6 +806,68 @@ void test_filebrowser_enter_does_not_commit_input(void) {
 }
 
 // ============================================================
+// Test: List item label has type prefix for filebrowser file items
+// ============================================================
+
+void test_list_item_label_has_prefix(void) {
+    int fbIdx = findProviderIndex("filebrowser");
+    TEST_ASSERT_NOT_EQUAL(-1, fbIdx);
+
+    navigateToProvider(fbIdx);
+    pressRight(app);
+    TEST_ASSERT_EQUAL(2, app->currentId.depth);
+
+    // Navigate to alpha.txt (an <input> file item)
+    FfonObject *fbObj = app->ffon[fbIdx]->data.object;
+    int alphaIdx = findChildIndex(fbObj, "alpha.txt");
+    TEST_ASSERT_NOT_EQUAL_MESSAGE(-1, alphaIdx, "alpha.txt not found");
+    while (app->currentId.ids[1] != alphaIdx) pressDown(app);
+
+    // Explicitly rebuild list and sync listIndex
+    createListCurrentLayer(app);
+    app->listIndex = app->currentId.ids[app->currentId.depth - 1];
+
+    TEST_ASSERT_NOT_NULL_MESSAGE(app->totalListCurrentLayer, "List should be populated");
+    TEST_ASSERT_TRUE_MESSAGE(app->listIndex >= 0 && app->listIndex < app->totalListCount,
+        "listIndex out of range");
+
+    const char *label = app->totalListCurrentLayer[app->listIndex].label;
+    TEST_ASSERT_NOT_NULL_MESSAGE(label, "List item should have a label");
+
+    // Filebrowser files have <input> tag → list prefix "-i"
+    // The label is used as input to labelToSpeech which produces the spoken announcement
+    char failMsg[512];
+    snprintf(failMsg, sizeof(failMsg), "Expected label to start with '-i ', got: '%s'", label);
+    TEST_ASSERT_TRUE_MESSAGE(strncmp(label, "-i ", 3) == 0, failMsg);
+    TEST_ASSERT_TRUE_MESSAGE(strstr(label, "alpha.txt") != NULL, "Label should contain filename");
+}
+
+// ============================================================
+// Test: handleI populates inputBuffer with the editable value
+// ============================================================
+
+void test_handleI_populates_input_buffer(void) {
+    int fbIdx = findProviderIndex("filebrowser");
+    TEST_ASSERT_NOT_EQUAL(-1, fbIdx);
+
+    navigateToProvider(fbIdx);
+    pressRight(app);
+
+    FfonObject *fbObj = app->ffon[fbIdx]->data.object;
+    int alphaIdx = findChildIndex(fbObj, "alpha.txt");
+    TEST_ASSERT_NOT_EQUAL_MESSAGE(-1, alphaIdx, "alpha.txt not found");
+    while (app->currentId.ids[1] != alphaIdx) pressDown(app);
+
+    pressKey(app, SDLK_I, 0);
+    TEST_ASSERT_EQUAL(COORDINATE_OPERATOR_INSERT, app->currentCoordinate);
+
+    // inputBuffer is what accesskitSpeakModeChange uses as context for the announcement
+    char failMsg[512];
+    snprintf(failMsg, sizeof(failMsg), "Expected inputBuffer='alpha.txt', got: '%s'", app->inputBuffer);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("alpha.txt", app->inputBuffer, failMsg);
+}
+
+// ============================================================
 
 int main(void) {
     UNITY_BEGIN();
@@ -794,9 +883,12 @@ int main(void) {
     RUN_TEST(test_directory_creation_via_command);
     RUN_TEST(test_escape_returns_to_operator);
     RUN_TEST(test_file_deletion);
+    RUN_TEST(test_scroll_search_esc_chain);
     RUN_TEST(test_mode_transitions);
     RUN_TEST(test_full_workflow);
     RUN_TEST(test_webbrowser_enter_commits_url);
     RUN_TEST(test_filebrowser_enter_does_not_commit_input);
+    RUN_TEST(test_list_item_label_has_prefix);
+    RUN_TEST(test_handleI_populates_input_buffer);
     return UNITY_END();
 }
