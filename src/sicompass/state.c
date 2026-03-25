@@ -156,6 +156,7 @@ const char* taskToString(Task task) {
         case TASK_CUT: return "cut";
         case TASK_COPY: return "copy";
         case TASK_PASTE: return "paste";
+        case TASK_FS_CREATE: return "fs_create";
         default: return "unknown";
     }
 }

@@ -868,6 +868,99 @@ void test_handleI_populates_input_buffer(void) {
 }
 
 // ============================================================
+// Test: Undo/redo of filesystem file creation
+// ============================================================
+
+void test_undo_file_creation(void) {
+    int fbIdx = -1;
+    for (int i = 0; i < app->ffonCount; i++) {
+        if (strcmp(app->providers[i]->name, "filebrowser") == 0) {
+            fbIdx = i;
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_EQUAL(-1, fbIdx);
+
+    while (app->currentId.ids[0] != fbIdx) pressDown(app);
+    pressRight(app);
+
+    // Create a file via insert mode
+    pressCtrl(app, SDLK_I);
+    typeText(app, "- undotest.txt");
+    pressEnter(app);
+    TEST_ASSERT_EQUAL(COORDINATE_OPERATOR_GENERAL, app->currentCoordinate);
+    TEST_ASSERT_TRUE_MESSAGE(fileExists(tmpDir, "undotest.txt"),
+        "File should exist after creation");
+
+    // Undo should delete the file
+    pressCtrl(app, SDLK_Z);
+    TEST_ASSERT_FALSE_MESSAGE(fileExists(tmpDir, "undotest.txt"),
+        "File should be deleted after undo");
+
+    // Redo should re-create the file
+    pressCtrlShift(app, SDLK_Z);
+    TEST_ASSERT_TRUE_MESSAGE(fileExists(tmpDir, "undotest.txt"),
+        "File should be re-created after redo");
+}
+
+// ============================================================
+// Test: Undo/redo of filesystem directory creation
+// ============================================================
+
+void test_undo_directory_creation(void) {
+    int fbIdx = -1;
+    for (int i = 0; i < app->ffonCount; i++) {
+        if (strcmp(app->providers[i]->name, "filebrowser") == 0) {
+            fbIdx = i;
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_EQUAL(-1, fbIdx);
+
+    while (app->currentId.ids[0] != fbIdx) pressDown(app);
+    pressRight(app);
+    int depthBeforeCreate = app->currentId.depth;
+
+    // Create a directory via insert mode
+    pressCtrl(app, SDLK_I);
+    typeText(app, "+ undodir");
+    pressEnter(app);
+    TEST_ASSERT_EQUAL(COORDINATE_OPERATOR_GENERAL, app->currentCoordinate);
+    // After creating a directory, we navigate into it (depth increases)
+    TEST_ASSERT_EQUAL_MESSAGE(depthBeforeCreate + 1, app->currentId.depth,
+        "Should be inside the new directory after creation");
+
+    char dirPath[512];
+    snprintf(dirPath, sizeof(dirPath), "%s/undodir", tmpDir);
+    struct stat st;
+    TEST_ASSERT_EQUAL_MESSAGE(0, stat(dirPath, &st), "Directory should exist after creation");
+    TEST_ASSERT_TRUE(S_ISDIR(st.st_mode));
+
+    // Undo should delete the directory and navigate back to parent
+    pressCtrl(app, SDLK_Z);
+    TEST_ASSERT_NOT_EQUAL_MESSAGE(0, stat(dirPath, &st),
+        "Directory should be deleted after undo");
+    TEST_ASSERT_EQUAL_MESSAGE(depthBeforeCreate, app->currentId.depth,
+        "Should be back at parent level after undo");
+
+    // Second undo should not crash (no stale TASK_INSERT entry)
+    pressCtrl(app, SDLK_Z);
+
+    // Redo should re-create the directory and navigate into it
+    pressCtrlShift(app, SDLK_Z);
+    TEST_ASSERT_EQUAL_MESSAGE(0, stat(dirPath, &st),
+        "Directory should be re-created after redo");
+    TEST_ASSERT_TRUE(S_ISDIR(st.st_mode));
+    TEST_ASSERT_EQUAL_MESSAGE(depthBeforeCreate + 1, app->currentId.depth,
+        "Should be inside the directory after redo");
+
+    // Undo again to clean up
+    pressCtrl(app, SDLK_Z);
+    TEST_ASSERT_NOT_EQUAL_MESSAGE(0, stat(dirPath, &st),
+        "Directory should be deleted after second undo");
+}
+
+// ============================================================
 
 int main(void) {
     UNITY_BEGIN();
@@ -890,5 +983,7 @@ int main(void) {
     RUN_TEST(test_filebrowser_enter_does_not_commit_input);
     RUN_TEST(test_list_item_label_has_prefix);
     RUN_TEST(test_handleI_populates_input_buffer);
+    RUN_TEST(test_undo_file_creation);
+    RUN_TEST(test_undo_directory_creation);
     return UNITY_END();
 }

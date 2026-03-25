@@ -595,6 +595,10 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                             return;  // stay in COORDINATE_OPERATOR_INSERT
                         }
 
+                        // Capture undo info at the element's current level
+                        IdArray fsUndoId;
+                        idArrayCopy(&fsUndoId, &appRenderer->currentId);
+
                         if (isFile) {
                             char *newKey = providerTagFormatKey(name);
                             if (newKey) {
@@ -614,6 +618,29 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                             if (pActive && pActive->pushPath)
                                 pActive->pushPath(pActive, name);
                             idArrayPush(&appRenderer->currentId, 0);
+                        }
+
+                        // Discard the placeholder undo entry (TASK_INSERT/TASK_APPEND from handleCtrlI/handleCtrlA)
+                        // so that only the TASK_FS_CREATE entry remains for this operation
+                        if (appRenderer->undoHistoryCount > 0) {
+                            UndoEntry *prev = &appRenderer->undoHistory[appRenderer->undoHistoryCount - 1];
+                            if (prev->task == TASK_INSERT || prev->task == TASK_INSERT_INSERT ||
+                                prev->task == TASK_APPEND || prev->task == TASK_APPEND_APPEND) {
+                                if (prev->prevElement) ffonElementDestroy(prev->prevElement);
+                                if (prev->newElement) ffonElementDestroy(prev->newElement);
+                                appRenderer->undoHistoryCount--;
+                            }
+                        }
+
+                        // Record undo history for filesystem creation (use parent-level id)
+                        {
+                            FfonElement *undoElem = isFile
+                                ? ffonElementCreateString(providerTagFormatKey(name))
+                                : ffonElementCreateObject(providerTagFormatKey(name));
+                            if (undoElem) {
+                                updateHistory(appRenderer, TASK_FS_CREATE, &fsUndoId, NULL, undoElem, HISTORY_NONE);
+                                ffonElementDestroy(undoElem);
+                            }
                         }
 
                         free(oldContent);
@@ -723,13 +750,23 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                     bool wasInput = providerTagHasInput(elementKey);
                     // Only commit if changed
                     bool commitSucceeded = false;
+                    bool fsCreated = false;
+                    char fsCreatedName[MAX_LINE_LENGTH] = "";
                     if (strcmp(oldContent, newContent) != 0) {
                         if (oldContent[0] == '\0' && appRenderer->inputPrefix[0] == '\0' && elem->type == FFON_OBJECT) {
                             commitSucceeded = providerCreateDirectory(appRenderer, newContent);
+                            if (commitSucceeded) {
+                                fsCreated = true;
+                                strncpy(fsCreatedName, newContent, MAX_LINE_LENGTH - 1);
+                            }
                         } else if (oldContent[0] == '\0' && appRenderer->inputPrefix[0] == '\0' && elem->type == FFON_STRING) {
                             Provider *p = providerGetActive(appRenderer);
                             if (p && p->createFile) {
                                 commitSucceeded = providerCreateFile(appRenderer, newContent);
+                                if (commitSucceeded) {
+                                    fsCreated = true;
+                                    strncpy(fsCreatedName, newContent, MAX_LINE_LENGTH - 1);
+                                }
                             } else {
                                 // Provider has no file creation: update FFON element directly
                                 char *newKey = providerTagFormatKey(newContent);
@@ -809,6 +846,53 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                         memcpy(appRenderer->errorMessage, savedError, sizeof(appRenderer->errorMessage));
                     appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
                     appRenderer->scrollOffset = 0;
+                    // Record undo history for filesystem creation
+                    if (fsCreated) {
+                        // Discard the placeholder undo entry (TASK_INSERT/TASK_APPEND)
+                        if (appRenderer->undoHistoryCount > 0) {
+                            UndoEntry *prev = &appRenderer->undoHistory[appRenderer->undoHistoryCount - 1];
+                            if (prev->task == TASK_INSERT || prev->task == TASK_INSERT_INSERT ||
+                                prev->task == TASK_APPEND || prev->task == TASK_APPEND_APPEND) {
+                                if (prev->prevElement) ffonElementDestroy(prev->prevElement);
+                                if (prev->newElement) ffonElementDestroy(prev->newElement);
+                                appRenderer->undoHistoryCount--;
+                            }
+                        }
+
+                        int count;
+                        FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                                        &appRenderer->currentId, &count);
+                        if (arr) {
+                            // Find the newly created element by name
+                            int foundIdx = -1;
+                            for (int si = 0; si < count; si++) {
+                                const char *ek = (arr[si]->type == FFON_STRING)
+                                    ? arr[si]->data.string
+                                    : (arr[si]->type == FFON_OBJECT ? arr[si]->data.object->key : NULL);
+                                if (!ek) continue;
+                                char *extracted = providerTagExtractContent(ek);
+                                if (extracted) {
+                                    if (strcmp(extracted, fsCreatedName) == 0) {
+                                        foundIdx = si;
+                                        free(extracted);
+                                        break;
+                                    }
+                                    free(extracted);
+                                }
+                            }
+                            if (foundIdx >= 0) {
+                                IdArray fsId;
+                                idArrayCopy(&fsId, &appRenderer->currentId);
+                                fsId.ids[fsId.depth - 1] = foundIdx;
+                                FfonElement *newElem = ffonElementClone(arr[foundIdx]);
+                                updateHistory(appRenderer, TASK_FS_CREATE, &fsId, NULL, newElem, HISTORY_NONE);
+                                ffonElementDestroy(newElem);
+                                // Move cursor to the created element
+                                appRenderer->currentId.ids[appRenderer->currentId.depth - 1] = foundIdx;
+                                appRenderer->listIndex = foundIdx;
+                            }
+                        }
+                    }
                     appRenderer->needsRedraw = true;
                     appRenderer->lastKeypressTime = now;
                     return;
