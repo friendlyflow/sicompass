@@ -38,6 +38,9 @@ typedef struct {
 static FolderMapping g_folderMappings[MAX_FOLDERS];
 static int g_folderMappingCount = 0;
 
+// Set after send — compose/reply fetch returns confirmation instead of form
+static bool g_composeSent = false;
+
 // Pending compose state (persists across commit calls within one compose)
 static struct {
     char to[256];
@@ -220,52 +223,58 @@ static FfonElement** ecBuildComposeForm(const char *replyFolder,
     FfonElement **elems = malloc(maxElems * sizeof(FfonElement*));
     int idx = 0;
 
-    char fromBuf[300];
-    snprintf(fromBuf, sizeof(fromBuf), "From: %s", g_config.username);
-    elems[idx++] = ffonElementCreateString(fromBuf);
+    // Pre-fill from original message only if fields are still empty
+    // (first call after memset in ecHandleCommand)
+    // Pre-fill To from original sender only if fields are still empty
+    if (replyFolder && replyUid > 0 && !g_pendingCompose.to[0]) {
+        EmailMessage *msg = emailclientFetchMessage(
+            &g_config, replyFolder, replyUid);
+        if (msg) {
+            strncpy(g_pendingCompose.to, msg->from,
+                    sizeof(g_pendingCompose.to) - 1);
+            g_pendingCompose.to[sizeof(g_pendingCompose.to) - 1] = '\0';
 
-    EmailMessage *msg = NULL;
-    if (replyFolder && replyUid > 0) {
-        msg = emailclientFetchMessage(&g_config, replyFolder, replyUid);
+            const char *subj = msg->subject;
+            if (strncasecmp(subj, "Re: ", 4) != 0)
+                snprintf(g_pendingCompose.subject,
+                         sizeof(g_pendingCompose.subject),
+                         "Re: %s", subj);
+            else
+                strncpy(g_pendingCompose.subject, subj,
+                        sizeof(g_pendingCompose.subject) - 1);
+            g_pendingCompose.subject[
+                sizeof(g_pendingCompose.subject) - 1] = '\0';
+
+            emailclientFreeMessage(msg);
+        }
     }
 
-    if (msg) {
-        char toBuf[300], subjBuf[560];
-        snprintf(toBuf, sizeof(toBuf), "To: <input>%s</input>", msg->from);
-        elems[idx++] = ffonElementCreateString(toBuf);
+    // Always reflect g_pendingCompose values in inputs
+    // From is always the user's own address
+    char fromBuf[300], toBuf[300], subjBuf[560], bodyBuf[8300];
+    snprintf(fromBuf, sizeof(fromBuf), "From: %s", g_config.username);
+    elems[idx++] = ffonElementCreateString(fromBuf);
+    snprintf(toBuf, sizeof(toBuf),
+             "To: <input>%s</input>", g_pendingCompose.to);
+    elems[idx++] = ffonElementCreateString(toBuf);
+    snprintf(subjBuf, sizeof(subjBuf),
+             "Subject: <input>%s</input>", g_pendingCompose.subject);
+    elems[idx++] = ffonElementCreateString(subjBuf);
+    snprintf(bodyBuf, sizeof(bodyBuf),
+             "Body: <input>%s</input>", g_pendingCompose.body);
+    elems[idx++] = ffonElementCreateString(bodyBuf);
+    elems[idx++] = ffonElementCreateString(
+        "<button>send</button>Send");
 
-        const char *subj = msg->subject;
-        if (strncasecmp(subj, "Re: ", 4) != 0)
-            snprintf(subjBuf, sizeof(subjBuf),
-                     "Subject: <input>Re: %s</input>", subj);
-        else
-            snprintf(subjBuf, sizeof(subjBuf),
-                     "Subject: <input>%s</input>", subj);
-        elems[idx++] = ffonElementCreateString(subjBuf);
-
-        // Pre-fill pending compose state
-        strncpy(g_pendingCompose.to, msg->from,
-                sizeof(g_pendingCompose.to) - 1);
-        strncpy(g_pendingCompose.subject,
-                subjBuf + 18, // skip "Subject: <input>"
-                sizeof(g_pendingCompose.subject) - 1);
-        char *inputEnd = strstr(g_pendingCompose.subject, "</input>");
-        if (inputEnd) *inputEnd = '\0';
-
-        elems[idx++] = ffonElementCreateString("Body: <input></input>");
-        elems[idx++] = ffonElementCreateString(
-            "<button>send</button>Send");
-
-        FfonElement *history = ecBuildHistory(replyFolder, msg->references);
-        if (history) elems[idx++] = history;
-
-        emailclientFreeMessage(msg);
-    } else {
-        elems[idx++] = ffonElementCreateString("To: <input></input>");
-        elems[idx++] = ffonElementCreateString("Subject: <input></input>");
-        elems[idx++] = ffonElementCreateString("Body: <input></input>");
-        elems[idx++] = ffonElementCreateString(
-            "<button>send</button>Send");
+    // Thread history for reply
+    if (replyFolder && replyUid > 0) {
+        EmailMessage *msg = emailclientFetchMessage(
+            &g_config, replyFolder, replyUid);
+        if (msg) {
+            FfonElement *history = ecBuildHistory(replyFolder, msg->references);
+            if (history) elems[idx++] = history;
+            emailclientFreeMessage(msg);
+        }
     }
 
     *outCount = idx;
@@ -292,6 +301,12 @@ static FfonElement** ecFetch(const char *path, int *outCount) {
     // are served here because noCache=true causes re-fetch on navigation.
     if (pathContainsSegment(path, "compose") ||
         pathContainsSegment(path, "reply")) {
+        if (g_composeSent) {
+            *outCount = 1;
+            FfonElement **elems = malloc(sizeof(FfonElement*));
+            elems[0] = ffonElementCreateString("message sent");
+            return elems;
+        }
         return ecBuildComposeForm(
             g_pendingCompose.replyFolder[0] ? g_pendingCompose.replyFolder : NULL,
             g_pendingCompose.replyUid, outCount);
@@ -472,11 +487,11 @@ static const char** ecGetCommands(int *outCount) {
 static FfonElement* ecHandleCommand(const char *path, const char *command,
                                      const char *elementKey, int elementType,
                                      char *errorMsg, int errorMsgSize) {
-    (void)path;
     (void)elementType;
 
     if (strcmp(command, "compose") == 0 || strcmp(command, "reply") == 0) {
         memset(&g_pendingCompose, 0, sizeof(g_pendingCompose));
+        g_composeSent = false;
 
         bool isReply = (strcmp(command, "reply") == 0);
 
@@ -617,6 +632,7 @@ static void ecOnButtonPress(struct Provider *self, const char *functionName) {
                                 g_pendingCompose.subject,
                                 g_pendingCompose.body);
         memset(&g_pendingCompose, 0, sizeof(g_pendingCompose));
+        g_composeSent = true;
     }
 }
 

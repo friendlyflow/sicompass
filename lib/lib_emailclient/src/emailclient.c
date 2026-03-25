@@ -597,6 +597,21 @@ EmailMessage* emailclientFetchMessageByMessageId(
     return emailclientFetchMessage(config, folder, uid);
 }
 
+// Extract bare email from "Name <addr>" or "<addr>" format.
+// If no angle brackets, returns the input as-is.
+static const char* extractBareEmail(const char *addr, char *out, int outSize) {
+    const char *lt = strchr(addr, '<');
+    const char *gt = lt ? strchr(lt, '>') : NULL;
+    if (lt && gt && gt > lt + 1) {
+        int len = (int)(gt - lt - 1);
+        if (len >= outSize) len = outSize - 1;
+        memcpy(out, lt + 1, len);
+        out[len] = '\0';
+        return out;
+    }
+    return addr;
+}
+
 bool emailclientSendMessage(EmailClientConfig *config,
                              const char *to, const char *subject,
                              const char *body) {
@@ -606,6 +621,10 @@ bool emailclientSendMessage(EmailClientConfig *config,
 
     CURL *curl = curl_easy_init();
     if (!curl) return false;
+
+    // Extract bare email for SMTP envelope
+    char bareAddr[256];
+    const char *rcpt = extractBareEmail(to, bareAddr, sizeof(bareAddr));
 
     // Build RFC 5322 message
     char payload[16384];
@@ -620,7 +639,7 @@ bool emailclientSendMessage(EmailClientConfig *config,
     UploadBuffer upload = {payload, strlen(payload), 0};
 
     struct curl_slist *recipients = NULL;
-    recipients = curl_slist_append(recipients, to);
+    recipients = curl_slist_append(recipients, rcpt);
 
     curl_easy_setopt(curl, CURLOPT_URL, config->smtpUrl);
     applyAuth(curl, config);

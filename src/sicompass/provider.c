@@ -906,6 +906,8 @@ void providerNotifyButtonPressed(AppRenderer *appRenderer, IdArray *elementId) {
 
     if (!handled && provider->onButtonPress) {
         provider->onButtonPress(provider, functionName);
+        // Refresh after button press so the provider can update the view
+        providerRefreshCurrentDirectory(appRenderer);
     }
     free(functionName);
 }
