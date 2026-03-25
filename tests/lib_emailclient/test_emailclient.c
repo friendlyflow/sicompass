@@ -150,15 +150,30 @@ void test_get_commands_returns_expected(void) {
     TEST_ASSERT_TRUE(hasRefresh);
 }
 
-void test_handle_command_compose_returns_input(void) {
+void test_handle_command_compose_returns_object(void) {
     Provider *p = providerFactoryCreate("email client");
     p->init(p);
     char err[256] = "";
     FfonElement *r = p->handleCommand(p, "compose", "", FFON_STRING,
                                        err, sizeof(err));
     TEST_ASSERT_NOT_NULL(r);
-    TEST_ASSERT_EQUAL_INT(FFON_STRING, r->type);
-    TEST_ASSERT_TRUE(providerTagHasInput(r->data.string));
+    TEST_ASSERT_EQUAL_INT(FFON_OBJECT, r->type);
+    TEST_ASSERT_EQUAL_STRING("compose", r->data.object->key);
+    // Should have 5 children: From, To, Subject, Body, Send button
+    TEST_ASSERT_EQUAL_INT(5, r->data.object->count);
+    // From is display-only (no input tag)
+    TEST_ASSERT_FALSE(providerTagHasInput(
+        r->data.object->elements[0]->data.string));
+    // To, Subject, Body have input tags
+    TEST_ASSERT_TRUE(providerTagHasInput(
+        r->data.object->elements[1]->data.string));
+    TEST_ASSERT_TRUE(providerTagHasInput(
+        r->data.object->elements[2]->data.string));
+    TEST_ASSERT_TRUE(providerTagHasInput(
+        r->data.object->elements[3]->data.string));
+    // Send button
+    TEST_ASSERT_TRUE(strstr(r->data.object->elements[4]->data.string,
+                            "<button>send</button>") != NULL);
     ffonElementDestroy(r);
 }
 
@@ -223,14 +238,16 @@ void test_get_commands_includes_login_and_logout(void) {
     Provider *p = providerFactoryCreate("email client");
     int count = 0;
     const char **cmds = p->getCommands(p, &count);
-    TEST_ASSERT_EQUAL_INT(4, count);
-    bool hasLogin = false, hasLogout = false;
+    TEST_ASSERT_EQUAL_INT(5, count);
+    bool hasLogin = false, hasLogout = false, hasReply = false;
     for (int i = 0; i < count; i++) {
         if (strcmp(cmds[i], "login") == 0) hasLogin = true;
         if (strcmp(cmds[i], "logout") == 0) hasLogout = true;
+        if (strcmp(cmds[i], "reply") == 0) hasReply = true;
     }
     TEST_ASSERT_TRUE(hasLogin);
     TEST_ASSERT_TRUE(hasLogout);
+    TEST_ASSERT_TRUE(hasReply);
 }
 
 void test_handle_command_login_without_credentials(void) {
@@ -343,6 +360,55 @@ void test_oauth2_authorize_empty_secret_fails(void) {
     TEST_ASSERT_TRUE(strlen(r.error) > 0);
 }
 
+void test_commit_stores_to_field(void) {
+    Provider *p = providerFactoryCreate("email client");
+    p->init(p);
+    p->pushPath(p, "compose");
+    p->pushPath(p, "To");
+    bool ok = p->commitEdit(p, "", "user@example.com");
+    TEST_ASSERT_TRUE(ok);
+    p->popPath(p);
+    p->popPath(p);
+}
+
+void test_commit_stores_subject_field(void) {
+    Provider *p = providerFactoryCreate("email client");
+    p->init(p);
+    p->pushPath(p, "compose");
+    p->pushPath(p, "Subject");
+    bool ok = p->commitEdit(p, "", "Test Subject");
+    TEST_ASSERT_TRUE(ok);
+    p->popPath(p);
+    p->popPath(p);
+}
+
+void test_commit_stores_body_field(void) {
+    Provider *p = providerFactoryCreate("email client");
+    p->init(p);
+    p->pushPath(p, "compose");
+    p->pushPath(p, "Body");
+    bool ok = p->commitEdit(p, "", "Hello world");
+    TEST_ASSERT_TRUE(ok);
+    p->popPath(p);
+    p->popPath(p);
+}
+
+void test_commit_unknown_field_returns_false(void) {
+    Provider *p = providerFactoryCreate("email client");
+    p->init(p);
+    p->pushPath(p, "compose");
+    p->pushPath(p, "Unknown");
+    bool ok = p->commitEdit(p, "", "value");
+    TEST_ASSERT_FALSE(ok);
+    p->popPath(p);
+    p->popPath(p);
+}
+
+void test_provider_has_button_press(void) {
+    Provider *p = providerFactoryCreate("email client");
+    TEST_ASSERT_NOT_NULL(p->onButtonPress);
+}
+
 void test_oauth2_refresh_empty_token_fails(void) {
     OAuth2TokenResult r = __real_emailclientOAuth2RefreshToken("id", "secret", "");
     TEST_ASSERT_FALSE(r.success);
@@ -372,7 +438,7 @@ int main(void) {
     RUN_TEST(test_push_two_levels);
 
     RUN_TEST(test_get_commands_returns_expected);
-    RUN_TEST(test_handle_command_compose_returns_input);
+    RUN_TEST(test_handle_command_compose_returns_object);
     RUN_TEST(test_handle_command_refresh_returns_null);
     RUN_TEST(test_handle_command_set_imap_url);
     RUN_TEST(test_handle_command_set_smtp_url);
@@ -388,6 +454,12 @@ int main(void) {
 
     RUN_TEST(test_handle_command_login_success);
     RUN_TEST(test_handle_command_login_oauth_fails);
+
+    RUN_TEST(test_commit_stores_to_field);
+    RUN_TEST(test_commit_stores_subject_field);
+    RUN_TEST(test_commit_stores_body_field);
+    RUN_TEST(test_commit_unknown_field_returns_false);
+    RUN_TEST(test_provider_has_button_press);
 
     RUN_TEST(test_oauth2_authorize_null_params_fails);
     RUN_TEST(test_oauth2_authorize_empty_secret_fails);

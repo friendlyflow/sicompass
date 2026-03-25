@@ -28,8 +28,12 @@ typedef struct {
 typedef struct {
     int uid;
     char from[256];
+    char to[256];
     char subject[512];
     char date[64];
+    char messageId[256];
+    char inReplyTo[256];
+    char references[2048];
     char body[8192];
 } EmailMessage;
 
@@ -66,6 +70,14 @@ void emailclientFreeHeaders(EmailHeader *headers, int count);
 EmailMessage* emailclientFetchMessage(EmailClientConfig *config,
                                        const char *folder, int uid);
 void emailclientFreeMessage(EmailMessage *msg);
+
+/**
+ * Fetch a message by its Message-ID header from a folder.
+ * Uses IMAP SEARCH to find the UID, then fetches the full message.
+ * Returns NULL if not found.
+ */
+EmailMessage* emailclientFetchMessageByMessageId(
+    EmailClientConfig *config, const char *folder, const char *messageId);
 
 /**
  * Send a plain-text email via SMTP.
