@@ -41,6 +41,13 @@ static int g_folderMappingCount = 0;
 // Set after send — compose/reply fetch returns confirmation instead of form
 static bool g_composeSent = false;
 
+typedef enum {
+    COMPOSE_NEW,
+    COMPOSE_REPLY,
+    COMPOSE_REPLY_ALL,
+    COMPOSE_FORWARD
+} ComposeMode;
+
 // Pending compose state (persists across commit calls within one compose)
 static struct {
     char to[256];
@@ -48,6 +55,7 @@ static struct {
     char body[8192];
     char replyFolder[256]; // folder of message being replied to
     int replyUid;          // UID of message being replied to
+    ComposeMode mode;
 } g_pendingCompose;
 
 // Split body text into FFON string elements by newlines.
@@ -187,6 +195,25 @@ static void pathSecondSegment(const char *path, char *out, int outSize) {
     out[len] = '\0';
 }
 
+// Extract the third path segment (after third "/")
+static void pathThirdSegment(const char *path, char *out, int outSize) {
+    out[0] = '\0';
+    if (!path || path[0] != '/') return;
+    const char *start = path + 1;
+    int slashCount = 0;
+    while (slashCount < 2) {
+        const char *slash = strchr(start, '/');
+        if (!slash) return;
+        start = slash + 1;
+        slashCount++;
+    }
+    const char *slash = strchr(start, '/');
+    int len = slash ? (int)(slash - start) : (int)strlen(start);
+    if (len >= outSize) len = outSize - 1;
+    memcpy(out, start, len);
+    out[len] = '\0';
+}
+
 // Persist OAuth tokens to settings.json
 static void ecSaveOAuthTokens(void) {
     char *configPath = providerGetMainConfigPath();
@@ -218,32 +245,90 @@ static void ecSaveOAuthTokens(void) {
 // Build compose form elements (shared between ecFetch and ecHandleCommand).
 // If replyFolder and replyUid are valid, pre-fill from the original message.
 static FfonElement** ecBuildComposeForm(const char *replyFolder,
-                                         int replyUid, int *outCount) {
+                                         int replyUid, ComposeMode mode,
+                                         int *outCount) {
     int maxElems = 6; // From, To, Subject, Body, Send, History
     FfonElement **elems = malloc(maxElems * sizeof(FfonElement*));
     int idx = 0;
 
     // Pre-fill from original message only if fields are still empty
-    // (first call after memset in ecHandleCommand)
-    // Pre-fill To from original sender only if fields are still empty
-    if (replyFolder && replyUid > 0 && !g_pendingCompose.to[0]) {
+    if (replyFolder && replyUid > 0 && !g_pendingCompose.to[0] &&
+        !g_pendingCompose.subject[0]) {
         EmailMessage *msg = emailclientFetchMessage(
             &g_config, replyFolder, replyUid);
         if (msg) {
-            strncpy(g_pendingCompose.to, msg->from,
-                    sizeof(g_pendingCompose.to) - 1);
-            g_pendingCompose.to[sizeof(g_pendingCompose.to) - 1] = '\0';
-
             const char *subj = msg->subject;
-            if (strncasecmp(subj, "Re: ", 4) != 0)
-                snprintf(g_pendingCompose.subject,
-                         sizeof(g_pendingCompose.subject),
-                         "Re: %s", subj);
-            else
-                strncpy(g_pendingCompose.subject, subj,
-                        sizeof(g_pendingCompose.subject) - 1);
-            g_pendingCompose.subject[
-                sizeof(g_pendingCompose.subject) - 1] = '\0';
+
+            if (mode == COMPOSE_REPLY) {
+                strncpy(g_pendingCompose.to, msg->from,
+                        sizeof(g_pendingCompose.to) - 1);
+                g_pendingCompose.to[sizeof(g_pendingCompose.to) - 1] = '\0';
+
+                if (strncasecmp(subj, "Re: ", 4) != 0)
+                    snprintf(g_pendingCompose.subject,
+                             sizeof(g_pendingCompose.subject),
+                             "Re: %s", subj);
+                else
+                    strncpy(g_pendingCompose.subject, subj,
+                            sizeof(g_pendingCompose.subject) - 1);
+                g_pendingCompose.subject[
+                    sizeof(g_pendingCompose.subject) - 1] = '\0';
+            } else if (mode == COMPOSE_REPLY_ALL) {
+                // Start with original sender
+                char combined[1024];
+                strncpy(combined, msg->from, sizeof(combined) - 1);
+                combined[sizeof(combined) - 1] = '\0';
+                // Append original To recipients, excluding self
+                if (msg->to[0]) {
+                    char toCopy[256];
+                    strncpy(toCopy, msg->to, sizeof(toCopy) - 1);
+                    toCopy[sizeof(toCopy) - 1] = '\0';
+                    char *saveptr = NULL;
+                    char *tok = strtok_r(toCopy, ",", &saveptr);
+                    while (tok) {
+                        while (*tok == ' ') tok++;
+                        if (!strstr(tok, g_config.username)) {
+                            size_t cur = strlen(combined);
+                            snprintf(combined + cur,
+                                     sizeof(combined) - cur,
+                                     ", %s", tok);
+                        }
+                        tok = strtok_r(NULL, ",", &saveptr);
+                    }
+                }
+                strncpy(g_pendingCompose.to, combined,
+                        sizeof(g_pendingCompose.to) - 1);
+                g_pendingCompose.to[sizeof(g_pendingCompose.to) - 1] = '\0';
+
+                if (strncasecmp(subj, "Re: ", 4) != 0)
+                    snprintf(g_pendingCompose.subject,
+                             sizeof(g_pendingCompose.subject),
+                             "Re: %s", subj);
+                else
+                    strncpy(g_pendingCompose.subject, subj,
+                            sizeof(g_pendingCompose.subject) - 1);
+                g_pendingCompose.subject[
+                    sizeof(g_pendingCompose.subject) - 1] = '\0';
+            } else if (mode == COMPOSE_FORWARD) {
+                // To left empty for user to fill in
+                if (strncasecmp(subj, "Fwd: ", 5) != 0)
+                    snprintf(g_pendingCompose.subject,
+                             sizeof(g_pendingCompose.subject),
+                             "Fwd: %s", subj);
+                else
+                    strncpy(g_pendingCompose.subject, subj,
+                            sizeof(g_pendingCompose.subject) - 1);
+                g_pendingCompose.subject[
+                    sizeof(g_pendingCompose.subject) - 1] = '\0';
+
+                snprintf(g_pendingCompose.body,
+                         sizeof(g_pendingCompose.body),
+                         "---------- Forwarded message ----------\n"
+                         "From: %s\nTo: %s\nDate: %s\n"
+                         "Subject: %s\n\n%s",
+                         msg->from, msg->to, msg->date,
+                         msg->subject, msg->body);
+            }
 
             emailclientFreeMessage(msg);
         }
@@ -266,8 +351,9 @@ static FfonElement** ecBuildComposeForm(const char *replyFolder,
     elems[idx++] = ffonElementCreateString(
         "<button>send</button>Send");
 
-    // Thread history for reply
-    if (replyFolder && replyUid > 0) {
+    // Thread history for reply/reply-all (not forward)
+    if (replyFolder && replyUid > 0 &&
+        (mode == COMPOSE_REPLY || mode == COMPOSE_REPLY_ALL)) {
         EmailMessage *msg = emailclientFetchMessage(
             &g_config, replyFolder, replyUid);
         if (msg) {
@@ -297,19 +383,45 @@ static bool pathContainsSegment(const char *path, const char *name) {
 }
 
 static FfonElement** ecFetch(const char *path, int *outCount) {
-    // Handle compose path at any depth — the compose object's children
+    // Handle compose/reply/reply-all/forward paths — the object's children
     // are served here because noCache=true causes re-fetch on navigation.
     if (pathContainsSegment(path, "compose") ||
-        pathContainsSegment(path, "reply")) {
+        pathContainsSegment(path, "reply") ||
+        pathContainsSegment(path, "reply all") ||
+        pathContainsSegment(path, "forward")) {
         if (g_composeSent) {
             *outCount = 1;
             FfonElement **elems = malloc(sizeof(FfonElement*));
             elems[0] = ffonElementCreateString("message sent");
             return elems;
         }
+        // Initialize compose state from path when entering an action object
+        if (pathDepth(path) >= 3 && !g_pendingCompose.replyFolder[0]) {
+            char folderSeg[256], msgSeg[512], actionSeg[64];
+            pathFirstSegment(path, folderSeg, sizeof(folderSeg));
+            pathSecondSegment(path, msgSeg, sizeof(msgSeg));
+            pathThirdSegment(path, actionSeg, sizeof(actionSeg));
+
+            const char *realFolder = ecLookupFolderName(folderSeg);
+            if (!realFolder) realFolder = folderSeg;
+            strncpy(g_pendingCompose.replyFolder, realFolder,
+                    sizeof(g_pendingCompose.replyFolder) - 1);
+            g_pendingCompose.replyFolder[
+                sizeof(g_pendingCompose.replyFolder) - 1] = '\0';
+            g_pendingCompose.replyUid = ecLookupUid(msgSeg);
+
+            if (strcmp(actionSeg, "reply all") == 0)
+                g_pendingCompose.mode = COMPOSE_REPLY_ALL;
+            else if (strcmp(actionSeg, "forward") == 0)
+                g_pendingCompose.mode = COMPOSE_FORWARD;
+            else if (strcmp(actionSeg, "reply") == 0)
+                g_pendingCompose.mode = COMPOSE_REPLY;
+            else
+                g_pendingCompose.mode = COMPOSE_NEW;
+        }
         return ecBuildComposeForm(
             g_pendingCompose.replyFolder[0] ? g_pendingCompose.replyFolder : NULL,
-            g_pendingCompose.replyUid, outCount);
+            g_pendingCompose.replyUid, g_pendingCompose.mode, outCount);
     }
 
     if (!g_config.imapUrl[0] || !g_config.username[0]) {
@@ -419,8 +531,9 @@ static FfonElement** ecFetch(const char *path, int *outCount) {
             return elems;
         }
 
-        // Build structured view: From, To, Date, Subject, Body{}, History{}
-        int maxElems = 6; // from, to, date, subject, body obj, history obj
+        // Build structured view: From, To, Date, Subject, Body{}, History{},
+        // reply{}, reply all{}, forward{}
+        int maxElems = 9;
         FfonElement **elems = malloc(maxElems * sizeof(FfonElement*));
         int idx = 0;
 
@@ -444,6 +557,11 @@ static FfonElement** ecFetch(const char *path, int *outCount) {
         if (history) {
             elems[idx++] = history;
         }
+
+        // Action objects for reply / reply all / forward
+        elems[idx++] = ffonElementCreateObject("reply");
+        elems[idx++] = ffonElementCreateObject("reply all");
+        elems[idx++] = ffonElementCreateObject("forward");
 
         emailclientFreeMessage(msg);
         *outCount = idx;
@@ -488,10 +606,10 @@ static bool ecCommit(const char *path, const char *oldName,
     return false;
 }
 
-static const char *ec_commands[] = {"compose", "reply", "refresh", "login", "logout"};
+static const char *ec_commands[] = {"compose", "refresh", "login", "logout"};
 
 static const char** ecGetCommands(int *outCount) {
-    *outCount = 5;
+    *outCount = 4;
     return ec_commands;
 }
 
@@ -506,38 +624,6 @@ static FfonElement* ecHandleCommand(const char *path, const char *command,
         memset(&g_pendingCompose, 0, sizeof(g_pendingCompose));
         g_composeSent = false;
         return NULL;
-    }
-    if (strcmp(command, "reply") == 0) {
-        memset(&g_pendingCompose, 0, sizeof(g_pendingCompose));
-        g_composeSent = false;
-
-        // Store reply context
-        if (pathDepth(path) >= 2) {
-            char folderSeg[256], msgSeg[512];
-            pathFirstSegment(path, folderSeg, sizeof(folderSeg));
-            pathSecondSegment(path, msgSeg, sizeof(msgSeg));
-            const char *realFolder = ecLookupFolderName(folderSeg);
-            if (!realFolder) realFolder = folderSeg;
-            strncpy(g_pendingCompose.replyFolder, realFolder,
-                    sizeof(g_pendingCompose.replyFolder) - 1);
-            g_pendingCompose.replyFolder[
-                sizeof(g_pendingCompose.replyFolder) - 1] = '\0';
-            g_pendingCompose.replyUid = ecLookupUid(msgSeg);
-        }
-
-        // Build reply object with children from the shared helper
-        int childCount = 0;
-        FfonElement **children = ecBuildComposeForm(
-            g_pendingCompose.replyFolder[0] ? g_pendingCompose.replyFolder : NULL,
-            g_pendingCompose.replyUid, &childCount);
-
-        FfonElement *compose = ffonElementCreateObject("reply");
-        for (int i = 0; i < childCount; i++) {
-            ffonObjectAddElement(compose->data.object, children[i]);
-        }
-        free(children);
-
-        return compose;
     }
     if (strcmp(command, "refresh") == 0) {
         return NULL;
@@ -641,7 +727,8 @@ static void ecOnButtonPress(struct Provider *self, const char *functionName) {
     if (!functionName) return;
 
     if (strcmp(functionName, "send") == 0) {
-        if (!g_pendingCompose.to[0]) return;
+        if (!g_pendingCompose.to[0] &&
+            g_pendingCompose.mode != COMPOSE_FORWARD) return;
         emailclientSendMessage(&g_config,
                                 g_pendingCompose.to,
                                 g_pendingCompose.subject,
