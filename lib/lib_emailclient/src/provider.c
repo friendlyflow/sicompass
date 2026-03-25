@@ -38,6 +38,85 @@ typedef struct {
 static FolderMapping g_folderMappings[MAX_FOLDERS];
 static int g_folderMappingCount = 0;
 
+// Pending compose state (persists across commit calls within one compose)
+static struct {
+    char to[256];
+    char subject[512];
+    char body[8192];
+    char replyFolder[256]; // folder of message being replied to
+    int replyUid;          // UID of message being replied to
+} g_pendingCompose;
+
+// Split body text into FFON string elements by newlines.
+// Caller must free the returned array (elements are owned by caller).
+static void addBodyLines(FfonObject *parent, const char *body) {
+    const char *p = body;
+    while (*p) {
+        const char *eol = strchr(p, '\n');
+        if (eol) {
+            int len = (int)(eol - p);
+            if (len > 0 && p[len - 1] == '\r') len--;
+            char line[4096];
+            if (len >= (int)sizeof(line)) len = sizeof(line) - 1;
+            memcpy(line, p, len);
+            line[len] = '\0';
+            ffonObjectAddElement(parent, ffonElementCreateString(line));
+            p = eol + 1;
+        } else {
+            ffonObjectAddElement(parent, ffonElementCreateString(p));
+            break;
+        }
+    }
+}
+
+// Build a History FFON object from References header.
+// Follows the chain of Message-IDs and fetches each referenced message.
+static FfonElement* ecBuildHistory(const char *folder,
+                                    const char *references) {
+    if (!references || !references[0]) return NULL;
+
+    FfonElement *history = ffonElementCreateObject("History");
+
+    // Parse space-separated Message-IDs from References header
+    // References: <id1> <id2> <id3> (oldest to newest)
+    const char *p = references;
+    int count = 0;
+    while (*p && count < 10) {
+        while (*p == ' ') p++;
+        if (*p != '<') { p++; continue; }
+
+        const char *end = strchr(p, '>');
+        if (!end) break;
+
+        int len = (int)(end - p + 1); // include < and >
+        char msgId[256];
+        if (len >= (int)sizeof(msgId)) len = sizeof(msgId) - 1;
+        memcpy(msgId, p, len);
+        msgId[len] = '\0';
+
+        EmailMessage *ref = emailclientFetchMessageByMessageId(
+            &g_config, folder, msgId);
+        if (ref) {
+            char key[1024];
+            snprintf(key, sizeof(key), "From: %s — Subject: %s",
+                     ref->from, ref->subject);
+            FfonElement *refObj = ffonElementCreateObject(key);
+            addBodyLines(refObj->data.object, ref->body);
+            ffonObjectAddElement(history->data.object, refObj);
+            emailclientFreeMessage(ref);
+            count++;
+        }
+
+        p = end + 1;
+    }
+
+    if (history->data.object->count == 0) {
+        ffonElementDestroy(history);
+        return NULL;
+    }
+    return history;
+}
+
 static void ecStoreFolderMappings(const EmailFolder *folders, int count) {
     g_folderMappingCount = 0;
     for (int i = 0; i < count && i < MAX_FOLDERS; i++) {
@@ -133,7 +212,91 @@ static void ecSaveOAuthTokens(void) {
     free(configPath);
 }
 
+// Build compose form elements (shared between ecFetch and ecHandleCommand).
+// If replyFolder and replyUid are valid, pre-fill from the original message.
+static FfonElement** ecBuildComposeForm(const char *replyFolder,
+                                         int replyUid, int *outCount) {
+    int maxElems = 6; // From, To, Subject, Body, Send, History
+    FfonElement **elems = malloc(maxElems * sizeof(FfonElement*));
+    int idx = 0;
+
+    char fromBuf[300];
+    snprintf(fromBuf, sizeof(fromBuf), "From: %s", g_config.username);
+    elems[idx++] = ffonElementCreateString(fromBuf);
+
+    EmailMessage *msg = NULL;
+    if (replyFolder && replyUid > 0) {
+        msg = emailclientFetchMessage(&g_config, replyFolder, replyUid);
+    }
+
+    if (msg) {
+        char toBuf[300], subjBuf[560];
+        snprintf(toBuf, sizeof(toBuf), "To: <input>%s</input>", msg->from);
+        elems[idx++] = ffonElementCreateString(toBuf);
+
+        const char *subj = msg->subject;
+        if (strncasecmp(subj, "Re: ", 4) != 0)
+            snprintf(subjBuf, sizeof(subjBuf),
+                     "Subject: <input>Re: %s</input>", subj);
+        else
+            snprintf(subjBuf, sizeof(subjBuf),
+                     "Subject: <input>%s</input>", subj);
+        elems[idx++] = ffonElementCreateString(subjBuf);
+
+        // Pre-fill pending compose state
+        strncpy(g_pendingCompose.to, msg->from,
+                sizeof(g_pendingCompose.to) - 1);
+        strncpy(g_pendingCompose.subject,
+                subjBuf + 18, // skip "Subject: <input>"
+                sizeof(g_pendingCompose.subject) - 1);
+        char *inputEnd = strstr(g_pendingCompose.subject, "</input>");
+        if (inputEnd) *inputEnd = '\0';
+
+        elems[idx++] = ffonElementCreateString("Body: <input></input>");
+        elems[idx++] = ffonElementCreateString(
+            "<button>send</button>Send");
+
+        FfonElement *history = ecBuildHistory(replyFolder, msg->references);
+        if (history) elems[idx++] = history;
+
+        emailclientFreeMessage(msg);
+    } else {
+        elems[idx++] = ffonElementCreateString("To: <input></input>");
+        elems[idx++] = ffonElementCreateString("Subject: <input></input>");
+        elems[idx++] = ffonElementCreateString("Body: <input></input>");
+        elems[idx++] = ffonElementCreateString(
+            "<button>send</button>Send");
+    }
+
+    *outCount = idx;
+    return elems;
+}
+
+// Check if any path segment equals the given name
+static bool pathContainsSegment(const char *path, const char *name) {
+    if (!path || path[0] != '/') return false;
+    const char *p = path + 1;
+    while (*p) {
+        const char *slash = strchr(p, '/');
+        int len = slash ? (int)(slash - p) : (int)strlen(p);
+        if (len == (int)strlen(name) && strncmp(p, name, len) == 0)
+            return true;
+        if (!slash) break;
+        p = slash + 1;
+    }
+    return false;
+}
+
 static FfonElement** ecFetch(const char *path, int *outCount) {
+    // Handle compose path at any depth — the compose object's children
+    // are served here because noCache=true causes re-fetch on navigation.
+    if (pathContainsSegment(path, "compose") ||
+        pathContainsSegment(path, "reply")) {
+        return ecBuildComposeForm(
+            g_pendingCompose.replyFolder[0] ? g_pendingCompose.replyFolder : NULL,
+            g_pendingCompose.replyUid, outCount);
+    }
+
     if (!g_config.imapUrl[0] || !g_config.username[0]) {
         *outCount = 1;
         FfonElement **elems = malloc(sizeof(FfonElement*));
@@ -211,7 +374,7 @@ static FfonElement** ecFetch(const char *path, int *outCount) {
     }
 
     if (depth == 2) {
-        // Inside a message: show body
+        // Inside a message: structured view
         char msgSegment[512];
         pathSecondSegment(path, msgSegment, sizeof(msgSegment));
         int uid = ecLookupUid(msgSegment);
@@ -230,43 +393,30 @@ static FfonElement** ecFetch(const char *path, int *outCount) {
             return elems;
         }
 
-        // Display: from, date, subject, blank, body lines
-        // Count body lines
-        int bodyLines = 1;
-        for (const char *p = msg->body; *p; p++) {
-            if (*p == '\n') bodyLines++;
-        }
-
-        int totalElems = 3 + bodyLines; // from, date, subject, body lines
-        FfonElement **elems = malloc(totalElems * sizeof(FfonElement*));
+        // Build structured view: From, To, Date, Subject, Body{}, History{}
+        int maxElems = 6; // from, to, date, subject, body obj, history obj
+        FfonElement **elems = malloc(maxElems * sizeof(FfonElement*));
         int idx = 0;
 
         char buf[1024];
         snprintf(buf, sizeof(buf), "From: %s", msg->from);
+        elems[idx++] = ffonElementCreateString(buf);
+        snprintf(buf, sizeof(buf), "To: %s", msg->to);
         elems[idx++] = ffonElementCreateString(buf);
         snprintf(buf, sizeof(buf), "Date: %s", msg->date);
         elems[idx++] = ffonElementCreateString(buf);
         snprintf(buf, sizeof(buf), "Subject: %s", msg->subject);
         elems[idx++] = ffonElementCreateString(buf);
 
-        // Split body by newlines
-        char *body = msg->body;
-        while (*body) {
-            char *eol = strchr(body, '\n');
-            if (eol) {
-                int len = eol - body;
-                // Trim \r
-                if (len > 0 && body[len - 1] == '\r') len--;
-                char line[4096];
-                if (len >= (int)sizeof(line)) len = sizeof(line) - 1;
-                memcpy(line, body, len);
-                line[len] = '\0';
-                elems[idx++] = ffonElementCreateString(line);
-                body = eol + 1;
-            } else {
-                elems[idx++] = ffonElementCreateString(body);
-                break;
-            }
+        // Body as navigable object
+        FfonElement *bodyObj = ffonElementCreateObject("Body");
+        addBodyLines(bodyObj->data.object, msg->body);
+        elems[idx++] = bodyObj;
+
+        // Thread history from References header
+        FfonElement *history = ecBuildHistory(folder, msg->references);
+        if (history) {
+            elems[idx++] = history;
         }
 
         emailclientFreeMessage(msg);
@@ -280,16 +430,42 @@ static FfonElement** ecFetch(const char *path, int *outCount) {
 
 static bool ecCommit(const char *path, const char *oldName,
                       const char *newName) {
-    (void)path;
     (void)oldName;
-    (void)newName;
+    if (!path || !newName) return false;
+
+    // Check if we're inside a compose object by looking at the path
+    // The commit flow pushes the label prefix as a path segment,
+    // e.g. path becomes "/compose/To" when editing the To field
+    const char *lastSlash = strrchr(path, '/');
+    if (!lastSlash) return false;
+    const char *field = lastSlash + 1;
+
+    if (strcmp(field, "To") == 0) {
+        strncpy(g_pendingCompose.to, newName,
+                sizeof(g_pendingCompose.to) - 1);
+        g_pendingCompose.to[sizeof(g_pendingCompose.to) - 1] = '\0';
+        return true;
+    }
+    if (strcmp(field, "Subject") == 0) {
+        strncpy(g_pendingCompose.subject, newName,
+                sizeof(g_pendingCompose.subject) - 1);
+        g_pendingCompose.subject[sizeof(g_pendingCompose.subject) - 1] = '\0';
+        return true;
+    }
+    if (strcmp(field, "Body") == 0) {
+        strncpy(g_pendingCompose.body, newName,
+                sizeof(g_pendingCompose.body) - 1);
+        g_pendingCompose.body[sizeof(g_pendingCompose.body) - 1] = '\0';
+        return true;
+    }
+
     return false;
 }
 
-static const char *ec_commands[] = {"compose", "refresh", "login", "logout"};
+static const char *ec_commands[] = {"compose", "reply", "refresh", "login", "logout"};
 
 static const char** ecGetCommands(int *outCount) {
-    *outCount = 4;
+    *outCount = 5;
     return ec_commands;
 }
 
@@ -299,8 +475,39 @@ static FfonElement* ecHandleCommand(const char *path, const char *command,
     (void)path;
     (void)elementType;
 
-    if (strcmp(command, "compose") == 0) {
-        return ffonElementCreateString("<input></input>");
+    if (strcmp(command, "compose") == 0 || strcmp(command, "reply") == 0) {
+        memset(&g_pendingCompose, 0, sizeof(g_pendingCompose));
+
+        bool isReply = (strcmp(command, "reply") == 0);
+
+        // Store reply context only for reply command
+        if (isReply && pathDepth(path) >= 2) {
+            char folderSeg[256], msgSeg[512];
+            pathFirstSegment(path, folderSeg, sizeof(folderSeg));
+            pathSecondSegment(path, msgSeg, sizeof(msgSeg));
+            const char *realFolder = ecLookupFolderName(folderSeg);
+            if (!realFolder) realFolder = folderSeg;
+            strncpy(g_pendingCompose.replyFolder, realFolder,
+                    sizeof(g_pendingCompose.replyFolder) - 1);
+            g_pendingCompose.replyFolder[
+                sizeof(g_pendingCompose.replyFolder) - 1] = '\0';
+            g_pendingCompose.replyUid = ecLookupUid(msgSeg);
+        }
+
+        // Build compose object with children from the shared helper
+        int childCount = 0;
+        FfonElement **children = ecBuildComposeForm(
+            g_pendingCompose.replyFolder[0] ? g_pendingCompose.replyFolder : NULL,
+            g_pendingCompose.replyUid, &childCount);
+
+        const char *label = isReply ? "reply" : "compose";
+        FfonElement *compose = ffonElementCreateObject(label);
+        for (int i = 0; i < childCount; i++) {
+            ffonObjectAddElement(compose->data.object, children[i]);
+        }
+        free(children);
+
+        return compose;
     }
     if (strcmp(command, "refresh") == 0) {
         return NULL;
@@ -397,6 +604,20 @@ static bool ecExecuteCommand(const char *path, const char *command,
     (void)command;
     (void)selection;
     return true;
+}
+
+static void ecOnButtonPress(struct Provider *self, const char *functionName) {
+    (void)self;
+    if (!functionName) return;
+
+    if (strcmp(functionName, "send") == 0) {
+        if (!g_pendingCompose.to[0]) return;
+        emailclientSendMessage(&g_config,
+                                g_pendingCompose.to,
+                                g_pendingCompose.subject,
+                                g_pendingCompose.body);
+        memset(&g_pendingCompose, 0, sizeof(g_pendingCompose));
+    }
 }
 
 // Provider singleton
@@ -516,6 +737,7 @@ Provider* emailclientGetProvider(void) {
         g_provider->init = ecInit;
         g_provider->cleanup = ecCleanup;
         g_provider->noCache = true;
+        g_provider->onButtonPress = ecOnButtonPress;
     }
     return g_provider;
 }

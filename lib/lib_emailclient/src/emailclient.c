@@ -494,6 +494,33 @@ EmailMessage* emailclientFetchMessage(EmailClientConfig *config,
                     len = sizeof(msg->date) - 1;
                 memcpy(msg->date, p + 6, len);
                 msg->date[len] = '\0';
+            } else if (lineLen > 4 && strncasecmp(p, "To: ", 4) == 0) {
+                int len = lineLen - 4;
+                if (len >= (int)sizeof(msg->to))
+                    len = sizeof(msg->to) - 1;
+                memcpy(msg->to, p + 4, len);
+                msg->to[len] = '\0';
+            } else if (lineLen > 12 &&
+                       strncasecmp(p, "Message-ID: ", 12) == 0) {
+                int len = lineLen - 12;
+                if (len >= (int)sizeof(msg->messageId))
+                    len = sizeof(msg->messageId) - 1;
+                memcpy(msg->messageId, p + 12, len);
+                msg->messageId[len] = '\0';
+            } else if (lineLen > 13 &&
+                       strncasecmp(p, "In-Reply-To: ", 13) == 0) {
+                int len = lineLen - 13;
+                if (len >= (int)sizeof(msg->inReplyTo))
+                    len = sizeof(msg->inReplyTo) - 1;
+                memcpy(msg->inReplyTo, p + 13, len);
+                msg->inReplyTo[len] = '\0';
+            } else if (lineLen > 12 &&
+                       strncasecmp(p, "References: ", 12) == 0) {
+                int len = lineLen - 12;
+                if (len >= (int)sizeof(msg->references))
+                    len = sizeof(msg->references) - 1;
+                memcpy(msg->references, p + 12, len);
+                msg->references[len] = '\0';
             }
             p = eol + 1;
         }
@@ -517,6 +544,57 @@ EmailMessage* emailclientFetchMessage(EmailClientConfig *config,
 
 void emailclientFreeMessage(EmailMessage *msg) {
     free(msg);
+}
+
+EmailMessage* emailclientFetchMessageByMessageId(
+    EmailClientConfig *config, const char *folder, const char *messageId) {
+    if (!config || !config->imapUrl[0] || !config->username[0]) return NULL;
+    if (!folder || !folder[0] || !messageId || !messageId[0]) return NULL;
+    if (!ensureOAuth2Token(config)) return NULL;
+
+    CURL *curl = curl_easy_init();
+    if (!curl) return NULL;
+
+    char encodedFolder[512];
+    urlEncodeFolder(folder, encodedFolder, sizeof(encodedFolder));
+
+    char url[1024];
+    snprintf(url, sizeof(url), "%s/%s", config->imapUrl, encodedFolder);
+
+    ResponseBuffer buf = {NULL, 0, 0};
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    applyAuth(curl, config);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteCallback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+
+    // IMAP SEARCH by Message-ID header
+    char searchCmd[512];
+    snprintf(searchCmd, sizeof(searchCmd),
+             "SEARCH HEADER Message-ID \"%s\"", messageId);
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, searchCmd);
+
+    CURLcode res = curl_easy_perform(curl);
+    curl_easy_cleanup(curl);
+
+    if (res != CURLE_OK || !buf.data) {
+        free(buf.data);
+        return NULL;
+    }
+
+    // Parse "* SEARCH <uid1> <uid2> ..." response
+    int uid = 0;
+    char *searchLine = strstr(buf.data, "* SEARCH");
+    if (searchLine) {
+        char *p = searchLine + 8; // skip "* SEARCH"
+        while (*p == ' ') p++;
+        if (*p >= '0' && *p <= '9') uid = atoi(p);
+    }
+    free(buf.data);
+
+    if (uid <= 0) return NULL;
+
+    return emailclientFetchMessage(config, folder, uid);
 }
 
 bool emailclientSendMessage(EmailClientConfig *config,
