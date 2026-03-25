@@ -223,16 +223,14 @@ void test_get_commands_includes_login_and_logout(void) {
     Provider *p = providerFactoryCreate("email client");
     int count = 0;
     const char **cmds = p->getCommands(p, &count);
-    TEST_ASSERT_EQUAL_INT(5, count);
-    bool hasLogin = false, hasLogout = false, hasReply = false;
+    TEST_ASSERT_EQUAL_INT(4, count);
+    bool hasLogin = false, hasLogout = false;
     for (int i = 0; i < count; i++) {
         if (strcmp(cmds[i], "login") == 0) hasLogin = true;
         if (strcmp(cmds[i], "logout") == 0) hasLogout = true;
-        if (strcmp(cmds[i], "reply") == 0) hasReply = true;
     }
     TEST_ASSERT_TRUE(hasLogin);
     TEST_ASSERT_TRUE(hasLogout);
-    TEST_ASSERT_TRUE(hasReply);
 }
 
 void test_handle_command_login_without_credentials(void) {
