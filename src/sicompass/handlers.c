@@ -2709,8 +2709,32 @@ void handleCommand(AppRenderer *appRenderer) {
                     appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
                     appRenderer->previousCoordinate = COORDINATE_OPERATOR_GENERAL;
                     appRenderer->currentCommand = COMMAND_NONE;
+
+                    // Navigate back to provider root if deeper, then search
+                    // for an element matching the command name (e.g. "compose").
+                    while (appRenderer->currentId.depth > 2)
+                        providerNavigateLeft(appRenderer);
+
                     providerRefreshCurrentDirectory(appRenderer);
                     createListCurrentLayer(appRenderer);
+
+                    // If an element key matches the command name, navigate into it
+                    int cmdCount;
+                    FfonElement **cmdArr = getFfonAtId(appRenderer->ffon,
+                        appRenderer->ffonCount, &appRenderer->currentId, &cmdCount);
+                    if (cmdArr) {
+                        for (int ci = 0; ci < cmdCount; ci++) {
+                            if (cmdArr[ci]->type == FFON_OBJECT &&
+                                strcmp(cmdArr[ci]->data.object->key,
+                                       appRenderer->providerCommandName) == 0) {
+                                appRenderer->currentId.ids[appRenderer->currentId.depth - 1] = ci;
+                                providerNavigateRight(appRenderer);
+                                createListCurrentLayer(appRenderer);
+                                break;
+                            }
+                        }
+                    }
+
                     // Sync visual selection with logical cursor so Enter acts on the
                     // highlighted item (createListCurrentLayer resets listIndex to 0).
                     appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];

@@ -150,31 +150,16 @@ void test_get_commands_returns_expected(void) {
     TEST_ASSERT_TRUE(hasRefresh);
 }
 
-void test_handle_command_compose_returns_object(void) {
+void test_handle_command_compose_returns_null(void) {
+    // compose command returns NULL — the compose object is always present
+    // at root level and the app layer navigates to it
     Provider *p = providerFactoryCreate("email client");
     p->init(p);
     char err[256] = "";
     FfonElement *r = p->handleCommand(p, "compose", "", FFON_STRING,
                                        err, sizeof(err));
-    TEST_ASSERT_NOT_NULL(r);
-    TEST_ASSERT_EQUAL_INT(FFON_OBJECT, r->type);
-    TEST_ASSERT_EQUAL_STRING("compose", r->data.object->key);
-    // Should have 5 children: From, To, Subject, Body, Send button
-    TEST_ASSERT_EQUAL_INT(5, r->data.object->count);
-    // From is display-only (no input tag)
-    TEST_ASSERT_FALSE(providerTagHasInput(
-        r->data.object->elements[0]->data.string));
-    // To, Subject, Body have input tags
-    TEST_ASSERT_TRUE(providerTagHasInput(
-        r->data.object->elements[1]->data.string));
-    TEST_ASSERT_TRUE(providerTagHasInput(
-        r->data.object->elements[2]->data.string));
-    TEST_ASSERT_TRUE(providerTagHasInput(
-        r->data.object->elements[3]->data.string));
-    // Send button
-    TEST_ASSERT_TRUE(strstr(r->data.object->elements[4]->data.string,
-                            "<button>send</button>") != NULL);
-    ffonElementDestroy(r);
+    TEST_ASSERT_NULL(r);
+    TEST_ASSERT_EQUAL_STRING("", err);
 }
 
 void test_handle_command_refresh_returns_null(void) {
@@ -438,7 +423,7 @@ int main(void) {
     RUN_TEST(test_push_two_levels);
 
     RUN_TEST(test_get_commands_returns_expected);
-    RUN_TEST(test_handle_command_compose_returns_object);
+    RUN_TEST(test_handle_command_compose_returns_null);
     RUN_TEST(test_handle_command_refresh_returns_null);
     RUN_TEST(test_handle_command_set_imap_url);
     RUN_TEST(test_handle_command_set_smtp_url);

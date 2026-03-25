@@ -328,19 +328,30 @@ static FfonElement** ecFetch(const char *path, int *outCount) {
         EmailFolder *folders = emailclientListFolders(&g_config, &folderCount);
         if (!folders || folderCount == 0) {
             emailclientFreeFolders(folders, folderCount);
-            *outCount = 1;
-            FfonElement **elems = malloc(sizeof(FfonElement*));
+            *outCount = 2;
+            FfonElement **elems = malloc(2 * sizeof(FfonElement*));
             elems[0] = ffonElementCreateString("no folders found");
+            elems[1] = ffonElementCreateObject("compose");
             return elems;
         }
 
-        FfonElement **elems = malloc(folderCount * sizeof(FfonElement*));
+        FfonElement **elems = malloc((folderCount + 1) * sizeof(FfonElement*));
+        int idx = 0;
+        // Insert compose right after INBOX
+        bool composeInserted = false;
         for (int i = 0; i < folderCount; i++) {
-            elems[i] = ffonElementCreateObject(folders[i].name);
+            elems[idx++] = ffonElementCreateObject(folders[i].name);
+            if (!composeInserted &&
+                strcasecmp(folders[i].name, "INBOX") == 0) {
+                elems[idx++] = ffonElementCreateObject("compose");
+                composeInserted = true;
+            }
         }
+        if (!composeInserted)
+            elems[idx++] = ffonElementCreateObject("compose");
         ecStoreFolderMappings(folders, folderCount);
         emailclientFreeFolders(folders, folderCount);
-        *outCount = folderCount;
+        *outCount = idx;
         return elems;
     }
 
@@ -489,14 +500,19 @@ static FfonElement* ecHandleCommand(const char *path, const char *command,
                                      char *errorMsg, int errorMsgSize) {
     (void)elementType;
 
-    if (strcmp(command, "compose") == 0 || strcmp(command, "reply") == 0) {
+    if (strcmp(command, "compose") == 0) {
+        // Reset compose state; the compose object is always present at root
+        // level — the app layer navigates to it.
+        memset(&g_pendingCompose, 0, sizeof(g_pendingCompose));
+        g_composeSent = false;
+        return NULL;
+    }
+    if (strcmp(command, "reply") == 0) {
         memset(&g_pendingCompose, 0, sizeof(g_pendingCompose));
         g_composeSent = false;
 
-        bool isReply = (strcmp(command, "reply") == 0);
-
-        // Store reply context only for reply command
-        if (isReply && pathDepth(path) >= 2) {
+        // Store reply context
+        if (pathDepth(path) >= 2) {
             char folderSeg[256], msgSeg[512];
             pathFirstSegment(path, folderSeg, sizeof(folderSeg));
             pathSecondSegment(path, msgSeg, sizeof(msgSeg));
@@ -509,14 +525,13 @@ static FfonElement* ecHandleCommand(const char *path, const char *command,
             g_pendingCompose.replyUid = ecLookupUid(msgSeg);
         }
 
-        // Build compose object with children from the shared helper
+        // Build reply object with children from the shared helper
         int childCount = 0;
         FfonElement **children = ecBuildComposeForm(
             g_pendingCompose.replyFolder[0] ? g_pendingCompose.replyFolder : NULL,
             g_pendingCompose.replyUid, &childCount);
 
-        const char *label = isReply ? "reply" : "compose";
-        FfonElement *compose = ffonElementCreateObject(label);
+        FfonElement *compose = ffonElementCreateObject("reply");
         for (int i = 0; i < childCount; i++) {
             ffonObjectAddElement(compose->data.object, children[i]);
         }
