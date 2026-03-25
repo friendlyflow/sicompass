@@ -70,7 +70,8 @@ typedef enum {
     TASK_L_ARROW_RIGHT,
     TASK_CUT,
     TASK_COPY,
-    TASK_PASTE
+    TASK_PASTE,
+    TASK_FS_CREATE
 } Task;
 
 typedef enum {

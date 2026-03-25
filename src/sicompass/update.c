@@ -1,4 +1,6 @@
 #include "app_state.h"
+#include "provider.h"
+#include "provider_tags.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -670,7 +672,8 @@ void updateHistory(AppRenderer *appRenderer, Task task, const IdArray *id, FfonE
     if (task == TASK_APPEND || task == TASK_APPEND_APPEND ||
         task == TASK_INSERT || task == TASK_INSERT_INSERT ||
         task == TASK_DELETE || task == TASK_INPUT ||
-        task == TASK_CUT || task == TASK_PASTE) {
+        task == TASK_CUT || task == TASK_PASTE ||
+        task == TASK_FS_CREATE) {
 
         // Truncate redo entries beyond current position
         if (appRenderer->undoPosition > 0) {
@@ -809,6 +812,37 @@ void handleHistoryAction(AppRenderer *appRenderer, History history) {
                 }
                 break;
 
+            case TASK_FS_CREATE:
+                // Filesystem creation. Undo = delete the created file/directory.
+                if (entry->newElement) {
+                    // Navigate back to the level where the item was created
+                    // (e.g., after creating a directory we may be inside it)
+                    while (appRenderer->currentId.depth > entry->id.depth &&
+                           appRenderer->currentId.depth > 1) {
+                        Provider *p = providerGetActive(appRenderer);
+                        if (p && p->popPath) p->popPath(p);
+                        idArrayPop(&appRenderer->currentId);
+                    }
+                    const char *key = (entry->newElement->type == FFON_STRING)
+                        ? entry->newElement->data.string
+                        : entry->newElement->data.object->key;
+                    char *name = providerTagExtractContent(key);
+                    if (name) {
+                        providerDeleteItem(appRenderer, name);
+                        free(name);
+                    }
+                    providerRefreshCurrentDirectory(appRenderer);
+                    idArrayCopy(&appRenderer->currentId, &entry->id);
+                    int count;
+                    getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                               &appRenderer->currentId, &count);
+                    int idx = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
+                    if (idx >= count && count > 0) {
+                        appRenderer->currentId.ids[appRenderer->currentId.depth - 1] = count - 1;
+                    }
+                }
+                break;
+
             default:
                 break;
         }
@@ -856,6 +890,32 @@ void handleHistoryAction(AppRenderer *appRenderer, History history) {
                 if (entry->newElement) {
                     replaceElementAtId(appRenderer, &entry->id, entry->newElement);
                     idArrayCopy(&appRenderer->currentId, &entry->id);
+                }
+                break;
+
+            case TASK_FS_CREATE:
+                // Filesystem creation. Redo = re-create the file/directory.
+                if (entry->newElement) {
+                    const char *key = (entry->newElement->type == FFON_STRING)
+                        ? entry->newElement->data.string
+                        : entry->newElement->data.object->key;
+                    char *name = providerTagExtractContent(key);
+                    if (name) {
+                        if (entry->newElement->type == FFON_OBJECT) {
+                            providerCreateDirectory(appRenderer, name);
+                            providerRefreshCurrentDirectory(appRenderer);
+                            // Navigate into the new directory (like original creation)
+                            Provider *p = providerGetActive(appRenderer);
+                            if (p && p->pushPath) p->pushPath(p, name);
+                            idArrayCopy(&appRenderer->currentId, &entry->id);
+                            idArrayPush(&appRenderer->currentId, 0);
+                        } else {
+                            providerCreateFile(appRenderer, name);
+                            providerRefreshCurrentDirectory(appRenderer);
+                            idArrayCopy(&appRenderer->currentId, &entry->id);
+                        }
+                        free(name);
+                    }
                 }
                 break;
 
