@@ -1,6 +1,8 @@
 # Silicon's Compass
 
-Another structure for people who like structure, but tangible compared to web technology e.g.
+From around 1981 until 2026 the graphical user interface (GUI) marginally evolved while never being able to service accessibility the way many people demanded.
+
+Proudly I can share that that changes now, that non-inclusive era is history ...
 
 ## What is Sicompass?
 
