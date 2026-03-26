@@ -344,6 +344,17 @@ void mainLoop(SiCompassApplication* app) {
             app->appRenderer->needsRedraw = true;
         }
 
+        // Check if active provider has new data
+        {
+            Provider *active = providerGetActive(app->appRenderer);
+            if (active && active->needsRefresh) {
+                active->needsRefresh = false;
+                providerRefreshCurrentDirectory(app->appRenderer);
+                createListCurrentLayer(app->appRenderer);
+                app->appRenderer->needsRedraw = true;
+            }
+        }
+
         // Recreate swapchain if framebuffer was resized
         if (app->framebufferResized) {
             app->framebufferResized = false;

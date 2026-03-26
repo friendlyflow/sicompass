@@ -1,5 +1,6 @@
 #include <win_compat.h>
 #include <emailclient.h>
+#include <emailclient_idle.h>
 #include <emailclient_oauth2.h>
 #include <emailclient_provider.h>
 #include <provider_tags.h>
@@ -26,6 +27,17 @@ typedef struct {
 
 static MessageMapping g_msgMappings[MAX_MESSAGES];
 static int g_msgMappingCount = 0;
+
+// Provider singleton (forward-declared for ecIdleNotify/ecFetch)
+static Provider *g_provider = NULL;
+
+// IDLE state
+static char g_idleFolder[256] = "";
+
+static void ecIdleNotify(void *userdata) {
+    Provider *p = (Provider *)userdata;
+    p->needsRefresh = true;
+}
 
 // Map display names back to folder names
 #define MAX_FOLDERS 128
@@ -128,10 +140,19 @@ static FfonElement* ecBuildHistory(const char *folder,
     return history;
 }
 
+// Extract display name from IMAP folder name by stripping hierarchy prefix.
+// e.g., "[Gmail]/Verzonden berichten" → "Verzonden berichten"
+// Folders without a slash (e.g., "INBOX") are returned as-is.
+static const char* folderDisplayName(const char *imapName) {
+    const char *slash = strrchr(imapName, '/');
+    return slash ? slash + 1 : imapName;
+}
+
 static void ecStoreFolderMappings(const EmailFolder *folders, int count) {
     g_folderMappingCount = 0;
     for (int i = 0; i < count && i < MAX_FOLDERS; i++) {
-        strncpy(g_folderMappings[i].displayName, folders[i].name,
+        const char *display = folderDisplayName(folders[i].name);
+        strncpy(g_folderMappings[i].displayName, display,
                 sizeof(g_folderMappings[i].displayName) - 1);
         g_folderMappings[i].displayName[sizeof(g_folderMappings[i].displayName) - 1] = '\0';
         strncpy(g_folderMappings[i].folderName, folders[i].name,
@@ -434,6 +455,12 @@ static FfonElement** ecFetch(const char *path, int *outCount) {
 
     int depth = pathDepth(path);
 
+    // Stop IDLE when leaving a folder (root level fetch)
+    if (depth == 0 && g_idleFolder[0]) {
+        emailclientIdleStop();
+        g_idleFolder[0] = '\0';
+    }
+
     if (depth == 0) {
         // Root: list folders
         int folderCount = 0;
@@ -452,7 +479,21 @@ static FfonElement** ecFetch(const char *path, int *outCount) {
         // Insert compose right after INBOX
         bool composeInserted = false;
         for (int i = 0; i < folderCount; i++) {
-            elems[idx++] = ffonElementCreateObject(folders[i].name);
+            // Skip hierarchy-only containers like "[Gmail]"
+            if (strchr(folders[i].name, '/') && !strchr(folders[i].name + 1, '/'))
+                continue;  // has a child prefix but no slash in its own name — skip it
+            // Actually just check: if any other folder starts with "name/", skip it
+            bool isContainer = false;
+            int nameLen = strlen(folders[i].name);
+            for (int j = 0; j < folderCount && !isContainer; j++) {
+                if (j != i && strncmp(folders[j].name, folders[i].name, nameLen) == 0 &&
+                    folders[j].name[nameLen] == '/')
+                    isContainer = true;
+            }
+            if (isContainer) continue;
+
+            const char *display = folderDisplayName(folders[i].name);
+            elems[idx++] = ffonElementCreateObject(display);
             if (!composeInserted &&
                 strcasecmp(folders[i].name, "INBOX") == 0) {
                 elems[idx++] = ffonElementCreateObject("compose");
@@ -508,6 +549,15 @@ static FfonElement** ecFetch(const char *path, int *outCount) {
         }
         emailclientFreeHeaders(headers, msgCount);
         *outCount = msgCount;
+
+        // Start IDLE for this folder after successful fetch
+        if (strcmp(folder, g_idleFolder) != 0) {
+            emailclientIdleStop();
+            emailclientIdleStart(&g_config, folder, ecIdleNotify, g_provider);
+            strncpy(g_idleFolder, folder, sizeof(g_idleFolder) - 1);
+            g_idleFolder[sizeof(g_idleFolder) - 1] = '\0';
+        }
+
         return elems;
     }
 
@@ -606,10 +656,10 @@ static bool ecCommit(const char *path, const char *oldName,
     return false;
 }
 
-static const char *ec_commands[] = {"compose", "refresh", "login", "logout"};
+static const char *ec_commands[] = {"compose", "login", "logout"};
 
 static const char** ecGetCommands(int *outCount) {
-    *outCount = 4;
+    *outCount = 3;
     return ec_commands;
 }
 
@@ -623,9 +673,6 @@ static FfonElement* ecHandleCommand(const char *path, const char *command,
         // level — the app layer navigates to it.
         memset(&g_pendingCompose, 0, sizeof(g_pendingCompose));
         g_composeSent = false;
-        return NULL;
-    }
-    if (strcmp(command, "refresh") == 0) {
         return NULL;
     }
     if (strcmp(command, "login") == 0) {
@@ -738,8 +785,6 @@ static void ecOnButtonPress(struct Provider *self, const char *functionName) {
     }
 }
 
-// Provider singleton
-static Provider *g_provider = NULL;
 static void (*g_originalInit)(struct Provider *self) = NULL;
 
 static void ecInit(struct Provider *self) {
@@ -830,6 +875,7 @@ static void ecInit(struct Provider *self) {
 
 static void ecCleanup(struct Provider *self) {
     (void)self;
+    emailclientIdleStop();
     emailclientGlobalCleanup();
 }
 
