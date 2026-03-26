@@ -141,13 +141,11 @@ void test_get_commands_returns_expected(void) {
     int count = 0;
     const char **cmds = p->getCommands(p, &count);
     TEST_ASSERT_TRUE(count >= 2);
-    bool hasCompose = false, hasRefresh = false;
+    bool hasCompose = false;
     for (int i = 0; i < count; i++) {
         if (strcmp(cmds[i], "compose") == 0) hasCompose = true;
-        if (strcmp(cmds[i], "refresh") == 0) hasRefresh = true;
     }
     TEST_ASSERT_TRUE(hasCompose);
-    TEST_ASSERT_TRUE(hasRefresh);
 }
 
 void test_handle_command_compose_returns_null(void) {
@@ -162,13 +160,9 @@ void test_handle_command_compose_returns_null(void) {
     TEST_ASSERT_EQUAL_STRING("", err);
 }
 
-void test_handle_command_refresh_returns_null(void) {
+void test_provider_has_needs_refresh(void) {
     Provider *p = providerFactoryCreate("email client");
-    p->init(p);
-    char err[256] = "";
-    FfonElement *r = p->handleCommand(p, "refresh", "", FFON_STRING,
-                                       err, sizeof(err));
-    TEST_ASSERT_NULL(r);
+    TEST_ASSERT_FALSE(p->needsRefresh);
 }
 
 void test_handle_command_set_imap_url(void) {
@@ -223,7 +217,7 @@ void test_get_commands_includes_login_and_logout(void) {
     Provider *p = providerFactoryCreate("email client");
     int count = 0;
     const char **cmds = p->getCommands(p, &count);
-    TEST_ASSERT_EQUAL_INT(4, count);
+    TEST_ASSERT_EQUAL_INT(3, count);
     bool hasLogin = false, hasLogout = false;
     for (int i = 0; i < count; i++) {
         if (strcmp(cmds[i], "login") == 0) hasLogin = true;
@@ -422,7 +416,7 @@ int main(void) {
 
     RUN_TEST(test_get_commands_returns_expected);
     RUN_TEST(test_handle_command_compose_returns_null);
-    RUN_TEST(test_handle_command_refresh_returns_null);
+    RUN_TEST(test_provider_has_needs_refresh);
     RUN_TEST(test_handle_command_set_imap_url);
     RUN_TEST(test_handle_command_set_smtp_url);
     RUN_TEST(test_handle_command_set_username);
