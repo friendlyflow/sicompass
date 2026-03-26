@@ -8,6 +8,18 @@ if host_machine.system() == 'linux'
     '-Wl,--wrap=emailclientOAuth2Authorize',
     '-Wl,--wrap=emailclientOAuth2RefreshToken',
     '-Wl,--wrap=providerGetMainConfigPath',
+    '-Wl,--wrap=emailclientListFolders',
+    '-Wl,--wrap=emailclientFreeFolders',
+    '-Wl,--wrap=emailclientListMessages',
+    '-Wl,--wrap=emailclientFreeHeaders',
+    '-Wl,--wrap=emailclientFetchMessage',
+    '-Wl,--wrap=emailclientFreeMessage',
+    '-Wl,--wrap=emailclientFetchMessageByMessageId',
+    '-Wl,--wrap=emailclientIdleStart',
+    '-Wl,--wrap=emailclientIdleStop',
+    '-Wl,--wrap=emailclientGlobalInit',
+    '-Wl,--wrap=emailclientGlobalCleanup',
+    '-Wl,--wrap=emailclientSendMessage',
   ]
 endif
 
