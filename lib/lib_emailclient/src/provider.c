@@ -34,10 +34,8 @@ static Provider *g_provider = NULL;
 // IDLE state
 static char g_idleFolder[256] = "";
 
-static void ecIdleNotify(void *userdata) {
-    Provider *p = (Provider *)userdata;
-    p->needsRefresh = true;
-}
+// Forward declaration — defined after cache structs
+static void ecIdleNotify(void *userdata);
 
 // Map display names back to folder names
 #define MAX_FOLDERS 128
@@ -52,6 +50,59 @@ static int g_folderMappingCount = 0;
 
 // Set after send — compose/reply fetch returns confirmation instead of form
 static bool g_composeSent = false;
+
+// Deferred history state: stored at depth 2, fetched lazily at depth 3
+static char g_historyFolder[256] = "";
+static char g_historyRefs[4096] = "";
+
+// --- Fetch cache ---
+// Cached results are served on back-navigation instead of re-fetching.
+// Invalidated by IDLE notifications or when entering a different folder.
+
+typedef struct {
+    FfonElement **elems;
+    int count;
+    bool valid;
+} FetchCache;
+
+static FetchCache g_folderCache = {NULL, 0, false};
+
+static char g_envelopeCacheFolder[256] = "";
+static FetchCache g_envelopeCache = {NULL, 0, false};
+
+static void fetchCacheFree(FetchCache *cache) {
+    if (cache->elems) {
+        for (int i = 0; i < cache->count; i++)
+            ffonElementDestroy(cache->elems[i]);
+        free(cache->elems);
+        cache->elems = NULL;
+    }
+    cache->count = 0;
+    cache->valid = false;
+}
+
+static FfonElement** fetchCacheClone(const FetchCache *cache, int *outCount) {
+    FfonElement **elems = malloc(cache->count * sizeof(FfonElement*));
+    for (int i = 0; i < cache->count; i++)
+        elems[i] = ffonElementClone(cache->elems[i]);
+    *outCount = cache->count;
+    return elems;
+}
+
+static void fetchCacheStore(FetchCache *cache, FfonElement **elems, int count) {
+    fetchCacheFree(cache);
+    cache->elems = malloc(count * sizeof(FfonElement*));
+    for (int i = 0; i < count; i++)
+        cache->elems[i] = ffonElementClone(elems[i]);
+    cache->count = count;
+    cache->valid = true;
+}
+
+static void ecIdleNotify(void *userdata) {
+    Provider *p = (Provider *)userdata;
+    g_envelopeCache.valid = false;
+    p->needsRefresh = true;
+}
 
 typedef enum {
     COMPOSE_NEW,
@@ -372,16 +423,11 @@ static FfonElement** ecBuildComposeForm(const char *replyFolder,
     elems[idx++] = ffonElementCreateString(
         "<button>send</button>Send");
 
-    // Thread history for reply/reply-all (not forward)
-    if (replyFolder && replyUid > 0 &&
-        (mode == COMPOSE_REPLY || mode == COMPOSE_REPLY_ALL)) {
-        EmailMessage *msg = emailclientFetchMessage(
-            &g_config, replyFolder, replyUid);
-        if (msg) {
-            FfonElement *history = ecBuildHistory(replyFolder, msg->references);
-            if (history) elems[idx++] = history;
-            emailclientFreeMessage(msg);
-        }
+    // Lazy history for reply/reply-all: g_historyRefs was stored when the
+    // message was viewed at depth 2, so just add a navigable History object.
+    if ((mode == COMPOSE_REPLY || mode == COMPOSE_REPLY_ALL) &&
+        g_historyRefs[0]) {
+        elems[idx++] = ffonElementCreateObject("History");
     }
 
     *outCount = idx;
@@ -445,6 +491,33 @@ static FfonElement** ecFetch(const char *path, int *outCount) {
             g_pendingCompose.replyUid, g_pendingCompose.mode, outCount);
     }
 
+    // Lazy history: fetch referenced messages only when user enters "History"
+    if (pathContainsSegment(path, "History")) {
+        if (!g_historyRefs[0]) {
+            *outCount = 1;
+            FfonElement **elems = malloc(sizeof(FfonElement*));
+            elems[0] = ffonElementCreateString("no history");
+            return elems;
+        }
+        FfonElement *history = ecBuildHistory(g_historyFolder, g_historyRefs);
+        if (!history) {
+            *outCount = 1;
+            FfonElement **elems = malloc(sizeof(FfonElement*));
+            elems[0] = ffonElementCreateString("no history");
+            return elems;
+        }
+        // Return the history object's children directly
+        *outCount = history->data.object->count;
+        FfonElement **elems = malloc(*outCount * sizeof(FfonElement*));
+        for (int i = 0; i < *outCount; i++) {
+            elems[i] = history->data.object->elements[i];
+            history->data.object->elements[i] = NULL;
+        }
+        history->data.object->count = 0;
+        ffonElementDestroy(history);
+        return elems;
+    }
+
     if (!g_config.imapUrl[0] || !g_config.username[0]) {
         *outCount = 1;
         FfonElement **elems = malloc(sizeof(FfonElement*));
@@ -462,6 +535,10 @@ static FfonElement** ecFetch(const char *path, int *outCount) {
     }
 
     if (depth == 0) {
+        // Serve cached folder list if available
+        if (g_folderCache.valid)
+            return fetchCacheClone(&g_folderCache, outCount);
+
         // Root: list folders
         int folderCount = 0;
         EmailFolder *folders = emailclientListFolders(&g_config, &folderCount);
@@ -505,6 +582,7 @@ static FfonElement** ecFetch(const char *path, int *outCount) {
         ecStoreFolderMappings(folders, folderCount);
         emailclientFreeFolders(folders, folderCount);
         *outCount = idx;
+        fetchCacheStore(&g_folderCache, elems, idx);
         return elems;
     }
 
@@ -514,6 +592,15 @@ static FfonElement** ecFetch(const char *path, int *outCount) {
     if (!folder) folder = folderSegment;
 
     if (depth == 1) {
+        // Serve cached envelopes if same folder and still valid
+        if (g_envelopeCache.valid &&
+            strcmp(g_envelopeCacheFolder, folder) == 0)
+            return fetchCacheClone(&g_envelopeCache, outCount);
+
+        // Invalidate cache when switching folders
+        if (strcmp(g_envelopeCacheFolder, folder) != 0)
+            fetchCacheFree(&g_envelopeCache);
+
         // Inside a folder: list messages
         int msgCount = 0;
         EmailHeader *headers = emailclientListMessages(&g_config, folder,
@@ -549,6 +636,11 @@ static FfonElement** ecFetch(const char *path, int *outCount) {
         }
         emailclientFreeHeaders(headers, msgCount);
         *outCount = msgCount;
+
+        // Cache envelope results
+        fetchCacheStore(&g_envelopeCache, elems, msgCount);
+        strncpy(g_envelopeCacheFolder, folder, sizeof(g_envelopeCacheFolder) - 1);
+        g_envelopeCacheFolder[sizeof(g_envelopeCacheFolder) - 1] = '\0';
 
         // Start IDLE for this folder after successful fetch
         if (strcmp(folder, g_idleFolder) != 0) {
@@ -602,10 +694,15 @@ static FfonElement** ecFetch(const char *path, int *outCount) {
         addBodyLines(bodyObj->data.object, msg->body);
         elems[idx++] = bodyObj;
 
-        // Thread history from References header
-        FfonElement *history = ecBuildHistory(folder, msg->references);
-        if (history) {
-            elems[idx++] = history;
+        // Store references for lazy history loading at depth 3
+        if (msg->references[0]) {
+            strncpy(g_historyFolder, folder, sizeof(g_historyFolder) - 1);
+            g_historyFolder[sizeof(g_historyFolder) - 1] = '\0';
+            strncpy(g_historyRefs, msg->references, sizeof(g_historyRefs) - 1);
+            g_historyRefs[sizeof(g_historyRefs) - 1] = '\0';
+            elems[idx++] = ffonElementCreateObject("History");
+        } else {
+            g_historyRefs[0] = '\0';
         }
 
         // Action objects for reply / reply all / forward
@@ -790,6 +887,9 @@ static void (*g_originalInit)(struct Provider *self) = NULL;
 static void ecInit(struct Provider *self) {
     if (g_originalInit) g_originalInit(self);
     emailclientGlobalInit();
+    fetchCacheFree(&g_folderCache);
+    fetchCacheFree(&g_envelopeCache);
+    g_envelopeCacheFolder[0] = '\0';
 
     // Load config from settings.json
     char *configPath = providerGetMainConfigPath();
@@ -875,6 +975,8 @@ static void ecInit(struct Provider *self) {
 
 static void ecCleanup(struct Provider *self) {
     (void)self;
+    fetchCacheFree(&g_folderCache);
+    fetchCacheFree(&g_envelopeCache);
     emailclientIdleStop();
     emailclientGlobalCleanup();
 }

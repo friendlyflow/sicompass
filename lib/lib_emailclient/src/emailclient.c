@@ -53,7 +53,28 @@ void emailclientGlobalInit(void) {
     curl_global_init(CURL_GLOBAL_DEFAULT);
 }
 
+// Persistent CURL handle — reused across operations to avoid TLS/auth overhead.
+// curl_easy_reset() clears options but preserves the connection pool internally.
+static CURL *g_imapCurl = NULL;
+
+static CURL *getImapHandle(void) {
+    if (g_imapCurl) {
+        curl_easy_reset(g_imapCurl);
+    } else {
+        g_imapCurl = curl_easy_init();
+    }
+    return g_imapCurl;
+}
+
+static void releaseImapHandleOnError(void) {
+    if (g_imapCurl) {
+        curl_easy_cleanup(g_imapCurl);
+        g_imapCurl = NULL;
+    }
+}
+
 void emailclientGlobalCleanup(void) {
+    releaseImapHandleOnError();
     curl_global_cleanup();
 }
 
@@ -154,7 +175,7 @@ EmailFolder* emailclientListFolders(EmailClientConfig *config,
     if (!config || !config->imapUrl[0] || !config->username[0]) return NULL;
     if (!ensureOAuth2Token(config)) return NULL;
 
-    CURL *curl = curl_easy_init();
+    CURL *curl = getImapHandle();
     if (!curl) return NULL;
 
     char url[1024];
@@ -168,9 +189,9 @@ EmailFolder* emailclientListFolders(EmailClientConfig *config,
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
 
     CURLcode res = curl_easy_perform(curl);
-    curl_easy_cleanup(curl);
 
     if (res != CURLE_OK || !buf.data) {
+        if (res != CURLE_OK) releaseImapHandleOnError();
         free(buf.data);
         return NULL;
     }
@@ -336,7 +357,7 @@ EmailHeader* emailclientListMessages(EmailClientConfig *config,
     if (!folder || !folder[0]) return NULL;
     if (!ensureOAuth2Token(config)) return NULL;
 
-    CURL *curl = curl_easy_init();
+    CURL *curl = getImapHandle();
     if (!curl) return NULL;
 
     char encodedFolder[512];
@@ -362,9 +383,9 @@ EmailHeader* emailclientListMessages(EmailClientConfig *config,
     curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, fetchCmd);
 
     CURLcode res = curl_easy_perform(curl);
-    curl_easy_cleanup(curl);
 
     if (res != CURLE_OK || !buf.data) {
+        if (res != CURLE_OK) releaseImapHandleOnError();
         free(buf.data);
         return NULL;
     }
@@ -426,7 +447,7 @@ EmailMessage* emailclientFetchMessage(EmailClientConfig *config,
     if (!folder || !folder[0]) return NULL;
     if (!ensureOAuth2Token(config)) return NULL;
 
-    CURL *curl = curl_easy_init();
+    CURL *curl = getImapHandle();
     if (!curl) return NULL;
 
     char encodedFolder[512];
@@ -445,7 +466,7 @@ EmailMessage* emailclientFetchMessage(EmailClientConfig *config,
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
 
     CURLcode res = curl_easy_perform(curl);
-    curl_easy_cleanup(curl);
+    if (res != CURLE_OK) releaseImapHandleOnError();
 
     if (res != CURLE_OK || !buf.data) {
         free(buf.data);
@@ -552,7 +573,7 @@ EmailMessage* emailclientFetchMessageByMessageId(
     if (!folder || !folder[0] || !messageId || !messageId[0]) return NULL;
     if (!ensureOAuth2Token(config)) return NULL;
 
-    CURL *curl = curl_easy_init();
+    CURL *curl = getImapHandle();
     if (!curl) return NULL;
 
     char encodedFolder[512];
@@ -575,9 +596,9 @@ EmailMessage* emailclientFetchMessageByMessageId(
     curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, searchCmd);
 
     CURLcode res = curl_easy_perform(curl);
-    curl_easy_cleanup(curl);
 
     if (res != CURLE_OK || !buf.data) {
+        if (res != CURLE_OK) releaseImapHandleOnError();
         free(buf.data);
         return NULL;
     }
