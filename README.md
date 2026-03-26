@@ -4,6 +4,8 @@ From around 1981 until 2026 the graphical user interface (GUI) marginally evolve
 
 Proudly I can share that that changes now, that non-inclusive era is history ...
 
+Sorry for the marginal 'design' and optimal naviagation approach, which differs maximally from html and its eco-system, but that fact is the main reason of existence.
+
 ## What is Sicompass?
 
 Sicompass is an open-source, keyboard-only interface for navigating and editing structured content. Every graphical interface is essentially a tree of lists — Sicompass makes that structure explicit and navigable entirely from the keyboard, eliminating the need for a mouse.
