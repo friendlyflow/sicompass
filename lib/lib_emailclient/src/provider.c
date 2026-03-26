@@ -492,6 +492,31 @@ static FfonElement** ecFetch(const char *path, int *outCount) {
     }
 
     // Lazy history: fetch referenced messages only when user enters "History"
+    // Body: re-serve body lines (discarded by noCache on navigation)
+    if (pathContainsSegment(path, "Body")) {
+        char folderSeg[256], msgSeg[512];
+        pathFirstSegment(path, folderSeg, sizeof(folderSeg));
+        pathSecondSegment(path, msgSeg, sizeof(msgSeg));
+        const char *realFolder = ecLookupFolderName(folderSeg);
+        if (!realFolder) realFolder = folderSeg;
+        int uid = ecLookupUid(msgSeg);
+        if (uid < 0) { *outCount = 0; return NULL; }
+        EmailMessage *msg = emailclientFetchMessage(&g_config, realFolder, uid);
+        if (!msg) { *outCount = 0; return NULL; }
+        FfonElement *tmp = ffonElementCreateObject("_body");
+        addBodyLines(tmp->data.object, msg->body);
+        emailclientFreeMessage(msg);
+        *outCount = tmp->data.object->count;
+        FfonElement **elems = malloc(*outCount * sizeof(FfonElement*));
+        for (int i = 0; i < *outCount; i++) {
+            elems[i] = tmp->data.object->elements[i];
+            tmp->data.object->elements[i] = NULL;
+        }
+        tmp->data.object->count = 0;
+        ffonElementDestroy(tmp);
+        return elems;
+    }
+
     if (pathContainsSegment(path, "History")) {
         if (!g_historyRefs[0]) {
             *outCount = 1;

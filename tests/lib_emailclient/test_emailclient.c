@@ -710,6 +710,54 @@ void test_envelope_cache_avoids_refetch(void) {
     p->popPath(p);
 }
 
+void test_fetch_body_returns_body_lines(void) {
+    Provider *p = providerFactoryCreate("email client");
+    configureProvider(p);
+
+    EmailFolder folders[] = {{"INBOX"}};
+    g_mockFolders = folders;
+    g_mockFolderCount = 1;
+    int count = 0;
+    FfonElement **elems = p->fetch(p, &count);
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+
+    p->pushPath(p, "INBOX");
+    EmailHeader headers[] = {{.uid = 7, .from = "a@test", .subject = "Hi", .date = "Mon"}};
+    g_mockHeaders = headers;
+    g_mockHeaderCount = 1;
+    elems = p->fetch(p, &count);
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+
+    // Navigate into message
+    p->pushPath(p, "Hi \xe2\x80\x94 a@test");
+    EmailMessage msg = {
+        .uid = 7, .from = "a@test", .to = "b@test",
+        .subject = "Hi", .date = "Mon, 1 Jan 2025",
+        .body = "line one\nline two\nline three"
+    };
+    g_mockMessage = &msg;
+    elems = p->fetch(p, &count);
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+
+    // Navigate into Body — should return body lines
+    p->pushPath(p, "Body");
+    elems = p->fetch(p, &count);
+    TEST_ASSERT_EQUAL_INT(3, count);
+    TEST_ASSERT_EQUAL_INT(FFON_STRING, elems[0]->type);
+    TEST_ASSERT_EQUAL_STRING("line one", elems[0]->data.string);
+    TEST_ASSERT_EQUAL_STRING("line two", elems[1]->data.string);
+    TEST_ASSERT_EQUAL_STRING("line three", elems[2]->data.string);
+
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+    p->popPath(p);
+    p->popPath(p);
+    p->popPath(p);
+}
+
 void test_oauth2_refresh_empty_token_fails(void) {
     OAuth2TokenResult r = __real_emailclientOAuth2RefreshToken("id", "secret", "");
     TEST_ASSERT_FALSE(r.success);
@@ -773,6 +821,7 @@ int main(void) {
     RUN_TEST(test_fetch_history_lazily_on_navigation);
     RUN_TEST(test_folder_cache_avoids_refetch);
     RUN_TEST(test_envelope_cache_avoids_refetch);
+    RUN_TEST(test_fetch_body_returns_body_lines);
 
     return UNITY_END();
 }
