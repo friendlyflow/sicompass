@@ -4,7 +4,7 @@ From around 1981 until 2026 the graphical user interface (GUI) marginally evolve
 
 Proudly I can share that that changes now, that non-inclusive era is history ...
 
-Sorry for the marginal 'design' and optimal naviagation approach, which differs maximally from html and its eco-system, but that fact is the main reason of existence.
+(Sorry for the marginal 'design' approach and not-sorry for the optimal navigation approach, which differs maximally from html and its eco-system, but those facts are its main reasons of existence.)
 
 ## What is Sicompass?
 
