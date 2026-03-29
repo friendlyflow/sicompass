@@ -665,8 +665,26 @@ bool providerNavigateLeft(AppRenderer *appRenderer) {
         }
     }
 
-    // Pop path on the active provider (skip for link parents)
-    if (!parentIsLink) {
+    bool parentIsMeta = false;
+    if (appRenderer->currentId.depth >= 2) {
+        IdArray parentId;
+        idArrayCopy(&parentId, &appRenderer->currentId);
+        idArrayPop(&parentId);
+        int parentCount;
+        FfonElement **parentArr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                               &parentId, &parentCount);
+        if (parentArr) {
+            int parentIdx = parentId.ids[parentId.depth - 1];
+            if (parentIdx >= 0 && parentIdx < parentCount &&
+                parentArr[parentIdx]->type == FFON_OBJECT &&
+                strcmp(parentArr[parentIdx]->data.object->key, "meta") == 0) {
+                parentIsMeta = true;
+            }
+        }
+    }
+
+    // Pop path on the active provider (skip for link and meta parents)
+    if (!parentIsLink && !parentIsMeta) {
         Provider *provider = providerGetActive(appRenderer);
         if (provider && provider->popPath) {
             provider->popPath(provider);

@@ -330,11 +330,38 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
              appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
         handleDashboard(appRenderer);
     }
-    // M (toggle meta: tool info visibility)
+    // M (navigate into/out of meta object)
     else if (!ctrl && !shift && !alt && key == SDLK_M &&
              appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
-        appRenderer->showToolMenu = !appRenderer->showToolMenu;
-        createListCurrentLayer(appRenderer);
+        if (appRenderer->insideMeta) {
+            // Restore saved position
+            appRenderer->insideMeta = false;
+            appRenderer->showToolMenu = false;
+            idArrayCopy(&appRenderer->currentId, &appRenderer->metaReturnId);
+            appRenderer->listIndex = appRenderer->metaReturnListIndex;
+            appRenderer->scrollOffset = appRenderer->metaReturnScrollOffset;
+            createListCurrentLayer(appRenderer);
+        } else {
+            // Navigate into meta's children (meta is always at FFON index 0)
+            int count = 0;
+            FfonElement **arr = getFfonAtId(appRenderer->ffon, appRenderer->ffonCount,
+                                            &appRenderer->currentId, &count);
+            if (arr && count > 0 &&
+                arr[0]->type == FFON_OBJECT &&
+                strcmp(arr[0]->data.object->key, "meta") == 0 &&
+                arr[0]->data.object->count > 0) {
+                idArrayCopy(&appRenderer->metaReturnId, &appRenderer->currentId);
+                appRenderer->metaReturnListIndex = appRenderer->listIndex;
+                appRenderer->metaReturnScrollOffset = appRenderer->scrollOffset;
+                appRenderer->currentId.ids[appRenderer->currentId.depth - 1] = 0;
+                idArrayPush(&appRenderer->currentId, 0);
+                appRenderer->insideMeta = true;
+                appRenderer->showToolMenu = false;
+                appRenderer->listIndex = 0;
+                appRenderer->scrollOffset = 0;
+                createListCurrentLayer(appRenderer);
+            }
+        }
         appRenderer->needsRedraw = true;
     }
     // Backspace in insert modes
