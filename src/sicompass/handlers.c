@@ -537,6 +537,17 @@ static bool handleButtonPress(AppRenderer *appRenderer, IdArray *elementId) {
 
 static void resetFileBrowserState(AppRenderer *appRenderer);
 
+// Extract content from either <input> or <input-all> tags. Caller frees.
+static char* extractAnyInputContent(const char *key) {
+    char *content = providerTagExtractContent(key);
+    if (!content) content = providerTagExtractInputAllContent(key);
+    return content;
+}
+
+static bool hasAnyInput(const char *key) {
+    return providerTagHasInput(key) || providerTagHasInputAll(key);
+}
+
 void handleEnter(AppRenderer *appRenderer, History history) {
     if (appRenderer->currentCoordinate == COORDINATE_SCROLL_SEARCH ||
         appRenderer->currentCoordinate == COORDINATE_INPUT_SEARCH) return;
@@ -555,7 +566,8 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                     elem->data.string : elem->data.object->key;
 
                 // Check if provider handles this element
-                char *oldContent = providerTagExtractContent(elementKey);
+                bool wasInputAll = providerTagHasInputAll(elementKey);
+                char *oldContent = extractAnyInputContent(elementKey);
                 if (oldContent) {
                     const char *newContent = appRenderer->inputBuffer;
 
@@ -563,6 +575,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                     if (oldContent[0] == '\0' && appRenderer->prefixedInsertMode && !appRenderer->pendingFileBrowserSaveAs) {
                         bool isFile = false, isDir = false;
                         const char *name = NULL;
+                        char *strippedName = NULL;
                         if (newContent[0] == '-') {
                             isFile = true;
                             name = newContent + 1;
@@ -574,7 +587,22 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                         }
 
                         if ((!isFile && !isDir) || !name || name[0] == '\0') {
-                            setErrorMessage(appRenderer, "Start with '- name' for file or '+ name' for directory");
+                            // No +/- prefix: use trailing colon to determine type
+                            size_t inputLen = strlen(newContent);
+                            if (inputLen > 0 && newContent[inputLen - 1] == ':') {
+                                isDir = true;
+                                strippedName = strdup(newContent);
+                                if (strippedName) strippedName[inputLen - 1] = '\0';
+                                name = strippedName;
+                            } else if (inputLen > 0) {
+                                isFile = true;
+                                name = newContent;
+                            }
+                        }
+
+                        if ((!isFile && !isDir) || !name || name[0] == '\0') {
+                            setErrorMessage(appRenderer, "Enter a name (append ':' for directory)");
+                            free(strippedName);
                             free(oldContent);
                             appRenderer->needsRedraw = true;
                             return;  // stay in COORDINATE_OPERATOR_INSERT
@@ -590,6 +618,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                         if (!success) {
                             if (appRenderer->errorMessage[0] == '\0')
                                 setErrorMessage(appRenderer, "Failed to create item");
+                            free(strippedName);
                             free(oldContent);
                             appRenderer->needsRedraw = true;
                             return;  // stay in COORDINATE_OPERATOR_INSERT
@@ -643,6 +672,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                             }
                         }
 
+                        free(strippedName);
                         free(oldContent);
                         appRenderer->prefixedInsertMode = false;
                         appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
@@ -747,13 +777,56 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                         return;
                     }
 
-                    bool wasInput = providerTagHasInput(elementKey);
+                    bool wasInput = hasAnyInput(elementKey);
                     // Only commit if changed
                     bool commitSucceeded = false;
                     bool fsCreated = false;
                     char fsCreatedName[MAX_LINE_LENGTH] = "";
+                    const char *effectiveContent = newContent; // may point to stripped name for <input-all>
+                    char *strippedEffective = NULL;
                     if (strcmp(oldContent, newContent) != 0) {
-                        if (oldContent[0] == '\0' && appRenderer->inputPrefix[0] == '\0' && elem->type == FFON_OBJECT) {
+                        if (wasInputAll && oldContent[0] == '\0' && appRenderer->inputPrefix[0] == '\0') {
+                            // <input-all>: use trailing colon to determine object vs string
+                            bool createAsObject = isLineKey(newContent);
+                            if (createAsObject) {
+                                size_t _len = strlen(newContent);
+                                strippedEffective = malloc(_len); // _len - 1 chars + NUL
+                                if (strippedEffective) {
+                                    memcpy(strippedEffective, newContent, _len - 1);
+                                    strippedEffective[_len - 1] = '\0';
+                                }
+                            }
+                            effectiveContent = strippedEffective ? strippedEffective : newContent;
+                            Provider *p = providerGetActive(appRenderer);
+                            if (createAsObject) {
+                                if (p && p->createDirectory) {
+                                    commitSucceeded = providerCreateDirectory(appRenderer, effectiveContent);
+                                    if (commitSucceeded) {
+                                        fsCreated = true;
+                                        strncpy(fsCreatedName, effectiveContent, MAX_LINE_LENGTH - 1);
+                                    }
+                                } else {
+                                    // Pure FFON: convert string element to object
+                                    FfonElement *newObj = ffonElementCreateObject(effectiveContent);
+                                    ffonObjectAddElement(newObj->data.object, ffonElementCreateString(""));
+                                    ffonElementDestroy(arr[idx]);
+                                    arr[idx] = newObj;
+                                    elem = newObj;
+                                    commitSucceeded = true;
+                                }
+                            } else {
+                                if (p && p->createFile) {
+                                    commitSucceeded = providerCreateFile(appRenderer, effectiveContent);
+                                    if (commitSucceeded) {
+                                        fsCreated = true;
+                                        strncpy(fsCreatedName, effectiveContent, MAX_LINE_LENGTH - 1);
+                                    }
+                                } else {
+                                    // Pure FFON: string element stays string, format-key block handles key update
+                                    commitSucceeded = true;
+                                }
+                            }
+                        } else if (oldContent[0] == '\0' && appRenderer->inputPrefix[0] == '\0' && elem->type == FFON_OBJECT) {
                             commitSucceeded = providerCreateDirectory(appRenderer, newContent);
                             if (commitSucceeded) {
                                 fsCreated = true;
@@ -803,7 +876,9 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                         }
                         // Update element with new key, preserving prefix/suffix
                         {
-                            char *newKey = providerTagFormatKey(newContent);
+                            char *newKey = wasInputAll
+                                ? providerTagFormatInputAllKey(effectiveContent)
+                                : providerTagFormatKey(effectiveContent);
                             if (newKey) {
                                 char *fullKey;
                                 if (appRenderer->inputPrefix[0] != '\0' || appRenderer->inputSuffix[0] != '\0') {
@@ -833,6 +908,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                     if (wasInput) {
                         providerRefreshCurrentDirectory(appRenderer);
                     }
+                    free(strippedEffective);
                     free(oldContent);
                     // Return to operator general
                     appRenderer->currentCoordinate = COORDINATE_OPERATOR_GENERAL;
@@ -870,7 +946,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                                     ? arr[si]->data.string
                                     : (arr[si]->type == FFON_OBJECT ? arr[si]->data.object->key : NULL);
                                 if (!ek) continue;
-                                char *extracted = providerTagExtractContent(ek);
+                                char *extracted = extractAnyInputContent(ek);
                                 if (extracted) {
                                     if (strcmp(extracted, fsCreatedName) == 0) {
                                         foundIdx = si;
@@ -947,8 +1023,8 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                     // If element is an <input>, activate it (commit current content)
                     Provider *activeProvider = providerGetActive(appRenderer);
                     bool isFileBrowser = activeProvider && activeProvider->name && strcmp(activeProvider->name, "filebrowser") == 0;
-                    if (providerTagHasInput(elem->data.string) && !appRenderer->pendingFileBrowserOpen && !isFileBrowser) {
-                        char *content = providerTagExtractContent(elem->data.string);
+                    if (hasAnyInput(elem->data.string) && !appRenderer->pendingFileBrowserOpen && !isFileBrowser) {
+                        char *content = extractAnyInputContent(elem->data.string);
                         if (content) {
                             providerCommitEdit(appRenderer, content, content);
                             free(content);
@@ -965,7 +1041,7 @@ void handleEnter(AppRenderer *appRenderer, History history) {
                         appRenderer->lastKeypressTime = now;
                         return;
                     }
-                    char *filename = providerTagExtractContent(elem->data.string);
+                    char *filename = extractAnyInputContent(elem->data.string);
                     const char *path = providerGetCurrentPath(appRenderer);
 
                     // File-browser open: load selected .json into source provider
@@ -1429,7 +1505,7 @@ void handleFileDelete(AppRenderer *appRenderer) {
     const char *elementKey = (elem->type == FFON_STRING) ?
         elem->data.string : elem->data.object->key;
 
-    char *name = providerTagExtractContent(elementKey);
+    char *name = extractAnyInputContent(elementKey);
     if (!name) return;
 
     bool success = providerDeleteItem(appRenderer, name);
@@ -2084,7 +2160,7 @@ void handleI(AppRenderer *appRenderer) {
                     FfonElement *elem = arr[idx];
                     const char *elementKey = (elem->type == FFON_STRING) ?
                         elem->data.string : elem->data.object->key;
-                    char *content = providerTagExtractContent(elementKey);
+                    char *content = extractAnyInputContent(elementKey);
                     if (!content) return;
                     if (content[0] == '\0') {
                         Provider *p = providerGetActive(appRenderer);
@@ -2118,22 +2194,29 @@ void handleI(AppRenderer *appRenderer) {
                 context = elementKey;
 
                 // Try provider first
-                char *content = providerTagExtractContent(elementKey);
+                char *content = extractAnyInputContent(elementKey);
                 if (content) {
                     strncpy(appRenderer->inputBuffer, content,
                            appRenderer->inputBufferCapacity - 1);
                     appRenderer->inputBufferSize = strlen(appRenderer->inputBuffer);
                     free(content);
-                    // Extract prefix (text before <input>) and suffix (text after </input>)
-                    const char *openTag = strstr(elementKey, INPUT_TAG_OPEN);
+                    // Extract prefix (text before <input>/<input-all>) and suffix (text after close tag)
+                    const char *openTag = strstr(elementKey, INPUT_ALL_TAG_OPEN);
+                    const char *closeTagStr = INPUT_ALL_TAG_CLOSE;
+                    size_t closeTagLen = INPUT_ALL_TAG_CLOSE_LEN;
+                    if (!openTag) {
+                        openTag = strstr(elementKey, INPUT_TAG_OPEN);
+                        closeTagStr = INPUT_TAG_CLOSE;
+                        closeTagLen = INPUT_TAG_CLOSE_LEN;
+                    }
                     if (openTag) {
                         size_t prefixLen = openTag - elementKey;
                         if (prefixLen >= MAX_LINE_LENGTH) prefixLen = MAX_LINE_LENGTH - 1;
                         memcpy(appRenderer->inputPrefix, elementKey, prefixLen);
                         appRenderer->inputPrefix[prefixLen] = '\0';
-                        const char *closeTag = strstr(openTag, INPUT_TAG_CLOSE);
+                        const char *closeTag = strstr(openTag, closeTagStr);
                         if (closeTag) {
-                            strncpy(appRenderer->inputSuffix, closeTag + INPUT_TAG_CLOSE_LEN,
+                            strncpy(appRenderer->inputSuffix, closeTag + closeTagLen,
                                     MAX_LINE_LENGTH - 1);
                             appRenderer->inputSuffix[MAX_LINE_LENGTH - 1] = '\0';
                         } else {
@@ -2185,7 +2268,7 @@ void handleA(AppRenderer *appRenderer) {
                     FfonElement *elem = arr[idx];
                     const char *elementKey = (elem->type == FFON_STRING) ?
                         elem->data.string : elem->data.object->key;
-                    char *content = providerTagExtractContent(elementKey);
+                    char *content = extractAnyInputContent(elementKey);
                     if (!content) return;
                     if (content[0] == '\0') {
                         Provider *p = providerGetActive(appRenderer);
@@ -2219,22 +2302,29 @@ void handleA(AppRenderer *appRenderer) {
                 context = elementKey;
 
                 // Try provider first
-                char *content = providerTagExtractContent(elementKey);
+                char *content = extractAnyInputContent(elementKey);
                 if (content) {
                     strncpy(appRenderer->inputBuffer, content,
                            appRenderer->inputBufferCapacity - 1);
                     appRenderer->inputBufferSize = strlen(appRenderer->inputBuffer);
                     free(content);
-                    // Extract prefix (text before <input>) and suffix (text after </input>)
-                    const char *openTag = strstr(elementKey, INPUT_TAG_OPEN);
+                    // Extract prefix (text before <input>/<input-all>) and suffix (text after close tag)
+                    const char *openTag = strstr(elementKey, INPUT_ALL_TAG_OPEN);
+                    const char *closeTagStr = INPUT_ALL_TAG_CLOSE;
+                    size_t closeTagLen = INPUT_ALL_TAG_CLOSE_LEN;
+                    if (!openTag) {
+                        openTag = strstr(elementKey, INPUT_TAG_OPEN);
+                        closeTagStr = INPUT_TAG_CLOSE;
+                        closeTagLen = INPUT_TAG_CLOSE_LEN;
+                    }
                     if (openTag) {
                         size_t prefixLen = openTag - elementKey;
                         if (prefixLen >= MAX_LINE_LENGTH) prefixLen = MAX_LINE_LENGTH - 1;
                         memcpy(appRenderer->inputPrefix, elementKey, prefixLen);
                         appRenderer->inputPrefix[prefixLen] = '\0';
-                        const char *closeTag = strstr(openTag, INPUT_TAG_CLOSE);
+                        const char *closeTag = strstr(openTag, closeTagStr);
                         if (closeTag) {
-                            strncpy(appRenderer->inputSuffix, closeTag + INPUT_TAG_CLOSE_LEN,
+                            strncpy(appRenderer->inputSuffix, closeTag + closeTagLen,
                                     MAX_LINE_LENGTH - 1);
                             appRenderer->inputSuffix[MAX_LINE_LENGTH - 1] = '\0';
                         } else {
@@ -2383,7 +2473,7 @@ void handleEscape(AppRenderer *appRenderer) {
                     elem->data.string : elem->data.object->key;
 
                 // Check if provider handles this element
-                char *oldContent = providerTagExtractContent(elementKey);
+                char *oldContent = extractAnyInputContent(elementKey);
                 if (oldContent) {
                     const char *newContent = appRenderer->inputBuffer;
                     if (strcmp(oldContent, newContent) != 0) {
@@ -2617,7 +2707,7 @@ void handleCommand(AppRenderer *appRenderer) {
             if (newElem) {
                 // If the current element is an empty placeholder, replace it in-place;
                 // otherwise insert after the current position.
-                char *existingContent = providerTagExtractContent(elementKey);
+                char *existingContent = extractAnyInputContent(elementKey);
                 bool isPlaceholder = existingContent && existingContent[0] == '\0';
                 if (existingContent) free(existingContent);
 
@@ -2762,7 +2852,7 @@ void handleFileCut(AppRenderer *appRenderer) {
     const char *elementKey = (elem->type == FFON_STRING) ?
         elem->data.string : elem->data.object->key;
 
-    char *name = providerTagExtractContent(elementKey);
+    char *name = extractAnyInputContent(elementKey);
     if (!name) return;
 
     const char *srcDir = providerGetCurrentPath(appRenderer);
@@ -2809,7 +2899,7 @@ void handleFileCopy(AppRenderer *appRenderer) {
     const char *elementKey = (elem->type == FFON_STRING) ?
         elem->data.string : elem->data.object->key;
 
-    char *name = providerTagExtractContent(elementKey);
+    char *name = extractAnyInputContent(elementKey);
     if (!name) return;
 
     const char *srcDir = providerGetCurrentPath(appRenderer);
@@ -2875,7 +2965,7 @@ void handleFilePaste(AppRenderer *appRenderer) {
             const char *key = (listArr[i]->type == FFON_STRING)
                 ? listArr[i]->data.string
                 : listArr[i]->data.object->key;
-            char *extracted = providerTagExtractContent(key);
+            char *extracted = extractAnyInputContent(key);
             if (extracted && strcmp(extracted, destName) == 0) {
                 pastedIdx = i;
                 free(extracted);

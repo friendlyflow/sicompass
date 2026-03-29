@@ -77,7 +77,7 @@ describe("tutorial provider", () => {
   test("/Editing returns editing instructions", async () => {
     const result = await runTutorial("/Editing");
     expect(result).toBeArray();
-    expect(result.length).toBe(7);
+    expect(result.length).toBe(8);
   });
 
   test("/Programs lists provider subsections", async () => {

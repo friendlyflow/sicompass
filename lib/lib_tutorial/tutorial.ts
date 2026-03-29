@@ -82,7 +82,8 @@ const sections: Section[] = [
       "While editing, type normally to change the text. Use Backspace to delete characters.",
       "Press Enter to confirm your edit and save the change.",
       "Press Escape to cancel the edit and discard your changes.",
-      "Not all items are editable, only those marked with <input> tags by the provider. The file browser makes file and directory names editable; the settings provider makes configuration values editable.",
+      "Not all items are editable, only those marked with <input> or <input-all> tags by the provider. The file browser makes file and directory names editable; the settings provider makes configuration values editable.",
+      "Some editable items use <input-all> tags, meaning they can become either a string or an object (a section with children). When such an item is empty, entering a name without a trailing : creates a string or file; entering a name ending with : creates an object or directory (the colon is stripped from the name). This is the same convention used in editor mode.",
     ],
   },
   {
@@ -110,7 +111,8 @@ const sections: Section[] = [
           "The file browser turns your filesystem into a navigable tree. Directories become sections you can enter with the Right key; files are leaf items.",
           "Browse your filesystem by navigating up, down, and into directories. The current path is shown at the top of the screen.",
           "Rename files and directories by pressing i (insert mode) on any item. The name becomes editable inline. Type the new name and press Enter to confirm.",
-          "Create new items with commands: press : and type 'create file' or 'create directory'.",
+          "Create new items inline: press Ctrl+I or Ctrl+A to enter insert mode on an empty placeholder. Type a plain name to create a file, or append : to the name to create a directory (the colon is stripped from the directory name). For example, type 'notes' to create a file, or 'projects:' to create a directory named 'projects'.",
+          "You can also create items via commands: press : and type 'create file' or 'create directory'.",
           "Delete items by pressing the Delete key on a selected item. Directories are deleted recursively if non-empty.",
           "Copy with Ctrl+C and paste with Ctrl+V to duplicate files and directories.",
           "The file browser supports all the standard modes: search (Tab) to filter files, extended search (Ctrl+F) to find files recursively in subdirectories.",
@@ -213,6 +215,8 @@ const sections: Section[] = [
       },
       "Text inputs let you edit a value inline. Press i or a on the item below to start editing:",
       "Edit this text --> <input>hello world</input> <-- press i or a",
+      "Dual-type inputs (<input-all> elements) can become either a string or a section. When empty, type a name without : to create a string, or end the name with : to create a nested section (colon is stripped):",
+      "<input-all></input-all>",
       {
         key: "<radio>Pick a color",
         children: [
@@ -386,7 +390,8 @@ const sections: Section[] = [
         children: [
           "Element tags are special markers in string content that tell Sicompass to render interactive elements instead of plain text.",
           "Use \\\\< and \\\\> to escape angle brackets when you want to display them as literal text.",
-          "\\<input>content\\</input> - make the content editable inline. The user can press i or a to edit it.",
+          "\\<input>content\\</input> - make the content editable inline. The user can press i or a to edit it. Elements with this tag can only become strings.",
+          "\\<input-all>content\\</input-all> - like input, but can also become an object. When the value is empty, entering a name without a trailing : creates a string; entering a name ending with : creates an object (the colon is stripped). This is used for placeholders that can become either type.",
           "\\<radio>group name - mark a parent object as a radio group. Its children become mutually exclusive options.",
           "\\<checked>option - mark a radio option as the currently selected one.",
           "\\<checkbox>label - render an unchecked boolean toggle. Press Enter to check it.",

@@ -87,6 +87,7 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
                 bool hasCheckboxChecked = providerTagHasCheckboxChecked(strKey);
                 bool hasCheckbox = providerTagHasCheckbox(strKey);
                 bool hasChecked = providerTagHasChecked(strKey);
+                bool hasInputAll = providerTagHasInputAll(strKey);
                 bool hasInput = providerTagHasInput(strKey);
                 bool hasButton = providerTagHasButton(strKey);
                 const char *prefix;
@@ -106,6 +107,9 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
                     stripped = providerTagExtractCheckedContent(strKey);
                 } else if (hasButton) {
                     prefix = "-b";
+                    stripped = providerTagStripDisplay(strKey);
+                } else if (hasInputAll) {
+                    prefix = "-i";
                     stripped = providerTagStripDisplay(strKey);
                 } else if (hasInput) {
                     prefix = "-i";
@@ -146,6 +150,7 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
                 bool hasCheckbox = providerTagHasCheckbox(objKey);
                 bool hasLink = providerTagHasLink(objKey);
                 bool hasRadio = providerTagHasRadio(objKey);
+                bool hasInputAll = providerTagHasInputAll(objKey);
                 bool hasInput = providerTagHasInput(objKey);
                 const char *prefix;
                 char *stripped = NULL;
@@ -162,6 +167,9 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
                 } else if (hasRadio) {
                     prefix = "+R";
                     stripped = providerTagExtractRadioContent(objKey);
+                } else if (hasInputAll) {
+                    prefix = "+i";
+                    stripped = providerTagStripDisplay(objKey);
                 } else if (hasInput) {
                     prefix = "+i";
                     stripped = providerTagStripDisplay(objKey);
@@ -303,6 +311,7 @@ static void collectItemsRecursive(AppRenderer *appRenderer, FfonElement **elemen
             bool hasCheckbox = providerTagHasCheckbox(strKey);
             bool hasChecked = providerTagHasChecked(strKey);
             bool hasButton = providerTagHasButton(strKey);
+            bool hasInputAll = providerTagHasInputAll(strKey);
             bool hasInput = providerTagHasInput(strKey);
             const char *prefix;
             char *stripped = NULL;
@@ -322,6 +331,9 @@ static void collectItemsRecursive(AppRenderer *appRenderer, FfonElement **elemen
             } else if (hasButton) {
                 prefix = "-b";
                 stripped = providerTagExtractButtonDisplayText(strKey);
+            } else if (hasInputAll) {
+                prefix = "-i";
+                stripped = providerTagExtractInputAllContent(strKey);
             } else if (hasInput) {
                 prefix = "-i";
                 stripped = providerTagExtractContent(strKey);
@@ -352,6 +364,7 @@ static void collectItemsRecursive(AppRenderer *appRenderer, FfonElement **elemen
             bool hasCheckbox = providerTagHasCheckbox(objKey);
             bool hasLink = providerTagHasLink(objKey);
             bool hasRadio = providerTagHasRadio(objKey);
+            bool hasInputAll = providerTagHasInputAll(objKey);
             bool hasInput = providerTagHasInput(objKey);
             const char *prefix;
             char *stripped = NULL;
@@ -368,6 +381,9 @@ static void collectItemsRecursive(AppRenderer *appRenderer, FfonElement **elemen
             } else if (hasRadio) {
                 prefix = "+R";
                 stripped = providerTagExtractRadioContent(objKey);
+            } else if (hasInputAll) {
+                prefix = "+i";
+                stripped = providerTagExtractInputAllContent(objKey);
             } else if (hasInput) {
                 prefix = "+i";
                 stripped = providerTagExtractContent(objKey);
