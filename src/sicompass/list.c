@@ -69,8 +69,8 @@ void createListCurrentLayer(AppRenderer *appRenderer) {
         for (int i = 0; i < count; i++) {
             FfonElement *elem = arr[i];
 
-            // Skip meta objects unless showToolMenu is enabled
-            if (!appRenderer->showToolMenu &&
+            // Skip meta objects unless showMetaMenu is enabled
+            if (!appRenderer->showMetaMenu &&
                 elem->type == FFON_OBJECT &&
                 strcmp(elem->data.object->key, "meta") == 0) {
                 thisId.ids[thisId.depth - 1]++;

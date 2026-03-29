@@ -975,7 +975,7 @@ void test_undo_directory_creation(void) {
 // Tests: 'm' key navigates into/out of meta object
 // ============================================================
 
-void test_tool_menu_hidden_by_default(void) {
+void test_meta_menu_hidden_by_default(void) {
     int fbIdx = findProviderIndex("filebrowser");
     TEST_ASSERT_NOT_EQUAL(-1, fbIdx);
 
@@ -984,7 +984,7 @@ void test_tool_menu_hidden_by_default(void) {
     TEST_ASSERT_EQUAL(2, app->currentId.depth);
 
     // meta should be hidden by default
-    TEST_ASSERT_FALSE(app->showToolMenu);
+    TEST_ASSERT_FALSE(app->showMetaMenu);
     TEST_ASSERT_FALSE(app->insideMeta);
 
     // The list should not contain a meta item
@@ -1033,7 +1033,7 @@ void test_m_again_restores_position(void) {
     pressKey(app, SDLK_M, SDL_KMOD_NONE);
 
     TEST_ASSERT_FALSE(app->insideMeta);
-    TEST_ASSERT_FALSE(app->showToolMenu);
+    TEST_ASSERT_FALSE(app->showMetaMenu);
     TEST_ASSERT_EQUAL(2, app->currentId.depth);
     TEST_ASSERT_EQUAL(savedListIndex, app->listIndex);
 
@@ -1059,7 +1059,7 @@ void test_left_from_meta_shows_meta_selected(void) {
     pressLeft(app);
 
     TEST_ASSERT_FALSE(app->insideMeta);
-    TEST_ASSERT_TRUE(app->showToolMenu);
+    TEST_ASSERT_TRUE(app->showMetaMenu);
     TEST_ASSERT_EQUAL(2, app->currentId.depth);
     // meta should be first item and selected
     TEST_ASSERT_TRUE_MESSAGE(app->totalListCount > 0, "List should be populated");
@@ -1098,11 +1098,11 @@ void test_right_from_meta_selected_hides_meta(void) {
     // Enter meta, press left (meta selected at index 0), press right into meta
     pressKey(app, SDLK_M, SDL_KMOD_NONE);
     pressLeft(app);
-    TEST_ASSERT_TRUE(app->showToolMenu);
+    TEST_ASSERT_TRUE(app->showMetaMenu);
     TEST_ASSERT_EQUAL(0, app->listIndex);  // meta is selected
     pressRight(app); // navigate into meta (it's an object, so right succeeds)
 
-    TEST_ASSERT_FALSE(app->showToolMenu);
+    TEST_ASSERT_FALSE(app->showMetaMenu);
 }
 
 // ============================================================
@@ -1130,7 +1130,7 @@ int main(void) {
     RUN_TEST(test_handleI_populates_input_buffer);
     RUN_TEST(test_undo_file_creation);
     RUN_TEST(test_undo_directory_creation);
-    RUN_TEST(test_tool_menu_hidden_by_default);
+    RUN_TEST(test_meta_menu_hidden_by_default);
     RUN_TEST(test_m_navigates_into_meta);
     RUN_TEST(test_m_again_restores_position);
     RUN_TEST(test_left_from_meta_shows_meta_selected);

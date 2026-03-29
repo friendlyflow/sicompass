@@ -336,7 +336,7 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
         if (appRenderer->insideMeta) {
             // Restore saved position
             appRenderer->insideMeta = false;
-            appRenderer->showToolMenu = false;
+            appRenderer->showMetaMenu = false;
             idArrayCopy(&appRenderer->currentId, &appRenderer->metaReturnId);
             appRenderer->listIndex = appRenderer->metaReturnListIndex;
             appRenderer->scrollOffset = appRenderer->metaReturnScrollOffset;
@@ -356,7 +356,7 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
                 appRenderer->currentId.ids[appRenderer->currentId.depth - 1] = 0;
                 idArrayPush(&appRenderer->currentId, 0);
                 appRenderer->insideMeta = true;
-                appRenderer->showToolMenu = false;
+                appRenderer->showMetaMenu = false;
                 appRenderer->listIndex = 0;
                 appRenderer->scrollOffset = 0;
                 createListCurrentLayer(appRenderer);
