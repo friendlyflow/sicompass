@@ -763,7 +763,7 @@ static FfonElement* scriptCreateElement(Provider *self, const char *elementKey) 
         if (!tagged) return NULL;
         snprintf(tagged, taggedLen, ONE_OPT_TAG "%s", key);
         FfonElement *elem;
-        if (strstr(key, "<input>") != NULL) {
+        if (providerTagHasInput(key) || providerTagHasInputAll(key)) {
             elem = ffonElementCreateString(tagged);
         } else {
             elem = ffonElementCreateObject(tagged);
@@ -784,7 +784,7 @@ static FfonElement* scriptCreateElement(Provider *self, const char *elementKey) 
     if (!tagged) return NULL;
     snprintf(tagged, taggedLen, MANY_OPT_TAG "%s", key);
     FfonElement *elem;
-    if (strstr(key, "<input>") != NULL) {
+    if (providerTagHasInput(key) || providerTagHasInputAll(key)) {
         elem = ffonElementCreateString(tagged);
     } else {
         elem = ffonElementCreateObject(tagged);

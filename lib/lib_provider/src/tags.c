@@ -32,7 +32,10 @@ static void tagUnescape(char *text) {
 
 bool providerTagHasInput(const char *text) {
     if (!text) return false;
-    return tagFindUnescaped(text, INPUT_TAG_OPEN) != NULL && tagFindUnescaped(text, INPUT_TAG_CLOSE) != NULL;
+    // Must have <input> but NOT <input-all> (longer match takes precedence)
+    return tagFindUnescaped(text, INPUT_TAG_OPEN) != NULL
+        && tagFindUnescaped(text, INPUT_TAG_CLOSE) != NULL
+        && tagFindUnescaped(text, INPUT_ALL_TAG_OPEN) == NULL;
 }
 
 char* providerTagExtractContent(const char *taggedText) {
@@ -94,10 +97,18 @@ char* providerTagStripDisplay(const char *text) {
         return result;
     }
 
-    const char *openTag = tagFindUnescaped(text, INPUT_TAG_OPEN);
-    const char *closeTag = openTag ? strstr(openTag, INPUT_TAG_CLOSE) : NULL;
-    size_t openLen = INPUT_TAG_OPEN_LEN;
-    size_t closeLen = INPUT_TAG_CLOSE_LEN;
+    // Check <input-all> before <input> (longer match first)
+    const char *openTag = tagFindUnescaped(text, INPUT_ALL_TAG_OPEN);
+    const char *closeTag = openTag ? strstr(openTag, INPUT_ALL_TAG_CLOSE) : NULL;
+    size_t openLen = INPUT_ALL_TAG_OPEN_LEN;
+    size_t closeLen = INPUT_ALL_TAG_CLOSE_LEN;
+
+    if (!openTag) {
+        openTag = tagFindUnescaped(text, INPUT_TAG_OPEN);
+        closeTag = openTag ? strstr(openTag, INPUT_TAG_CLOSE) : NULL;
+        openLen = INPUT_TAG_OPEN_LEN;
+        closeLen = INPUT_TAG_CLOSE_LEN;
+    }
 
     if (!openTag) {
         openTag = tagFindUnescaped(text, RADIO_TAG_OPEN);
@@ -186,6 +197,43 @@ char* providerTagFormatKey(const char *content) {
     char *result = malloc(len);
     if (result) {
         snprintf(result, len, INPUT_TAG_OPEN "%s" INPUT_TAG_CLOSE, content);
+    }
+    return result;
+}
+
+bool providerTagHasInputAll(const char *text) {
+    if (!text) return false;
+    return tagFindUnescaped(text, INPUT_ALL_TAG_OPEN) != NULL
+        && tagFindUnescaped(text, INPUT_ALL_TAG_CLOSE) != NULL;
+}
+
+char* providerTagExtractInputAllContent(const char *taggedText) {
+    if (!taggedText) return NULL;
+
+    const char *start = tagFindUnescaped(taggedText, INPUT_ALL_TAG_OPEN);
+    if (!start) return NULL;
+
+    start += INPUT_ALL_TAG_OPEN_LEN;
+
+    const char *end = strstr(start, INPUT_ALL_TAG_CLOSE);
+    if (!end) return NULL;
+
+    size_t len = end - start;
+    char *result = malloc(len + 1);
+    if (!result) return NULL;
+
+    memcpy(result, start, len);
+    result[len] = '\0';
+    return result;
+}
+
+char* providerTagFormatInputAllKey(const char *content) {
+    if (!content) return NULL;
+
+    size_t len = INPUT_ALL_TAG_OPEN_LEN + strlen(content) + INPUT_ALL_TAG_CLOSE_LEN + 1;
+    char *result = malloc(len);
+    if (result) {
+        snprintf(result, len, INPUT_ALL_TAG_OPEN "%s" INPUT_ALL_TAG_CLOSE, content);
     }
     return result;
 }
