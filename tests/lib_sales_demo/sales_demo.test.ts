@@ -73,7 +73,7 @@ describe("sales demo provider", () => {
     expect(result as unknown[]).toHaveLength(0);
   });
 
-  test("sub-path output is plain JSON array", async () => {
+  test("sub-path output has children array", async () => {
     const root = getChildren(await runSalesDemo("/"));
     const firstObj = root.find((item) => {
       if (typeof item === "string") return false;
@@ -83,7 +83,8 @@ describe("sales demo provider", () => {
 
     if (firstObj && typeof firstObj === "object") {
       const key = Object.keys(firstObj as Record<string, unknown>)[0];
-      const children = await runSalesDemo("/" + key);
+      const result = await runSalesDemo("/" + key);
+      const children = getChildren(result);
       expect(children).toBeArray();
     }
   });

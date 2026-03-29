@@ -449,6 +449,21 @@ static bool pathContainsSegment(const char *path, const char *name) {
     return false;
 }
 
+static FfonElement** ecPrependMeta(FfonElement **items, int count, int *outCount) {
+    FfonElement *meta = ffonElementCreateObject("meta");
+    if (!meta) { *outCount = count; return items; }
+    FfonElement **result = malloc((count + 1) * sizeof(FfonElement *));
+    if (!result) { ffonElementDestroy(meta); *outCount = count; return items; }
+    ffonObjectAddElement(meta->data.object, ffonElementCreateString("/       Search"));
+    ffonObjectAddElement(meta->data.object, ffonElementCreateString("F5      Refresh"));
+    ffonObjectAddElement(meta->data.object, ffonElementCreateString(":       Commands"));
+    result[0] = meta;
+    for (int i = 0; i < count; i++) result[i + 1] = items[i];
+    free(items);
+    *outCount = count + 1;
+    return result;
+}
+
 static FfonElement** ecFetch(const char *path, int *outCount) {
     // Handle compose/reply/reply-all/forward paths — the object's children
     // are served here because noCache=true causes re-fetch on navigation.
@@ -457,10 +472,10 @@ static FfonElement** ecFetch(const char *path, int *outCount) {
         pathContainsSegment(path, "reply all") ||
         pathContainsSegment(path, "forward")) {
         if (g_composeSent) {
-            *outCount = 1;
+            int count = 1;
             FfonElement **elems = malloc(sizeof(FfonElement*));
             elems[0] = ffonElementCreateString("message sent");
-            return elems;
+            return ecPrependMeta(elems, count, outCount);
         }
         // Initialize compose state from path when entering an action object
         if (pathDepth(path) >= 3 && !g_pendingCompose.replyFolder[0]) {
@@ -486,44 +501,46 @@ static FfonElement** ecFetch(const char *path, int *outCount) {
             else
                 g_pendingCompose.mode = COMPOSE_NEW;
         }
-        return ecBuildComposeForm(
+        int composeCount = 0;
+        FfonElement **composeElems = ecBuildComposeForm(
             g_pendingCompose.replyFolder[0] ? g_pendingCompose.replyFolder : NULL,
-            g_pendingCompose.replyUid, g_pendingCompose.mode, outCount);
+            g_pendingCompose.replyUid, g_pendingCompose.mode, &composeCount);
+        return ecPrependMeta(composeElems, composeCount, outCount);
     }
 
     // Lazy history: fetch referenced messages only when user enters "History"
     if (pathContainsSegment(path, "History")) {
         if (!g_historyRefs[0]) {
-            *outCount = 1;
+            int count = 1;
             FfonElement **elems = malloc(sizeof(FfonElement*));
             elems[0] = ffonElementCreateString("no history");
-            return elems;
+            return ecPrependMeta(elems, count, outCount);
         }
         FfonElement *history = ecBuildHistory(g_historyFolder, g_historyRefs);
         if (!history) {
-            *outCount = 1;
+            int count = 1;
             FfonElement **elems = malloc(sizeof(FfonElement*));
             elems[0] = ffonElementCreateString("no history");
-            return elems;
+            return ecPrependMeta(elems, count, outCount);
         }
         // Return the history object's children directly
-        *outCount = history->data.object->count;
-        FfonElement **elems = malloc(*outCount * sizeof(FfonElement*));
-        for (int i = 0; i < *outCount; i++) {
+        int histCount = history->data.object->count;
+        FfonElement **elems = malloc(histCount * sizeof(FfonElement*));
+        for (int i = 0; i < histCount; i++) {
             elems[i] = history->data.object->elements[i];
             history->data.object->elements[i] = NULL;
         }
         history->data.object->count = 0;
         ffonElementDestroy(history);
-        return elems;
+        return ecPrependMeta(elems, histCount, outCount);
     }
 
     if (!g_config.imapUrl[0] || !g_config.username[0]) {
-        *outCount = 1;
+        int count = 1;
         FfonElement **elems = malloc(sizeof(FfonElement*));
         elems[0] = ffonElementCreateString(
             "configure IMAP URL, username, and password in settings");
-        return elems;
+        return ecPrependMeta(elems, count, outCount);
     }
 
     int depth = pathDepth(path);
@@ -536,19 +553,22 @@ static FfonElement** ecFetch(const char *path, int *outCount) {
 
     if (depth == 0) {
         // Serve cached folder list if available
-        if (g_folderCache.valid)
-            return fetchCacheClone(&g_folderCache, outCount);
+        if (g_folderCache.valid) {
+            int cacheCount = 0;
+            FfonElement **cached = fetchCacheClone(&g_folderCache, &cacheCount);
+            return ecPrependMeta(cached, cacheCount, outCount);
+        }
 
         // Root: list folders
         int folderCount = 0;
         EmailFolder *folders = emailclientListFolders(&g_config, &folderCount);
         if (!folders || folderCount == 0) {
             emailclientFreeFolders(folders, folderCount);
-            *outCount = 2;
+            int count = 2;
             FfonElement **elems = malloc(2 * sizeof(FfonElement*));
             elems[0] = ffonElementCreateString("no folders found");
             elems[1] = ffonElementCreateObject("compose");
-            return elems;
+            return ecPrependMeta(elems, count, outCount);
         }
 
         FfonElement **elems = malloc((folderCount + 1) * sizeof(FfonElement*));
@@ -581,9 +601,8 @@ static FfonElement** ecFetch(const char *path, int *outCount) {
             elems[idx++] = ffonElementCreateObject("compose");
         ecStoreFolderMappings(folders, folderCount);
         emailclientFreeFolders(folders, folderCount);
-        *outCount = idx;
         fetchCacheStore(&g_folderCache, elems, idx);
-        return elems;
+        return ecPrependMeta(elems, idx, outCount);
     }
 
     char folderSegment[256];
@@ -594,8 +613,11 @@ static FfonElement** ecFetch(const char *path, int *outCount) {
     if (depth == 1) {
         // Serve cached envelopes if same folder and still valid
         if (g_envelopeCache.valid &&
-            strcmp(g_envelopeCacheFolder, folder) == 0)
-            return fetchCacheClone(&g_envelopeCache, outCount);
+            strcmp(g_envelopeCacheFolder, folder) == 0) {
+            int cacheCount = 0;
+            FfonElement **cached = fetchCacheClone(&g_envelopeCache, &cacheCount);
+            return ecPrependMeta(cached, cacheCount, outCount);
+        }
 
         // Invalidate cache when switching folders
         if (strcmp(g_envelopeCacheFolder, folder) != 0)
@@ -607,10 +629,10 @@ static FfonElement** ecFetch(const char *path, int *outCount) {
                                                         50, &msgCount);
         if (!headers || msgCount == 0) {
             emailclientFreeHeaders(headers, msgCount);
-            *outCount = 1;
+            int count = 1;
             FfonElement **elems = malloc(sizeof(FfonElement*));
             elems[0] = ffonElementCreateString("no messages");
-            return elems;
+            return ecPrependMeta(elems, count, outCount);
         }
 
         FfonElement **elems = malloc(msgCount * sizeof(FfonElement*));
@@ -635,7 +657,6 @@ static FfonElement** ecFetch(const char *path, int *outCount) {
             g_msgMappingCount++;
         }
         emailclientFreeHeaders(headers, msgCount);
-        *outCount = msgCount;
 
         // Cache envelope results
         fetchCacheStore(&g_envelopeCache, elems, msgCount);
@@ -650,7 +671,7 @@ static FfonElement** ecFetch(const char *path, int *outCount) {
             g_idleFolder[sizeof(g_idleFolder) - 1] = '\0';
         }
 
-        return elems;
+        return ecPrependMeta(elems, msgCount, outCount);
     }
 
     if (depth == 2) {
@@ -659,18 +680,18 @@ static FfonElement** ecFetch(const char *path, int *outCount) {
         pathSecondSegment(path, msgSegment, sizeof(msgSegment));
         int uid = ecLookupUid(msgSegment);
         if (uid < 0) {
-            *outCount = 1;
+            int count = 1;
             FfonElement **elems = malloc(sizeof(FfonElement*));
             elems[0] = ffonElementCreateString("message not found");
-            return elems;
+            return ecPrependMeta(elems, count, outCount);
         }
 
         EmailMessage *msg = emailclientFetchMessage(&g_config, folder, uid);
         if (!msg) {
-            *outCount = 1;
+            int count = 1;
             FfonElement **elems = malloc(sizeof(FfonElement*));
             elems[0] = ffonElementCreateString("failed to fetch message");
-            return elems;
+            return ecPrependMeta(elems, count, outCount);
         }
 
         // Build structured view: From, To, Date, Subject, Body{}, History{},
@@ -708,8 +729,7 @@ static FfonElement** ecFetch(const char *path, int *outCount) {
         elems[idx++] = ffonElementCreateObject("forward");
 
         emailclientFreeMessage(msg);
-        *outCount = idx;
-        return elems;
+        return ecPrependMeta(elems, idx, outCount);
     }
 
     *outCount = 0;

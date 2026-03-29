@@ -115,10 +115,11 @@ const rawObj = getRawAtPath(equipmentRaw, pathParts);
 const children = rawObj ? buildDisplayChildren(rawObj) : null;
 if (children) {
   const jsonChildren = toJson(children);
+  const metaObj = { meta: ["/   Search", "F5  Refresh", ":   Commands"] };
   if (pathParts.length === 0) {
-    console.log(JSON.stringify({ children: jsonChildren, dashboardImage }));
+    console.log(JSON.stringify({ children: jsonChildren, dashboardImage, meta: metaObj }));
   } else {
-    console.log(JSON.stringify(jsonChildren));
+    console.log(JSON.stringify({ children: jsonChildren, meta: metaObj }));
   }
 } else {
   console.log("[]");

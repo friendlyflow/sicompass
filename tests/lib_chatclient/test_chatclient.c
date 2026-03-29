@@ -66,10 +66,10 @@ void test_fetch_unconfigured_returns_help_message(void) {
 
     int count = 0;
     FfonElement **elems = p->fetch(p, &count);
-    TEST_ASSERT_EQUAL_INT(1, count);
+    TEST_ASSERT_EQUAL_INT(2, count);  // meta + help message
     TEST_ASSERT_NOT_NULL(elems);
-    TEST_ASSERT_EQUAL_INT(FFON_STRING, elems[0]->type);
-    TEST_ASSERT_NOT_NULL(strstr(elems[0]->data.string, "configure"));
+    TEST_ASSERT_EQUAL_INT(FFON_STRING, elems[1]->type);
+    TEST_ASSERT_NOT_NULL(strstr(elems[1]->data.string, "configure"));
 
     for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
     free(elems);

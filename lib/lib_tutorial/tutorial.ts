@@ -457,7 +457,10 @@ const pathParts = rawPath === "/" ? [] : rawPath.split("/").filter(Boolean);
 
 const children = getChildrenAtPath(sections, pathParts);
 if (children) {
-  console.log(JSON.stringify(toJson(children)));
+  const output = pathParts.length === 0
+    ? { children: toJson(children), meta: { meta: ["/   Search"] } }
+    : toJson(children);
+  console.log(JSON.stringify(output));
 } else {
   console.log("[]");
 }
