@@ -117,10 +117,18 @@ static bool settingsPopulateSection(SettingsProviderState *state, FfonElement *s
 static FfonElement** settingsFetch(Provider *self, int *outCount) {
     SettingsProviderState *state = (SettingsProviderState *)self->state;
 
-    int total = 1 + state->sectionCount;  // sicompass + registered sections
+    int total = 1 + 1 + state->sectionCount;  // meta + sicompass + registered sections
     FfonElement **arr = malloc(total * sizeof(FfonElement *));
     if (!arr) { *outCount = 0; return NULL; }
     int n = 0;
+
+    // meta info object listing available shortcuts
+    FfonElement *meta = ffonElementCreateObject("meta");
+    if (meta) {
+        ffonObjectAddElement(meta->data.object, ffonElementCreateString("/   Search"));
+        ffonObjectAddElement(meta->data.object, ffonElementCreateString("F5  Refresh"));
+        arr[n++] = meta;
+    }
 
     // Priority section first (if set)
     if (state->hasPrioritySection) {

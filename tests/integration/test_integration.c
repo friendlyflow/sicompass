@@ -823,9 +823,20 @@ void test_list_item_label_has_prefix(void) {
     TEST_ASSERT_NOT_EQUAL_MESSAGE(-1, alphaIdx, "alpha.txt not found");
     while (app->currentId.ids[1] != alphaIdx) pressDown(app);
 
-    // Explicitly rebuild list and sync listIndex
+    // Explicitly rebuild list and find visual listIndex for current FFON element.
+    // FFON index != visual index when meta: objects are skipped, so scan the list.
     createListCurrentLayer(app);
-    app->listIndex = app->currentId.ids[app->currentId.depth - 1];
+    int targetFfonIdx = app->currentId.ids[app->currentId.depth - 1];
+    int visualIdx = -1;
+    for (int vi = 0; vi < app->totalListCount; vi++) {
+        IdArray *itemId = &app->totalListCurrentLayer[vi].id;
+        if (itemId->ids[itemId->depth - 1] == targetFfonIdx) {
+            visualIdx = vi;
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_EQUAL_MESSAGE(-1, visualIdx, "alpha.txt not found in visual list");
+    app->listIndex = visualIdx;
 
     TEST_ASSERT_NOT_NULL_MESSAGE(app->totalListCurrentLayer, "List should be populated");
     TEST_ASSERT_TRUE_MESSAGE(app->listIndex >= 0 && app->listIndex < app->totalListCount,
@@ -961,6 +972,57 @@ void test_undo_directory_creation(void) {
 }
 
 // ============================================================
+// Test: meta: object is hidden by default and visible after 'm'
+// ============================================================
+
+void test_tool_menu_hidden_by_default(void) {
+    int fbIdx = findProviderIndex("filebrowser");
+    TEST_ASSERT_NOT_EQUAL(-1, fbIdx);
+
+    navigateToProvider(fbIdx);
+    pressRight(app);
+    TEST_ASSERT_EQUAL(2, app->currentId.depth);
+
+    // meta: should be hidden by default (showToolMenu == false)
+    TEST_ASSERT_FALSE(app->showToolMenu);
+
+    // The list should not contain a meta: item
+    createListCurrentLayer(app);
+    for (int i = 0; i < app->totalListCount; i++) {
+        TEST_ASSERT_TRUE_MESSAGE(
+            strncmp(app->totalListCurrentLayer[i].label, "+ meta", 6) != 0,
+            "meta should not be visible in list when showToolMenu is false");
+    }
+}
+
+void test_tool_menu_toggle_shows_meta(void) {
+    int fbIdx = findProviderIndex("filebrowser");
+    TEST_ASSERT_NOT_EQUAL(-1, fbIdx);
+
+    navigateToProvider(fbIdx);
+    pressRight(app);
+    TEST_ASSERT_EQUAL(2, app->currentId.depth);
+
+    // Press 'm' to toggle tool menu on
+    pressKey(app, SDLK_M, SDL_KMOD_NONE);
+    TEST_ASSERT_TRUE(app->showToolMenu);
+
+    // meta: object should now appear as the first list item
+    TEST_ASSERT_TRUE_MESSAGE(app->totalListCount > 0, "List should be populated");
+    TEST_ASSERT_TRUE_MESSAGE(
+        strncmp(app->totalListCurrentLayer[0].label, "+ meta", 6) == 0,
+        "meta should be first item when showToolMenu is true");
+
+    // Press 'm' again to toggle off
+    pressKey(app, SDLK_M, SDL_KMOD_NONE);
+    TEST_ASSERT_FALSE(app->showToolMenu);
+    TEST_ASSERT_TRUE_MESSAGE(app->totalListCount > 0, "List should still be populated");
+    TEST_ASSERT_TRUE_MESSAGE(
+        strncmp(app->totalListCurrentLayer[0].label, "+ meta", 6) != 0,
+        "meta should be hidden again after second 'm' press");
+}
+
+// ============================================================
 
 int main(void) {
     UNITY_BEGIN();
@@ -985,5 +1047,7 @@ int main(void) {
     RUN_TEST(test_handleI_populates_input_buffer);
     RUN_TEST(test_undo_file_creation);
     RUN_TEST(test_undo_directory_creation);
+    RUN_TEST(test_tool_menu_hidden_by_default);
+    RUN_TEST(test_tool_menu_toggle_shows_meta);
     return UNITY_END();
 }

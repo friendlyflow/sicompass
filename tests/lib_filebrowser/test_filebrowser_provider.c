@@ -171,12 +171,13 @@ void test_handleCommand_show_hide_properties_toggle(void) {
     createFile(tmpDir, "testfile.txt");
 
     // Fetch without properties (default state after setUp reset)
+    // Note: fetch returns [meta:, ...files] so count = 1 file + 1 meta
     int count = 0;
     FfonElement **elems = provider->fetch(provider, &count);
-    TEST_ASSERT_EQUAL_INT(1, count);
+    TEST_ASSERT_EQUAL_INT(2, count);
     char *contentBefore = NULL;
-    if (elems[0]->type == FFON_STRING)
-        contentBefore = strdup(elems[0]->data.string);
+    if (elems[1]->type == FFON_STRING)
+        contentBefore = strdup(elems[1]->data.string);
     for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
     free(elems);
 
@@ -188,10 +189,10 @@ void test_handleCommand_show_hide_properties_toggle(void) {
 
     // Fetch with properties
     elems = provider->fetch(provider, &count);
-    TEST_ASSERT_EQUAL_INT(1, count);
+    TEST_ASSERT_EQUAL_INT(2, count);
     char *contentAfter = NULL;
-    if (elems[0]->type == FFON_STRING)
-        contentAfter = strdup(elems[0]->data.string);
+    if (elems[1]->type == FFON_STRING)
+        contentAfter = strdup(elems[1]->data.string);
     for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
     free(elems);
 
@@ -238,12 +239,13 @@ void test_handleCommand_sort_chrono(void) {
 
     int count = 0;
     FfonElement **elems = provider->fetch(provider, &count);
-    TEST_ASSERT_EQUAL_INT(3, count);
+    // fetch returns [meta:, ...files], so 3 files + 1 meta = 4
+    TEST_ASSERT_EQUAL_INT(4, count);
 
-    // Chrono sort: newest first
-    char *name0 = providerTagExtractContent(elems[0]->data.string);
-    char *name1 = providerTagExtractContent(elems[1]->data.string);
-    char *name2 = providerTagExtractContent(elems[2]->data.string);
+    // Chrono sort: newest first (skip elems[0] which is meta:)
+    char *name0 = providerTagExtractContent(elems[1]->data.string);
+    char *name1 = providerTagExtractContent(elems[2]->data.string);
+    char *name2 = providerTagExtractContent(elems[3]->data.string);
     TEST_ASSERT_EQUAL_STRING("newest.txt", name0);
     TEST_ASSERT_EQUAL_STRING("middle.txt", name1);
     TEST_ASSERT_EQUAL_STRING("oldest.txt", name2);
@@ -267,11 +269,13 @@ void test_handleCommand_sort_alpha(void) {
 
     int count = 0;
     FfonElement **elems = provider->fetch(provider, &count);
-    TEST_ASSERT_EQUAL_INT(3, count);
+    // fetch returns [meta:, ...files], so 3 files + 1 meta = 4
+    TEST_ASSERT_EQUAL_INT(4, count);
 
-    char *name0 = providerTagExtractContent(elems[0]->data.string);
-    char *name1 = providerTagExtractContent(elems[1]->data.string);
-    char *name2 = providerTagExtractContent(elems[2]->data.string);
+    // Skip elems[0] which is meta:
+    char *name0 = providerTagExtractContent(elems[1]->data.string);
+    char *name1 = providerTagExtractContent(elems[2]->data.string);
+    char *name2 = providerTagExtractContent(elems[3]->data.string);
     TEST_ASSERT_EQUAL_STRING("apple.txt", name0);
     TEST_ASSERT_EQUAL_STRING("banana.txt", name1);
     TEST_ASSERT_EQUAL_STRING("cherry.txt", name2);

@@ -15,14 +15,60 @@ static bool g_showProperties = false;
 // Current sort mode (session-only, initialised from settings on startup)
 static FilebrowserSortMode g_sortMode = FILEBROWSER_SORT_ALPHA;
 
+// Build the meta: FFON object describing available shortcuts for the file browser.
+// Caller takes ownership.
+static FfonElement* fbBuildMetaElement(void) {
+    FfonElement *meta = ffonElementCreateObject("meta");
+    if (!meta) return NULL;
+    FfonObject *obj = meta->data.object;
+    ffonObjectAddElement(obj, ffonElementCreateString("Ctrl+I  Insert before"));
+    ffonObjectAddElement(obj, ffonElementCreateString("Ctrl+A  Append after"));
+    ffonObjectAddElement(obj, ffonElementCreateString("Del     Delete"));
+    ffonObjectAddElement(obj, ffonElementCreateString("Ctrl+X  Cut"));
+    ffonObjectAddElement(obj, ffonElementCreateString("Ctrl+C  Copy"));
+    ffonObjectAddElement(obj, ffonElementCreateString("Ctrl+V  Paste"));
+    ffonObjectAddElement(obj, ffonElementCreateString("I       Rename"));
+    ffonObjectAddElement(obj, ffonElementCreateString(":       Commands"));
+    ffonObjectAddElement(obj, ffonElementCreateString("/       Search"));
+    ffonObjectAddElement(obj, ffonElementCreateString("F5      Refresh"));
+    return meta;
+}
+
+// Prepend a meta: element to an existing fetch result array.
+// Returns a new array (caller frees); on failure returns the original unchanged.
+static FfonElement** fbPrependMeta(FfonElement **items, int count, int *outCount) {
+    FfonElement *meta = fbBuildMetaElement();
+    if (!meta) {
+        *outCount = count;
+        return items;
+    }
+    FfonElement **result = malloc((count + 1) * sizeof(FfonElement *));
+    if (!result) {
+        ffonElementDestroy(meta);
+        *outCount = count;
+        return items;
+    }
+    result[0] = meta;
+    for (int i = 0; i < count; i++) result[i + 1] = items[i];
+    free(items);
+    *outCount = count + 1;
+    return result;
+}
+
 // Fetch children at current path
 static FfonElement** fbFetch(const char *path, int *outCount) {
+    FfonElement **items;
+    int count = 0;
 #ifdef _WIN32
     if (strcmp(path, "/") == 0) {
-        return filebrowserListDrives(outCount);
+        items = filebrowserListDrives(&count);
+    } else {
+        items = filebrowserListDirectory(path, false, g_showProperties, g_sortMode, &count);
     }
+#else
+    items = filebrowserListDirectory(path, false, g_showProperties, g_sortMode, &count);
 #endif
-    return filebrowserListDirectory(path, false, g_showProperties, g_sortMode, outCount);
+    return fbPrependMeta(items, count, outCount);
 }
 
 // Commit a rename operation
