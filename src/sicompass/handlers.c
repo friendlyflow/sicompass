@@ -2009,6 +2009,12 @@ void handleLeft(AppRenderer *appRenderer) {
         } else if ((appRenderer->currentCoordinate == COORDINATE_SIMPLE_SEARCH ||
                     appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) &&
                    providerNavigateLeft(appRenderer)) {
+            if (appRenderer->insideMeta) {
+                appRenderer->insideMeta = false;
+                appRenderer->showToolMenu = true;
+            } else if (appRenderer->showToolMenu) {
+                appRenderer->showToolMenu = false;
+            }
             if (appRenderer->currentCoordinate == COORDINATE_EXTENDED_SEARCH) {
                 createListExtendedSearch(appRenderer);
             } else {
@@ -2024,6 +2030,14 @@ void handleLeft(AppRenderer *appRenderer) {
     } else {
         // Use provider for navigation
         if (providerNavigateLeft(appRenderer)) {
+            if (appRenderer->insideMeta) {
+                // Navigating left out of meta children: show meta in parent list
+                appRenderer->insideMeta = false;
+                appRenderer->showToolMenu = true;
+            } else if (appRenderer->showToolMenu) {
+                // Navigating left from meta-selected level: hide meta again
+                appRenderer->showToolMenu = false;
+            }
             // Rebuild list for new location
             createListCurrentLayer(appRenderer);
             // Sync listIndex with current position in hierarchy
@@ -2125,6 +2139,7 @@ void handleRight(AppRenderer *appRenderer) {
         } else if (appRenderer->currentCoordinate != COORDINATE_SCROLL_SEARCH &&
                    appRenderer->currentCoordinate != COORDINATE_INPUT_SEARCH &&
                    providerNavigateRight(appRenderer)) {
+            appRenderer->showToolMenu = false;
             createListCurrentLayer(appRenderer);
             appRenderer->listIndex = appRenderer->currentId.ids[appRenderer->currentId.depth - 1];
             appRenderer->scrollOffset = appRenderer->listIndex;
@@ -2134,6 +2149,7 @@ void handleRight(AppRenderer *appRenderer) {
     } else {
         // Use provider for navigation (fetches children dynamically)
         if (providerNavigateRight(appRenderer)) {
+            appRenderer->showToolMenu = false;
             // Rebuild list for new location
             createListCurrentLayer(appRenderer);
             // Sync listIndex with currentId (normally 0 for new child,

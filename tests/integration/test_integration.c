@@ -972,7 +972,7 @@ void test_undo_directory_creation(void) {
 }
 
 // ============================================================
-// Test: meta: object is hidden by default and visible after 'm'
+// Tests: 'm' key navigates into/out of meta object
 // ============================================================
 
 void test_tool_menu_hidden_by_default(void) {
@@ -983,19 +983,20 @@ void test_tool_menu_hidden_by_default(void) {
     pressRight(app);
     TEST_ASSERT_EQUAL(2, app->currentId.depth);
 
-    // meta: should be hidden by default (showToolMenu == false)
+    // meta should be hidden by default
     TEST_ASSERT_FALSE(app->showToolMenu);
+    TEST_ASSERT_FALSE(app->insideMeta);
 
-    // The list should not contain a meta: item
+    // The list should not contain a meta item
     createListCurrentLayer(app);
     for (int i = 0; i < app->totalListCount; i++) {
         TEST_ASSERT_TRUE_MESSAGE(
             strncmp(app->totalListCurrentLayer[i].label, "+ meta", 6) != 0,
-            "meta should not be visible in list when showToolMenu is false");
+            "meta should not be visible in list by default");
     }
 }
 
-void test_tool_menu_toggle_shows_meta(void) {
+void test_m_navigates_into_meta(void) {
     int fbIdx = findProviderIndex("filebrowser");
     TEST_ASSERT_NOT_EQUAL(-1, fbIdx);
 
@@ -1003,23 +1004,105 @@ void test_tool_menu_toggle_shows_meta(void) {
     pressRight(app);
     TEST_ASSERT_EQUAL(2, app->currentId.depth);
 
-    // Press 'm' to toggle tool menu on
+    // Press 'm' to enter meta
     pressKey(app, SDLK_M, SDL_KMOD_NONE);
-    TEST_ASSERT_TRUE(app->showToolMenu);
+    TEST_ASSERT_TRUE(app->insideMeta);
+    TEST_ASSERT_EQUAL(3, app->currentId.depth);
 
-    // meta: object should now appear as the first list item
+    // List should contain meta's children (strings, not "+ meta" object)
+    TEST_ASSERT_TRUE_MESSAGE(app->totalListCount > 0, "Meta children should be listed");
+    for (int i = 0; i < app->totalListCount; i++) {
+        TEST_ASSERT_TRUE_MESSAGE(
+            strncmp(app->totalListCurrentLayer[i].label, "+ meta", 6) != 0,
+            "Meta children should not themselves be meta objects");
+    }
+}
+
+void test_m_again_restores_position(void) {
+    int fbIdx = findProviderIndex("filebrowser");
+    TEST_ASSERT_NOT_EQUAL(-1, fbIdx);
+
+    navigateToProvider(fbIdx);
+    pressRight(app);
+    TEST_ASSERT_EQUAL(2, app->currentId.depth);
+    int savedListIndex = app->listIndex;
+
+    // Enter meta, then exit
+    pressKey(app, SDLK_M, SDL_KMOD_NONE);
+    TEST_ASSERT_TRUE(app->insideMeta);
+    pressKey(app, SDLK_M, SDL_KMOD_NONE);
+
+    TEST_ASSERT_FALSE(app->insideMeta);
+    TEST_ASSERT_FALSE(app->showToolMenu);
+    TEST_ASSERT_EQUAL(2, app->currentId.depth);
+    TEST_ASSERT_EQUAL(savedListIndex, app->listIndex);
+
+    // meta should be hidden again
+    for (int i = 0; i < app->totalListCount; i++) {
+        TEST_ASSERT_TRUE_MESSAGE(
+            strncmp(app->totalListCurrentLayer[i].label, "+ meta", 6) != 0,
+            "meta should be hidden after second 'm' press");
+    }
+}
+
+void test_left_from_meta_shows_meta_selected(void) {
+    int fbIdx = findProviderIndex("filebrowser");
+    TEST_ASSERT_NOT_EQUAL(-1, fbIdx);
+
+    navigateToProvider(fbIdx);
+    pressRight(app);
+    TEST_ASSERT_EQUAL(2, app->currentId.depth);
+
+    // Enter meta, then press left
+    pressKey(app, SDLK_M, SDL_KMOD_NONE);
+    TEST_ASSERT_TRUE(app->insideMeta);
+    pressLeft(app);
+
+    TEST_ASSERT_FALSE(app->insideMeta);
+    TEST_ASSERT_TRUE(app->showToolMenu);
+    TEST_ASSERT_EQUAL(2, app->currentId.depth);
+    // meta should be first item and selected
     TEST_ASSERT_TRUE_MESSAGE(app->totalListCount > 0, "List should be populated");
     TEST_ASSERT_TRUE_MESSAGE(
         strncmp(app->totalListCurrentLayer[0].label, "+ meta", 6) == 0,
-        "meta should be first item when showToolMenu is true");
+        "meta should be first item after navigating left from inside meta");
+    TEST_ASSERT_EQUAL(0, app->listIndex);
+}
 
-    // Press 'm' again to toggle off
+void test_down_from_meta_selected_navigates_list(void) {
+    int fbIdx = findProviderIndex("filebrowser");
+    TEST_ASSERT_NOT_EQUAL(-1, fbIdx);
+
+    navigateToProvider(fbIdx);
+    pressRight(app);
+
+    // Enter meta, press left (meta selected), press down
     pressKey(app, SDLK_M, SDL_KMOD_NONE);
-    TEST_ASSERT_FALSE(app->showToolMenu);
-    TEST_ASSERT_TRUE_MESSAGE(app->totalListCount > 0, "List should still be populated");
+    pressLeft(app);
+    TEST_ASSERT_EQUAL(0, app->listIndex);
+    pressDown(app);
+
+    TEST_ASSERT_EQUAL(1, app->listIndex);
     TEST_ASSERT_TRUE_MESSAGE(
-        strncmp(app->totalListCurrentLayer[0].label, "+ meta", 6) != 0,
-        "meta should be hidden again after second 'm' press");
+        strncmp(app->totalListCurrentLayer[1].label, "+ meta", 6) != 0,
+        "Second item should not be meta");
+}
+
+void test_right_from_meta_selected_hides_meta(void) {
+    int fbIdx = findProviderIndex("filebrowser");
+    TEST_ASSERT_NOT_EQUAL(-1, fbIdx);
+
+    navigateToProvider(fbIdx);
+    pressRight(app);
+
+    // Enter meta, press left (meta selected at index 0), press right into meta
+    pressKey(app, SDLK_M, SDL_KMOD_NONE);
+    pressLeft(app);
+    TEST_ASSERT_TRUE(app->showToolMenu);
+    TEST_ASSERT_EQUAL(0, app->listIndex);  // meta is selected
+    pressRight(app); // navigate into meta (it's an object, so right succeeds)
+
+    TEST_ASSERT_FALSE(app->showToolMenu);
 }
 
 // ============================================================
@@ -1048,6 +1131,10 @@ int main(void) {
     RUN_TEST(test_undo_file_creation);
     RUN_TEST(test_undo_directory_creation);
     RUN_TEST(test_tool_menu_hidden_by_default);
-    RUN_TEST(test_tool_menu_toggle_shows_meta);
+    RUN_TEST(test_m_navigates_into_meta);
+    RUN_TEST(test_m_again_restores_position);
+    RUN_TEST(test_left_from_meta_shows_meta_selected);
+    RUN_TEST(test_down_from_meta_selected_navigates_list);
+    RUN_TEST(test_right_from_meta_selected_hides_meta);
     return UNITY_END();
 }
