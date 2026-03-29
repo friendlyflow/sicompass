@@ -297,6 +297,7 @@ typedef struct ScriptProviderState {
     const ProviderOps *ops;
     char scriptPath[4096];
     char dashboardImagePath[4096];
+    FfonElement *metaElement;  // parsed from "meta" key in script output; NULL if absent
 } ScriptProviderState;
 
 // On Windows, bun is installed to %USERPROFILE%\.bun\bin\bun.exe but the
@@ -487,6 +488,11 @@ static FfonElement** scriptFetch(Provider *self, int *outCount) {
             state->dashboardImagePath[sizeof(state->dashboardImagePath) - 1] = '\0';
             self->dashboardImagePath = state->dashboardImagePath;
         }
+        // Extract optional meta object (single-key object whose value is an array of strings)
+        json_object *metaObj = NULL;
+        if (json_object_object_get_ex(root, "meta", &metaObj)) {
+            state->metaElement = parseJsonValue(metaObj);
+        }
     }
 
     if (!childrenArr) {
@@ -518,6 +524,24 @@ static FfonElement** scriptFetch(Provider *self, int *outCount) {
     }
 
     json_object_put(root);
+
+    // Prepend meta element if provided by the script
+    if (state->metaElement && count > 0) {
+        FfonElement **withMeta = malloc(sizeof(FfonElement*) * (count + 1));
+        if (withMeta) {
+            withMeta[0] = state->metaElement;
+            for (int i = 0; i < count; i++) withMeta[i + 1] = elements[i];
+            free(elements);
+            state->metaElement = NULL;
+            *outCount = count + 1;
+            return withMeta;
+        }
+    }
+    if (state->metaElement) {
+        ffonElementDestroy(state->metaElement);
+        state->metaElement = NULL;
+    }
+
     *outCount = count;
     return elements;
 }

@@ -15,7 +15,12 @@ async function runTutorial(path: string): Promise<unknown[]> {
   });
   const text = await new Response(proc.stdout).text();
   await proc.exited;
-  return JSON.parse(text);
+  const parsed = JSON.parse(text);
+  // Root returns { children: [...], meta: {...} } — extract children for tests
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && Array.isArray(parsed.children)) {
+    return parsed.children;
+  }
+  return parsed;
 }
 
 describe("tutorial provider", () => {

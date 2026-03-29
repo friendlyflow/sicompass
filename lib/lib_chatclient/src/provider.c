@@ -69,13 +69,28 @@ static void ccSaveAccessToken(const char *accessToken) {
     free(configPath);
 }
 
+static FfonElement** ccPrependMeta(FfonElement **items, int count, int *outCount) {
+    FfonElement *meta = ffonElementCreateObject("meta");
+    if (!meta) { *outCount = count; return items; }
+    FfonElement **result = malloc((count + 1) * sizeof(FfonElement *));
+    if (!result) { ffonElementDestroy(meta); *outCount = count; return items; }
+    ffonObjectAddElement(meta->data.object, ffonElementCreateString("/       Search"));
+    ffonObjectAddElement(meta->data.object, ffonElementCreateString("F5      Refresh"));
+    ffonObjectAddElement(meta->data.object, ffonElementCreateString(":       Commands"));
+    result[0] = meta;
+    for (int i = 0; i < count; i++) result[i + 1] = items[i];
+    free(items);
+    *outCount = count + 1;
+    return result;
+}
+
 static FfonElement** ccFetch(const char *path, int *outCount) {
     if (!g_config.homeserverUrl[0] || !g_config.accessToken[0]) {
-        *outCount = 1;
+        int count = 1;
         FfonElement **elems = malloc(sizeof(FfonElement*));
         elems[0] = ffonElementCreateString(
             "configure homeserver URL, username and password in settings, then run login command");
-        return elems;
+        return ccPrependMeta(elems, count, outCount);
     }
 
     if (strcmp(path, "/") == 0) {
@@ -83,10 +98,10 @@ static FfonElement** ccFetch(const char *path, int *outCount) {
         ChatRoom *rooms = chatclientGetJoinedRooms(&g_config, &roomCount);
         if (!rooms || roomCount == 0) {
             chatclientFreeRooms(rooms, roomCount);
-            *outCount = 1;
+            int count = 1;
             FfonElement **elems = malloc(sizeof(FfonElement*));
             elems[0] = ffonElementCreateString("no rooms found");
-            return elems;
+            return ccPrependMeta(elems, count, outCount);
         }
 
         FfonElement **elems = malloc(roomCount * sizeof(FfonElement*));
@@ -95,28 +110,27 @@ static FfonElement** ccFetch(const char *path, int *outCount) {
         }
         ccStoreRoomMappings(rooms, roomCount);
         chatclientFreeRooms(rooms, roomCount);
-        *outCount = roomCount;
-        return elems;
+        return ccPrependMeta(elems, roomCount, outCount);
     }
 
     // Inside a room: path = "/{displayName}"
     const char *segment = path + 1;
     const char *roomId = ccLookupRoomId(segment);
     if (!roomId) {
-        *outCount = 1;
+        int count = 1;
         FfonElement **elems = malloc(sizeof(FfonElement*));
         elems[0] = ffonElementCreateString("room not found");
-        return elems;
+        return ccPrependMeta(elems, count, outCount);
     }
 
     int msgCount = 0;
     ChatMessage *msgs = chatclientGetRoomMessages(&g_config, roomId, 50, &msgCount);
     if (!msgs || msgCount == 0) {
         chatclientFreeMessages(msgs, msgCount);
-        *outCount = 1;
+        int count = 1;
         FfonElement **elems = malloc(sizeof(FfonElement*));
         elems[0] = ffonElementCreateString("<input></input>");
-        return elems;
+        return ccPrependMeta(elems, count, outCount);
     }
 
     FfonElement **elems = malloc((msgCount + 1) * sizeof(FfonElement*));
@@ -127,8 +141,7 @@ static FfonElement** ccFetch(const char *path, int *outCount) {
     }
     elems[msgCount] = ffonElementCreateString("<input></input>");
     chatclientFreeMessages(msgs, msgCount);
-    *outCount = msgCount + 1;
-    return elems;
+    return ccPrependMeta(elems, msgCount + 1, outCount);
 }
 
 static bool ccCommit(const char *path, const char *oldName, const char *newName) {

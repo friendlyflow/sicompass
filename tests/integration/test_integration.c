@@ -749,7 +749,7 @@ void test_webbrowser_enter_commits_url(void) {
     TEST_ASSERT_NOT_NULL(wbObj);
     TEST_ASSERT_TRUE(wbObj->count >= 1);
 
-    FfonElement *urlBar = wbObj->elements[0];
+    FfonElement *urlBar = wbObj->elements[1];  // elements[0] is meta
     TEST_ASSERT_NOT_NULL(urlBar);
     // URL bar is a string element with <input> tag
     const char *urlBarStr = (urlBar->type == FFON_STRING) ?
@@ -757,8 +757,8 @@ void test_webbrowser_enter_commits_url(void) {
     TEST_ASSERT_TRUE_MESSAGE(providerTagHasInput(urlBarStr),
         "First element of web browser should be an <input> URL bar");
 
-    // Navigate to the URL bar element (should be at index 0)
-    app->currentId.ids[app->currentId.depth - 1] = 0;
+    // Navigate to the URL bar element (FFON index 1, after meta at 0)
+    app->currentId.ids[app->currentId.depth - 1] = 1;
     createListCurrentLayer(app);
 
     // No provider error before pressing Enter

@@ -39,19 +39,36 @@ static FfonElement** wbFetch(const char *path, int *outCount) {
     else
         snprintf(urlBuf, sizeof(urlBuf), "<input>%s</input>", g_currentUrl);
 
-    *outCount = 1;
     FfonElement **elems = malloc(sizeof(FfonElement*));
 
     if (!g_cachedPage.elements) {
         // No page content: return as string so it can't be navigated into
         elems[0] = ffonElementCreateString(urlBuf);
-        return elems;
+    } else {
+        // Page loaded: return as object with page content as children
+        elems[0] = ffonElementCreateObject(urlBuf);
+        for (int i = 0; i < g_cachedPage.elementCount; i++)
+            ffonObjectAddElement(elems[0]->data.object, ffonElementClone(g_cachedPage.elements[i]));
     }
 
-    // Page loaded: return as object with page content as children
-    elems[0] = ffonElementCreateObject(urlBuf);
-    for (int i = 0; i < g_cachedPage.elementCount; i++)
-        ffonObjectAddElement(elems[0]->data.object, ffonElementClone(g_cachedPage.elements[i]));
+    // Prepend meta
+    FfonElement *meta = ffonElementCreateObject("meta");
+    if (meta) {
+        ffonObjectAddElement(meta->data.object, ffonElementCreateString("I       Edit URL"));
+        ffonObjectAddElement(meta->data.object, ffonElementCreateString("/       Search"));
+        ffonObjectAddElement(meta->data.object, ffonElementCreateString("F5      Refresh"));
+        ffonObjectAddElement(meta->data.object, ffonElementCreateString(":       Commands"));
+        FfonElement **result = malloc(2 * sizeof(FfonElement*));
+        if (result) {
+            result[0] = meta;
+            result[1] = elems[0];
+            free(elems);
+            *outCount = 2;
+            return result;
+        }
+        ffonElementDestroy(meta);
+    }
+    *outCount = 1;
     return elems;
 }
 

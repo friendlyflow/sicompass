@@ -222,10 +222,10 @@ void test_fetch_unconfigured_returns_help_message(void) {
 
     int count = 0;
     FfonElement **elems = p->fetch(p, &count);
-    TEST_ASSERT_EQUAL_INT(1, count);
+    TEST_ASSERT_EQUAL_INT(2, count);  // meta + help message
     TEST_ASSERT_NOT_NULL(elems);
-    TEST_ASSERT_EQUAL_INT(FFON_STRING, elems[0]->type);
-    TEST_ASSERT_NOT_NULL(strstr(elems[0]->data.string, "configure"));
+    TEST_ASSERT_EQUAL_INT(FFON_STRING, elems[1]->type);
+    TEST_ASSERT_NOT_NULL(strstr(elems[1]->data.string, "configure"));
 
     for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
     free(elems);
@@ -507,10 +507,10 @@ void test_fetch_root_lists_folders(void) {
 
     int count = 0;
     FfonElement **elems = p->fetch(p, &count);
-    // INBOX + compose + Sent = 3
-    TEST_ASSERT_EQUAL_INT(3, count);
-    TEST_ASSERT_EQUAL_INT(FFON_OBJECT, elems[0]->type);
-    TEST_ASSERT_EQUAL_STRING("INBOX", elems[0]->data.object->key);
+    // meta + INBOX + compose + Sent = 4
+    TEST_ASSERT_EQUAL_INT(4, count);
+    TEST_ASSERT_EQUAL_INT(FFON_OBJECT, elems[1]->type);
+    TEST_ASSERT_EQUAL_STRING("INBOX", elems[1]->data.object->key);
 
     for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
     free(elems);
@@ -536,9 +536,9 @@ void test_fetch_folder_lists_messages(void) {
     g_mockHeaderCount = 1;
 
     elems = p->fetch(p, &count);
-    TEST_ASSERT_EQUAL_INT(1, count);
-    TEST_ASSERT_EQUAL_INT(FFON_OBJECT, elems[0]->type);
-    TEST_ASSERT_NOT_NULL(strstr(elems[0]->data.object->key, "Hello"));
+    TEST_ASSERT_EQUAL_INT(2, count);  // meta + message
+    TEST_ASSERT_EQUAL_INT(FFON_OBJECT, elems[1]->type);
+    TEST_ASSERT_NOT_NULL(strstr(elems[1]->data.object->key, "Hello"));
 
     for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
     free(elems);
@@ -704,7 +704,7 @@ void test_envelope_cache_avoids_refetch(void) {
     // Second fetch — served from cache
     elems = p->fetch(p, &count);
     TEST_ASSERT_EQUAL_INT(1, g_listMessagesCallCount);
-    TEST_ASSERT_EQUAL_INT(1, count);
+    TEST_ASSERT_EQUAL_INT(2, count);  // meta + 1 message
     for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
     free(elems);
     p->popPath(p);
