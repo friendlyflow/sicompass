@@ -17,6 +17,11 @@ static FilebrowserSortMode g_sortMode = FILEBROWSER_SORT_ALPHA;
 
 // Fetch children at current path
 static FfonElement** fbFetch(const char *path, int *outCount) {
+#ifdef _WIN32
+    if (strcmp(path, "/") == 0) {
+        return filebrowserListDrives(outCount);
+    }
+#endif
     return filebrowserListDirectory(path, false, g_showProperties, g_sortMode, outCount);
 }
 
@@ -249,20 +254,49 @@ static SearchResultItem* fbCollectDeepSearchItems(const char *rootPath, int *out
 // Provider singleton
 static Provider *g_provider = NULL;
 
-// Custom init: chain the generic init (path setup) then clean up stale clipboard cache
+// Saved generic function pointers for chaining
 static void (*g_originalInit)(struct Provider *self) = NULL;
+#ifdef _WIN32
+static void (*g_originalPushPath)(struct Provider *self, const char *segment) = NULL;
+static void (*g_originalPopPath)(struct Provider *self) = NULL;
+#endif
 
+// Custom init: chain the generic init (path setup) then clean up stale clipboard cache.
+// On Windows the generic init sets "/" which is the drive-list sentinel — that's correct now.
 static void fbInit(struct Provider *self) {
     if (g_originalInit) g_originalInit(self);
     filebrowserCleanupClipboardCache();
-#ifdef _WIN32
-    // genericInit sets currentPath to "/" which is invalid on Windows (strlen < 2).
-    // Start at the root of C: instead.
-    if (self->setCurrentPath) {
-        self->setCurrentPath(self, "C:\\");
-    }
-#endif
 }
+
+#ifdef _WIN32
+// Returns true if path looks like a Windows drive root: one letter + ":\", len == 3.
+static bool fbIsDriveRoot(const char *path) {
+    size_t len = strlen(path);
+    return len == 3 && path[1] == ':' && path[2] == '\\';
+}
+
+// When at the drive-list sentinel ("/"), pushing a drive like "C:\" must use
+// setCurrentPath directly instead of the generic push (which would produce "/C:\").
+static void fbPushPath(struct Provider *self, const char *segment) {
+    const char *cur = self->getCurrentPath ? self->getCurrentPath(self) : "";
+    if (strcmp(cur, "/") == 0 && self->setCurrentPath) {
+        self->setCurrentPath(self, segment);
+    } else {
+        if (g_originalPushPath) g_originalPushPath(self, segment);
+    }
+}
+
+// When popping from a drive root (e.g. "C:\"), go back to the drive-list sentinel "/".
+static void fbPopPath(struct Provider *self) {
+    const char *cur = self->getCurrentPath ? self->getCurrentPath(self) : "";
+    if (strcmp(cur, "/") == 0) return; // already at top
+    if (fbIsDriveRoot(cur)) {
+        if (self->setCurrentPath) self->setCurrentPath(self, "/");
+    } else {
+        if (g_originalPopPath) g_originalPopPath(self);
+    }
+}
+#endif
 
 Provider* filebrowserGetProvider(void) {
     if (!g_provider) {
@@ -284,6 +318,12 @@ Provider* filebrowserGetProvider(void) {
         g_provider = providerCreate(&ops);
         g_originalInit = g_provider->init;
         g_provider->init = fbInit;
+#ifdef _WIN32
+        g_originalPushPath = g_provider->pushPath;
+        g_originalPopPath  = g_provider->popPath;
+        g_provider->pushPath = fbPushPath;
+        g_provider->popPath  = fbPopPath;
+#endif
     }
     return g_provider;
 }

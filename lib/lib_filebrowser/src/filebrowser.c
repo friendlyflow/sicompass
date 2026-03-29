@@ -498,6 +498,38 @@ void filebrowserGetClipboardCacheDir(char *out, int maxLen) {
 #endif
 }
 
+FfonElement** filebrowserListDrives(int *out_count) {
+    *out_count = 0;
+#if defined(_WIN32)
+    char buf[256];
+    DWORD len = GetLogicalDriveStringsA(sizeof(buf) - 1, buf);
+    if (len == 0 || len >= sizeof(buf)) return NULL;
+
+    int capacity = 8;
+    FfonElement **elements = malloc(capacity * sizeof(FfonElement *));
+    if (!elements) return NULL;
+
+    int count = 0;
+    for (char *p = buf; *p; p += strlen(p) + 1) {
+        if (count >= capacity) {
+            capacity *= 2;
+            FfonElement **newElems = realloc(elements, capacity * sizeof(FfonElement *));
+            if (!newElems) { free(elements); return NULL; }
+            elements = newElems;
+        }
+        char tag[32];
+        snprintf(tag, sizeof(tag), "%s%s%s", INPUT_TAG_OPEN, p, INPUT_TAG_CLOSE);
+        FfonElement *elem = ffonElementCreateObject(tag);
+        if (elem) elements[count++] = elem;
+    }
+
+    *out_count = count;
+    return count > 0 ? elements : (free(elements), NULL);
+#else
+    return NULL;
+#endif
+}
+
 void filebrowserCleanupClipboardCache(void) {
     char cacheDir[4096];
     getClipboardCacheDirInternal(cacheDir, sizeof(cacheDir));

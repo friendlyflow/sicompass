@@ -530,6 +530,55 @@ void test_executeCommand_unknown(void) {
     TEST_ASSERT_FALSE(result);
 }
 
+// --- Windows drive navigation ---
+
+void test_provider_init_starts_at_drive_list(void) {
+#ifdef _WIN32
+    provider->init(provider);
+    const char *path = provider->getCurrentPath(provider);
+    TEST_ASSERT_EQUAL_STRING("/", path);
+#endif
+}
+
+void test_provider_pushPath_from_drive_list(void) {
+#ifdef _WIN32
+    provider->setCurrentPath(provider, "/");
+    provider->pushPath(provider, "C:\\");
+    const char *path = provider->getCurrentPath(provider);
+    TEST_ASSERT_EQUAL_STRING("C:\\", path);
+#endif
+}
+
+void test_provider_popPath_from_drive_root(void) {
+#ifdef _WIN32
+    provider->setCurrentPath(provider, "C:\\");
+    provider->popPath(provider);
+    const char *path = provider->getCurrentPath(provider);
+    TEST_ASSERT_EQUAL_STRING("/", path);
+#endif
+}
+
+void test_provider_popPath_from_drive_list_no_change(void) {
+#ifdef _WIN32
+    provider->setCurrentPath(provider, "/");
+    provider->popPath(provider);
+    const char *path = provider->getCurrentPath(provider);
+    TEST_ASSERT_EQUAL_STRING("/", path);
+#endif
+}
+
+void test_provider_fetch_drive_list_on_windows(void) {
+#ifdef _WIN32
+    provider->setCurrentPath(provider, "/");
+    int count = 0;
+    FfonElement **elems = provider->fetch(provider, &count);
+    TEST_ASSERT_GREATER_THAN(0, count);
+    TEST_ASSERT_NOT_NULL(elems);
+    for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
+    free(elems);
+#endif
+}
+
 // --- main ---
 
 int main(void) {
@@ -564,6 +613,13 @@ int main(void) {
     RUN_TEST(test_getCommandListItems_open_with_no_apps);
     RUN_TEST(test_executeCommand_open_with);
     RUN_TEST(test_executeCommand_unknown);
+
+    // Windows drive navigation
+    RUN_TEST(test_provider_init_starts_at_drive_list);
+    RUN_TEST(test_provider_pushPath_from_drive_list);
+    RUN_TEST(test_provider_popPath_from_drive_root);
+    RUN_TEST(test_provider_popPath_from_drive_list_no_change);
+    RUN_TEST(test_provider_fetch_drive_list_on_windows);
 
     return UNITY_END();
 }

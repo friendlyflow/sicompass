@@ -81,3 +81,16 @@ bool filebrowserCopy(const char *srcDir, const char *srcName,
  * Called at provider init to remove leftovers from crashed sessions.
  */
 void filebrowserCleanupClipboardCache(void);
+
+/**
+ * List available drives (Windows only).
+ *
+ * On Windows: returns one FFON_OBJECT element per drive letter (e.g. C:\, D:\),
+ * with the drive path wrapped in <input>...</input> tags.
+ * On non-Windows: always returns NULL with *out_count = 0.
+ *
+ * @param out_count Output parameter for the number of elements returned
+ * @return Array of FfonElement*, or NULL if no drives found or not on Windows.
+ *         Caller is responsible for freeing the returned array and its elements.
+ */
+FfonElement** filebrowserListDrives(int *out_count);
