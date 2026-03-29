@@ -392,9 +392,11 @@ bool providerNavigateRight(AppRenderer *appRenderer) {
         }
     }
 
-    // If object already has children, navigate into it (using cache unless noCache is set)
+    // If object already has children, navigate into it (using cache unless noCache is set).
+    // meta objects are always treated as locally cached — never re-fetch them.
     if (obj->count > 0) {
-        if (provider && provider->noCache) {
+        bool isMeta = (strcmp(key, "meta") == 0);
+        if (provider && provider->noCache && !isMeta) {
             // Discard stale children and fall through to re-fetch below
             for (int i = 0; i < obj->count; i++) {
                 ffonElementDestroy(obj->elements[i]);
@@ -402,7 +404,7 @@ bool providerNavigateRight(AppRenderer *appRenderer) {
             }
             obj->count = 0;
         } else {
-            if (provider && provider->pushPath && strippedKey && shouldPushPath) {
+            if (!isMeta && provider && provider->pushPath && strippedKey && shouldPushPath) {
                 provider->pushPath(provider, strippedKey);
             }
             free(strippedKey);
