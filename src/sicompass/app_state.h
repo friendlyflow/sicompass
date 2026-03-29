@@ -209,7 +209,7 @@ typedef struct AppRenderer {
     bool pendingSaveAs;       // true when in COMMAND mode for "save as" filename input
     bool pendingFileBrowserSaveAs; // true when in file browser for save-as flow
     bool pendingFileBrowserOpen;   // true when in file browser for open/load flow
-    bool showToolMenu;        // true when meta objects are visible in the list (e.g. after left from inside meta)
+    bool showMetaMenu;        // true when meta objects are visible in the list (e.g. after left from inside meta)
     bool insideMeta;          // true when navigated into meta's children via 'm'
     IdArray metaReturnId;     // saved currentId before entering meta
     int metaReturnListIndex;  // saved listIndex before entering meta
