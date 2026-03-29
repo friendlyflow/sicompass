@@ -400,6 +400,33 @@ void test_cleanupClipboardCache_no_crash(void) {
     filebrowserCleanupClipboardCache();  // should not crash even with no cache
 }
 
+// --- filebrowserListDrives ---
+
+void test_listDrives_non_windows_returns_null(void) {
+#ifndef _WIN32
+    int count = 0;
+    FfonElement **drives = filebrowserListDrives(&count);
+    TEST_ASSERT_NULL(drives);
+    TEST_ASSERT_EQUAL_INT(0, count);
+#endif
+}
+
+void test_listDrives_windows_returns_at_least_one(void) {
+#ifdef _WIN32
+    int count = 0;
+    FfonElement **drives = filebrowserListDrives(&count);
+    TEST_ASSERT_GREATER_THAN(0, count);
+    TEST_ASSERT_NOT_NULL(drives);
+    // Each drive should be an FFON_OBJECT with an <input>X:\</input> key
+    TEST_ASSERT_EQUAL_INT(FFON_OBJECT, drives[0]->type);
+    TEST_ASSERT_NOT_NULL(strstr(drives[0]->key, "<input>"));
+    for (int i = 0; i < count; i++) {
+        ffonElementDestroy(drives[i]);
+    }
+    free(drives);
+#endif
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -433,6 +460,9 @@ int main(void) {
     RUN_TEST(test_listDirectory_chrono_sort);
     RUN_TEST(test_listDirectory_symlink);
     RUN_TEST(test_listDirectory_special_chars);
+
+    RUN_TEST(test_listDrives_non_windows_returns_null);
+    RUN_TEST(test_listDrives_windows_returns_at_least_one);
 
     return UNITY_END();
 }
