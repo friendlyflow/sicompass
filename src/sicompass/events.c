@@ -330,6 +330,13 @@ void handleKeys(AppRenderer *appRenderer, SDL_Event *event) {
              appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
         handleDashboard(appRenderer);
     }
+    // M (toggle meta: tool info visibility)
+    else if (!ctrl && !shift && !alt && key == SDLK_M &&
+             appRenderer->currentCoordinate == COORDINATE_OPERATOR_GENERAL) {
+        appRenderer->showToolMenu = !appRenderer->showToolMenu;
+        createListCurrentLayer(appRenderer);
+        appRenderer->needsRedraw = true;
+    }
     // Backspace in insert modes
     else if (!ctrl && !shift && !alt && key == SDLK_BACKSPACE &&
              (appRenderer->currentCoordinate == COORDINATE_EDITOR_INSERT ||

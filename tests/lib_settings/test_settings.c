@@ -101,14 +101,14 @@ void test_addSection_one(void) {
     // Verify via fetch: should return sicompass + "file browser"
     int count;
     FfonElement **elems = p->fetch(p, &count);
-    TEST_ASSERT_EQUAL_INT(2, count);
-    TEST_ASSERT_EQUAL_STRING("sicompass", elems[0]->data.object->key);
-    TEST_ASSERT_EQUAL_STRING("file browser", elems[1]->data.object->key);
+    TEST_ASSERT_EQUAL_INT(3, count);
+    TEST_ASSERT_EQUAL_STRING("sicompass", elems[1]->data.object->key);
+    TEST_ASSERT_EQUAL_STRING("file browser", elems[2]->data.object->key);
 
     // "file browser" section has "no settings" placeholder
-    TEST_ASSERT_EQUAL_INT(1, elems[1]->data.object->count);
+    TEST_ASSERT_EQUAL_INT(1, elems[2]->data.object->count);
     TEST_ASSERT_EQUAL_STRING("no settings",
-        elems[1]->data.object->elements[0]->data.string);
+        elems[2]->data.object->elements[0]->data.string);
 
     for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
     free(elems);
@@ -126,7 +126,7 @@ void test_addSection_null_name(void) {
 
     int count;
     FfonElement **elems = p->fetch(p, &count);
-    TEST_ASSERT_EQUAL_INT(1, count);  // only sicompass, no extra section
+    TEST_ASSERT_EQUAL_INT(2, count);  // only sicompass, no extra section
 
     for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
     free(elems);
@@ -145,10 +145,10 @@ void test_addSectionRadio(void) {
 
     int count;
     FfonElement **elems = p->fetch(p, &count);
-    TEST_ASSERT_EQUAL_INT(2, count);  // sicompass + file browser
+    TEST_ASSERT_EQUAL_INT(3, count);  // sicompass + file browser
 
     // file browser section should have a radio group
-    FfonObject *fbSection = elems[1]->data.object;
+    FfonObject *fbSection = elems[2]->data.object;
     TEST_ASSERT_EQUAL_STRING("file browser", fbSection->key);
     TEST_ASSERT_EQUAL_INT(1, fbSection->count);
 
@@ -178,8 +178,8 @@ void test_addSectionRadio_auto_creates_section(void) {
 
     int count;
     FfonElement **elems = p->fetch(p, &count);
-    TEST_ASSERT_EQUAL_INT(2, count);  // sicompass + auto section
-    TEST_ASSERT_EQUAL_STRING("auto section", elems[1]->data.object->key);
+    TEST_ASSERT_EQUAL_INT(3, count);  // sicompass + auto section
+    TEST_ASSERT_EQUAL_STRING("auto section", elems[2]->data.object->key);
 
     for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
     free(elems);
@@ -194,9 +194,9 @@ void test_fetch_default_color_scheme(void) {
 
     int count;
     FfonElement **elems = p->fetch(p, &count);
-    TEST_ASSERT_EQUAL_INT(1, count);
+    TEST_ASSERT_EQUAL_INT(2, count);
 
-    FfonObject *sicompass = elems[0]->data.object;
+    FfonObject *sicompass = elems[1]->data.object;
     TEST_ASSERT_EQUAL_STRING("sicompass", sicompass->key);
     TEST_ASSERT_EQUAL_INT(1, sicompass->count);
 
@@ -262,7 +262,7 @@ void test_onRadioChange_color_scheme(void) {
     // Verify fetch now reflects the change
     int count;
     FfonElement **elems = p->fetch(p, &count);
-    FfonObject *radioGroup = elems[0]->data.object->elements[0]->data.object;
+    FfonObject *radioGroup = elems[1]->data.object->elements[0]->data.object;
     // dark should not be checked, light should be checked
     TEST_ASSERT_FALSE(providerTagHasChecked(radioGroup->elements[0]->data.string));
     TEST_ASSERT_TRUE(providerTagHasChecked(radioGroup->elements[1]->data.string));
@@ -329,10 +329,10 @@ void test_addSectionText(void) {
 
     int count;
     FfonElement **elems = p->fetch(p, &count);
-    TEST_ASSERT_EQUAL_INT(2, count);  // sicompass + sales demo
+    TEST_ASSERT_EQUAL_INT(3, count);  // sicompass + sales demo
 
     // sales demo section should have an object with the label
-    FfonObject *sdSection = elems[1]->data.object;
+    FfonObject *sdSection = elems[2]->data.object;
     TEST_ASSERT_EQUAL_STRING("sales demo", sdSection->key);
     TEST_ASSERT_EQUAL_INT(1, sdSection->count);
 
@@ -357,8 +357,8 @@ void test_addSectionText_auto_creates_section(void) {
 
     int count;
     FfonElement **elems = p->fetch(p, &count);
-    TEST_ASSERT_EQUAL_INT(2, count);  // sicompass + new section
-    TEST_ASSERT_EQUAL_STRING("new section", elems[1]->data.object->key);
+    TEST_ASSERT_EQUAL_INT(3, count);  // sicompass + new section
+    TEST_ASSERT_EQUAL_STRING("new section", elems[2]->data.object->key);
 
     for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
     free(elems);
@@ -405,7 +405,7 @@ void test_commitEdit_text_entry(void) {
     // Fetch should reflect updated value
     int count;
     FfonElement **elems = p->fetch(p, &count);
-    FfonObject *sdSection = elems[1]->data.object;
+    FfonObject *sdSection = elems[2]->data.object;
     FfonElement *textElem = sdSection->elements[0];
     char *content = providerTagExtractContent(textElem->data.string);
     TEST_ASSERT_EQUAL_STRING("Documents", content);
@@ -442,9 +442,9 @@ void test_section_with_radio_and_text(void) {
 
     int count;
     FfonElement **elems = p->fetch(p, &count);
-    TEST_ASSERT_EQUAL_INT(2, count);  // sicompass + mixed
+    TEST_ASSERT_EQUAL_INT(3, count);  // sicompass + mixed
 
-    FfonObject *section = elems[1]->data.object;
+    FfonObject *section = elems[2]->data.object;
     TEST_ASSERT_EQUAL_STRING("mixed", section->key);
     TEST_ASSERT_EQUAL_INT(2, section->count);  // radio + text
 
@@ -470,10 +470,10 @@ void test_prioritySection_renders_first(void) {
 
     int count;
     FfonElement **elems = p->fetch(p, &count);
-    TEST_ASSERT_EQUAL_INT(3, count);  // programs + sicompass + other section
-    TEST_ASSERT_EQUAL_STRING("programs", elems[0]->data.object->key);
-    TEST_ASSERT_EQUAL_STRING("sicompass", elems[1]->data.object->key);
-    TEST_ASSERT_EQUAL_STRING("other section", elems[2]->data.object->key);
+    TEST_ASSERT_EQUAL_INT(4, count);  // programs + sicompass + other section
+    TEST_ASSERT_EQUAL_STRING("programs", elems[1]->data.object->key);
+    TEST_ASSERT_EQUAL_STRING("sicompass", elems[2]->data.object->key);
+    TEST_ASSERT_EQUAL_STRING("other section", elems[3]->data.object->key);
 
     for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
     free(elems);
@@ -490,9 +490,9 @@ void test_prioritySection_not_duplicated(void) {
     int count;
     FfonElement **elems = p->fetch(p, &count);
     // Only 2: programs (priority) + sicompass — not duplicated
-    TEST_ASSERT_EQUAL_INT(2, count);
-    TEST_ASSERT_EQUAL_STRING("programs", elems[0]->data.object->key);
-    TEST_ASSERT_EQUAL_STRING("sicompass", elems[1]->data.object->key);
+    TEST_ASSERT_EQUAL_INT(3, count);
+    TEST_ASSERT_EQUAL_STRING("programs", elems[1]->data.object->key);
+    TEST_ASSERT_EQUAL_STRING("sicompass", elems[2]->data.object->key);
 
     for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
     free(elems);
@@ -509,9 +509,9 @@ void test_checkbox_renders_checked(void) {
 
     int count;
     FfonElement **elems = p->fetch(p, &count);
-    TEST_ASSERT_EQUAL_INT(2, count);  // sicompass + programs
+    TEST_ASSERT_EQUAL_INT(3, count);  // sicompass + programs
 
-    FfonObject *section = elems[1]->data.object;
+    FfonObject *section = elems[2]->data.object;
     TEST_ASSERT_EQUAL_STRING("programs", section->key);
     TEST_ASSERT_EQUAL_INT(1, section->count);
 
@@ -533,7 +533,7 @@ void test_checkbox_renders_unchecked(void) {
     int count;
     FfonElement **elems = p->fetch(p, &count);
 
-    FfonObject *section = elems[1]->data.object;
+    FfonObject *section = elems[2]->data.object;
     FfonElement *cbElem = section->elements[0];
     TEST_ASSERT_TRUE(providerTagHasCheckbox(cbElem->data.string));
     TEST_ASSERT_FALSE(providerTagHasCheckboxChecked(cbElem->data.string));
@@ -559,7 +559,7 @@ void test_onCheckboxChange_updates_state(void) {
     // Fetch should now show unchecked
     int count;
     FfonElement **elems = p->fetch(p, &count);
-    FfonObject *section = elems[1]->data.object;
+    FfonObject *section = elems[2]->data.object;
     FfonElement *cbElem = section->elements[0];
     TEST_ASSERT_TRUE(providerTagHasCheckbox(cbElem->data.string));
     TEST_ASSERT_FALSE(providerTagHasCheckboxChecked(cbElem->data.string));
@@ -606,7 +606,7 @@ void test_setCheckboxState_updates_without_callback(void) {
     // Fetch should show checked
     int count;
     FfonElement **elems = p->fetch(p, &count);
-    FfonObject *section = elems[0]->data.object;  // sicompass section
+    FfonObject *section = elems[1]->data.object;  // sicompass section
     // Find the checkbox element
     bool foundChecked = false;
     for (int i = 0; i < section->count; i++) {
@@ -648,8 +648,8 @@ void test_removeSection_removes_from_fetch(void) {
 
     int count;
     FfonElement **elems = p->fetch(p, &count);
-    TEST_ASSERT_EQUAL_INT(1, count);  // only sicompass remains
-    TEST_ASSERT_EQUAL_STRING("sicompass", elems[0]->data.object->key);
+    TEST_ASSERT_EQUAL_INT(2, count);  // only sicompass remains
+    TEST_ASSERT_EQUAL_STRING("sicompass", elems[1]->data.object->key);
 
     for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
     free(elems);
@@ -669,8 +669,8 @@ void test_removeSection_removes_radio_entries(void) {
     settingsAddSection(p, "file browser");
     int count;
     FfonElement **elems = p->fetch(p, &count);
-    TEST_ASSERT_EQUAL_INT(2, count);
-    FfonObject *fb = elems[1]->data.object;
+    TEST_ASSERT_EQUAL_INT(3, count);
+    FfonObject *fb = elems[2]->data.object;
     TEST_ASSERT_EQUAL_STRING("file browser", fb->key);
     TEST_ASSERT_EQUAL_INT(1, fb->count);
     TEST_ASSERT_EQUAL_STRING("no settings", fb->elements[0]->data.string);
@@ -691,7 +691,7 @@ void test_removeSection_removes_text_entries(void) {
     settingsAddSection(p, "sales demo");
     int count;
     FfonElement **elems = p->fetch(p, &count);
-    FfonObject *sd = elems[1]->data.object;
+    FfonObject *sd = elems[2]->data.object;
     TEST_ASSERT_EQUAL_STRING("sales demo", sd->key);
     TEST_ASSERT_EQUAL_INT(1, sd->count);
     TEST_ASSERT_EQUAL_STRING("no settings", sd->elements[0]->data.string);
@@ -712,7 +712,7 @@ void test_removeSection_removes_checkbox_entries(void) {
     settingsAddSection(p, "programs");
     int count;
     FfonElement **elems = p->fetch(p, &count);
-    FfonObject *section = elems[1]->data.object;
+    FfonObject *section = elems[2]->data.object;
     TEST_ASSERT_EQUAL_STRING("programs", section->key);
     TEST_ASSERT_EQUAL_INT(1, section->count);
     TEST_ASSERT_EQUAL_STRING("no settings", section->elements[0]->data.string);
@@ -739,7 +739,7 @@ void test_removeSection_nonexistent(void) {
 
     int count;
     FfonElement **elems = p->fetch(p, &count);
-    TEST_ASSERT_EQUAL_INT(2, count);  // sicompass + file browser still present
+    TEST_ASSERT_EQUAL_INT(3, count);  // sicompass + file browser still present
 
     for (int i = 0; i < count; i++) ffonElementDestroy(elems[i]);
     free(elems);
@@ -757,10 +757,10 @@ void test_removeSection_leaves_other_sections(void) {
 
     int count;
     FfonElement **elems = p->fetch(p, &count);
-    TEST_ASSERT_EQUAL_INT(2, count);  // sicompass + section B
-    TEST_ASSERT_EQUAL_STRING("section B", elems[1]->data.object->key);
+    TEST_ASSERT_EQUAL_INT(3, count);  // sicompass + section B
+    TEST_ASSERT_EQUAL_STRING("section B", elems[2]->data.object->key);
     // section B should still have its text entry
-    FfonObject *sectionB = elems[1]->data.object;
+    FfonObject *sectionB = elems[2]->data.object;
     TEST_ASSERT_EQUAL_INT(1, sectionB->count);
     TEST_ASSERT_EQUAL_INT(FFON_STRING, sectionB->elements[0]->type);
     TEST_ASSERT_TRUE(providerTagHasInput(sectionB->elements[0]->data.string));
