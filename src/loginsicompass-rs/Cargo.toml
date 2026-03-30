@@ -1,0 +1,46 @@
+[package]
+name = "loginsicompass"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "loginsicompass — greetd login screen (Rust port of src/loginsicompass/)"
+
+[[bin]]
+name = "loginsicompass"
+path = "src/main.rs"
+
+[dependencies]
+# Wayland client — smithay-client-toolkit 0.19 for XDG shell, shm, seat
+smithay-client-toolkit = { version = "0.19", default-features = false, features = [
+    "calloop",
+    "xkbcommon",
+] }
+wayland-client = "0.31"
+wayland-protocols = { version = "0.31", features = ["client"] }
+
+# Keyboard
+xkeysym = "0.2"
+
+# 2D drawing for framebuffer (no GPU needed)
+tiny-skia = "0.11"
+
+# PNG / JPEG background image loading (already in workspace)
+image = { workspace = true }
+
+# greetd IPC: JSON over Unix socket
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Event loop (SCTK uses calloop 0.13)
+calloop = "0.13"
+calloop-wayland-source = "0.3"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Logging
+tracing          = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
