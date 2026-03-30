@@ -932,6 +932,93 @@ mod tests {
         }
     }
 
+    // ---- cleanup_clipboard_cache -------------------------------------------
+
+    #[test]
+    fn test_cleanup_clipboard_cache_no_crash() {
+        // Should be a no-op in Rust (we use in-memory clipboard), must not panic.
+        cleanup_clipboard_cache();
+    }
+
+    // ---- chrono sort ordering ----------------------------------------------
+
+    #[test]
+    #[cfg(unix)]
+    fn test_list_directory_chrono_sort() {
+        use std::time::{Duration, UNIX_EPOCH, SystemTime};
+        let (mut p, dir) = make_provider();
+
+        // Create three files with distinct mtime set via FileTimes
+        let make_file_at = |name: &str, secs: u64| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, b"").unwrap();
+            let mtime = UNIX_EPOCH + Duration::from_secs(secs);
+            let ft = std::fs::FileTimes::new().set_modified(mtime);
+            let f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+            f.set_times(ft).unwrap();
+        };
+        make_file_at("oldest.txt", 1_000_000);
+        make_file_at("middle.txt", 2_000_000);
+        make_file_at("newest.txt", 3_000_000);
+
+        p.sort_mode = SortMode::Chrono;
+        let items = p.fetch();
+        // Skip meta element (index 0); file entries are Str
+        let names: Vec<String> = items.iter().skip(1)
+            .filter_map(|e| e.as_str())
+            .map(|s| tags::strip_display(s).to_string())
+            .collect();
+        assert_eq!(names[0], "newest.txt", "newest should come first in chrono sort, got: {:?}", names);
+        assert_eq!(names[1], "middle.txt");
+        assert_eq!(names[2], "oldest.txt");
+    }
+
+    // ---- executables always shown ------------------------------------------
+
+    #[test]
+    #[cfg(unix)]
+    fn test_fetch_executable_always_shown() {
+        use std::os::unix::fs::PermissionsExt;
+        let (mut p, dir) = make_provider();
+        std::fs::write(dir.path().join("script.sh"), b"#!/bin/sh").unwrap();
+        std::fs::set_permissions(
+            dir.path().join("script.sh"),
+            std::fs::Permissions::from_mode(0o755),
+        ).unwrap();
+        std::fs::write(dir.path().join("data.txt"), b"").unwrap();
+
+        // Rust filebrowser always shows executables — no separate "commands mode"
+        let items = p.fetch();
+        // Should have meta + script.sh + data.txt = 3 entries
+        assert_eq!(items.len(), 3, "expected meta + 2 files, got {}", items.len());
+    }
+
+    // ---- execute_command open file with ------------------------------------
+
+    #[test]
+    fn test_execute_command_open_with_no_path_returns_false() {
+        // Without first calling handle_command to set the path, execute should return false.
+        let (mut p, _dir) = make_provider();
+        let result = p.execute_command("open file with", "firefox");
+        assert!(!result, "execute_command should return false when no path is set");
+    }
+
+    #[test]
+    fn test_execute_command_open_with_sets_path_then_executes() {
+        // handle_command stores the path; execute_command calls open_with.
+        // We can't test the actual open_with call (platform-specific) but we can
+        // verify the function accepts the call without panicking.
+        let (mut p, dir) = make_provider();
+        std::fs::write(dir.path().join("test.txt"), b"content").unwrap();
+        let mut err = String::new();
+        p.handle_command("open file with", "<input>test.txt</input>", 0, &mut err);
+        // open_with_path should now be set
+        assert!(p.open_with_path.is_some(), "open_with_path should be set after handle_command");
+        // execute_command will call platform::open_with — result depends on platform
+        let _ = p.execute_command("open file with", "xdg-open");
+        // No panic = pass
+    }
+
     #[test]
     #[cfg(unix)]
     fn test_fetch_symlink_appears_in_listing() {
