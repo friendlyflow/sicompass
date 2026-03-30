@@ -38,7 +38,7 @@
 //! | Return        | —        | SimpleSearch                       | handle_enter_search        |
 //! | Return        | —        | EditorInsert / EditorNormal        | update_state(Input)        |
 //! | Return        | —        | OperatorInsert                     | handle_enter_operator_ins  |
-//! | Return        | —        | Command                            | (execute command, TODO)    |
+//! | Return        | —        | Command                            | handle_enter_command       |
 //! | I             | —        | OperatorGeneral, EditorGeneral      | handle_i                   |
 //! | A             | —        | same                               | handle_a                   |
 //! | A             | Ctrl     | OperatorGeneral                    | handle_ctrl_a_operator     |

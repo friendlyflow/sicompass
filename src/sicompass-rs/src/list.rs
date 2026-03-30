@@ -3,8 +3,8 @@
 //! Builds `AppRenderer::total_list` from the FFON tree at the current
 //! navigation path, then optionally filters it by a search string.
 
-use crate::app_state::{AppRenderer, Coordinate, RenderListItem};
-use sicompass_sdk::ffon::{get_ffon_at_id, FfonElement};
+use crate::app_state::{AppRenderer, CommandPhase, Coordinate, RenderListItem};
+use sicompass_sdk::ffon::{get_ffon_at_id, FfonElement, IdArray};
 use sicompass_sdk::tags;
 
 // ---------------------------------------------------------------------------
@@ -24,6 +24,10 @@ pub fn create_list_current_layer(renderer: &mut AppRenderer) {
         | Coordinate::SimpleSearch
         | Coordinate::EditorGeneral
         | Coordinate::EditorInsert => {}
+        Coordinate::Command => {
+            build_command_list(renderer);
+            return;
+        }
         _ => {
             renderer.list_index = 0;
             return;
@@ -221,6 +225,55 @@ fn check_parent_has_radio(renderer: &AppRenderer) -> bool {
         }
     }
     false
+}
+
+// ---------------------------------------------------------------------------
+// Command mode list building
+// ---------------------------------------------------------------------------
+
+/// Build the list for `Coordinate::Command`.
+///
+/// - `CommandPhase::None`: show the available command names for the active element.
+/// - `CommandPhase::Provider`: show the secondary selection items (e.g. "open with" apps).
+fn build_command_list(renderer: &mut AppRenderer) {
+    renderer.list_index = 0;
+
+    match renderer.current_command {
+        CommandPhase::None => {
+            // Show provider commands as list items
+            let cmds = crate::provider::get_commands(renderer);
+            let items: Vec<RenderListItem> = cmds
+                .into_iter()
+                .enumerate()
+                .map(|(i, label)| {
+                    let mut id = IdArray::new();
+                    id.push(i);
+                    RenderListItem { id, label, data: None, nav_path: None }
+                })
+                .collect();
+            renderer.total_list = items;
+        }
+        CommandPhase::Provider => {
+            // Show secondary selection list (e.g. list of apps for "open with")
+            let cmd_name = renderer.provider_command_name.clone();
+            let items_raw = crate::provider::command_list_items(renderer, &cmd_name);
+            let items: Vec<RenderListItem> = items_raw
+                .into_iter()
+                .enumerate()
+                .map(|(i, li)| {
+                    let mut id = IdArray::new();
+                    id.push(i);
+                    RenderListItem {
+                        id,
+                        label: li.label,
+                        data: if li.data.is_empty() { None } else { Some(li.data) },
+                        nav_path: None,
+                    }
+                })
+                .collect();
+            renderer.total_list = items;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
