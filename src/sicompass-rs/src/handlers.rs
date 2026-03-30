@@ -72,6 +72,9 @@ pub fn handle_right(r: &mut AppRenderer) {
         r.current_id = new_id;
     }
 
+    // Mirror C: navigating right hides the meta menu.
+    r.show_meta_menu = false;
+
     list::create_list_current_layer(r);
     r.sync_current_id_from_list();
     r.caret.reset(sdl_ticks());
@@ -103,6 +106,16 @@ pub fn handle_left(r: &mut AppRenderer) {
     }
 
     r.current_id.pop();
+
+    // Mirror C: navigating left out of meta children shows meta in parent list;
+    // navigating left from a meta-selected level hides meta again.
+    if r.inside_meta {
+        r.inside_meta = false;
+        r.show_meta_menu = true;
+    } else if r.show_meta_menu {
+        r.show_meta_menu = false;
+    }
+
     list::create_list_current_layer(r);
     r.sync_current_id_from_list();
     r.caret.reset(sdl_ticks());

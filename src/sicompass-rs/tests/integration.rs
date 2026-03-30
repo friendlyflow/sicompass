@@ -550,3 +550,256 @@ fn webbrowser_url_bar_is_input() {
         "second element of web browser should be <input> URL bar, got: {url_str:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Tests: List item label prefix
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_list_item_label_has_prefix() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+    assert_eq!(h.renderer.current_id.depth(), 2);
+
+    // Find alpha.txt FFON index
+    let alpha_ffon_idx = {
+        let obj = h.renderer.ffon[fb_idx].as_obj().unwrap();
+        obj.children.iter().position(|c| {
+            let key = c.as_obj().map(|o| o.key.as_str())
+                .or_else(|| c.as_str())
+                .unwrap_or("");
+            sicompass_sdk::tags::strip_display(key).contains("alpha.txt")
+        })
+    };
+    let alpha_ffon_idx = alpha_ffon_idx.expect("alpha.txt not found in FFON");
+
+    // Navigate current_id to alpha.txt's FFON index
+    let cur = h.renderer.current_id.get(1).unwrap_or(0);
+    let diff = alpha_ffon_idx as isize - cur as isize;
+    if diff > 0 {
+        for _ in 0..diff { press_down(h.r()); }
+    } else {
+        for _ in 0..(-diff) { press_up(h.r()); }
+    }
+
+    // Rebuild list and find visual list index for alpha.txt
+    sicompass::list::create_list_current_layer(h.r());
+    let visual_idx = h.renderer.total_list.iter().position(|item| {
+        item.id.last() == Some(alpha_ffon_idx)
+    }).expect("alpha.txt not found in visual list");
+    h.renderer.list_index = visual_idx;
+
+    let label = &h.renderer.total_list[visual_idx].label;
+    assert!(
+        label.starts_with("-i "),
+        "filebrowser file item should have '-i ' prefix, got: '{label}'"
+    );
+    assert!(
+        label.contains("alpha.txt"),
+        "label should contain 'alpha.txt', got: '{label}'"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Tests: Full workflow (filebrowser — create/navigate/delete)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_full_workflow() {
+    let mut h = Harness::new();
+    let tmp = h.tmp_path().to_path_buf();
+    std::fs::create_dir(tmp.join("Downloads")).unwrap();
+
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+
+    // ---- Step 1: Navigate to filebrowser, enter it, refresh ----
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+    assert_eq!(h.renderer.current_id.depth(), 2);
+    press(h.r(), Keycode::F5);
+
+    // ---- Step 2: Navigate into Downloads subdir ----
+    let dl_idx = {
+        let obj = h.renderer.ffon[fb_idx].as_obj().unwrap();
+        obj.children.iter().position(|c| {
+            let key = c.as_obj().map(|o| o.key.as_str())
+                .or_else(|| c.as_str())
+                .unwrap_or("");
+            sicompass_sdk::tags::strip_display(key) == "Downloads"
+        })
+    };
+    let dl_idx = dl_idx.expect("Downloads not found in filebrowser after refresh");
+    let cur = h.renderer.current_id.get(1).unwrap_or(0);
+    let diff = dl_idx as isize - cur as isize;
+    if diff > 0 {
+        for _ in 0..diff { press_down(h.r()); }
+    } else {
+        for _ in 0..(-diff) { press_up(h.r()); }
+    }
+    press_right(h.r());
+    // In the Rust filebrowser, subdirectory navigation is lazy (currentPath changes,
+    // ffon[fb_idx] is replaced), so depth stays at 2 — not 3 as in C.
+    assert_eq!(h.renderer.current_id.depth(), 2, "should be inside Downloads");
+
+    // ---- Step 3: Create a file in Downloads ----
+    press_ctrl(h.r(), Keycode::I);
+    type_text(h.r(), "- report.txt");
+    press_enter(h.r());
+    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+    assert!(tmp.join("Downloads/report.txt").exists(), "report.txt should be created");
+
+    // ---- Step 4: Navigate back to root ----
+    while h.renderer.current_id.depth() > 1 { press_left(h.r()); }
+    assert_eq!(h.renderer.current_id.depth(), 1);
+    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+}
+
+// ---------------------------------------------------------------------------
+// Tests: Meta menu (M key)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_meta_menu_hidden_by_default() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+    assert_eq!(h.renderer.current_id.depth(), 2);
+
+    assert!(!h.renderer.show_meta_menu, "show_meta_menu should be false by default");
+    assert!(!h.renderer.inside_meta, "inside_meta should be false by default");
+
+    sicompass::list::create_list_current_layer(h.r());
+    for item in &h.renderer.total_list {
+        assert!(
+            !item.label.starts_with("+ meta"),
+            "meta should not be visible in list by default, got: '{}'",
+            item.label
+        );
+    }
+}
+
+#[test]
+fn test_m_navigates_into_meta() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+    assert_eq!(h.renderer.current_id.depth(), 2);
+
+    press(h.r(), Keycode::M);
+    assert!(h.renderer.inside_meta, "should be inside meta after pressing M");
+    assert_eq!(h.renderer.current_id.depth(), 3, "depth should be 3 inside meta");
+
+    assert!(!h.renderer.total_list.is_empty(), "meta children should be listed");
+    for item in &h.renderer.total_list {
+        assert!(
+            !item.label.starts_with("+ meta"),
+            "meta children should not themselves be meta objects, got: '{}'",
+            item.label
+        );
+    }
+}
+
+#[test]
+fn test_m_again_restores_position() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+    assert_eq!(h.renderer.current_id.depth(), 2);
+
+    let saved_list_index = h.renderer.list_index;
+
+    // Enter meta, then exit
+    press(h.r(), Keycode::M);
+    assert!(h.renderer.inside_meta);
+
+    press(h.r(), Keycode::M);
+    assert!(!h.renderer.inside_meta, "inside_meta should be false after second M");
+    assert!(!h.renderer.show_meta_menu, "show_meta_menu should be false after second M");
+    assert_eq!(h.renderer.current_id.depth(), 2, "depth should be 2 after second M");
+    assert_eq!(h.renderer.list_index, saved_list_index, "list_index should be restored");
+
+    // Meta should be hidden in the list
+    for item in &h.renderer.total_list {
+        assert!(
+            !item.label.starts_with("+ meta"),
+            "meta should be hidden after second M press, got: '{}'",
+            item.label
+        );
+    }
+}
+
+#[test]
+fn test_left_from_meta_shows_meta_selected() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+    assert_eq!(h.renderer.current_id.depth(), 2);
+
+    // Enter meta, then press left
+    press(h.r(), Keycode::M);
+    assert!(h.renderer.inside_meta);
+    press_left(h.r());
+
+    assert!(!h.renderer.inside_meta, "inside_meta should be false after left");
+    assert!(h.renderer.show_meta_menu, "show_meta_menu should be true after left from meta");
+    assert_eq!(h.renderer.current_id.depth(), 2, "depth should be 2");
+
+    // Meta should be first item and selected
+    assert!(!h.renderer.total_list.is_empty(), "list should be populated");
+    assert!(
+        h.renderer.total_list[0].label.starts_with("+ meta"),
+        "meta should be first item after navigating left from inside meta, got: '{}'",
+        h.renderer.total_list[0].label
+    );
+    assert_eq!(h.renderer.list_index, 0, "meta should be selected (list_index = 0)");
+}
+
+#[test]
+fn test_down_from_meta_selected_navigates_list() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+
+    // Enter meta, press left (meta selected), press down
+    press(h.r(), Keycode::M);
+    press_left(h.r());
+    assert_eq!(h.renderer.list_index, 0);
+
+    press_down(h.r());
+    assert_eq!(h.renderer.list_index, 1);
+    assert!(!h.renderer.total_list.is_empty());
+    if h.renderer.total_list.len() > 1 {
+        assert!(
+            !h.renderer.total_list[1].label.starts_with("+ meta"),
+            "second item should not be meta, got: '{}'",
+            h.renderer.total_list[1].label
+        );
+    }
+}
+
+#[test]
+fn test_right_from_meta_selected_hides_meta() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+
+    // Enter meta, press left (meta selected at index 0), press right into meta
+    press(h.r(), Keycode::M);
+    press_left(h.r());
+    assert!(h.renderer.show_meta_menu);
+    assert_eq!(h.renderer.list_index, 0);
+
+    press_right(h.r()); // navigate into meta (it's an object with children)
+    assert!(
+        !h.renderer.show_meta_menu,
+        "show_meta_menu should be false after navigating right into meta"
+    );
+}

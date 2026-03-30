@@ -893,4 +893,396 @@ mod tests {
         id.push(0);
         assert!(get_ffon_at_id(&tree, &id).is_none());
     }
+
+    // ---------------------------------------------------------------------------
+    // Additional IdArray tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn test_idarray_new_depth_zero() {
+        let id = IdArray::new();
+        assert_eq!(id.depth(), 0);
+    }
+
+    #[test]
+    fn test_idarray_clone_populated() {
+        let mut src = IdArray::new();
+        src.push(1); src.push(2); src.push(3);
+        let dst = src.clone();
+        assert_eq!(dst.depth(), 3);
+        assert_eq!(dst.get(0), Some(1));
+        assert_eq!(dst.get(1), Some(2));
+        assert_eq!(dst.get(2), Some(3));
+    }
+
+    #[test]
+    fn test_idarray_clone_empty() {
+        let src = IdArray::new();
+        let dst = src.clone();
+        assert_eq!(dst.depth(), 0);
+    }
+
+    #[test]
+    fn test_idarray_clone_is_independent() {
+        let mut src = IdArray::new();
+        src.push(5);
+        let dst = src.clone();
+        src.push(10);
+        assert_eq!(dst.depth(), 1); // dst unaffected by push on src
+    }
+
+    #[test]
+    fn test_idarray_equal_both_empty() {
+        let a = IdArray::new();
+        let b = IdArray::new();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_idarray_equal_different_depth() {
+        let mut a = IdArray::new();
+        let b = IdArray::new();
+        a.push(1);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn test_idarray_equal_different_values() {
+        let mut a = IdArray::new();
+        let mut b = IdArray::new();
+        a.push(1);
+        b.push(2);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn test_idarray_push_increments_depth() {
+        let mut arr = IdArray::new();
+        arr.push(42);
+        assert_eq!(arr.depth(), 1);
+        assert_eq!(arr.get(0), Some(42));
+    }
+
+    #[test]
+    fn test_idarray_push_multiple() {
+        let mut arr = IdArray::new();
+        arr.push(10); arr.push(20); arr.push(30);
+        assert_eq!(arr.depth(), 3);
+        assert_eq!(arr.get(0), Some(10));
+        assert_eq!(arr.get(1), Some(20));
+        assert_eq!(arr.get(2), Some(30));
+    }
+
+    #[test]
+    fn test_idarray_pop_returns_value() {
+        let mut arr = IdArray::new();
+        arr.push(5); arr.push(10);
+        assert_eq!(arr.pop(), Some(10));
+        assert_eq!(arr.depth(), 1);
+    }
+
+    #[test]
+    fn test_idarray_pop_empty_returns_none() {
+        let mut arr = IdArray::new();
+        assert_eq!(arr.pop(), None);
+        assert_eq!(arr.depth(), 0);
+    }
+
+    #[test]
+    fn test_idarray_pop_all() {
+        let mut arr = IdArray::new();
+        arr.push(1); arr.push(2);
+        assert_eq!(arr.pop(), Some(2));
+        assert_eq!(arr.pop(), Some(1));
+        assert_eq!(arr.pop(), None);
+    }
+
+    #[test]
+    fn test_idarray_tostring_single() {
+        let mut id = IdArray::new();
+        id.push(42);
+        assert_eq!(id.to_display_string(), "42");
+    }
+
+    #[test]
+    fn test_idarray_tostring_multiple() {
+        let mut id = IdArray::new();
+        id.push(1); id.push(2); id.push(3);
+        assert_eq!(id.to_display_string(), "1,2,3");
+    }
+
+    // ---------------------------------------------------------------------------
+    // Additional FfonObject tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn test_object_new_normal() {
+        let obj = FfonObject::new("testkey");
+        assert_eq!(obj.key, "testkey");
+        assert_eq!(obj.children.len(), 0);
+    }
+
+    #[test]
+    fn test_object_new_empty_key() {
+        let obj = FfonObject::new("");
+        assert_eq!(obj.key, "");
+        assert_eq!(obj.children.len(), 0);
+    }
+
+    #[test]
+    fn test_object_add_multiple() {
+        let mut obj = FfonObject::new("k");
+        for i in 0..5 {
+            obj.push(FfonElement::new_str(format!("item{i}")));
+        }
+        assert_eq!(obj.children.len(), 5);
+        assert_eq!(obj.children[0].as_str(), Some("item0"));
+        assert_eq!(obj.children[4].as_str(), Some("item4"));
+    }
+
+    #[test]
+    fn test_object_insert_at_end() {
+        let mut obj = FfonObject::new("k");
+        obj.push(FfonElement::new_str("a"));
+        obj.insert(1, FfonElement::new_str("b")); // index == len → appended
+        assert_eq!(obj.children.len(), 2);
+        assert_eq!(obj.children[0].as_str(), Some("a"));
+        assert_eq!(obj.children[1].as_str(), Some("b"));
+    }
+
+    #[test]
+    fn test_object_insert_beyond_count_clamped() {
+        let mut obj = FfonObject::new("k");
+        obj.push(FfonElement::new_str("a"));
+        obj.insert(100, FfonElement::new_str("b")); // clamped to len → appended
+        assert_eq!(obj.children.len(), 2);
+        assert_eq!(obj.children[0].as_str(), Some("a"));
+        assert_eq!(obj.children[1].as_str(), Some("b"));
+    }
+
+    #[test]
+    fn test_object_remove_middle() {
+        let mut obj = FfonObject::new("k");
+        obj.push(FfonElement::new_str("a"));
+        obj.push(FfonElement::new_str("b"));
+        obj.push(FfonElement::new_str("c"));
+        let removed = obj.remove(1).unwrap();
+        assert_eq!(removed.as_str(), Some("b"));
+        assert_eq!(obj.children.len(), 2);
+        assert_eq!(obj.children[0].as_str(), Some("a"));
+        assert_eq!(obj.children[1].as_str(), Some("c"));
+    }
+
+    #[test]
+    fn test_object_remove_last() {
+        let mut obj = FfonObject::new("k");
+        obj.push(FfonElement::new_str("a"));
+        obj.push(FfonElement::new_str("b"));
+        let removed = obj.remove(1).unwrap();
+        assert_eq!(removed.as_str(), Some("b"));
+        assert_eq!(obj.children.len(), 1);
+        assert_eq!(obj.children[0].as_str(), Some("a"));
+    }
+
+    // ---------------------------------------------------------------------------
+    // Additional navigation tests (using C test tree structure)
+    // ---------------------------------------------------------------------------
+
+    /// Build the same tree used in C navigation tests:
+    ///   [0] "string0"
+    ///   [1] obj "parent" → [0]"child0", [1]"child1", [2] obj "nested" → [0]"leaf"
+    ///   [2] "string2"
+    fn make_nav_tree() -> Vec<FfonElement> {
+        let mut parent = FfonElement::new_obj("parent");
+        parent.as_obj_mut().unwrap().push(FfonElement::new_str("child0"));
+        parent.as_obj_mut().unwrap().push(FfonElement::new_str("child1"));
+        let mut nested = FfonElement::new_obj("nested");
+        nested.as_obj_mut().unwrap().push(FfonElement::new_str("leaf"));
+        parent.as_obj_mut().unwrap().push(nested);
+
+        vec![
+            FfonElement::new_str("string0"),
+            parent,
+            FfonElement::new_str("string2"),
+        ]
+    }
+
+    #[test]
+    fn test_get_ffon_at_id_depth_two() {
+        let tree = make_nav_tree();
+        let mut id = IdArray::new();
+        id.push(1); id.push(2); // into "parent", look at "nested"
+        let slice = get_ffon_at_id(&tree, &id).unwrap();
+        // depth=2: walked [1] → parent's children (3 children)
+        assert_eq!(slice.len(), 3); // parent has 3 children
+    }
+
+    #[test]
+    fn test_get_ffon_at_id_depth_three() {
+        let tree = make_nav_tree();
+        let mut id = IdArray::new();
+        id.push(1); id.push(2); id.push(0); // into parent→nested, look at "leaf"
+        let slice = get_ffon_at_id(&tree, &id).unwrap();
+        // depth=3: walked [1]→parent, [2]→nested's children (1 child)
+        assert_eq!(slice.len(), 1); // nested has 1 child
+    }
+
+    #[test]
+    fn test_get_ffon_at_id_non_object_at_path() {
+        let tree = make_nav_tree();
+        let mut id = IdArray::new();
+        id.push(0); id.push(0); // string0 is not an object — can't walk into it
+        assert!(get_ffon_at_id(&tree, &id).is_none());
+    }
+
+    #[test]
+    fn test_next_layer_exists_empty_id() {
+        let tree = make_nav_tree();
+        let id = IdArray::new();
+        assert!(!next_layer_exists(&tree, &id));
+    }
+
+    #[test]
+    fn test_next_layer_exists_out_of_bounds() {
+        let tree = make_nav_tree();
+        let mut id = IdArray::new();
+        id.push(99);
+        assert!(!next_layer_exists(&tree, &id));
+    }
+
+    #[test]
+    fn test_next_layer_exists_nested_object() {
+        let tree = make_nav_tree();
+        let mut id = IdArray::new();
+        id.push(1); id.push(2); // parent[2] = "nested" (an object)
+        assert!(next_layer_exists(&tree[1].as_obj().unwrap().children, &{
+            let mut child_id = IdArray::new(); child_id.push(2); child_id
+        }));
+    }
+
+    #[test]
+    fn test_next_layer_exists_nested_string() {
+        let tree = make_nav_tree();
+        let children = &tree[1].as_obj().unwrap().children;
+        let mut id = IdArray::new();
+        id.push(0); // children[0] = "child0" (a string)
+        assert!(!next_layer_exists(children, &id));
+    }
+
+    #[test]
+    fn test_get_ffon_max_id_nested() {
+        let tree = make_nav_tree();
+        let mut id = IdArray::new();
+        id.push(1); // into "parent" which has 3 children
+        assert_eq!(get_ffon_max_id(&tree, &id), 2); // max index = 2
+    }
+
+    #[test]
+    fn test_get_ffon_max_id_deep_nested() {
+        let tree = make_nav_tree();
+        let mut id = IdArray::new();
+        id.push(1); id.push(2); id.push(0); // nested has 1 child → max index = 0
+        assert_eq!(get_ffon_max_id(&tree, &id), 0);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Additional serialization tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn test_load_ffon_file_nonexistent() {
+        let result = load_ffon_file(Path::new("/nonexistent/path.ffon"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_json_parse_integer_becomes_string() {
+        let parsed = parse_json("[42]").unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].as_str(), Some("42"));
+    }
+
+    #[test]
+    fn test_json_parse_nested_array_becomes_object() {
+        // An inner JSON array becomes FfonElement::Obj{key:"array", ...}
+        let parsed = parse_json(r#"[["x","y"]]"#).unwrap();
+        assert_eq!(parsed.len(), 1);
+        let obj = parsed[0].as_obj().unwrap();
+        assert_eq!(obj.key, "array");
+        assert_eq!(obj.children.len(), 2);
+        assert_eq!(obj.children[0].as_str(), Some("x"));
+        assert_eq!(obj.children[1].as_str(), Some("y"));
+    }
+
+    #[test]
+    fn test_load_json_file_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.json");
+        std::fs::write(&path, r#"["item1", {"key": ["child"]}]"#).unwrap();
+        let result = load_json_file(&path).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].as_str(), Some("item1"));
+        let obj = result[1].as_obj().unwrap();
+        assert_eq!(obj.key, "key");
+        assert_eq!(obj.children.len(), 1);
+        assert_eq!(obj.children[0].as_str(), Some("child"));
+    }
+
+    #[test]
+    fn test_load_json_file_nonexistent() {
+        let result = load_json_file(Path::new("/nonexistent/file.json"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_json_serialize_string_element() {
+        let elems = vec![FfonElement::new_str("hello world")];
+        let json = to_json_string(&elems).unwrap();
+        assert!(json.contains("hello world"));
+        // Verify it round-trips
+        let back = parse_json(&json).unwrap();
+        assert_eq!(back, elems);
+    }
+
+    #[test]
+    fn test_json_serialize_object_element() {
+        let mut elem = FfonElement::new_obj("mykey");
+        elem.as_obj_mut().unwrap().push(FfonElement::new_str("child1"));
+        elem.as_obj_mut().unwrap().push(FfonElement::new_str("child2"));
+        let json = to_json_string(&[elem.clone()]).unwrap();
+        assert!(json.contains("mykey"));
+        // Round-trip
+        let back = parse_json(&json).unwrap();
+        assert_eq!(back, vec![elem]);
+    }
+
+    #[test]
+    fn test_json_roundtrip_with_tags() {
+        // Tags like <input>...</input> and <radio> must survive JSON round-trip
+        let elems = vec![
+            FfonElement::new_str("<radio>lang"),
+            FfonElement::new_str("<input>test</input>"),
+        ];
+        let json = to_json_string(&elems).unwrap();
+        let back = parse_json(&json).unwrap();
+        assert_eq!(back, elems);
+    }
+
+    #[test]
+    fn test_save_load_json_file_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("roundtrip.json");
+        let elems = vec![
+            FfonElement::new_str("version"),
+            {
+                let mut obj = FfonElement::new_obj("settings");
+                obj.as_obj_mut().unwrap().push(FfonElement::new_str("<radio>lang"));
+                obj.as_obj_mut().unwrap().push(FfonElement::new_str("English"));
+                obj
+            },
+        ];
+        save_json_file(&elems, &path).unwrap();
+        let loaded = load_json_file(&path).unwrap();
+        assert_eq!(loaded, elems);
+    }
 }
