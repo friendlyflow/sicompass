@@ -113,6 +113,63 @@ pub fn commit_edit(renderer: &mut AppRenderer, old: &str, new: &str) -> bool {
     }
 }
 
+/// Delete a file or directory by name via the active provider.
+pub fn delete_item_by_name(renderer: &mut AppRenderer, name: &str) -> bool {
+    let idx = match renderer.current_id.get(0) {
+        Some(i) => i,
+        None => return false,
+    };
+    if let Some(p) = renderer.providers.get_mut(idx) {
+        let ok = p.delete_item(name);
+        if !ok {
+            if let Some(err) = p.take_error() {
+                renderer.error_message = err;
+            }
+        }
+        ok
+    } else {
+        false
+    }
+}
+
+/// Create a file via the active provider.
+pub fn create_file(renderer: &mut AppRenderer, name: &str) -> bool {
+    let idx = match renderer.current_id.get(0) {
+        Some(i) => i,
+        None => return false,
+    };
+    if let Some(p) = renderer.providers.get_mut(idx) {
+        let ok = p.create_file(name);
+        if !ok {
+            if let Some(err) = p.take_error() {
+                renderer.error_message = err;
+            }
+        }
+        ok
+    } else {
+        false
+    }
+}
+
+/// Create a directory via the active provider.
+pub fn create_directory(renderer: &mut AppRenderer, name: &str) -> bool {
+    let idx = match renderer.current_id.get(0) {
+        Some(i) => i,
+        None => return false,
+    };
+    if let Some(p) = renderer.providers.get_mut(idx) {
+        let ok = p.create_directory(name);
+        if !ok {
+            if let Some(err) = p.take_error() {
+                renderer.error_message = err;
+            }
+        }
+        ok
+    } else {
+        false
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------

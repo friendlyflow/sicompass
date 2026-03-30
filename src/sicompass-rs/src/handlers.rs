@@ -73,6 +73,7 @@ pub fn handle_right(r: &mut AppRenderer) {
     }
 
     list::create_list_current_layer(r);
+    r.sync_current_id_from_list();
     r.caret.reset(sdl_ticks());
     r.needs_redraw = true;
 }
@@ -83,31 +84,27 @@ pub fn handle_left(r: &mut AppRenderer) {
         return; // already at root
     }
 
-    // If we're at depth 2 inside a lazy-fetch provider that has navigated into
-    // a subdirectory, pop the provider path and re-fetch rather than popping
-    // the id (which would exit the provider entirely).
-    if r.current_id.depth() == 2 {
-        let provider_has_path = crate::provider::get_active_provider_ref(r)
-            .map(|p| p.current_path() != "/")
-            .unwrap_or(false);
-
-        if provider_has_path {
-            let provider_idx = r.current_id.get(0).unwrap_or(0);
-            crate::provider::pop_path(r);
-            crate::provider::refresh_current_directory(r);
-            let mut new_id = IdArray::new();
-            new_id.push(provider_idx);
-            new_id.push(0);
-            r.current_id = new_id;
-            list::create_list_current_layer(r);
-            r.caret.reset(sdl_ticks());
-            r.needs_redraw = true;
-            return;
+    // Check if the parent element has a <link> or is "meta" — skip popPath for those
+    // (mirrors C's providerNavigateLeft: parentIsLink / parentIsMeta checks)
+    let (parent_is_link, parent_is_meta) = {
+        let mut parent_id = r.current_id.clone();
+        parent_id.pop();
+        let parent_idx = parent_id.last().unwrap_or(0);
+        match get_ffon_at_id(&r.ffon, &parent_id).and_then(|a| a.get(parent_idx)) {
+            Some(sicompass_sdk::ffon::FfonElement::Obj(obj)) => {
+                (tags::has_link(&obj.key), obj.key == "meta")
+            }
+            _ => (false, false),
         }
+    };
+
+    if !parent_is_link && !parent_is_meta {
+        crate::provider::pop_path(r);
     }
 
     r.current_id.pop();
     list::create_list_current_layer(r);
+    r.sync_current_id_from_list();
     r.caret.reset(sdl_ticks());
     r.needs_redraw = true;
 }
@@ -248,7 +245,7 @@ pub fn handle_tab(r: &mut AppRenderer) {
             list::create_list_current_layer(r);
         }
         Coordinate::SimpleSearch => {
-            // Tab again → scroll mode
+            // Tab again → scroll mode (C: no previous_coordinate update)
             r.coordinate = Coordinate::Scroll;
             r.scroll_offset = 0;
         }
@@ -502,6 +499,59 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
         return;
     }
 
+    // Prefix-based creation (Ctrl+I / Ctrl+A in filebrowser)
+    if old_content.is_empty() && r.prefixed_insert_mode {
+        let (is_file, is_dir, item_name) = parse_creation_prefix(&new_content);
+
+        if (!is_file && !is_dir) || item_name.is_empty() {
+            r.error_message = "Enter a name (prefix with '- ' for file or '+ ' for directory)".to_owned();
+            r.needs_redraw = true;
+            return; // stay in OperatorInsert
+        }
+
+        let undo_id = r.current_id.clone();
+        let success = if is_file {
+            crate::provider::create_file(r, &item_name)
+        } else {
+            crate::provider::create_directory(r, &item_name)
+        };
+
+        if !success {
+            if r.error_message.is_empty() {
+                r.error_message = "Failed to create item".to_owned();
+            }
+            r.needs_redraw = true;
+            return; // stay in OperatorInsert
+        }
+
+        // Discard the placeholder Insert/Append undo entry (replaced by FsCreate below)
+        if r.undo_history.last().map(|e| matches!(e.task, Task::Insert | Task::InsertInsert | Task::Append | Task::AppendAppend)).unwrap_or(false) {
+            r.undo_history.pop();
+        }
+
+        // Record FsCreate undo entry (Str = file, Obj = directory)
+        let undo_elem = if is_dir {
+            FfonElement::new_obj(&item_name)
+        } else {
+            FfonElement::new_str(item_name.clone())
+        };
+        crate::state::update_history(
+            r, Task::FsCreate, &undo_id,
+            None, Some(undo_elem), History::None,
+        );
+
+        r.prefixed_insert_mode = false;
+        crate::provider::refresh_current_directory(r);
+        list::create_list_current_layer(r);
+
+        r.coordinate = Coordinate::OperatorGeneral;
+        r.previous_coordinate = Coordinate::OperatorGeneral;
+        r.input_buffer.clear();
+        r.cursor_position = 0;
+        r.needs_redraw = true;
+        return;
+    }
+
     // Try provider commit first
     let committed = crate::provider::commit_edit(r, &old_content, &new_content);
 
@@ -535,6 +585,29 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
     handle_escape(r);
 }
 
+/// Parse "- name" (file) or "+ name" (directory) creation prefixes.
+/// Returns (is_file, is_dir, name_without_prefix).
+fn parse_creation_prefix(input: &str) -> (bool, bool, String) {
+    if let Some(rest) = input.strip_prefix('-') {
+        let name = rest.trim_start().to_owned();
+        (true, false, name)
+    } else if let Some(rest) = input.strip_prefix('+') {
+        let name = rest.trim_start().to_owned();
+        (false, true, name)
+    } else {
+        // No prefix: bare name → file (or dir if ends with ':')
+        let trimmed = input.trim();
+        if trimmed.ends_with(':') {
+            let name = trimmed.trim_end_matches(':').trim().to_owned();
+            (false, !name.is_empty(), name)
+        } else if !trimmed.is_empty() {
+            (true, false, trimmed.to_owned())
+        } else {
+            (false, false, String::new())
+        }
+    }
+}
+
 /// Undo the last edit action.
 pub fn handle_undo(r: &mut AppRenderer) {
     crate::state::handle_history_action(r, History::Undo);
@@ -555,6 +628,7 @@ pub fn handle_escape(r: &mut AppRenderer) {
         }
         Coordinate::SimpleSearch | Coordinate::ExtendedSearch => {
             r.coordinate = r.previous_coordinate;
+            r.previous_coordinate = r.coordinate;
             r.search_string.clear();
             list::create_list_current_layer(r);
         }
@@ -571,9 +645,14 @@ pub fn handle_escape(r: &mut AppRenderer) {
             r.cursor_position = 0;
             r.selection_anchor = None;
         }
-        Coordinate::Scroll | Coordinate::ScrollSearch => {
-            r.coordinate = r.previous_coordinate;
+        Coordinate::ScrollSearch => {
+            r.coordinate = Coordinate::Scroll;
+        }
+        Coordinate::Scroll => {
+            r.coordinate = Coordinate::SimpleSearch;
+            r.search_string.clear();
             r.scroll_offset = 0;
+            list::create_list_current_layer(r);
         }
         _ => {
             r.coordinate = r.previous_coordinate;
@@ -657,10 +736,31 @@ pub fn handle_delete(r: &mut AppRenderer, history: crate::app_state::History) {
     r.needs_redraw = true;
 }
 
+/// Delete via active provider (file browser delete — mirrors C's `handleFileDelete`).
+///
+/// Calls `provider::delete_item` which invokes the provider's `delete_item` method
+/// (e.g. removes the file from disk) and refreshes the directory listing.
+pub fn handle_file_delete(r: &mut AppRenderer) {
+    let ok = crate::provider::delete_item(r);
+    if ok {
+        // Clamp current_id to valid range after deletion + refresh
+        let new_len = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)
+            .map(|a| a.len())
+            .unwrap_or(0);
+        let cur = r.current_id.last().unwrap_or(0);
+        if new_len > 0 && cur >= new_len {
+            r.current_id.set_last(new_len - 1);
+        }
+        list::create_list_current_layer(r);
+        r.needs_redraw = true;
+    }
+}
+
 /// Handle F5 — refresh current provider.
 pub fn handle_f5(r: &mut AppRenderer) {
     crate::provider::refresh_current_directory(r);
     list::create_list_current_layer(r);
+    r.sync_current_id_from_list();
     r.needs_redraw = true;
 }
 
@@ -1188,6 +1288,12 @@ fn insert_operator_placeholder(r: &mut AppRenderer, insert_idx: usize) {
     use sicompass_sdk::ffon::FfonElement;
     let placeholder = FfonElement::Str("<input></input>".to_owned());
 
+    // Check provider before any mutation (borrow checker: can't hold ref while mutating)
+    let is_filebrowser = r.current_id.get(0)
+        .and_then(|idx| r.providers.get(idx))
+        .map(|p| p.name() == "filebrowser")
+        .unwrap_or(false);
+
     let depth = r.current_id.depth();
     if depth == 1 {
         r.ffon.insert(insert_idx, placeholder);
@@ -1207,7 +1313,7 @@ fn insert_operator_placeholder(r: &mut AppRenderer, insert_idx: usize) {
     }
 
     r.current_id.set_last(insert_idx);
-    r.prefixed_insert_mode = false;
+    r.prefixed_insert_mode = is_filebrowser;
     list::create_list_current_layer(r);
     r.list_index = insert_idx;
     r.scroll_offset = 0;
