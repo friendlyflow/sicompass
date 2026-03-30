@@ -21,6 +21,17 @@
 //! | `events`        | events.c         | 4     | ✓      |
 //! | `image`         | image.c          | 5     | stub   |
 //! | `accesskit_sdl` | accesskit_sdl.c  | 5     | stub   |
+//!
+//! ## Library providers (Phase 5)
+//!
+//! | Crate                    | C library            | Status |
+//! |--------------------------|----------------------|--------|
+//! | `sicompass-settings`     | lib_settings         | ✓      |
+//! | `sicompass-filebrowser`  | lib_filebrowser      | ✓      |
+//! | `sicompass-tutorial`     | lib_tutorial (TS)    | ✓      |
+//! | `sicompass-webbrowser`   | lib_webbrowser       | ✓      |
+//! | `sicompass-chatclient`   | lib_chatclient       | ✓      |
+//! | `sicompass-emailclient`  | lib_emailclient      | ✓      |
 
 mod app_state;
 mod render;

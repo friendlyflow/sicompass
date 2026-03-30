@@ -19,6 +19,9 @@ use sicompass_sdk::provider::Provider;
 use sicompass_filebrowser::FilebrowserProvider;
 use sicompass_settings::SettingsProvider;
 use sicompass_tutorial::TutorialProvider;
+use sicompass_chatclient::ChatClientProvider;
+use sicompass_emailclient::EmailClientProvider;
+use sicompass_webbrowser::WebbrowserProvider;
 use std::sync::{Arc, Mutex};
 
 // ---------------------------------------------------------------------------
@@ -98,6 +101,15 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
             "tutorial" => {
                 register_provider(renderer, Box::new(TutorialProvider::new_headless()));
             }
+            "web browser" => {
+                register_provider(renderer, Box::new(WebbrowserProvider::new()));
+            }
+            "chat client" => {
+                register_provider(renderer, Box::new(ChatClientProvider::new()));
+            }
+            "email client" => {
+                register_provider(renderer, Box::new(EmailClientProvider::new()));
+            }
             other => {
                 eprintln!("sicompass: unknown program '{other}' — skipping");
             }
@@ -120,6 +132,15 @@ pub fn enable_provider(renderer: &mut AppRenderer, name: &str) {
         }
         "tutorial" => {
             register_provider(renderer, Box::new(TutorialProvider::new_headless()));
+        }
+        "web browser" => {
+            register_provider(renderer, Box::new(WebbrowserProvider::new()));
+        }
+        "chat client" => {
+            register_provider(renderer, Box::new(ChatClientProvider::new()));
+        }
+        "email client" => {
+            register_provider(renderer, Box::new(EmailClientProvider::new()));
         }
         other => {
             eprintln!("sicompass: cannot enable unknown provider '{other}'");
@@ -195,6 +216,12 @@ fn apply_setting(
             // Window maximization — handled in main loop via SDL (no AppRenderer field)
         }
         _ => {}
+    }
+
+    // Broadcast to all providers so they can react to settings that affect them
+    // (e.g. chatHomeserver → ChatClientProvider, sortOrder → FilebrowserProvider).
+    for provider in &mut renderer.providers {
+        provider.on_setting_change(key, value);
     }
 }
 

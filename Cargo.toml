@@ -4,6 +4,9 @@ members = [
     "lib/lib_tutorial-rs",
     "lib/lib_settings-rs",
     "lib/lib_filebrowser-rs",
+    "lib/lib_webbrowser-rs",
+    "lib/lib_chatclient-rs",
+    "lib/lib_emailclient-rs",
     "src/sicompass-rs",
 ]
 resolver = "2"
@@ -19,6 +22,9 @@ sicompass-sdk = { path = "sdk-rs" }
 sicompass-tutorial = { path = "lib/lib_tutorial-rs" }
 sicompass-settings = { path = "lib/lib_settings-rs" }
 sicompass-filebrowser = { path = "lib/lib_filebrowser-rs" }
+sicompass-webbrowser = { path = "lib/lib_webbrowser-rs" }
+sicompass-chatclient = { path = "lib/lib_chatclient-rs" }
+sicompass-emailclient = { path = "lib/lib_emailclient-rs" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -47,7 +53,13 @@ unicode-normalization = "0.1"
 
 # Async / networking (library providers, later phases)
 tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "blocking"] }
+
+# HTML parsing
+scraper = "0.22"
+
+# URL handling
+url = "2"
 
 # Plugin loading
 libloading = "0.8"

@@ -123,3 +123,150 @@ pub fn get_commands(renderer: &AppRenderer) -> Vec<String> {
         .map(|p| p.commands())
         .unwrap_or_default()
 }
+
+/// Handle a command invocation (`:command`). Returns optional result element.
+pub fn handle_command(
+    renderer: &mut AppRenderer,
+    command: &str,
+    element_key: &str,
+    element_type: i32,
+) -> Option<sicompass_sdk::ffon::FfonElement> {
+    let idx = renderer.current_id.get(0)?;
+    let mut error = String::new();
+    let result = renderer.providers.get_mut(idx)?.handle_command(
+        command,
+        element_key,
+        element_type,
+        &mut error,
+    );
+    if !error.is_empty() {
+        renderer.error_message = error;
+    }
+    result
+}
+
+/// Get the items for a command's secondary selection list (e.g. "open with" app list).
+pub fn command_list_items(
+    renderer: &mut AppRenderer,
+    command: &str,
+) -> Vec<sicompass_sdk::provider::ListItem> {
+    let idx = match renderer.current_id.get(0) {
+        Some(i) => i,
+        None => return Vec::new(),
+    };
+    renderer.providers
+        .get_mut(idx)
+        .map(|p| p.command_list_items(command))
+        .unwrap_or_default()
+}
+
+/// Execute a command with the selected list item.
+pub fn execute_command(
+    renderer: &mut AppRenderer,
+    command: &str,
+    selected_item: &str,
+) -> bool {
+    let idx = match renderer.current_id.get(0) {
+        Some(i) => i,
+        None => return false,
+    };
+    renderer.providers
+        .get_mut(idx)
+        .map(|p| p.execute_command(command, selected_item))
+        .unwrap_or(false)
+}
+
+/// Delete the currently selected item via the active provider.
+pub fn delete_item(renderer: &mut AppRenderer) -> bool {
+    use sicompass_sdk::ffon::get_ffon_at_id;
+    use sicompass_sdk::tags;
+
+    // Get the element name before borrowing providers mutably
+    let name = {
+        let arr = get_ffon_at_id(&renderer.ffon, &renderer.current_id);
+        let idx = renderer.current_id.last().unwrap_or(0);
+        arr.and_then(|a| a.get(idx))
+            .map(|e| match e {
+                sicompass_sdk::ffon::FfonElement::Str(s) => tags::strip_display(s).to_string(),
+                sicompass_sdk::ffon::FfonElement::Obj(o) => tags::strip_display(&o.key).to_string(),
+            })
+            .unwrap_or_default()
+    };
+
+    let provider_idx = match renderer.current_id.get(0) {
+        Some(i) => i,
+        None => return false,
+    };
+    let ok = renderer.providers
+        .get_mut(provider_idx)
+        .map(|p| p.delete_item(&name))
+        .unwrap_or(false);
+
+    if ok {
+        refresh_current_directory(renderer);
+    }
+    ok
+}
+
+/// Notify the active provider that a checkbox changed state.
+///
+/// Extracts the label and new checked state from the FFON element, then calls
+/// `on_checkbox_change` on the provider (e.g. settings saves the config).
+pub fn notify_checkbox_changed(renderer: &mut AppRenderer, new_elem_text: &str) {
+    use sicompass_sdk::tags;
+
+    let (label, checked) = if tags::has_checkbox_checked(new_elem_text) {
+        (tags::extract_checkbox_checked(new_elem_text).unwrap_or_default(), true)
+    } else if tags::has_checkbox(new_elem_text) {
+        (tags::extract_checkbox(new_elem_text).unwrap_or_default(), false)
+    } else {
+        return;
+    };
+
+    if let Some(p) = get_active_provider(renderer) {
+        p.on_checkbox_change(&label, checked);
+    }
+}
+
+/// Notify the active provider that a radio button changed value.
+///
+/// Equivalent to `providerNotifyRadioChanged` in the C code. Extracts the
+/// selected value from the FFON tree and fires `on_radio_change` on the provider.
+pub fn notify_radio_changed(renderer: &mut AppRenderer) {
+    use sicompass_sdk::ffon::get_ffon_at_id;
+    use sicompass_sdk::tags;
+
+    // current_id points to the radio group parent. The selected child has <checked>.
+    let mut parent_id = renderer.current_id.clone();
+    let _ = parent_id.pop(); // go up one level to the radio group
+
+    // Find the radio group key (group name)
+    let group_key = {
+        let arr = get_ffon_at_id(&renderer.ffon, &parent_id);
+        let pidx = parent_id.last().unwrap_or(0);
+        arr.and_then(|a| a.get(pidx))
+            .and_then(|e| e.as_obj())
+            .map(|o| tags::strip_display(&o.key).to_string())
+            .unwrap_or_default()
+    };
+
+    // Find the checked child value
+    let selected_value = {
+        let arr = get_ffon_at_id(&renderer.ffon, &renderer.current_id);
+        arr.and_then(|children| {
+            children.iter().find_map(|e| {
+                let s = e.as_str()?;
+                if tags::has_checked(s) {
+                    Some(tags::extract_checked(s).unwrap_or(s.to_string()))
+                } else {
+                    None
+                }
+            })
+        })
+        .unwrap_or_default()
+    };
+
+    if let Some(p) = get_active_provider(renderer) {
+        p.on_radio_change(&group_key, &selected_value);
+    }
+}
