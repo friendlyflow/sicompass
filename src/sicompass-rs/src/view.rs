@@ -3,11 +3,24 @@
 //! Routes SDL events to key handlers, updates the window title with
 //! navigation state, and drives the Vulkan render loop.
 
-use crate::app_state::{AppRenderer, AppState, Coordinate};
+use crate::app_state::{AppRenderer, AppState, Coordinate, History, Task};
 use crate::handlers;
 use crate::render;
 use sdl3::event::{Event, WindowEvent};
 use sdl3::keyboard::{Keycode, Mod};
+
+// Modes where the caret blinks and we need continuous redraw
+fn is_insert_mode(c: Coordinate) -> bool {
+    matches!(
+        c,
+        Coordinate::EditorInsert
+            | Coordinate::EditorNormal
+            | Coordinate::EditorVisual
+            | Coordinate::OperatorInsert
+            | Coordinate::SimpleSearch
+            | Coordinate::Command
+    )
+}
 
 // ---------------------------------------------------------------------------
 // Public entry point
@@ -69,6 +82,11 @@ pub fn main_loop(app: &mut AppState) {
             break;
         }
 
+        // ---- Continuous redraw in insert/search modes (caret blink) ---------
+        if is_insert_mode(app.renderer.coordinate) {
+            app.renderer.needs_redraw = true;
+        }
+
         // ---- Update window title when needed --------------------------------
         if app.renderer.needs_redraw {
             update_window_title(app);
@@ -128,6 +146,8 @@ fn update_view(app: &mut AppState) {
     let win_w = app.swapchain_extent.width as f32;
     let win_h = app.swapchain_extent.height as f32;
     let list_items: Vec<(String, bool)> = collect_list_items(&app.renderer);
+    // In insert mode the selected item shows prefix + buffer (with cursor marker)
+    let insert_display: Option<String> = build_insert_display(&app.renderer);
     let search_str = if matches!(
         app.renderer.coordinate,
         Coordinate::SimpleSearch | Coordinate::Command
@@ -194,7 +214,12 @@ fn update_view(app: &mut AppState) {
 
         // Item text (re-borrow fr after possible rect_renderer borrow)
         if let Some(fr) = app.font_renderer.as_mut() {
-            fr.prepare_text_for_rendering(label, 10.0, item_y, scale, COLOR_TEXT);
+            let display = if *is_selected {
+                insert_display.as_deref().unwrap_or(label.as_str())
+            } else {
+                label.as_str()
+            };
+            fr.prepare_text_for_rendering(display, 10.0, item_y, scale, COLOR_TEXT);
         }
     }
 }
@@ -226,136 +251,270 @@ fn collect_list_items(r: &AppRenderer) -> Vec<(String, bool)> {
     out
 }
 
+/// In insert modes, build the display text for the selected item:
+/// `input_prefix` + text-before-cursor + `|` + text-after-cursor + `input_suffix`.
+/// Returns `None` when not in an insert mode.
+fn build_insert_display(r: &AppRenderer) -> Option<String> {
+    if !matches!(
+        r.coordinate,
+        Coordinate::EditorInsert
+            | Coordinate::EditorNormal
+            | Coordinate::EditorVisual
+            | Coordinate::OperatorInsert
+    ) {
+        return None;
+    }
+
+    let buf = &r.input_buffer;
+    let pos = r.cursor_position.min(buf.len());
+    let before = &buf[..pos];
+    let after = &buf[pos..];
+
+    Some(format!("{}{}|{}{}", r.input_prefix, before, after, r.input_suffix))
+}
+
 // ---------------------------------------------------------------------------
 // Key dispatch
 // ---------------------------------------------------------------------------
 
 fn handle_keydown(app: &mut AppState, keycode: Option<Keycode>, keymod: Mod) {
     let r = &mut app.renderer;
-    let ctrl = keymod.intersects(Mod::LCTRLMOD | Mod::RCTRLMOD);
+    let ctrl  = keymod.intersects(Mod::LCTRLMOD  | Mod::RCTRLMOD);
     let shift = keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD);
 
     match r.coordinate {
-        // ---- Operator / editor / search modes (navigation) ------------------
-        Coordinate::OperatorGeneral
-        | Coordinate::OperatorInsert
-        | Coordinate::EditorGeneral
-        | Coordinate::SimpleSearch => {
-            match keycode {
-                Some(Keycode::Up) | Some(Keycode::K) if !ctrl => {
-                    handlers::handle_up(r);
-                }
-                Some(Keycode::Down) | Some(Keycode::J) if !ctrl => {
-                    handlers::handle_down(r);
-                }
-                Some(Keycode::Right) | Some(Keycode::L) if !ctrl => {
-                    handlers::handle_right(r);
-                }
-                Some(Keycode::Left) | Some(Keycode::H) if !ctrl => {
-                    handlers::handle_left(r);
-                }
-                Some(Keycode::PageUp) => handlers::handle_page_up(r),
-                Some(Keycode::PageDown) => handlers::handle_page_down(r),
-                Some(Keycode::Home) if ctrl => handlers::handle_ctrl_home(r),
-                Some(Keycode::End) if ctrl => handlers::handle_ctrl_end(r),
-                Some(Keycode::Tab) => handlers::handle_tab(r),
-                Some(Keycode::Semicolon) if shift => {
-                    // Shift+; = :
-                    handlers::handle_colon(r);
-                }
-                Some(Keycode::I) if !ctrl && matches!(r.coordinate,
-                    Coordinate::OperatorGeneral | Coordinate::EditorGeneral) =>
-                {
-                    handlers::handle_i(r);
-                }
-                Some(Keycode::A) if !ctrl && matches!(r.coordinate,
-                    Coordinate::OperatorGeneral | Coordinate::EditorGeneral) =>
-                {
-                    handlers::handle_a(r);
-                }
-                Some(Keycode::F5) => handlers::handle_f5(r),
-                Some(Keycode::Backspace) => handlers::handle_backspace(r),
-                Some(Keycode::Escape) => {
-                    if matches!(r.coordinate, Coordinate::OperatorGeneral) {
-                        app.running = false;
-                        return;
-                    }
-                    handlers::handle_escape(r);
-                }
-                Some(Keycode::Q) if matches!(r.coordinate, Coordinate::OperatorGeneral) => {
-                    app.running = false;
-                    return;
-                }
-                _ => {}
+        // ---- Operator general -----------------------------------------------
+        Coordinate::OperatorGeneral => match keycode {
+            Some(Keycode::Up) | Some(Keycode::K) if !ctrl && !shift => handlers::handle_up(r),
+            Some(Keycode::Down) | Some(Keycode::J) if !ctrl && !shift => handlers::handle_down(r),
+            Some(Keycode::Right) | Some(Keycode::L) if !ctrl && !shift => handlers::handle_right(r),
+            Some(Keycode::Left) | Some(Keycode::H) if !ctrl && !shift => handlers::handle_left(r),
+            Some(Keycode::PageUp) if !ctrl && !shift => handlers::handle_page_up(r),
+            Some(Keycode::PageDown) if !ctrl && !shift => handlers::handle_page_down(r),
+            Some(Keycode::Home) if !ctrl && !shift => handlers::handle_home(r),
+            Some(Keycode::End) if !ctrl && !shift => handlers::handle_end(r),
+            Some(Keycode::Tab) => handlers::handle_tab(r),
+            Some(Keycode::Semicolon) if shift => handlers::handle_colon(r),
+            Some(Keycode::Return) | Some(Keycode::KpEnter) if !ctrl => {
+                handlers::handle_enter_operator(r);
             }
-        }
+            Some(Keycode::I) if !ctrl && !shift => handlers::handle_i(r),
+            Some(Keycode::A) if !ctrl && !shift => handlers::handle_a(r),
+            Some(Keycode::A) if ctrl && !shift => handlers::handle_ctrl_a_operator(r),
+            Some(Keycode::I) if ctrl && !shift => handlers::handle_ctrl_i_operator(r),
+            Some(Keycode::D) if ctrl && !shift => handlers::handle_delete(r, History::None),
+            Some(Keycode::Delete) if !ctrl && !shift => handlers::handle_delete(r, History::None),
+            Some(Keycode::M) if !ctrl && !shift => handlers::handle_meta(r),
+            Some(Keycode::Space) if !ctrl && !shift => handlers::handle_space(r),
+            Some(Keycode::Z) if ctrl && !shift => handlers::handle_undo(r),
+            Some(Keycode::Z) if ctrl && shift => handlers::handle_redo(r),
+            Some(Keycode::X) if ctrl && !shift => handlers::handle_ctrl_x(r),
+            Some(Keycode::C) if ctrl && !shift => handlers::handle_ctrl_c(r),
+            Some(Keycode::V) if ctrl && !shift => handlers::handle_ctrl_v(r),
+            Some(Keycode::F) if ctrl && !shift => handlers::handle_ctrl_f(r),
+            Some(Keycode::F5) => handlers::handle_f5(r),
+            Some(Keycode::Backspace) => handlers::handle_backspace(r),
+            Some(Keycode::Escape) | Some(Keycode::Q) => {
+                app.running = false;
+                return;
+            }
+            _ => {}
+        },
 
-        // ---- Insert mode (text editing) -------------------------------------
-        Coordinate::EditorInsert | Coordinate::EditorNormal
-        | Coordinate::EditorVisual => {
-            match keycode {
-                Some(Keycode::Escape) => handlers::handle_escape(r),
-                Some(Keycode::Backspace) => handlers::handle_backspace(r),
-                Some(Keycode::Left) => {
-                    if r.cursor_position > 0 {
-                        let before = &r.input_buffer[..r.cursor_position];
-                        r.cursor_position = before.char_indices().rev()
-                            .next().map(|(i, _)| i).unwrap_or(0);
-                        r.needs_redraw = true;
-                    }
+        // ---- Editor general -------------------------------------------------
+        Coordinate::EditorGeneral => match keycode {
+            Some(Keycode::Up) | Some(Keycode::K) if !ctrl && !shift => handlers::handle_up(r),
+            Some(Keycode::Down) | Some(Keycode::J) if !ctrl && !shift => handlers::handle_down(r),
+            Some(Keycode::Right) | Some(Keycode::L) if !ctrl && !shift => handlers::handle_right(r),
+            Some(Keycode::Left) | Some(Keycode::H) if !ctrl && !shift => handlers::handle_left(r),
+            Some(Keycode::PageUp) if !ctrl && !shift => handlers::handle_page_up(r),
+            Some(Keycode::PageDown) if !ctrl && !shift => handlers::handle_page_down(r),
+            Some(Keycode::Home) if !ctrl && !shift => handlers::handle_home(r),
+            Some(Keycode::End) if !ctrl && !shift => handlers::handle_end(r),
+            Some(Keycode::Tab) => handlers::handle_tab(r),
+            Some(Keycode::Semicolon) if shift => handlers::handle_colon(r),
+            Some(Keycode::Return) | Some(Keycode::KpEnter) if !ctrl => handlers::handle_append(r),
+            Some(Keycode::I) if !ctrl && !shift => handlers::handle_i(r),
+            Some(Keycode::A) if !ctrl && !shift => handlers::handle_a(r),
+            Some(Keycode::A) if ctrl && !shift => handlers::handle_append(r),
+            Some(Keycode::I) if ctrl && !shift => handlers::handle_insert(r),
+            Some(Keycode::D) if ctrl && !shift => handlers::handle_delete(r, History::None),
+            Some(Keycode::Space) if !ctrl && !shift => handlers::handle_space(r),
+            Some(Keycode::Z) if ctrl && !shift => handlers::handle_undo(r),
+            Some(Keycode::Z) if ctrl && shift => handlers::handle_redo(r),
+            Some(Keycode::X) if ctrl && !shift => handlers::handle_ctrl_x(r),
+            Some(Keycode::C) if ctrl && !shift => handlers::handle_ctrl_c(r),
+            Some(Keycode::V) if ctrl && !shift => handlers::handle_ctrl_v(r),
+            Some(Keycode::F) if ctrl && !shift => handlers::handle_ctrl_f(r),
+            Some(Keycode::F5) => handlers::handle_f5(r),
+            Some(Keycode::Backspace) => handlers::handle_backspace(r),
+            Some(Keycode::Escape) => handlers::handle_escape(r),
+            _ => {}
+        },
+
+        // ---- Simple search --------------------------------------------------
+        Coordinate::SimpleSearch => match keycode {
+            Some(Keycode::Up) | Some(Keycode::K) if !ctrl && !shift => handlers::handle_up(r),
+            Some(Keycode::Down) | Some(Keycode::J) if !ctrl && !shift => handlers::handle_down(r),
+            Some(Keycode::PageUp) if !ctrl && !shift => handlers::handle_page_up(r),
+            Some(Keycode::PageDown) if !ctrl && !shift => handlers::handle_page_down(r),
+            Some(Keycode::Home) if ctrl => handlers::handle_ctrl_home(r),
+            Some(Keycode::End) if ctrl => handlers::handle_ctrl_end(r),
+            Some(Keycode::Home) if !ctrl && !shift => handlers::handle_home(r),
+            Some(Keycode::End) if !ctrl && !shift => handlers::handle_end(r),
+            Some(Keycode::Home) if shift => handlers::handle_shift_home(r),
+            Some(Keycode::End) if shift => handlers::handle_shift_end(r),
+            Some(Keycode::Left) if shift => handlers::handle_shift_left(r),
+            Some(Keycode::Right) if shift => handlers::handle_shift_right(r),
+            Some(Keycode::Left) if !ctrl && !shift => {
+                if r.cursor_position > 0 {
+                    let before = &r.search_string[..r.cursor_position.min(r.search_string.len())];
+                    r.cursor_position = before.char_indices().rev().next().map(|(i,_)| i).unwrap_or(0);
+                    r.needs_redraw = true;
                 }
-                Some(Keycode::Right) => {
-                    let pos = r.cursor_position;
-                    if pos < r.input_buffer.len() {
-                        let ch = r.input_buffer[pos..].chars().next().unwrap();
-                        r.cursor_position = pos + ch.len_utf8();
-                        r.needs_redraw = true;
-                    }
-                }
-                Some(Keycode::Return) | Some(Keycode::KpEnter) => {
-                    // TODO: commit to provider
-                    handlers::handle_escape(r);
-                }
-                _ => {}
             }
-        }
+            Some(Keycode::Right) if !ctrl && !shift => {
+                let pos = r.cursor_position;
+                let slen = r.search_string.len();
+                if pos < slen {
+                    let ch = r.search_string[pos..].chars().next().unwrap();
+                    r.cursor_position = pos + ch.len_utf8();
+                    r.needs_redraw = true;
+                }
+            }
+            Some(Keycode::Tab) => handlers::handle_tab(r),
+            Some(Keycode::Return) | Some(Keycode::KpEnter) => handlers::handle_enter_search(r),
+            Some(Keycode::A) if ctrl && !shift => handlers::handle_select_all(r),
+            Some(Keycode::X) if ctrl && !shift => handlers::handle_ctrl_x(r),
+            Some(Keycode::C) if ctrl && !shift => handlers::handle_ctrl_c(r),
+            Some(Keycode::V) if ctrl && !shift => handlers::handle_ctrl_v(r),
+            Some(Keycode::F) if ctrl && !shift => handlers::handle_ctrl_f(r),
+            Some(Keycode::Backspace) => handlers::handle_backspace(r),
+            Some(Keycode::Delete) if !ctrl && !shift => handlers::handle_delete_forward(r),
+            Some(Keycode::Escape) => handlers::handle_escape(r),
+            _ => {}
+        },
+
+        // ---- Insert / normal / visual modes ---------------------------------
+        Coordinate::EditorInsert | Coordinate::EditorNormal
+        | Coordinate::EditorVisual | Coordinate::OperatorInsert => match keycode {
+            Some(Keycode::Escape) => handlers::handle_escape(r),
+            Some(Keycode::Backspace) => handlers::handle_backspace(r),
+            Some(Keycode::Delete) if !ctrl && !shift => handlers::handle_delete_forward(r),
+            Some(Keycode::Up) if !ctrl && !shift => handlers::handle_up_insert(r),
+            Some(Keycode::Down) if !ctrl && !shift => handlers::handle_down_insert(r),
+            Some(Keycode::Up) if shift => handlers::handle_shift_up_insert(r),
+            Some(Keycode::Down) if shift => handlers::handle_shift_down_insert(r),
+            Some(Keycode::Left) if shift => handlers::handle_shift_left(r),
+            Some(Keycode::Right) if shift => handlers::handle_shift_right(r),
+            Some(Keycode::Home) if shift => handlers::handle_shift_home(r),
+            Some(Keycode::End) if shift => handlers::handle_shift_end(r),
+            Some(Keycode::Home) if !ctrl && !shift => handlers::handle_home(r),
+            Some(Keycode::End) if !ctrl && !shift => handlers::handle_end(r),
+            Some(Keycode::Left) if !ctrl && !shift => {
+                if r.cursor_position > 0 {
+                    let before = &r.input_buffer[..r.cursor_position];
+                    r.cursor_position = before.char_indices().rev()
+                        .next().map(|(i, _)| i).unwrap_or(0);
+                    r.needs_redraw = true;
+                }
+            }
+            Some(Keycode::Right) if !ctrl && !shift => {
+                let pos = r.cursor_position;
+                if pos < r.input_buffer.len() {
+                    let ch = r.input_buffer[pos..].chars().next().unwrap();
+                    r.cursor_position = pos + ch.len_utf8();
+                    r.needs_redraw = true;
+                }
+            }
+            Some(Keycode::Return) | Some(Keycode::KpEnter)
+                if matches!(r.coordinate, Coordinate::EditorInsert | Coordinate::EditorNormal) =>
+            {
+                crate::state::update_state(r, Task::Input, History::None);
+                handlers::handle_escape(r);
+            }
+            Some(Keycode::Return) | Some(Keycode::KpEnter)
+                if r.coordinate == Coordinate::OperatorInsert =>
+            {
+                handlers::handle_enter_operator_insert(r);
+            }
+            Some(Keycode::A) if ctrl && !shift => handlers::handle_select_all(r),
+            Some(Keycode::X) if ctrl && !shift => handlers::handle_ctrl_x(r),
+            Some(Keycode::C) if ctrl && !shift => handlers::handle_ctrl_c(r),
+            Some(Keycode::V) if ctrl && !shift => handlers::handle_ctrl_v(r),
+            Some(Keycode::F) if ctrl && !shift => handlers::handle_ctrl_f(r),
+            _ => {}
+        },
 
         // ---- Command mode ---------------------------------------------------
-        Coordinate::Command => {
-            match keycode {
-                Some(Keycode::Escape) => handlers::handle_escape(r),
-                Some(Keycode::Backspace) => handlers::handle_backspace(r),
-                Some(Keycode::Return) | Some(Keycode::KpEnter) => {
-                    // TODO Phase 4+: execute command
-                    handlers::handle_escape(r);
+        Coordinate::Command => match keycode {
+            Some(Keycode::Escape) => handlers::handle_escape(r),
+            Some(Keycode::Backspace) => handlers::handle_backspace(r),
+            Some(Keycode::Delete) if !ctrl && !shift => handlers::handle_delete_forward(r),
+            Some(Keycode::Home) if ctrl => handlers::handle_ctrl_home(r),
+            Some(Keycode::End) if ctrl => handlers::handle_ctrl_end(r),
+            Some(Keycode::Home) if !ctrl && !shift => handlers::handle_home(r),
+            Some(Keycode::End) if !ctrl && !shift => handlers::handle_end(r),
+            Some(Keycode::Home) if shift => handlers::handle_shift_home(r),
+            Some(Keycode::End) if shift => handlers::handle_shift_end(r),
+            Some(Keycode::Left) if shift => handlers::handle_shift_left(r),
+            Some(Keycode::Right) if shift => handlers::handle_shift_right(r),
+            Some(Keycode::Left) if !ctrl && !shift => {
+                if r.cursor_position > 0 {
+                    let before = &r.input_buffer[..r.cursor_position];
+                    r.cursor_position = before.char_indices().rev()
+                        .next().map(|(i, _)| i).unwrap_or(0);
+                    r.needs_redraw = true;
                 }
-                _ => {}
             }
-        }
+            Some(Keycode::Right) if !ctrl && !shift => {
+                let pos = r.cursor_position;
+                if pos < r.input_buffer.len() {
+                    let ch = r.input_buffer[pos..].chars().next().unwrap();
+                    r.cursor_position = pos + ch.len_utf8();
+                    r.needs_redraw = true;
+                }
+            }
+            Some(Keycode::Return) | Some(Keycode::KpEnter) => {
+                // TODO Phase 4+: execute command
+                handlers::handle_escape(r);
+            }
+            Some(Keycode::A) if ctrl && !shift => handlers::handle_select_all(r),
+            Some(Keycode::X) if ctrl && !shift => handlers::handle_ctrl_x(r),
+            Some(Keycode::C) if ctrl && !shift => handlers::handle_ctrl_c(r),
+            Some(Keycode::V) if ctrl && !shift => handlers::handle_ctrl_v(r),
+            _ => {}
+        },
 
-        // ---- Scroll mode ----------------------------------------------------
-        Coordinate::Scroll | Coordinate::ScrollSearch => {
-            match keycode {
-                Some(Keycode::Escape) | Some(Keycode::Tab) => {
-                    handlers::handle_escape(r);
-                }
-                Some(Keycode::Up) | Some(Keycode::K) => {
-                    r.text_scroll_offset = (r.text_scroll_offset - 1).max(0);
-                    r.needs_redraw = true;
-                }
-                Some(Keycode::Down) | Some(Keycode::J) => {
-                    r.text_scroll_offset += 1;
-                    r.needs_redraw = true;
-                }
-                _ => {}
+        // ---- Scroll / scroll-search modes -----------------------------------
+        Coordinate::Scroll | Coordinate::ScrollSearch | Coordinate::InputSearch => match keycode {
+            Some(Keycode::Escape) | Some(Keycode::Tab) => handlers::handle_escape(r),
+            Some(Keycode::Up) | Some(Keycode::K) if !ctrl && !shift => {
+                r.text_scroll_offset = (r.text_scroll_offset - 1).max(0);
+                r.needs_redraw = true;
             }
-        }
+            Some(Keycode::Down) | Some(Keycode::J) if !ctrl && !shift => {
+                r.text_scroll_offset += 1;
+                r.needs_redraw = true;
+            }
+            Some(Keycode::Home) if !ctrl && !shift => handlers::handle_home(r),
+            Some(Keycode::End) if !ctrl && !shift => handlers::handle_end(r),
+            Some(Keycode::F) if ctrl && !shift => handlers::handle_ctrl_f(r),
+            Some(Keycode::Backspace) if matches!(r.coordinate,
+                Coordinate::ScrollSearch | Coordinate::InputSearch) =>
+            {
+                handlers::handle_backspace(r);
+            }
+            Some(Keycode::Delete) if matches!(r.coordinate,
+                Coordinate::ScrollSearch | Coordinate::InputSearch) =>
+            {
+                handlers::handle_delete_forward(r);
+            }
+            _ => {}
+        },
 
         _ => {}
     }
-
-    // Suppress unused warning for shift
-    let _ = shift;
 }
 
 // ---------------------------------------------------------------------------
