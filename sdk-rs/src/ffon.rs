@@ -229,6 +229,18 @@ impl IdArray {
     pub fn to_display_string(&self) -> String {
         self.0.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",")
     }
+
+    /// Replace the last index in the path (used when moving the selection up/down).
+    pub fn set_last(&mut self, idx: usize) {
+        if let Some(last) = self.0.last_mut() {
+            *last = idx;
+        }
+    }
+
+    /// Return the last index, or `None` if the path is empty.
+    pub fn last(&self) -> Option<usize> {
+        self.0.last().copied()
+    }
 }
 
 // ---------------------------------------------------------------------------

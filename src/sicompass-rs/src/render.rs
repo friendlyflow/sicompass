@@ -9,6 +9,206 @@ use ash::vk::Handle as _;
 use std::ffi::{CStr, CString};
 
 // ---------------------------------------------------------------------------
+// Vulkan memory / buffer / image helpers (used by text.rs, rectangle.rs)
+// ---------------------------------------------------------------------------
+
+pub(crate) unsafe fn find_memory_type(
+    instance: &ash::Instance,
+    physical_device: vk::PhysicalDevice,
+    type_filter: u32,
+    properties: vk::MemoryPropertyFlags,
+) -> Option<u32> {
+    let props = instance.get_physical_device_memory_properties(physical_device);
+    for i in 0..props.memory_type_count {
+        if (type_filter & (1 << i)) != 0
+            && props.memory_types[i as usize].property_flags.contains(properties)
+        {
+            return Some(i);
+        }
+    }
+    None
+}
+
+pub(crate) unsafe fn create_buffer(
+    device: &ash::Device,
+    instance: &ash::Instance,
+    physical_device: vk::PhysicalDevice,
+    size: vk::DeviceSize,
+    usage: vk::BufferUsageFlags,
+    properties: vk::MemoryPropertyFlags,
+) -> Result<(vk::Buffer, vk::DeviceMemory), SiError> {
+    let buf_info = vk::BufferCreateInfo::default()
+        .size(size)
+        .usage(usage)
+        .sharing_mode(vk::SharingMode::EXCLUSIVE);
+    let buffer = device.create_buffer(&buf_info, None)?;
+    let req = device.get_buffer_memory_requirements(buffer);
+    let mem_type = find_memory_type(instance, physical_device, req.memory_type_bits, properties)
+        .ok_or_else(|| SiError::Other("No suitable memory type for buffer".into()))?;
+    let alloc = vk::MemoryAllocateInfo::default()
+        .allocation_size(req.size)
+        .memory_type_index(mem_type);
+    let memory = device.allocate_memory(&alloc, None)?;
+    device.bind_buffer_memory(buffer, memory, 0)?;
+    Ok((buffer, memory))
+}
+
+pub(crate) unsafe fn create_image_helper(
+    device: &ash::Device,
+    instance: &ash::Instance,
+    physical_device: vk::PhysicalDevice,
+    width: u32,
+    height: u32,
+    format: vk::Format,
+    tiling: vk::ImageTiling,
+    usage: vk::ImageUsageFlags,
+    properties: vk::MemoryPropertyFlags,
+) -> Result<(vk::Image, vk::DeviceMemory), SiError> {
+    let img_info = vk::ImageCreateInfo::default()
+        .image_type(vk::ImageType::TYPE_2D)
+        .extent(vk::Extent3D { width, height, depth: 1 })
+        .mip_levels(1)
+        .array_layers(1)
+        .format(format)
+        .tiling(tiling)
+        .initial_layout(vk::ImageLayout::UNDEFINED)
+        .usage(usage)
+        .sharing_mode(vk::SharingMode::EXCLUSIVE)
+        .samples(vk::SampleCountFlags::TYPE_1);
+    let image = device.create_image(&img_info, None)?;
+    let req = device.get_image_memory_requirements(image);
+    let mem_type = find_memory_type(instance, physical_device, req.memory_type_bits, properties)
+        .ok_or_else(|| SiError::Other("No suitable memory type for image".into()))?;
+    let alloc = vk::MemoryAllocateInfo::default()
+        .allocation_size(req.size)
+        .memory_type_index(mem_type);
+    let memory = device.allocate_memory(&alloc, None)?;
+    device.bind_image_memory(image, memory, 0)?;
+    Ok((image, memory))
+}
+
+unsafe fn begin_single_time_commands(
+    device: &ash::Device,
+    command_pool: vk::CommandPool,
+) -> vk::CommandBuffer {
+    let alloc = vk::CommandBufferAllocateInfo::default()
+        .command_pool(command_pool)
+        .level(vk::CommandBufferLevel::PRIMARY)
+        .command_buffer_count(1);
+    let cb = device.allocate_command_buffers(&alloc).unwrap()[0];
+    let begin = vk::CommandBufferBeginInfo::default()
+        .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+    device.begin_command_buffer(cb, &begin).unwrap();
+    cb
+}
+
+unsafe fn end_single_time_commands(
+    device: &ash::Device,
+    command_pool: vk::CommandPool,
+    cb: vk::CommandBuffer,
+    queue: vk::Queue,
+) {
+    device.end_command_buffer(cb).unwrap();
+    let cbs = [cb];
+    let submit = vk::SubmitInfo::default().command_buffers(&cbs);
+    device.queue_submit(queue, &[submit], vk::Fence::null()).unwrap();
+    device.queue_wait_idle(queue).unwrap();
+    device.free_command_buffers(command_pool, &cbs);
+}
+
+pub(crate) unsafe fn transition_image_layout(
+    device: &ash::Device,
+    command_pool: vk::CommandPool,
+    queue: vk::Queue,
+    image: vk::Image,
+    old_layout: vk::ImageLayout,
+    new_layout: vk::ImageLayout,
+) {
+    let cb = begin_single_time_commands(device, command_pool);
+
+    let (src_access, dst_access, src_stage, dst_stage) = match (old_layout, new_layout) {
+        (vk::ImageLayout::UNDEFINED, vk::ImageLayout::TRANSFER_DST_OPTIMAL) => (
+            vk::AccessFlags::empty(),
+            vk::AccessFlags::TRANSFER_WRITE,
+            vk::PipelineStageFlags::TOP_OF_PIPE,
+            vk::PipelineStageFlags::TRANSFER,
+        ),
+        (vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL) => (
+            vk::AccessFlags::TRANSFER_WRITE,
+            vk::AccessFlags::SHADER_READ,
+            vk::PipelineStageFlags::TRANSFER,
+            vk::PipelineStageFlags::FRAGMENT_SHADER,
+        ),
+        _ => panic!("transition_image_layout: unsupported layout pair"),
+    };
+
+    let barrier = vk::ImageMemoryBarrier::default()
+        .old_layout(old_layout)
+        .new_layout(new_layout)
+        .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+        .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+        .image(image)
+        .subresource_range(
+            vk::ImageSubresourceRange::default()
+                .aspect_mask(vk::ImageAspectFlags::COLOR)
+                .base_mip_level(0).level_count(1)
+                .base_array_layer(0).layer_count(1),
+        )
+        .src_access_mask(src_access)
+        .dst_access_mask(dst_access);
+
+    device.cmd_pipeline_barrier(
+        cb, src_stage, dst_stage,
+        vk::DependencyFlags::empty(),
+        &[], &[], &[barrier],
+    );
+
+    end_single_time_commands(device, command_pool, cb, queue);
+}
+
+pub(crate) unsafe fn copy_buffer_to_image(
+    device: &ash::Device,
+    command_pool: vk::CommandPool,
+    queue: vk::Queue,
+    buffer: vk::Buffer,
+    image: vk::Image,
+    width: u32,
+    height: u32,
+) {
+    let cb = begin_single_time_commands(device, command_pool);
+    let region = vk::BufferImageCopy::default()
+        .image_subresource(
+            vk::ImageSubresourceLayers::default()
+                .aspect_mask(vk::ImageAspectFlags::COLOR)
+                .mip_level(0)
+                .base_array_layer(0)
+                .layer_count(1),
+        )
+        .image_extent(vk::Extent3D { width, height, depth: 1 });
+    device.cmd_copy_buffer_to_image(
+        cb, buffer, image, vk::ImageLayout::TRANSFER_DST_OPTIMAL, &[region],
+    );
+    end_single_time_commands(device, command_pool, cb, queue);
+}
+
+pub(crate) unsafe fn create_shader_module(
+    device: &ash::Device,
+    code: &[u8],
+) -> Result<vk::ShaderModule, SiError> {
+    // SPIR-V words must be 4-byte aligned
+    let code_u32: Vec<u32> = code
+        .chunks(4)
+        .map(|c| {
+            let mut b = [0u8; 4];
+            b[..c.len()].copy_from_slice(c);
+            u32::from_le_bytes(b)
+        })
+        .collect();
+    let info = vk::ShaderModuleCreateInfo::default().code(&code_u32);
+    Ok(device.create_shader_module(&info, None)?)
+}
+
+// ---------------------------------------------------------------------------
 // Validation layers
 // ---------------------------------------------------------------------------
 
@@ -576,6 +776,9 @@ pub fn build_app() -> Result<AppState, SiError> {
         running: true,
         // Dark theme background: 0x000000FF
         clear_color: [0.0, 0.0, 0.0, 1.0],
+        renderer: crate::app_state::AppRenderer::new(),
+        font_renderer: None,
+        rect_renderer: None,
     })
 }
 
@@ -694,7 +897,30 @@ pub fn draw_frame(app: &mut AppState) {
             .clear_values(&clear_values);
 
         app.device.cmd_begin_render_pass(cb, &rp_begin, vk::SubpassContents::INLINE);
-        // Phase 4: drawText / drawRectangle / drawImage go here
+
+        // Dynamic viewport + scissor (required for pipelines with dynamic state)
+        let viewport = vk::Viewport {
+            x: 0.0, y: 0.0,
+            width: app.swapchain_extent.width as f32,
+            height: app.swapchain_extent.height as f32,
+            min_depth: 0.0, max_depth: 1.0,
+        };
+        app.device.cmd_set_viewport(cb, 0, &[viewport]);
+        let scissor = vk::Rect2D {
+            offset: vk::Offset2D { x: 0, y: 0 },
+            extent: app.swapchain_extent,
+        };
+        app.device.cmd_set_scissor(cb, 0, &[scissor]);
+
+        // Draw rectangles (background, selection highlight, separator)
+        if let Some(rr) = &app.rect_renderer {
+            rr.draw_rectangles(&app.device, cb, app.swapchain_extent);
+        }
+        // Draw text (list items, header)
+        if let Some(fr) = &app.font_renderer {
+            fr.draw_text(&app.device, cb, frame, app.swapchain_extent);
+        }
+
         app.device.cmd_end_render_pass(cb);
         app.device.end_command_buffer(cb).unwrap();
 
@@ -751,6 +977,14 @@ pub fn cleanup(app: &mut AppState) {
     unsafe {
         // Let all GPU work finish before we destroy anything
         let _ = app.device.device_wait_idle();
+
+        // Destroy rendering sub-systems first
+        if let Some(fr) = app.font_renderer.take() {
+            fr.cleanup(&app.device);
+        }
+        if let Some(rr) = app.rect_renderer.take() {
+            rr.cleanup(&app.device);
+        }
 
         for i in 0..MAX_FRAMES_IN_FLIGHT {
             app.device.destroy_semaphore(app.render_finished[i], None);
