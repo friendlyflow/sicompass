@@ -158,6 +158,22 @@ impl accesskit::DeactivationHandler for NoopDeactivationHandler {
 }
 
 // ---------------------------------------------------------------------------
+// Mode-change announcement helpers
+// ---------------------------------------------------------------------------
+
+/// Format the accessibility announcement for a coordinate mode change.
+///
+/// Mirrors `accesskitSpeakModeChange` from the C source. When `context` is
+/// non-empty the result is `"{mode} - {context}"`, otherwise just `"{mode}"`.
+pub fn speak_mode_change_text(renderer: &AppRenderer, context: Option<&str>) -> String {
+    let mode = renderer.coordinate.as_str();
+    match context {
+        Some(ctx) if !ctx.is_empty() => format!("{mode} - {ctx}"),
+        _ => mode.to_string(),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -231,5 +247,78 @@ mod tests {
         let tree = build_tree(&r);
         let (_, root_node) = &tree.nodes[0];
         assert_eq!(root_node.role(), Role::Window);
+    }
+
+    #[test]
+    fn build_tree_item_labels_match() {
+        let r = make_renderer_with_list(&["Files", "Tutorial"]);
+        let tree = build_tree(&r);
+        assert_eq!(tree.nodes[1].1.name().as_deref(), Some("Files"));
+        assert_eq!(tree.nodes[2].1.name().as_deref(), Some("Tutorial"));
+    }
+
+    #[test]
+    fn build_tree_root_name_is_sicompass() {
+        let r = AppRenderer::new();
+        let tree = build_tree(&r);
+        assert_eq!(tree.nodes[0].1.name().as_deref(), Some("sicompass"));
+    }
+
+    #[test]
+    fn build_tree_has_correct_tree() {
+        let r = AppRenderer::new();
+        let tree = build_tree(&r);
+        assert!(tree.tree.is_some());
+        assert_eq!(tree.tree.unwrap().root, ROOT_ID);
+    }
+
+    // --- speak_mode_change_text ---
+
+    #[test]
+    fn speak_mode_change_simple_search_no_context() {
+        let mut r = AppRenderer::new();
+        r.coordinate = crate::app_state::Coordinate::SimpleSearch;
+        assert_eq!(speak_mode_change_text(&r, None), "search");
+    }
+
+    #[test]
+    fn speak_mode_change_with_context() {
+        let mut r = AppRenderer::new();
+        r.coordinate = crate::app_state::Coordinate::EditorInsert;
+        assert_eq!(speak_mode_change_text(&r, Some("filename.txt")), "editor insert - filename.txt");
+    }
+
+    #[test]
+    fn speak_mode_change_empty_context_gives_mode_only() {
+        let mut r = AppRenderer::new();
+        r.coordinate = crate::app_state::Coordinate::Command;
+        assert_eq!(speak_mode_change_text(&r, Some("")), "command");
+    }
+
+    #[test]
+    fn speak_mode_change_operator_general() {
+        let r = AppRenderer::new(); // default is OperatorGeneral
+        assert_eq!(speak_mode_change_text(&r, None), "operator");
+    }
+
+    #[test]
+    fn speak_mode_change_operator_insert_with_context() {
+        let mut r = AppRenderer::new();
+        r.coordinate = crate::app_state::Coordinate::OperatorInsert;
+        assert_eq!(speak_mode_change_text(&r, Some("Documents")), "operator insert - Documents");
+    }
+
+    #[test]
+    fn speak_mode_change_editor_general() {
+        let mut r = AppRenderer::new();
+        r.coordinate = crate::app_state::Coordinate::EditorGeneral;
+        assert_eq!(speak_mode_change_text(&r, None), "editor");
+    }
+
+    #[test]
+    fn speak_mode_change_extended_search() {
+        let mut r = AppRenderer::new();
+        r.coordinate = crate::app_state::Coordinate::ExtendedSearch;
+        assert_eq!(speak_mode_change_text(&r, None), "extended search");
     }
 }
