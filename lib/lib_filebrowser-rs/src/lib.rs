@@ -207,7 +207,7 @@ impl Provider for FilebrowserProvider {
         &mut self,
         command: &str,
         element_key: &str,
-        _element_type: i32,
+        element_type: i32,
         error: &mut String,
     ) -> Option<FfonElement> {
         match command {
@@ -232,8 +232,8 @@ impl Provider for FilebrowserProvider {
                 None
             }
             "open file with" => {
-                // element_key must be a file (Str), not a directory (Obj key ends with '/')
-                if element_key.ends_with('/') {
+                // element_type 1 = FFON_OBJECT (directory) — reject directories
+                if element_type == 1 {
                     *error = "open with: select a file, not a directory".into();
                     return None;
                 }
@@ -733,5 +733,97 @@ mod tests {
         std::fs::write(dir.path().join("myfile.txt"), b"").unwrap();
         let results = p.collect_deep_search_items().unwrap_or_default();
         assert!(results.iter().any(|r| r.label.starts_with("- ")));
+    }
+
+    #[test]
+    fn test_handle_command_sort_alpha() {
+        let (mut p, dir) = make_provider();
+        std::fs::write(dir.path().join("cherry.txt"), b"").unwrap();
+        std::fs::write(dir.path().join("apple.txt"), b"").unwrap();
+        std::fs::write(dir.path().join("banana.txt"), b"").unwrap();
+        let mut err = String::new();
+        p.handle_command("sort alphanumerically", "", 0, &mut err);
+        assert_eq!(p.sort_mode, SortMode::Alpha);
+        let items = p.fetch();
+        // items[0] is meta, files follow
+        let file_labels: Vec<_> = items.iter()
+            .skip(1)
+            .filter_map(|e| e.as_str())
+            .map(|s| sicompass_sdk::tags::strip_display(s).to_string())
+            .collect();
+        assert_eq!(file_labels, vec!["apple.txt", "banana.txt", "cherry.txt"]);
+    }
+
+    #[test]
+    fn test_handle_command_open_with_directory_error() {
+        let (mut p, _dir) = make_provider();
+        let mut err = String::new();
+        // element_type 1 = FFON_OBJECT (directory)
+        let result = p.handle_command("open file with", "<input>somedir</input>", 1, &mut err);
+        assert!(result.is_none());
+        assert!(!err.is_empty(), "error should be set for directory");
+        assert!(err.contains("directory"), "error should mention directory");
+    }
+
+    #[test]
+    fn test_handle_command_unknown() {
+        let (mut p, _dir) = make_provider();
+        let mut err = String::new();
+        let result = p.handle_command("nonexistent command", "", 0, &mut err);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_deep_search_empty_dir() {
+        let (mut p, dir) = make_provider();
+        p.set_current_path(dir.path().to_str().unwrap());
+        let results = p.collect_deep_search_items().unwrap_or_default();
+        assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn test_deep_search_flat_files() {
+        let (mut p, dir) = make_provider();
+        std::fs::write(dir.path().join("alpha.txt"), b"").unwrap();
+        std::fs::write(dir.path().join("beta.txt"), b"").unwrap();
+        std::fs::write(dir.path().join("gamma.txt"), b"").unwrap();
+        let results = p.collect_deep_search_items().unwrap_or_default();
+        assert_eq!(results.len(), 3);
+        for item in &results {
+            assert!(item.label.starts_with("- "), "flat files should have '- ' prefix");
+            assert_eq!(item.breadcrumb, "", "flat files should have empty breadcrumb");
+            assert!(item.nav_path.contains(dir.path().to_str().unwrap()));
+        }
+    }
+
+    #[test]
+    fn test_get_command_list_items_non_open_with() {
+        let (p, _dir) = make_provider();
+        let items = p.command_list_items("create directory");
+        assert!(items.is_empty());
+    }
+
+    #[test]
+    fn test_execute_command_unknown() {
+        let (mut p, _dir) = make_provider();
+        let result = p.execute_command("nonexistent", "anything");
+        assert!(!result);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_deep_search_symlink_not_followed() {
+        let (mut p, dir) = make_provider();
+        // Create a symlink pointing back to the root dir (circular)
+        let link_path = dir.path().join("loop");
+        std::os::unix::fs::symlink(dir.path(), &link_path).unwrap();
+        // Also create a regular file
+        std::fs::write(dir.path().join("regular.txt"), b"").unwrap();
+        let results = p.collect_deep_search_items().unwrap_or_default();
+        // Should find: loop (as non-dir via symlink_metadata) + regular.txt = 2
+        assert_eq!(results.len(), 2, "symlink should not be traversed as dir");
+        let loop_item = results.iter().find(|r| r.label.contains("loop"));
+        assert!(loop_item.is_some(), "loop symlink should appear in results");
+        assert!(loop_item.unwrap().label.starts_with("- "), "symlink should show as file, not dir");
     }
 }

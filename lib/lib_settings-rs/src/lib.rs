@@ -869,4 +869,128 @@ mod tests {
         let entries = log.lock().unwrap();
         assert!(entries.iter().any(|(k, _)| k == "colorScheme"));
     }
+
+    #[test]
+    fn test_init_fires_apply_for_text_entries() {
+        let log: Arc<Mutex<Vec<(String, String)>>> = Arc::new(Mutex::new(Vec::new()));
+        let log2 = Arc::clone(&log);
+        let mut p = SettingsProvider::new(move |k, v| {
+            log2.lock().unwrap().push((k.to_owned(), v.to_owned()));
+        });
+        p.add_text("sales demo", "save folder", "saveFolder", "Downloads");
+        p.init();
+        let entries = log.lock().unwrap();
+        assert!(entries.iter().any(|(k, _)| k == "colorScheme"));
+        assert!(entries.iter().any(|(k, v)| k == "saveFolder" && v == "Downloads"));
+    }
+
+    #[test]
+    fn test_init_fires_apply_for_checkbox_entries() {
+        let log: Arc<Mutex<Vec<(String, String)>>> = Arc::new(Mutex::new(Vec::new()));
+        let log2 = Arc::clone(&log);
+        let mut p = SettingsProvider::new(move |k, v| {
+            log2.lock().unwrap().push((k.to_owned(), v.to_owned()));
+        });
+        p.add_checkbox("programs", "tutorial", "enable_tutorial", true);
+        p.add_checkbox("programs", "file browser", "enable_file browser", false);
+        p.init();
+        let entries = log.lock().unwrap();
+        assert!(entries.iter().any(|(k, _)| k == "colorScheme"));
+        assert!(entries.iter().any(|(k, v)| k == "enable_tutorial" && v == "true"));
+        assert!(entries.iter().any(|(k, v)| k == "enable_file browser" && v == "false"));
+    }
+
+    #[test]
+    fn test_section_with_radio_and_text() {
+        let mut p = SettingsProvider::new_headless();
+        p.add_radio("mixed", "radio group", "radioKey", &["a", "b"], "a");
+        p.add_text("mixed", "text field", "textKey", "hello");
+        let items = p.fetch();
+        // meta + sicompass + mixed
+        assert_eq!(items.len(), 3);
+        let mixed = items[2].as_obj().unwrap();
+        assert_eq!(mixed.key, "mixed");
+        assert_eq!(mixed.children.len(), 2); // radio group + text entry
+    }
+
+    #[test]
+    fn test_priority_section_not_duplicated() {
+        let mut p = SettingsProvider::new_headless();
+        p.add_priority_section("programs");
+        p.add_checkbox("programs", "tutorial", "enable_tutorial", true);
+        let items = p.fetch();
+        // meta + programs + sicompass — programs not duplicated
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[1].as_obj().unwrap().key, "programs");
+        assert_eq!(items[2].as_obj().unwrap().key, "sicompass");
+    }
+
+    #[test]
+    fn test_set_checkbox_state_no_change_skips() {
+        let call_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let cc2 = Arc::clone(&call_count);
+        let mut p = SettingsProvider::new(move |_, _| {
+            cc2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        });
+        p.add_checkbox("sicompass", "maximized", "maximized", false);
+        // reset counter after construction (construction doesn't call set_checkbox_state)
+        call_count.store(0, std::sync::atomic::Ordering::SeqCst);
+        p.set_checkbox_state("maximized", false); // already false — should not call apply_fn
+        assert_eq!(call_count.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn test_remove_section_removes_text_entries() {
+        let mut p = SettingsProvider::new_headless();
+        p.add_text("sales demo", "save folder", "saveFolder", "Downloads");
+        p.remove_section("sales demo");
+        // Re-add empty section to verify text entries are gone
+        p.add_section("sales demo");
+        let items = p.fetch();
+        let sd = items.iter().find(|e| e.as_obj().map(|o| o.key == "sales demo").unwrap_or(false));
+        assert!(sd.is_some());
+        let children = &sd.unwrap().as_obj().unwrap().children;
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].as_str().unwrap(), "no settings");
+    }
+
+    #[test]
+    fn test_remove_section_removes_checkbox_entries() {
+        let mut p = SettingsProvider::new_headless();
+        p.add_checkbox("programs", "tutorial", "enable_tutorial", true);
+        p.remove_section("programs");
+        p.add_section("programs");
+        let items = p.fetch();
+        let prog = items.iter().find(|e| e.as_obj().map(|o| o.key == "programs").unwrap_or(false));
+        assert!(prog.is_some());
+        let children = &prog.unwrap().as_obj().unwrap().children;
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].as_str().unwrap(), "no settings");
+    }
+
+    #[test]
+    fn test_remove_section_nonexistent() {
+        let mut p = SettingsProvider::new_headless();
+        p.add_section("file browser");
+        p.remove_section("nonexistent");
+        let items = p.fetch();
+        // meta + sicompass + file browser still present
+        assert_eq!(items.len(), 3);
+    }
+
+    #[test]
+    fn test_remove_section_leaves_other_sections() {
+        let mut p = SettingsProvider::new_headless();
+        p.add_radio("section A", "radio", "key", &["a", "b"], "a");
+        p.add_text("section B", "label", "textKey", "value");
+        p.remove_section("section A");
+        let items = p.fetch();
+        // meta + sicompass + section B
+        assert_eq!(items.len(), 3);
+        assert!(!items.iter().any(|e| e.as_obj().map(|o| o.key == "section A").unwrap_or(false)));
+        let sb = items.iter().find(|e| e.as_obj().map(|o| o.key == "section B").unwrap_or(false));
+        assert!(sb.is_some());
+        // section B still has its text entry
+        assert_eq!(sb.unwrap().as_obj().unwrap().children.len(), 1);
+    }
 }
