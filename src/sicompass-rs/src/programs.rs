@@ -209,8 +209,11 @@ fn apply_setting(
 
     match key {
         "colorScheme" => {
-            // Palette switching — no-op until palette support is ported (Phase 5+)
-            let _ = value;
+            renderer.palette_theme = if value == "light" {
+                crate::app_state::PaletteTheme::Light
+            } else {
+                crate::app_state::PaletteTheme::Dark
+            };
         }
         "maximized" => {
             // Window maximization — handled in main loop via SDL (no AppRenderer field)
@@ -382,5 +385,44 @@ mod tests {
         assert_eq!(r.providers.len(), 2);
         assert_eq!(r.providers[0].name(), "a");
         assert_eq!(r.providers[1].name(), "c");
+    }
+
+    // --- apply_setting (colorScheme) ---
+
+    #[test]
+    fn apply_setting_color_scheme_light() {
+        let mut r = AppRenderer::new();
+        apply_setting(&mut r, "colorScheme", "light", false);
+        assert_eq!(r.palette_theme, crate::app_state::PaletteTheme::Light);
+    }
+
+    #[test]
+    fn apply_setting_color_scheme_dark() {
+        let mut r = AppRenderer::new();
+        r.palette_theme = crate::app_state::PaletteTheme::Light;
+        apply_setting(&mut r, "colorScheme", "dark", false);
+        assert_eq!(r.palette_theme, crate::app_state::PaletteTheme::Dark);
+    }
+
+    #[test]
+    fn apply_setting_color_scheme_unknown_defaults_dark() {
+        let mut r = AppRenderer::new();
+        apply_setting(&mut r, "colorScheme", "solarized", false);
+        assert_eq!(r.palette_theme, crate::app_state::PaletteTheme::Dark);
+    }
+
+    #[test]
+    fn palette_dark_background_is_black() {
+        use crate::app_state::{PALETTE_DARK, PALETTE_LIGHT};
+        assert_eq!(PALETTE_DARK.background, 0x000000FF);
+        assert_eq!(PALETTE_LIGHT.background, 0xFFFFFFFF);
+    }
+
+    #[test]
+    fn palette_accessor_returns_dark_by_default() {
+        use crate::app_state::{PaletteTheme, PALETTE_DARK};
+        let r = AppRenderer::new();
+        assert_eq!(r.palette_theme, PaletteTheme::Dark);
+        assert_eq!(r.palette().background, PALETTE_DARK.background);
     }
 }
