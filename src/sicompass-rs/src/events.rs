@@ -68,6 +68,249 @@ use crate::app_state::{AppRenderer, Coordinate, History, Task};
 use crate::handlers;
 use sdl3::keyboard::{Keycode, Mod};
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app_state::AppRenderer;
+
+    fn no_mod() -> Mod { Mod::empty() }
+    fn ctrl()   -> Mod { Mod::LCTRLMOD }
+    fn shift()  -> Mod { Mod::LSHIFTMOD }
+    fn ctrl_shift() -> Mod { Mod::LCTRLMOD | Mod::LSHIFTMOD }
+
+    // --- Tab ---
+
+    #[test]
+    fn tab_in_operator_switches_to_simple_search() {
+        let mut r = AppRenderer::new();
+        dispatch_key(&mut r, Some(Keycode::Tab), no_mod());
+        assert_eq!(r.coordinate, Coordinate::SimpleSearch);
+    }
+
+    // --- Colon (Shift+Semicolon) ---
+
+    #[test]
+    fn colon_in_operator_switches_to_command() {
+        let mut r = AppRenderer::new();
+        dispatch_key(&mut r, Some(Keycode::Semicolon), shift());
+        assert_eq!(r.coordinate, Coordinate::Command);
+    }
+
+    #[test]
+    fn colon_blocked_in_editor_insert() {
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::EditorInsert;
+        dispatch_key(&mut r, Some(Keycode::Semicolon), shift());
+        assert_eq!(r.coordinate, Coordinate::EditorInsert);
+    }
+
+    // --- Space toggle ---
+
+    #[test]
+    fn space_in_operator_switches_to_editor() {
+        let mut r = AppRenderer::new();
+        dispatch_key(&mut r, Some(Keycode::Space), no_mod());
+        assert_eq!(r.coordinate, Coordinate::EditorGeneral);
+        assert_eq!(r.previous_coordinate, Coordinate::OperatorGeneral);
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn space_in_editor_switches_to_operator() {
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::EditorGeneral;
+        dispatch_key(&mut r, Some(Keycode::Space), no_mod());
+        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+        assert_eq!(r.previous_coordinate, Coordinate::EditorGeneral);
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn space_noop_in_editor_insert() {
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::EditorInsert;
+        dispatch_key(&mut r, Some(Keycode::Space), no_mod());
+        assert_eq!(r.coordinate, Coordinate::EditorInsert);
+    }
+
+    // --- Ctrl+F → SimpleSearch (from OperatorGeneral) ---
+
+    #[test]
+    fn ctrl_f_in_operator_switches_to_simple_search() {
+        let mut r = AppRenderer::new();
+        dispatch_key(&mut r, Some(Keycode::F), ctrl());
+        assert_eq!(r.coordinate, Coordinate::SimpleSearch);
+    }
+
+    // --- Escape ---
+
+    #[test]
+    fn escape_in_editor_insert_returns_to_operator() {
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::EditorInsert;
+        dispatch_key(&mut r, Some(Keycode::Escape), no_mod());
+        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+    }
+
+    #[test]
+    fn escape_in_operator_returns_quit_signal() {
+        let mut r = AppRenderer::new();
+        let quit = dispatch_key(&mut r, Some(Keycode::Escape), no_mod());
+        assert!(quit);
+    }
+
+    #[test]
+    fn q_in_operator_returns_quit_signal() {
+        let mut r = AppRenderer::new();
+        let quit = dispatch_key(&mut r, Some(Keycode::Q), no_mod());
+        assert!(quit);
+    }
+
+    #[test]
+    fn non_quit_key_returns_false() {
+        let mut r = AppRenderer::new();
+        let quit = dispatch_key(&mut r, Some(Keycode::Tab), no_mod());
+        assert!(!quit);
+    }
+
+    // --- Ctrl+A select all in EditorInsert ---
+
+    #[test]
+    fn ctrl_a_in_editor_insert_selects_all() {
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::EditorInsert;
+        r.input_buffer = "hello".to_string();
+        r.cursor_position = 0;
+        dispatch_key(&mut r, Some(Keycode::A), ctrl());
+        assert_eq!(r.selection_anchor, Some(0));
+        assert_eq!(r.cursor_position, 5);
+    }
+
+    // --- Shift+Left in EditorInsert ---
+
+    #[test]
+    fn shift_left_in_editor_insert_starts_selection() {
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::EditorInsert;
+        r.input_buffer = "hello".to_string();
+        r.cursor_position = 3;
+        dispatch_key(&mut r, Some(Keycode::Left), shift());
+        assert_eq!(r.selection_anchor, Some(3));
+        assert_eq!(r.cursor_position, 2);
+    }
+
+    // --- Shift+Right in SimpleSearch ---
+
+    #[test]
+    fn shift_right_in_simple_search_starts_selection() {
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::SimpleSearch;
+        r.input_buffer = "hello".to_string();
+        r.cursor_position = 2;
+        dispatch_key(&mut r, Some(Keycode::Right), shift());
+        assert_eq!(r.selection_anchor, Some(2));
+        assert_eq!(r.cursor_position, 3);
+    }
+
+    // --- Ctrl+I in EditorGeneral → handle_insert ---
+
+    #[test]
+    fn ctrl_i_in_editor_general_sets_needs_redraw() {
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::EditorGeneral;
+        dispatch_key(&mut r, Some(Keycode::I), ctrl());
+        assert!(r.needs_redraw);
+    }
+
+    // --- Ctrl+D in OperatorGeneral → no crash ---
+
+    #[test]
+    fn ctrl_d_in_operator_general_no_crash() {
+        let mut r = AppRenderer::new();
+        dispatch_key(&mut r, Some(Keycode::D), ctrl());
+        // handle_file_delete with no providers — no crash
+    }
+
+    // --- Ctrl+D in EditorGeneral → no crash ---
+
+    #[test]
+    fn ctrl_d_in_editor_general_no_crash() {
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::EditorGeneral;
+        dispatch_key(&mut r, Some(Keycode::D), ctrl());
+    }
+
+    // --- Delete key in OperatorGeneral → no crash ---
+
+    #[test]
+    fn delete_key_in_operator_general_no_crash() {
+        let mut r = AppRenderer::new();
+        dispatch_key(&mut r, Some(Keycode::Delete), no_mod());
+    }
+
+    // --- K/J/Up in navigation modes set needs_redraw ---
+
+    #[test]
+    fn k_in_operator_sets_needs_redraw() {
+        let mut r = AppRenderer::new();
+        dispatch_key(&mut r, Some(Keycode::K), no_mod());
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn j_in_editor_general_sets_needs_redraw() {
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::EditorGeneral;
+        dispatch_key(&mut r, Some(Keycode::J), no_mod());
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn up_arrow_in_simple_search_sets_needs_redraw() {
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::SimpleSearch;
+        dispatch_key(&mut r, Some(Keycode::Up), no_mod());
+        assert!(r.needs_redraw);
+    }
+
+    // --- Ctrl+Z / Ctrl+Shift+Z set needs_redraw ---
+
+    #[test]
+    fn ctrl_z_in_editor_general_sets_needs_redraw() {
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::EditorGeneral;
+        dispatch_key(&mut r, Some(Keycode::Z), ctrl());
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn ctrl_shift_z_in_editor_general_sets_needs_redraw() {
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::EditorGeneral;
+        dispatch_key(&mut r, Some(Keycode::Z), ctrl_shift());
+        assert!(r.needs_redraw);
+    }
+
+    // --- D in EditorGeneral → not handled (no needs_redraw, no coordinate change) ---
+
+    #[test]
+    fn d_in_editor_general_not_handled() {
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::EditorGeneral;
+        dispatch_key(&mut r, Some(Keycode::D), no_mod());
+        assert_eq!(r.coordinate, Coordinate::EditorGeneral);
+    }
+
+    // --- Ctrl+A in OperatorGeneral → handle_ctrl_a_operator → stays OperatorGeneral ---
+
+    #[test]
+    fn ctrl_a_in_operator_general_stays_operator() {
+        let mut r = AppRenderer::new();
+        dispatch_key(&mut r, Some(Keycode::A), ctrl());
+        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+    }
+}
+
 /// Dispatch a key event to the appropriate handler based on the current mode.
 ///
 /// Returns `true` if the application should quit (Escape/Q in OperatorGeneral),

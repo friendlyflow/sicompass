@@ -622,6 +622,7 @@ pub fn handle_redo(r: &mut AppRenderer) {
 
 /// Return to the previous/operator mode (Escape).
 pub fn handle_escape(r: &mut AppRenderer) {
+    clear_selection(r);
     match r.coordinate {
         Coordinate::OperatorGeneral => {
             // Already at base mode — nothing to do
@@ -668,6 +669,15 @@ pub fn handle_escape(r: &mut AppRenderer) {
 
 /// Handle a printable text input event.
 pub fn handle_input(r: &mut AppRenderer, text: &str) {
+    if text.is_empty() { return; }
+
+    // When entering Command mode via handle_colon, SDL fires both a key event and
+    // a text input event for the ':' key. Ignore the text event so the colon is
+    // not inserted into the command buffer.
+    if r.coordinate == Coordinate::Command && r.input_buffer.is_empty() && text == ":" {
+        return;
+    }
+
     match r.coordinate {
         Coordinate::SimpleSearch => {
             r.search_string.push_str(text);
@@ -1454,11 +1464,544 @@ mod tests {
     }
 
     #[test]
+    fn handle_input_basic_insert() {
+        let mut r = make_input_renderer("");
+        r.cursor_position = 0;
+        handle_input(&mut r, "abc");
+        assert_eq!(r.input_buffer, "abc");
+        assert_eq!(r.cursor_position, 3);
+    }
+
+    #[test]
+    fn handle_input_insert_at_cursor() {
+        let mut r = make_input_renderer("hello");
+        r.cursor_position = 2;
+        handle_input(&mut r, "X");
+        assert_eq!(r.input_buffer, "heXllo");
+        assert_eq!(r.cursor_position, 3);
+    }
+
+    #[test]
+    fn handle_input_ignores_colon_in_empty_command_mode() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::Command;
+        r.input_buffer.clear();
+        r.cursor_position = 0;
+        handle_input(&mut r, ":");
+        assert_eq!(r.input_buffer, "");
+    }
+
+    #[test]
+    fn handle_input_allows_colon_in_non_empty_command() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::Command;
+        handle_input(&mut r, "a");
+        handle_input(&mut r, ":");
+        assert_eq!(r.input_buffer, "a:");
+    }
+
+    #[test]
+    fn handle_input_sets_needs_redraw() {
+        let mut r = make_input_renderer("");
+        r.cursor_position = 0;
+        handle_input(&mut r, "x");
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn handle_input_resets_caret() {
+        let mut r = make_input_renderer("");
+        r.cursor_position = 0;
+        r.caret.visible = false;
+        handle_input(&mut r, "x");
+        assert!(r.caret.visible);
+    }
+
+    #[test]
+    fn handle_input_noop_in_operator_general() {
+        let mut r = make_renderer();
+        // OperatorGeneral is not a text-edit mode — input is ignored
+        handle_input(&mut r, "abc");
+        assert_eq!(r.input_buffer, "");
+    }
+
+    #[test]
     fn handle_backspace_in_search() {
         let mut r = make_renderer();
         r.coordinate = Coordinate::SimpleSearch;
         r.search_string = "abc".to_owned();
         handle_backspace(&mut r);
         assert_eq!(r.search_string, "ab");
+    }
+
+    // -----------------------------------------------------------------------
+    // Input buffer helpers
+    // -----------------------------------------------------------------------
+
+    fn make_input_renderer(text: &str) -> AppRenderer {
+        let mut r = AppRenderer::new();
+        r.input_buffer = text.to_string();
+        r.cursor_position = 0;
+        r.selection_anchor = None;
+        r.coordinate = Coordinate::EditorInsert;
+        r
+    }
+
+    // has_selection
+    #[test]
+    fn has_selection_no_anchor() {
+        let r = make_input_renderer("hello");
+        assert!(!has_selection(&r));
+    }
+
+    #[test]
+    fn has_selection_anchor_equals_cursor() {
+        let mut r = make_input_renderer("hello");
+        r.cursor_position = 3;
+        r.selection_anchor = Some(3);
+        assert!(!has_selection(&r));
+    }
+
+    #[test]
+    fn has_selection_forward() {
+        let mut r = make_input_renderer("hello");
+        r.selection_anchor = Some(1);
+        r.cursor_position = 4;
+        assert!(has_selection(&r));
+    }
+
+    #[test]
+    fn has_selection_reverse() {
+        let mut r = make_input_renderer("hello");
+        r.selection_anchor = Some(4);
+        r.cursor_position = 1;
+        assert!(has_selection(&r));
+    }
+
+    // clear_selection
+    #[test]
+    fn clear_selection_resets_anchor() {
+        let mut r = make_input_renderer("hello");
+        r.selection_anchor = Some(3);
+        clear_selection(&mut r);
+        assert_eq!(r.selection_anchor, None);
+    }
+
+    // selection_range
+    #[test]
+    fn selection_range_forward() {
+        let mut r = make_input_renderer("hello");
+        r.selection_anchor = Some(1);
+        r.cursor_position = 4;
+        assert_eq!(selection_range(&r), Some((1, 4)));
+    }
+
+    #[test]
+    fn selection_range_backward() {
+        let mut r = make_input_renderer("hello");
+        r.selection_anchor = Some(4);
+        r.cursor_position = 1;
+        assert_eq!(selection_range(&r), Some((1, 4)));
+    }
+
+    // delete_selection
+    #[test]
+    fn delete_selection_no_selection() {
+        let mut r = make_input_renderer("hello");
+        r.cursor_position = 3;
+        delete_selection(&mut r);
+        assert_eq!(r.input_buffer, "hello");
+        assert_eq!(r.cursor_position, 3);
+    }
+
+    #[test]
+    fn delete_selection_middle() {
+        let mut r = make_input_renderer("hello");
+        r.selection_anchor = Some(1);
+        r.cursor_position = 4;
+        delete_selection(&mut r);
+        assert_eq!(r.input_buffer, "ho");
+        assert_eq!(r.cursor_position, 1);
+        assert_eq!(r.selection_anchor, None);
+    }
+
+    #[test]
+    fn delete_selection_reverse() {
+        let mut r = make_input_renderer("hello");
+        r.selection_anchor = Some(4);
+        r.cursor_position = 1;
+        delete_selection(&mut r);
+        assert_eq!(r.input_buffer, "ho");
+        assert_eq!(r.cursor_position, 1);
+    }
+
+    #[test]
+    fn delete_selection_entire_string() {
+        let mut r = make_input_renderer("hello");
+        r.selection_anchor = Some(0);
+        r.cursor_position = 5;
+        delete_selection(&mut r);
+        assert_eq!(r.input_buffer, "");
+        assert_eq!(r.cursor_position, 0);
+    }
+
+    #[test]
+    fn delete_selection_single_char() {
+        let mut r = make_input_renderer("hello");
+        r.selection_anchor = Some(2);
+        r.cursor_position = 3;
+        delete_selection(&mut r);
+        assert_eq!(r.input_buffer, "helo");
+        assert_eq!(r.input_buffer.len(), 4);
+    }
+
+    // -----------------------------------------------------------------------
+    // Shift selection handlers
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn shift_left_starts_selection() {
+        let mut r = make_input_renderer("hello");
+        r.cursor_position = 3;
+        handle_shift_left(&mut r);
+        assert_eq!(r.selection_anchor, Some(3));
+        assert_eq!(r.cursor_position, 2);
+    }
+
+    #[test]
+    fn shift_left_extends_selection() {
+        let mut r = make_input_renderer("hello");
+        r.cursor_position = 3;
+        handle_shift_left(&mut r);
+        handle_shift_left(&mut r);
+        assert_eq!(r.selection_anchor, Some(3));
+        assert_eq!(r.cursor_position, 1);
+    }
+
+    #[test]
+    fn shift_left_at_start_noop() {
+        let mut r = make_input_renderer("hello");
+        r.cursor_position = 0;
+        handle_shift_left(&mut r);
+        assert_eq!(r.selection_anchor, None);
+        assert_eq!(r.cursor_position, 0);
+    }
+
+    #[test]
+    fn shift_left_utf8() {
+        // "Aé" = A(1) + é(2) = 3 bytes
+        let mut r = make_input_renderer("A\u{00E9}"); // é is 2 UTF-8 bytes
+        r.cursor_position = 3; // end
+        handle_shift_left(&mut r);
+        assert_eq!(r.selection_anchor, Some(3));
+        assert_eq!(r.cursor_position, 1); // start of é
+    }
+
+    #[test]
+    fn shift_right_starts_selection() {
+        let mut r = make_input_renderer("hello");
+        r.cursor_position = 1;
+        handle_shift_right(&mut r);
+        assert_eq!(r.selection_anchor, Some(1));
+        assert_eq!(r.cursor_position, 2);
+    }
+
+    #[test]
+    fn shift_right_at_end_noop() {
+        let mut r = make_input_renderer("hello");
+        r.cursor_position = 5;
+        handle_shift_right(&mut r);
+        assert_eq!(r.selection_anchor, None);
+        assert_eq!(r.cursor_position, 5);
+    }
+
+    #[test]
+    fn shift_right_utf8() {
+        // "éB" = é(2) + B(1) = 3 bytes
+        let mut r = make_input_renderer("\u{00E9}B"); // é is 2 UTF-8 bytes
+        r.cursor_position = 0;
+        handle_shift_right(&mut r);
+        assert_eq!(r.selection_anchor, Some(0));
+        assert_eq!(r.cursor_position, 2); // past é
+    }
+
+    #[test]
+    fn shift_home_from_middle() {
+        let mut r = make_input_renderer("hello");
+        r.cursor_position = 3;
+        handle_shift_home(&mut r);
+        assert_eq!(r.selection_anchor, Some(3));
+        assert_eq!(r.cursor_position, 0);
+    }
+
+    #[test]
+    fn shift_home_preserves_existing_anchor() {
+        let mut r = make_input_renderer("hello");
+        r.cursor_position = 3;
+        r.selection_anchor = Some(4);
+        handle_shift_home(&mut r);
+        assert_eq!(r.selection_anchor, Some(4));
+        assert_eq!(r.cursor_position, 0);
+    }
+
+    #[test]
+    fn shift_end_from_middle() {
+        let mut r = make_input_renderer("hello");
+        r.cursor_position = 2;
+        handle_shift_end(&mut r);
+        assert_eq!(r.selection_anchor, Some(2));
+        assert_eq!(r.cursor_position, 5);
+    }
+
+    #[test]
+    fn select_all_selects_everything() {
+        let mut r = make_input_renderer("hello");
+        r.cursor_position = 2;
+        handle_select_all(&mut r);
+        assert_eq!(r.selection_anchor, Some(0));
+        assert_eq!(r.cursor_position, 5);
+    }
+
+    #[test]
+    fn select_all_empty_buffer_noop() {
+        let mut r = make_input_renderer("");
+        handle_select_all(&mut r);
+        assert_eq!(r.selection_anchor, None);
+        assert_eq!(r.cursor_position, 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // handle_ctrl_home / handle_ctrl_end
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn ctrl_home_jumps_to_first() {
+        let mut r = make_renderer();
+        r.list_index = 3;
+        handle_ctrl_home(&mut r);
+        assert_eq!(r.list_index, 0);
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn ctrl_end_jumps_to_last() {
+        let mut r = make_renderer();
+        r.list_index = 0;
+        handle_ctrl_end(&mut r);
+        let last = r.active_list_len() - 1;
+        assert_eq!(r.list_index, last);
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn ctrl_end_empty_list_no_change() {
+        let mut r = AppRenderer::new();
+        r.ffon = vec![FfonElement::new_obj("p")];
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        // Empty: no children pushed
+        r.list_index = 0;
+        handle_ctrl_end(&mut r);
+        // Empty list — list_index stays at 0
+        assert_eq!(r.list_index, 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // handle_delete
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn delete_sets_needs_redraw() {
+        let mut r = make_renderer();
+        r.needs_redraw = false;
+        handle_delete(&mut r, History::None);
+        assert!(r.needs_redraw);
+    }
+
+    // -----------------------------------------------------------------------
+    // handle_colon
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn colon_enters_command_mode() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::OperatorGeneral;
+        handle_colon(&mut r);
+        assert_eq!(r.coordinate, Coordinate::Command);
+        assert_eq!(r.previous_coordinate, Coordinate::OperatorGeneral);
+    }
+
+    #[test]
+    fn colon_clears_input_buffer() {
+        let mut r = make_renderer();
+        r.input_buffer = "hello".to_string();
+        r.cursor_position = 3;
+        handle_colon(&mut r);
+        assert!(r.input_buffer.is_empty());
+        assert_eq!(r.cursor_position, 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // handle_tab
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn tab_noop_in_scroll_mode() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::Scroll;
+        handle_tab(&mut r);
+        assert_eq!(r.coordinate, Coordinate::Scroll);
+    }
+
+    #[test]
+    fn tab_from_operator_enters_simple_search() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::OperatorGeneral;
+        handle_tab(&mut r);
+        assert_eq!(r.coordinate, Coordinate::SimpleSearch);
+        assert_eq!(r.previous_coordinate, Coordinate::OperatorGeneral);
+        assert!(r.search_string.is_empty());
+    }
+
+    #[test]
+    fn tab_from_simple_search_enters_scroll() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::SimpleSearch;
+        handle_tab(&mut r);
+        assert_eq!(r.coordinate, Coordinate::Scroll);
+    }
+
+    // -----------------------------------------------------------------------
+    // handle_escape (advanced)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn escape_from_command_mode() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::Command;
+        r.previous_coordinate = Coordinate::OperatorGeneral;
+        handle_escape(&mut r);
+        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+    }
+
+    #[test]
+    fn escape_from_extended_search() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::ExtendedSearch;
+        r.previous_coordinate = Coordinate::OperatorGeneral;
+        handle_escape(&mut r);
+        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+    }
+
+    #[test]
+    fn escape_from_scroll_search() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::ScrollSearch;
+        handle_escape(&mut r);
+        assert_eq!(r.coordinate, Coordinate::Scroll);
+    }
+
+    #[test]
+    fn escape_from_scroll_enters_simple_search() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::Scroll;
+        handle_escape(&mut r);
+        assert_eq!(r.coordinate, Coordinate::SimpleSearch);
+    }
+
+    #[test]
+    fn escape_clears_selection_anchor() {
+        let mut r = make_input_renderer("hello");
+        r.coordinate = Coordinate::OperatorInsert;
+        r.selection_anchor = Some(5);
+        handle_escape(&mut r);
+        assert_eq!(r.selection_anchor, None);
+    }
+
+    #[test]
+    fn escape_from_editor_insert_goes_to_operator_general() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::EditorInsert;
+        handle_escape(&mut r);
+        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+    }
+
+    // -----------------------------------------------------------------------
+    // handle_ctrl_f
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn ctrl_f_from_scroll_enters_scroll_search() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::Scroll;
+        handle_ctrl_f(&mut r);
+        assert_eq!(r.coordinate, Coordinate::ScrollSearch);
+    }
+
+    #[test]
+    fn ctrl_f_noop_in_scroll_search() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::ScrollSearch;
+        handle_ctrl_f(&mut r);
+        assert_eq!(r.coordinate, Coordinate::ScrollSearch);
+    }
+
+    #[test]
+    fn ctrl_f_from_operator_enters_simple_search() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::OperatorGeneral;
+        handle_ctrl_f(&mut r);
+        assert_eq!(r.coordinate, Coordinate::SimpleSearch);
+        assert_eq!(r.previous_coordinate, Coordinate::OperatorGeneral);
+    }
+
+    #[test]
+    fn ctrl_f_from_insert_enters_input_search() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::OperatorInsert;
+        handle_ctrl_f(&mut r);
+        assert_eq!(r.coordinate, Coordinate::InputSearch);
+        assert_eq!(r.previous_coordinate, Coordinate::OperatorInsert);
+    }
+
+    // -----------------------------------------------------------------------
+    // handle_up / handle_down (advanced — with actual list)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn up_in_simple_search_decrements_list_index() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::SimpleSearch;
+        r.list_index = 3;
+        r.sync_current_id_from_list();
+        handle_up(&mut r);
+        assert_eq!(r.list_index, 2);
+    }
+
+    #[test]
+    fn up_at_zero_stays_in_search() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::SimpleSearch;
+        r.list_index = 0;
+        handle_up(&mut r);
+        assert_eq!(r.list_index, 0);
+    }
+
+    #[test]
+    fn down_in_simple_search_increments_list_index() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::SimpleSearch;
+        r.list_index = 0;
+        handle_down(&mut r);
+        assert_eq!(r.list_index, 1);
+    }
+
+    #[test]
+    fn down_at_max_stays_in_search() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::SimpleSearch;
+        let last = r.active_list_len() - 1;
+        r.list_index = last;
+        handle_down(&mut r);
+        assert_eq!(r.list_index, last);
     }
 }

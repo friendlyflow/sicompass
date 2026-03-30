@@ -20,4 +20,18 @@ mod tests {
         assert!(contains_normalised("\u{00e9}", "e\u{0301}"));
         assert!(contains_normalised("e\u{0301}", "\u{00e9}"));
     }
+
+    #[test] fn uppercase_needle() { assert!(contains_normalised("hello world", "HELLO")); }
+    #[test] fn exact_match() { assert!(contains_normalised("hello", "hello")); }
+    #[test] fn unicode_case_fold() {
+        // "CAFÉ" should match "café"
+        assert!(contains_normalised("café", "CAFÉ"));
+    }
+    #[test] fn unicode_accent_resume() {
+        assert!(contains_normalised("Résumé", "résumé"));
+    }
+    #[test] fn partial_no_match() {
+        // needle longer than haystack
+        assert!(!contains_normalised("hel", "hello"));
+    }
 }
