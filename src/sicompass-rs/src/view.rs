@@ -63,6 +63,16 @@ pub fn main_loop(app: &mut AppState) {
                         WindowEvent::CloseRequested => {
                             app.running = false;
                         }
+                        WindowEvent::FocusGained => {
+                            if let Some(adapter) = app.accesskit_adapter.as_mut() {
+                                adapter.update_window_focus(true);
+                            }
+                        }
+                        WindowEvent::FocusLost => {
+                            if let Some(adapter) = app.accesskit_adapter.as_mut() {
+                                adapter.update_window_focus(false);
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -225,14 +235,25 @@ fn update_view(app: &mut AppState) {
             }
         }
 
-        // Item text (re-borrow fr after possible rect_renderer borrow)
-        if let Some(fr) = app.font_renderer.as_mut() {
-            let display = if *is_selected {
-                insert_display.as_deref().unwrap_or(label.as_str())
-            } else {
-                label.as_str()
-            };
-            fr.prepare_text_for_rendering(display, 10.0, item_y, scale, COLOR_TEXT);
+        // Image item or text item
+        let img_path = sicompass_sdk::tags::extract_image(label);
+        if let Some(ref path) = img_path {
+            // Render a thumbnail square fitting within the line height
+            if let Some(ir) = app.image_renderer.as_mut() {
+                let img_h = line_height as f32 - 4.0;
+                let img_y = item_y - ascender * scale - crate::text::TEXT_PADDING + 2.0;
+                unsafe { ir.prepare_image(path, 10.0, img_y, img_h, img_h); }
+            }
+        } else {
+            // Text item (re-borrow fr after possible rect_renderer borrow)
+            if let Some(fr) = app.font_renderer.as_mut() {
+                let display = if *is_selected {
+                    insert_display.as_deref().unwrap_or(label.as_str())
+                } else {
+                    label.as_str()
+                };
+                fr.prepare_text_for_rendering(display, 10.0, item_y, scale, COLOR_TEXT);
+            }
         }
     }
 }
@@ -291,6 +312,13 @@ fn build_insert_display(r: &AppRenderer) -> Option<String> {
 // ---------------------------------------------------------------------------
 
 fn handle_keydown(app: &mut AppState, keycode: Option<Keycode>, keymod: Mod) {
+    if crate::events::dispatch_key(&mut app.renderer, keycode, keymod) {
+        app.running = false;
+    }
+}
+
+#[allow(dead_code)]
+fn handle_keydown_old(app: &mut AppState, keycode: Option<Keycode>, keymod: Mod) {
     let r = &mut app.renderer;
     let ctrl  = keymod.intersects(Mod::LCTRLMOD  | Mod::RCTRLMOD);
     let shift = keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD);

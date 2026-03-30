@@ -1,4 +1,3 @@
-#![allow(dead_code, unused_imports)]
 //! sicompass — Rust port of the Vulkan/SDL3 modal UI application.
 //!
 //! Module layout mirrors the C source in `src/sicompass/`:
@@ -19,8 +18,8 @@
 //! | `programs`      | programs.c       | 4     | ✓      |
 //! | `state`         | state.c          | 4     | ✓      |
 //! | `events`        | events.c         | 4     | ✓      |
-//! | `image`         | image.c          | 5     | stub   |
-//! | `accesskit_sdl` | accesskit_sdl.c  | 5     | stub   |
+//! | `image`         | image.c          | 5     | ✓      |
+//! | `accesskit_sdl` | accesskit_sdl.c  | 5     | ✓      |
 //!
 //! ## Library providers (Phase 5)
 //!
@@ -33,24 +32,10 @@
 //! | `sicompass-chatclient`   | lib_chatclient       | ✓      |
 //! | `sicompass-emailclient`  | lib_emailclient      | ✓      |
 
-mod app_state;
-mod render;
-mod view;
-
-mod accesskit_sdl;
-mod caret;
-mod checkmark;
-mod events;
-mod handlers;
-mod image;
-mod list;
-mod programs;
-mod provider;
-mod rectangle;
-mod state;
-mod text;
-mod unicode_search;
-
+// All modules are declared in lib.rs; the binary just re-uses them.
+use sicompass::app_state;
+use sicompass::render;
+use sicompass::view;
 use std::process;
 
 fn main() {

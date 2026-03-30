@@ -375,6 +375,25 @@ pub fn handle_history_action(r: &mut AppRenderer, history: History) {
                     r.current_id = entry_id;
                 }
             }
+            Task::FsCreate => {
+                let undo_elem = r.undo_history[entry_idx].new_element.clone();
+                if let Some(elem) = undo_elem {
+                    let name = match &elem {
+                        sicompass_sdk::ffon::FfonElement::Str(s) => s.clone(),
+                        sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.clone(),
+                    };
+                    r.current_id = entry_id.clone();
+                    crate::provider::delete_item_by_name(r, &name);
+                    crate::provider::refresh_current_directory(r);
+                    // Clamp cursor if out of bounds
+                    let parent_len = get_parent_len(&r.ffon, &entry_id);
+                    if let Some(idx) = r.current_id.last() {
+                        if idx >= parent_len && parent_len > 0 {
+                            r.current_id.set_last(parent_len - 1);
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     } else if history == History::Redo {
@@ -409,6 +428,23 @@ pub fn handle_history_action(r: &mut AppRenderer, history: History) {
             Task::Input | Task::Paste => {
                 if let Some(elem) = entry_new {
                     replace_element_at_id(r, &entry_id, elem);
+                    r.current_id = entry_id;
+                }
+            }
+            Task::FsCreate => {
+                if let Some(elem) = entry_new {
+                    let name = match &elem {
+                        sicompass_sdk::ffon::FfonElement::Str(s) => s.clone(),
+                        sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.clone(),
+                    };
+                    let is_dir = matches!(elem, sicompass_sdk::ffon::FfonElement::Obj(_));
+                    r.current_id = entry_id.clone();
+                    if is_dir {
+                        crate::provider::create_directory(r, &name);
+                    } else {
+                        crate::provider::create_file(r, &name);
+                    }
+                    crate::provider::refresh_current_directory(r);
                     r.current_id = entry_id;
                 }
             }

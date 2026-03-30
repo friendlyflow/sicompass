@@ -9,6 +9,10 @@ description = "sicompass — Vulkan/SDL3 modal UI (Rust port)"
 name = "sicompass"
 path = "src/main.rs"
 
+[lib]
+name = "sicompass"
+path = "src/lib.rs"
+
 [dependencies]
 sicompass-sdk = { workspace = true }
 sicompass-tutorial = { workspace = true }
