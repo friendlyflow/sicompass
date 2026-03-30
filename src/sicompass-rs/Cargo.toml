@@ -32,6 +32,7 @@ image = { workspace = true }
 sdl3 = { workspace = true }
 
 accesskit = { workspace = true }
+accesskit_unix = { workspace = true }
 
 unicode-normalization = { workspace = true }
 

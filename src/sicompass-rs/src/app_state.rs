@@ -388,6 +388,10 @@ pub struct AppState {
     // ---- Rendering sub-systems (Phase 5) -----------------------------------
     pub font_renderer: Option<crate::text::FontRenderer>,
     pub rect_renderer: Option<crate::rectangle::RectangleRenderer>,
+    pub image_renderer: Option<crate::image::ImageRenderer>,
+
+    // ---- Accessibility -----------------------------------------------------
+    pub accesskit_adapter: Option<crate::accesskit_sdl::AccessKitAdapter>,
 
     // ---- Settings apply queue ----------------------------------------------
     /// Receives (key, value) events fired by the settings provider's ApplyFn.
@@ -420,7 +424,21 @@ impl AppState {
                 state.render_pass,
             )?;
             state.rect_renderer = Some(rr);
+
+            let ir = crate::image::ImageRenderer::new(
+                &state.device,
+                &state.instance,
+                state.physical_device,
+                state.command_pool,
+                state.graphics_queue,
+                state.render_pass,
+            )?;
+            state.image_renderer = Some(ir);
         }
+
+        // Initialise accessibility adapter (no-op if no AT is active)
+        state.accesskit_adapter =
+            crate::accesskit_sdl::AccessKitAdapter::new(&state.window, &state.renderer);
 
         // Load providers (tutorial + settings by default)
         let queue = crate::programs::load_programs(&mut state.renderer);

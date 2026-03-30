@@ -779,6 +779,8 @@ pub fn build_app() -> Result<AppState, SiError> {
         renderer: crate::app_state::AppRenderer::new(),
         font_renderer: None,
         rect_renderer: None,
+        image_renderer: None,
+        accesskit_adapter: None,
         settings_queue: None,
     })
 }
@@ -921,6 +923,10 @@ pub fn draw_frame(app: &mut AppState) {
         if let Some(fr) = &app.font_renderer {
             fr.draw_text(&app.device, cb, frame, app.swapchain_extent);
         }
+        // Draw images (<image> tags)
+        if let Some(ir) = &app.image_renderer {
+            ir.draw_images(&app.device, cb, app.swapchain_extent);
+        }
 
         app.device.cmd_end_render_pass(cb);
         app.device.end_command_buffer(cb).unwrap();
@@ -986,6 +992,11 @@ pub fn cleanup(app: &mut AppState) {
         if let Some(rr) = app.rect_renderer.take() {
             rr.cleanup(&app.device);
         }
+        if let Some(mut ir) = app.image_renderer.take() {
+            ir.cleanup();
+        }
+        // accesskit_adapter has no GPU resources — drop is sufficient.
+        drop(app.accesskit_adapter.take());
 
         for i in 0..MAX_FRAMES_IN_FLIGHT {
             app.device.destroy_semaphore(app.render_finished[i], None);
