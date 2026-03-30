@@ -392,6 +392,39 @@ mod tests {
         dispatch_key(&mut r, Some(Keycode::L), no_mod());
         assert!(r.needs_redraw);
     }
+
+    // --- D in OperatorGeneral → handle_dashboard ---
+
+    #[test]
+    fn d_in_operator_general_goes_to_dashboard() {
+        let mut r = AppRenderer::new();
+        // No provider — handle_dashboard returns early, but dispatch routes to it
+        dispatch_key(&mut r, Some(Keycode::D), no_mod());
+        // Coordinate stays OperatorGeneral when no provider has a dashboard image
+        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+    }
+
+    #[test]
+    fn d_in_editor_general_is_not_handled() {
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::EditorGeneral;
+        let before = r.coordinate;
+        dispatch_key(&mut r, Some(Keycode::D), no_mod());
+        assert_eq!(r.coordinate, before);
+    }
+
+    // --- Ctrl+Enter in EditorInsert → insert newline ---
+
+    #[test]
+    fn ctrl_enter_in_editor_insert_inserts_newline() {
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::EditorInsert;
+        r.input_buffer = "hello".to_string();
+        r.cursor_position = 5;
+        dispatch_key(&mut r, Some(Keycode::Return), ctrl());
+        assert!(r.input_buffer.contains('\n'));
+        assert!(r.needs_redraw);
+    }
 }
 
 /// Dispatch a key event to the appropriate handler based on the current mode.
@@ -427,6 +460,7 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
             Some(Keycode::I) if ctrl && !shift => handlers::handle_ctrl_i_operator(r),
             Some(Keycode::D) if ctrl && !shift => handlers::handle_file_delete(r),
             Some(Keycode::Delete) if !ctrl && !shift => handlers::handle_file_delete(r),
+            Some(Keycode::D) if !ctrl && !shift => handlers::handle_dashboard(r),
             Some(Keycode::M) if !ctrl && !shift => handlers::handle_meta(r),
             Some(Keycode::Space) if !ctrl && !shift => handlers::handle_space(r),
             Some(Keycode::Z) if ctrl && !shift => handlers::handle_undo(r),
@@ -546,6 +580,11 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
                     r.cursor_position = pos + ch.len_utf8();
                     r.needs_redraw = true;
                 }
+            }
+            Some(Keycode::Return) | Some(Keycode::KpEnter)
+                if ctrl && matches!(r.coordinate, Coordinate::EditorInsert | Coordinate::OperatorInsert) =>
+            {
+                handlers::handle_input(r, "\n");
             }
             Some(Keycode::Return) | Some(Keycode::KpEnter)
                 if matches!(r.coordinate, Coordinate::EditorInsert | Coordinate::EditorNormal) =>
