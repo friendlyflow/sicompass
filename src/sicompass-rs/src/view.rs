@@ -122,6 +122,9 @@ pub fn main_loop(app: &mut AppState) {
             render::recreate_swapchain(app);
         }
 
+        // ---- Sync clear colour from active palette --------------------------
+        app.clear_color = rgba_u32_to_f32(app.renderer.palette().background);
+
         // ---- Draw frame ---------------------------------------------------
         render::draw_frame(app);
 
@@ -138,14 +141,10 @@ pub fn main_loop(app: &mut AppState) {
 // updateView — fill CPU vertex buffers for this frame
 // ---------------------------------------------------------------------------
 
-// Dark palette colours (ARGB-packed as RRGGBBAA)
-const COLOR_BG: u32      = 0x000000FF; // black background (same as clear)
-const COLOR_TEXT: u32    = 0xFFFFFFFF; // white text
-const COLOR_SELECTED: u32 = 0x2D4A28FF; // dark green selection
-const COLOR_SEPARATOR: u32 = 0x333333FF; // dark gray separator
-const COLOR_ERROR: u32   = 0xFF0000FF; // red
-
 fn update_view(app: &mut AppState) {
+    // ---- Snapshot palette before mutable borrows ---------------------------
+    let p = *app.renderer.palette();
+
     // ---- Collect rendering data (before borrowing font/rect renderers) ----
     let scale;
     let line_height;
@@ -200,23 +199,23 @@ fn update_view(app: &mut AppState) {
 
     // ---- Header separator line -------------------------------------------
     if let Some(rr) = app.rect_renderer.as_mut() {
-        rr.prepare_rectangle(0.0, line_height as f32, win_w, 1.0, COLOR_SEPARATOR, 0.0);
+        rr.prepare_rectangle(0.0, line_height as f32, win_w, 1.0, p.header_sep, 0.0);
     }
 
     // ---- Header text -----------------------------------------------------
     let header_baseline = (ascender * scale + crate::text::TEXT_PADDING) as f32;
-    fr.prepare_text_for_rendering(&header, 10.0, header_baseline, scale, COLOR_TEXT);
+    fr.prepare_text_for_rendering(&header, 10.0, header_baseline, scale, p.text);
 
     // ---- Error message (right of header) ---------------------------------
     if !error_msg.is_empty() {
         let err_x = (header.len() as f32 * fr.get_width_em(scale)) + 20.0;
-        fr.prepare_text_for_rendering(&error_msg, err_x, header_baseline, scale, COLOR_ERROR);
+        fr.prepare_text_for_rendering(&error_msg, err_x, header_baseline, scale, p.error);
     }
 
     // ---- Search / command line -------------------------------------------
     if let Some(ref s) = search_str {
         let search_y = line_height as f32 * 2.0 - crate::text::TEXT_PADDING;
-        fr.prepare_text_for_rendering(s, 10.0, search_y, scale, COLOR_TEXT);
+        fr.prepare_text_for_rendering(s, 10.0, search_y, scale, p.text);
     }
 
     // ---- List items -------------------------------------------------------
@@ -231,7 +230,7 @@ fn update_view(app: &mut AppState) {
         if *is_selected {
             let rect_y = item_y - ascender * scale - crate::text::TEXT_PADDING;
             if let Some(rr) = app.rect_renderer.as_mut() {
-                rr.prepare_rectangle(0.0, rect_y, win_w, line_height as f32, COLOR_SELECTED, 0.0);
+                rr.prepare_rectangle(0.0, rect_y, win_w, line_height as f32, p.selected, 0.0);
             }
         }
 
@@ -252,10 +251,20 @@ fn update_view(app: &mut AppState) {
                 } else {
                     label.as_str()
                 };
-                fr.prepare_text_for_rendering(display, 10.0, item_y, scale, COLOR_TEXT);
+                fr.prepare_text_for_rendering(display, 10.0, item_y, scale, p.text);
             }
         }
     }
+}
+
+/// Convert a packed 0xRRGGBBAA color to `[r, g, b, a]` floats in 0.0..=1.0.
+fn rgba_u32_to_f32(c: u32) -> [f32; 4] {
+    [
+        ((c >> 24) & 0xFF) as f32 / 255.0,
+        ((c >> 16) & 0xFF) as f32 / 255.0,
+        ((c >>  8) & 0xFF) as f32 / 255.0,
+        ( c        & 0xFF) as f32 / 255.0,
+    ]
 }
 
 /// Build the header status line (mirrors C updateView header format).
@@ -608,4 +617,36 @@ fn build_display_path(r: &crate::app_state::AppRenderer) -> String {
     }
 
     if parts.is_empty() { "/".to_owned() } else { parts.join(" / ") }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rgba_u32_to_f32_black() {
+        let [r, g, b, a] = rgba_u32_to_f32(0x000000FF);
+        assert!((r - 0.0).abs() < 1e-6);
+        assert!((g - 0.0).abs() < 1e-6);
+        assert!((b - 0.0).abs() < 1e-6);
+        assert!((a - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn rgba_u32_to_f32_white() {
+        let [r, g, b, a] = rgba_u32_to_f32(0xFFFFFFFF);
+        assert!((r - 1.0).abs() < 1e-6);
+        assert!((g - 1.0).abs() < 1e-6);
+        assert!((b - 1.0).abs() < 1e-6);
+        assert!((a - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn rgba_u32_to_f32_red() {
+        let [r, g, b, a] = rgba_u32_to_f32(0xFF0000FF);
+        assert!((r - 1.0).abs() < 1e-6);
+        assert!((g - 0.0).abs() < 1e-6);
+        assert!((b - 0.0).abs() < 1e-6);
+        assert!((a - 1.0).abs() < 1e-6);
+    }
 }

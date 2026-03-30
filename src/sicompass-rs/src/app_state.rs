@@ -56,6 +56,52 @@ impl From<ash::LoadingError> for SiError {
 // ---------------------------------------------------------------------------
 // Enums
 // ---------------------------------------------------------------------------
+// Palette
+// ---------------------------------------------------------------------------
+
+/// Theme selection. Mirrors C `colorScheme` setting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PaletteTheme {
+    #[default]
+    Dark,
+    Light,
+}
+
+/// RGBA color values for all rendered elements (packed as 0xRRGGBBAA).
+///
+/// Mirrors C `ColorPalette` struct.
+#[derive(Debug, Clone, Copy)]
+pub struct ColorPalette {
+    pub background:      u32,
+    pub text:            u32,
+    pub header_sep:      u32,
+    pub selected:        u32,
+    pub ext_search:      u32,
+    pub scroll_search:   u32,
+    pub error:           u32,
+}
+
+pub const PALETTE_DARK: ColorPalette = ColorPalette {
+    background:    0x000000FF,
+    text:          0xFFFFFFFF,
+    header_sep:    0x333333FF,
+    selected:      0x2D4A28FF,
+    ext_search:    0x696969FF,
+    scroll_search: 0x264F78FF,
+    error:         0xFF0000FF,
+};
+
+pub const PALETTE_LIGHT: ColorPalette = ColorPalette {
+    background:    0xFFFFFFFF,
+    text:          0x000000FF,
+    header_sep:    0xE0E0E0FF,
+    selected:      0xC0ECB8FF,
+    ext_search:    0x333333FF,
+    scroll_search: 0xA8C7FAFF,
+    error:         0xFF0000FF,
+};
+
+// ---------------------------------------------------------------------------
 
 /// Navigation / edit mode — mirrors the C `Coordinate` enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -282,6 +328,9 @@ pub struct AppRenderer {
     pub current_command: CommandPhase,
     pub provider_command_name: String,
 
+    // ---- Palette -----------------------------------------------------------
+    pub palette_theme: PaletteTheme,
+
     // ---- Current URI -------------------------------------------------------
     pub current_uri: String,
 }
@@ -333,7 +382,16 @@ impl AppRenderer {
             error_message: String::new(),
             current_command: CommandPhase::None,
             provider_command_name: String::new(),
+            palette_theme: PaletteTheme::Dark,
             current_uri: String::new(),
+        }
+    }
+
+    /// Return the active color palette.
+    pub fn palette(&self) -> &'static ColorPalette {
+        match self.palette_theme {
+            PaletteTheme::Dark => &PALETTE_DARK,
+            PaletteTheme::Light => &PALETTE_LIGHT,
         }
     }
 
