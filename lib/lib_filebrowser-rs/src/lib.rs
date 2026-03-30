@@ -147,6 +147,15 @@ impl Provider for FilebrowserProvider {
 
     fn needs_refresh(&self) -> bool { false }
 
+    fn on_setting_change(&mut self, key: &str, value: &str) {
+        if key == "sortOrder" {
+            self.sort_mode = match value {
+                "chronologically" => SortMode::Chrono,
+                _ => SortMode::Alpha,
+            };
+        }
+    }
+
     fn commit_edit(&mut self, old: &str, new_content: &str) -> bool {
         // Strip tags to get bare filename
         let old_name = tags::strip_display(old);

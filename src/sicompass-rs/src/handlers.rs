@@ -5,7 +5,7 @@
 
 use crate::app_state::{AppRenderer, Coordinate, History, Task};
 use crate::list;
-use sicompass_sdk::ffon::{get_ffon_at_id, next_layer_exists};
+use sicompass_sdk::ffon::{get_ffon_at_id, next_layer_exists, IdArray};
 use sicompass_sdk::tags;
 
 // ---------------------------------------------------------------------------
@@ -45,12 +45,32 @@ pub fn handle_right(r: &mut AppRenderer) {
         return; // leaf node — not navigable
     }
 
-    let mut new_id = item_id.clone();
-    new_id.push(0);
-    r.current_id = new_id;
+    // Extract segment name + whether the Obj already has children (static vs lazy).
+    let (segment, has_children) = {
+        let depth = item_id.depth();
+        let last_idx = item_id.get(depth.saturating_sub(1)).unwrap_or(0);
+        get_ffon_at_id(&r.ffon, &item_id)
+            .and_then(|s| s.get(last_idx))
+            .and_then(|e| e.as_obj())
+            .map(|o| (tags::strip_display(&o.key).to_string(), !o.children.is_empty()))
+            .unwrap_or_default()
+    };
 
-    // Refresh from provider if it uses lazy fetching (no_cache providers)
-    crate::provider::refresh_if_needed(r);
+    if has_children {
+        // Static tree (settings, tutorial, meta): navigate deeper in-place.
+        let mut new_id = item_id.clone();
+        new_id.push(0);
+        r.current_id = new_id;
+    } else {
+        // Lazy-fetch provider (filebrowser): push path, re-fetch, stay at depth 2.
+        let provider_idx = item_id.get(0).unwrap_or(0);
+        crate::provider::push_path(r, &segment);
+        crate::provider::refresh_current_directory(r);
+        let mut new_id = IdArray::new();
+        new_id.push(provider_idx);
+        new_id.push(0);
+        r.current_id = new_id;
+    }
 
     list::create_list_current_layer(r);
     r.caret.reset(sdl_ticks());
@@ -63,14 +83,31 @@ pub fn handle_left(r: &mut AppRenderer) {
         return; // already at root
     }
 
+    // If we're at depth 2 inside a lazy-fetch provider that has navigated into
+    // a subdirectory, pop the provider path and re-fetch rather than popping
+    // the id (which would exit the provider entirely).
+    if r.current_id.depth() == 2 {
+        let provider_has_path = crate::provider::get_active_provider_ref(r)
+            .map(|p| p.current_path() != "/")
+            .unwrap_or(false);
+
+        if provider_has_path {
+            let provider_idx = r.current_id.get(0).unwrap_or(0);
+            crate::provider::pop_path(r);
+            crate::provider::refresh_current_directory(r);
+            let mut new_id = IdArray::new();
+            new_id.push(provider_idx);
+            new_id.push(0);
+            r.current_id = new_id;
+            list::create_list_current_layer(r);
+            r.caret.reset(sdl_ticks());
+            r.needs_redraw = true;
+            return;
+        }
+    }
+
     r.current_id.pop();
-
-    // Refresh parent level if needed
-    crate::provider::refresh_if_needed(r);
-
     list::create_list_current_layer(r);
-    // current_id.last() now points at the item we came from — list_index was
-    // already set correctly by create_list_current_layer.
     r.caret.reset(sdl_ticks());
     r.needs_redraw = true;
 }
@@ -265,15 +302,16 @@ pub fn handle_enter_operator(r: &mut AppRenderer) {
         if let Some(arr) = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id) {
             if let Some(elem) = arr.get_mut(idx) {
                 *elem = match &elem_clone {
-                    FfonElement::Str(_) => FfonElement::new_str(new_text),
+                    FfonElement::Str(_) => FfonElement::new_str(new_text.clone()),
                     FfonElement::Obj(o) => {
-                        let mut new_obj = FfonElement::new_obj(new_text);
+                        let mut new_obj = FfonElement::new_obj(new_text.clone());
                         for c in &o.children { new_obj.as_obj_mut().unwrap().push(c.clone()); }
                         new_obj
                     }
                 };
             }
         }
+        crate::provider::notify_checkbox_changed(r, &new_text);
         list::create_list_current_layer(r);
         r.needs_redraw = true;
         return;
@@ -281,6 +319,7 @@ pub fn handle_enter_operator(r: &mut AppRenderer) {
 
     // Toggle radio — add <checked> to selected, remove from siblings
     if toggle_radio(r) {
+        crate::provider::notify_radio_changed(r);
         list::create_list_current_layer(r);
         r.needs_redraw = true;
         return;

@@ -106,6 +106,12 @@ pub trait Provider: Send + 'static {
     fn on_button_press(&mut self, _function_name: &str) {}
     fn on_checkbox_change(&mut self, _label: &str, _checked: bool) {}
 
+    /// Called when any setting changes (key/value pair from the settings apply callback).
+    ///
+    /// Providers implement this to react to settings that affect them
+    /// (e.g. `chatHomeserver`, `sortOrder`, `colorScheme`). Default: no-op.
+    fn on_setting_change(&mut self, _key: &str, _value: &str) {}
+
     /// Create a new FFON element for an "Add element:" section.
     fn create_element(&mut self, _key: &str) -> Option<FfonElement> { None }
 

@@ -14,6 +14,9 @@ sicompass-sdk = { workspace = true }
 sicompass-tutorial = { workspace = true }
 sicompass-settings = { workspace = true }
 sicompass-filebrowser = { workspace = true }
+sicompass-webbrowser = { workspace = true }
+sicompass-chatclient = { workspace = true }
+sicompass-emailclient = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }
