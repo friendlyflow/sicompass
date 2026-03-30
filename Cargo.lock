@@ -1231,12 +1231,21 @@ dependencies = [
  "sdl3",
  "serde",
  "serde_json",
+ "sicompass-filebrowser",
  "sicompass-sdk",
  "sicompass-settings",
  "sicompass-tutorial",
  "tempfile",
  "tokio",
  "unicode-normalization",
+]
+
+[[package]]
+name = "sicompass-filebrowser"
+version = "0.1.0"
+dependencies = [
+ "sicompass-sdk",
+ "tempfile",
 ]
 
 [[package]]
