@@ -327,3 +327,118 @@ pub fn notify_radio_changed(renderer: &mut AppRenderer) {
         p.on_radio_change(&group_key, &selected_value);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sicompass_sdk::ffon::{FfonElement, IdArray};
+    use sicompass_sdk::provider::Provider;
+
+    /// Minimal provider for testing.
+    struct MockProvider {
+        name: String,
+        path: String,
+        items: Vec<FfonElement>,
+    }
+
+    impl MockProvider {
+        fn new(name: &str, items: Vec<FfonElement>) -> Self {
+            MockProvider { name: name.to_owned(), path: "/".to_owned(), items }
+        }
+    }
+
+    impl Provider for MockProvider {
+        fn name(&self) -> &str { &self.name }
+        fn fetch(&mut self) -> Vec<FfonElement> { self.items.clone() }
+        fn push_path(&mut self, seg: &str) {
+            if self.path == "/" { self.path = format!("/{seg}"); }
+            else { self.path.push('/'); self.path.push_str(seg); }
+        }
+        fn pop_path(&mut self) {
+            if let Some(s) = self.path.rfind('/') {
+                if s == 0 { self.path = "/".to_owned(); } else { self.path.truncate(s); }
+            }
+        }
+        fn current_path(&self) -> &str { &self.path }
+    }
+
+    fn make_renderer_with_provider(p: MockProvider) -> AppRenderer {
+        let mut r = AppRenderer::new();
+        // Build a minimal FFON tree mirroring what filebrowser would set up
+        let mut root = FfonElement::new_obj(p.name().to_owned());
+        for item in p.items.iter() { root.as_obj_mut().unwrap().push(item.clone()); }
+        r.ffon = vec![root];
+        r.providers = vec![Box::new(p)];
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        r
+    }
+
+    // --- active_provider_index ---
+
+    #[test]
+    fn active_provider_index_returns_first_id() {
+        let p = MockProvider::new("test", vec![]);
+        let r = make_renderer_with_provider(p);
+        assert_eq!(active_provider_index(&r), Some(0));
+    }
+
+    #[test]
+    fn active_provider_index_second_provider() {
+        let p = MockProvider::new("test", vec![]);
+        let mut r = make_renderer_with_provider(p);
+        // Manually set id to point to index 0 — already done by make_renderer_with_provider
+        assert_eq!(active_provider_index(&r), Some(0));
+        // Change to index 1 (even if no provider there)
+        r.current_id.set_last(1);
+        assert_eq!(active_provider_index(&r), Some(1));
+    }
+
+    // --- get_active_provider_ref ---
+
+    #[test]
+    fn get_active_provider_ref_returns_name() {
+        let p = MockProvider::new("myprovider", vec![]);
+        let r = make_renderer_with_provider(p);
+        let name = get_active_provider_ref(&r).map(|p| p.name().to_owned());
+        assert_eq!(name, Some("myprovider".to_owned()));
+    }
+
+    #[test]
+    fn get_active_provider_ref_none_when_no_providers() {
+        let mut r = AppRenderer::new();
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        assert!(get_active_provider_ref(&r).is_none());
+    }
+
+    // --- push_path / pop_path / current_path ---
+
+    #[test]
+    fn push_path_updates_provider_path() {
+        let p = MockProvider::new("test", vec![]);
+        let mut r = make_renderer_with_provider(p);
+        push_path(&mut r, "subdir");
+        assert_eq!(current_path(&r), "/subdir");
+    }
+
+    #[test]
+    fn pop_path_restores_root() {
+        let p = MockProvider::new("test", vec![]);
+        let mut r = make_renderer_with_provider(p);
+        push_path(&mut r, "subdir");
+        pop_path(&mut r);
+        assert_eq!(current_path(&r), "/");
+    }
+
+    #[test]
+    fn current_path_default_is_slash() {
+        let p = MockProvider::new("test", vec![]);
+        let r = make_renderer_with_provider(p);
+        assert_eq!(current_path(&r), "/");
+    }
+
+    #[test]
+    fn current_path_returns_slash_when_no_provider() {
+        let r = AppRenderer::new();
+        assert_eq!(current_path(&r), "/");
+    }
+}

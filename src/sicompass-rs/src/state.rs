@@ -772,4 +772,130 @@ mod tests {
         assert_eq!(r.undo_history.len(), 1);
         assert_eq!(r.undo_history[0].task, Task::Input);
     }
+
+    // --- is_line_key (additional) ---
+
+    #[test]
+    fn is_line_key_just_colon() {
+        assert!(is_line_key(":"));
+    }
+
+    #[test]
+    fn is_line_key_colon_in_middle() {
+        assert!(!is_line_key("key:value"));
+    }
+
+    #[test]
+    fn is_line_key_multiple_colons() {
+        assert!(is_line_key("a:b:c:"));
+    }
+
+    #[test]
+    fn is_line_key_spaces_before_colon() {
+        assert!(is_line_key("my key :"));
+    }
+
+    // --- strip_trailing_colon (additional) ---
+
+    #[test]
+    fn strip_colon_just_colon() {
+        assert_eq!(strip_trailing_colon(":"), "");
+    }
+
+    // --- update_history ---
+
+    #[test]
+    fn update_history_skips_non_none_history() {
+        let mut r = AppRenderer::new();
+        let id = IdArray::new();
+        update_history(&mut r, Task::Input, &id, None, None, History::Undo);
+        assert_eq!(r.undo_history.len(), 0);
+    }
+
+    #[test]
+    fn update_history_skips_navigation_tasks() {
+        let mut r = AppRenderer::new();
+        let id = IdArray::new();
+        update_history(&mut r, Task::ArrowUp, &id, None, None, History::None);
+        update_history(&mut r, Task::ArrowDown, &id, None, None, History::None);
+        assert_eq!(r.undo_history.len(), 0);
+    }
+
+    #[test]
+    fn update_history_adds_entry() {
+        let mut r = AppRenderer::new();
+        let mut id = IdArray::new();
+        id.push(0);
+        id.push(2);
+        let prev = FfonElement::new_str("old");
+        let new = FfonElement::new_str("new");
+        update_history(&mut r, Task::Input, &id, Some(prev), Some(new), History::None);
+        assert_eq!(r.undo_history.len(), 1);
+        assert_eq!(r.undo_history[0].task, Task::Input);
+    }
+
+    #[test]
+    fn update_history_multiple_entries() {
+        let mut r = AppRenderer::new();
+        let id = IdArray::new();
+        for _ in 0..5 {
+            update_history(&mut r, Task::Input, &id, None, None, History::None);
+        }
+        assert_eq!(r.undo_history.len(), 5);
+    }
+
+    #[test]
+    fn update_history_null_elements_stored() {
+        let mut r = AppRenderer::new();
+        let id = IdArray::new();
+        update_history(&mut r, Task::Delete, &id, None, None, History::None);
+        assert_eq!(r.undo_history.len(), 1);
+        assert!(r.undo_history[0].prev_element.is_none());
+        assert!(r.undo_history[0].new_element.is_none());
+    }
+
+    // --- update_ids (additional boundary cases) ---
+
+    #[test]
+    fn update_ids_move_up_at_top_stays() {
+        let mut r = make_renderer(vec![FfonElement::new_str("only")]);
+        r.current_id.set_last(0);
+        update_ids(&mut r, false, Task::ArrowUp, History::None);
+        assert_eq!(r.current_id.last(), Some(0));
+    }
+
+    #[test]
+    fn update_ids_move_down_at_bottom_stays() {
+        let mut r = make_renderer(vec![
+            FfonElement::new_str("a"),
+            FfonElement::new_str("b"),
+        ]);
+        r.current_id.set_last(1);
+        update_ids(&mut r, false, Task::ArrowDown, History::None);
+        assert_eq!(r.current_id.last(), Some(1));
+    }
+
+    // --- update_ffon (object key modification) ---
+
+    #[test]
+    fn update_ffon_input_key_modifies_object_key() {
+        let mut r = make_renderer(vec![{
+            let mut root = FfonElement::new_obj("root:");
+            let child = FfonElement::new_obj("old key:");
+            root.as_obj_mut().unwrap().push(child);
+            root
+        }]);
+        r.coordinate = Coordinate::EditorInsert;
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id.push(0);
+            id
+        };
+        r.previous_id = r.current_id.clone();
+        update_ffon(&mut r, "new key:", true, Task::Input, History::None);
+        // The child at [0][0] should now have key "new key"
+        let root_obj = r.ffon[0].as_obj().unwrap();
+        assert_eq!(root_obj.children[0].as_obj().unwrap().key, "new key");
+    }
 }

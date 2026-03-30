@@ -555,3 +555,143 @@ impl FontRenderer {
         ft::FT_Done_FreeType(self.ft_library);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a minimal FontRenderer with zeroed Vulkan/FT handles for math-only tests.
+    fn make_fr(dpi: f32, line_height: f32, m_advance: f32) -> FontRenderer {
+        let mut glyphs: Vec<GlyphInfo> = (0..256).map(|_| GlyphInfo::default()).collect();
+        glyphs[b'M' as usize].advance = m_advance;
+        FontRenderer {
+            ft_library: std::ptr::null_mut(),
+            ft_face: std::ptr::null_mut(),
+            glyphs,
+            line_height,
+            ascender: line_height * 0.8,
+            descender: -(line_height * 0.2),
+            dpi,
+            font_atlas_image: vk::Image::null(),
+            font_atlas_memory: vk::DeviceMemory::null(),
+            font_atlas_view: vk::ImageView::null(),
+            font_atlas_sampler: vk::Sampler::null(),
+            vertex_buffer: vk::Buffer::null(),
+            vertex_buffer_memory: vk::DeviceMemory::null(),
+            descriptor_set_layout: vk::DescriptorSetLayout::null(),
+            descriptor_pool: vk::DescriptorPool::null(),
+            descriptor_sets: Vec::new(),
+            pipeline_layout: vk::PipelineLayout::null(),
+            pipeline: vk::Pipeline::null(),
+            vertices: Vec::new(),
+        }
+    }
+
+    // ---- get_text_scale ---
+
+    #[test]
+    fn text_scale_12pt_96dpi() {
+        let fr = make_fr(96.0, 20.0, 10.0);
+        // 12pt at 96dpi = 16px; scale = 16/20 = 0.8
+        let s = fr.get_text_scale(12.0);
+        assert!((s - 0.8).abs() < 1e-3, "expected 0.8, got {s}");
+    }
+
+    #[test]
+    fn text_scale_24pt_96dpi() {
+        let fr = make_fr(96.0, 20.0, 10.0);
+        // 24pt at 96dpi = 32px; scale = 32/20 = 1.6
+        let s = fr.get_text_scale(24.0);
+        assert!((s - 1.6).abs() < 1e-3, "expected 1.6, got {s}");
+    }
+
+    #[test]
+    fn text_scale_12pt_144dpi() {
+        let fr = make_fr(144.0, 20.0, 10.0);
+        // 12pt at 144dpi = 24px; scale = 24/20 = 1.2
+        let s = fr.get_text_scale(12.0);
+        assert!((s - 1.2).abs() < 1e-3, "expected 1.2, got {s}");
+    }
+
+    #[test]
+    fn text_scale_proportional_to_pt_size() {
+        let fr = make_fr(96.0, 20.0, 10.0);
+        let s12 = fr.get_text_scale(12.0);
+        let s24 = fr.get_text_scale(24.0);
+        assert!((s24 - s12 * 2.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn text_scale_proportional_to_dpi() {
+        let fr96 = make_fr(96.0, 20.0, 10.0);
+        let fr192 = make_fr(192.0, 20.0, 10.0);
+        let s96 = fr96.get_text_scale(12.0);
+        let s192 = fr192.get_text_scale(12.0);
+        assert!((s192 - s96 * 2.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn text_scale_inversely_proportional_to_line_height() {
+        let fr20 = make_fr(96.0, 20.0, 10.0);
+        let fr40 = make_fr(96.0, 40.0, 10.0);
+        let s20 = fr20.get_text_scale(12.0);
+        let s40 = fr40.get_text_scale(12.0);
+        assert!((s20 - s40 * 2.0).abs() < 1e-3);
+    }
+
+    // ---- get_width_em ---
+
+    #[test]
+    fn width_em_basic() {
+        let fr = make_fr(96.0, 20.0, 10.0);
+        assert!((fr.get_width_em(1.0) - 10.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn width_em_scaled() {
+        let fr = make_fr(96.0, 20.0, 10.0);
+        assert!((fr.get_width_em(2.5) - 25.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn width_em_zero_scale() {
+        let fr = make_fr(96.0, 20.0, 10.0);
+        assert!((fr.get_width_em(0.0) - 0.0).abs() < 1e-3);
+    }
+
+    // ---- get_line_height ---
+
+    #[test]
+    fn line_height_no_padding() {
+        let fr = make_fr(96.0, 20.0, 10.0);
+        assert!((fr.get_line_height(1.0, 0.0) - 20.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn line_height_with_padding() {
+        let fr = make_fr(96.0, 20.0, 10.0);
+        // 20 * 1.0 + 4 * 2 = 28
+        assert!((fr.get_line_height(1.0, 4.0) - 28.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn line_height_scaled() {
+        let fr = make_fr(96.0, 20.0, 10.0);
+        // 20 * 2.0 = 40
+        assert!((fr.get_line_height(2.0, 0.0) - 40.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn line_height_scaled_with_padding() {
+        let fr = make_fr(96.0, 20.0, 10.0);
+        // 20 * 0.5 + 3 * 2 = 16
+        assert!((fr.get_line_height(0.5, 3.0) - 16.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn line_height_different_font() {
+        let fr = make_fr(96.0, 30.0, 10.0);
+        // 30 * 1.0 + 2 * 2 = 34
+        assert!((fr.get_line_height(1.0, 2.0) - 34.0).abs() < 1e-3);
+    }
+}

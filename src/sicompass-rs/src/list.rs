@@ -348,4 +348,75 @@ mod tests {
     fn input_str_label() {
         assert!(build_str_label("edit: <input>value</input>", false).starts_with("-i"));
     }
+
+    fn make_renderer_with_items(items: &[&str]) -> AppRenderer {
+        let mut root = FfonElement::new_obj("provider");
+        for &item in items {
+            root.as_obj_mut().unwrap().push(FfonElement::new_str(item));
+        }
+        let mut r = make_renderer_with_ffon(vec![root]);
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        create_list_current_layer(&mut r);
+        r
+    }
+
+    #[test]
+    fn create_list_clears_previous_items() {
+        let mut r = make_renderer_with_items(&["a", "b"]);
+        assert_eq!(r.total_list.len(), 2);
+        // Replace ffon and rebuild
+        r.ffon = vec![{ let mut root = FfonElement::new_obj("p"); root.as_obj_mut().unwrap().push(FfonElement::new_str("only")); root }];
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        create_list_current_layer(&mut r);
+        assert_eq!(r.total_list.len(), 1);
+    }
+
+    #[test]
+    fn create_list_resets_filtered() {
+        let mut r = make_renderer_with_items(&["hello", "world"]);
+        populate_list_current_layer(&mut r, "hello");
+        assert_eq!(r.filtered_list_indices.len(), 1);
+        create_list_current_layer(&mut r);
+        assert!(r.filtered_list_indices.is_empty());
+    }
+
+    #[test]
+    fn populate_empty_search_clears_filter() {
+        let mut r = make_renderer_with_items(&["hello", "world"]);
+        populate_list_current_layer(&mut r, "hello");
+        assert_eq!(r.filtered_list_indices.len(), 1);
+        populate_list_current_layer(&mut r, ""); // empty search → clear filter
+        assert!(r.filtered_list_indices.is_empty());
+    }
+
+    #[test]
+    fn populate_no_matches() {
+        let mut r = make_renderer_with_items(&["hello", "world"]);
+        populate_list_current_layer(&mut r, "xyz");
+        assert_eq!(r.filtered_list_indices.len(), 0);
+    }
+
+    #[test]
+    fn populate_case_insensitive() {
+        let mut r = make_renderer_with_items(&["Hello", "WORLD"]);
+        populate_list_current_layer(&mut r, "hello");
+        assert_eq!(r.filtered_list_indices.len(), 1);
+    }
+
+    #[test]
+    fn populate_clamps_list_index() {
+        let mut r = make_renderer_with_items(&["hello", "world"]);
+        r.list_index = 5; // out of range
+        populate_list_current_layer(&mut r, "hello"); // 1 match
+        assert_eq!(r.list_index, 0);
+    }
+
+    #[test]
+    fn populate_replaces_previous_filter() {
+        let mut r = make_renderer_with_items(&["hello", "world", "help"]);
+        populate_list_current_layer(&mut r, "hel"); // 2 matches: hello, help
+        assert_eq!(r.filtered_list_indices.len(), 2);
+        populate_list_current_layer(&mut r, "hello"); // 1 match
+        assert_eq!(r.filtered_list_indices.len(), 1);
+    }
 }
