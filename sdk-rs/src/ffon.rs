@@ -693,6 +693,13 @@ mod tests {
     }
 
     #[test]
+    fn test_id_array_to_string_single() {
+        let mut id = IdArray::new();
+        id.push(5);
+        assert_eq!(id.to_display_string(), "5");
+    }
+
+    #[test]
     fn test_id_array_to_string() {
         let mut id = IdArray::new();
         id.push(0); id.push(3); id.push(1);
@@ -1376,5 +1383,59 @@ mod tests {
         save_json_file(&elems, &path).unwrap();
         let loaded = load_json_file(&path).unwrap();
         assert_eq!(loaded, elems);
+    }
+
+    // Deeply-nested JSON roundtrip — two levels with tagged content
+    #[test]
+    fn test_json_nested_two_levels_with_tags() {
+        // [{"project": [{"id": ["<input>test</input>"]}]}]
+        let mut inner = FfonElement::new_obj("id");
+        inner.as_obj_mut().unwrap().push(FfonElement::new_str("<input>test</input>"));
+        let mut outer = FfonElement::new_obj("project");
+        outer.as_obj_mut().unwrap().push(inner);
+        let elems = vec![outer];
+        let json = to_json_string(&elems).unwrap();
+        let parsed = parse_json(&json).unwrap();
+        assert_eq!(parsed, elems);
+    }
+
+    // Object insert: verify negative conceptual index (0-based) clamps to front
+    #[test]
+    fn test_object_insert_at_zero_goes_to_front() {
+        let mut obj = FfonElement::new_obj("key");
+        obj.as_obj_mut().unwrap().push(FfonElement::new_str("b"));
+        obj.as_obj_mut().unwrap().insert(0, FfonElement::new_str("a"));
+        let children = &obj.as_obj().unwrap().children;
+        assert_eq!(children[0].as_str(), Some("a"));
+        assert_eq!(children[1].as_str(), Some("b"));
+    }
+
+    // JSON serialization of an empty element list
+    #[test]
+    fn test_json_serialize_empty_element_list() {
+        let elems: Vec<FfonElement> = vec![];
+        let json = to_json_string(&elems).unwrap();
+        let parsed = parse_json(&json).unwrap();
+        assert!(parsed.is_empty());
+    }
+
+    // IdArray: push multiple and verify depth
+    #[test]
+    fn test_idarray_push_multiple_increments_depth() {
+        let mut id = IdArray::new();
+        id.push(0);
+        id.push(1);
+        id.push(2);
+        assert_eq!(id.depth(), 3);
+        assert_eq!(id.get(0), Some(0));
+        assert_eq!(id.get(1), Some(1));
+        assert_eq!(id.get(2), Some(2));
+    }
+
+    #[test]
+    fn test_object_add_one_element_count_is_one() {
+        let mut obj = FfonObject { key: "root".to_string(), children: vec![] };
+        obj.push(FfonElement::new_str("hello"));
+        assert_eq!(obj.children.len(), 1);
     }
 }

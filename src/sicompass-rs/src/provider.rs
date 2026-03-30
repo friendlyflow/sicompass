@@ -285,6 +285,35 @@ pub fn notify_checkbox_changed(renderer: &mut AppRenderer, new_elem_text: &str) 
     }
 }
 
+// ---------------------------------------------------------------------------
+// Auth registry — maps URL origins to Bearer API keys
+// ---------------------------------------------------------------------------
+
+use std::sync::Mutex;
+
+static AUTH_REGISTRY: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
+
+/// Register a URL origin → API key mapping for Bearer auth.
+/// Equivalent to `providerRegisterAuth` in the C code.
+pub fn register_auth(origin: &str, api_key: &str) {
+    AUTH_REGISTRY.lock().unwrap().push((origin.to_owned(), api_key.to_owned()));
+}
+
+/// Find an API key for a URL by prefix match.
+/// Equivalent to `findApiKeyForUrl` in the C code.
+pub fn find_api_key_for_url(url: &str) -> Option<String> {
+    let registry = AUTH_REGISTRY.lock().unwrap();
+    registry.iter()
+        .find(|(origin, _)| url.starts_with(origin.as_str()))
+        .map(|(_, key)| key.clone())
+}
+
+/// Clear the auth registry (for tests only).
+#[cfg(test)]
+fn clear_auth_registry() {
+    AUTH_REGISTRY.lock().unwrap().clear();
+}
+
 /// Notify the active provider that a radio button changed value.
 ///
 /// Equivalent to `providerNotifyRadioChanged` in the C code. Extracts the
@@ -341,8 +370,15 @@ mod tests {
         items: Vec<FfonElement>,
         commit_ok: bool,
         create_dir_ok: bool,
+        create_file_ok: bool,
+        delete_ok: bool,
+        execute_ok: bool,
+        cmds: Vec<String>,
         last_commit: Option<(String, String)>,
         last_create_dir: Option<String>,
+        last_create_file: Option<String>,
+        last_delete: Option<String>,
+        last_execute: Option<(String, String)>,
     }
 
     impl MockProvider {
@@ -353,8 +389,15 @@ mod tests {
                 items,
                 commit_ok: true,
                 create_dir_ok: true,
+                create_file_ok: true,
+                delete_ok: true,
+                execute_ok: true,
+                cmds: vec![],
                 last_commit: None,
                 last_create_dir: None,
+                last_create_file: None,
+                last_delete: None,
+                last_execute: None,
             }
         }
     }
@@ -379,6 +422,19 @@ mod tests {
         fn create_directory(&mut self, name: &str) -> bool {
             self.last_create_dir = Some(name.to_owned());
             self.create_dir_ok
+        }
+        fn create_file(&mut self, name: &str) -> bool {
+            self.last_create_file = Some(name.to_owned());
+            self.create_file_ok
+        }
+        fn delete_item(&mut self, name: &str) -> bool {
+            self.last_delete = Some(name.to_owned());
+            self.delete_ok
+        }
+        fn commands(&self) -> Vec<String> { self.cmds.clone() }
+        fn execute_command(&mut self, cmd: &str, sel: &str) -> bool {
+            self.last_execute = Some((cmd.to_owned(), sel.to_owned()));
+            self.execute_ok
         }
     }
 
@@ -542,5 +598,108 @@ mod tests {
         let mut r = make_renderer_with_provider(p);
         r.current_id.set_last(99); // out of bounds
         assert!(get_active_provider_ref(&r).is_none());
+    }
+
+    // --- create_file dispatch ---
+
+    #[test]
+    fn create_file_dispatches_to_provider() {
+        let p = MockProvider::new("test", vec![]);
+        let mut r = make_renderer_with_provider(p);
+        assert!(create_file(&mut r, "newfile.txt"));
+    }
+
+    #[test]
+    fn create_file_returns_false_when_no_provider() {
+        let mut r = AppRenderer::new();
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        assert!(!create_file(&mut r, "f.txt"));
+    }
+
+    // --- delete_item_by_name dispatch ---
+
+    #[test]
+    fn delete_item_by_name_dispatches_to_provider() {
+        let p = MockProvider::new("test", vec![]);
+        let mut r = make_renderer_with_provider(p);
+        assert!(delete_item_by_name(&mut r, "old.txt"));
+    }
+
+    #[test]
+    fn delete_item_by_name_returns_false_when_no_provider() {
+        let mut r = AppRenderer::new();
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        assert!(!delete_item_by_name(&mut r, "f.txt"));
+    }
+
+    // --- get_commands dispatch ---
+
+    #[test]
+    fn get_commands_dispatches_to_provider() {
+        let mut p = MockProvider::new("test", vec![]);
+        p.cmds = vec!["open".to_string(), "rename".to_string()];
+        let r = make_renderer_with_provider(p);
+        let cmds = get_commands(&r);
+        assert_eq!(cmds, vec!["open", "rename"]);
+    }
+
+    #[test]
+    fn get_commands_returns_empty_when_no_provider() {
+        let r = AppRenderer::new();
+        assert!(get_commands(&r).is_empty());
+    }
+
+    // --- execute_command dispatch ---
+
+    #[test]
+    fn execute_command_dispatches_to_provider() {
+        let p = MockProvider::new("test", vec![]);
+        let mut r = make_renderer_with_provider(p);
+        assert!(execute_command(&mut r, "open", "file.txt"));
+    }
+
+    #[test]
+    fn execute_command_returns_false_when_no_provider() {
+        let mut r = AppRenderer::new();
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        assert!(!execute_command(&mut r, "open", "f"));
+    }
+
+    // --- auth registry ---
+
+    #[test]
+    fn register_auth_and_find() {
+        clear_auth_registry();
+        register_auth("https://example.com", "secret123");
+        let key = find_api_key_for_url("https://example.com/api/data");
+        assert_eq!(key.as_deref(), Some("secret123"));
+        clear_auth_registry();
+    }
+
+    #[test]
+    fn find_api_key_no_match() {
+        clear_auth_registry();
+        register_auth("https://example.com", "secret");
+        assert!(find_api_key_for_url("https://other.com/foo").is_none());
+        clear_auth_registry();
+    }
+
+    #[test]
+    fn register_auth_multiple() {
+        clear_auth_registry();
+        register_auth("https://a.com", "key_a");
+        register_auth("https://b.com", "key_b");
+        assert_eq!(find_api_key_for_url("https://a.com/path").as_deref(), Some("key_a"));
+        assert_eq!(find_api_key_for_url("https://b.com/path").as_deref(), Some("key_b"));
+        clear_auth_registry();
+    }
+
+    #[test]
+    fn register_auth_prefix_match() {
+        clear_auth_registry();
+        register_auth("https://api.example.com", "bearer_token");
+        assert!(find_api_key_for_url("https://api.example.com/v1/data").is_some());
+        assert!(find_api_key_for_url("https://example.com/v1/data").is_none());
+        clear_auth_registry();
     }
 }

@@ -321,4 +321,25 @@ mod tests {
         r.coordinate = crate::app_state::Coordinate::ExtendedSearch;
         assert_eq!(speak_mode_change_text(&r, None), "extended search");
     }
+
+    #[test]
+    fn speak_mode_change_scroll() {
+        let mut r = AppRenderer::new();
+        r.coordinate = crate::app_state::Coordinate::Scroll;
+        assert_eq!(speak_mode_change_text(&r, None), "scroll");
+    }
+
+    #[test]
+    fn speak_mode_change_dashboard() {
+        let mut r = AppRenderer::new();
+        r.coordinate = crate::app_state::Coordinate::Dashboard;
+        assert_eq!(speak_mode_change_text(&r, None), "dashboard");
+    }
+
+    #[test]
+    fn speak_mode_change_input_search() {
+        let mut r = AppRenderer::new();
+        r.coordinate = crate::app_state::Coordinate::InputSearch;
+        assert_eq!(speak_mode_change_text(&r, None), "input search");
+    }
 }

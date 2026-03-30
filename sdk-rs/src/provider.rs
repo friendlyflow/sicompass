@@ -479,4 +479,17 @@ mod tests {
     fn test_factory_create_unknown_returns_none() {
         assert!(create_provider_by_name("__nonexistent__").is_none());
     }
+
+    #[test]
+    fn test_provider_init_path_is_root() {
+        let p = GenericProvider::new("p", "P", |_| vec![]);
+        assert_eq!(p.current_path(), "/");
+    }
+
+    #[test]
+    fn test_provider_display_name_defaults_to_name() {
+        let p = GenericProvider::new("myname", "My Name", |_| vec![]);
+        assert_eq!(p.display_name(), "My Name");
+        assert_eq!(p.name(), "myname");
+    }
 }
