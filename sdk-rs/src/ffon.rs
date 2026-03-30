@@ -1268,6 +1268,98 @@ mod tests {
         assert_eq!(back, elems);
     }
 
+    // ---------------------------------------------------------------------------
+    // Additional element / object / idarray tests (port of remaining C tests)
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn test_create_string_null_input_is_empty() {
+        // C: ffonElementCreateString(NULL) → string with ""
+        // Rust equivalent: new_str("") works identically
+        let e = FfonElement::new_str("");
+        assert_eq!(e.as_str(), Some(""));
+    }
+
+    #[test]
+    fn test_create_object_null_key_is_empty() {
+        // C: ffonElementCreateObject(NULL) → Obj with key ""
+        let e = FfonElement::new_obj("");
+        assert_eq!(e.as_obj().unwrap().key, "");
+        assert_eq!(e.as_obj().unwrap().children.len(), 0);
+    }
+
+    #[test]
+    fn test_object_insert_at_beginning() {
+        let mut obj = FfonObject::new("k");
+        obj.push(FfonElement::new_str("b"));
+        obj.push(FfonElement::new_str("c"));
+        obj.insert(0, FfonElement::new_str("a"));
+        assert_eq!(obj.children.len(), 3);
+        assert_eq!(obj.children[0].as_str(), Some("a"));
+        assert_eq!(obj.children[1].as_str(), Some("b"));
+        assert_eq!(obj.children[2].as_str(), Some("c"));
+    }
+
+    #[test]
+    fn test_object_insert_at_middle() {
+        let mut obj = FfonObject::new("k");
+        obj.push(FfonElement::new_str("a"));
+        obj.push(FfonElement::new_str("c"));
+        obj.insert(1, FfonElement::new_str("b"));
+        assert_eq!(obj.children.len(), 3);
+        assert_eq!(obj.children[0].as_str(), Some("a"));
+        assert_eq!(obj.children[1].as_str(), Some("b"));
+        assert_eq!(obj.children[2].as_str(), Some("c"));
+    }
+
+    #[test]
+    fn test_object_add_triggers_capacity_growth() {
+        // Verify that adding many elements (>10) works correctly (Vec grows as needed)
+        let mut obj = FfonObject::new("k");
+        for i in 0..15 {
+            obj.push(FfonElement::new_str(format!("item{i}")));
+        }
+        assert_eq!(obj.children.len(), 15);
+        assert_eq!(obj.children[14].as_str(), Some("item14"));
+    }
+
+    #[test]
+    fn test_object_remove_first() {
+        let mut obj = FfonObject::new("k");
+        obj.push(FfonElement::new_str("a"));
+        obj.push(FfonElement::new_str("b"));
+        obj.push(FfonElement::new_str("c"));
+        let removed = obj.remove(0).unwrap();
+        assert_eq!(removed.as_str(), Some("a"));
+        assert_eq!(obj.children.len(), 2);
+        assert_eq!(obj.children[0].as_str(), Some("b"));
+        assert_eq!(obj.children[1].as_str(), Some("c"));
+    }
+
+    #[test]
+    fn test_idarray_push_grows_unbounded() {
+        // C IdArray had MAX_ID_DEPTH=32; Rust IdArray is Vec-backed (no limit).
+        // Verify many pushes work correctly.
+        let mut id = IdArray::new();
+        for i in 0..32 {
+            id.push(i);
+        }
+        assert_eq!(id.depth(), 32);
+        id.push(100); // one more — Rust allows it
+        assert_eq!(id.depth(), 33);
+        assert_eq!(id.get(32), Some(100));
+    }
+
+    #[test]
+    fn test_idarray_new_is_empty() {
+        // C: idArrayInit sets depth to 0 and zeros all ids.
+        // Rust: new() returns an empty Vec.
+        let id = IdArray::new();
+        assert_eq!(id.depth(), 0);
+        assert_eq!(id.last(), None);
+        assert_eq!(id.get(0), None);
+    }
+
     #[test]
     fn test_save_load_json_file_roundtrip() {
         let dir = tempfile::tempdir().unwrap();

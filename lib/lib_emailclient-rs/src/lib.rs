@@ -385,16 +385,18 @@ impl Provider for EmailClientProvider {
     }
 
     fn commit_edit(&mut self, _old: &str, new_content: &str) -> bool {
-        // Update whichever draft field is being edited
-        let path = self.current_path.clone();
-        if path.contains("/compose") || path.contains("/reply") || path.contains("/forward") {
-            // We can't know which field from commit_edit alone; the caller should
-            // use on_button_press("send") for actual sending.
-            // For now, update body as the last input-all field.
-            self.draft.body = new_content.to_owned();
-            return true;
+        // Determine which draft field to update from the last path segment
+        // e.g. "/compose/To" → field = "To"
+        let field = self.current_path
+            .rfind('/')
+            .map(|i| &self.current_path[i + 1..])
+            .unwrap_or("");
+        match field {
+            "To" => { self.draft.to = new_content.to_owned(); true }
+            "Subject" => { self.draft.subject = new_content.to_owned(); true }
+            "Body" => { self.draft.body = new_content.to_owned(); true }
+            _ => false,
         }
-        false
     }
 
     fn on_button_press(&mut self, function_name: &str) {
@@ -887,5 +889,40 @@ mod tests {
         let mut p = EmailClientProvider::new();
         p.push_path("compose");
         assert!(p.at_compose());
+    }
+
+    #[test]
+    fn test_commit_stores_to_field() {
+        let mut p = EmailClientProvider::new();
+        p.push_path("compose");
+        p.push_path("To");
+        assert!(p.commit_edit("", "user@example.com"));
+        assert_eq!(p.draft.to, "user@example.com");
+    }
+
+    #[test]
+    fn test_commit_stores_subject_field() {
+        let mut p = EmailClientProvider::new();
+        p.push_path("compose");
+        p.push_path("Subject");
+        assert!(p.commit_edit("", "Test Subject"));
+        assert_eq!(p.draft.subject, "Test Subject");
+    }
+
+    #[test]
+    fn test_commit_stores_body_field() {
+        let mut p = EmailClientProvider::new();
+        p.push_path("compose");
+        p.push_path("Body");
+        assert!(p.commit_edit("", "Hello world!"));
+        assert_eq!(p.draft.body, "Hello world!");
+    }
+
+    #[test]
+    fn test_commit_unknown_field_returns_false() {
+        let mut p = EmailClientProvider::new();
+        p.push_path("compose");
+        p.push_path("Unknown");
+        assert!(!p.commit_edit("", "value"));
     }
 }

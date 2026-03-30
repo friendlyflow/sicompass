@@ -741,4 +741,175 @@ mod tests {
     fn test_escaped_link_not_recognized() {
         assert!(!has_link("\\<link>url\\</link>"));
     }
+
+    // --- empty / null-equivalent edge cases ---
+
+    #[test]
+    fn test_has_input_empty() {
+        assert!(!has_input(""));
+    }
+
+    #[test]
+    fn test_strip_display_empty() {
+        assert_eq!(strip_display(""), "");
+    }
+
+    #[test]
+    fn test_has_radio_empty() {
+        assert!(!has_radio(""));
+    }
+
+    #[test]
+    fn test_extract_radio_empty() {
+        assert_eq!(extract_radio(""), None);
+    }
+
+    #[test]
+    fn test_has_checked_empty() {
+        assert!(!has_checked(""));
+    }
+
+    #[test]
+    fn test_extract_checked_with_close() {
+        assert_eq!(extract_checked("<checked>dark</checked>"), Some("dark".to_owned()));
+    }
+
+    #[test]
+    fn test_extract_checked_empty() {
+        assert_eq!(extract_checked(""), None);
+    }
+
+    #[test]
+    fn test_has_checkbox_empty() {
+        assert!(!has_checkbox(""));
+    }
+
+    #[test]
+    fn test_has_checkbox_checked_empty() {
+        assert!(!has_checkbox_checked(""));
+    }
+
+    #[test]
+    fn test_has_link_empty() {
+        assert!(!has_link(""));
+    }
+
+    #[test]
+    fn test_extract_link_no_tags() {
+        assert_eq!(extract_link("no tags"), None);
+    }
+
+    #[test]
+    fn test_has_image_empty() {
+        assert!(!has_image(""));
+    }
+
+    #[test]
+    fn test_extract_image_no_tags() {
+        assert_eq!(extract_image("no image tags"), None);
+    }
+
+    #[test]
+    fn test_has_many_opt_empty() {
+        assert!(!has_many_opt(""));
+    }
+
+    #[test]
+    fn test_has_one_opt_false() {
+        assert!(!has_one_opt("no tag"));
+    }
+
+    #[test]
+    fn test_has_one_opt_empty() {
+        assert!(!has_one_opt(""));
+    }
+
+    #[test]
+    fn test_strip_one_opt_empty() {
+        assert_eq!(strip_one_opt(""), "");
+    }
+
+    #[test]
+    fn test_strip_many_opt_no_tag() {
+        assert_eq!(strip_many_opt("no tag"), "no tag");
+    }
+
+    #[test]
+    fn test_strip_many_opt_empty() {
+        assert_eq!(strip_many_opt(""), "");
+    }
+
+    #[test]
+    fn test_extract_button_function_name_no_tag() {
+        assert_eq!(extract_button_function_name("no button"), None);
+    }
+
+    #[test]
+    fn test_extract_button_display_text_no_tag() {
+        assert_eq!(extract_button_display_text("no button"), None);
+    }
+
+    // --- opt + nested tag combinations ---
+
+    #[test]
+    fn test_strip_display_one_opt_and_input() {
+        assert_eq!(
+            strip_display("<one-opt></one-opt><input>value</input>"),
+            "value"
+        );
+    }
+
+    #[test]
+    fn test_strip_display_many_opt_and_checkbox() {
+        assert_eq!(
+            strip_display("<many-opt></many-opt><checkbox>task</checkbox>"),
+            "task"
+        );
+    }
+
+    // --- escape handling for remaining tag types ---
+
+    #[test]
+    fn test_escaped_radio_not_recognized() {
+        assert!(!has_radio("\\<radio>group"));
+    }
+
+    #[test]
+    fn test_escaped_checked_not_recognized() {
+        assert!(!has_checked("\\<checked>option"));
+    }
+
+    #[test]
+    fn test_escaped_checkbox_not_recognized() {
+        assert!(!has_checkbox("\\<checkbox>label"));
+    }
+
+    #[test]
+    fn test_escaped_checkbox_checked_not_recognized() {
+        assert!(!has_checkbox_checked("\\<checkbox checked>label"));
+    }
+
+    #[test]
+    fn test_escaped_image_not_recognized() {
+        assert!(!has_image("\\<image>pic.jpg\\</image>"));
+    }
+
+    #[test]
+    fn test_escaped_button_not_recognized() {
+        assert!(!has_button("\\<button>fn\\</button>text"));
+    }
+
+    #[test]
+    fn test_strip_display_unescapes_checkbox() {
+        assert_eq!(strip_display("\\<checkbox>label"), "<checkbox>label");
+    }
+
+    #[test]
+    fn test_strip_display_unescapes_mixed() {
+        // Real input tag + escaped angle brackets in surrounding text
+        assert_eq!(
+            strip_display("prefix \\<b\\> <input>editable</input> suffix"),
+            "prefix <b> editable suffix"
+        );
+    }
 }
