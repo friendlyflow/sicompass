@@ -28,6 +28,7 @@ pub fn find_normalised_byte_pos(haystack: &str, needle: &str) -> Option<usize> {
 mod tests {
     use super::*;
     #[test] fn empty_needle() { assert!(contains_normalised("anything", "")); }
+    #[test] fn empty_haystack_nonempty_needle() { assert!(!contains_normalised("", "abc")); }
     #[test] fn ascii_match() { assert!(contains_normalised("hello world", "world")); }
     #[test] fn case_insensitive() { assert!(contains_normalised("Hello", "hello")); }
     #[test] fn no_match() { assert!(!contains_normalised("hello", "xyz")); }
@@ -71,6 +72,11 @@ mod tests {
     #[test]
     fn pos_no_match() {
         assert_eq!(find_normalised_byte_pos("hello", "xyz"), None);
+    }
+
+    #[test]
+    fn pos_empty_haystack_nonempty_needle() {
+        assert_eq!(find_normalised_byte_pos("", "abc"), None);
     }
 
     #[test]

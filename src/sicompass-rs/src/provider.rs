@@ -339,11 +339,23 @@ mod tests {
         name: String,
         path: String,
         items: Vec<FfonElement>,
+        commit_ok: bool,
+        create_dir_ok: bool,
+        last_commit: Option<(String, String)>,
+        last_create_dir: Option<String>,
     }
 
     impl MockProvider {
         fn new(name: &str, items: Vec<FfonElement>) -> Self {
-            MockProvider { name: name.to_owned(), path: "/".to_owned(), items }
+            MockProvider {
+                name: name.to_owned(),
+                path: "/".to_owned(),
+                items,
+                commit_ok: true,
+                create_dir_ok: true,
+                last_commit: None,
+                last_create_dir: None,
+            }
         }
     }
 
@@ -360,6 +372,14 @@ mod tests {
             }
         }
         fn current_path(&self) -> &str { &self.path }
+        fn commit_edit(&mut self, old: &str, new: &str) -> bool {
+            self.last_commit = Some((old.to_owned(), new.to_owned()));
+            self.commit_ok
+        }
+        fn create_directory(&mut self, name: &str) -> bool {
+            self.last_create_dir = Some(name.to_owned());
+            self.create_dir_ok
+        }
     }
 
     fn make_renderer_with_provider(p: MockProvider) -> AppRenderer {
@@ -440,5 +460,87 @@ mod tests {
     fn current_path_returns_slash_when_no_provider() {
         let r = AppRenderer::new();
         assert_eq!(current_path(&r), "/");
+    }
+
+    // --- commit_edit dispatch ---
+
+    #[test]
+    fn commit_edit_dispatches_to_provider() {
+        let p = MockProvider::new("test", vec![]);
+        let mut r = make_renderer_with_provider(p);
+        // MockProvider.commit_ok defaults to true
+        let ok = commit_edit(&mut r, "old", "new value");
+        assert!(ok);
+    }
+
+    #[test]
+    fn commit_edit_returns_false_when_no_provider() {
+        let mut r = AppRenderer::new();
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        assert!(!commit_edit(&mut r, "old", "new"));
+    }
+
+    // --- create_directory dispatch ---
+
+    #[test]
+    fn create_directory_dispatches_to_provider() {
+        let p = MockProvider::new("test", vec![]);
+        let mut r = make_renderer_with_provider(p);
+        let ok = create_directory(&mut r, "newdir");
+        assert!(ok);
+    }
+
+    #[test]
+    fn create_directory_returns_false_when_no_provider() {
+        let mut r = AppRenderer::new();
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        assert!(!create_directory(&mut r, "dir"));
+    }
+
+    // --- navigate_left (pop_path equivalent) ---
+
+    #[test]
+    fn pop_path_at_root_stays_at_root() {
+        let p = MockProvider::new("test", vec![]);
+        let mut r = make_renderer_with_provider(p);
+        // Already at root "/"
+        pop_path(&mut r);
+        assert_eq!(current_path(&r), "/");
+    }
+
+    #[test]
+    fn pop_path_after_push_restores_parent() {
+        let p = MockProvider::new("test", vec![]);
+        let mut r = make_renderer_with_provider(p);
+        push_path(&mut r, "inbox");
+        push_path(&mut r, "subfolder");
+        pop_path(&mut r);
+        assert_eq!(current_path(&r), "/inbox");
+    }
+
+    // --- multiple providers ---
+
+    #[test]
+    fn get_active_provider_selects_correct_index() {
+        let p0 = MockProvider::new("alpha", vec![]);
+        let p1 = MockProvider::new("beta", vec![]);
+        let mut r = AppRenderer::new();
+        r.ffon = vec![
+            FfonElement::new_obj("alpha"),
+            FfonElement::new_obj("beta"),
+        ];
+        r.providers = vec![Box::new(p0), Box::new(p1)];
+        // Select provider at index 1
+        r.current_id = { let mut id = IdArray::new(); id.push(1); id };
+        let name = get_active_provider_ref(&r).map(|p| p.name().to_owned());
+        assert_eq!(name, Some("beta".to_owned()));
+    }
+
+    #[test]
+    fn get_active_provider_out_of_bounds_returns_none() {
+        let p = MockProvider::new("only", vec![]);
+        let mut r = make_renderer_with_provider(p);
+        r.current_id.set_last(99); // out of bounds
+        assert!(get_active_provider_ref(&r).is_none());
     }
 }
