@@ -1,0 +1,18 @@
+[package]
+name = "sicompass-sdk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Sicompass provider SDK — FFON types, Provider trait, tag parsing, platform utils"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+unicode-normalization = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+xdg = "2"
+
+[dev-dependencies]
+mockall = { workspace = true }
+tempfile = { workspace = true }

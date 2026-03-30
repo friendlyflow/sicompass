@@ -1,0 +1,13 @@
+[package]
+name = "sicompass-tutorial"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Sicompass tutorial provider (Rust port of tutorial.ts)"
+
+[dependencies]
+sicompass-sdk = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
