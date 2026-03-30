@@ -779,6 +779,7 @@ pub fn build_app() -> Result<AppState, SiError> {
         renderer: crate::app_state::AppRenderer::new(),
         font_renderer: None,
         rect_renderer: None,
+        settings_queue: None,
     })
 }
 

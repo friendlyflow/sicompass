@@ -1,0 +1,12 @@
+[package]
+name = "sicompass-filebrowser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Sicompass file browser provider"
+
+[dependencies]
+sicompass-sdk = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

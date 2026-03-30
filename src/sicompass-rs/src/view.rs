@@ -82,6 +82,11 @@ pub fn main_loop(app: &mut AppState) {
             break;
         }
 
+        // ---- Drain settings apply-callback events ---------------------------
+        if let Some(q) = app.settings_queue.clone() {
+            crate::programs::apply_pending_settings(&mut app.renderer, &q, false);
+        }
+
         // ---- Continuous redraw in insert/search modes (caret blink) ---------
         if is_insert_mode(app.renderer.coordinate) {
             app.renderer.needs_redraw = true;
