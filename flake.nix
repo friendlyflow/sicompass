@@ -280,8 +280,12 @@
               # Rust stdlib source for rust-analyzer
               export RUST_SRC_PATH="${pkgs.rustc}/lib/rustlib/src/rust/library";
 
+              # SDL3 + deps pkg-config / link path (needed by sdl3-rs / cargo build)
+              export PKG_CONFIG_PATH="${sdl3}/lib/pkgconfig:${libxkbcommon.dev}/lib/pkgconfig:$PKG_CONFIG_PATH";
+              export LIBRARY_PATH="${sdl3}/lib:${libxkbcommon}/lib:${wayland}/lib:$LIBRARY_PATH";
+
               # Include system library path for Vulkan drivers (Debian/non-NixOS)
-              export LD_LIBRARY_PATH="${stb}/lib:${libwebp}/lib:${glfw}/lib:${freetype}/lib:${vulkan-loader}/lib:${vulkan-validation-layers}/lib:${harfbuzz}/lib:${json_c}/lib:${curl}/lib:${utf8proc}/lib:${lexbor}/lib:/usr/lib/x86_64-linux-gnu";
+              export LD_LIBRARY_PATH="${stb}/lib:${libwebp}/lib:${glfw}/lib:${freetype}/lib:${vulkan-loader}/lib:${vulkan-validation-layers}/lib:${harfbuzz}/lib:${json_c}/lib:${curl}/lib:${utf8proc}/lib:${lexbor}/lib:${sdl3}/lib:${libxkbcommon}/lib:${wayland}/lib:/usr/lib/x86_64-linux-gnu";
               export VULKAN_SDK="${vulkan-headers}";
               export VK_LAYER_PATH="${vulkan-validation-layers}/share/vulkan/explicit_layer.d";
 
