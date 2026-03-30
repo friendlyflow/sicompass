@@ -699,4 +699,22 @@ mod tests {
         let ok = p.commit_edit("", "anything");
         assert!(!ok);
     }
+
+    #[test]
+    fn test_handle_command_login_without_credentials() {
+        let mut p = ChatClientProvider::new();
+        let mut err = String::new();
+        // No homeserver/credentials set — login should fail and set error
+        let result = p.handle_command("login", "", 0, &mut err);
+        assert!(result.is_none());
+        assert!(!err.is_empty(), "error message should be set on failed login");
+    }
+
+    #[test]
+    fn test_handle_command_refresh_returns_none() {
+        let mut p = ChatClientProvider::new();
+        let mut err = String::new();
+        let result = p.handle_command("refresh", "", 0, &mut err);
+        assert!(result.is_none());
+    }
 }
