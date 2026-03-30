@@ -136,20 +136,22 @@ mod tests {
     // --- Ctrl+F → SimpleSearch (from OperatorGeneral) ---
 
     #[test]
-    fn ctrl_f_in_operator_switches_to_simple_search() {
+    fn ctrl_f_in_operator_switches_to_extended_search() {
+        // C spec: Ctrl+F from OperatorGeneral enters ExtendedSearch (not SimpleSearch)
         let mut r = AppRenderer::new();
         dispatch_key(&mut r, Some(Keycode::F), ctrl());
-        assert_eq!(r.coordinate, Coordinate::SimpleSearch);
+        assert_eq!(r.coordinate, Coordinate::ExtendedSearch);
     }
 
     // --- Escape ---
 
     #[test]
-    fn escape_in_editor_insert_returns_to_operator() {
+    fn escape_in_editor_insert_returns_to_editor_general() {
+        // C spec: EditorInsert → updateState(Input) → EditorGeneral
         let mut r = AppRenderer::new();
         r.coordinate = Coordinate::EditorInsert;
         dispatch_key(&mut r, Some(Keycode::Escape), no_mod());
-        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+        assert_eq!(r.coordinate, Coordinate::EditorGeneral);
     }
 
     #[test]
@@ -308,6 +310,87 @@ mod tests {
         let mut r = AppRenderer::new();
         dispatch_key(&mut r, Some(Keycode::A), ctrl());
         assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+    }
+
+    // --- Ctrl+A in EditorGeneral → handle_append → sets needs_redraw ---
+
+    #[test]
+    fn ctrl_a_in_editor_general_appends() {
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::EditorGeneral;
+        dispatch_key(&mut r, Some(Keycode::A), ctrl());
+        assert!(r.needs_redraw);
+    }
+
+    // --- Return in EditorGeneral → handle_append → sets needs_redraw ---
+
+    #[test]
+    fn enter_in_editor_general_appends() {
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::EditorGeneral;
+        dispatch_key(&mut r, Some(Keycode::Return), no_mod());
+        assert!(r.needs_redraw);
+    }
+
+    // --- Return in OperatorGeneral → handle_enter_operator → sets needs_redraw ---
+
+    #[test]
+    fn enter_in_operator_general_sets_needs_redraw() {
+        let mut r = AppRenderer::new();
+        dispatch_key(&mut r, Some(Keycode::Return), no_mod());
+        assert!(r.needs_redraw);
+    }
+
+    // --- Ctrl+I in OperatorGeneral → handle_ctrl_i_operator → no crash ---
+
+    #[test]
+    fn ctrl_i_in_operator_general_no_crash() {
+        let mut r = AppRenderer::new();
+        dispatch_key(&mut r, Some(Keycode::I), ctrl());
+        // handle_ctrl_i_operator with empty ffon — no crash
+    }
+
+    // --- Ctrl+X/C/V in EditorGeneral → sets needs_redraw ---
+
+    #[test]
+    fn ctrl_x_in_editor_general_sets_needs_redraw() {
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::EditorGeneral;
+        dispatch_key(&mut r, Some(Keycode::X), ctrl());
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn ctrl_c_in_editor_general_sets_needs_redraw() {
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::EditorGeneral;
+        dispatch_key(&mut r, Some(Keycode::C), ctrl());
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn ctrl_v_in_editor_general_sets_needs_redraw() {
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::EditorGeneral;
+        dispatch_key(&mut r, Some(Keycode::V), ctrl());
+        assert!(r.needs_redraw);
+    }
+
+    // --- H moves left / L moves right ---
+
+    #[test]
+    fn h_moves_left_in_operator_sets_needs_redraw() {
+        let mut r = AppRenderer::new();
+        dispatch_key(&mut r, Some(Keycode::H), no_mod());
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn l_moves_right_in_editor_sets_needs_redraw() {
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::EditorGeneral;
+        dispatch_key(&mut r, Some(Keycode::L), no_mod());
+        assert!(r.needs_redraw);
     }
 }
 

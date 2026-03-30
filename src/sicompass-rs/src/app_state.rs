@@ -117,6 +117,28 @@ pub enum Task {
     FsCreate,
 }
 
+impl Task {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Task::None => "none",
+            Task::Input => "input",
+            Task::Append => "append",
+            Task::AppendAppend => "append append",
+            Task::Insert => "insert",
+            Task::InsertInsert => "insert insert",
+            Task::Delete => "delete",
+            Task::ArrowUp => "up",
+            Task::ArrowDown => "down",
+            Task::ArrowLeft => "left",
+            Task::ArrowRight => "right",
+            Task::Cut => "cut",
+            Task::Copy => "copy",
+            Task::Paste => "paste",
+            Task::FsCreate => "fs create",
+        }
+    }
+}
+
 /// Undo/redo direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum History {
@@ -202,6 +224,17 @@ pub struct AppRenderer {
     // ---- Scroll state ------------------------------------------------------
     pub scroll_offset: i32,
     pub text_scroll_offset: i32,
+    pub text_scroll_line_count: i32,
+
+    // ---- Scroll search state -----------------------------------------------
+    pub scroll_search_match_count: usize,
+    pub scroll_search_current_match: usize,
+
+    // ---- Dashboard state ---------------------------------------------------
+    pub dashboard_image_path: String,
+
+    // ---- Keypress timing (for double-tap detection) ------------------------
+    pub last_keypress_time: u64,
 
     // ---- Search string (Tab search) ----------------------------------------
     pub search_string: String,
@@ -261,6 +294,11 @@ impl AppRenderer {
             input_suffix: String::new(),
             scroll_offset: 0,
             text_scroll_offset: 0,
+            text_scroll_line_count: 0,
+            scroll_search_match_count: 0,
+            scroll_search_current_match: 0,
+            dashboard_image_path: String::new(),
+            last_keypress_time: 0,
             search_string: String::new(),
             undo_history: Vec::new(),
             undo_position: 0,
@@ -459,5 +497,149 @@ impl AppState {
 impl Drop for AppState {
     fn drop(&mut self) {
         render::cleanup(self);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- Coordinate::as_str ---
+
+    #[test]
+    fn coordinate_as_str_operator_general() {
+        assert_eq!(Coordinate::OperatorGeneral.as_str(), "operator");
+    }
+
+    #[test]
+    fn coordinate_as_str_operator_insert() {
+        assert_eq!(Coordinate::OperatorInsert.as_str(), "operator insert");
+    }
+
+    #[test]
+    fn coordinate_as_str_editor_general() {
+        assert_eq!(Coordinate::EditorGeneral.as_str(), "editor");
+    }
+
+    #[test]
+    fn coordinate_as_str_editor_insert() {
+        assert_eq!(Coordinate::EditorInsert.as_str(), "editor insert");
+    }
+
+    #[test]
+    fn coordinate_as_str_editor_normal() {
+        assert_eq!(Coordinate::EditorNormal.as_str(), "editor normal");
+    }
+
+    #[test]
+    fn coordinate_as_str_editor_visual() {
+        assert_eq!(Coordinate::EditorVisual.as_str(), "editor visual");
+    }
+
+    #[test]
+    fn coordinate_as_str_simple_search() {
+        assert_eq!(Coordinate::SimpleSearch.as_str(), "search");
+    }
+
+    #[test]
+    fn coordinate_as_str_extended_search() {
+        assert_eq!(Coordinate::ExtendedSearch.as_str(), "extended search");
+    }
+
+    #[test]
+    fn coordinate_as_str_command() {
+        assert_eq!(Coordinate::Command.as_str(), "command");
+    }
+
+    #[test]
+    fn coordinate_as_str_scroll() {
+        assert_eq!(Coordinate::Scroll.as_str(), "scroll");
+    }
+
+    #[test]
+    fn coordinate_as_str_scroll_search() {
+        assert_eq!(Coordinate::ScrollSearch.as_str(), "scroll search");
+    }
+
+    #[test]
+    fn coordinate_as_str_input_search() {
+        assert_eq!(Coordinate::InputSearch.as_str(), "input search");
+    }
+
+    #[test]
+    fn coordinate_as_str_dashboard() {
+        assert_eq!(Coordinate::Dashboard.as_str(), "dashboard");
+    }
+
+    // --- Task::as_str ---
+
+    #[test]
+    fn task_as_str_none() { assert_eq!(Task::None.as_str(), "none"); }
+
+    #[test]
+    fn task_as_str_input() { assert_eq!(Task::Input.as_str(), "input"); }
+
+    #[test]
+    fn task_as_str_append() { assert_eq!(Task::Append.as_str(), "append"); }
+
+    #[test]
+    fn task_as_str_append_append() { assert_eq!(Task::AppendAppend.as_str(), "append append"); }
+
+    #[test]
+    fn task_as_str_insert() { assert_eq!(Task::Insert.as_str(), "insert"); }
+
+    #[test]
+    fn task_as_str_insert_insert() { assert_eq!(Task::InsertInsert.as_str(), "insert insert"); }
+
+    #[test]
+    fn task_as_str_delete() { assert_eq!(Task::Delete.as_str(), "delete"); }
+
+    #[test]
+    fn task_as_str_arrow_up() { assert_eq!(Task::ArrowUp.as_str(), "up"); }
+
+    #[test]
+    fn task_as_str_arrow_down() { assert_eq!(Task::ArrowDown.as_str(), "down"); }
+
+    #[test]
+    fn task_as_str_arrow_left() { assert_eq!(Task::ArrowLeft.as_str(), "left"); }
+
+    #[test]
+    fn task_as_str_arrow_right() { assert_eq!(Task::ArrowRight.as_str(), "right"); }
+
+    #[test]
+    fn task_as_str_cut() { assert_eq!(Task::Cut.as_str(), "cut"); }
+
+    #[test]
+    fn task_as_str_copy() { assert_eq!(Task::Copy.as_str(), "copy"); }
+
+    #[test]
+    fn task_as_str_paste() { assert_eq!(Task::Paste.as_str(), "paste"); }
+
+    // --- AppRenderer.error_message ---
+
+    #[test]
+    fn error_message_simple() {
+        let mut r = AppRenderer::new();
+        r.error_message = "test error".to_owned();
+        assert_eq!(r.error_message, "test error");
+    }
+
+    #[test]
+    fn error_message_empty() {
+        let mut r = AppRenderer::new();
+        r.error_message = String::new();
+        assert_eq!(r.error_message, "");
+    }
+
+    #[test]
+    fn error_message_overwrites() {
+        let mut r = AppRenderer::new();
+        r.error_message = "first".to_owned();
+        r.error_message = "second".to_owned();
+        assert_eq!(r.error_message, "second");
     }
 }
