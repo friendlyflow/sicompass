@@ -238,6 +238,14 @@ const PROGRAM_ENTRIES: &[(&str, &str, bool)] = &[
     ("web browser",  "enable_web browser",  false),
 ];
 
+/// Return true if `display_name` matches `provider_name` when spaces are ignored.
+/// e.g., "chat client" matches "chatclient".
+pub fn name_matches_provider(display_name: &str, provider_name: &str) -> bool {
+    if display_name == provider_name { return true; }
+    let stripped: String = display_name.chars().filter(|&c| c != ' ').collect();
+    stripped == provider_name
+}
+
 fn enabled_programs() -> Vec<String> {
     if let Some(path) = sicompass_sdk::platform::main_config_path() {
         if let Ok(data) = std::fs::read_to_string(&path) {
@@ -266,4 +274,113 @@ fn enabled_programs() -> Vec<String> {
         .filter(|&&(_, _, default)| default)
         .map(|&(name, _, _)| name.to_string())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app_state::AppRenderer;
+    use sicompass_sdk::ffon::FfonElement;
+    use sicompass_sdk::provider::Provider;
+
+    struct MockProv { name: String }
+    impl MockProv { fn new(n: &str) -> Self { MockProv { name: n.to_owned() } } }
+    impl Provider for MockProv {
+        fn name(&self) -> &str { &self.name }
+        fn fetch(&mut self) -> Vec<FfonElement> { vec![] }
+    }
+
+    // --- name_matches_provider ---
+
+    #[test]
+    fn name_matches_exact() {
+        assert!(name_matches_provider("tutorial", "tutorial"));
+    }
+
+    #[test]
+    fn name_matches_with_spaces() {
+        assert!(name_matches_provider("chat client", "chatclient"));
+    }
+
+    #[test]
+    fn name_no_match() {
+        assert!(!name_matches_provider("chat client", "emailclient"));
+    }
+
+    #[test]
+    fn name_matches_web_browser() {
+        assert!(name_matches_provider("web browser", "webbrowser"));
+    }
+
+    #[test]
+    fn name_matches_empty_strings() {
+        assert!(name_matches_provider("", ""));
+    }
+
+    #[test]
+    fn name_matches_trailing_spaces() {
+        assert!(name_matches_provider("chat ", "chat"));
+    }
+
+    // --- register_provider ---
+
+    #[test]
+    fn register_provider_adds_to_renderer() {
+        let mut r = AppRenderer::new();
+        register_provider(&mut r, Box::new(MockProv::new("test")));
+        assert_eq!(r.providers.len(), 1);
+        assert_eq!(r.ffon.len(), 1);
+    }
+
+    #[test]
+    fn register_provider_multiple() {
+        let mut r = AppRenderer::new();
+        register_provider(&mut r, Box::new(MockProv::new("a")));
+        register_provider(&mut r, Box::new(MockProv::new("b")));
+        register_provider(&mut r, Box::new(MockProv::new("c")));
+        assert_eq!(r.providers.len(), 3);
+        assert_eq!(r.providers[1].name(), "b");
+    }
+
+    // --- disable_provider ---
+
+    #[test]
+    fn disable_provider_removes_by_name() {
+        let mut r = AppRenderer::new();
+        register_provider(&mut r, Box::new(MockProv::new("keep")));
+        register_provider(&mut r, Box::new(MockProv::new("remove")));
+        disable_provider(&mut r, "remove");
+        assert_eq!(r.providers.len(), 1);
+        assert_eq!(r.providers[0].name(), "keep");
+    }
+
+    #[test]
+    fn disable_provider_removes_first() {
+        let mut r = AppRenderer::new();
+        register_provider(&mut r, Box::new(MockProv::new("first")));
+        register_provider(&mut r, Box::new(MockProv::new("second")));
+        disable_provider(&mut r, "first");
+        assert_eq!(r.providers.len(), 1);
+        assert_eq!(r.providers[0].name(), "second");
+    }
+
+    #[test]
+    fn disable_provider_not_found_is_noop() {
+        let mut r = AppRenderer::new();
+        register_provider(&mut r, Box::new(MockProv::new("keep")));
+        disable_provider(&mut r, "nonexistent");
+        assert_eq!(r.providers.len(), 1);
+    }
+
+    #[test]
+    fn disable_provider_removes_middle() {
+        let mut r = AppRenderer::new();
+        register_provider(&mut r, Box::new(MockProv::new("a")));
+        register_provider(&mut r, Box::new(MockProv::new("b")));
+        register_provider(&mut r, Box::new(MockProv::new("c")));
+        disable_provider(&mut r, "b");
+        assert_eq!(r.providers.len(), 2);
+        assert_eq!(r.providers[0].name(), "a");
+        assert_eq!(r.providers[1].name(), "c");
+    }
 }

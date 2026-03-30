@@ -16,9 +16,9 @@ pub fn update_state(r: &mut AppRenderer, task: Task, history: History) {
     // Capture position before modification (needed for undo of DELETE)
     let history_id = r.current_id.clone();
 
-    // Capture element BEFORE modification (for undo of DELETE / INPUT)
+    // Capture element BEFORE modification (for undo of DELETE / INPUT / PASTE)
     let prev_element = if history == History::None
-        && matches!(task, Task::Delete | Task::Input)
+        && matches!(task, Task::Delete | Task::Input | Task::Paste)
     {
         get_element_at(&r.ffon, &r.current_id).cloned()
     } else {
@@ -32,7 +32,7 @@ pub fn update_state(r: &mut AppRenderer, task: Task, history: History) {
     update_ids(r, is_key, task, history);
     update_ffon(r, &line, is_key, task, history);
 
-    // Capture element AFTER modification (for undo of APPEND / INSERT / INPUT)
+    // Capture element AFTER modification (for undo of APPEND / INSERT / INPUT / PASTE)
     let new_element = if history == History::None
         && matches!(
             task,
@@ -41,13 +41,14 @@ pub fn update_state(r: &mut AppRenderer, task: Task, history: History) {
                 | Task::Insert
                 | Task::InsertInsert
                 | Task::Input
+                | Task::Paste
         ) {
         get_element_at(&r.ffon, &r.current_id).cloned()
     } else {
         None
     };
 
-    let record_id = if task == Task::Delete {
+    let record_id = if matches!(task, Task::Delete | Task::Cut | Task::Paste) {
         history_id
     } else {
         r.current_id.clone()
@@ -155,6 +156,16 @@ pub fn update_ffon(r: &mut AppRenderer, line: &str, is_key: bool, task: Task, hi
         return;
     }
 
+    // Paste: replace current element with clipboard content
+    if task == Task::Paste {
+        let prev_id = r.previous_id.clone();
+        let prev_idx = match prev_id.last() { Some(i) => i, None => return };
+        if let Some(elem) = r.clipboard.clone() {
+            replace_at(&mut r.ffon, &prev_id, prev_idx, elem);
+        }
+        return;
+    }
+
     let is_editor = is_editor_coordinate(r.coordinate);
 
     // Clone the ids so we can still mutate r.current_id
@@ -182,7 +193,7 @@ pub fn update_ffon(r: &mut AppRenderer, line: &str, is_key: bool, task: Task, hi
             arr.and_then(|a| a.get(prev_idx)).map_or(false, |e| e.is_obj())
         };
 
-        if task == Task::Delete {
+        if matches!(task, Task::Delete | Task::Cut) {
             // Remove element at prev_idx
             let removed = remove_at(&mut r.ffon, &prev_id, prev_idx);
             let new_len = get_parent_len(&r.ffon, &prev_id);
@@ -238,7 +249,7 @@ pub fn update_ffon(r: &mut AppRenderer, line: &str, is_key: bool, task: Task, hi
             }
         }
     } else if !is_key && is_editor {
-        if task == Task::Delete {
+        if matches!(task, Task::Delete | Task::Cut) {
             remove_at(&mut r.ffon, &prev_id, prev_idx);
             let new_len = get_parent_len(&r.ffon, &prev_id);
             // If cursor is at 0 and list is now empty at non-root level, insert placeholder
@@ -263,8 +274,8 @@ pub fn update_ffon(r: &mut AppRenderer, line: &str, is_key: bool, task: Task, hi
             // TASK_INPUT / navigation — update the value
             replace_at(&mut r.ffon, &prev_id, prev_idx, FfonElement::new_str(line));
         }
-    } else if task == Task::Delete {
-        // Non-editor delete (e.g. file browser in OperatorGeneral)
+    } else if matches!(task, Task::Delete | Task::Cut) {
+        // Non-editor delete/cut (e.g. file browser in OperatorGeneral)
         remove_at(&mut r.ffon, &prev_id, prev_idx);
         let new_len = get_parent_len(&r.ffon, &prev_id);
         if new_len == 0 {

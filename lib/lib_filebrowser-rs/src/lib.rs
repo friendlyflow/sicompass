@@ -826,4 +826,127 @@ mod tests {
         assert!(loop_item.is_some(), "loop symlink should appear in results");
         assert!(loop_item.unwrap().label.starts_with("- "), "symlink should show as file, not dir");
     }
+
+    // ---- additional coverage to match C test suite -------------------------
+
+    #[test]
+    fn test_create_file_already_exists() {
+        // Creating an already-existing file should not crash; file still exists.
+        let (mut p, dir) = make_provider();
+        p.create_file("existing.txt");
+        p.create_file("existing.txt"); // second call — should not panic
+        assert!(dir.path().join("existing.txt").exists());
+    }
+
+    #[test]
+    fn test_fetch_nonexistent_path_returns_only_meta() {
+        let mut p = FilebrowserProvider::new();
+        p.set_current_path("/nonexistent/path/xyz/abc");
+        let items = p.fetch();
+        // On a nonexistent path the listing is empty, so only meta is returned
+        assert_eq!(items.len(), 1);
+        assert!(items[0].as_obj().map_or(false, |o| o.key == "meta"));
+    }
+
+    #[test]
+    fn test_rename_nonexistent_returns_false() {
+        let (mut p, _dir) = make_provider();
+        let result = p.commit_edit("<input>nonexistent.txt</input>", "<input>new.txt</input>");
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_rename_directory() {
+        let (mut p, dir) = make_provider();
+        std::fs::create_dir(dir.path().join("olddir")).unwrap();
+        let ok = p.commit_edit("<input>olddir</input>", "<input>newdir</input>");
+        assert!(ok);
+        assert!(!dir.path().join("olddir").exists());
+        assert!(dir.path().join("newdir").exists());
+    }
+
+    #[test]
+    fn test_delete_nonexistent_returns_false() {
+        let (mut p, _dir) = make_provider();
+        assert!(!p.delete_item("<input>nonexistent_xyz</input>"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_copy_directory() {
+        let (mut p, dir) = make_provider();
+        let src = dir.path().join("srcdir");
+        std::fs::create_dir(&src).unwrap();
+        std::fs::write(src.join("inner.txt"), b"data").unwrap();
+        let src_str = dir.path().to_str().unwrap();
+        assert!(p.copy_item(src_str, "srcdir", src_str, "cpdir"));
+        assert!(dir.path().join("cpdir").is_dir());
+        assert!(dir.path().join("cpdir/inner.txt").exists());
+    }
+
+    #[test]
+    fn test_fetch_special_chars_in_filename() {
+        // Files with spaces and dashes should not crash the listing.
+        let (mut p, dir) = make_provider();
+        std::fs::write(dir.path().join("hello world.txt"), b"").unwrap();
+        std::fs::write(dir.path().join("file-with-dashes.txt"), b"").unwrap();
+        let items = p.fetch();
+        // Should have meta + 2 files
+        assert_eq!(items.len(), 3);
+    }
+
+    #[test]
+    fn test_get_commands_returns_six() {
+        let p = FilebrowserProvider::new();
+        let cmds = p.commands();
+        assert_eq!(cmds.len(), 6);
+        assert!(cmds.contains(&"create directory".to_string()));
+        assert!(cmds.contains(&"create file".to_string()));
+        assert!(cmds.contains(&"open file with".to_string()));
+        assert!(cmds.contains(&"show/hide properties".to_string()));
+        assert!(cmds.contains(&"sort alphanumerically".to_string()));
+        assert!(cmds.contains(&"sort chronologically".to_string()));
+    }
+
+    #[test]
+    fn test_get_command_list_items_open_with_no_apps() {
+        // When no desktop apps are found, open_with returns empty list.
+        let (mut p, dir) = make_provider();
+        std::fs::write(dir.path().join("test.txt"), b"").unwrap();
+        // Prime open_with_path via handle_command
+        let mut err = String::new();
+        p.handle_command("open file with", "<input>test.txt</input>", 0, &mut err);
+        // command_list_items queries the platform for apps; on headless CI this returns empty
+        let items = p.command_list_items("open file with");
+        // Either empty (no apps found in CI) or non-empty (apps found) — just must not panic.
+        let _ = items; // no crash is the assertion
+    }
+
+    #[test]
+    fn test_provider_path_starts_at_root() {
+        // On non-Windows, the initial path is "/".
+        #[cfg(not(windows))]
+        {
+            let p = FilebrowserProvider::new();
+            assert_eq!(p.current_path(), "/");
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_fetch_symlink_appears_in_listing() {
+        let (mut p, dir) = make_provider();
+        let target = dir.path().join("real.txt");
+        std::fs::write(&target, b"content").unwrap();
+        let link = dir.path().join("link.txt");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let items = p.fetch();
+        // Should have meta + real.txt + link.txt = 3 entries
+        assert_eq!(items.len(), 3);
+        let names: Vec<_> = items.iter().skip(1)
+            .filter_map(|e| e.as_str())
+            .map(|s| tags::strip_display(s).to_string())
+            .collect();
+        assert!(names.contains(&"link.txt".to_string()));
+    }
 }

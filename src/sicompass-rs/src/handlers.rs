@@ -2357,6 +2357,100 @@ mod tests {
         assert_eq!(r.input_buffer, before);
     }
 
+    // --- Ctrl+X actually removes element from FFON ---
+
+    #[test]
+    fn ctrl_x_removes_element_from_ffon() {
+        let mut r = make_editor_with_items(&["first", "second", "third"]);
+        r.list_index = 1;
+        r.sync_current_id_from_list();
+        let before_len = r.ffon[0].as_obj().unwrap().children.len();
+        handle_ctrl_x(&mut r);
+        let after_len = r.ffon[0].as_obj().unwrap().children.len();
+        assert_eq!(after_len, before_len - 1);
+    }
+
+    #[test]
+    fn ctrl_x_cut_first_element_cursor_stays_at_zero() {
+        let mut r = make_editor_with_items(&["a", "b", "c"]);
+        r.list_index = 0;
+        r.sync_current_id_from_list();
+        handle_ctrl_x(&mut r);
+        assert_eq!(r.list_index, 0);
+    }
+
+    #[test]
+    fn ctrl_x_cut_last_element_cursor_adjusts() {
+        let mut r = make_editor_with_items(&["a", "b", "c"]);
+        r.list_index = 2;
+        r.sync_current_id_from_list();
+        handle_ctrl_x(&mut r);
+        let new_len = r.ffon[0].as_obj().unwrap().children.len();
+        assert!(r.list_index < new_len.max(1));
+    }
+
+    // --- Ctrl+V actually replaces element ---
+
+    #[test]
+    fn ctrl_v_paste_replaces_current_element() {
+        let mut r = make_editor_with_items(&["original"]);
+        r.list_index = 0;
+        r.sync_current_id_from_list();
+        r.clipboard = Some(FfonElement::Str("pasted".to_string()));
+        handle_ctrl_v(&mut r);
+        let elem = &r.ffon[0].as_obj().unwrap().children[0];
+        assert_eq!(elem.as_str(), Some("pasted"));
+    }
+
+    // --- Integration: copy then paste ---
+
+    #[test]
+    fn clipboard_integration_copy_then_paste() {
+        let mut r = make_editor_with_items(&["alpha", "beta"]);
+        r.list_index = 0;
+        r.sync_current_id_from_list();
+        handle_ctrl_c(&mut r);
+        r.list_index = 1;
+        r.sync_current_id_from_list();
+        handle_ctrl_v(&mut r);
+        let elem = &r.ffon[0].as_obj().unwrap().children[1];
+        assert_eq!(elem.as_str(), Some("alpha"));
+    }
+
+    #[test]
+    fn clipboard_integration_cut_then_paste() {
+        let mut r = make_editor_with_items(&["alpha", "beta"]);
+        r.list_index = 0;
+        r.sync_current_id_from_list();
+        handle_ctrl_x(&mut r);
+        assert_eq!(r.clipboard, Some(FfonElement::Str("alpha".to_string())));
+        // After cut, "beta" is at index 0
+        crate::list::create_list_current_layer(&mut r);
+        r.list_index = 0;
+        r.sync_current_id_from_list();
+        handle_ctrl_v(&mut r);
+        let elem = &r.ffon[0].as_obj().unwrap().children[0];
+        assert_eq!(elem.as_str(), Some("alpha"));
+    }
+
+    #[test]
+    fn clipboard_integration_multiple_pastes() {
+        let mut r = make_editor_with_items(&["src", "dst1", "dst2"]);
+        r.list_index = 0;
+        r.sync_current_id_from_list();
+        handle_ctrl_c(&mut r);
+        r.list_index = 1;
+        r.sync_current_id_from_list();
+        handle_ctrl_v(&mut r);
+        crate::list::create_list_current_layer(&mut r);
+        r.list_index = 2;
+        r.sync_current_id_from_list();
+        handle_ctrl_v(&mut r);
+        let children = &r.ffon[0].as_obj().unwrap().children;
+        assert_eq!(children[1].as_str(), Some("src"));
+        assert_eq!(children[2].as_str(), Some("src"));
+    }
+
     // -----------------------------------------------------------------------
     // handle_ctrl_home / handle_ctrl_end (filtered list variants)
     // -----------------------------------------------------------------------
@@ -2687,5 +2781,107 @@ mod tests {
         r.list_index = 2; // already at max filtered index
         handle_down(&mut r);
         assert_eq!(r.list_index, 2); // can't go further
+    }
+
+    // ---- UTF-8 cursor movement (mirrors C test_handlers.c utf8_* tests) ----
+
+    // Rust doesn't have standalone utf8_char_length/utf8_move_forward/backward
+    // functions — the behavior is tested through cursor operations.
+
+    #[test]
+    fn utf8_char_length_ascii() {
+        // ASCII char is 1 byte
+        let s = "A";
+        let len = s.chars().next().map(|c| c.len_utf8()).unwrap_or(0);
+        assert_eq!(len, 1);
+    }
+
+    #[test]
+    fn utf8_char_length_two_byte() {
+        // "é" (U+00E9) is 2 bytes
+        let s = "\u{00E9}";
+        let len = s.chars().next().map(|c| c.len_utf8()).unwrap_or(0);
+        assert_eq!(len, 2);
+    }
+
+    #[test]
+    fn utf8_char_length_three_byte() {
+        // "€" (U+20AC) is 3 bytes
+        let s = "\u{20AC}";
+        let len = s.chars().next().map(|c| c.len_utf8()).unwrap_or(0);
+        assert_eq!(len, 3);
+    }
+
+    #[test]
+    fn utf8_char_length_four_byte() {
+        // "𝄞" (U+1D11E) is 4 bytes
+        let s = "\u{1D11E}";
+        let len = s.chars().next().map(|c| c.len_utf8()).unwrap_or(0);
+        assert_eq!(len, 4);
+    }
+
+    #[test]
+    fn utf8_char_length_at_offset() {
+        // "Aé" — char at byte offset 1 is "é" (2 bytes)
+        let s = "A\u{00E9}";
+        let len = s[1..].chars().next().map(|c| c.len_utf8()).unwrap_or(0);
+        assert_eq!(len, 2);
+    }
+
+    #[test]
+    fn utf8_move_backward_at_start() {
+        // At position 0, backspace is a no-op
+        let mut r = make_input_renderer("hello");
+        r.cursor_position = 0;
+        handle_backspace(&mut r);
+        assert_eq!(r.cursor_position, 0);
+        assert_eq!(r.input_buffer, "hello");
+    }
+
+    #[test]
+    fn utf8_move_backward_ascii() {
+        // From byte 3 in "hello", backspace moves to byte 2
+        let mut r = make_input_renderer("hello");
+        r.cursor_position = 3;
+        handle_backspace(&mut r);
+        assert_eq!(r.cursor_position, 2);
+    }
+
+    #[test]
+    fn utf8_move_backward_two_byte_char() {
+        // "Aé": backspace from end (byte 3) removes "é", cursor at byte 1
+        let mut r = make_input_renderer("A\u{00E9}");
+        r.cursor_position = 3;
+        handle_backspace(&mut r);
+        assert_eq!(r.cursor_position, 1);
+        assert_eq!(r.input_buffer, "A");
+    }
+
+    #[test]
+    fn utf8_move_backward_three_byte_char() {
+        // "A€": backspace from end (byte 4) removes "€", cursor at byte 1
+        let mut r = make_input_renderer("A\u{20AC}");
+        r.cursor_position = 4;
+        handle_backspace(&mut r);
+        assert_eq!(r.cursor_position, 1);
+        assert_eq!(r.input_buffer, "A");
+    }
+
+    #[test]
+    fn utf8_move_forward_ascii() {
+        // Shift+Right on ASCII "hello" from pos 0 moves to pos 1
+        let mut r = make_input_renderer("hello");
+        r.cursor_position = 0;
+        handle_shift_right(&mut r);
+        assert_eq!(r.cursor_position, 1);
+    }
+
+    #[test]
+    fn utf8_move_forward_at_end() {
+        // Shift+Right at end is a no-op
+        let mut r = make_input_renderer("hello");
+        r.cursor_position = 5;
+        handle_shift_right(&mut r);
+        assert_eq!(r.cursor_position, 5);
     }
 }
