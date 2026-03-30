@@ -45,7 +45,7 @@ image = { version = "0.25", features = ["jpeg", "png", "webp"] }
 sdl3 = "0.12"
 
 # Accessibility
-accesskit = "0.17"
+accesskit = "0.16"
 accesskit_unix = "0.12"
 
 # Unicode

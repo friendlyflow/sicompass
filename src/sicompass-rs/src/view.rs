@@ -101,6 +101,11 @@ pub fn main_loop(app: &mut AppState) {
         // ---- Fill vertex buffers for this frame ----------------------------
         update_view(app);
 
+        // ---- Update accessibility tree (no-op when no AT is active) ---------
+        if let Some(adapter) = app.accesskit_adapter.as_mut() {
+            adapter.update_if_active(&app.renderer);
+        }
+
         // ---- Recreate swapchain if needed -----------------------------------
         if app.framebuffer_resized {
             app.framebuffer_resized = false;
@@ -178,6 +183,9 @@ fn update_view(app: &mut AppState) {
     fr.begin_text_rendering();
     if let Some(rr) = rr_opt.as_deref_mut() {
         rr.begin_rect_rendering();
+    }
+    if let Some(ir) = app.image_renderer.as_mut() {
+        ir.begin_image_rendering();
     }
 
     // ---- Header separator line -------------------------------------------
