@@ -29,10 +29,12 @@ mod tests {
     use super::*;
     const I: u64 = CaretState::BLINK_INTERVAL_MS;
 
+    #[test] fn blink_interval_ms_is_400() { assert_eq!(CaretState::BLINK_INTERVAL_MS, 400); }
     #[test] fn new_not_visible() { assert!(!CaretState::new().visible); }
     #[test] fn reset_makes_visible() { let mut c = CaretState::new(); c.reset(0); assert!(c.visible); }
     #[test] fn no_toggle_before_interval() { let mut c = CaretState::new(); c.reset(0); c.update(I - 1); assert!(c.visible); }
     #[test] fn toggles_at_interval() { let mut c = CaretState::new(); c.reset(0); c.update(I); assert!(!c.visible); }
+    #[test] fn toggles_past_interval() { let mut c = CaretState::new(); c.reset(0); c.update(I + 100); assert!(!c.visible); }
     #[test] fn toggles_twice() { let mut c = CaretState::new(); c.reset(0); c.update(I); c.update(I * 2); assert!(c.visible); }
 
     #[test]

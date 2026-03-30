@@ -802,6 +802,11 @@ mod tests {
         assert_eq!(strip_trailing_colon(":"), "");
     }
 
+    #[test]
+    fn strip_colon_empty_string() {
+        assert_eq!(strip_trailing_colon(""), "");
+    }
+
     // --- update_history ---
 
     #[test]

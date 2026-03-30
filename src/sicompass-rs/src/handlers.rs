@@ -14,23 +14,88 @@ use sicompass_sdk::tags;
 
 /// Move selection up in the current list.
 pub fn handle_up(r: &mut AppRenderer) {
-    if r.list_index > 0 {
-        r.list_index -= 1;
-        r.sync_current_id_from_list();
-        r.caret.reset(sdl_ticks());
-        r.needs_redraw = true;
+    match r.coordinate {
+        Coordinate::ScrollSearch => {
+            if r.scroll_search_match_count > 0 {
+                if r.scroll_search_current_match > 0 {
+                    r.scroll_search_current_match -= 1;
+                } else {
+                    r.scroll_search_current_match = r.scroll_search_match_count - 1;
+                }
+            }
+            r.needs_redraw = true;
+        }
+        Coordinate::Scroll => {
+            if r.text_scroll_offset > 0 {
+                r.text_scroll_offset -= 1;
+            }
+            r.needs_redraw = true;
+        }
+        Coordinate::SimpleSearch | Coordinate::Command | Coordinate::ExtendedSearch => {
+            r.error_message.clear();
+            if r.list_index > 0 {
+                r.list_index -= 1;
+                if r.coordinate != Coordinate::Command {
+                    r.sync_current_id_from_list();
+                }
+            }
+            r.needs_redraw = true;
+        }
+        Coordinate::EditorInsert | Coordinate::OperatorInsert => {
+            r.needs_redraw = true;
+        }
+        _ => {
+            crate::state::update_state(r, Task::ArrowUp, History::None);
+            r.needs_redraw = true;
+        }
     }
 }
 
 /// Move selection down in the current list.
 pub fn handle_down(r: &mut AppRenderer) {
-    let len = r.active_list_len();
-    if len == 0 { return; }
-    if r.list_index < len - 1 {
-        r.list_index += 1;
-        r.sync_current_id_from_list();
-        r.caret.reset(sdl_ticks());
-        r.needs_redraw = true;
+    match r.coordinate {
+        Coordinate::ScrollSearch => {
+            if r.scroll_search_match_count > 0 {
+                if r.scroll_search_current_match < r.scroll_search_match_count - 1 {
+                    r.scroll_search_current_match += 1;
+                } else {
+                    r.scroll_search_current_match = 0;
+                }
+            }
+            r.needs_redraw = true;
+        }
+        Coordinate::Scroll => {
+            let line_height = r.cached_line_height.max(1);
+            let header_lines = 2;
+            let visible_lines = ((r.window_height - line_height * header_lines) / line_height).max(1);
+            let max_offset = (r.text_scroll_line_count - visible_lines).max(0);
+            if r.text_scroll_offset < max_offset {
+                r.text_scroll_offset += 1;
+            }
+            r.needs_redraw = true;
+        }
+        Coordinate::SimpleSearch | Coordinate::Command | Coordinate::ExtendedSearch => {
+            r.error_message.clear();
+            let max_index = if r.filtered_list_indices.is_empty() {
+                r.total_list.len().saturating_sub(1)
+            } else {
+                r.filtered_list_indices.len().saturating_sub(1)
+            };
+            if r.list_index < max_index {
+                r.list_index += 1;
+                if r.coordinate != Coordinate::Command {
+                    r.sync_current_id_from_list();
+                }
+            }
+            r.needs_redraw = true;
+        }
+        Coordinate::EditorInsert | Coordinate::OperatorInsert => {
+            // noop in insert modes
+        }
+        _ => {
+            crate::state::update_state(r, Task::ArrowDown, History::None);
+            r.needs_redraw = true;
+        }
     }
 }
 
@@ -251,20 +316,25 @@ pub fn handle_meta(r: &mut AppRenderer) {
 /// Enter Tab search mode.
 pub fn handle_tab(r: &mut AppRenderer) {
     match r.coordinate {
-        Coordinate::OperatorGeneral | Coordinate::OperatorInsert => {
+        Coordinate::Scroll | Coordinate::ScrollSearch => {
+            // noop in scroll modes
+        }
+        Coordinate::OperatorGeneral | Coordinate::OperatorInsert | Coordinate::EditorGeneral => {
             r.previous_coordinate = r.coordinate;
             r.coordinate = Coordinate::SimpleSearch;
             r.search_string.clear();
             list::create_list_current_layer(r);
+            r.needs_redraw = true;
         }
         Coordinate::SimpleSearch => {
             // Tab again → scroll mode (C: no previous_coordinate update)
             r.coordinate = Coordinate::Scroll;
-            r.scroll_offset = 0;
+            r.text_scroll_offset = 0;
+            r.text_scroll_line_count = 0;
+            r.needs_redraw = true;
         }
         _ => {}
     }
-    r.needs_redraw = true;
 }
 
 /// Enter command mode (:).
@@ -637,39 +707,64 @@ pub fn handle_redo(r: &mut AppRenderer) {
 pub fn handle_escape(r: &mut AppRenderer) {
     clear_selection(r);
     match r.coordinate {
-        Coordinate::OperatorGeneral => {
-            // Already at base mode — nothing to do
+        Coordinate::EditorInsert => {
+            // Save via updateState, return to EditorGeneral
+            crate::state::update_state(r, Task::Input, History::None);
+            r.coordinate = Coordinate::EditorGeneral;
         }
-        Coordinate::SimpleSearch | Coordinate::ExtendedSearch => {
-            r.coordinate = r.previous_coordinate;
-            r.previous_coordinate = r.coordinate;
-            r.search_string.clear();
-            list::create_list_current_layer(r);
+        Coordinate::OperatorInsert => {
+            // Discard changes, return to OperatorGeneral
+            r.coordinate = Coordinate::OperatorGeneral;
         }
         Coordinate::Command => {
             r.coordinate = r.previous_coordinate;
             r.input_buffer.clear();
             r.cursor_position = 0;
             list::create_list_current_layer(r);
+            r.list_index = r.current_id.last().unwrap_or(0);
+            r.scroll_offset = 0;
+            r.caret.reset(sdl_ticks());
+            r.needs_redraw = true;
+            return;
         }
-        Coordinate::EditorInsert | Coordinate::EditorGeneral
-        | Coordinate::EditorNormal | Coordinate::EditorVisual => {
-            r.coordinate = Coordinate::OperatorGeneral;
-            r.input_buffer.clear();
-            r.cursor_position = 0;
-            r.selection_anchor = None;
+        Coordinate::SimpleSearch | Coordinate::ExtendedSearch => {
+            r.coordinate = r.previous_coordinate;
+            r.search_string.clear();
+            list::create_list_current_layer(r);
+            r.list_index = r.current_id.last().unwrap_or(0);
+            r.scroll_offset = 0;
+            r.caret.reset(sdl_ticks());
+            r.needs_redraw = true;
+            return;
+        }
+        Coordinate::Dashboard => {
+            r.coordinate = r.previous_coordinate;
+            r.caret.reset(sdl_ticks());
+            r.needs_redraw = true;
+            return;
         }
         Coordinate::ScrollSearch => {
             r.coordinate = Coordinate::Scroll;
+            r.scroll_search_match_count = 0;
+            r.scroll_search_current_match = 0;
         }
         Coordinate::Scroll => {
             r.coordinate = Coordinate::SimpleSearch;
             r.search_string.clear();
             r.scroll_offset = 0;
             list::create_list_current_layer(r);
+            r.list_index = r.current_id.last().unwrap_or(0);
         }
         _ => {
-            r.coordinate = r.previous_coordinate;
+            // EditorGeneral, EditorNormal, EditorVisual, OperatorGeneral, etc.
+            // Go to previous if it was an operator mode, else editor
+            if r.previous_coordinate == Coordinate::OperatorGeneral
+                || r.previous_coordinate == Coordinate::OperatorInsert
+            {
+                r.coordinate = Coordinate::OperatorGeneral;
+            } else {
+                r.coordinate = Coordinate::EditorGeneral;
+            }
         }
     }
     r.caret.reset(sdl_ticks());
@@ -1239,6 +1334,9 @@ pub fn handle_ctrl_v(r: &mut AppRenderer) {
 
 /// Ctrl+F — in Scroll mode enters ScrollSearch; in insert modes enters InputSearch;
 /// otherwise enters SimpleSearch.
+/// Double-tap interval for Ctrl+F extended search reset (mirrors C DELTA_MS).
+const DELTA_MS: u64 = 400;
+
 pub fn handle_ctrl_f(r: &mut AppRenderer) {
     match r.coordinate {
         Coordinate::Scroll => {
@@ -1246,9 +1344,13 @@ pub fn handle_ctrl_f(r: &mut AppRenderer) {
             r.input_buffer.clear();
             r.cursor_position = 0;
             r.selection_anchor = None;
+            r.scroll_search_match_count = 0;
+            r.scroll_search_current_match = 0;
             r.needs_redraw = true;
         }
-        Coordinate::ScrollSearch | Coordinate::InputSearch => {}
+        Coordinate::ScrollSearch | Coordinate::InputSearch => {
+            // noop
+        }
         Coordinate::EditorInsert | Coordinate::OperatorInsert => {
             r.previous_coordinate = r.coordinate;
             r.coordinate = Coordinate::InputSearch;
@@ -1257,13 +1359,56 @@ pub fn handle_ctrl_f(r: &mut AppRenderer) {
             r.selection_anchor = None;
             r.needs_redraw = true;
         }
-        _ => {
-            r.previous_coordinate = r.coordinate;
-            r.coordinate = Coordinate::SimpleSearch;
-            r.search_string.clear();
-            list::create_list_current_layer(r);
+        Coordinate::Command => {
+            // noop in command mode
+        }
+        Coordinate::ExtendedSearch => {
+            // Double-tap: reset to root of current provider
+            let now = sdl_ticks();
+            if now.saturating_sub(r.last_keypress_time) <= DELTA_MS {
+                while r.current_id.depth() > 1 {
+                    r.current_id.pop();
+                }
+                r.input_buffer.clear();
+                r.cursor_position = 0;
+                r.selection_anchor = None;
+                r.scroll_offset = 0;
+                list::create_list_current_layer(r);
+                r.list_index = 0;
+            }
+            r.last_keypress_time = now;
             r.needs_redraw = true;
         }
+        _ => {
+            // From SimpleSearch: preserve previous_coordinate (don't overwrite)
+            if r.coordinate != Coordinate::SimpleSearch {
+                r.previous_coordinate = r.coordinate;
+            }
+            r.coordinate = Coordinate::ExtendedSearch;
+            r.input_buffer.clear();
+            r.cursor_position = 0;
+            r.selection_anchor = None;
+            r.scroll_offset = 0;
+            list::create_list_current_layer(r);
+            r.list_index = r.current_id.last().unwrap_or(0);
+            r.last_keypress_time = sdl_ticks();
+            r.needs_redraw = true;
+        }
+    }
+}
+
+/// Enter dashboard mode if the active provider has a dashboard image.
+pub fn handle_dashboard(r: &mut AppRenderer) {
+    let provider_idx = r.current_id.get(0).unwrap_or(0);
+    let image_path = r.providers.get(provider_idx)
+        .and_then(|p| p.dashboard_image_path())
+        .map(|s| s.to_owned());
+
+    if let Some(path) = image_path {
+        r.dashboard_image_path = path;
+        r.previous_coordinate = r.coordinate;
+        r.coordinate = Coordinate::Dashboard;
+        r.needs_redraw = true;
     }
 }
 
@@ -1385,6 +1530,7 @@ mod tests {
     #[test]
     fn up_moves_index() {
         let mut r = make_renderer();
+        r.coordinate = Coordinate::SimpleSearch;
         r.list_index = 1;
         r.sync_current_id_from_list();
         handle_up(&mut r);
@@ -1394,6 +1540,7 @@ mod tests {
     #[test]
     fn up_clamps_at_zero() {
         let mut r = make_renderer();
+        r.coordinate = Coordinate::SimpleSearch;
         r.list_index = 0;
         handle_up(&mut r);
         assert_eq!(r.list_index, 0);
@@ -1402,6 +1549,7 @@ mod tests {
     #[test]
     fn down_moves_index() {
         let mut r = make_renderer();
+        r.coordinate = Coordinate::SimpleSearch;
         r.list_index = 0;
         handle_down(&mut r);
         assert_eq!(r.list_index, 1);
@@ -1410,6 +1558,7 @@ mod tests {
     #[test]
     fn down_clamps_at_end() {
         let mut r = make_renderer();
+        r.coordinate = Coordinate::SimpleSearch;
         let last = r.active_list_len() - 1;
         r.list_index = last;
         handle_down(&mut r);
@@ -1931,11 +2080,12 @@ mod tests {
     }
 
     #[test]
-    fn escape_from_editor_insert_goes_to_operator_general() {
+    fn escape_from_editor_insert_goes_to_editor_general() {
+        // C spec: EditorInsert → updateState(Input) → EditorGeneral
         let mut r = make_renderer();
         r.coordinate = Coordinate::EditorInsert;
         handle_escape(&mut r);
-        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+        assert_eq!(r.coordinate, Coordinate::EditorGeneral);
     }
 
     // -----------------------------------------------------------------------
@@ -1959,11 +2109,11 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_f_from_operator_enters_simple_search() {
+    fn ctrl_f_from_operator_enters_extended_search() {
         let mut r = make_renderer();
         r.coordinate = Coordinate::OperatorGeneral;
         handle_ctrl_f(&mut r);
-        assert_eq!(r.coordinate, Coordinate::SimpleSearch);
+        assert_eq!(r.coordinate, Coordinate::ExtendedSearch);
         assert_eq!(r.previous_coordinate, Coordinate::OperatorGeneral);
     }
 
@@ -2205,5 +2355,337 @@ mod tests {
         handle_ctrl_v(&mut r);
         // Buffer unchanged (no SDL clipboard available in tests)
         assert_eq!(r.input_buffer, before);
+    }
+
+    // -----------------------------------------------------------------------
+    // handle_ctrl_home / handle_ctrl_end (filtered list variants)
+    // -----------------------------------------------------------------------
+
+    fn make_renderer_with_items(items: &[&str]) -> AppRenderer {
+        let mut root = FfonElement::new_obj("provider");
+        for item in items {
+            root.as_obj_mut().unwrap().push(FfonElement::new_str(*item));
+        }
+        let mut r = AppRenderer::new();
+        r.ffon = vec![root];
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        list::create_list_current_layer(&mut r);
+        r
+    }
+
+    #[test]
+    fn ctrl_home_filtered_list_jumps_to_first() {
+        let mut r = make_renderer_with_items(&["a", "b", "c", "d", "e"]);
+        // Simulate a filtered list with 3 matches
+        r.filtered_list_indices = vec![1, 2, 3];
+        r.list_index = 2;
+        handle_ctrl_home(&mut r);
+        assert_eq!(r.list_index, 0);
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn ctrl_home_empty_list_no_change() {
+        let mut r = AppRenderer::new();
+        r.ffon = vec![FfonElement::new_obj("empty")];
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        r.list_index = 0;
+        handle_ctrl_home(&mut r);
+        assert_eq!(r.list_index, 0);
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn ctrl_end_filtered_list_jumps_to_last_filtered() {
+        let mut r = make_renderer_with_items(&["a", "b", "c", "d", "e"]);
+        // Simulate a filtered list with 3 matches (indices 1,2,3 → display index 0,1,2)
+        r.filtered_list_indices = vec![1, 2, 3];
+        r.list_index = 0;
+        handle_ctrl_end(&mut r);
+        assert_eq!(r.list_index, 2); // filteredListCount - 1
+        assert!(r.needs_redraw);
+    }
+
+    // -----------------------------------------------------------------------
+    // handle_delete (no-history variant)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn delete_no_history_passes_none() {
+        let mut r = make_renderer_with_items(&["item"]);
+        r.list_index = 0;
+        r.sync_current_id_from_list();
+        // Should not panic; just verify it sets needs_redraw
+        handle_delete(&mut r, History::None);
+        assert!(r.needs_redraw);
+    }
+
+    // -----------------------------------------------------------------------
+    // handle_tab (new variants)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn tab_noop_in_scroll_search_mode() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::ScrollSearch;
+        handle_tab(&mut r);
+        assert_eq!(r.coordinate, Coordinate::ScrollSearch);
+    }
+
+    #[test]
+    fn tab_from_editor_enters_simple_search() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::EditorGeneral;
+        handle_tab(&mut r);
+        assert_eq!(r.coordinate, Coordinate::SimpleSearch);
+        assert_eq!(r.previous_coordinate, Coordinate::EditorGeneral);
+    }
+
+    // -----------------------------------------------------------------------
+    // handle_escape (new variants)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn escape_from_operator_insert_goes_to_operator_general() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::OperatorInsert;
+        handle_escape(&mut r);
+        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+    }
+
+    #[test]
+    fn escape_from_simple_search_returns_to_previous() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::SimpleSearch;
+        r.previous_coordinate = Coordinate::EditorGeneral;
+        r.current_id.set_last(3); // simulate current position
+        handle_escape(&mut r);
+        assert_eq!(r.coordinate, Coordinate::EditorGeneral);
+        // list_index should be synced to currentId
+        assert_eq!(r.list_index, 3);
+    }
+
+    #[test]
+    fn escape_from_unknown_with_operator_previous() {
+        // EditorGeneral + previousCoordinate=OperatorGeneral → OperatorGeneral
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::EditorGeneral;
+        r.previous_coordinate = Coordinate::OperatorGeneral;
+        handle_escape(&mut r);
+        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+    }
+
+    #[test]
+    fn escape_from_unknown_defaults_to_editor() {
+        // EditorGeneral + previousCoordinate=EditorGeneral → EditorGeneral
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::EditorGeneral;
+        r.previous_coordinate = Coordinate::EditorGeneral;
+        handle_escape(&mut r);
+        assert_eq!(r.coordinate, Coordinate::EditorGeneral);
+    }
+
+    #[test]
+    fn escape_from_dashboard_returns_to_previous() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::Dashboard;
+        r.previous_coordinate = Coordinate::OperatorGeneral;
+        handle_escape(&mut r);
+        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn escape_from_scroll_search_resets_match_counts() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::ScrollSearch;
+        r.scroll_search_match_count = 5;
+        r.scroll_search_current_match = 2;
+        handle_escape(&mut r);
+        assert_eq!(r.coordinate, Coordinate::Scroll);
+        assert_eq!(r.scroll_search_match_count, 0);
+        assert_eq!(r.scroll_search_current_match, 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // handle_ctrl_f (new variants)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn ctrl_f_noop_in_command_mode() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::Command;
+        handle_ctrl_f(&mut r);
+        assert_eq!(r.coordinate, Coordinate::Command);
+    }
+
+    #[test]
+    fn ctrl_f_from_simple_search_preserves_previous() {
+        // C: when coming from SimpleSearch, don't overwrite previousCoordinate
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::SimpleSearch;
+        r.previous_coordinate = Coordinate::OperatorGeneral;
+        handle_ctrl_f(&mut r);
+        assert_eq!(r.coordinate, Coordinate::ExtendedSearch);
+        assert_eq!(r.previous_coordinate, Coordinate::OperatorGeneral); // not overwritten
+    }
+
+    #[test]
+    fn ctrl_f_from_scroll_resets_search_state() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::Scroll;
+        r.scroll_search_match_count = 5;
+        r.scroll_search_current_match = 3;
+        handle_ctrl_f(&mut r);
+        assert_eq!(r.coordinate, Coordinate::ScrollSearch);
+        assert_eq!(r.scroll_search_match_count, 0);
+        assert_eq!(r.scroll_search_current_match, 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // handle_up (new variants: scroll search, scroll, command mode)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn up_in_scroll_search_wraps_to_last() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::ScrollSearch;
+        r.scroll_search_match_count = 5;
+        r.scroll_search_current_match = 0;
+        handle_up(&mut r);
+        assert_eq!(r.scroll_search_current_match, 4); // wraps to last
+    }
+
+    #[test]
+    fn up_in_scroll_search_decrements() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::ScrollSearch;
+        r.scroll_search_match_count = 5;
+        r.scroll_search_current_match = 3;
+        handle_up(&mut r);
+        assert_eq!(r.scroll_search_current_match, 2);
+    }
+
+    #[test]
+    fn up_in_scroll_mode_decrements_offset() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::Scroll;
+        r.text_scroll_offset = 5;
+        handle_up(&mut r);
+        assert_eq!(r.text_scroll_offset, 4);
+    }
+
+    #[test]
+    fn up_in_scroll_mode_clamps_at_zero() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::Scroll;
+        r.text_scroll_offset = 0;
+        handle_up(&mut r);
+        assert_eq!(r.text_scroll_offset, 0);
+    }
+
+    #[test]
+    fn up_in_search_clears_error_message() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::SimpleSearch;
+        r.error_message = "some error".to_owned();
+        r.list_index = 2;
+        handle_up(&mut r);
+        assert!(r.error_message.is_empty());
+    }
+
+    #[test]
+    fn up_in_command_mode_no_id_copy() {
+        // In command mode, listIndex decrements but currentId is NOT updated
+        let mut r = make_renderer_with_items(&["a", "b", "c", "d", "e"]);
+        r.coordinate = Coordinate::Command;
+        r.list_index = 2;
+        let saved_id = r.current_id.clone();
+        handle_up(&mut r);
+        assert_eq!(r.list_index, 1);
+        assert_eq!(r.current_id, saved_id); // currentId unchanged
+    }
+
+    #[test]
+    fn up_in_general_sets_needs_redraw() {
+        // OperatorGeneral calls updateState(ArrowUp); just verify no crash + needsRedraw
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::OperatorGeneral;
+        handle_up(&mut r);
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn up_noop_in_insert_mode_but_redraws() {
+        // C: insert modes set needsRedraw but don't call updateState
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::EditorInsert;
+        handle_up(&mut r);
+        assert!(r.needs_redraw);
+    }
+
+    // -----------------------------------------------------------------------
+    // handle_down (new variants)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn down_in_scroll_search_wraps_to_first() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::ScrollSearch;
+        r.scroll_search_match_count = 5;
+        r.scroll_search_current_match = 4;
+        handle_down(&mut r);
+        assert_eq!(r.scroll_search_current_match, 0); // wraps to first
+    }
+
+    #[test]
+    fn down_in_scroll_search_increments() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::ScrollSearch;
+        r.scroll_search_match_count = 5;
+        r.scroll_search_current_match = 2;
+        handle_down(&mut r);
+        assert_eq!(r.scroll_search_current_match, 3);
+    }
+
+    #[test]
+    fn down_in_command_mode_no_id_copy() {
+        let mut r = make_renderer_with_items(&["a", "b", "c", "d", "e"]);
+        r.coordinate = Coordinate::Command;
+        r.list_index = 1;
+        let saved_id = r.current_id.clone();
+        handle_down(&mut r);
+        assert_eq!(r.list_index, 2);
+        assert_eq!(r.current_id, saved_id); // currentId unchanged
+    }
+
+    #[test]
+    fn down_in_general_sets_needs_redraw() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::EditorGeneral;
+        handle_down(&mut r);
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn down_noop_in_operator_insert() {
+        // OperatorInsert: down does nothing (no updateState, no listIndex change)
+        let mut r = make_renderer_with_items(&["a", "b", "c"]);
+        r.coordinate = Coordinate::OperatorInsert;
+        r.list_index = 1;
+        handle_down(&mut r);
+        assert_eq!(r.list_index, 1); // unchanged
+    }
+
+    #[test]
+    fn down_uses_filtered_count_as_max() {
+        // ExtendedSearch with filtered list: can't go past filteredListCount - 1
+        let mut r = make_renderer_with_items(&["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]);
+        r.coordinate = Coordinate::ExtendedSearch;
+        // Simulate 3 filtered matches (display indices 0, 1, 2)
+        r.filtered_list_indices = vec![0, 1, 2];
+        r.list_index = 2; // already at max filtered index
+        handle_down(&mut r);
+        assert_eq!(r.list_index, 2); // can't go further
     }
 }
