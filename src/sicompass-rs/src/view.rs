@@ -517,8 +517,7 @@ fn handle_keydown_old(app: &mut AppState, keycode: Option<Keycode>, keymod: Mod)
                 }
             }
             Some(Keycode::Return) | Some(Keycode::KpEnter) => {
-                // TODO Phase 4+: execute command
-                handlers::handle_escape(r);
+                handlers::handle_enter_command(r);
             }
             Some(Keycode::A) if ctrl && !shift => handlers::handle_select_all(r),
             Some(Keycode::X) if ctrl && !shift => handlers::handle_ctrl_x(r),

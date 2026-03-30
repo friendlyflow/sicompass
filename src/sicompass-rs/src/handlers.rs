@@ -3,7 +3,7 @@
 //! Each function corresponds to one key action and mutates `AppRenderer`
 //! in-place. Rendering is triggered by setting `needs_redraw = true`.
 
-use crate::app_state::{AppRenderer, Coordinate, History, Task};
+use crate::app_state::{AppRenderer, CommandPhase, Coordinate, History, Task};
 use crate::list;
 use sicompass_sdk::ffon::{get_ffon_at_id, next_layer_exists, IdArray};
 use sicompass_sdk::tags;
@@ -341,10 +341,98 @@ pub fn handle_tab(r: &mut AppRenderer) {
 pub fn handle_colon(r: &mut AppRenderer) {
     r.previous_coordinate = r.coordinate;
     r.coordinate = Coordinate::Command;
+    r.current_command = CommandPhase::None;
+    r.provider_command_name.clear();
     r.input_buffer.clear();
     r.cursor_position = 0;
     list::create_list_current_layer(r);
     r.needs_redraw = true;
+}
+
+/// Execute the selected command or its secondary selection (Return in Command mode).
+///
+/// Two-phase flow:
+/// 1. `CommandPhase::None` → user selected a command name; record it and ask the
+///    provider whether it needs a secondary list (e.g. "open with" app list).
+/// 2. `CommandPhase::Provider` → user selected from the secondary list; execute.
+pub fn handle_enter_command(r: &mut AppRenderer) {
+    match r.current_command {
+        CommandPhase::None => {
+            // Phase 1: user chose a command name from the list
+            let cmd = match r.current_list_item() {
+                Some(item) => item.label.clone(),
+                None => { handle_escape(r); return; }
+            };
+
+            // Get the current element key for the provider
+            let (element_key, element_type) = {
+                let arr = get_ffon_at_id(&r.ffon, &r.current_id);
+                let idx = r.current_id.last().unwrap_or(0);
+                match arr.and_then(|a| a.get(idx)) {
+                    Some(sicompass_sdk::ffon::FfonElement::Str(s)) => (s.clone(), 0),
+                    Some(sicompass_sdk::ffon::FfonElement::Obj(o)) => (o.key.clone(), 1),
+                    None => { handle_escape(r); return; }
+                }
+            };
+
+            r.provider_command_name = cmd.clone();
+            r.current_command = CommandPhase::Provider;
+
+            // Ask the provider to handle the command
+            let result = crate::provider::handle_command(r, &cmd, &element_key, element_type);
+
+            if let Some(new_elem) = result {
+                // Provider returned a new element — insert it after the current position
+                let insert_idx = r.current_id.last().unwrap_or(0) + 1;
+                insert_ffon_element(r, insert_idx, new_elem);
+                r.current_id.set_last(insert_idx);
+                r.current_command = CommandPhase::None;
+                r.coordinate = Coordinate::OperatorGeneral;
+                list::create_list_current_layer(r);
+                r.list_index = insert_idx;
+                r.scroll_offset = 0;
+                // Enter insert mode on the new element
+                handle_i(r);
+            } else if !r.error_message.is_empty() {
+                // Provider set an error
+                r.current_command = CommandPhase::None;
+                r.coordinate = Coordinate::OperatorGeneral;
+                list::create_list_current_layer(r);
+                r.needs_redraw = true;
+            } else {
+                // No result, no error → provider needs a secondary selection
+                r.input_buffer.clear();
+                r.cursor_position = 0;
+                list::create_list_current_layer(r); // now shows secondary items
+                r.scroll_offset = 0;
+
+                if r.total_list.is_empty() {
+                    // Command was a state toggle — return to previous mode
+                    r.current_command = CommandPhase::None;
+                    r.coordinate = r.previous_coordinate;
+                    list::create_list_current_layer(r);
+                }
+                r.needs_redraw = true;
+            }
+        }
+
+        CommandPhase::Provider => {
+            // Phase 2: user chose a secondary item (e.g. an application to open with)
+            let selection = match r.current_list_item() {
+                Some(item) => item.data.clone().unwrap_or_else(|| item.label.clone()),
+                None => { handle_escape(r); return; }
+            };
+            let cmd = r.provider_command_name.clone();
+            crate::provider::execute_command(r, &cmd, &selection);
+
+            r.current_command = CommandPhase::None;
+            r.coordinate = r.previous_coordinate;
+            list::create_list_current_layer(r);
+            r.list_index = r.current_id.last().unwrap_or(0);
+            r.scroll_offset = 0;
+            r.needs_redraw = true;
+        }
+    }
 }
 
 /// Append a new empty element after the current one (Ctrl+A / Enter in EditorGeneral).
@@ -1501,6 +1589,55 @@ fn sdl_ticks() -> u64 {
 }
 
 // ---------------------------------------------------------------------------
+// FFON insertion helper (for handle_enter_command)
+// ---------------------------------------------------------------------------
+
+/// Insert `elem` at `insert_idx` in the FFON tree at the current navigation depth.
+///
+/// - Depth 1 (root level): inserts directly into `r.ffon`.
+/// - Depth > 1: finds the parent object and inserts into its children.
+fn insert_ffon_element(r: &mut AppRenderer, insert_idx: usize, elem: sicompass_sdk::ffon::FfonElement) {
+    if r.current_id.depth() <= 1 {
+        r.ffon.insert(insert_idx, elem);
+        return;
+    }
+
+    // Build parent id (current_id minus last component)
+    let mut parent_id = r.current_id.clone();
+    parent_id.pop();
+
+    // Bounds-check the parent exists before walking mutably
+    let parent_idx = parent_id.last().unwrap_or(0);
+    if get_ffon_at_id(&r.ffon, &parent_id).and_then(|s| s.get(parent_idx)).is_none() {
+        return;
+    }
+
+    // Re-walk mutably — we need a mutable reference to the parent object's children
+    // Navigate step by step through the id chain
+    let mut current: &mut Vec<sicompass_sdk::ffon::FfonElement> = &mut r.ffon;
+    let depth = parent_id.depth();
+    for d in 0..depth {
+        let idx = parent_id.get(d).unwrap_or(0);
+        if d + 1 == depth {
+            // `current[idx]` is the parent object — insert into its children
+            if let Some(sicompass_sdk::ffon::FfonElement::Obj(obj)) = current.get_mut(idx) {
+                if insert_idx <= obj.children.len() {
+                    obj.children.insert(insert_idx, elem);
+                }
+            }
+            return;
+        }
+        // Step into the Obj at this level
+        match current.get_mut(idx) {
+            Some(sicompass_sdk::ffon::FfonElement::Obj(obj)) => {
+                current = &mut obj.children;
+            }
+            _ => return,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -2000,6 +2137,113 @@ mod tests {
         handle_colon(&mut r);
         assert!(r.input_buffer.is_empty());
         assert_eq!(r.cursor_position, 0);
+    }
+
+    #[test]
+    fn colon_resets_command_phase_to_none() {
+        let mut r = make_renderer();
+        r.current_command = CommandPhase::Provider;
+        handle_colon(&mut r);
+        assert_eq!(r.current_command, CommandPhase::None);
+    }
+
+    // -----------------------------------------------------------------------
+    // handle_enter_command
+    // -----------------------------------------------------------------------
+
+    /// A provider that exposes one command ("open") and executes it immediately.
+    struct CmdProvider {
+        cmds: Vec<String>,
+        execute_ok: bool,
+        handle_result: Option<FfonElement>,
+        secondary_items: Vec<sicompass_sdk::provider::ListItem>,
+    }
+    impl sicompass_sdk::provider::Provider for CmdProvider {
+        fn name(&self) -> &str { "cmdprov" }
+        fn fetch(&mut self) -> Vec<FfonElement> { vec![] }
+        fn commands(&self) -> Vec<String> { self.cmds.clone() }
+        fn execute_command(&mut self, _cmd: &str, _sel: &str) -> bool { self.execute_ok }
+        fn handle_command(&mut self, _cmd: &str, _key: &str, _ty: i32, _err: &mut String) -> Option<FfonElement> {
+            self.handle_result.clone()
+        }
+        fn command_list_items(&self, _cmd: &str) -> Vec<sicompass_sdk::provider::ListItem> {
+            self.secondary_items.clone()
+        }
+    }
+
+    fn make_renderer_with_cmd_provider(
+        commands: &[&str],
+        handle_result: Option<FfonElement>,
+        secondary_items: Vec<sicompass_sdk::provider::ListItem>,
+    ) -> AppRenderer {
+        let mut root = FfonElement::new_obj("cmdprov");
+        root.as_obj_mut().unwrap().push(FfonElement::new_str("- item0"));
+
+        let mut r = AppRenderer::new();
+        r.ffon = vec![root];
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        r.providers.push(Box::new(CmdProvider {
+            cmds: commands.iter().map(|s| s.to_string()).collect(),
+            execute_ok: true,
+            handle_result,
+            secondary_items,
+        }));
+        list::create_list_current_layer(&mut r);
+        r
+    }
+
+    #[test]
+    fn enter_command_no_list_item_escapes() {
+        let mut r = make_renderer_with_cmd_provider(&[], None, vec![]);
+        r.coordinate = Coordinate::Command;
+        r.total_list.clear(); // no items
+        handle_enter_command(&mut r);
+        // should escape back to previous coordinate
+        assert_ne!(r.coordinate, Coordinate::Command);
+    }
+
+    #[test]
+    fn enter_command_phase_none_with_secondary_list_stays_in_command() {
+        // Provider returns None + no error + has secondary items
+        let items = vec![sicompass_sdk::provider::ListItem { label: "App A".to_string(), data: "/usr/bin/a".to_string() }];
+        let mut r = make_renderer_with_cmd_provider(&["open"], None, items);
+        r.coordinate = Coordinate::Command;
+        r.previous_coordinate = Coordinate::OperatorGeneral;
+        // Manually populate command list
+        list::create_list_current_layer(&mut r);
+        // Should show 1 command: "open"
+        assert_eq!(r.total_list.len(), 1);
+        r.list_index = 0;
+
+        handle_enter_command(&mut r);
+
+        // Now in Phase 2: CommandPhase::Provider, secondary list visible
+        assert_eq!(r.current_command, CommandPhase::Provider);
+        assert_eq!(r.coordinate, Coordinate::Command);
+        assert_eq!(r.total_list[0].label, "App A");
+    }
+
+    #[test]
+    fn enter_command_phase_provider_executes_and_returns() {
+        let mut r = make_renderer_with_cmd_provider(&["open"], None, vec![]);
+        r.coordinate = Coordinate::Command;
+        r.previous_coordinate = Coordinate::OperatorGeneral;
+        r.current_command = CommandPhase::Provider;
+        r.provider_command_name = "open".to_string();
+        // Build a secondary list manually
+        r.total_list = vec![crate::app_state::RenderListItem {
+            id: { let mut id = IdArray::new(); id.push(0); id },
+            label: "App A".to_string(),
+            data: Some("/usr/bin/a".to_string()),
+            nav_path: None,
+        }];
+        r.list_index = 0;
+
+        handle_enter_command(&mut r);
+
+        // Should return to previous coordinate and reset phase
+        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+        assert_eq!(r.current_command, CommandPhase::None);
     }
 
     // -----------------------------------------------------------------------

@@ -148,6 +148,17 @@ pub enum History {
     Redo,
 }
 
+/// Two-phase command execution state — mirrors C `currentCommand`.
+///
+/// `None` → showing the command list.
+/// `Provider` → showing the secondary selection list for `provider_command_name`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CommandPhase {
+    #[default]
+    None,
+    Provider,
+}
+
 // ---------------------------------------------------------------------------
 // AppRenderer supporting types
 // ---------------------------------------------------------------------------
@@ -267,6 +278,10 @@ pub struct AppRenderer {
     // ---- Error display -----------------------------------------------------
     pub error_message: String,
 
+    // ---- Command execution state ------------------------------------------
+    pub current_command: CommandPhase,
+    pub provider_command_name: String,
+
     // ---- Current URI -------------------------------------------------------
     pub current_uri: String,
 }
@@ -316,6 +331,8 @@ impl AppRenderer {
             window_height: WINDOW_HEIGHT as i32,
             cached_line_height: 20,
             error_message: String::new(),
+            current_command: CommandPhase::None,
+            provider_command_name: String::new(),
             current_uri: String::new(),
         }
     }
