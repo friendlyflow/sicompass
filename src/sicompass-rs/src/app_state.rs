@@ -388,6 +388,11 @@ pub struct AppState {
     // ---- Rendering sub-systems (Phase 5) -----------------------------------
     pub font_renderer: Option<crate::text::FontRenderer>,
     pub rect_renderer: Option<crate::rectangle::RectangleRenderer>,
+
+    // ---- Settings apply queue ----------------------------------------------
+    /// Receives (key, value) events fired by the settings provider's ApplyFn.
+    /// Drained each frame in the main loop via `programs::apply_pending_settings`.
+    pub settings_queue: Option<crate::programs::SettingsQueue>,
 }
 
 impl AppState {
@@ -417,8 +422,12 @@ impl AppState {
             state.rect_renderer = Some(rr);
         }
 
-        // Load providers (tutorial by default)
-        crate::programs::load_programs(&mut state.renderer);
+        // Load providers (tutorial + settings by default)
+        let queue = crate::programs::load_programs(&mut state.renderer);
+        // Apply initial settings (skip enable_* — providers already loaded above)
+        crate::programs::apply_pending_settings(&mut state.renderer, &queue, true);
+        state.settings_queue = Some(queue);
+
         crate::list::create_list_current_layer(&mut state.renderer);
         Ok(state)
     }
