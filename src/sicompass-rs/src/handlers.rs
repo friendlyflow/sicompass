@@ -670,6 +670,90 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
         return;
     }
 
+    // File-browser save-as: user typed a filename → write source provider data
+    if r.pending_file_browser_save_as && old_content.is_empty() {
+        if new_content.is_empty() {
+            r.needs_redraw = true;
+            return; // stay in insert mode
+        }
+
+        let save_dir = resolve_save_folder(r);
+
+        // Build collision-free destination filename (append .json, handle duplicates)
+        let base = new_content.trim_end_matches(".json");
+        let mut dest_name = format!("{base}.json");
+        let mut n = 0u32;
+        loop {
+            let full = format!("{save_dir}/{dest_name}");
+            if !std::path::Path::new(&full).exists() { break; }
+            n += 1;
+            dest_name = format!("{base} (copy {n}).json");
+        }
+        let dest_full = format!("{save_dir}/{dest_name}");
+
+        // Save source provider FFON to file
+        let src_idx = r.save_as_source_root_idx;
+        let save_result = if let Some(sicompass_sdk::ffon::FfonElement::Obj(root_obj)) = r.ffon.get(src_idx).cloned() {
+            sicompass_sdk::ffon::save_json_file(
+                &[sicompass_sdk::ffon::FfonElement::Obj(root_obj)],
+                std::path::Path::new(&dest_full),
+            )
+        } else {
+            Err(std::io::Error::new(std::io::ErrorKind::NotFound, "source provider not found"))
+        };
+
+        // Remove the placeholder element from the filebrowser
+        let remove_idx = r.current_id.last().unwrap_or(0);
+        let mut parent_id = r.current_id.clone();
+        parent_id.pop();
+        let parent_idx = parent_id.last().unwrap_or(0);
+        if let Some(parent_slice) = crate::state::navigate_to_slice_pub(&mut r.ffon, &parent_id) {
+            if let Some(FfonElement::Obj(obj)) = parent_slice.get_mut(parent_idx) {
+                if remove_idx < obj.children.len() {
+                    obj.children.remove(remove_idx);
+                }
+            }
+        }
+
+        // Reset filebrowser to root
+        let fb_idx = r.current_id.get(0).unwrap_or(0);
+        if let Some(p) = r.providers.get_mut(fb_idx) { p.set_current_path("/"); }
+        if let Some(FfonElement::Obj(obj)) = r.ffon.get_mut(fb_idx) {
+            obj.children.clear();
+        }
+        if let Some(p) = r.providers.get_mut(fb_idx) {
+            let children = p.fetch();
+            if let Some(FfonElement::Obj(obj)) = r.ffon.get_mut(fb_idx) {
+                obj.children = children;
+            }
+        }
+
+        // Navigate back to source provider
+        let return_id = r.save_as_return_id.clone();
+        r.current_id = return_id;
+        r.pending_file_browser_save_as = false;
+        r.coordinate = Coordinate::OperatorGeneral;
+        r.previous_coordinate = Coordinate::OperatorGeneral;
+        r.input_buffer.clear();
+        r.cursor_position = 0;
+
+        list::create_list_current_layer(r);
+        r.list_index = r.current_id.last().unwrap_or(0);
+        r.scroll_offset = 0;
+
+        match save_result {
+            Ok(()) => {
+                r.current_save_path = dest_full.clone();
+                r.error_message = format!("Saved to {dest_full}");
+            }
+            Err(e) => {
+                r.error_message = format!("Failed to save: {e}");
+            }
+        }
+        r.needs_redraw = true;
+        return;
+    }
+
     // Prefix-based creation (Ctrl+I / Ctrl+A in filebrowser)
     if old_content.is_empty() && r.prefixed_insert_mode {
         let (is_file, is_dir, item_name) = parse_creation_prefix(&new_content);
@@ -1076,6 +1160,24 @@ pub fn handle_file_paste(r: &mut AppRenderer) {
     r.needs_redraw = true;
 }
 
+/// Ctrl+I in OperatorGeneral — double-tap undo+insert.
+///
+/// A single tap inserts a new item (same as Ctrl+I operator).
+/// A double tap (within DELTA_MS) undoes the previous insert and re-enters insert.
+/// Mirrors C `handleCtrlI`.
+pub fn handle_ctrl_i(r: &mut AppRenderer, history: crate::app_state::History) {
+    let now = sdl_ticks();
+    if now.saturating_sub(r.last_keypress_time) <= DELTA_MS {
+        r.last_keypress_time = 0;
+        crate::state::handle_history_action(r, History::Undo);
+        crate::state::update_state(r, Task::InsertInsert, History::None);
+    } else {
+        crate::state::update_state(r, Task::Insert, history);
+    }
+    r.last_keypress_time = now;
+    r.needs_redraw = true;
+}
+
 /// Ctrl+Enter — insert a newline character in insert modes.
 ///
 /// Mirrors C `handleCtrlEnter`.
@@ -1090,12 +1192,11 @@ pub fn handle_ctrl_enter(r: &mut AppRenderer) {
 
 /// Save the active provider's FFON tree to `current_save_path` (Ctrl+S).
 ///
-/// If no save path is set, shows an error prompting Ctrl+Shift+S.
+/// If no save path is set, launches the save-as dialog (filebrowser navigation).
 /// Mirrors C `handleSaveProviderConfig`.
 pub fn handle_save_provider_config(r: &mut AppRenderer) {
     if r.current_save_path.is_empty() {
-        r.error_message = "No save path set — use Ctrl+Shift+S to choose one".to_owned();
-        r.needs_redraw = true;
+        handle_save_as_provider_config(r);
         return;
     }
     let idx = match r.current_id.get(0) { Some(i) => i, None => return };
@@ -1116,6 +1217,91 @@ pub fn handle_save_provider_config(r: &mut AppRenderer) {
         r.error_message = "Nothing to save".to_owned();
     }
     r.needs_redraw = true;
+}
+
+/// Save-as: navigate to filebrowser save-folder, insert a filename `<input>` placeholder,
+/// and enter insert mode so the user can type a filename.
+///
+/// On Enter (in `handle_enter_operator_insert`), the typed name is used to write the
+/// source provider's FFON data to `<save_folder>/<name>.json`, then navigation returns
+/// to the original provider.
+///
+/// Mirrors C `handleSaveAsProviderConfig` → `handleFileBrowserSaveAs`.
+pub fn handle_save_as_provider_config(r: &mut AppRenderer) {
+    // Record which provider we're saving from, and where to return
+    let src_idx = match r.current_id.get(0) { Some(i) => i, None => return };
+    r.save_as_source_root_idx = src_idx;
+    r.save_as_return_id = r.current_id.clone();
+
+    // Find the filebrowser provider index
+    let Some(fb_idx) = r.providers.iter().position(|p| p.name() == "filebrowser") else {
+        r.error_message = "File browser not available".to_owned();
+        r.needs_redraw = true;
+        return;
+    };
+
+    // Resolve the save folder
+    let save_dir = resolve_save_folder(r);
+    if !std::path::Path::new(&save_dir).is_dir() {
+        r.error_message = format!("Save folder does not exist: {save_dir}");
+        r.needs_redraw = true;
+        return;
+    }
+
+    // Navigate filebrowser to the save folder
+    crate::provider::navigate_to_path(r, fb_idx, &save_dir, "");
+    list::create_list_current_layer(r);
+
+    // Insert an empty <input></input> placeholder at position 0 in the current dir
+    use sicompass_sdk::ffon::FfonElement;
+    let depth = r.current_id.depth();
+    if depth >= 2 {
+        let mut parent_id = r.current_id.clone();
+        parent_id.pop();
+        let parent_idx = parent_id.last().unwrap_or(0);
+        if let Some(parent_slice) = crate::state::navigate_to_slice_pub(&mut r.ffon, &parent_id) {
+            if let Some(FfonElement::Obj(obj)) = parent_slice.get_mut(parent_idx) {
+                obj.children.insert(0, FfonElement::Str("<input></input>".to_owned()));
+            }
+        }
+    }
+
+    // Point cursor at position 0 (the new placeholder)
+    r.current_id.set_last(0);
+    r.pending_file_browser_save_as = true;
+    r.coordinate = Coordinate::OperatorGeneral;
+    list::create_list_current_layer(r);
+    r.list_index = 0;
+    r.scroll_offset = 0;
+    r.prefixed_insert_mode = false;
+
+    // Immediately enter insert mode
+    handle_i(r);
+    r.needs_redraw = true;
+}
+
+/// Resolve the configured save folder to an absolute path.
+///
+/// Empty or relative paths are resolved relative to `$HOME`.
+/// Falls back to the platform downloads directory or `/tmp`.
+fn resolve_save_folder(r: &AppRenderer) -> String {
+    let folder = r.save_folder_path.trim();
+    if folder.is_empty() {
+        // Default to Downloads directory
+        return sicompass_sdk::platform::downloads_dir()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "/tmp".to_owned());
+    }
+    let path = std::path::Path::new(folder);
+    if path.is_absolute() {
+        return folder.to_owned();
+    }
+    // Relative → $HOME/<folder>
+    let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_default();
+    if home.is_empty() {
+        return folder.to_owned();
+    }
+    format!("{home}/{folder}")
 }
 
 /// Load a JSON config file into the current provider (Ctrl+O).
@@ -3312,6 +3498,103 @@ mod tests {
         assert_eq!(r.input_buffer, "A");
     }
 
+    // -----------------------------------------------------------------------
+    // handle_ctrl_i
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn ctrl_i_single_tap_performs_insert() {
+        let mut r = AppRenderer::new();
+        r.last_keypress_time = 0; // ensure no double-tap
+        r.coordinate = Coordinate::OperatorGeneral;
+        handle_ctrl_i(&mut r, History::None);
+        assert!(r.needs_redraw);
+        assert!(r.last_keypress_time > 0);
+    }
+
+    #[test]
+    fn ctrl_i_double_tap_updates_timer() {
+        let mut r = AppRenderer::new();
+        // Simulate first tap just happened (set time far in the past so next call is a "second tap"
+        // within DELTA_MS by setting it to now so the delta is near zero)
+        let before = sdl_ticks();
+        r.last_keypress_time = before; // within DELTA_MS of the upcoming call
+        handle_ctrl_i(&mut r, History::None);
+        // After double-tap the timer should be updated to "now" (>= before)
+        assert!(r.last_keypress_time >= before);
+        assert!(r.needs_redraw);
+    }
+
+    // -----------------------------------------------------------------------
+    // navigate_to_path (provider.rs) — tested via handler indirectly
+    // handle_save_as_provider_config
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn save_as_sets_pending_when_filebrowser_present() {
+        use sicompass_sdk::ffon::{FfonElement, FfonObject};
+        use sicompass_sdk::provider::Provider;
+        struct FbProv;
+        impl Provider for FbProv {
+            fn name(&self) -> &str { "filebrowser" }
+            fn fetch(&mut self) -> Vec<FfonElement> { vec![] }
+            fn current_path(&self) -> &str { "/" }
+            fn set_current_path(&mut self, _: &str) {}
+        }
+
+        let fb_root = FfonElement::Obj(FfonObject { key: "file browser".to_string(), children: vec![] });
+        let src_root = FfonElement::Obj(FfonObject { key: "myprov".to_string(), children: vec![] });
+        let mut r = AppRenderer::new();
+        r.ffon = vec![fb_root, src_root];
+        r.providers.push(Box::new(FbProv));
+        // Navigate to provider 1 (source)
+        r.current_id = { let mut id = IdArray::new(); id.push(1); id.push(0); id };
+        // Set save_folder_path to /tmp (guaranteed to exist)
+        r.save_folder_path = "/tmp".to_owned();
+
+        handle_save_as_provider_config(&mut r);
+
+        assert!(r.pending_file_browser_save_as, "save-as flag should be set");
+        assert_eq!(r.save_as_source_root_idx, 1);
+    }
+
+    #[test]
+    fn save_as_no_filebrowser_sets_error() {
+        let mut r = AppRenderer::new();
+        handle_save_as_provider_config(&mut r);
+        assert!(!r.error_message.is_empty());
+        assert!(!r.pending_file_browser_save_as);
+    }
+
+    // -----------------------------------------------------------------------
+    // resolve_save_folder
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn resolve_save_folder_absolute_path_unchanged() {
+        let mut r = AppRenderer::new();
+        r.save_folder_path = "/custom/save/dir".to_owned();
+        let result = resolve_save_folder(&r);
+        assert_eq!(result, "/custom/save/dir");
+    }
+
+    #[test]
+    fn resolve_save_folder_relative_appends_home() {
+        let mut r = AppRenderer::new();
+        r.save_folder_path = "Documents".to_owned();
+        let result = resolve_save_folder(&r);
+        // Should contain "Documents" somewhere (after HOME/)
+        assert!(result.ends_with("/Documents"), "got: {result}");
+    }
+
+    #[test]
+    fn resolve_save_folder_empty_returns_downloads() {
+        let r = AppRenderer::new(); // save_folder_path is empty
+        let result = resolve_save_folder(&r);
+        // Should be some real path (Downloads or /tmp fallback)
+        assert!(!result.is_empty());
+    }
+
     #[test]
     fn utf8_move_backward_three_byte_char() {
         // "A€": backspace from end (byte 4) removes "€", cursor at byte 1
@@ -3423,11 +3706,15 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn save_config_no_path_sets_error_message() {
+    fn save_config_no_path_launches_save_as() {
+        // When no path is set, save_provider_config launches save-as.
+        // With no filebrowser registered it should set an error about filebrowser unavailability.
         let mut r = AppRenderer::new();
         r.current_save_path = String::new();
         handle_save_provider_config(&mut r);
-        assert!(r.error_message.contains("No save path"));
+        // Either the save-as dialog started (pending_file_browser_save_as set) or
+        // an error was shown (no filebrowser available in test renderer).
+        assert!(r.pending_file_browser_save_as || !r.error_message.is_empty());
         assert!(r.needs_redraw);
     }
 

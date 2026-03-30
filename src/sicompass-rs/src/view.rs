@@ -396,7 +396,7 @@ fn handle_keydown_old(app: &mut AppState, keycode: Option<Keycode>, keymod: Mod)
             Some(Keycode::I) if !ctrl && !shift => handlers::handle_i(r),
             Some(Keycode::A) if !ctrl && !shift => handlers::handle_a(r),
             Some(Keycode::A) if ctrl && !shift => handlers::handle_append(r),
-            Some(Keycode::I) if ctrl && !shift => handlers::handle_insert(r),
+            Some(Keycode::I) if ctrl && !shift => handlers::handle_ctrl_i(r, History::None),
             Some(Keycode::D) if ctrl && !shift => handlers::handle_delete(r, History::None),
             Some(Keycode::Space) if !ctrl && !shift => handlers::handle_space(r),
             Some(Keycode::Z) if ctrl && !shift => handlers::handle_undo(r),
@@ -406,12 +406,16 @@ fn handle_keydown_old(app: &mut AppState, keycode: Option<Keycode>, keymod: Mod)
             Some(Keycode::V) if ctrl && !shift => handlers::handle_ctrl_v(r),
             Some(Keycode::F) if ctrl && !shift => handlers::handle_ctrl_f(r),
             Some(Keycode::S) if ctrl && !shift => handlers::handle_save_provider_config(r),
-            Some(Keycode::O) if ctrl && !shift => {
-                // Ctrl+O: open provider config — for now just a placeholder
-                // (full filebrowser dialog not yet ported)
+            Some(Keycode::S) if ctrl && shift => {
                 if r.providers.get(r.current_id.get(0).unwrap_or(0))
                     .map(|p| p.supports_config_files()).unwrap_or(false) {
-                    r.error_message = "Ctrl+O: use filebrowser to navigate to file, then press Enter".to_owned();
+                    handlers::handle_save_as_provider_config(r);
+                }
+            }
+            Some(Keycode::O) if ctrl && !shift => {
+                if r.providers.get(r.current_id.get(0).unwrap_or(0))
+                    .map(|p| p.supports_config_files()).unwrap_or(false) {
+                    r.error_message = "Ctrl+O: navigate to a JSON file in the file browser and press Enter".to_owned();
                     r.needs_redraw = true;
                 }
             }
@@ -467,6 +471,12 @@ fn handle_keydown_old(app: &mut AppState, keycode: Option<Keycode>, keymod: Mod)
         // ---- Insert / normal / visual modes ---------------------------------
         Coordinate::EditorInsert | Coordinate::EditorNormal
         | Coordinate::EditorVisual | Coordinate::OperatorInsert => match keycode {
+            // Ctrl+Shift+I in EditorInsert: escape current edit, double-tap insert, re-enter insert
+            Some(Keycode::I) if ctrl && shift && r.coordinate == Coordinate::EditorInsert => {
+                handlers::handle_escape(r);
+                handlers::handle_ctrl_i(r, History::None);
+                handlers::handle_i(r);
+            }
             Some(Keycode::Escape) => handlers::handle_escape(r),
             Some(Keycode::Backspace) => handlers::handle_backspace(r),
             Some(Keycode::Delete) if !ctrl && !shift => handlers::handle_delete_forward(r),

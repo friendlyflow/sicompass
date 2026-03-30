@@ -378,6 +378,170 @@ pub fn notify_radio_changed(renderer: &mut AppRenderer) {
     }
 }
 
+/// Navigate a specific provider to an absolute directory path.
+///
+/// Resets the provider to `/`, refetches, then walks each path component
+/// by matching display-stripped element names.  Sets `renderer.current_id`
+/// so that the depth-2 slot points inside `absolute_dir`.
+///
+/// If `target_filename` is non-empty, the cursor is moved to that entry;
+/// otherwise the cursor stays at 0.  Returns `true` on success.
+///
+/// Mirrors C `providerNavigateToPath`.
+pub fn navigate_to_path(
+    renderer: &mut AppRenderer,
+    root_idx: usize,
+    absolute_dir: &str,
+    target_filename: &str,
+) -> bool {
+    use sicompass_sdk::ffon::{FfonElement, IdArray, get_ffon_at_id};
+    use sicompass_sdk::tags;
+
+    if root_idx >= renderer.providers.len() { return false; }
+
+    // Reset provider to root and re-fetch
+    renderer.providers[root_idx].set_current_path("/");
+    let root_children = renderer.providers[root_idx].fetch();
+    if let Some(FfonElement::Obj(root_obj)) = renderer.ffon.get_mut(root_idx) {
+        root_obj.children = root_children;
+    } else {
+        return false;
+    }
+
+    // Start cursor at depth=2 inside this provider's root
+    let mut nav_id = IdArray::new();
+    nav_id.push(root_idx);
+    nav_id.push(0);
+    renderer.current_id = nav_id;
+
+    // Walk each component of the absolute path (skip leading '/')
+    let path_stripped = absolute_dir.trim_start_matches('/');
+    for component in path_stripped.split('/') {
+        if component.is_empty() { continue; }
+
+        // Find component in current level
+        let found_idx = {
+            let arr = get_ffon_at_id(&renderer.ffon, &renderer.current_id);
+            arr.and_then(|slice| {
+                slice.iter().enumerate().find_map(|(i, e)| {
+                    let raw = match e {
+                        FfonElement::Str(s) => s.as_str(),
+                        FfonElement::Obj(o) => o.key.as_str(),
+                    };
+                    if tags::strip_display(raw) == component { Some(i) } else { None }
+                })
+            })
+        };
+
+        let Some(idx) = found_idx else { return false; };
+        renderer.current_id.set_last(idx);
+
+        // Navigate right into this component (lazy-fetch child level)
+        if !navigate_right(renderer) { return false; }
+    }
+
+    // If target_filename specified, find and select it
+    if !target_filename.is_empty() {
+        let found = {
+            let arr = get_ffon_at_id(&renderer.ffon, &renderer.current_id);
+            arr.and_then(|slice| {
+                slice.iter().enumerate().find_map(|(i, e)| {
+                    let raw = match e {
+                        FfonElement::Str(s) => s.as_str(),
+                        FfonElement::Obj(o) => o.key.as_str(),
+                    };
+                    if tags::strip_display(raw) == target_filename { Some(i) } else { None }
+                })
+            })
+        };
+        if let Some(i) = found {
+            renderer.current_id.set_last(i);
+        }
+    }
+
+    true
+}
+
+/// Navigate right into the currently selected element (enter a directory).
+///
+/// Pushes the element name to the provider, fetches children, appends them
+/// to the FFON tree, and advances `current_id` by one depth level.
+/// Returns `false` if the selected element is not an `Obj` (not a directory).
+///
+/// Mirrors C `providerNavigateRight`.
+pub fn navigate_right(renderer: &mut AppRenderer) -> bool {
+    use sicompass_sdk::ffon::{FfonElement, get_ffon_at_id};
+    use sicompass_sdk::tags;
+
+    let idx = renderer.current_id.last().unwrap_or(0);
+    let root_idx = match renderer.current_id.get(0) { Some(i) => i, None => return false };
+
+    // Get the element name (must be an Obj to navigate into)
+    let (segment, is_obj) = {
+        let arr = match get_ffon_at_id(&renderer.ffon, &renderer.current_id) {
+            Some(a) => a,
+            None => return false,
+        };
+        match arr.get(idx) {
+            Some(FfonElement::Obj(o)) => (tags::strip_display(&o.key).to_string(), true),
+            _ => return false,
+        }
+    };
+    if !is_obj { return false; }
+
+    // Push path to provider and fetch children
+    if let Some(p) = renderer.providers.get_mut(root_idx) {
+        p.push_path(&segment);
+    }
+    let children = if let Some(p) = renderer.providers.get_mut(root_idx) {
+        p.fetch()
+    } else {
+        return false;
+    };
+
+    // Attach children to the selected Obj element
+    {
+        let arr = match get_ffon_at_id_mut(&mut renderer.ffon, &renderer.current_id) {
+            Some(a) => a,
+            None => return false,
+        };
+        if let Some(FfonElement::Obj(obj)) = arr.get_mut(idx) {
+            obj.children = children;
+        }
+    }
+
+    // Advance current_id one level deeper
+    renderer.current_id.push(0);
+    true
+}
+
+/// Mutable equivalent of `get_ffon_at_id` — walk to the parent level of `id`.
+///
+/// Returns a mutable slice of siblings at depth `id.depth - 1`.
+fn get_ffon_at_id_mut<'a>(
+    ffon: &'a mut Vec<sicompass_sdk::ffon::FfonElement>,
+    id: &sicompass_sdk::ffon::IdArray,
+) -> Option<&'a mut Vec<sicompass_sdk::ffon::FfonElement>> {
+    use sicompass_sdk::ffon::FfonElement;
+    let depth = id.depth();
+    if depth == 0 { return None; }
+    if depth == 1 {
+        return Some(ffon);
+    }
+    // Walk down to depth-1 level
+    let mut current: &mut Vec<FfonElement> = ffon;
+    for level in 0..depth - 1 {
+        let idx = id.get(level)?;
+        // Need to go into children of the element at `idx`
+        let elem = current.get_mut(idx)?;
+        current = match elem {
+            FfonElement::Obj(o) => &mut o.children,
+            FfonElement::Str(_) => return None,
+        };
+    }
+    Some(current)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
