@@ -218,6 +218,9 @@ fn apply_setting(
         "maximized" => {
             renderer.pending_maximized = Some(value == "true");
         }
+        "saveFolder" => {
+            renderer.save_folder_path = value.to_owned();
+        }
         _ => {}
     }
 

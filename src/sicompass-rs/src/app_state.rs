@@ -337,6 +337,16 @@ pub struct AppRenderer {
     /// The filesystem path last used for Ctrl+S / save-as. Empty = no path set yet.
     pub current_save_path: String,
 
+    // ---- Save-as dialog state -----------------------------------------------
+    /// True while navigating the filebrowser to pick a save-as destination.
+    pub pending_file_browser_save_as: bool,
+    /// Provider index of the data source when doing save-as (not the filebrowser).
+    pub save_as_source_root_idx: usize,
+    /// Navigation state to restore after save-as completes.
+    pub save_as_return_id: IdArray,
+    /// Configured save folder (relative to home, absolute, or empty → Downloads).
+    pub save_folder_path: String,
+
     // ---- Current URI -------------------------------------------------------
     pub current_uri: String,
 }
@@ -391,6 +401,10 @@ impl AppRenderer {
             palette_theme: PaletteTheme::Dark,
             pending_maximized: None,
             current_save_path: String::new(),
+            pending_file_browser_save_as: false,
+            save_as_source_root_idx: 0,
+            save_as_return_id: IdArray::new(),
+            save_folder_path: String::new(),
             current_uri: String::new(),
         }
     }
