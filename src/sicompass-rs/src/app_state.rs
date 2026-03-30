@@ -54,8 +54,6 @@ impl From<ash::LoadingError> for SiError {
 }
 
 // ---------------------------------------------------------------------------
-// Enums
-// ---------------------------------------------------------------------------
 // Palette
 // ---------------------------------------------------------------------------
 
@@ -331,6 +329,14 @@ pub struct AppRenderer {
     // ---- Palette -----------------------------------------------------------
     pub palette_theme: PaletteTheme,
 
+    // ---- Pending window commands (set by settings apply, consumed by main loop) --
+    /// `Some(true)` → maximize window, `Some(false)` → restore, `None` → no-op.
+    pub pending_maximized: Option<bool>,
+
+    // ---- Save/load path (set by save-as dialog, used by Ctrl+S) ------------
+    /// The filesystem path last used for Ctrl+S / save-as. Empty = no path set yet.
+    pub current_save_path: String,
+
     // ---- Current URI -------------------------------------------------------
     pub current_uri: String,
 }
@@ -383,6 +389,8 @@ impl AppRenderer {
             current_command: CommandPhase::None,
             provider_command_name: String::new(),
             palette_theme: PaletteTheme::Dark,
+            pending_maximized: None,
+            current_save_path: String::new(),
             current_uri: String::new(),
         }
     }

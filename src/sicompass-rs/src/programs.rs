@@ -216,7 +216,7 @@ fn apply_setting(
             };
         }
         "maximized" => {
-            // Window maximization — handled in main loop via SDL (no AppRenderer field)
+            renderer.pending_maximized = Some(value == "true");
         }
         _ => {}
     }
@@ -424,5 +424,29 @@ mod tests {
         let r = AppRenderer::new();
         assert_eq!(r.palette_theme, PaletteTheme::Dark);
         assert_eq!(r.palette().background, PALETTE_DARK.background);
+    }
+
+    // --- apply_setting (maximized) ---
+
+    #[test]
+    fn apply_setting_maximized_true_sets_pending() {
+        let mut r = AppRenderer::new();
+        apply_setting(&mut r, "maximized", "true", false);
+        assert_eq!(r.pending_maximized, Some(true));
+    }
+
+    #[test]
+    fn apply_setting_maximized_false_sets_pending() {
+        let mut r = AppRenderer::new();
+        apply_setting(&mut r, "maximized", "false", false);
+        assert_eq!(r.pending_maximized, Some(false));
+    }
+
+    #[test]
+    fn apply_setting_unknown_key_is_noop() {
+        let mut r = AppRenderer::new();
+        apply_setting(&mut r, "unknownKey", "someValue", false);
+        assert_eq!(r.pending_maximized, None);
+        assert_eq!(r.palette_theme, crate::app_state::PaletteTheme::Dark);
     }
 }
