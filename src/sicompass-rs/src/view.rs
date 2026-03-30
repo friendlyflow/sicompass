@@ -97,6 +97,15 @@ pub fn main_loop(app: &mut AppState) {
             crate::programs::apply_pending_settings(&mut app.renderer, &q, false);
         }
 
+        // ---- Apply pending window commands from settings --------------------
+        if let Some(maximize) = app.renderer.pending_maximized.take() {
+            if maximize {
+                app.window.maximize();
+            } else {
+                app.window.restore();
+            }
+        }
+
         // ---- Continuous redraw in insert/search modes (caret blink) ---------
         if is_insert_mode(app.renderer.coordinate) {
             app.renderer.needs_redraw = true;
@@ -396,6 +405,16 @@ fn handle_keydown_old(app: &mut AppState, keycode: Option<Keycode>, keymod: Mod)
             Some(Keycode::C) if ctrl && !shift => handlers::handle_ctrl_c(r),
             Some(Keycode::V) if ctrl && !shift => handlers::handle_ctrl_v(r),
             Some(Keycode::F) if ctrl && !shift => handlers::handle_ctrl_f(r),
+            Some(Keycode::S) if ctrl && !shift => handlers::handle_save_provider_config(r),
+            Some(Keycode::O) if ctrl && !shift => {
+                // Ctrl+O: open provider config — for now just a placeholder
+                // (full filebrowser dialog not yet ported)
+                if r.providers.get(r.current_id.get(0).unwrap_or(0))
+                    .map(|p| p.supports_config_files()).unwrap_or(false) {
+                    r.error_message = "Ctrl+O: use filebrowser to navigate to file, then press Enter".to_owned();
+                    r.needs_redraw = true;
+                }
+            }
             Some(Keycode::F5) => handlers::handle_f5(r),
             Some(Keycode::Backspace) => handlers::handle_backspace(r),
             Some(Keycode::Escape) => handlers::handle_escape(r),

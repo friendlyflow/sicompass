@@ -132,6 +132,27 @@ pub fn delete_item_by_name(renderer: &mut AppRenderer, name: &str) -> bool {
     }
 }
 
+/// Copy an item via the active provider.
+///
+/// Parameters mirror C `providerCopyItem`: source dir, source name, dest dir, dest name.
+pub fn copy_item(renderer: &mut AppRenderer, src_dir: &str, src_name: &str, dest_dir: &str, dest_name: &str) -> bool {
+    let idx = match renderer.current_id.get(0) {
+        Some(i) => i,
+        None => return false,
+    };
+    if let Some(p) = renderer.providers.get_mut(idx) {
+        let ok = p.copy_item(src_dir, src_name, dest_dir, dest_name);
+        if !ok {
+            if let Some(err) = p.take_error() {
+                renderer.error_message = err;
+            }
+        }
+        ok
+    } else {
+        false
+    }
+}
+
 /// Create a file via the active provider.
 pub fn create_file(renderer: &mut AppRenderer, name: &str) -> bool {
     let idx = match renderer.current_id.get(0) {

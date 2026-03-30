@@ -962,6 +962,192 @@ pub fn handle_file_delete(r: &mut AppRenderer) {
     }
 }
 
+/// Copy the selected file's path into `file_clipboard_path` (no move).
+///
+/// Only works when the active provider is "filebrowser".
+/// Mirrors C `handleFileCopy`.
+pub fn handle_file_copy(r: &mut AppRenderer) {
+    let current_path = crate::provider::current_path(r).to_owned();
+    let arr = match get_ffon_at_id(&r.ffon, &r.current_id) { Some(a) => a, None => return };
+    let idx = r.current_id.last().unwrap_or(0);
+    let elem = match arr.get(idx) { Some(e) => e, None => return };
+    let key = match elem {
+        sicompass_sdk::ffon::FfonElement::Str(s) => s.as_str(),
+        sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.as_str(),
+    };
+    let name = tags::strip_display(key);
+    if name.is_empty() { return; }
+    r.file_clipboard_path = format!("{current_path}/{name}");
+    r.file_clipboard_is_cut = false;
+    r.needs_redraw = true;
+}
+
+/// Cut the selected file: copy to clipboard cache, delete original.
+///
+/// Only works when the active provider is "filebrowser".
+/// Mirrors C `handleFileCut`.
+pub fn handle_file_cut(r: &mut AppRenderer) {
+    let current_path = crate::provider::current_path(r).to_owned();
+    let arr = match get_ffon_at_id(&r.ffon, &r.current_id) { Some(a) => a, None => return };
+    let idx = r.current_id.last().unwrap_or(0);
+    let elem = match arr.get(idx) { Some(e) => e, None => return };
+    let key = match elem {
+        sicompass_sdk::ffon::FfonElement::Str(s) => s.as_str(),
+        sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.as_str(),
+    };
+    let name = tags::strip_display(key).to_owned();
+    if name.is_empty() { return; }
+
+    // Resolve clipboard cache dir
+    let cache_dir = {
+        let base = sicompass_sdk::platform::cache_home()
+            .unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
+        let dir = base.join("sicompass").join("clipboard");
+        let _ = std::fs::create_dir_all(&dir);
+        dir.to_string_lossy().into_owned()
+    };
+
+    if !crate::provider::copy_item(r, &current_path, &name, &cache_dir, &name) {
+        r.error_message = "Cut: failed to copy file to clipboard cache".to_owned();
+        return;
+    }
+    if !crate::provider::delete_item_by_name(r, &name) {
+        r.error_message = "Cut: failed to delete original file".to_owned();
+        return;
+    }
+
+    r.file_clipboard_path = format!("{cache_dir}/{name}");
+    r.file_clipboard_is_cut = true;
+
+    crate::state::update_state(r, Task::Delete, History::None);
+    r.list_index = r.current_id.last().unwrap_or(0);
+    r.needs_redraw = true;
+}
+
+/// Paste the file from `file_clipboard_path` into the current directory.
+///
+/// Resolves name collisions by appending " (copy N)". Mirrors C `handleFilePaste`.
+pub fn handle_file_paste(r: &mut AppRenderer) {
+    if r.file_clipboard_path.is_empty() { return; }
+
+    let src_path = r.file_clipboard_path.clone();
+    let slash = match src_path.rfind('/') { Some(p) => p, None => return };
+    let src_dir = &src_path[..slash];
+    let src_name = &src_path[slash + 1..];
+    if src_name.is_empty() { return; }
+
+    let dest_dir = crate::provider::current_path(r).to_owned();
+
+    // Resolve collision-free destination name
+    let dest_name = {
+        let mut candidate = src_name.to_owned();
+        let mut n = 0u32;
+        loop {
+            let full = format!("{dest_dir}/{candidate}");
+            if !std::path::Path::new(&full).exists() { break; }
+            n += 1;
+            candidate = format!("{src_name} (copy {n})");
+        }
+        candidate
+    };
+
+    if !crate::provider::copy_item(r, src_dir, src_name, &dest_dir, &dest_name) {
+        r.error_message = "Paste: failed to copy file".to_owned();
+        return;
+    }
+
+    crate::provider::refresh_current_directory(r);
+    list::create_list_current_layer(r);
+
+    // Move cursor to the newly pasted element
+    if let Some(arr) = get_ffon_at_id(&r.ffon, &r.current_id) {
+        for (i, elem) in arr.iter().enumerate() {
+            let key = match elem {
+                sicompass_sdk::ffon::FfonElement::Str(s) => s.as_str(),
+                sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.as_str(),
+            };
+            if tags::strip_display(key) == dest_name {
+                r.current_id.set_last(i);
+                r.list_index = i;
+                break;
+            }
+        }
+    }
+    r.needs_redraw = true;
+}
+
+/// Ctrl+Enter — insert a newline character in insert modes.
+///
+/// Mirrors C `handleCtrlEnter`.
+pub fn handle_ctrl_enter(r: &mut AppRenderer) {
+    if matches!(
+        r.coordinate,
+        Coordinate::EditorInsert | Coordinate::OperatorInsert
+    ) {
+        handle_input(r, "\n");
+    }
+}
+
+/// Save the active provider's FFON tree to `current_save_path` (Ctrl+S).
+///
+/// If no save path is set, shows an error prompting Ctrl+Shift+S.
+/// Mirrors C `handleSaveProviderConfig`.
+pub fn handle_save_provider_config(r: &mut AppRenderer) {
+    if r.current_save_path.is_empty() {
+        r.error_message = "No save path set — use Ctrl+Shift+S to choose one".to_owned();
+        r.needs_redraw = true;
+        return;
+    }
+    let idx = match r.current_id.get(0) { Some(i) => i, None => return };
+    let path = r.current_save_path.clone();
+    if let Some(sicompass_sdk::ffon::FfonElement::Obj(root_obj)) = r.ffon.get(idx) {
+        match sicompass_sdk::ffon::save_json_file(
+            &[sicompass_sdk::ffon::FfonElement::Obj(root_obj.clone())],
+            std::path::Path::new(&path),
+        ) {
+            Ok(()) => {
+                r.error_message = format!("Saved to {path}");
+            }
+            Err(e) => {
+                r.error_message = format!("Failed to save: {e}");
+            }
+        }
+    } else {
+        r.error_message = "Nothing to save".to_owned();
+    }
+    r.needs_redraw = true;
+}
+
+/// Load a JSON config file into the current provider (Ctrl+O).
+///
+/// Mirrors C `handleLoadProviderConfig` → `handleFileBrowserOpen` → `loadProviderConfigFromFile`.
+pub fn handle_load_provider_config(r: &mut AppRenderer, path: &str) {
+    if path.is_empty() { return; }
+    let idx = match r.current_id.get(0) { Some(i) => i, None => return };
+
+    match sicompass_sdk::ffon::load_json_file(std::path::Path::new(path)) {
+        Ok(new_children) => {
+            if let Some(sicompass_sdk::ffon::FfonElement::Obj(root_obj)) = r.ffon.get_mut(idx) {
+                root_obj.children = new_children;
+            }
+            if let Some(p) = r.providers.get_mut(idx) {
+                p.set_current_path("/");
+            }
+            // Clear undo history
+            r.undo_history.clear();
+            r.undo_position = 0;
+
+            r.current_save_path = path.to_owned();
+            list::create_list_current_layer(r);
+            r.error_message = format!("Loaded from {path}");
+        }
+        Err(e) => {
+            r.error_message = format!("Failed to load: {e}");
+        }
+    }
+    r.needs_redraw = true;
+}
+
 /// Handle F5 — refresh current provider.
 pub fn handle_f5(r: &mut AppRenderer) {
     crate::provider::refresh_current_directory(r);
@@ -1346,6 +1532,16 @@ fn is_text_edit_mode(r: &AppRenderer) -> bool {
     )
 }
 
+/// Returns true when the active provider is the file browser.
+///
+/// Used to route Ctrl+C/X/V to filesystem clipboard ops in OperatorGeneral.
+fn active_provider_is_filebrowser(r: &AppRenderer) -> bool {
+    r.current_id.get(0)
+        .and_then(|i| r.providers.get(i))
+        .map(|p| p.name() == "filebrowser")
+        .unwrap_or(false)
+}
+
 /// Ctrl+X — cut selected text (insert modes) or cut FFON element (editor general).
 pub fn handle_ctrl_x(r: &mut AppRenderer) {
     if is_text_edit_mode(r) {
@@ -1357,6 +1553,11 @@ pub fn handle_ctrl_x(r: &mut AppRenderer) {
         r.caret.reset(sdl_ticks());
         maybe_update_search(r);
         r.needs_redraw = true;
+        return;
+    }
+    // File browser: filesystem cut
+    if r.coordinate == Coordinate::OperatorGeneral && active_provider_is_filebrowser(r) {
+        handle_file_cut(r);
         return;
     }
     if matches!(r.coordinate, Coordinate::EditorGeneral) {
@@ -1374,7 +1575,7 @@ pub fn handle_ctrl_x(r: &mut AppRenderer) {
     }
 }
 
-/// Ctrl+C — copy selected text (insert modes) or copy FFON element (editor general).
+/// Ctrl+C — copy selected text (insert modes), file path (filebrowser), or FFON element.
 pub fn handle_ctrl_c(r: &mut AppRenderer) {
     if is_text_edit_mode(r) {
         if !has_selection(r) { return; }
@@ -1382,6 +1583,11 @@ pub fn handle_ctrl_c(r: &mut AppRenderer) {
             sdl_set_clipboard(&r.input_buffer[start..end].to_owned());
         }
         r.needs_redraw = true;
+        return;
+    }
+    // File browser: record filesystem copy path
+    if r.coordinate == Coordinate::OperatorGeneral && active_provider_is_filebrowser(r) {
+        handle_file_copy(r);
         return;
     }
     if matches!(r.coordinate, Coordinate::EditorGeneral) {
@@ -1397,7 +1603,7 @@ pub fn handle_ctrl_c(r: &mut AppRenderer) {
     }
 }
 
-/// Ctrl+V — paste from system clipboard (insert modes) or paste FFON element (editor general).
+/// Ctrl+V — paste from system clipboard (insert modes), file paste (filebrowser), or FFON paste.
 pub fn handle_ctrl_v(r: &mut AppRenderer) {
     if is_text_edit_mode(r) {
         let text = match sdl_get_clipboard() { Some(t) => t, None => return };
@@ -1408,6 +1614,11 @@ pub fn handle_ctrl_v(r: &mut AppRenderer) {
         r.caret.reset(sdl_ticks());
         maybe_update_search(r);
         r.needs_redraw = true;
+        return;
+    }
+    // File browser: paste file from clipboard
+    if r.coordinate == Coordinate::OperatorGeneral && active_provider_is_filebrowser(r) {
+        handle_file_paste(r);
         return;
     }
     if matches!(r.coordinate, Coordinate::EditorGeneral) {
@@ -3127,5 +3338,157 @@ mod tests {
         r.cursor_position = 5;
         handle_shift_right(&mut r);
         assert_eq!(r.cursor_position, 5);
+    }
+
+    // -----------------------------------------------------------------------
+    // handle_file_copy
+    // -----------------------------------------------------------------------
+
+    fn make_renderer_with_file_elem(dir: &str, filename: &str) -> AppRenderer {
+        use sicompass_sdk::ffon::{FfonElement, FfonObject};
+        use sicompass_sdk::provider::Provider;
+        struct FbProv { path: String }
+        impl Provider for FbProv {
+            fn name(&self) -> &str { "filebrowser" }
+            fn fetch(&mut self) -> Vec<FfonElement> { vec![] }
+            fn current_path(&self) -> &str { &self.path }
+        }
+        let entry = FfonElement::new_str(filename);
+        let root_obj = FfonObject { key: "file browser".to_string(), children: vec![entry] };
+        let root = FfonElement::Obj(root_obj);
+        let mut r = AppRenderer::new();
+        r.ffon = vec![root];
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        r.providers.push(Box::new(FbProv { path: dir.to_owned() }));
+        r
+    }
+
+    #[test]
+    fn file_copy_sets_clipboard_path() {
+        let mut r = make_renderer_with_file_elem("/home/user/docs", "report.pdf");
+        handle_file_copy(&mut r);
+        assert_eq!(r.file_clipboard_path, "/home/user/docs/report.pdf");
+        assert!(!r.file_clipboard_is_cut);
+    }
+
+    #[test]
+    fn file_copy_empty_name_is_noop() {
+        // An element with an empty (display-stripped) name should not change clipboard
+        let mut r = make_renderer_with_file_elem("/home/user", "");
+        let before = r.file_clipboard_path.clone();
+        handle_file_copy(&mut r);
+        assert_eq!(r.file_clipboard_path, before);
+    }
+
+    #[test]
+    fn file_copy_marks_not_cut() {
+        let mut r = make_renderer_with_file_elem("/tmp", "notes.txt");
+        r.file_clipboard_is_cut = true; // ensure it's overwritten
+        handle_file_copy(&mut r);
+        assert!(!r.file_clipboard_is_cut);
+    }
+
+    // -----------------------------------------------------------------------
+    // handle_ctrl_enter
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn ctrl_enter_inserts_newline_in_editor_insert() {
+        let mut r = make_input_renderer("hello");
+        r.cursor_position = 5;
+        r.coordinate = Coordinate::EditorInsert;
+        handle_ctrl_enter(&mut r);
+        assert!(r.input_buffer.contains('\n'));
+    }
+
+    #[test]
+    fn ctrl_enter_inserts_newline_in_operator_insert() {
+        let mut r = make_input_renderer("abc");
+        r.cursor_position = 3;
+        r.coordinate = Coordinate::OperatorInsert;
+        handle_ctrl_enter(&mut r);
+        assert!(r.input_buffer.contains('\n'));
+    }
+
+    #[test]
+    fn ctrl_enter_noop_in_operator_general() {
+        let mut r = make_input_renderer("abc");
+        r.coordinate = Coordinate::OperatorGeneral;
+        handle_ctrl_enter(&mut r);
+        assert_eq!(r.input_buffer, "abc"); // unchanged
+    }
+
+    // -----------------------------------------------------------------------
+    // handle_save_provider_config
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn save_config_no_path_sets_error_message() {
+        let mut r = AppRenderer::new();
+        r.current_save_path = String::new();
+        handle_save_provider_config(&mut r);
+        assert!(r.error_message.contains("No save path"));
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn save_config_with_path_writes_file() {
+        use tempfile::NamedTempFile;
+        use sicompass_sdk::ffon::{FfonElement, FfonObject};
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().to_str().unwrap().to_owned();
+
+        let root = FfonElement::Obj(FfonObject { key: "myprov".to_string(), children: vec![] });
+        let mut r = AppRenderer::new();
+        r.ffon = vec![root];
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        r.current_save_path = path.clone();
+
+        handle_save_provider_config(&mut r);
+
+        assert!(r.error_message.contains(&path), "expected path in message, got: {}", r.error_message);
+        assert!(tmp.path().exists());
+    }
+
+    // -----------------------------------------------------------------------
+    // handle_load_provider_config
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn load_config_empty_path_is_noop() {
+        let mut r = AppRenderer::new();
+        r.error_message = String::new();
+        handle_load_provider_config(&mut r, "");
+        assert!(r.error_message.is_empty());
+    }
+
+    #[test]
+    fn load_config_sets_save_path_and_clears_undo() {
+        use tempfile::NamedTempFile;
+        use std::io::Write;
+        let mut tmp = NamedTempFile::new().unwrap();
+        tmp.write_all(b"[\"- item1\", \"- item2\"]\n").unwrap();
+        let path = tmp.path().to_str().unwrap().to_owned();
+
+        use sicompass_sdk::ffon::{FfonElement, FfonObject};
+        let root = FfonElement::Obj(FfonObject { key: "myprov".to_string(), children: vec![] });
+        let mut r = AppRenderer::new();
+        r.ffon = vec![root];
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        r.undo_position = 3;
+
+        handle_load_provider_config(&mut r, &path);
+
+        assert_eq!(r.current_save_path, path);
+        assert_eq!(r.undo_position, 0);
+        assert!(r.error_message.contains(&path));
+    }
+
+    #[test]
+    fn load_config_missing_file_sets_error() {
+        let mut r = AppRenderer::new();
+        handle_load_provider_config(&mut r, "/nonexistent/path/file.json");
+        assert!(!r.error_message.is_empty());
+        assert!(r.needs_redraw);
     }
 }
