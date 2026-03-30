@@ -205,6 +205,13 @@
         {
           default = pkgs.mkShell {
             buildInputs = with pkgs; [
+              # Rust toolchain
+              cargo
+              rustc
+              rust-analyzer
+              clippy
+              rustfmt
+              # C build system
               meson
               ninja
               pkg-config
@@ -269,6 +276,9 @@
               echo "tools: ${vulkan-tools}"
               echo "tools-lunarg: ${vulkan-tools-lunarg}"
               echo "extension-layer: ${vulkan-extension-layer}"
+
+              # Rust stdlib source for rust-analyzer
+              export RUST_SRC_PATH="${pkgs.rustc}/lib/rustlib/src/rust/library";
 
               # Include system library path for Vulkan drivers (Debian/non-NixOS)
               export LD_LIBRARY_PATH="${stb}/lib:${libwebp}/lib:${glfw}/lib:${freetype}/lib:${vulkan-loader}/lib:${vulkan-validation-layers}/lib:${harfbuzz}/lib:${json_c}/lib:${curl}/lib:${utf8proc}/lib:${lexbor}/lib:/usr/lib/x86_64-linux-gnu";

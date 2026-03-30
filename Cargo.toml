@@ -1,0 +1,56 @@
+[workspace]
+members = [
+    "sdk-rs",
+    "lib/lib_tutorial-rs",
+    "lib/lib_settings-rs",
+    "src/sicompass-rs",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+# SDK
+sicompass-sdk = { path = "sdk-rs" }
+sicompass-tutorial = { path = "lib/lib_tutorial-rs" }
+sicompass-settings = { path = "lib/lib_settings-rs" }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Graphics
+ash = "0.38"
+glam = "0.29"
+
+# Text rendering
+freetype = "0.7"
+rustybuzz = "0.20"
+
+# Image loading
+image = { version = "0.25", features = ["jpeg", "png", "webp"] }
+
+# Windowing + events
+sdl3 = "0.12"
+
+# Accessibility
+accesskit = "0.17"
+accesskit_unix = "0.12"
+
+# Unicode
+unicode-normalization = "0.1"
+
+# Async / networking (library providers, later phases)
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json"] }
+
+# Plugin loading
+libloading = "0.8"
+
+# Test dependencies
+mockall = "0.13"
+tempfile = "3"
+wiremock = "0.6"

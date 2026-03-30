@@ -1,0 +1,40 @@
+[package]
+name = "sicompass"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "sicompass — Vulkan/SDL3 modal UI (Rust port)"
+
+[[bin]]
+name = "sicompass"
+path = "src/main.rs"
+
+[dependencies]
+sicompass-sdk = { workspace = true }
+sicompass-tutorial = { workspace = true }
+sicompass-settings = { workspace = true }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+ash = { workspace = true }
+glam = { workspace = true }
+
+freetype = { workspace = true }
+rustybuzz = { workspace = true }
+
+image = { workspace = true }
+
+sdl3 = { workspace = true }
+
+accesskit = { workspace = true }
+
+unicode-normalization = { workspace = true }
+
+tokio = { workspace = true }
+
+libloading = { workspace = true }
+
+[dev-dependencies]
+mockall = { workspace = true }
+tempfile = { workspace = true }

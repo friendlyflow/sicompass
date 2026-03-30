@@ -1,5 +1,6 @@
 # Build artifacts
 build
+target/
 .cache
 .vscode
 PLAN.md

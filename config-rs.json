@@ -1,0 +1,33 @@
+{
+  "sicompass": {
+    "colorScheme": "dark",
+    "maximized": false
+  },
+  "file browser": {
+    "sortOrder": "alphanumerically"
+  },
+  "Available programs:": {
+    "enable_tutorial": true,
+    "enable_sales demo": true,
+    "enable_chat client": false,
+    "enable_email client": false,
+    "enable_web browser": false
+  },
+  "sales demo": {
+    "saveFolder": "Downloads"
+  },
+  "chat client": {
+    "chatHomeserver": "https://matrix.org",
+    "chatAccessToken": "",
+    "chatUsername": "",
+    "chatPassword": ""
+  },
+  "email client": {
+    "emailImapUrl": "imaps://imap.gmail.com",
+    "emailSmtpUrl": "smtps://smtp.gmail.com",
+    "emailUsername": "",
+    "emailPassword": "",
+    "emailClientId": "",
+    "emailClientSecret": ""
+  }
+}
