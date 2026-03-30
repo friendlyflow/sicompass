@@ -3,6 +3,7 @@ members = [
     "sdk-rs",
     "lib/lib_tutorial-rs",
     "lib/lib_settings-rs",
+    "lib/lib_filebrowser-rs",
     "src/sicompass-rs",
 ]
 resolver = "2"
@@ -17,6 +18,7 @@ license = "MIT"
 sicompass-sdk = { path = "sdk-rs" }
 sicompass-tutorial = { path = "lib/lib_tutorial-rs" }
 sicompass-settings = { path = "lib/lib_settings-rs" }
+sicompass-filebrowser = { path = "lib/lib_filebrowser-rs" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

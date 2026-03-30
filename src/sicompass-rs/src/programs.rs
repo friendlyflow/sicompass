@@ -16,6 +16,7 @@
 use crate::app_state::AppRenderer;
 use sicompass_sdk::ffon::FfonElement;
 use sicompass_sdk::provider::Provider;
+use sicompass_filebrowser::FilebrowserProvider;
 use sicompass_settings::SettingsProvider;
 use sicompass_tutorial::TutorialProvider;
 use std::sync::{Arc, Mutex};
@@ -87,6 +88,9 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
         settings.add_checkbox("Available programs:", name, config_key, default);
     }
 
+    // ---- Always register file browser first --------------------------------
+    register_provider(renderer, Box::new(FilebrowserProvider::new()));
+
     // ---- Load enabled content providers (before registering settings) -------
     let enabled = enabled_programs();
     for name in &enabled {
@@ -108,7 +112,12 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
 
 /// Enable a provider by name at runtime (hot-load).
 pub fn enable_provider(renderer: &mut AppRenderer, name: &str) {
+    // Never double-load an already-registered provider
+    if renderer.providers.iter().any(|p| p.name() == name) { return; }
     match name {
+        "filebrowser" => {
+            register_provider(renderer, Box::new(FilebrowserProvider::new()));
+        }
         "tutorial" => {
             register_provider(renderer, Box::new(TutorialProvider::new_headless()));
         }

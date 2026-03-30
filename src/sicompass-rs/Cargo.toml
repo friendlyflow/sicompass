@@ -13,6 +13,7 @@ path = "src/main.rs"
 sicompass-sdk = { workspace = true }
 sicompass-tutorial = { workspace = true }
 sicompass-settings = { workspace = true }
+sicompass-filebrowser = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }
