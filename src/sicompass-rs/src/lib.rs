@@ -17,6 +17,8 @@ pub mod events;
 pub mod handlers;
 pub mod image;
 pub mod list;
+pub mod plugin_loader;
+pub mod plugin_manifest;
 pub mod programs;
 pub mod provider;
 pub mod rectangle;

@@ -8,6 +8,7 @@ members = [
     "lib/lib_chatclient-rs",
     "lib/lib_emailclient-rs",
     "src/sicompass-rs",
+    "src/desicompass-rs",
 ]
 resolver = "2"
 

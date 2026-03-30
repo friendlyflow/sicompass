@@ -14,6 +14,8 @@
 //! [`apply_pending_settings`].
 
 use crate::app_state::AppRenderer;
+use crate::plugin_loader::{NativePlugin, ScriptProvider};
+use crate::plugin_manifest::{PluginType, discover_user_plugins};
 use sicompass_sdk::ffon::FfonElement;
 use sicompass_sdk::provider::Provider;
 use sicompass_filebrowser::FilebrowserProvider;
@@ -116,10 +118,63 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
         }
     }
 
+    // ---- Load user-installed plugins ----------------------------------------
+    load_user_plugins(renderer, &mut settings);
+
     // ---- Register settings as the last provider ----------------------------
     register_provider(renderer, Box::new(settings));
 
     queue
+}
+
+/// Discover plugins in `~/.config/sicompass/plugins/`, inject their settings
+/// entries, and register them as providers.
+fn load_user_plugins(renderer: &mut AppRenderer, settings: &mut SettingsProvider) {
+    for plugin in discover_user_plugins() {
+        let m = &plugin.manifest;
+
+        // Inject per-plugin settings into the settings provider.
+        for s in &m.settings {
+            use crate::plugin_manifest::SettingKind;
+            match s.kind {
+                SettingKind::Text => {
+                    settings.add_text(&m.display_name, &s.label, &s.key, &s.default);
+                }
+                SettingKind::Checkbox => {
+                    settings.add_checkbox(
+                        &m.display_name, &s.label, &s.key, s.default_checked,
+                    );
+                }
+                SettingKind::Radio => {
+                    let opts: Vec<&str> = s.options.iter().map(String::as_str).collect();
+                    settings.add_radio(
+                        &m.display_name, &s.label, &s.key, &opts, &s.default,
+                    );
+                }
+            }
+        }
+
+        // Construct and register the provider.
+        let provider: Option<Box<dyn Provider>> = match m.plugin_type {
+            PluginType::Native => NativePlugin::open(&plugin.entry_path)
+                .map(|p| Box::new(p) as Box<dyn Provider>),
+            PluginType::Script => Some(Box::new(ScriptProvider::new(
+                &m.name,
+                &m.display_name,
+                plugin.entry_path.clone(),
+            ))),
+        };
+
+        if let Some(p) = provider {
+            register_provider(renderer, p);
+        } else {
+            eprintln!(
+                "sicompass: failed to load plugin '{}' from {}",
+                m.name,
+                plugin.entry_path.display()
+            );
+        }
+    }
 }
 
 /// Enable a provider by name at runtime (hot-load).
