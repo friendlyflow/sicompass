@@ -2004,4 +2004,193 @@ mod tests {
         handle_down(&mut r);
         assert_eq!(r.list_index, last);
     }
+
+    // -----------------------------------------------------------------------
+    // Clipboard — Ctrl+C / Ctrl+X / Ctrl+V
+    // -----------------------------------------------------------------------
+
+    /// Set up an EditorGeneral renderer whose list shows `items` as string children
+    /// of provider 0. `list_index` is left at 0 (first child).
+    fn make_editor_with_items(items: &[&str]) -> AppRenderer {
+        use sicompass_sdk::ffon::IdArray;
+        let mut root = FfonElement::new_obj("test");
+        for &item in items {
+            root.as_obj_mut().unwrap().push(FfonElement::new_str(item));
+        }
+        let mut r = AppRenderer::new();
+        r.ffon = vec![root];
+        r.coordinate = Coordinate::EditorGeneral;
+        let mut id = IdArray::new();
+        id.push(0);
+        id.push(0);
+        r.current_id = id;
+        crate::list::create_list_current_layer(&mut r);
+        r.list_index = 0;
+        r
+    }
+
+    // --- Ctrl+C element mode ---
+
+    #[test]
+    fn ctrl_c_copies_first_element_to_clipboard() {
+        let mut r = make_editor_with_items(&["hello", "world"]);
+        handle_ctrl_c(&mut r);
+        assert_eq!(r.clipboard, Some(FfonElement::Str("hello".to_string())));
+        // ffon unchanged
+        assert_eq!(r.ffon[0].as_obj().unwrap().children.len(), 2);
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn ctrl_c_copies_second_element() {
+        let mut r = make_editor_with_items(&["first", "second"]);
+        r.list_index = 1;
+        handle_ctrl_c(&mut r);
+        assert_eq!(r.clipboard, Some(FfonElement::Str("second".to_string())));
+    }
+
+    #[test]
+    fn ctrl_c_copies_object_element() {
+        use sicompass_sdk::ffon::IdArray;
+        let mut root = FfonElement::new_obj("test");
+        let mut section = FfonElement::new_obj("mykey");
+        section.as_obj_mut().unwrap().push(FfonElement::new_str("child"));
+        root.as_obj_mut().unwrap().push(FfonElement::new_str("first"));
+        root.as_obj_mut().unwrap().push(section);
+        let mut r = AppRenderer::new();
+        r.ffon = vec![root];
+        r.coordinate = Coordinate::EditorGeneral;
+        let mut id = IdArray::new();
+        id.push(0); id.push(0);
+        r.current_id = id;
+        crate::list::create_list_current_layer(&mut r);
+        r.list_index = 1; // second child = "mykey" object
+        handle_ctrl_c(&mut r);
+        let clip = r.clipboard.as_ref().unwrap();
+        assert!(clip.is_obj());
+        assert_eq!(clip.as_obj().unwrap().key, "mykey");
+        assert_eq!(clip.as_obj().unwrap().children.len(), 1);
+    }
+
+    #[test]
+    fn ctrl_c_replaces_previous_clipboard() {
+        let mut r = make_editor_with_items(&["first", "second"]);
+        r.list_index = 0;
+        handle_ctrl_c(&mut r);
+        assert_eq!(r.clipboard, Some(FfonElement::Str("first".to_string())));
+        r.list_index = 1;
+        handle_ctrl_c(&mut r);
+        assert_eq!(r.clipboard, Some(FfonElement::Str("second".to_string())));
+    }
+
+    // --- Ctrl+C text mode (selection) ---
+
+    #[test]
+    fn ctrl_c_text_no_selection_does_nothing() {
+        let mut r = make_input_renderer("hello");
+        r.needs_redraw = false;
+        handle_ctrl_c(&mut r);
+        // no selection → nothing happens
+        assert_eq!(r.input_buffer, "hello");
+        assert!(!r.needs_redraw);
+    }
+
+    #[test]
+    fn ctrl_c_text_with_selection_sets_needs_redraw() {
+        let mut r = make_input_renderer("hello world");
+        r.selection_anchor = Some(0);
+        r.cursor_position = 5;
+        handle_ctrl_c(&mut r);
+        // buffer unchanged (copy, not cut)
+        assert_eq!(r.input_buffer, "hello world");
+        assert!(r.needs_redraw);
+    }
+
+    // --- Ctrl+X element mode ---
+
+    #[test]
+    fn ctrl_x_sets_clipboard_in_editor_general() {
+        let mut r = make_editor_with_items(&["first", "second", "third"]);
+        r.list_index = 1;
+        handle_ctrl_x(&mut r);
+        assert_eq!(r.clipboard, Some(FfonElement::Str("second".to_string())));
+        assert!(r.needs_redraw);
+    }
+
+    // --- Ctrl+X text mode ---
+
+    #[test]
+    fn ctrl_x_text_cuts_selection() {
+        let mut r = make_input_renderer("hello world");
+        r.selection_anchor = Some(6);
+        r.cursor_position = 11;
+        handle_ctrl_x(&mut r);
+        assert_eq!(r.input_buffer, "hello ");
+        assert_eq!(r.cursor_position, 6);
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn ctrl_x_text_no_selection_does_nothing() {
+        let mut r = make_input_renderer("hello");
+        r.needs_redraw = false;
+        handle_ctrl_x(&mut r);
+        assert_eq!(r.input_buffer, "hello");
+        assert!(!r.needs_redraw);
+    }
+
+    #[test]
+    fn ctrl_x_text_cuts_middle_selection() {
+        let mut r = make_input_renderer("abcdefgh");
+        r.selection_anchor = Some(2);
+        r.cursor_position = 5;
+        handle_ctrl_x(&mut r);
+        assert_eq!(r.input_buffer, "abfgh");
+        assert_eq!(r.cursor_position, 2);
+    }
+
+    #[test]
+    fn ctrl_x_text_reverse_selection_cuts_correctly() {
+        // anchor > cursor (reverse selection)
+        let mut r = make_input_renderer("hello world");
+        r.selection_anchor = Some(11);
+        r.cursor_position = 6;
+        handle_ctrl_x(&mut r);
+        assert_eq!(r.input_buffer, "hello ");
+        assert_eq!(r.cursor_position, 6);
+    }
+
+    // --- Ctrl+V element mode ---
+
+    #[test]
+    fn ctrl_v_element_mode_sets_needs_redraw() {
+        let mut r = make_editor_with_items(&["original"]);
+        r.clipboard = Some(FfonElement::Str("pasted".to_string()));
+        handle_ctrl_v(&mut r);
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn ctrl_v_element_mode_no_clipboard_still_redraws() {
+        // In Rust, handle_ctrl_v in EditorGeneral always calls update_state(Paste)
+        // and sets needs_redraw regardless of whether clipboard is set.
+        let mut r = make_editor_with_items(&["original"]);
+        r.clipboard = None;
+        handle_ctrl_v(&mut r);
+        assert!(r.needs_redraw);
+    }
+
+    // --- Ctrl+V text mode (no clipboard path) ---
+
+    #[test]
+    fn ctrl_v_text_no_clipboard_does_nothing() {
+        // Without a real SDL clipboard, handle_ctrl_v returns early.
+        // Verify no crash and no buffer modification.
+        let mut r = make_input_renderer("hello");
+        r.cursor_position = 5;
+        let before = r.input_buffer.clone();
+        handle_ctrl_v(&mut r);
+        // Buffer unchanged (no SDL clipboard available in tests)
+        assert_eq!(r.input_buffer, before);
+    }
 }
