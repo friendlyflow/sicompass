@@ -158,6 +158,7 @@ fn update_view(app: &mut AppState) {
     let scale;
     let line_height;
     let ascender;
+    let em_width;
 
     {
         let fr = match app.font_renderer.as_ref() {
@@ -167,14 +168,16 @@ fn update_view(app: &mut AppState) {
         scale = fr.get_text_scale(crate::text::FONT_SIZE_PT);
         line_height = fr.get_line_height(scale, crate::text::TEXT_PADDING) as i32;
         ascender = fr.ascender;
+        em_width = fr.get_width_em(scale);
     }
 
     // Snapshot the display state so we can borrow font_renderer mutably after
     let header = build_header_text(&app.renderer, line_height);
     let win_w = app.swapchain_extent.width as f32;
     let win_h = app.swapchain_extent.height as f32;
-    let (content_x, content_w) = content_layout(win_w);
+    let (content_x, content_w) = content_layout(win_w, em_width);
     let text_x = content_x + 10.0;
+    let max_content_w = content_w.min(win_w - text_x);
     let list_items: Vec<(String, bool)> = collect_list_items(&app.renderer);
     // In insert mode the selected item shows prefix + buffer (with cursor marker)
     let insert_display: Option<String> = build_insert_display(&app.renderer);
@@ -191,6 +194,30 @@ fn update_view(app: &mut AppState) {
         None
     };
     let error_msg = app.renderer.error_message.clone();
+
+    // ---- Per-item layout metrics (immutable font borrow) ------------------
+    // Each entry: (item_y, content_start_x, lines_used, highlight_w)
+    let item_metrics: Vec<(f32, f32, usize, f32)> = {
+        let fr = match app.font_renderer.as_ref() {
+            Some(f) => f,
+            None => return,
+        };
+        let first_item_y = (line_height as f32) * 2.0 + ascender * scale;
+        let mut y = first_item_y;
+        let mut metrics = Vec::with_capacity(list_items.len());
+        for (label, _) in &list_items {
+            if y > win_h { break; }
+            let (prefix, content) = split_label(label);
+            let prefix_px = fr.measure_text_width(prefix, scale);
+            let content_start_x = text_x + prefix_px;
+            let item_max_w = max_content_w.max(1.0);
+            let lines = fr.count_wrapped_lines(content, scale, item_max_w);
+            let highlight_w = (prefix_px + item_max_w + 10.0).min(win_w - content_x);
+            metrics.push((y, content_start_x, lines, highlight_w));
+            y += lines as f32 * line_height as f32;
+        }
+        metrics
+    };
 
     // Cache layout metrics for handler use
     app.renderer.window_height = win_h as i32;
@@ -229,41 +256,37 @@ fn update_view(app: &mut AppState) {
         fr.prepare_text_for_rendering(s, text_x, search_y, scale, p.text);
     }
 
-    // ---- List items -------------------------------------------------------
-    let first_item_y = (line_height as f32) * 2.0 + ascender * scale;
-    let visible_items = ((win_h - first_item_y) / line_height as f32).ceil() as usize + 1;
-
-    for (i, (label, is_selected)) in list_items.iter().enumerate() {
-        if i >= visible_items { break; }
-        let item_y = first_item_y + i as f32 * line_height as f32;
-
-        // Selection highlight rectangle
-        if *is_selected {
-            let rect_y = item_y - ascender * scale - crate::text::TEXT_PADDING;
-            if let Some(rr) = app.rect_renderer.as_mut() {
-                rr.prepare_rectangle(content_x, rect_y, content_w, line_height as f32, p.selected, 0.0);
-            }
+    // ---- List items — selection highlight rectangles ----------------------
+    for (i, (_, is_selected)) in list_items.iter().take(item_metrics.len()).enumerate() {
+        if !is_selected { continue; }
+        let (item_y, _, lines, highlight_w) = item_metrics[i];
+        let rect_y = item_y - ascender * scale - crate::text::TEXT_PADDING;
+        let rect_h = lines as f32 * line_height as f32;
+        if let Some(rr) = app.rect_renderer.as_mut() {
+            rr.prepare_rectangle(content_x, rect_y, highlight_w, rect_h, p.selected, 0.0);
         }
+    }
 
-        // Image item or text item
+    // ---- List items — text / images ----------------------------------------
+    for (i, (label, is_selected)) in list_items.iter().take(item_metrics.len()).enumerate() {
+        let (item_y, content_start_x, _, _) = item_metrics[i];
+
         let img_path = sicompass_sdk::tags::extract_image(label);
         if let Some(ref path) = img_path {
-            // Render a thumbnail square fitting within the line height
             if let Some(ir) = app.image_renderer.as_mut() {
                 let img_h = line_height as f32 - 4.0;
                 let img_y = item_y - ascender * scale - crate::text::TEXT_PADDING + 2.0;
                 unsafe { ir.prepare_image(path, text_x, img_y, img_h, img_h); }
             }
-        } else {
-            // Text item (re-borrow fr after possible rect_renderer borrow)
-            if let Some(fr) = app.font_renderer.as_mut() {
-                let display = if *is_selected {
-                    insert_display.as_deref().unwrap_or(label.as_str())
-                } else {
-                    label.as_str()
-                };
-                fr.prepare_text_for_rendering(display, text_x, item_y, scale, p.text);
-            }
+        } else if let Some(fr) = app.font_renderer.as_mut() {
+            let display_label = if *is_selected {
+                insert_display.as_deref().unwrap_or(label.as_str())
+            } else {
+                label.as_str()
+            };
+            let (prefix, content) = split_label(display_label);
+            fr.prepare_text_for_rendering(prefix, text_x, item_y, scale, p.text);
+            fr.prepare_text_wrapped(content, content_start_x, item_y, scale, max_content_w.max(1.0), line_height as f32, p.text);
         }
     }
 }
@@ -650,23 +673,22 @@ fn build_display_path(r: &crate::app_state::AppRenderer) -> String {
     if parts.is_empty() { "/".to_owned() } else { parts.join(" / ") }
 }
 
-/// Compute horizontal content layout using Tailwind CSS container breakpoints.
-/// Returns `(content_x, content_width)` where `content_x` is the left offset
-/// needed to center the content area within the window.
-fn content_layout(win_w: f32) -> (f32, f32) {
-    let max_w = if win_w < 640.0 {
-        win_w
-    } else if win_w < 768.0 {
-        640.0
-    } else if win_w < 1024.0 {
-        768.0
-    } else if win_w < 1280.0 {
-        1024.0
-    } else if win_w < 1536.0 {
-        1280.0
+/// Split a list label at the first space into (prefix_with_space, content).
+/// E.g. `"-c My item"` -> `("-c ", "My item")`.
+fn split_label(label: &str) -> (&str, &str) {
+    if let Some(i) = label.find(' ') {
+        (&label[..=i], &label[i + 1..])
     } else {
-        1536.0
-    };
+        (label, "")
+    }
+}
+
+/// Compute horizontal content layout.
+/// Returns `(content_x, content_width)` where `content_width` is the 120-em
+/// content column width (clamped to the window) and `content_x` is the left
+/// offset needed to center that column.
+fn content_layout(win_w: f32, em_width: f32) -> (f32, f32) {
+    let max_w = (120.0 * em_width).min(win_w);
     let content_x = ((win_w - max_w) / 2.0).max(0.0);
     (content_x, max_w)
 }
@@ -703,45 +725,47 @@ mod tests {
     }
 
     #[test]
-    fn content_layout_below_640() {
-        let (x, w) = content_layout(500.0);
+    fn content_layout_small_viewport() {
+        // Viewport smaller than 120 em (10px each): full width, x = 0
+        let (x, w) = content_layout(500.0, 10.0); // 120 * 10 = 1200 > 500
         assert_eq!(x, 0.0);
         assert_eq!(w, 500.0);
     }
 
     #[test]
-    fn content_layout_at_640() {
-        let (x, w) = content_layout(640.0);
-        assert_eq!(w, 640.0);
+    fn content_layout_exact_fit() {
+        // Viewport exactly 120 em wide
+        let (x, w) = content_layout(1200.0, 10.0);
         assert_eq!(x, 0.0);
+        assert_eq!(w, 1200.0);
     }
 
     #[test]
-    fn content_layout_at_768() {
-        let (x, w) = content_layout(768.0);
-        assert_eq!(w, 768.0);
-        assert_eq!(x, 0.0);
+    fn content_layout_wide_viewport() {
+        // Viewport wider than 120 em: content is 120 em, centered
+        let (x, w) = content_layout(1920.0, 10.0); // 120 * 10 = 1200
+        assert_eq!(w, 1200.0);
+        assert!((x - 360.0).abs() < 0.01); // (1920 - 1200) / 2 = 360
     }
 
     #[test]
-    fn content_layout_at_1024() {
-        let (x, w) = content_layout(1024.0);
-        assert_eq!(w, 1024.0);
-        assert_eq!(x, 0.0);
+    fn split_label_with_space() {
+        let (prefix, content) = split_label("-c My item");
+        assert_eq!(prefix, "-c ");
+        assert_eq!(content, "My item");
     }
 
     #[test]
-    fn content_layout_at_1920() {
-        let (x, w) = content_layout(1920.0);
-        assert_eq!(w, 1536.0);
-        assert!((x - 192.0).abs() < 0.01);
+    fn split_label_no_space() {
+        let (prefix, content) = split_label("nospace");
+        assert_eq!(prefix, "nospace");
+        assert_eq!(content, "");
     }
 
     #[test]
-    fn content_layout_between_breakpoints() {
-        // 900px window: falls in 768–1023 range, max-width 768px
-        let (x, w) = content_layout(900.0);
-        assert_eq!(w, 768.0);
-        assert!((x - 66.0).abs() < 0.01); // (900 - 768) / 2 = 66
+    fn split_label_obj_prefix() {
+        let (prefix, content) = split_label("+ Section name");
+        assert_eq!(prefix, "+ ");
+        assert_eq!(content, "Section name");
     }
 }
