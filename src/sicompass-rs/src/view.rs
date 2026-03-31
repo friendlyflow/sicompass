@@ -180,10 +180,29 @@ fn update_view(app: &mut AppState) {
     let header = build_header_text(&app.renderer, line_height);
     let win_w = app.swapchain_extent.width as f32;
     let win_h = app.swapchain_extent.height as f32;
-    let (content_x, content_w) = content_layout(win_w, em_width);
-    let text_x = content_x + 10.0;
-    let max_content_w = content_w.min(win_w - text_x);
     let list_items: Vec<(String, Option<String>, bool)> = collect_list_items(&app.renderer);
+
+    // Compute indent and max prefix width before centering so the full visual
+    // width (indent + prefix + content) can be centered in the window.
+    let (list_indent_px, max_prefix_px) = {
+        let fr = match app.font_renderer.as_ref() {
+            Some(f) => f,
+            None => return,
+        };
+        let indent = fr.measure_text_width("    ", scale);
+        let prefix = list_items.iter()
+            .map(|(label, _, _)| {
+                let (p, _) = split_label(label);
+                fr.measure_text_width(p, scale)
+            })
+            .fold(0.0_f32, f32::max);
+        (indent, prefix)
+    };
+    let left_inset = 10.0 + list_indent_px + max_prefix_px;
+    let content_w = (120.0 * em_width).min(win_w);
+    let content_x = ((win_w - content_w - left_inset) / 2.0).max(0.0);
+    let text_x = content_x + 10.0;
+    let max_content_w = content_w.min(win_w - text_x - left_inset);
     // In insert mode the selected item shows prefix + buffer (with cursor marker)
     let insert_display: Option<String> = build_insert_display(&app.renderer);
     let search_str = if matches!(
@@ -244,19 +263,10 @@ fn update_view(app: &mut AppState) {
             Some(f) => f,
             None => return,
         };
-        // List items are indented 4 ems to the right of the parent element.
-        let list_indent_px = fr.measure_text_width("    ", scale);
         let item_prefix_x = text_x + list_indent_px;
-        // Compute the widest prefix across all visible items so content aligns uniformly.
-        let max_prefix_px = list_items.iter()
-            .map(|(label, _, _)| {
-                let (prefix, _) = split_label(label);
-                fr.measure_text_width(prefix, scale)
-            })
-            .fold(0.0_f32, f32::max);
         let content_start_x = item_prefix_x + max_prefix_px;
         let extra_lines = 1 + if parent_info.radio_summary.is_some() { 1 } else { 0 };
-        let first_item_y = (line_height as f32) * (2.0 + extra_lines as f32) + ascender * scale;
+        let first_item_y = (line_height as f32) * (1.0 + extra_lines as f32) + ascender * scale;
         let mut y = first_item_y;
         let mut metrics = Vec::with_capacity(list_items.len());
         for (label, img_data, _) in &list_items {
@@ -278,7 +288,7 @@ fn update_view(app: &mut AppState) {
                 let (_, content) = split_label(label);
                 fr.count_wrapped_lines(content, scale, item_max_w)
             };
-            let highlight_w = (max_prefix_px + item_max_w + 10.0).min(win_w - content_x);
+            let highlight_w = (max_prefix_px + item_max_w + 10.0).min(win_w - content_x - list_indent_px);
             metrics.push((y, content_start_x, lines, highlight_w));
             y += lines as f32 * line_height as f32;
         }
@@ -318,7 +328,7 @@ fn update_view(app: &mut AppState) {
 
     // ---- Parent element (when navigated into a child level) ---------------
     if !parent_info.display_text.is_empty() {
-        let parent_y = line_height as f32 * 2.0 + ascender * scale;
+        let parent_y = line_height as f32 + ascender * scale + crate::text::TEXT_PADDING;
         fr.prepare_text_for_rendering(&parent_info.display_text, text_x, parent_y, scale, p.text);
         if let Some(ref summary) = parent_info.radio_summary {
             let indent = fr.measure_text_width("    ", scale);
@@ -342,7 +352,7 @@ fn update_view(app: &mut AppState) {
         let rect_y = item_y - ascender * scale - crate::text::TEXT_PADDING;
         let rect_h = lines as f32 * line_height as f32;
         if let Some(rr) = app.rect_renderer.as_mut() {
-            rr.prepare_rectangle(content_x, rect_y, highlight_w, rect_h, p.selected, 5.0);
+            rr.prepare_rectangle(content_x + 4.0 * em_width, rect_y, highlight_w, rect_h, p.selected, 5.0);
         }
     }
 
@@ -771,15 +781,6 @@ fn split_label(label: &str) -> (&str, &str) {
     }
 }
 
-/// Compute horizontal content layout.
-/// Returns `(content_x, content_width)` where `content_width` is the 120-em
-/// content column width (clamped to the window) and `content_x` is the left
-/// offset needed to center that column.
-fn content_layout(win_w: f32, em_width: f32) -> (f32, f32) {
-    let max_w = (120.0 * em_width).min(win_w);
-    let content_x = ((win_w - max_w) / 2.0).max(0.0);
-    (content_x, max_w)
-}
 
 #[cfg(test)]
 mod tests {
@@ -810,30 +811,6 @@ mod tests {
         assert!((g - 0.0).abs() < 1e-6);
         assert!((b - 0.0).abs() < 1e-6);
         assert!((a - 1.0).abs() < 1e-6);
-    }
-
-    #[test]
-    fn content_layout_small_viewport() {
-        // Viewport smaller than 120 em (10px each): full width, x = 0
-        let (x, w) = content_layout(500.0, 10.0); // 120 * 10 = 1200 > 500
-        assert_eq!(x, 0.0);
-        assert_eq!(w, 500.0);
-    }
-
-    #[test]
-    fn content_layout_exact_fit() {
-        // Viewport exactly 120 em wide
-        let (x, w) = content_layout(1200.0, 10.0);
-        assert_eq!(x, 0.0);
-        assert_eq!(w, 1200.0);
-    }
-
-    #[test]
-    fn content_layout_wide_viewport() {
-        // Viewport wider than 120 em: content is 120 em, centered
-        let (x, w) = content_layout(1920.0, 10.0); // 120 * 10 = 1200
-        assert_eq!(w, 1200.0);
-        assert!((x - 360.0).abs() < 0.01); // (1920 - 1200) / 2 = 360
     }
 
     #[test]
