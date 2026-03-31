@@ -344,6 +344,7 @@ pub struct ScriptProvider {
     script_path: PathBuf,
     current_path: String,
     error_message: String,
+    dashboard_image: String,
 }
 
 impl ScriptProvider {
@@ -354,6 +355,7 @@ impl ScriptProvider {
             script_path,
             current_path: "/".to_owned(),
             error_message: String::new(),
+            dashboard_image: String::new(),
         }
     }
 
@@ -372,12 +374,37 @@ impl ScriptProvider {
         }
     }
 
-    /// Parse a JSON array string into `Vec<FfonElement>`.
-    fn parse_json_elements(json: &str) -> Vec<FfonElement> {
-        let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(json) else {
-            return Vec::new();
+    /// Parse a JSON string into FFON elements.
+    ///
+    /// Accepts either a plain JSON array (backward compat) or an object with a
+    /// `"children"` array plus optional `"dashboardImage"` string metadata —
+    /// matching the C ScriptProvider's protocol.
+    ///
+    /// Returns `(elements, dashboard_image_path)`.
+    fn parse_json_output(json: &str) -> (Vec<FfonElement>, String) {
+        let Ok(val) = serde_json::from_str::<serde_json::Value>(json) else {
+            return (Vec::new(), String::new());
         };
-        arr.into_iter().filter_map(json_value_to_ffon).collect()
+        match val {
+            serde_json::Value::Array(arr) => {
+                let elems = arr.into_iter().filter_map(json_value_to_ffon).collect();
+                (elems, String::new())
+            }
+            serde_json::Value::Object(ref map) => {
+                let children = map
+                    .get("children")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().cloned().filter_map(json_value_to_ffon).collect())
+                    .unwrap_or_default();
+                let dashboard = map
+                    .get("dashboardImage")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_owned();
+                (children, dashboard)
+            }
+            _ => (Vec::new(), String::new()),
+        }
     }
 }
 
@@ -413,11 +440,20 @@ impl Provider for ScriptProvider {
     }
 
     fn fetch(&mut self) -> Vec<FfonElement> {
+        // C ScriptProvider passes just the current path (no subcommand) for fetch.
         let path = self.current_path.clone();
-        match self.run(&["fetch", &path]) {
-            Some(json) => Self::parse_json_elements(&json),
+        match self.run(&[&path]) {
+            Some(json) => {
+                let (elems, dashboard) = Self::parse_json_output(&json);
+                self.dashboard_image = dashboard;
+                elems
+            }
             None => Vec::new(),
         }
+    }
+
+    fn dashboard_image_path(&self) -> Option<&str> {
+        if self.dashboard_image.is_empty() { None } else { Some(&self.dashboard_image) }
     }
 
     fn commit_edit(&mut self, old: &str, new: &str) -> bool {
@@ -519,24 +555,24 @@ mod tests {
         assert!(json_value_to_ffon(serde_json::Value::Number(42.into())).is_none());
     }
 
-    // --- parse_json_elements ---
+    // --- parse_json_output ---
 
     #[test]
     fn parse_empty_array() {
-        assert!(ScriptProvider::parse_json_elements("[]").is_empty());
+        assert!(ScriptProvider::parse_json_output("[]").0.is_empty());
     }
 
     #[test]
     fn parse_string_array() {
-        let elems = ScriptProvider::parse_json_elements(r#"["a","b","c"]"#);
+        let (elems, _) = ScriptProvider::parse_json_output(r#"["a","b","c"]"#);
         assert_eq!(elems.len(), 3);
         assert!(matches!(&elems[0], FfonElement::Str(s) if s == "a"));
     }
 
     #[test]
     fn parse_mixed_array() {
-        let elems =
-            ScriptProvider::parse_json_elements(r#"["hello",{"mySection":["item1","item2"]}]"#);
+        let (elems, _) =
+            ScriptProvider::parse_json_output(r#"["hello",{"mySection":["item1","item2"]}]"#);
         assert_eq!(elems.len(), 2);
         assert!(matches!(&elems[0], FfonElement::Str(_)));
         let obj = elems[1].as_obj().unwrap();
@@ -546,7 +582,24 @@ mod tests {
 
     #[test]
     fn parse_invalid_json_returns_empty() {
-        assert!(ScriptProvider::parse_json_elements("not json").is_empty());
+        assert!(ScriptProvider::parse_json_output("not json").0.is_empty());
+    }
+
+    #[test]
+    fn parse_wrapped_object_with_children() {
+        let json = r#"{"children":["a","b"],"dashboardImage":"/path/to/img.webp"}"#;
+        let (elems, dashboard) = ScriptProvider::parse_json_output(json);
+        assert_eq!(elems.len(), 2);
+        assert!(matches!(&elems[0], FfonElement::Str(s) if s == "a"));
+        assert_eq!(dashboard, "/path/to/img.webp");
+    }
+
+    #[test]
+    fn parse_wrapped_object_no_dashboard() {
+        let json = r#"{"children":["item"]}"#;
+        let (elems, dashboard) = ScriptProvider::parse_json_output(json);
+        assert_eq!(elems.len(), 1);
+        assert!(dashboard.is_empty());
     }
 
     // --- ScriptProvider path management ---

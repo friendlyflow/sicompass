@@ -135,6 +135,12 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
             "email client" => {
                 register_provider(renderer, Box::new(EmailClientProvider::new()));
             }
+            "sales demo" => {
+                register_provider(renderer, Box::new(ScriptProvider::new(
+                    "sales demo", "sales demo", sales_demo_script_path(),
+                )));
+                settings.add_text("sales demo", "save folder (product configuration)", "saveFolder", "Downloads");
+            }
             other => {
                 eprintln!("sicompass: unknown program '{other}' — skipping");
             }
@@ -227,6 +233,15 @@ fn tutorial_assets_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("lib/lib_tutorial/assets"))
 }
 
+/// Resolve the sales demo script path relative to the running executable.
+/// Falls back to a cwd-relative path if the executable path is unavailable.
+fn sales_demo_script_path() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("../../lib/lib_sales_demo/sales_demo.ts")))
+        .unwrap_or_else(|| PathBuf::from("lib/lib_sales_demo/sales_demo.ts"))
+}
+
 /// Enable a provider by name at runtime (hot-load).
 ///
 /// The new provider is inserted alphabetically by name between the filebrowser
@@ -243,6 +258,9 @@ pub fn enable_provider(renderer: &mut AppRenderer, name: &str) {
         "web browser" => Box::new(WebbrowserProvider::new()),
         "chat client" => Box::new(ChatClientProvider::new()),
         "email client"=> Box::new(EmailClientProvider::new()),
+        "sales demo"  => Box::new(ScriptProvider::new(
+            "sales demo", "sales demo", sales_demo_script_path(),
+        )),
         other => {
             eprintln!("sicompass: cannot enable unknown provider '{other}'");
             return;
