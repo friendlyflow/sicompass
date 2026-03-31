@@ -490,8 +490,8 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
             _ => {}
         },
 
-        // ---- Simple search --------------------------------------------------
-        Coordinate::SimpleSearch => match keycode {
+        // ---- Simple search / extended search --------------------------------
+        Coordinate::SimpleSearch | Coordinate::ExtendedSearch => match keycode {
             Some(Keycode::Up) | Some(Keycode::K) if !ctrl && !shift => handlers::handle_up(r),
             Some(Keycode::Down) | Some(Keycode::J) if !ctrl && !shift => handlers::handle_down(r),
             Some(Keycode::PageUp) if !ctrl && !shift => handlers::handle_page_up(r),
@@ -591,6 +591,10 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
 
         // ---- Command mode ---------------------------------------------------
         Coordinate::Command => match keycode {
+            Some(Keycode::Up) | Some(Keycode::K) if !ctrl && !shift => handlers::handle_up(r),
+            Some(Keycode::Down) | Some(Keycode::J) if !ctrl && !shift => handlers::handle_down(r),
+            Some(Keycode::PageUp) if !ctrl && !shift => handlers::handle_page_up(r),
+            Some(Keycode::PageDown) if !ctrl && !shift => handlers::handle_page_down(r),
             Some(Keycode::Escape) => handlers::handle_escape(r),
             Some(Keycode::Backspace) => handlers::handle_backspace(r),
             Some(Keycode::Delete) if !ctrl && !shift => handlers::handle_delete_forward(r),
@@ -639,6 +643,8 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
                 r.text_scroll_offset += 1;
                 r.needs_redraw = true;
             }
+            Some(Keycode::PageUp) if !ctrl && !shift => handlers::handle_page_up(r),
+            Some(Keycode::PageDown) if !ctrl && !shift => handlers::handle_page_down(r),
             Some(Keycode::Home) if !ctrl && !shift => handlers::handle_home(r),
             Some(Keycode::End) if !ctrl && !shift => handlers::handle_end(r),
             Some(Keycode::F) if ctrl && !shift => handlers::handle_ctrl_f(r),

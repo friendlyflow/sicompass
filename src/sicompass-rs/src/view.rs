@@ -266,8 +266,89 @@ fn update_view(app: &mut AppState) {
         ParentInfo { display_text: String::new(), radio_summary: None }
     };
 
+    // ---- Scroll-into-view: compute start_index from scroll_offset/list_index --
+    // Pre-compute per-item line counts (needed before item_metrics so the scroll
+    // algorithm can run first, matching the C render.c viewport logic).
+    let extra_lines = 1 + if parent_info.radio_summary.is_some() { 1 } else { 0 };
+    let first_item_y = (line_height as f32) * (1.0 + extra_lines as f32) + ascender * scale + crate::text::TEXT_PADDING;
+    let available_lines = ((win_h - first_item_y) / line_height as f32).max(1.0) as usize;
+    let item_max_w = max_content_w.max(1.0);
+
+    let line_counts: Vec<usize> = {
+        let fr = match app.font_renderer.as_ref() { Some(f) => f, None => return };
+        list_items.iter().map(|(label, img_data, _)| {
+            if let Some(path) = img_data {
+                let img_h = app.image_renderer.as_mut()
+                    .and_then(|ir| unsafe { ir.texture_size(path) })
+                    .map(|(tw, th)| if tw == 0 { item_max_w } else { item_max_w * th as f32 / tw as f32 })
+                    .unwrap_or(item_max_w);
+                ((img_h / line_height as f32).ceil() as usize).max(1)
+            } else {
+                let (_, content) = split_label(label);
+                fr.count_wrapped_lines(content, scale, item_max_w)
+            }
+        }).collect()
+    };
+
+    let count = list_items.len();
+    let list_index = if count > 0 { app.renderer.list_index.min(count - 1) } else { 0 };
+    let start_index: usize = if count == 0 {
+        0
+    } else {
+        let scroll_offset = app.renderer.scroll_offset;
+        if scroll_offset < 0 {
+            // Sentinel -1: position list_index as second-to-last visible (scroll-from-bottom).
+            let mut lines_from_bottom = line_counts.get(list_index).copied().unwrap_or(1);
+            if list_index + 1 < count {
+                lines_from_bottom += line_counts.get(list_index + 1).copied().unwrap_or(1);
+            }
+            let mut si = list_index;
+            while si > 0 {
+                let prev = line_counts.get(si - 1).copied().unwrap_or(1);
+                if lines_from_bottom + prev > available_lines { break; }
+                lines_from_bottom += prev;
+                si -= 1;
+            }
+            si
+        } else {
+            let mut si = (scroll_offset as usize).min(list_index);
+            // Snap forward until list_index is within the visible area.
+            let mut lines_to_sel: usize = line_counts[si..=list_index].iter().sum();
+            while lines_to_sel > available_lines && si < list_index {
+                lines_to_sel -= line_counts.get(si).copied().unwrap_or(1);
+                si += 1;
+            }
+            // Scrolloff: try to show 1 item below the selection.
+            if list_index + 1 < count {
+                let next_lines = line_counts.get(list_index + 1).copied().unwrap_or(1);
+                if lines_to_sel + next_lines > available_lines && si < list_index {
+                    let saved_si = si;
+                    let saved_lines = lines_to_sel;
+                    while lines_to_sel + next_lines > available_lines && si < list_index {
+                        lines_to_sel -= line_counts.get(si).copied().unwrap_or(1);
+                        si += 1;
+                    }
+                    if lines_to_sel + next_lines > available_lines {
+                        si = saved_si;
+                        lines_to_sel = saved_lines;
+                    }
+                }
+            }
+            // Scrolloff: try to show 1 item above the selection.
+            if si > 0 && si == list_index {
+                let prev_lines = line_counts.get(si - 1).copied().unwrap_or(1);
+                if lines_to_sel + prev_lines <= available_lines {
+                    si -= 1;
+                }
+            }
+            si
+        }
+    };
+    app.renderer.scroll_offset = start_index as i32;
+
     // ---- Per-item layout metrics (immutable font borrow) ------------------
     // Each entry: (item_y, content_start_x, lines_used, highlight_w)
+    // Starts from start_index so only visible items are measured/rendered.
     let item_metrics: Vec<(f32, f32, usize, f32)> = {
         let fr = match app.font_renderer.as_ref() {
             Some(f) => f,
@@ -275,13 +356,10 @@ fn update_view(app: &mut AppState) {
         };
         let item_prefix_x = text_x + list_indent_px;
         let content_start_x = item_prefix_x + max_prefix_px;
-        let extra_lines = 1 + if parent_info.radio_summary.is_some() { 1 } else { 0 };
-        let first_item_y = (line_height as f32) * (1.0 + extra_lines as f32) + ascender * scale + crate::text::TEXT_PADDING;
         let mut y = first_item_y;
-        let mut metrics = Vec::with_capacity(list_items.len());
-        for (label, img_data, _) in &list_items {
+        let mut metrics = Vec::with_capacity(list_items.len().saturating_sub(start_index));
+        for (label, img_data, _) in list_items.iter().skip(start_index) {
             if y > win_h { break; }
-            let item_max_w = max_content_w.max(1.0);
             let lines = if let Some(path) = img_data {
                 // Compute image height as aspect-ratio of content width, measured in lines.
                 let img_h = if let Some(ir) = app.image_renderer.as_mut() {
@@ -359,7 +437,7 @@ fn update_view(app: &mut AppState) {
     }
 
     // ---- List items — selection highlight rectangles ----------------------
-    for (i, (_, _, is_selected)) in list_items.iter().take(item_metrics.len()).enumerate() {
+    for (i, (_, _, is_selected)) in list_items[start_index..].iter().take(item_metrics.len()).enumerate() {
         if !is_selected { continue; }
         let (item_y, _, lines, highlight_w) = item_metrics[i];
         let rect_y = item_y - ascender * scale - crate::text::TEXT_PADDING;
@@ -371,7 +449,7 @@ fn update_view(app: &mut AppState) {
 
     // ---- List items — text / images ----------------------------------------
     let item_prefix_x = text_x + 4.0 * em_width;
-    for (i, (label, img_data, is_selected)) in list_items.iter().take(item_metrics.len()).enumerate() {
+    for (i, (label, img_data, is_selected)) in list_items[start_index..].iter().take(item_metrics.len()).enumerate() {
         let (item_y, content_start_x, _, _) = item_metrics[i];
 
         // Draw graphical indicator (radio/checkbox) and compute x shift.
