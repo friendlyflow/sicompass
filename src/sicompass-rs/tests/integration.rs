@@ -186,6 +186,18 @@ fn navigate_between_providers_up_down() {
 fn enter_provider_and_navigate_back() {
     let mut h = Harness::new();
     let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+
+    // Reset filebrowser to "/" so pressing left from the provider root returns to depth 1.
+    h.renderer.providers[fb_idx].set_current_path("/");
+    {
+        let children = h.renderer.providers[fb_idx].fetch();
+        let display_name = h.renderer.providers[fb_idx].display_name().to_owned();
+        let mut root_elem = FfonElement::new_obj(&display_name);
+        for child in children { root_elem.as_obj_mut().unwrap().push(child); }
+        h.renderer.ffon[fb_idx] = root_elem;
+    }
+    sicompass::list::create_list_current_layer(h.r());
+
     navigate_to_provider(h.r(), fb_idx);
 
     press_right(h.r());
@@ -194,6 +206,34 @@ fn enter_provider_and_navigate_back() {
 
     press_left(h.r());
     assert_eq!(h.renderer.current_id.depth(), 1, "should be back at root");
+}
+
+#[test]
+fn filebrowser_left_in_subdir_stays_at_depth_2() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+
+    // Enter the filebrowser (depth 2, listing temp dir)
+    press_right(h.r());
+    assert_eq!(h.renderer.current_id.depth(), 2, "should be inside provider");
+
+    // Navigate down to subdir (meta=0, alpha.txt=1, beta.txt=2, subdir=3)
+    press_down(h.r());
+    press_down(h.r());
+    press_down(h.r());
+
+    // Enter subdir — lazy fetch, push_path called
+    press_right(h.r());
+    assert_eq!(h.renderer.current_id.depth(), 2, "still at depth 2 inside subdir");
+    let path_in_subdir = sicompass::provider::current_path(&h.renderer).to_owned();
+    assert!(path_in_subdir.ends_with("subdir"), "path should be inside subdir");
+
+    // Press left — should navigate back to parent dir, staying at depth 2
+    press_left(h.r());
+    assert_eq!(h.renderer.current_id.depth(), 2, "should stay at depth 2 after left from subdir");
+    let path_after = sicompass::provider::current_path(&h.renderer).to_owned();
+    assert!(!path_after.ends_with("subdir"), "path should be back at parent");
 }
 
 #[test]
@@ -278,11 +318,23 @@ fn navigate_into_subdirectory() {
 fn provider_state_preserved_across_navigation() {
     let mut h = Harness::new();
     let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+
+    // Use "/" so that pressing left from inside the provider exits to the root list.
+    h.renderer.providers[fb_idx].set_current_path("/");
+    {
+        let children = h.renderer.providers[fb_idx].fetch();
+        let display_name = h.renderer.providers[fb_idx].display_name().to_owned();
+        let mut root_elem = FfonElement::new_obj(&display_name);
+        for child in children { root_elem.as_obj_mut().unwrap().push(child); }
+        h.renderer.ffon[fb_idx] = root_elem;
+    }
+    sicompass::list::create_list_current_layer(h.r());
+
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
 
     let count_before = h.renderer.ffon[fb_idx].as_obj().unwrap().children.len();
-    assert!(count_before >= 3);
+    assert!(count_before >= 1);
 
     press_left(h.r());
     press_down(h.r());
