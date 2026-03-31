@@ -18,6 +18,7 @@ use crate::plugin_loader::{NativePlugin, ScriptProvider};
 use crate::plugin_manifest::{PluginType, discover_user_plugins};
 use sicompass_sdk::ffon::FfonElement;
 use sicompass_sdk::provider::Provider;
+use std::path::PathBuf;
 use sicompass_filebrowser::FilebrowserProvider;
 use sicompass_settings::SettingsProvider;
 use sicompass_tutorial::TutorialProvider;
@@ -101,7 +102,7 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
     for name in &enabled {
         match name.as_str() {
             "tutorial" => {
-                register_provider(renderer, Box::new(TutorialProvider::new_headless()));
+                register_provider(renderer, Box::new(TutorialProvider::new(&tutorial_assets_dir())));
             }
             "web browser" => {
                 register_provider(renderer, Box::new(WebbrowserProvider::new()));
@@ -177,6 +178,15 @@ fn load_user_plugins(renderer: &mut AppRenderer, settings: &mut SettingsProvider
     }
 }
 
+/// Resolve the tutorial assets directory relative to the running executable.
+/// Falls back to a cwd-relative path if the executable path is unavailable.
+fn tutorial_assets_dir() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("../../lib/lib_tutorial/assets")))
+        .unwrap_or_else(|| PathBuf::from("lib/lib_tutorial/assets"))
+}
+
 /// Enable a provider by name at runtime (hot-load).
 pub fn enable_provider(renderer: &mut AppRenderer, name: &str) {
     // Never double-load an already-registered provider
@@ -186,7 +196,7 @@ pub fn enable_provider(renderer: &mut AppRenderer, name: &str) {
             register_provider(renderer, Box::new(FilebrowserProvider::new()));
         }
         "tutorial" => {
-            register_provider(renderer, Box::new(TutorialProvider::new_headless()));
+            register_provider(renderer, Box::new(TutorialProvider::new(&tutorial_assets_dir())));
         }
         "web browser" => {
             register_provider(renderer, Box::new(WebbrowserProvider::new()));

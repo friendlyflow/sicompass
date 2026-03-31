@@ -272,6 +272,13 @@ impl ImageRenderer {
         self.current_frame += 1;
     }
 
+    /// Return `(width, height)` of the cached/loaded texture, or `None` on failure.
+    pub unsafe fn texture_size(&mut self, path: &str) -> Option<(u32, u32)> {
+        let slot = self.find_or_load(path)?;
+        let tex = self.cache[slot].as_ref()?;
+        Some((tex.width, tex.height))
+    }
+
     /// Schedule a textured quad at (x, y, w, h).
     ///
     /// If `path` is already cached the texture is reused; otherwise the image

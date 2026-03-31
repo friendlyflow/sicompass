@@ -150,6 +150,11 @@ pub fn main_loop(app: &mut AppState) {
 // updateView — fill CPU vertex buffers for this frame
 // ---------------------------------------------------------------------------
 
+struct ParentInfo {
+    display_text: String,
+    radio_summary: Option<String>,
+}
+
 fn update_view(app: &mut AppState) {
     // ---- Snapshot palette before mutable borrows ---------------------------
     let p = *app.renderer.palette();
@@ -178,7 +183,7 @@ fn update_view(app: &mut AppState) {
     let (content_x, content_w) = content_layout(win_w, em_width);
     let text_x = content_x + 10.0;
     let max_content_w = content_w.min(win_w - text_x);
-    let list_items: Vec<(String, bool)> = collect_list_items(&app.renderer);
+    let list_items: Vec<(String, Option<String>, bool)> = collect_list_items(&app.renderer);
     // In insert mode the selected item shows prefix + buffer (with cursor marker)
     let insert_display: Option<String> = build_insert_display(&app.renderer);
     let search_str = if matches!(
@@ -195,6 +200,43 @@ fn update_view(app: &mut AppState) {
     };
     let error_msg = app.renderer.error_message.clone();
 
+    // ---- Parent element snapshot -------------------------------------------
+    // Always present (empty at root level), so list items are consistently
+    // indented one level below the parent line.
+    let parent_info: ParentInfo = if app.renderer.current_id.depth() > 1 {
+        let mut parent_id = app.renderer.current_id.clone();
+        parent_id.pop();
+        let parent_idx = parent_id.last();
+        let parent_slice = sicompass_sdk::ffon::get_ffon_at_id(&app.renderer.ffon, &parent_id);
+        parent_slice.zip(parent_idx).and_then(|(slice, idx)| {
+            let elem = slice.get(idx)?;
+            let raw_text = match elem {
+                sicompass_sdk::ffon::FfonElement::Obj(obj) => obj.key.as_str(),
+                sicompass_sdk::ffon::FfonElement::Str(s) => s.as_str(),
+            };
+            let display_text = sicompass_sdk::tags::strip_display(raw_text);
+            let radio_summary = if let sicompass_sdk::ffon::FfonElement::Obj(obj) = elem {
+                if sicompass_sdk::tags::has_radio(&obj.key) {
+                    obj.children.iter().find_map(|child| {
+                        if let sicompass_sdk::ffon::FfonElement::Str(s) = child {
+                            if sicompass_sdk::tags::has_checked(s) {
+                                return sicompass_sdk::tags::extract_checked(s);
+                            }
+                        }
+                        None
+                    })
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            Some(ParentInfo { display_text, radio_summary })
+        }).unwrap_or(ParentInfo { display_text: String::new(), radio_summary: None })
+    } else {
+        ParentInfo { display_text: String::new(), radio_summary: None }
+    };
+
     // ---- Per-item layout metrics (immutable font borrow) ------------------
     // Each entry: (item_y, content_start_x, lines_used, highlight_w)
     let item_metrics: Vec<(f32, f32, usize, f32)> = {
@@ -202,22 +244,40 @@ fn update_view(app: &mut AppState) {
             Some(f) => f,
             None => return,
         };
+        // List items are indented 4 ems to the right of the parent element.
+        let list_indent_px = fr.measure_text_width("    ", scale);
+        let item_prefix_x = text_x + list_indent_px;
         // Compute the widest prefix across all visible items so content aligns uniformly.
         let max_prefix_px = list_items.iter()
-            .map(|(label, _)| {
+            .map(|(label, _, _)| {
                 let (prefix, _) = split_label(label);
                 fr.measure_text_width(prefix, scale)
             })
             .fold(0.0_f32, f32::max);
-        let content_start_x = text_x + max_prefix_px;
-        let first_item_y = (line_height as f32) * 2.0 + ascender * scale;
+        let content_start_x = item_prefix_x + max_prefix_px;
+        let extra_lines = 1 + if parent_info.radio_summary.is_some() { 1 } else { 0 };
+        let first_item_y = (line_height as f32) * (2.0 + extra_lines as f32) + ascender * scale;
         let mut y = first_item_y;
         let mut metrics = Vec::with_capacity(list_items.len());
-        for (label, _) in &list_items {
+        for (label, img_data, _) in &list_items {
             if y > win_h { break; }
-            let (_, content) = split_label(label);
             let item_max_w = max_content_w.max(1.0);
-            let lines = fr.count_wrapped_lines(content, scale, item_max_w);
+            let lines = if let Some(path) = img_data {
+                // Compute image height as aspect-ratio of content width, measured in lines.
+                let img_h = if let Some(ir) = app.image_renderer.as_mut() {
+                    unsafe { ir.texture_size(path) }
+                        .map(|(tw, th)| {
+                            if tw == 0 { item_max_w } else { item_max_w * th as f32 / tw as f32 }
+                        })
+                        .unwrap_or(item_max_w)
+                } else {
+                    item_max_w
+                };
+                ((img_h / line_height as f32).ceil() as usize).max(1)
+            } else {
+                let (_, content) = split_label(label);
+                fr.count_wrapped_lines(content, scale, item_max_w)
+            };
             let highlight_w = (max_prefix_px + item_max_w + 10.0).min(win_w - content_x);
             metrics.push((y, content_start_x, lines, highlight_w));
             y += lines as f32 * line_height as f32;
@@ -256,6 +316,19 @@ fn update_view(app: &mut AppState) {
         fr.prepare_text_for_rendering(&error_msg, err_x, header_baseline, scale, p.error);
     }
 
+    // ---- Parent element (when navigated into a child level) ---------------
+    if !parent_info.display_text.is_empty() {
+        let parent_y = line_height as f32 * 2.0 + ascender * scale;
+        fr.prepare_text_for_rendering(&parent_info.display_text, text_x, parent_y, scale, p.text);
+        if let Some(ref summary) = parent_info.radio_summary {
+            let indent = fr.measure_text_width("    ", scale);
+            let summary_x = text_x + indent;
+            let summary_y = parent_y + line_height as f32;
+            let display = format!("-rc {}", summary);
+            fr.prepare_text_for_rendering(&display, summary_x, summary_y, scale, p.text);
+        }
+    }
+
     // ---- Search / command line -------------------------------------------
     if let Some(ref s) = search_str {
         let search_y = line_height as f32 * 2.0 - crate::text::TEXT_PADDING;
@@ -263,7 +336,7 @@ fn update_view(app: &mut AppState) {
     }
 
     // ---- List items — selection highlight rectangles ----------------------
-    for (i, (_, is_selected)) in list_items.iter().take(item_metrics.len()).enumerate() {
+    for (i, (_, _, is_selected)) in list_items.iter().take(item_metrics.len()).enumerate() {
         if !is_selected { continue; }
         let (item_y, _, lines, highlight_w) = item_metrics[i];
         let rect_y = item_y - ascender * scale - crate::text::TEXT_PADDING;
@@ -274,15 +347,24 @@ fn update_view(app: &mut AppState) {
     }
 
     // ---- List items — text / images ----------------------------------------
-    for (i, (label, is_selected)) in list_items.iter().take(item_metrics.len()).enumerate() {
+    let item_prefix_x = text_x + 4.0 * em_width;
+    for (i, (label, img_data, is_selected)) in list_items.iter().take(item_metrics.len()).enumerate() {
         let (item_y, content_start_x, _, _) = item_metrics[i];
 
-        let img_path = sicompass_sdk::tags::extract_image(label);
-        if let Some(ref path) = img_path {
+        if let Some(ref path) = img_data {
+            let (prefix, _) = split_label(label);
+            if let Some(fr) = app.font_renderer.as_mut() {
+                fr.prepare_text_for_rendering(prefix, item_prefix_x, item_y, scale, p.text);
+            }
             if let Some(ir) = app.image_renderer.as_mut() {
-                let img_h = line_height as f32 - 4.0;
-                let img_y = item_y - ascender * scale - crate::text::TEXT_PADDING + 2.0;
-                unsafe { ir.prepare_image(path, text_x, img_y, img_h, img_h); }
+                let img_w = max_content_w.max(1.0);
+                let img_h = unsafe { ir.texture_size(path) }
+                    .map(|(tw, th)| {
+                        if tw == 0 { img_w } else { img_w * th as f32 / tw as f32 }
+                    })
+                    .unwrap_or(img_w);
+                let img_y = item_y - ascender * scale - crate::text::TEXT_PADDING;
+                unsafe { ir.prepare_image(path, content_start_x, img_y, img_w, img_h); }
             }
         } else if let Some(fr) = app.font_renderer.as_mut() {
             let display_label = if *is_selected {
@@ -291,7 +373,7 @@ fn update_view(app: &mut AppState) {
                 label.as_str()
             };
             let (prefix, content) = split_label(display_label);
-            fr.prepare_text_for_rendering(prefix, text_x, item_y, scale, p.text);
+            fr.prepare_text_for_rendering(prefix, item_prefix_x, item_y, scale, p.text);
             fr.prepare_text_wrapped(content, content_start_x, item_y, scale, max_content_w.max(1.0), line_height as f32, p.text);
         }
     }
@@ -318,7 +400,7 @@ fn build_header_text(r: &AppRenderer, line_height: i32) -> String {
 }
 
 /// Snapshot the active list for rendering (avoids mixed borrows later).
-fn collect_list_items(r: &AppRenderer) -> Vec<(String, bool)> {
+fn collect_list_items(r: &AppRenderer) -> Vec<(String, Option<String>, bool)> {
     let len = r.active_list_len();
     let mut out = Vec::with_capacity(len);
     for i in 0..len {
@@ -328,7 +410,7 @@ fn collect_list_items(r: &AppRenderer) -> Vec<(String, bool)> {
             r.filtered_list_indices.get(i).and_then(|&raw| r.total_list.get(raw))
         };
         if let Some(item) = item {
-            out.push((item.label.clone(), i == r.list_index));
+            out.push((item.label.clone(), item.data.clone(), i == r.list_index));
         }
     }
     out
