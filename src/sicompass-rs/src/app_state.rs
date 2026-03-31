@@ -280,6 +280,7 @@ pub struct AppRenderer {
     pub scroll_offset: i32,
     pub text_scroll_offset: i32,
     pub text_scroll_line_count: i32,
+    pub input_search_scroll_offset: i32,
 
     // ---- Scroll search state -----------------------------------------------
     pub scroll_search_match_count: usize,
@@ -375,6 +376,7 @@ impl AppRenderer {
             scroll_offset: 0,
             text_scroll_offset: 0,
             text_scroll_line_count: 0,
+            input_search_scroll_offset: 0,
             scroll_search_match_count: 0,
             scroll_search_current_match: 0,
             dashboard_image_path: String::new(),

@@ -208,34 +208,104 @@ pub fn handle_left(r: &mut AppRenderer) {
 
 /// Page up (scroll a full screen up).
 pub fn handle_page_up(r: &mut AppRenderer) {
-    let page = (r.window_height / r.cached_line_height.max(1)).max(1) as usize;
-    r.list_index = r.list_index.saturating_sub(page);
-    r.sync_current_id_from_list();
+    match r.coordinate {
+        Coordinate::EditorInsert | Coordinate::OperatorInsert => return,
+        _ => {}
+    }
+
+    let line_height = r.cached_line_height.max(1);
+    let page_size = ((r.window_height / line_height) - 3).max(1) as usize;
+
+    match r.coordinate {
+        Coordinate::InputSearch => {
+            r.input_search_scroll_offset = (r.input_search_scroll_offset - page_size as i32).max(0);
+        }
+        Coordinate::Scroll | Coordinate::ScrollSearch => {
+            r.text_scroll_offset = (r.text_scroll_offset - page_size as i32).max(0);
+        }
+        Coordinate::SimpleSearch | Coordinate::Command | Coordinate::ExtendedSearch => {
+            r.error_message.clear();
+            r.list_index = r.list_index.saturating_sub(page_size);
+            r.scroll_offset = r.list_index as i32;
+        }
+        Coordinate::OperatorGeneral | Coordinate::EditorGeneral => {
+            if let Some(slice) = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id) {
+                let max_id = slice.len().saturating_sub(1);
+                let cur = r.current_id.last().unwrap_or(0);
+                let new_id = cur.saturating_sub(page_size).min(max_id);
+                r.current_id.set_last(new_id);
+                list::create_list_current_layer(r);
+                r.scroll_offset = r.list_index as i32;
+            }
+        }
+        _ => {}
+    }
     r.needs_redraw = true;
 }
 
 /// Page down (scroll a full screen down).
 pub fn handle_page_down(r: &mut AppRenderer) {
-    let len = r.active_list_len();
-    if len == 0 { return; }
-    let page = (r.window_height / r.cached_line_height.max(1)).max(1) as usize;
-    r.list_index = (r.list_index + page).min(len - 1);
-    r.sync_current_id_from_list();
+    match r.coordinate {
+        Coordinate::EditorInsert | Coordinate::OperatorInsert => return,
+        _ => {}
+    }
+
+    let line_height = r.cached_line_height.max(1);
+    let page_size = ((r.window_height / line_height) - 3).max(1) as usize;
+
+    match r.coordinate {
+        Coordinate::InputSearch => {
+            r.input_search_scroll_offset += page_size as i32;
+            // No upper clamp here — renderer will clamp when it knows the line count
+        }
+        Coordinate::Scroll | Coordinate::ScrollSearch => {
+            let header_lines = 2;
+            let available_height = r.window_height - (line_height * header_lines);
+            let visible_lines = (available_height / line_height).max(1);
+            let max_offset = (r.text_scroll_line_count - visible_lines).max(0);
+            r.text_scroll_offset = (r.text_scroll_offset + page_size as i32).min(max_offset);
+        }
+        Coordinate::SimpleSearch | Coordinate::Command | Coordinate::ExtendedSearch => {
+            r.error_message.clear();
+            let count = r.active_list_len();
+            if count > 0 {
+                r.list_index = (r.list_index + page_size).min(count - 1);
+                r.scroll_offset = -1;
+            }
+        }
+        Coordinate::OperatorGeneral | Coordinate::EditorGeneral => {
+            if let Some(slice) = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id) {
+                let max_id = slice.len().saturating_sub(1);
+                let cur = r.current_id.last().unwrap_or(0);
+                let new_id = (cur + page_size).min(max_id);
+                r.current_id.set_last(new_id);
+                list::create_list_current_layer(r);
+                r.list_index = new_id;
+                r.scroll_offset = -1;
+            }
+        }
+        _ => {}
+    }
     r.needs_redraw = true;
 }
 
-/// Jump to first item.
+/// Jump to first item (Ctrl+Home in SimpleSearch/Command/ExtendedSearch).
 pub fn handle_ctrl_home(r: &mut AppRenderer) {
-    r.list_index = 0;
-    r.sync_current_id_from_list();
+    let len = r.active_list_len();
+    if len > 0 {
+        r.list_index = 0;
+        r.scroll_offset = 0;
+        r.sync_current_id_from_list();
+    }
     r.needs_redraw = true;
 }
 
-/// Jump to last item.
+/// Jump to last item (Ctrl+End in SimpleSearch/Command/ExtendedSearch).
 pub fn handle_ctrl_end(r: &mut AppRenderer) {
     let len = r.active_list_len();
     if len > 0 {
         r.list_index = len - 1;
+        r.scroll_offset = -1;
         r.sync_current_id_from_list();
     }
     r.needs_redraw = true;
@@ -1538,10 +1608,19 @@ pub fn handle_home(r: &mut AppRenderer) {
             r.needs_redraw = true;
         }
         Coordinate::OperatorGeneral | Coordinate::EditorGeneral => {
-            r.current_id.set_last(0);
+            let now = sdl_ticks();
+            if now.saturating_sub(r.last_keypress_time) <= DELTA_MS && r.current_id.depth() > 1 {
+                // Double-tap: navigate to root
+                while r.current_id.depth() > 1 {
+                    handle_left(r);
+                }
+            } else {
+                r.current_id.set_last(0);
+            }
+            r.last_keypress_time = now;
             list::create_list_current_layer(r);
-            r.list_index = 0;
-            r.scroll_offset = 0;
+            r.list_index = r.current_id.last().unwrap_or(0);
+            r.scroll_offset = r.list_index as i32;
             r.needs_redraw = true;
         }
         _ => {
@@ -1559,8 +1638,12 @@ pub fn handle_home(r: &mut AppRenderer) {
 pub fn handle_end(r: &mut AppRenderer) {
     match r.coordinate {
         Coordinate::Scroll => {
-            // scroll to bottom — approximated; full impl needs line count
-            r.text_scroll_offset = i32::MAX;
+            let line_height = r.cached_line_height.max(1);
+            let header_lines = 2;
+            let available_height = r.window_height - (line_height * header_lines);
+            let visible_lines = (available_height / line_height).max(1);
+            let max_offset = (r.text_scroll_line_count - visible_lines).max(0);
+            r.text_scroll_offset = max_offset;
             r.needs_redraw = true;
         }
         Coordinate::OperatorGeneral | Coordinate::EditorGeneral => {
