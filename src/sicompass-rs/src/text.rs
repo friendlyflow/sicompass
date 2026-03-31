@@ -538,6 +538,96 @@ impl FontRenderer {
         self.glyphs[b'M' as usize].advance * scale
     }
 
+    /// Pixel width of `text` at `scale` (sum of glyph advances).
+    pub fn measure_text_width(&self, text: &str, scale: f32) -> f32 {
+        text.bytes()
+            .map(|b| {
+                let idx = if b >= 32 { b as usize } else { b' ' as usize };
+                self.glyphs[idx].advance * scale
+            })
+            .sum()
+    }
+
+    /// Number of lines required to render `text` with word-wrapping at `max_width` pixels.
+    pub fn count_wrapped_lines(&self, text: &str, scale: f32, max_width: f32) -> usize {
+        Self::compute_wrap_lines(text, scale, max_width, &self.glyphs).len().max(1)
+    }
+
+    /// Render `text` with word-wrapping. All lines start at `x`; the first line
+    /// baseline is `y`, subsequent lines advance by `line_height`. Returns line count.
+    pub fn prepare_text_wrapped(
+        &mut self,
+        text: &str,
+        x: f32,
+        y: f32,
+        scale: f32,
+        max_width: f32,
+        line_height: f32,
+        color: u32,
+    ) -> usize {
+        let lines = Self::compute_wrap_lines(text, scale, max_width, &self.glyphs);
+        let count = lines.len().max(1);
+        for (n, line) in lines.iter().enumerate() {
+            let line_y = y + n as f32 * line_height;
+            self.prepare_text_for_rendering(line, x, line_y, scale, color);
+        }
+        count
+    }
+
+    /// Split `text` into wrapped line strings given `max_width` pixels per line.
+    fn compute_wrap_lines(text: &str, scale: f32, max_width: f32, glyphs: &[GlyphInfo]) -> Vec<String> {
+        if text.is_empty() {
+            return vec![String::new()];
+        }
+
+        let adv = |b: u8| -> f32 {
+            let idx = if b >= 32 { b as usize } else { b' ' as usize };
+            glyphs[idx.min(255)].advance * scale
+        };
+
+        let bytes = text.as_bytes();
+        let n = bytes.len();
+        let mut lines: Vec<String> = Vec::new();
+        let mut line_start = 0usize;
+        let mut line_width = 0.0f32;
+        let mut last_space: Option<usize> = None;
+        let mut last_fit = 0usize;
+        let mut i = 0usize;
+
+        while i < n {
+            let b = bytes[i];
+            let next_width = line_width + adv(b);
+
+            if next_width > max_width && i > line_start {
+                let break_end = if let Some(sp) = last_space {
+                    sp
+                } else {
+                    last_fit.max(line_start + 1)
+                };
+                lines.push(text[line_start..break_end].to_owned());
+                line_start = break_end;
+                if line_start < n && bytes[line_start] == b' ' {
+                    line_start += 1;
+                }
+                line_width = 0.0;
+                last_space = None;
+                last_fit = line_start;
+                i = line_start;
+                continue;
+            }
+
+            if b == b' ' {
+                last_space = Some(i);
+            }
+            last_fit = i + 1;
+            line_width = next_width;
+            i += 1;
+        }
+
+        lines.push(text[line_start..].to_owned());
+        lines
+    }
+
     // ---- Cleanup -----------------------------------------------------------
 
     pub unsafe fn cleanup(&self, device: &ash::Device) {
@@ -693,5 +783,90 @@ mod tests {
         let fr = make_fr(96.0, 30.0, 10.0);
         // 30 * 1.0 + 2 * 2 = 34
         assert!((fr.get_line_height(1.0, 2.0) - 34.0).abs() < 1e-3);
+    }
+
+    // ---- measure_text_width ---
+
+    fn make_fr_uniform(advance: f32) -> FontRenderer {
+        let mut glyphs: Vec<GlyphInfo> = (0..256).map(|_| GlyphInfo::default()).collect();
+        for g in &mut glyphs {
+            g.advance = advance;
+        }
+        glyphs[b'M' as usize].advance = advance;
+        FontRenderer {
+            ft_library: std::ptr::null_mut(),
+            ft_face: std::ptr::null_mut(),
+            glyphs,
+            line_height: 20.0,
+            ascender: 16.0,
+            descender: -4.0,
+            dpi: 96.0,
+            font_atlas_image: vk::Image::null(),
+            font_atlas_memory: vk::DeviceMemory::null(),
+            font_atlas_view: vk::ImageView::null(),
+            font_atlas_sampler: vk::Sampler::null(),
+            vertex_buffer: vk::Buffer::null(),
+            vertex_buffer_memory: vk::DeviceMemory::null(),
+            descriptor_set_layout: vk::DescriptorSetLayout::null(),
+            descriptor_pool: vk::DescriptorPool::null(),
+            descriptor_sets: Vec::new(),
+            pipeline_layout: vk::PipelineLayout::null(),
+            pipeline: vk::Pipeline::null(),
+            vertices: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn measure_empty() {
+        let fr = make_fr_uniform(10.0);
+        assert!((fr.measure_text_width("", 1.0) - 0.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn measure_three_chars() {
+        let fr = make_fr_uniform(10.0);
+        assert!((fr.measure_text_width("abc", 1.0) - 30.0).abs() < 1e-3);
+    }
+
+    // ---- count_wrapped_lines ---
+
+    #[test]
+    fn wrap_single_line_fits() {
+        let fr = make_fr_uniform(10.0);
+        // "hello" = 5 chars * 10px = 50px, max 100px -> 1 line
+        assert_eq!(fr.count_wrapped_lines("hello", 1.0, 100.0), 1);
+    }
+
+    #[test]
+    fn wrap_two_words_wrap() {
+        let fr = make_fr_uniform(10.0);
+        // "hello world" = 11 chars * 10px = 110px, max 100px -> break at space -> 2 lines
+        assert_eq!(fr.count_wrapped_lines("hello world", 1.0, 100.0), 2);
+    }
+
+    #[test]
+    fn wrap_empty_text() {
+        let fr = make_fr_uniform(10.0);
+        assert_eq!(fr.count_wrapped_lines("", 1.0, 100.0), 1);
+    }
+
+    #[test]
+    fn wrap_force_break_no_space() {
+        let fr = make_fr_uniform(10.0);
+        // "abcdefghijk" = 11 chars * 10px = 110px, max 100px, no space -> force break at 10 -> 2 lines
+        assert_eq!(fr.count_wrapped_lines("abcdefghijk", 1.0, 100.0), 2);
+    }
+
+    #[test]
+    fn wrap_three_lines() {
+        let fr = make_fr_uniform(10.0);
+        // 15 chars: "aaa bbb ccc ddd" = break at each space when max=50 (5 chars)
+        // "aaa b" = 50px (fits exactly at 50), next...
+        // Actually "aaa " = 40px, "aaa b" = 50px exactly -> does NOT exceed 50, so continues
+        // "aaa bb" = 60px > 50 -> break at last space (after "aaa") -> "aaa", then "bbb ccc ddd"
+        // "bbb c" = 50px, "bbb cc" = 60 > 50 -> break at space -> "bbb", then "ccc ddd"
+        // "ccc d" = 50, "ccc dd" = 60 > 50 -> break at space -> "ccc", then "ddd"
+        // Result: ["aaa", "bbb", "ccc", "ddd"] = 4 lines
+        assert_eq!(fr.count_wrapped_lines("aaa bbb ccc ddd", 1.0, 50.0), 4);
     }
 }
