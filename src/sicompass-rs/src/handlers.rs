@@ -166,11 +166,30 @@ pub fn handle_left(r: &mut AppRenderer) {
         }
     };
 
+    // For lazy-fetch providers (filebrowser) at depth 2: if pop_path moves us
+    // to a parent directory, stay at depth 2 and re-fetch instead of going back
+    // to the root provider list.
+    let path_before = if r.current_id.depth() == 2 && !parent_is_link && !parent_is_meta {
+        Some(crate::provider::current_path(r).to_owned())
+    } else {
+        None
+    };
+
     if !parent_is_link && !parent_is_meta {
         crate::provider::pop_path(r);
     }
 
-    r.current_id.pop();
+    let path_changed = path_before
+        .map(|before| before != crate::provider::current_path(r))
+        .unwrap_or(false);
+
+    if path_changed {
+        // Path moved to parent dir — stay inside the provider and re-fetch.
+        crate::provider::refresh_current_directory(r);
+        r.current_id.set(1, 0);
+    } else {
+        r.current_id.pop();
+    }
 
     // Mirror C: navigating left out of meta children shows meta in parent list;
     // navigating left from a meta-selected level hides meta again.
