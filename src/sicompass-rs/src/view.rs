@@ -202,17 +202,23 @@ fn update_view(app: &mut AppState) {
             Some(f) => f,
             None => return,
         };
+        // Compute the widest prefix across all visible items so content aligns uniformly.
+        let max_prefix_px = list_items.iter()
+            .map(|(label, _)| {
+                let (prefix, _) = split_label(label);
+                fr.measure_text_width(prefix, scale)
+            })
+            .fold(0.0_f32, f32::max);
+        let content_start_x = text_x + max_prefix_px;
         let first_item_y = (line_height as f32) * 2.0 + ascender * scale;
         let mut y = first_item_y;
         let mut metrics = Vec::with_capacity(list_items.len());
         for (label, _) in &list_items {
             if y > win_h { break; }
-            let (prefix, content) = split_label(label);
-            let prefix_px = fr.measure_text_width(prefix, scale);
-            let content_start_x = text_x + prefix_px;
+            let (_, content) = split_label(label);
             let item_max_w = max_content_w.max(1.0);
             let lines = fr.count_wrapped_lines(content, scale, item_max_w);
-            let highlight_w = (prefix_px + item_max_w + 10.0).min(win_w - content_x);
+            let highlight_w = (max_prefix_px + item_max_w + 10.0).min(win_w - content_x);
             metrics.push((y, content_start_x, lines, highlight_w));
             y += lines as f32 * line_height as f32;
         }
@@ -263,7 +269,7 @@ fn update_view(app: &mut AppState) {
         let rect_y = item_y - ascender * scale - crate::text::TEXT_PADDING;
         let rect_h = lines as f32 * line_height as f32;
         if let Some(rr) = app.rect_renderer.as_mut() {
-            rr.prepare_rectangle(content_x, rect_y, highlight_w, rect_h, p.selected, 0.0);
+            rr.prepare_rectangle(content_x, rect_y, highlight_w, rect_h, p.selected, 5.0);
         }
     }
 
