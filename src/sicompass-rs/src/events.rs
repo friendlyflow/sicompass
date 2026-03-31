@@ -59,9 +59,7 @@
 //! | F             | Ctrl     | most modes                         | handle_ctrl_f              |
 //! | F5            | —        | OperatorGeneral, EditorGeneral      | handle_f5                  |
 //! | Backspace     | —        | all editing modes                  | handle_backspace           |
-//! | Escape        | —        | OperatorGeneral                    | quit                       |
-//! | Escape        | —        | all other modes                    | handle_escape              |
-//! | Q             | —        | OperatorGeneral                    | quit                       |
+//! | Escape        | —        | all modes                          | handle_escape              |
 //! | Shift+;       | —        | navigation modes                   | handle_colon               |
 
 use crate::app_state::{AppRenderer, Coordinate, History, Task};
@@ -155,24 +153,11 @@ mod tests {
     }
 
     #[test]
-    fn escape_in_operator_returns_quit_signal() {
+    fn dispatch_key_returns_false() {
         let mut r = AppRenderer::new();
-        let quit = dispatch_key(&mut r, Some(Keycode::Escape), no_mod());
-        assert!(quit);
-    }
-
-    #[test]
-    fn q_in_operator_returns_quit_signal() {
-        let mut r = AppRenderer::new();
-        let quit = dispatch_key(&mut r, Some(Keycode::Q), no_mod());
-        assert!(quit);
-    }
-
-    #[test]
-    fn non_quit_key_returns_false() {
-        let mut r = AppRenderer::new();
-        let quit = dispatch_key(&mut r, Some(Keycode::Tab), no_mod());
-        assert!(!quit);
+        assert!(!dispatch_key(&mut r, Some(Keycode::Escape), no_mod()));
+        assert!(!dispatch_key(&mut r, Some(Keycode::Q), no_mod()));
+        assert!(!dispatch_key(&mut r, Some(Keycode::Tab), no_mod()));
     }
 
     // --- Ctrl+A select all in EditorInsert ---
@@ -471,7 +456,6 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
             Some(Keycode::F) if ctrl && !shift => handlers::handle_ctrl_f(r),
             Some(Keycode::F5) => handlers::handle_f5(r),
             Some(Keycode::Backspace) => handlers::handle_backspace(r),
-            Some(Keycode::Escape) | Some(Keycode::Q) => return true,
             _ => {}
         },
 
