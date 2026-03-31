@@ -173,6 +173,8 @@ fn update_view(app: &mut AppState) {
     let header = build_header_text(&app.renderer, line_height);
     let win_w = app.swapchain_extent.width as f32;
     let win_h = app.swapchain_extent.height as f32;
+    let (content_x, content_w) = content_layout(win_w);
+    let text_x = content_x + 10.0;
     let list_items: Vec<(String, bool)> = collect_list_items(&app.renderer);
     // In insert mode the selected item shows prefix + buffer (with cursor marker)
     let insert_display: Option<String> = build_insert_display(&app.renderer);
@@ -213,18 +215,18 @@ fn update_view(app: &mut AppState) {
 
     // ---- Header text -----------------------------------------------------
     let header_baseline = (ascender * scale + crate::text::TEXT_PADDING) as f32;
-    fr.prepare_text_for_rendering(&header, 10.0, header_baseline, scale, p.text);
+    fr.prepare_text_for_rendering(&header, text_x, header_baseline, scale, p.text);
 
     // ---- Error message (right of header) ---------------------------------
     if !error_msg.is_empty() {
-        let err_x = (header.len() as f32 * fr.get_width_em(scale)) + 20.0;
+        let err_x = text_x + (header.len() as f32 * fr.get_width_em(scale)) + 10.0;
         fr.prepare_text_for_rendering(&error_msg, err_x, header_baseline, scale, p.error);
     }
 
     // ---- Search / command line -------------------------------------------
     if let Some(ref s) = search_str {
         let search_y = line_height as f32 * 2.0 - crate::text::TEXT_PADDING;
-        fr.prepare_text_for_rendering(s, 10.0, search_y, scale, p.text);
+        fr.prepare_text_for_rendering(s, text_x, search_y, scale, p.text);
     }
 
     // ---- List items -------------------------------------------------------
@@ -239,7 +241,7 @@ fn update_view(app: &mut AppState) {
         if *is_selected {
             let rect_y = item_y - ascender * scale - crate::text::TEXT_PADDING;
             if let Some(rr) = app.rect_renderer.as_mut() {
-                rr.prepare_rectangle(0.0, rect_y, win_w, line_height as f32, p.selected, 0.0);
+                rr.prepare_rectangle(content_x, rect_y, content_w, line_height as f32, p.selected, 0.0);
             }
         }
 
@@ -250,7 +252,7 @@ fn update_view(app: &mut AppState) {
             if let Some(ir) = app.image_renderer.as_mut() {
                 let img_h = line_height as f32 - 4.0;
                 let img_y = item_y - ascender * scale - crate::text::TEXT_PADDING + 2.0;
-                unsafe { ir.prepare_image(path, 10.0, img_y, img_h, img_h); }
+                unsafe { ir.prepare_image(path, text_x, img_y, img_h, img_h); }
             }
         } else {
             // Text item (re-borrow fr after possible rect_renderer borrow)
@@ -260,7 +262,7 @@ fn update_view(app: &mut AppState) {
                 } else {
                     label.as_str()
                 };
-                fr.prepare_text_for_rendering(display, 10.0, item_y, scale, p.text);
+                fr.prepare_text_for_rendering(display, text_x, item_y, scale, p.text);
             }
         }
     }
@@ -648,6 +650,27 @@ fn build_display_path(r: &crate::app_state::AppRenderer) -> String {
     if parts.is_empty() { "/".to_owned() } else { parts.join(" / ") }
 }
 
+/// Compute horizontal content layout using Tailwind CSS container breakpoints.
+/// Returns `(content_x, content_width)` where `content_x` is the left offset
+/// needed to center the content area within the window.
+fn content_layout(win_w: f32) -> (f32, f32) {
+    let max_w = if win_w < 640.0 {
+        win_w
+    } else if win_w < 768.0 {
+        640.0
+    } else if win_w < 1024.0 {
+        768.0
+    } else if win_w < 1280.0 {
+        1024.0
+    } else if win_w < 1536.0 {
+        1280.0
+    } else {
+        1536.0
+    };
+    let content_x = ((win_w - max_w) / 2.0).max(0.0);
+    (content_x, max_w)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -677,5 +700,48 @@ mod tests {
         assert!((g - 0.0).abs() < 1e-6);
         assert!((b - 0.0).abs() < 1e-6);
         assert!((a - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn content_layout_below_640() {
+        let (x, w) = content_layout(500.0);
+        assert_eq!(x, 0.0);
+        assert_eq!(w, 500.0);
+    }
+
+    #[test]
+    fn content_layout_at_640() {
+        let (x, w) = content_layout(640.0);
+        assert_eq!(w, 640.0);
+        assert_eq!(x, 0.0);
+    }
+
+    #[test]
+    fn content_layout_at_768() {
+        let (x, w) = content_layout(768.0);
+        assert_eq!(w, 768.0);
+        assert_eq!(x, 0.0);
+    }
+
+    #[test]
+    fn content_layout_at_1024() {
+        let (x, w) = content_layout(1024.0);
+        assert_eq!(w, 1024.0);
+        assert_eq!(x, 0.0);
+    }
+
+    #[test]
+    fn content_layout_at_1920() {
+        let (x, w) = content_layout(1920.0);
+        assert_eq!(w, 1536.0);
+        assert!((x - 192.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn content_layout_between_breakpoints() {
+        // 900px window: falls in 768–1023 range, max-width 768px
+        let (x, w) = content_layout(900.0);
+        assert_eq!(w, 768.0);
+        assert!((x - 66.0).abs() < 0.01); // (900 - 768) / 2 = 66
     }
 }
