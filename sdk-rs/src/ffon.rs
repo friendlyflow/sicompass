@@ -237,6 +237,13 @@ impl IdArray {
         }
     }
 
+    /// Replace the index at a specific depth level.
+    pub fn set(&mut self, depth: usize, idx: usize) {
+        if let Some(slot) = self.0.get_mut(depth) {
+            *slot = idx;
+        }
+    }
+
     /// Return the last index, or `None` if the path is empty.
     pub fn last(&self) -> Option<usize> {
         self.0.last().copied()

@@ -299,12 +299,14 @@ impl SettingsProvider {
         let mut obj = FfonElement::new_obj(section_name);
         let o = obj.as_obj_mut().unwrap();
 
-        // Checkboxes
-        for e in &self.checkbox_entries {
-            if e.section == section_name {
-                let tag = if e.checked { "<checkbox checked>" } else { "<checkbox>" };
-                o.push(FfonElement::Str(format!("{}{}", tag, e.label)));
-            }
+        // Checkboxes (sorted alphabetically by label)
+        let mut checkboxes: Vec<&CheckboxEntry> = self.checkbox_entries.iter()
+            .filter(|e| e.section == section_name)
+            .collect();
+        checkboxes.sort_by(|a, b| a.label.to_ascii_lowercase().cmp(&b.label.to_ascii_lowercase()));
+        for e in checkboxes {
+            let tag = if e.checked { "<checkbox checked>" } else { "<checkbox>" };
+            o.push(FfonElement::Str(format!("{}{}", tag, e.label)));
         }
 
         // Radio groups
@@ -387,10 +389,13 @@ impl Provider for SettingsProvider {
         }
         result.push(sc_obj);
 
-        // Other sections (skip sicompass and priority — already rendered)
-        for section in self.sections.clone() {
-            if section == "sicompass" { continue; }
-            if prio.as_deref() == Some(&section) { continue; }
+        // Other sections (skip sicompass and priority — already rendered), sorted alphabetically
+        let mut other_sections: Vec<String> = self.sections.iter()
+            .filter(|s| s.as_str() != "sicompass" && prio.as_deref() != Some(s.as_str()))
+            .cloned()
+            .collect();
+        other_sections.sort_by(|a, b| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()));
+        for section in other_sections {
             result.push(self.populate_section(&section));
         }
 
@@ -473,6 +478,14 @@ impl Provider for SettingsProvider {
             self.save_config_if_possible();
             self.fire_apply(&config_key, if checked { "true" } else { "false" });
         }
+    }
+
+    fn add_settings_section(&mut self, name: &str) {
+        self.add_section(name);
+    }
+
+    fn remove_settings_section(&mut self, name: &str) {
+        self.remove_section(name);
     }
 }
 
@@ -992,5 +1005,28 @@ mod tests {
         assert!(sb.is_some());
         // section B still has its text entry
         assert_eq!(sb.unwrap().as_obj().unwrap().children.len(), 1);
+    }
+
+    #[test]
+    fn test_other_sections_sorted_alphabetically() {
+        let mut p = SettingsProvider::new_headless();
+        p.add_priority_section("Available programs:");
+        p.add_checkbox("Available programs:", "tutorial", "enable_tutorial", true);
+        p.add_text("tutorial", "label", "key", "val");
+        p.add_text("chat client", "label", "key", "val");
+        p.add_text("email client", "label", "key", "val");
+        p.add_text("web browser", "label", "key", "val");
+        let items = p.fetch();
+        // Expected order: meta, Available programs:, sicompass, chat client, email client, tutorial, web browser
+        let keys: Vec<&str> = items.iter()
+            .filter_map(|e| e.as_obj().map(|o| o.key.as_str()))
+            .collect();
+        assert_eq!(keys[0], "meta");
+        assert_eq!(keys[1], "Available programs:");
+        assert_eq!(keys[2], "sicompass");
+        assert_eq!(keys[3], "chat client");
+        assert_eq!(keys[4], "email client");
+        assert_eq!(keys[5], "tutorial");
+        assert_eq!(keys[6], "web browser");
     }
 }
