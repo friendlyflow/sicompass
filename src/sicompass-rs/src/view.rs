@@ -292,7 +292,7 @@ fn update_view(app: &mut AppState) {
                 let (_, content) = split_label(label);
                 fr.count_wrapped_lines(content, scale, item_max_w)
             };
-            let highlight_w = (max_prefix_px + item_max_w + 10.0).min(win_w - content_x - list_indent_px);
+            let highlight_w = (max_prefix_px + item_max_w + 20.0).min(win_w - content_x - list_indent_px);
             metrics.push((y, content_start_x, lines, highlight_w));
             y += lines as f32 * line_height as f32;
         }
