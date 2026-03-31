@@ -185,6 +185,9 @@ fn update_view(app: &mut AppState) {
     let win_w = app.swapchain_extent.width as f32;
     let win_h = app.swapchain_extent.height as f32;
     let list_items: Vec<(String, Option<String>, bool)> = collect_list_items(&app.renderer);
+    let list_has_indicators = list_items.iter().any(|(label, _, _)| {
+        get_radio_type(label) != RadioType::None || get_checkbox_type(label) != CheckboxType::None
+    });
 
     // Compute indent and max prefix width before centering so the full visual
     // width (indent + prefix + content) can be centered in the window.
@@ -197,7 +200,10 @@ fn update_view(app: &mut AppState) {
         let prefix = list_items.iter()
             .map(|(label, _, _)| {
                 let (p, _) = split_label(label);
-                fr.measure_text_width(p, scale)
+                let text_w = fr.measure_text_width(p, scale);
+                // When any item has an indicator, all items reserve the same indicator width
+                let indicator_w = if list_has_indicators { indicator_width(line_height as f32, em_width) } else { 0.0 };
+                text_w + indicator_w
             })
             .fold(0.0_f32, f32::max);
         (indent, prefix)
@@ -270,7 +276,7 @@ fn update_view(app: &mut AppState) {
         let item_prefix_x = text_x + list_indent_px;
         let content_start_x = item_prefix_x + max_prefix_px;
         let extra_lines = 1 + if parent_info.radio_summary.is_some() { 1 } else { 0 };
-        let first_item_y = (line_height as f32) * (1.0 + extra_lines as f32) + ascender * scale;
+        let first_item_y = (line_height as f32) * (1.0 + extra_lines as f32) + ascender * scale + crate::text::TEXT_PADDING;
         let mut y = first_item_y;
         let mut metrics = Vec::with_capacity(list_items.len());
         for (label, img_data, _) in &list_items {
@@ -339,7 +345,10 @@ fn update_view(app: &mut AppState) {
             let summary_x = text_x + indent;
             let summary_y = parent_y + line_height as f32;
             let display = format!("-rc {}", summary);
-            fr.prepare_text_for_rendering(&display, summary_x, summary_y, scale, p.text);
+            let indicator_offset = if let Some(rr) = app.rect_renderer.as_mut() {
+                render_radio_indicator(rr, &RadioType::Checked, summary_x, summary_y, scale, ascender, line_height as f32, em_width, &p)
+            } else { 0.0 };
+            fr.prepare_text_for_rendering(&display, summary_x + indicator_offset, summary_y, scale, p.text);
         }
     }
 
@@ -365,10 +374,30 @@ fn update_view(app: &mut AppState) {
     for (i, (label, img_data, is_selected)) in list_items.iter().take(item_metrics.len()).enumerate() {
         let (item_y, content_start_x, _, _) = item_metrics[i];
 
+        // Draw graphical indicator (radio/checkbox) and compute x shift.
+        // When any item has an indicator, all items shift their text right by the
+        // same indicator_width so prefixes align across the entire list.
+        let radio = get_radio_type(label);
+        let checkbox = get_checkbox_type(label);
+        if radio != RadioType::None {
+            if let Some(rr) = app.rect_renderer.as_mut() {
+                render_radio_indicator(rr, &radio, item_prefix_x, item_y, scale, ascender, line_height as f32, em_width, &p);
+            }
+        } else if checkbox != CheckboxType::None {
+            if let Some(rr) = app.rect_renderer.as_mut() {
+                render_checkbox_indicator(rr, &checkbox, item_prefix_x, item_y, scale, ascender, line_height as f32, em_width, &p);
+            }
+        }
+        let text_prefix_x = if list_has_indicators {
+            item_prefix_x + indicator_width(line_height as f32, em_width)
+        } else {
+            item_prefix_x
+        };
+
         if let Some(ref path) = img_data {
             let (prefix, _) = split_label(label);
             if let Some(fr) = app.font_renderer.as_mut() {
-                fr.prepare_text_for_rendering(prefix, item_prefix_x, item_y, scale, p.text);
+                fr.prepare_text_for_rendering(prefix, text_prefix_x, item_y, scale, p.text);
             }
             if let Some(ir) = app.image_renderer.as_mut() {
                 let img_w = max_content_w.max(1.0);
@@ -387,7 +416,7 @@ fn update_view(app: &mut AppState) {
                 label.as_str()
             };
             let (prefix, content) = split_label(display_label);
-            fr.prepare_text_for_rendering(prefix, item_prefix_x, item_y, scale, p.text);
+            fr.prepare_text_for_rendering(prefix, text_prefix_x, item_y, scale, p.text);
             fr.prepare_text_wrapped(content, content_start_x, item_y, scale, max_content_w.max(1.0), line_height as f32, p.text);
         }
     }
@@ -773,6 +802,82 @@ fn build_display_path(r: &crate::app_state::AppRenderer) -> String {
     }
 
     if parts.is_empty() { "/".to_owned() } else { parts.join(" / ") }
+}
+
+// ---------------------------------------------------------------------------
+// Checkbox / radio indicator helpers (mirrors render.c:263-338)
+// ---------------------------------------------------------------------------
+
+#[derive(PartialEq)]
+enum RadioType { None, Unchecked, Checked }
+
+#[derive(PartialEq)]
+enum CheckboxType { None, Unchecked, Checked }
+
+fn get_radio_type(label: &str) -> RadioType {
+    if label.starts_with("-rc ") { RadioType::Checked }
+    else if label.starts_with("-r ") { RadioType::Unchecked }
+    else { RadioType::None }
+}
+
+fn get_checkbox_type(label: &str) -> CheckboxType {
+    if label.starts_with("-cc ") || label.starts_with("+cc ") { CheckboxType::Checked }
+    else if label.starts_with("-c ") || label.starts_with("+c ") { CheckboxType::Unchecked }
+    else { CheckboxType::None }
+}
+
+/// Returns the pixel width consumed by the indicator (circle/box + one em gap).
+fn indicator_width(line_h: f32, em_width: f32) -> f32 {
+    line_h * 0.8 + em_width
+}
+
+/// Draw a radio indicator. Returns the x offset to add before drawing text.
+fn render_radio_indicator(
+    rr: &mut crate::rectangle::RectangleRenderer,
+    radio_type: &RadioType,
+    x: f32, item_y: f32,
+    scale: f32, ascender: f32, line_h: f32, em_width: f32,
+    p: &crate::app_state::ColorPalette,
+) -> f32 {
+    let size = line_h * 0.8;
+    let line_top = item_y - ascender * scale - crate::text::TEXT_PADDING;
+    let indicator_y = line_top + (line_h - size) / 2.0;
+
+    // Outer circle
+    rr.prepare_rectangle(x, indicator_y, size, size, p.text, size / 2.0);
+    // Inner circle
+    let inner_size = size * 0.55;
+    let inner_offset = (size - inner_size) / 2.0;
+    let inner_color = if *radio_type == RadioType::Checked { p.selected } else { p.background };
+    rr.prepare_rectangle(x + inner_offset, indicator_y + inner_offset, inner_size, inner_size, inner_color, inner_size / 2.0);
+
+    size + em_width
+}
+
+/// Draw a checkbox indicator. Returns the x offset to add before drawing text.
+fn render_checkbox_indicator(
+    rr: &mut crate::rectangle::RectangleRenderer,
+    checkbox_type: &CheckboxType,
+    x: f32, item_y: f32,
+    scale: f32, ascender: f32, line_h: f32, em_width: f32,
+    p: &crate::app_state::ColorPalette,
+) -> f32 {
+    let size = line_h * 0.8;
+    let line_top = item_y - ascender * scale - crate::text::TEXT_PADDING;
+    let box_y = line_top + (line_h - size) / 2.0;
+
+    if *checkbox_type == CheckboxType::Checked {
+        rr.prepare_rectangle(x, box_y, size, size, p.selected, 0.0);
+        let pad = size * 0.02;
+        rr.prepare_checkmark(x + pad, box_y + pad, size - pad * 2.0, p.text);
+    } else {
+        rr.prepare_rectangle(x, box_y, size, size, p.text, 0.0);
+        let border = size * 0.07;
+        let inner = size - border * 2.0;
+        rr.prepare_rectangle(x + border, box_y + border, inner, inner, p.background, 0.0);
+    }
+
+    size + em_width
 }
 
 /// Split a list label at the first space into (prefix_with_space, content).
