@@ -145,16 +145,22 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
     // Only programs that actually have a provider registered get a section.
     // Using renderer.providers (not `enabled`) as the source of truth ensures
     // that only checked programs with a working implementation appear in settings.
-    let program_names: std::collections::HashSet<&str> =
-        PROGRAM_ENTRIES.iter().map(|(n, _, _)| *n).collect();
+    // Use the PROGRAM_ENTRIES name (e.g. "chat client") rather than provider.name()
+    // (e.g. "chatclient") so section names are consistent across initial load and
+    // dynamic enable/disable.
     for p in renderer.providers.iter() {
-        if program_names.contains(p.name()) {
-            settings.add_section(p.name());
+        if let Some(&(entry_name, _, _)) = PROGRAM_ENTRIES.iter()
+            .find(|&&(n, _, _)| name_matches_provider(n, p.name()))
+        {
+            settings.add_section(entry_name);
         }
     }
 
     // ---- Load user-installed plugins ----------------------------------------
     load_user_plugins(renderer, &mut settings);
+
+    // ---- Sort all registered providers alphabetically ----------------------
+    sort_providers_alphabetically(renderer);
 
     // ---- Register settings as the last provider ----------------------------
     register_provider(renderer, Box::new(settings));
@@ -228,8 +234,9 @@ fn tutorial_assets_dir() -> PathBuf {
 /// index points at or after the insertion point, it is incremented so the
 /// selection stays on the same provider.
 pub fn enable_provider(renderer: &mut AppRenderer, name: &str) {
-    // Never double-load an already-registered provider
-    if renderer.providers.iter().any(|p| p.name() == name) { return; }
+    // Never double-load an already-registered provider.
+    // Use name_matches_provider so "chat client" matches provider.name() "chatclient".
+    if renderer.providers.iter().any(|p| name_matches_provider(name, p.name())) { return; }
     let provider: Box<dyn Provider> = match name {
         "filebrowser" => Box::new(FilebrowserProvider::new()),
         "tutorial"    => Box::new(TutorialProvider::new(&tutorial_assets_dir())),
@@ -244,10 +251,31 @@ pub fn enable_provider(renderer: &mut AppRenderer, name: &str) {
     insert_provider_alphabetically(renderer, provider);
 }
 
+/// Sort all currently registered providers (and their ffon entries) alphabetically
+/// by name (case-insensitive). Call this before registering settings so settings
+/// stays last.
+fn sort_providers_alphabetically(renderer: &mut AppRenderer) {
+    let len = renderer.providers.len();
+    if len <= 1 {
+        return;
+    }
+    let mut pairs: Vec<(Box<dyn Provider>, FfonElement)> = renderer.providers
+        .drain(..)
+        .zip(renderer.ffon.drain(..))
+        .collect();
+    pairs.sort_by(|(a, _), (b, _)| {
+        a.name().to_ascii_lowercase().cmp(&b.name().to_ascii_lowercase())
+    });
+    let (providers, ffon): (Vec<_>, Vec<_>) = pairs.into_iter().unzip();
+    renderer.providers = providers;
+    renderer.ffon = ffon;
+}
+
 /// Insert a provider at the alphabetically correct position.
 ///
-/// Filebrowser (index 0) and settings (last index) are never displaced.
-/// The insertion point is found by scanning indices `1..len-1` and picking
+/// Settings (last index) is never displaced. All other providers (including
+/// filebrowser) participate in alphabetical ordering.
+/// The insertion point is found by scanning indices `0..len-1` and picking
 /// the first slot where the existing provider's name sorts after the new name
 /// (case-insensitive ASCII). Falls back to just before settings.
 fn insert_provider_alphabetically(renderer: &mut AppRenderer, mut provider: Box<dyn Provider>) {
@@ -260,11 +288,17 @@ fn insert_provider_alphabetically(renderer: &mut AppRenderer, mut provider: Box<
         root.as_obj_mut().unwrap().push(child);
     }
 
-    // Find insertion index: between filebrowser (0) and settings (last).
+    // Find insertion index: anywhere before settings (last).
     let settings_idx = renderer.providers.len().saturating_sub(1);
     let new_name_lower = provider.name().to_ascii_lowercase();
+    // Determine the canonical settings section name (PROGRAM_ENTRIES name, e.g. "chat client")
+    // before consuming `provider` below.
+    let section_name = PROGRAM_ENTRIES.iter()
+        .find(|&&(n, _, _)| name_matches_provider(n, provider.name()))
+        .map(|&(n, _, _)| n.to_owned())
+        .unwrap_or_else(|| display_name.clone());
     let mut insert_idx = settings_idx; // default: just before settings
-    for i in 1..settings_idx {
+    for i in 0..settings_idx {
         if renderer.providers[i].name().to_ascii_lowercase() > new_name_lower {
             insert_idx = i;
             break;
@@ -273,11 +307,8 @@ fn insert_provider_alphabetically(renderer: &mut AppRenderer, mut provider: Box<
 
     renderer.ffon.insert(insert_idx, root);
     renderer.providers.insert(insert_idx, provider);
-
-    // Register a settings section for the newly enabled program.
-    // Settings is always the last provider; add_settings_section is a no-op on all others.
     if let Some(settings) = renderer.providers.last_mut() {
-        settings.add_settings_section(&display_name);
+        settings.add_settings_section(&section_name);
     }
     rebuild_settings_ffon(renderer);
 
@@ -291,17 +322,24 @@ fn insert_provider_alphabetically(renderer: &mut AppRenderer, mut provider: Box<
 
 /// Disable and remove a provider by name.
 pub fn disable_provider(renderer: &mut AppRenderer, name: &str) {
-    let Some(idx) = renderer.providers.iter().position(|p| p.name() == name) else {
+    // Use name_matches_provider so "chat client" matches provider.name() "chatclient".
+    let Some(idx) = renderer.providers.iter().position(|p| name_matches_provider(name, p.name())) else {
         return;
     };
 
-    let removed_name = renderer.providers[idx].name().to_owned();
+    let removed_provider_name = renderer.providers[idx].name().to_owned();
+    // Use the PROGRAM_ENTRIES canonical name for section removal (e.g. "chat client"
+    // not "chatclient") to match what was added during load or dynamic enable.
+    let removed_section_name = PROGRAM_ENTRIES.iter()
+        .find(|&&(n, _, _)| name_matches_provider(n, &removed_provider_name))
+        .map(|&(n, _, _)| n.to_owned())
+        .unwrap_or_else(|| removed_provider_name.clone());
     renderer.ffon.remove(idx);
     renderer.providers.remove(idx);
 
     // Remove the settings section for the disabled program and rebuild.
     if let Some(settings) = renderer.providers.last_mut() {
-        settings.remove_settings_section(&removed_name);
+        settings.remove_settings_section(&removed_section_name);
     }
     rebuild_settings_ffon(renderer);
 
@@ -538,6 +576,29 @@ mod tests {
         assert_eq!(r.providers[1].name(), "c");
     }
 
+    // --- sort_providers_alphabetically ---
+
+    #[test]
+    fn sort_providers_alphabetically_orders_by_name() {
+        let mut r = AppRenderer::new();
+        register_provider(&mut r, Box::new(MockProv::new("tutorial")));
+        register_provider(&mut r, Box::new(MockProv::new("chat client")));
+        register_provider(&mut r, Box::new(MockProv::new("filebrowser")));
+        sort_providers_alphabetically(&mut r);
+        assert_eq!(r.providers[0].name(), "chat client");
+        assert_eq!(r.providers[1].name(), "filebrowser");
+        assert_eq!(r.providers[2].name(), "tutorial");
+    }
+
+    #[test]
+    fn sort_providers_alphabetically_single_provider_noop() {
+        let mut r = AppRenderer::new();
+        register_provider(&mut r, Box::new(MockProv::new("only")));
+        sort_providers_alphabetically(&mut r);
+        assert_eq!(r.providers.len(), 1);
+        assert_eq!(r.providers[0].name(), "only");
+    }
+
     // --- insert_provider_alphabetically ---
 
     #[test]
@@ -561,11 +622,11 @@ mod tests {
         register_provider(&mut r, Box::new(MockProv::new("settings")));
         insert_provider_alphabetically(&mut r, Box::new(MockProv::new("chat client")));
         insert_provider_alphabetically(&mut r, Box::new(MockProv::new("email client")));
-        // Expected: filebrowser, chat client, email client, tutorial, settings
+        // Expected: chat client, email client, filebrowser, tutorial, settings
         assert_eq!(r.providers.len(), 5);
-        assert_eq!(r.providers[0].name(), "filebrowser");
-        assert_eq!(r.providers[1].name(), "chat client");
-        assert_eq!(r.providers[2].name(), "email client");
+        assert_eq!(r.providers[0].name(), "chat client");
+        assert_eq!(r.providers[1].name(), "email client");
+        assert_eq!(r.providers[2].name(), "filebrowser");
         assert_eq!(r.providers[3].name(), "tutorial");
         assert_eq!(r.providers[4].name(), "settings");
     }
