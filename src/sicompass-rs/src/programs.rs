@@ -58,6 +58,28 @@ pub fn register_provider(renderer: &mut AppRenderer, mut provider: Box<dyn Provi
 }
 
 // ---------------------------------------------------------------------------
+// Settings FFON refresh
+// ---------------------------------------------------------------------------
+
+/// Rebuild the settings FFON element in-place (settings is always the last provider).
+///
+/// Call this after modifying the settings provider's sections at runtime so the
+/// displayed tree reflects the new state. Mirrors C's `refreshSettingsFfon`.
+fn rebuild_settings_ffon(renderer: &mut AppRenderer) {
+    if renderer.ffon.is_empty() { return; }
+    let settings_idx = renderer.ffon.len() - 1;
+    if let Some(settings_provider) = renderer.providers.last_mut() {
+        let children = settings_provider.fetch();
+        let display_name = settings_provider.display_name().to_owned();
+        let mut root = FfonElement::new_obj(&display_name);
+        for child in children {
+            root.as_obj_mut().unwrap().push(child);
+        }
+        renderer.ffon[settings_idx] = root;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -116,6 +138,18 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
             other => {
                 eprintln!("sicompass: unknown program '{other}' — skipping");
             }
+        }
+    }
+
+    // ---- Register a settings section for each loaded program ---------------
+    // Only programs that actually have a provider registered get a section.
+    // Using renderer.providers (not `enabled`) as the source of truth ensures
+    // that only checked programs with a working implementation appear in settings.
+    let program_names: std::collections::HashSet<&str> =
+        PROGRAM_ENTRIES.iter().map(|(n, _, _)| *n).collect();
+    for p in renderer.providers.iter() {
+        if program_names.contains(p.name()) {
+            settings.add_section(p.name());
         }
     }
 
@@ -188,27 +222,69 @@ fn tutorial_assets_dir() -> PathBuf {
 }
 
 /// Enable a provider by name at runtime (hot-load).
+///
+/// The new provider is inserted alphabetically by name between the filebrowser
+/// (always index 0) and settings (always last). If the current root navigation
+/// index points at or after the insertion point, it is incremented so the
+/// selection stays on the same provider.
 pub fn enable_provider(renderer: &mut AppRenderer, name: &str) {
     // Never double-load an already-registered provider
     if renderer.providers.iter().any(|p| p.name() == name) { return; }
-    match name {
-        "filebrowser" => {
-            register_provider(renderer, Box::new(FilebrowserProvider::new()));
-        }
-        "tutorial" => {
-            register_provider(renderer, Box::new(TutorialProvider::new(&tutorial_assets_dir())));
-        }
-        "web browser" => {
-            register_provider(renderer, Box::new(WebbrowserProvider::new()));
-        }
-        "chat client" => {
-            register_provider(renderer, Box::new(ChatClientProvider::new()));
-        }
-        "email client" => {
-            register_provider(renderer, Box::new(EmailClientProvider::new()));
-        }
+    let provider: Box<dyn Provider> = match name {
+        "filebrowser" => Box::new(FilebrowserProvider::new()),
+        "tutorial"    => Box::new(TutorialProvider::new(&tutorial_assets_dir())),
+        "web browser" => Box::new(WebbrowserProvider::new()),
+        "chat client" => Box::new(ChatClientProvider::new()),
+        "email client"=> Box::new(EmailClientProvider::new()),
         other => {
             eprintln!("sicompass: cannot enable unknown provider '{other}'");
+            return;
+        }
+    };
+    insert_provider_alphabetically(renderer, provider);
+}
+
+/// Insert a provider at the alphabetically correct position.
+///
+/// Filebrowser (index 0) and settings (last index) are never displaced.
+/// The insertion point is found by scanning indices `1..len-1` and picking
+/// the first slot where the existing provider's name sorts after the new name
+/// (case-insensitive ASCII). Falls back to just before settings.
+fn insert_provider_alphabetically(renderer: &mut AppRenderer, mut provider: Box<dyn Provider>) {
+    provider.init();
+    let children = provider.fetch();
+    let display_name = provider.display_name().to_owned();
+
+    let mut root = FfonElement::new_obj(&display_name);
+    for child in children {
+        root.as_obj_mut().unwrap().push(child);
+    }
+
+    // Find insertion index: between filebrowser (0) and settings (last).
+    let settings_idx = renderer.providers.len().saturating_sub(1);
+    let new_name_lower = provider.name().to_ascii_lowercase();
+    let mut insert_idx = settings_idx; // default: just before settings
+    for i in 1..settings_idx {
+        if renderer.providers[i].name().to_ascii_lowercase() > new_name_lower {
+            insert_idx = i;
+            break;
+        }
+    }
+
+    renderer.ffon.insert(insert_idx, root);
+    renderer.providers.insert(insert_idx, provider);
+
+    // Register a settings section for the newly enabled program.
+    // Settings is always the last provider; add_settings_section is a no-op on all others.
+    if let Some(settings) = renderer.providers.last_mut() {
+        settings.add_settings_section(&display_name);
+    }
+    rebuild_settings_ffon(renderer);
+
+    // Adjust root navigation index if it points at or after the insertion point.
+    if let Some(root_idx) = renderer.current_id.get(0) {
+        if root_idx >= insert_idx {
+            renderer.current_id.set(0, root_idx + 1);
         }
     }
 }
@@ -219,14 +295,21 @@ pub fn disable_provider(renderer: &mut AppRenderer, name: &str) {
         return;
     };
 
+    let removed_name = renderer.providers[idx].name().to_owned();
     renderer.ffon.remove(idx);
     renderer.providers.remove(idx);
+
+    // Remove the settings section for the disabled program and rebuild.
+    if let Some(settings) = renderer.providers.last_mut() {
+        settings.remove_settings_section(&removed_name);
+    }
+    rebuild_settings_ffon(renderer);
 
     // Clamp root navigation index
     let max_root = renderer.ffon.len().saturating_sub(1);
     if let Some(root_idx) = renderer.current_id.get(0) {
         if root_idx > max_root {
-            renderer.current_id.set_last(max_root);
+            renderer.current_id.set(0, max_root);
         }
     }
 }
@@ -453,6 +536,66 @@ mod tests {
         assert_eq!(r.providers.len(), 2);
         assert_eq!(r.providers[0].name(), "a");
         assert_eq!(r.providers[1].name(), "c");
+    }
+
+    // --- insert_provider_alphabetically ---
+
+    #[test]
+    fn insert_alphabetically_between_filebrowser_and_settings() {
+        let mut r = AppRenderer::new();
+        register_provider(&mut r, Box::new(MockProv::new("filebrowser")));
+        register_provider(&mut r, Box::new(MockProv::new("settings")));
+        insert_provider_alphabetically(&mut r, Box::new(MockProv::new("tutorial")));
+        // Expected: filebrowser, tutorial, settings
+        assert_eq!(r.providers.len(), 3);
+        assert_eq!(r.providers[0].name(), "filebrowser");
+        assert_eq!(r.providers[1].name(), "tutorial");
+        assert_eq!(r.providers[2].name(), "settings");
+    }
+
+    #[test]
+    fn insert_alphabetically_sorts_among_existing_providers() {
+        let mut r = AppRenderer::new();
+        register_provider(&mut r, Box::new(MockProv::new("filebrowser")));
+        register_provider(&mut r, Box::new(MockProv::new("tutorial")));
+        register_provider(&mut r, Box::new(MockProv::new("settings")));
+        insert_provider_alphabetically(&mut r, Box::new(MockProv::new("chat client")));
+        insert_provider_alphabetically(&mut r, Box::new(MockProv::new("email client")));
+        // Expected: filebrowser, chat client, email client, tutorial, settings
+        assert_eq!(r.providers.len(), 5);
+        assert_eq!(r.providers[0].name(), "filebrowser");
+        assert_eq!(r.providers[1].name(), "chat client");
+        assert_eq!(r.providers[2].name(), "email client");
+        assert_eq!(r.providers[3].name(), "tutorial");
+        assert_eq!(r.providers[4].name(), "settings");
+    }
+
+    #[test]
+    fn insert_alphabetically_adjusts_current_id_when_before() {
+        let mut r = AppRenderer::new();
+        register_provider(&mut r, Box::new(MockProv::new("filebrowser")));
+        register_provider(&mut r, Box::new(MockProv::new("tutorial")));
+        register_provider(&mut r, Box::new(MockProv::new("settings")));
+        // Simulate user navigated inside tutorial (depth 2): current_id = [1, 3]
+        r.current_id.set_last(1); // root → tutorial (index 1)
+        r.current_id.push(3);     // navigated one level deeper
+        insert_provider_alphabetically(&mut r, Box::new(MockProv::new("chat client")));
+        // chat client inserts at index 1, tutorial shifts to index 2
+        // Root index (depth 0) must be incremented; deeper index (depth 1) must be unchanged
+        assert_eq!(r.current_id.get(0), Some(2));
+        assert_eq!(r.current_id.get(1), Some(3));
+    }
+
+    #[test]
+    fn insert_alphabetically_no_adjust_when_after() {
+        let mut r = AppRenderer::new();
+        register_provider(&mut r, Box::new(MockProv::new("filebrowser")));
+        register_provider(&mut r, Box::new(MockProv::new("chat client")));
+        register_provider(&mut r, Box::new(MockProv::new("settings")));
+        // Stay at filebrowser (index 0) — AppRenderer::new() already sets current_id to [0]
+        insert_provider_alphabetically(&mut r, Box::new(MockProv::new("tutorial")));
+        // tutorial inserts at index 2, filebrowser stays at index 0
+        assert_eq!(r.current_id.get(0), Some(0));
     }
 
     // --- apply_setting (colorScheme) ---

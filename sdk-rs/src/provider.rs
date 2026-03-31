@@ -106,6 +106,15 @@ pub trait Provider: Send + 'static {
     fn on_button_press(&mut self, _function_name: &str) {}
     fn on_checkbox_change(&mut self, _label: &str, _checked: bool) {}
 
+    // ---- Optional: settings section management -----------------------------
+
+    /// Register a named section in this provider. Used by programs to give
+    /// themselves a section in the settings provider (mirrors C's `settingsAddSection`).
+    fn add_settings_section(&mut self, _name: &str) {}
+
+    /// Remove a named section from this provider.
+    fn remove_settings_section(&mut self, _name: &str) {}
+
     /// Called when any setting changes (key/value pair from the settings apply callback).
     ///
     /// Providers implement this to react to settings that affect them
