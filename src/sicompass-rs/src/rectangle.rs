@@ -10,7 +10,7 @@ use ash::vk;
 // Constants
 // ---------------------------------------------------------------------------
 
-const MAX_RECT_VERTICES: usize = 200 * 6; // 200 rectangles × 6 vertices
+const MAX_RECT_VERTICES: usize = 300 * 6; // 300 quads × 6 vertices (extra headroom for checkmark strokes)
 
 // ---------------------------------------------------------------------------
 // Vertex layout (must match shaders/rectangle.vert attributes)
@@ -214,6 +214,63 @@ impl RectangleRenderer {
         self.vertices.push(RectVertex { pos: [x0, y0], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
         self.vertices.push(RectVertex { pos: [x1, y1], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
         self.vertices.push(RectVertex { pos: [x0, y1], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
+    }
+
+    /// Append a checkmark (tick) shape — two stroke quads using the Heroicons check path.
+    /// `x`, `y` is the top-left corner of the bounding box; `size` is width and height.
+    /// Ports `prepareCheckmark()` from `checkmark.c`.
+    pub fn prepare_checkmark(&mut self, x: f32, y: f32, size: f32, color: u32) {
+        if self.vertices.len() + 12 > MAX_RECT_VERTICES { return; }
+
+        let r = ((color >> 24) & 0xFF) as f32 / 255.0;
+        let g = ((color >> 16) & 0xFF) as f32 / 255.0;
+        let b = ((color >>  8) & 0xFF) as f32 / 255.0;
+        let a = ( color        & 0xFF) as f32 / 255.0;
+        let col = [r, g, b, a];
+
+        // Scale from 24×24 Heroicons viewbox to actual size
+        let s = size / 24.0;
+
+        // Heroicons check path: M4.5 12.75l6 6 9-13.5
+        let ax = x + 4.5  * s; let ay = y + 12.75 * s;
+        let bx = x + 10.5 * s; let by = y + 18.75 * s;
+        let cx = x + 19.5 * s; let cy = y +  5.25 * s;
+
+        let thickness = 2.0 * s;
+        let half = thickness * 0.5;
+
+        // Perpendicular offsets for segment A→B
+        let dx1 = bx - ax; let dy1 = by - ay;
+        let len1 = (dx1 * dx1 + dy1 * dy1).sqrt();
+        let nx1 = -dy1 / len1 * half;
+        let ny1 =  dx1 / len1 * half;
+
+        // Perpendicular offsets for segment B→C
+        let dx2 = cx - bx; let dy2 = cy - by;
+        let len2 = (dx2 * dx2 + dy2 * dy2).sqrt();
+        let nx2 = -dy2 / len2 * half;
+        let ny2 =  dx2 / len2 * half;
+
+        // Neutralize SDF — use a huge rect so the fragment shader draws all pixels
+        let cr = [0.0_f32, 0.0];
+        let rs = [10000.0_f32, 10000.0];
+        let ro = [0.0_f32, 0.0];
+
+        // Quad 1: segment A→B (short downstroke)
+        self.vertices.push(RectVertex { pos: [ax + nx1, ay + ny1], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
+        self.vertices.push(RectVertex { pos: [ax - nx1, ay - ny1], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
+        self.vertices.push(RectVertex { pos: [bx - nx1, by - ny1], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
+        self.vertices.push(RectVertex { pos: [ax + nx1, ay + ny1], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
+        self.vertices.push(RectVertex { pos: [bx - nx1, by - ny1], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
+        self.vertices.push(RectVertex { pos: [bx + nx1, by + ny1], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
+
+        // Quad 2: segment B→C (long upstroke)
+        self.vertices.push(RectVertex { pos: [bx + nx2, by + ny2], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
+        self.vertices.push(RectVertex { pos: [bx - nx2, by - ny2], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
+        self.vertices.push(RectVertex { pos: [cx - nx2, cy - ny2], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
+        self.vertices.push(RectVertex { pos: [bx + nx2, by + ny2], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
+        self.vertices.push(RectVertex { pos: [cx - nx2, cy - ny2], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
+        self.vertices.push(RectVertex { pos: [cx + nx2, cy + ny2], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
     }
 
     /// Upload vertices and issue draw command.
