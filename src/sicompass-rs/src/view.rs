@@ -59,6 +59,10 @@ pub fn main_loop(app: &mut AppState) {
                         }
                         WindowEvent::Maximized | WindowEvent::Restored => {
                             app.framebuffer_resized = true;
+                            let is_maximized = matches!(win_event, WindowEvent::Maximized);
+                            if let Some(s) = app.renderer.providers.iter_mut().find(|p| p.name() == "settings") {
+                                s.on_checkbox_change("maximized", is_maximized);
+                            }
                         }
                         WindowEvent::CloseRequested => {
                             app.running = false;
