@@ -536,9 +536,9 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
                 } else if handlers::navigate_left_raw(r) {
                     // Cursor at start — navigate up in tree.
                     if r.coordinate == Coordinate::ExtendedSearch {
+                        r.input_buffer.clear();
+                        r.cursor_position = 0;
                         list::create_list_extended_search(r);
-                        let filter = r.input_buffer.clone();
-                        list::populate_list_current_layer(r, &filter);
                     } else {
                         r.search_string.clear();
                         r.cursor_position = 0;
@@ -581,9 +581,9 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
                             r.current_id = item.id;
                         }
                         if handlers::navigate_right_raw(r) {
-                            let filter = r.input_buffer.clone();
+                            r.input_buffer.clear();
+                            r.cursor_position = 0;
                             list::create_list_extended_search(r);
-                            list::populate_list_current_layer(r, &filter);
                             r.list_index = r.current_id.last().unwrap_or(0)
                                 .min(r.active_list_len().saturating_sub(1));
                             r.scroll_offset = r.list_index as i32;
