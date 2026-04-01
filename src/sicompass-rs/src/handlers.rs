@@ -4372,4 +4372,251 @@ mod tests {
         assert!(!r.error_message.is_empty());
         assert!(r.needs_redraw);
     }
+
+    // -----------------------------------------------------------------------
+    // handle_page_up / handle_page_down
+    // -----------------------------------------------------------------------
+
+    // Helper: renderer with window_height=40, cached_line_height=10 → page_size=1
+    fn make_renderer_paged() -> AppRenderer {
+        let mut r = make_renderer();
+        r.window_height = 40;
+        r.cached_line_height = 10;
+        r
+    }
+
+    #[test]
+    fn page_up_noop_in_editor_insert() {
+        let mut r = make_renderer_paged();
+        r.coordinate = Coordinate::EditorInsert;
+        r.list_index = 2;
+        handle_page_up(&mut r);
+        assert_eq!(r.list_index, 2); // unchanged
+    }
+
+    #[test]
+    fn page_down_noop_in_operator_insert() {
+        let mut r = make_renderer_paged();
+        r.coordinate = Coordinate::OperatorInsert;
+        r.list_index = 0;
+        handle_page_down(&mut r);
+        assert_eq!(r.list_index, 0); // unchanged
+    }
+
+    #[test]
+    fn page_up_simple_search_moves_index() {
+        let mut r = make_renderer_paged();
+        r.coordinate = Coordinate::SimpleSearch;
+        r.list_index = 3;
+        r.error_message = "err".to_owned();
+        handle_page_up(&mut r);
+        assert_eq!(r.list_index, 2); // decremented by page_size=1
+        assert!(r.error_message.is_empty());
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn page_up_simple_search_clamps_at_zero() {
+        let mut r = make_renderer_paged();
+        r.coordinate = Coordinate::SimpleSearch;
+        r.list_index = 0;
+        handle_page_up(&mut r);
+        assert_eq!(r.list_index, 0);
+    }
+
+    #[test]
+    fn page_down_simple_search_moves_index() {
+        let mut r = make_renderer_paged();
+        r.coordinate = Coordinate::SimpleSearch;
+        r.list_index = 0;
+        handle_page_down(&mut r);
+        assert_eq!(r.list_index, 1); // incremented by page_size=1
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn page_down_simple_search_clamps_at_end() {
+        let mut r = make_renderer_paged();
+        r.coordinate = Coordinate::SimpleSearch;
+        let last = r.active_list_len() - 1;
+        r.list_index = last;
+        handle_page_down(&mut r);
+        assert_eq!(r.list_index, last);
+    }
+
+    #[test]
+    fn page_up_scroll_decreases_offset() {
+        let mut r = make_renderer_paged();
+        r.coordinate = Coordinate::Scroll;
+        r.text_scroll_offset = 5;
+        handle_page_up(&mut r);
+        assert_eq!(r.text_scroll_offset, 4); // page_size=1
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn page_up_scroll_clamps_at_zero() {
+        let mut r = make_renderer_paged();
+        r.coordinate = Coordinate::Scroll;
+        r.text_scroll_offset = 0;
+        handle_page_up(&mut r);
+        assert_eq!(r.text_scroll_offset, 0);
+    }
+
+    #[test]
+    fn page_down_scroll_increases_offset() {
+        let mut r = make_renderer_paged();
+        r.coordinate = Coordinate::Scroll;
+        r.text_scroll_offset = 0;
+        r.text_scroll_line_count = 100;
+        handle_page_down(&mut r);
+        assert!(r.text_scroll_offset > 0);
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn page_up_input_search_decreases_offset() {
+        let mut r = make_renderer_paged();
+        r.coordinate = Coordinate::InputSearch;
+        r.input_search_scroll_offset = 3;
+        handle_page_up(&mut r);
+        assert_eq!(r.input_search_scroll_offset, 2);
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn page_up_input_search_clamps_at_zero() {
+        let mut r = make_renderer_paged();
+        r.coordinate = Coordinate::InputSearch;
+        r.input_search_scroll_offset = 0;
+        handle_page_up(&mut r);
+        assert_eq!(r.input_search_scroll_offset, 0);
+    }
+
+    #[test]
+    fn page_down_input_search_increases_offset() {
+        let mut r = make_renderer_paged();
+        r.coordinate = Coordinate::InputSearch;
+        r.input_search_scroll_offset = 0;
+        handle_page_down(&mut r);
+        assert_eq!(r.input_search_scroll_offset, 1); // page_size=1
+        assert!(r.needs_redraw);
+    }
+
+    // -----------------------------------------------------------------------
+    // handle_ctrl_home / handle_ctrl_end
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn ctrl_home_in_simple_search_resets_scroll_offset() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::SimpleSearch;
+        r.list_index = 3;
+        r.scroll_offset = 3;
+        handle_ctrl_home(&mut r);
+        assert_eq!(r.list_index, 0);
+        assert_eq!(r.scroll_offset, 0);
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn ctrl_home_empty_list_no_crash() {
+        let mut r = AppRenderer::new();
+        handle_ctrl_home(&mut r); // should not panic
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn ctrl_end_in_simple_search_sets_scroll_offset_minus_one() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::SimpleSearch;
+        r.list_index = 0;
+        let last = r.active_list_len() - 1;
+        handle_ctrl_end(&mut r);
+        assert_eq!(r.list_index, last);
+        assert_eq!(r.scroll_offset, -1);
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn ctrl_end_empty_list_no_crash() {
+        let mut r = AppRenderer::new();
+        handle_ctrl_end(&mut r); // should not panic
+        assert!(r.needs_redraw);
+    }
+
+    // -----------------------------------------------------------------------
+    // handle_enter_search
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn enter_search_no_item_returns_to_previous() {
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::SimpleSearch;
+        r.previous_coordinate = Coordinate::OperatorGeneral;
+        r.search_string = "abc".to_owned();
+        // total_list is empty → current_list_item_id() returns None
+        handle_enter_search(&mut r);
+        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+        assert!(r.search_string.is_empty());
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn enter_search_selects_item_and_exits() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::SimpleSearch;
+        r.previous_coordinate = Coordinate::OperatorGeneral;
+        r.list_index = 2;
+        r.search_string = "item".to_owned();
+        r.sync_current_id_from_list();
+        handle_enter_search(&mut r);
+        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+        assert!(r.search_string.is_empty());
+        assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn enter_search_extended_empty_list_escapes() {
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::ExtendedSearch;
+        r.previous_coordinate = Coordinate::OperatorGeneral;
+        // Empty list → handle_enter_extended_search will escape
+        handle_enter_search(&mut r);
+        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+        assert!(r.needs_redraw);
+    }
+
+    // -----------------------------------------------------------------------
+    // handle_enter_operator_insert — guard clause paths
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn enter_operator_insert_no_element_escapes() {
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::OperatorInsert;
+        // ffon is empty → get_ffon_at_id returns None → handle_escape called
+        handle_enter_operator_insert(&mut r);
+        // After escape, coordinate should not be OperatorInsert
+        assert_ne!(r.coordinate, Coordinate::OperatorInsert);
+    }
+
+    #[test]
+    fn enter_operator_insert_no_input_tag_escapes() {
+        let mut r = make_renderer_with_items(&["plain text"]);
+        r.coordinate = Coordinate::OperatorInsert;
+        handle_enter_operator_insert(&mut r);
+        // No <input> tag → escape
+        assert_ne!(r.coordinate, Coordinate::OperatorInsert);
+    }
+
+    #[test]
+    fn enter_operator_insert_unchanged_content_escapes() {
+        let mut r = make_renderer_with_items(&["<input>hello</input>"]);
+        r.coordinate = Coordinate::OperatorInsert;
+        r.input_buffer = "hello".to_owned(); // same as element content
+        handle_enter_operator_insert(&mut r);
+        // Unchanged → escape
+        assert_ne!(r.coordinate, Coordinate::OperatorInsert);
+    }
 }
