@@ -8,7 +8,7 @@ TOOL=$(echo "$INPUT" | jq -r '.tool_name')
 FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path')
 
 # Only check source files
-if [[ ! "$FILE_PATH" =~ \.(c|h|ts)$ ]]; then
+if [[ ! "$FILE_PATH" =~ \.(c|h|ts|rs)$ ]]; then
   exit 0
 fi
 
@@ -25,7 +25,11 @@ fi
 # New file creation: remind to write tests
 if [[ "$TOOL" == "Write" ]]; then
   echo "REMINDER: You created a new source file: $FILE_PATH" >&2
-  echo "Make sure to write or update corresponding tests in tests/." >&2
+  if [[ "$FILE_PATH" =~ \.rs$ ]]; then
+    echo "Make sure to write or update corresponding tests (inline #[cfg(test)] module or integration tests)." >&2
+  else
+    echo "Make sure to write or update corresponding tests in tests/." >&2
+  fi
   exit 2
 fi
 
@@ -37,6 +41,14 @@ if [[ "$TOOL" == "Edit" ]]; then
      [[ "$FILE_PATH" =~ lib/lib_.*/src/provider\.c ]]; then
     echo "REMINDER: You edited $FILE_PATH" >&2
     echo "Consider adding/updating integration tests in tests/integration/test_integration.c for cross-provider or full-workflow behavior." >&2
+    exit 2
+  fi
+  if [[ "$FILE_PATH" =~ src/sicompass-rs/src/handlers\.rs ]] || \
+     [[ "$FILE_PATH" =~ src/sicompass-rs/src/provider\.rs ]] || \
+     [[ "$FILE_PATH" =~ src/sicompass-rs/src/events\.rs ]] || \
+     [[ "$FILE_PATH" =~ lib/lib_.*-rs/src/.*\.rs ]]; then
+    echo "REMINDER: You edited $FILE_PATH" >&2
+    echo "Consider adding/updating integration tests in src/sicompass-rs/tests/integration.rs for cross-provider or full-workflow behavior." >&2
     exit 2
   fi
 fi
