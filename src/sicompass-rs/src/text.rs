@@ -950,4 +950,54 @@ mod tests {
         // Result: ["aaa", "bbb", "ccc", "ddd"] = 4 lines
         assert_eq!(fr.count_wrapped_lines("aaa bbb ccc ddd", 1.0, 50.0), 4);
     }
+
+    // ---- wrap_lines_with_offsets ---
+
+    #[test]
+    fn wrap_offsets_empty() {
+        let fr = make_fr_uniform(10.0);
+        let result = fr.wrap_lines_with_offsets("", 1.0, 100.0);
+        assert_eq!(result, vec![("".to_string(), 0)]);
+    }
+
+    #[test]
+    fn wrap_offsets_single_line() {
+        let fr = make_fr_uniform(10.0);
+        // "hello" = 50px < 100px, fits on one line
+        let result = fr.wrap_lines_with_offsets("hello", 1.0, 100.0);
+        assert_eq!(result, vec![("hello".to_string(), 0)]);
+    }
+
+    #[test]
+    fn wrap_offsets_two_words() {
+        let fr = make_fr_uniform(10.0);
+        // "hello world" = 110px > 100px → breaks at space after "hello"
+        // second line "world" starts at byte offset 6 ("hello " = 6 bytes)
+        let result = fr.wrap_lines_with_offsets("hello world", 1.0, 100.0);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], ("hello".to_string(), 0));
+        assert_eq!(result[1], ("world".to_string(), 6));
+    }
+
+    #[test]
+    fn wrap_offsets_force_break() {
+        let fr = make_fr_uniform(10.0);
+        // "abcdefghijk" = 11 chars, no spaces, max=100px → force-break after 10 chars
+        let result = fr.wrap_lines_with_offsets("abcdefghijk", 1.0, 100.0);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].0, "abcdefghij");
+        assert_eq!(result[0].1, 0);
+        assert_eq!(result[1].0, "k");
+        assert_eq!(result[1].1, 10);
+    }
+
+    #[test]
+    fn wrap_offsets_newline_split() {
+        let fr = make_fr_uniform(10.0);
+        // Explicit newline → two lines, "def" starts at byte 4 ("abc\n")
+        let result = fr.wrap_lines_with_offsets("abc\ndef", 1.0, 100.0);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], ("abc".to_string(), 0));
+        assert_eq!(result[1], ("def".to_string(), 4));
+    }
 }
