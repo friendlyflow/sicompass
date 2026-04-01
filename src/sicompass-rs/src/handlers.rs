@@ -602,8 +602,13 @@ pub fn handle_enter_operator(r: &mut AppRenderer) {
     r.needs_redraw = true;
 }
 
-/// Enter in SimpleSearch — navigate to selected item and return to previous mode.
+/// Enter in SimpleSearch / ExtendedSearch — navigate to selected item and return to previous mode.
 pub fn handle_enter_search(r: &mut AppRenderer) {
+    if r.coordinate == Coordinate::ExtendedSearch {
+        handle_enter_extended_search(r);
+        return;
+    }
+
     let selected_id = match r.current_list_item_id() {
         Some(id) => id,
         None => {
@@ -620,6 +625,54 @@ pub fn handle_enter_search(r: &mut AppRenderer) {
     list::create_list_current_layer(r);
     r.list_index = r.current_id.last().unwrap_or(0).min(r.active_list_len().saturating_sub(1));
     r.needs_redraw = true;
+}
+
+fn handle_enter_extended_search(r: &mut AppRenderer) {
+    let item = match r.current_list_item().cloned() {
+        Some(i) => i,
+        None => {
+            r.coordinate = r.previous_coordinate;
+            r.input_buffer.clear();
+            r.cursor_position = 0;
+            list::create_list_current_layer(r);
+            r.needs_redraw = true;
+            return;
+        }
+    };
+
+    // Deep search item: teleport via nav_path
+    if let Some(ref nav_path) = item.nav_path {
+        let root_idx = item.id.get(0).unwrap_or(0);
+        let (parent_dir, filename) = split_nav_path(nav_path);
+        crate::provider::navigate_to_path(r, root_idx, parent_dir, filename);
+        r.coordinate = r.previous_coordinate;
+        r.input_buffer.clear();
+        r.cursor_position = 0;
+        list::create_list_current_layer(r);
+        r.list_index = r.current_id.last().unwrap_or(0);
+        r.scroll_offset = -1;
+        r.needs_redraw = true;
+        return;
+    }
+
+    // Regular FFON-tree item: navigate by id
+    r.current_id = item.id;
+    r.coordinate = r.previous_coordinate;
+    r.input_buffer.clear();
+    r.cursor_position = 0;
+    list::create_list_current_layer(r);
+    r.list_index = r.current_id.last().unwrap_or(0).min(r.active_list_len().saturating_sub(1));
+    r.scroll_offset = -1;
+    r.needs_redraw = true;
+}
+
+/// Split a nav_path like `/a/b/c` into (`/a/b`, `c`).
+fn split_nav_path(nav_path: &str) -> (&str, &str) {
+    match nav_path.rfind('/') {
+        Some(pos) if pos > 0 => (&nav_path[..pos], &nav_path[pos + 1..]),
+        Some(_) => ("/", &nav_path[1..]),
+        None => ("", nav_path),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -987,13 +1040,23 @@ pub fn handle_escape(r: &mut AppRenderer) {
             r.needs_redraw = true;
             return;
         }
-        Coordinate::SimpleSearch | Coordinate::ExtendedSearch => {
+        Coordinate::SimpleSearch => {
             r.coordinate = r.previous_coordinate;
             r.search_string.clear();
             list::create_list_current_layer(r);
             r.list_index = r.current_id.last().unwrap_or(0);
             r.scroll_offset = 0;
             r.caret.reset(sdl_ticks());
+            r.needs_redraw = true;
+            return;
+        }
+        Coordinate::ExtendedSearch => {
+            r.coordinate = r.previous_coordinate;
+            r.input_buffer.clear();
+            r.cursor_position = 0;
+            list::create_list_current_layer(r);
+            r.list_index = r.current_id.last().unwrap_or(0);
+            r.scroll_offset = 0;
             r.needs_redraw = true;
             return;
         }
@@ -1081,6 +1144,15 @@ pub fn handle_input(r: &mut AppRenderer, text: &str) {
             r.cursor_position = pos + text.len();
             r.needs_redraw = true;
         }
+        Coordinate::ExtendedSearch => {
+            let pos = r.cursor_position.min(r.input_buffer.len());
+            r.input_buffer.insert_str(pos, text);
+            r.cursor_position = pos + text.len();
+            let filter = r.input_buffer.clone();
+            list::create_list_extended_search(r);
+            list::populate_list_current_layer(r, &filter);
+            r.needs_redraw = true;
+        }
         _ => {}
     }
 }
@@ -1104,7 +1176,7 @@ pub fn handle_backspace(r: &mut AppRenderer) {
                 r.needs_redraw = true;
             }
         }
-        Coordinate::Command | Coordinate::EditorInsert | Coordinate::OperatorInsert | Coordinate::ScrollSearch => {
+        Coordinate::Command | Coordinate::EditorInsert | Coordinate::OperatorInsert | Coordinate::ScrollSearch | Coordinate::ExtendedSearch => {
             if has_selection(r) {
                 delete_selection(r);
                 r.caret.reset(sdl_ticks());
@@ -1796,13 +1868,21 @@ pub fn handle_delete_forward(r: &mut AppRenderer) {
 
 /// Re-filter the list when editing in search/command modes.
 fn maybe_update_search(r: &mut AppRenderer) {
-    if matches!(r.coordinate, Coordinate::SimpleSearch | Coordinate::Command) {
-        let s = match r.coordinate {
-            Coordinate::Command => r.input_buffer.clone(),
-            _ => r.search_string.clone(),
-        };
-        list::create_list_current_layer(r);
-        list::populate_list_current_layer(r, &s);
+    match r.coordinate {
+        Coordinate::SimpleSearch | Coordinate::Command => {
+            let s = match r.coordinate {
+                Coordinate::Command => r.input_buffer.clone(),
+                _ => r.search_string.clone(),
+            };
+            list::create_list_current_layer(r);
+            list::populate_list_current_layer(r, &s);
+        }
+        Coordinate::ExtendedSearch => {
+            let s = r.input_buffer.clone();
+            list::create_list_extended_search(r);
+            list::populate_list_current_layer(r, &s);
+        }
+        _ => {}
     }
 }
 
@@ -1834,6 +1914,7 @@ fn is_text_edit_mode(r: &AppRenderer) -> bool {
         Coordinate::EditorInsert
             | Coordinate::OperatorInsert
             | Coordinate::SimpleSearch
+            | Coordinate::ExtendedSearch
             | Coordinate::Command
     )
 }
@@ -1978,7 +2059,7 @@ pub fn handle_ctrl_f(r: &mut AppRenderer) {
                 r.cursor_position = 0;
                 r.selection_anchor = None;
                 r.scroll_offset = 0;
-                list::create_list_current_layer(r);
+                list::create_list_extended_search(r);
                 r.list_index = 0;
             }
             r.last_keypress_time = now;
@@ -1994,7 +2075,7 @@ pub fn handle_ctrl_f(r: &mut AppRenderer) {
             r.cursor_position = 0;
             r.selection_anchor = None;
             r.scroll_offset = 0;
-            list::create_list_current_layer(r);
+            list::create_list_extended_search(r);
             r.list_index = r.current_id.last().unwrap_or(0);
             r.last_keypress_time = sdl_ticks();
             r.needs_redraw = true;

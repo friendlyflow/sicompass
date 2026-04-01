@@ -507,17 +507,26 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
             Some(Keycode::Left) if shift => handlers::handle_shift_left(r),
             Some(Keycode::Right) if shift => handlers::handle_shift_right(r),
             Some(Keycode::Left) if !ctrl && !shift => {
+                let buf = if r.coordinate == Coordinate::ExtendedSearch {
+                    &r.input_buffer
+                } else {
+                    &r.search_string
+                };
                 if r.cursor_position > 0 {
-                    let before = &r.search_string[..r.cursor_position.min(r.search_string.len())];
+                    let before = &buf[..r.cursor_position.min(buf.len())];
                     r.cursor_position = before.char_indices().rev().next().map(|(i,_)| i).unwrap_or(0);
                     r.needs_redraw = true;
                 }
             }
             Some(Keycode::Right) if !ctrl && !shift => {
                 let pos = r.cursor_position;
-                let slen = r.search_string.len();
-                if pos < slen {
-                    let ch = r.search_string[pos..].chars().next().unwrap();
+                let buf = if r.coordinate == Coordinate::ExtendedSearch {
+                    r.input_buffer.clone()
+                } else {
+                    r.search_string.clone()
+                };
+                if pos < buf.len() {
+                    let ch = buf[pos..].chars().next().unwrap();
                     r.cursor_position = pos + ch.len_utf8();
                     r.needs_redraw = true;
                 }
