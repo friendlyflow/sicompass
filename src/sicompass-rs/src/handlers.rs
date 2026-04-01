@@ -599,12 +599,26 @@ pub fn handle_enter_operator(r: &mut AppRenderer) {
         return;
     }
 
-    // Activate <input> element (commit existing content — triggers provider refresh)
-    let (elem_text, is_obj_elem) = match &elem_clone {
+    // Button press
+    if tags::has_button(&match &elem_clone { FfonElement::Str(s) => s.clone(), FfonElement::Obj(o) => o.key.clone() }) {
+        crate::provider::notify_button_pressed(r);
+        list::create_list_current_layer(r);
+        r.list_index = r.current_id.last().unwrap_or(0);
+        r.needs_redraw = true;
+        return;
+    }
+
+    // Activate <input> element (commit existing content — triggers provider refresh).
+    // In the filebrowser, elements with <input> tags represent files — open them instead of editing.
+    let (elem_text, _is_obj_elem) = match &elem_clone {
         FfonElement::Str(s) => (s.clone(), false),
         FfonElement::Obj(o) => (o.key.clone(), true),
     };
-    if tags::has_input(&elem_text) || tags::has_input_all(&elem_text) {
+    let is_filebrowser = crate::provider::get_active_provider_ref(r)
+        .map(|p| p.name() == "filebrowser")
+        .unwrap_or(false);
+
+    if (tags::has_input(&elem_text) || tags::has_input_all(&elem_text)) && !is_filebrowser {
         let content = if tags::has_input_all(&elem_text) {
             tags::extract_input_all(&elem_text).unwrap_or_default()
         } else {
@@ -615,6 +629,22 @@ pub fn handle_enter_operator(r: &mut AppRenderer) {
         list::create_list_current_layer(r);
         r.needs_redraw = true;
         return;
+    }
+
+    // For filebrowser string elements: open file with the system default program.
+    if matches!(elem_clone, FfonElement::Str(_)) {
+        let filename = if tags::has_input(&elem_text) {
+            tags::extract_input(&elem_text)
+        } else if tags::has_input_all(&elem_text) {
+            tags::extract_input_all(&elem_text)
+        } else {
+            None
+        };
+        if let Some(fname) = filename {
+            let path = crate::provider::current_path(r).to_owned();
+            let full_path = format!("{}/{}", path.trim_end_matches('/'), fname);
+            sicompass_sdk::platform::open_with_default(&full_path);
+        }
     }
 
     r.needs_redraw = true;
@@ -637,6 +667,54 @@ pub fn handle_enter_search(r: &mut AppRenderer) {
             return;
         }
     };
+
+    // Checkbox toggle: stay in search mode after toggling.
+    {
+        use sicompass_sdk::ffon::{FfonElement, get_ffon_at_id};
+        let elem_clone = get_ffon_at_id(&r.ffon, &selected_id)
+            .and_then(|a| a.get(selected_id.last().unwrap_or(0)))
+            .cloned();
+        if let Some(elem) = elem_clone {
+            if let Some(new_text) = toggle_checkbox(&elem) {
+                let idx = selected_id.last().unwrap_or(0);
+                if let Some(arr) = crate::state::navigate_to_slice_pub(&mut r.ffon, &selected_id) {
+                    if let Some(e) = arr.get_mut(idx) {
+                        *e = match &elem {
+                            FfonElement::Str(_) => FfonElement::new_str(new_text.clone()),
+                            FfonElement::Obj(o) => {
+                                let mut obj = FfonElement::new_obj(new_text.clone());
+                                for c in &o.children { obj.as_obj_mut().unwrap().push(c.clone() as FfonElement); }
+                                obj
+                            }
+                        };
+                    }
+                }
+                crate::provider::notify_checkbox_changed(r, &new_text);
+                let saved_index = r.list_index;
+                list::create_list_current_layer(r);
+                r.list_index = saved_index;
+                r.needs_redraw = true;
+                return;
+            }
+        }
+    }
+
+    // Radio toggle: exit search after selecting.
+    {
+        let saved_id = r.current_id.clone();
+        r.current_id = selected_id.clone();
+        if toggle_radio(r) {
+            crate::provider::notify_radio_changed(r);
+            r.coordinate = r.previous_coordinate;
+            r.search_string.clear();
+            list::create_list_current_layer(r);
+            r.list_index = r.current_id.last().unwrap_or(0);
+            r.needs_redraw = true;
+            return;
+        }
+        r.current_id = saved_id;
+    }
+
     r.current_id = selected_id;
     r.coordinate = r.previous_coordinate;
     r.search_string.clear();
@@ -657,6 +735,120 @@ fn handle_enter_extended_search(r: &mut AppRenderer) {
             return;
         }
     };
+
+    let selected_id = item.id.clone();
+
+    // Validate ancestor radio groups along the path to the selected item.
+    // Any radio group ancestor must have only string children and at most one <checked>.
+    {
+        use sicompass_sdk::ffon::get_ffon_at_id;
+        use sicompass_sdk::tags;
+
+        let depth = selected_id.depth();
+        let mut blocked_error: Option<&'static str> = None;
+        let mut blocked_ancestor_id = selected_id.clone();
+
+        'outer: for d in 1..depth.saturating_sub(1) {
+            let mut ancestor_id = sicompass_sdk::ffon::IdArray::new();
+            for i in 0..=d {
+                if let Some(v) = selected_id.get(i) { ancestor_id.push(v); }
+            }
+            let ancestor_idx = ancestor_id.last().unwrap_or(0);
+
+            let radio_key = get_ffon_at_id(&r.ffon, &ancestor_id)
+                .and_then(|a| a.get(ancestor_idx))
+                .and_then(|e| e.as_obj())
+                .filter(|o| tags::has_radio(&o.key))
+                .map(|o| o.key.clone());
+
+            if let Some(_) = radio_key {
+                let children = get_ffon_at_id(&r.ffon, &ancestor_id)
+                    .and_then(|a| a.get(ancestor_idx))
+                    .and_then(|e| e.as_obj())
+                    .map(|o| o.children.clone())
+                    .unwrap_or_default();
+
+                let mut checked_count = 0usize;
+                for child in &children {
+                    if child.is_obj() {
+                        blocked_error = Some("Radio group children must be strings, not objects");
+                        blocked_ancestor_id = ancestor_id.clone();
+                        break 'outer;
+                    }
+                    if let Some(s) = child.as_str() {
+                        if tags::has_checked(s) { checked_count += 1; }
+                    }
+                }
+                if checked_count > 1 {
+                    blocked_error = Some("Radio group must have at most one checked item");
+                    blocked_ancestor_id = ancestor_id.clone();
+                    break 'outer;
+                }
+            }
+        }
+
+        if let Some(err) = blocked_error {
+            r.current_id = blocked_ancestor_id;
+            r.coordinate = r.previous_coordinate;
+            r.input_buffer.clear();
+            r.cursor_position = 0;
+            list::create_list_current_layer(r);
+            r.error_message = err.to_owned();
+            r.list_index = r.current_id.last().unwrap_or(0);
+            r.scroll_offset = -1;
+            r.needs_redraw = true;
+            return;
+        }
+    }
+
+    // Checkbox toggle: stay in extended search after toggling.
+    {
+        use sicompass_sdk::ffon::{FfonElement, get_ffon_at_id};
+        let elem_clone = get_ffon_at_id(&r.ffon, &selected_id)
+            .and_then(|a| a.get(selected_id.last().unwrap_or(0)))
+            .cloned();
+        if let Some(elem) = elem_clone {
+            if let Some(new_text) = toggle_checkbox(&elem) {
+                let idx = selected_id.last().unwrap_or(0);
+                if let Some(arr) = crate::state::navigate_to_slice_pub(&mut r.ffon, &selected_id) {
+                    if let Some(e) = arr.get_mut(idx) {
+                        *e = match &elem {
+                            FfonElement::Str(_) => FfonElement::new_str(new_text.clone()),
+                            FfonElement::Obj(o) => {
+                                let mut obj = FfonElement::new_obj(new_text.clone());
+                                for c in &o.children { obj.as_obj_mut().unwrap().push(c.clone() as FfonElement); }
+                                obj
+                            }
+                        };
+                    }
+                }
+                crate::provider::notify_checkbox_changed(r, &new_text);
+                let saved_index = r.list_index;
+                list::create_list_extended_search(r);
+                r.list_index = saved_index;
+                r.needs_redraw = true;
+                return;
+            }
+        }
+    }
+
+    // Radio toggle: exit search after selecting.
+    {
+        let saved_id = r.current_id.clone();
+        r.current_id = selected_id.clone();
+        if toggle_radio(r) {
+            crate::provider::notify_radio_changed(r);
+            r.coordinate = r.previous_coordinate;
+            r.input_buffer.clear();
+            r.cursor_position = 0;
+            list::create_list_current_layer(r);
+            r.list_index = r.current_id.last().unwrap_or(0);
+            r.scroll_offset = -1;
+            r.needs_redraw = true;
+            return;
+        }
+        r.current_id = saved_id;
+    }
 
     // Deep search item: teleport via nav_path
     if let Some(ref nav_path) = item.nav_path {
@@ -966,8 +1158,179 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
         return;
     }
 
+    // <input-all> with empty old content and no prefix: create file or directory.
+    // A trailing ':' on the new name means "create as directory".
+    if tags::has_input_all(&elem_text) && old_content.is_empty() && r.input_prefix.is_empty() && !new_content.is_empty() {
+        let (create_as_dir, effective_name) = if new_content.ends_with(':') {
+            (true, new_content.trim_end_matches(':').trim().to_owned())
+        } else {
+            (false, new_content.clone())
+        };
+
+        let undo_id = r.current_id.clone();
+        let success;
+        let fs_created;
+
+        if create_as_dir {
+            let created = crate::provider::create_directory(r, &effective_name);
+            if created {
+                success = true;
+                fs_created = true;
+            } else if r.error_message.is_empty() {
+                // Provider has no createDirectory — convert FFON element to Obj in-place
+                let idx = r.current_id.last().unwrap_or(0);
+                if let Some(arr) = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id) {
+                    if idx < arr.len() {
+                        let mut new_obj = FfonElement::new_obj(effective_name.clone());
+                        new_obj.as_obj_mut().unwrap().push(FfonElement::new_str(String::new()));
+                        arr[idx] = new_obj;
+                    }
+                }
+                success = true;
+                fs_created = false;
+            } else {
+                r.needs_redraw = true;
+                return;
+            }
+        } else {
+            let created = crate::provider::create_file(r, &effective_name);
+            if created {
+                success = true;
+                fs_created = true;
+            } else if r.error_message.is_empty() {
+                // Provider has no createFile — keep as string, fall through to key update
+                success = true;
+                fs_created = false;
+            } else {
+                r.needs_redraw = true;
+                return;
+            }
+        }
+
+        if success {
+            if fs_created {
+                if r.undo_history.last().map(|e| matches!(e.task, Task::Insert | Task::InsertInsert | Task::Append | Task::AppendAppend)).unwrap_or(false) {
+                    r.undo_history.pop();
+                }
+                let undo_elem = if create_as_dir {
+                    FfonElement::new_obj(&effective_name)
+                } else {
+                    FfonElement::new_str(effective_name.clone())
+                };
+                crate::state::update_history(r, Task::FsCreate, &undo_id, None, Some(undo_elem), History::None);
+                crate::provider::refresh_current_directory(r);
+                list::create_list_current_layer(r);
+
+                // Find the created item and move cursor to it
+                let found_idx = r.total_list.iter().position(|item| {
+                    use sicompass_sdk::tags;
+                    let raw = item.label.as_str();
+                    tags::strip_display(raw) == effective_name || raw == effective_name
+                });
+                if let Some(i) = found_idx {
+                    if let Some(id) = r.total_list.get(i).map(|it| it.id.clone()) {
+                        r.current_id = id;
+                    }
+                }
+            } else {
+                // Pure FFON: update element key with new content
+                let new_key = if !fs_created && !create_as_dir {
+                    tags::format_input(&effective_name)
+                } else {
+                    effective_name.clone()
+                };
+                let idx = r.current_id.last().unwrap_or(0);
+                if let Some(arr) = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id) {
+                    if let Some(e) = arr.get_mut(idx) {
+                        *e = FfonElement::new_str(new_key);
+                    }
+                }
+                list::create_list_current_layer(r);
+            }
+
+            r.coordinate = Coordinate::OperatorGeneral;
+            r.previous_coordinate = Coordinate::OperatorGeneral;
+            r.input_buffer.clear();
+            r.cursor_position = 0;
+            r.list_index = r.current_id.last().unwrap_or(0);
+            r.scroll_offset = 0;
+            r.needs_redraw = true;
+        }
+        return;
+    }
+
+    // Empty old content, no prefix, Obj element: create directory via provider.
+    if old_content.is_empty() && r.input_prefix.is_empty() && is_obj && !new_content.is_empty() {
+        let undo_id = r.current_id.clone();
+        if crate::provider::create_directory(r, &new_content) {
+            if r.undo_history.last().map(|e| matches!(e.task, Task::Insert | Task::InsertInsert | Task::Append | Task::AppendAppend)).unwrap_or(false) {
+                r.undo_history.pop();
+            }
+            crate::state::update_history(r, Task::FsCreate, &undo_id, None, Some(FfonElement::new_obj(&new_content)), History::None);
+            crate::provider::refresh_current_directory(r);
+            list::create_list_current_layer(r);
+            r.coordinate = Coordinate::OperatorGeneral;
+            r.previous_coordinate = Coordinate::OperatorGeneral;
+            r.input_buffer.clear();
+            r.cursor_position = 0;
+            r.needs_redraw = true;
+        } else if !r.error_message.is_empty() {
+            r.needs_redraw = true;
+        }
+        return;
+    }
+
+    // Empty old content, no prefix, Str element: create file via provider or FFON update.
+    if old_content.is_empty() && r.input_prefix.is_empty() && !is_obj && !new_content.is_empty() {
+        let undo_id = r.current_id.clone();
+        if crate::provider::create_file(r, &new_content) {
+            if r.undo_history.last().map(|e| matches!(e.task, Task::Insert | Task::InsertInsert | Task::Append | Task::AppendAppend)).unwrap_or(false) {
+                r.undo_history.pop();
+            }
+            crate::state::update_history(r, Task::FsCreate, &undo_id, None, Some(FfonElement::new_str(new_content.clone())), History::None);
+            crate::provider::refresh_current_directory(r);
+            list::create_list_current_layer(r);
+            r.coordinate = Coordinate::OperatorGeneral;
+            r.previous_coordinate = Coordinate::OperatorGeneral;
+            r.input_buffer.clear();
+            r.cursor_position = 0;
+            r.needs_redraw = true;
+            return;
+        } else if r.error_message.is_empty() {
+            // Provider has no createFile: update FFON element key directly
+            let new_key = tags::format_input(&new_content);
+            let idx = r.current_id.last().unwrap_or(0);
+            if let Some(arr) = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id) {
+                if let Some(e) = arr.get_mut(idx) {
+                    *e = FfonElement::new_str(new_key);
+                }
+            }
+            handle_escape(r);
+            return;
+        } else {
+            r.needs_redraw = true;
+            return;
+        }
+    }
+
+    // For flat "label: <input>value</input>" items, temporarily push the prefix label
+    // onto the provider path so commit_edit can locate the correct setting entry.
+    let prefix_label = r.input_prefix
+        .trim_end_matches(' ').trim_end_matches(':').trim()
+        .to_owned();
+    let prefix_path_pushed = if !prefix_label.is_empty() {
+        crate::provider::push_path(r, &prefix_label);
+        true
+    } else {
+        false
+    };
+
     // Try provider commit first
     let committed = crate::provider::commit_edit(r, &old_content, &new_content);
+
+    if prefix_path_pushed {
+        crate::provider::pop_path(r);
+    }
 
     // Build replacement element text (re-wrap in tag format)
     let new_elem_text = if tags::has_input_all(&elem_text) {
@@ -997,6 +1360,16 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
     }
 
     handle_escape(r);
+    r.input_buffer.clear();
+    r.cursor_position = 0;
+
+    let saved_error = r.error_message.clone();
+    list::create_list_current_layer(r);
+    if !saved_error.is_empty() {
+        r.error_message = saved_error;
+    }
+    r.list_index = r.current_id.last().unwrap_or(0);
+    r.scroll_offset = 0;
 }
 
 /// Parse "- name" (file) or "+ name" (directory) creation prefixes.
