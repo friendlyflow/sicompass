@@ -321,7 +321,7 @@ fn update_view(app: &mut AppState) {
         Coordinate::SimpleSearch | Coordinate::ExtendedSearch | Coordinate::Command
     ) {
         let (prefix, text) = match app.renderer.coordinate {
-            Coordinate::Command => (":", app.renderer.input_buffer.as_str()),
+            Coordinate::Command => ("search: ", app.renderer.input_buffer.as_str()),
             Coordinate::ExtendedSearch => ("ext search: ", app.renderer.input_buffer.as_str()),
             _ => ("search: ", app.renderer.search_string.as_str()),
         };
@@ -713,7 +713,7 @@ fn update_view(app: &mut AppState) {
             } else {
                 let prefix = match app.renderer.coordinate {
                     Coordinate::ExtendedSearch => "ext search: ",
-                    Coordinate::Command => ":",
+                    Coordinate::Command => "search: ",
                     _ => "search: ",
                 };
                 let pfx_w = app.font_renderer.as_ref()
@@ -798,7 +798,7 @@ fn update_view(app: &mut AppState) {
         ) {
             // Search/command caret after the prefix
             let (prefix, buf, cursor) = match app.renderer.coordinate {
-                Coordinate::Command => (":", insert_buf.as_str(), insert_cursor),
+                Coordinate::Command => ("search: ", insert_buf.as_str(), insert_cursor),
                 Coordinate::ExtendedSearch => ("ext search: ", insert_buf.as_str(), insert_cursor),
                 _ => ("search: ", app.renderer.search_string.as_str(), insert_cursor),
             };

@@ -378,6 +378,181 @@ pub fn notify_radio_changed(renderer: &mut AppRenderer) {
     }
 }
 
+/// Notify the active provider that a button was pressed.
+///
+/// Handles the "Add element:" section protocol: if a button inside an
+/// "Add element:" object is pressed, calls `create_element` on the provider
+/// and inserts the returned element before that section. Otherwise calls
+/// `on_button_press` and refreshes the current directory.
+///
+/// Mirrors C `providerNotifyButtonPressed` in `provider.c`.
+pub fn notify_button_pressed(renderer: &mut AppRenderer) {
+    use sicompass_sdk::ffon::{FfonElement, get_ffon_at_id};
+    use sicompass_sdk::tags;
+
+    let current_id = renderer.current_id.clone();
+    let depth = current_id.depth();
+    let provider_idx = match current_id.get(0) { Some(i) => i, None => return };
+
+    // Extract button function name from the current string element.
+    let function_name: String = {
+        let arr = get_ffon_at_id(&renderer.ffon, &current_id);
+        let idx = current_id.last().unwrap_or(0);
+        let text = match arr.and_then(|a| a.get(idx)).and_then(|e| e.as_str()) {
+            Some(s) => s.to_owned(),
+            None => return,
+        };
+        match tags::extract_button_function_name(&text) {
+            Some(n) => n,
+            None => return,
+        }
+    };
+
+    let mut handled = false;
+
+    // Check for "Add element:" section (requires depth >= 3: root / grandparent / "Add element:" / button).
+    if depth >= 3 {
+        let mut parent_id = current_id.clone();
+        parent_id.pop();
+        let parent_idx = parent_id.last().unwrap_or(0);
+
+        // Is the parent an "Add element:" object?
+        let parent_is_add_elem = {
+            get_ffon_at_id(&renderer.ffon, &parent_id)
+                .and_then(|a| a.get(parent_idx))
+                .and_then(|e| e.as_obj())
+                .map(|o| o.key.as_str() == "Add element:")
+                .unwrap_or(false)
+        };
+
+        if parent_is_add_elem {
+            let mut grand_id = parent_id.clone();
+            grand_id.pop();
+            // insert_idx = position of "Add element:" inside grandparent's children
+            let insert_idx = parent_idx;
+            let grand_idx = grand_id.last().unwrap_or(0);
+
+            let grand_is_obj = {
+                get_ffon_at_id(&renderer.ffon, &grand_id)
+                    .and_then(|a| a.get(grand_idx))
+                    .map(|e| matches!(e, FfonElement::Obj(_)))
+                    .unwrap_or(false)
+            };
+
+            if grand_is_obj {
+                let new_elem = renderer.providers.get_mut(provider_idx)
+                    .and_then(|p| p.create_element(&function_name));
+
+                if let Some(new_elem) = new_elem {
+                    // Pop "Add element:" path segment from provider path.
+                    if let Some(p) = renderer.providers.get_mut(provider_idx) {
+                        p.pop_path();
+                    }
+
+                    // Insert new_elem before "Add element:" in grandparent's children.
+                    {
+                        if let Some(slice) = get_ffon_at_id_mut(&mut renderer.ffon, &grand_id) {
+                            if let Some(obj) = slice.get_mut(grand_idx).and_then(|e| e.as_obj_mut()) {
+                                obj.children.insert(insert_idx.min(obj.children.len()), new_elem);
+                            }
+                        }
+                    }
+
+                    // Move cursor to the newly inserted element.
+                    renderer.current_id = grand_id.clone();
+                    renderer.current_id.push(insert_idx);
+
+                    handled = true;
+
+                    let add_elem_pos = insert_idx + 1;
+                    let is_one_opt = function_name.starts_with("one-opt:");
+
+                    let grand_child_count = {
+                        get_ffon_at_id(&renderer.ffon, &grand_id)
+                            .and_then(|a| a.get(grand_idx))
+                            .and_then(|e| e.as_obj())
+                            .map(|o| o.children.len())
+                            .unwrap_or(0)
+                    };
+
+                    if add_elem_pos < grand_child_count.saturating_sub(1) {
+                        // Clone "Add element:": remove the clone at add_elem_pos.
+                        {
+                            if let Some(slice) = get_ffon_at_id_mut(&mut renderer.ffon, &grand_id) {
+                                if let Some(obj) = slice.get_mut(grand_idx).and_then(|e| e.as_obj_mut()) {
+                                    if add_elem_pos < obj.children.len() {
+                                        obj.children.remove(add_elem_pos);
+                                    }
+                                }
+                            }
+                        }
+                        // Remove matching one-opt button from the original "Add element:" (last child).
+                        if is_one_opt {
+                            let last_idx = {
+                                get_ffon_at_id(&renderer.ffon, &grand_id)
+                                    .and_then(|a| a.get(grand_idx))
+                                    .and_then(|e| e.as_obj())
+                                    .map(|o| o.children.len().saturating_sub(1))
+                                    .unwrap_or(0)
+                            };
+                            remove_one_opt_button_and_maybe_section(
+                                &mut renderer.ffon, &grand_id, grand_idx, last_idx, &function_name,
+                            );
+                        }
+                    } else if is_one_opt {
+                        // Original "Add element:": remove button and section if empty.
+                        let removed_all = remove_one_opt_button_and_maybe_section(
+                            &mut renderer.ffon, &grand_id, grand_idx, add_elem_pos, &function_name,
+                        );
+                        if removed_all {
+                            if let Some(slice) = get_ffon_at_id_mut(&mut renderer.ffon, &grand_id) {
+                                if let Some(obj) = slice.get_mut(grand_idx).and_then(|e| e.as_obj_mut()) {
+                                    if add_elem_pos < obj.children.len() {
+                                        obj.children.remove(add_elem_pos);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if !handled {
+        if let Some(p) = renderer.providers.get_mut(provider_idx) {
+            p.on_button_press(&function_name);
+        }
+        refresh_current_directory(renderer);
+    }
+}
+
+/// Remove the button matching `function_name` from the "Add element:" child at
+/// `add_elem_idx` inside the grandparent object. Returns `true` if that child
+/// is now empty (so the caller can remove the "Add element:" section).
+fn remove_one_opt_button_and_maybe_section(
+    ffon: &mut Vec<sicompass_sdk::ffon::FfonElement>,
+    grand_id: &sicompass_sdk::ffon::IdArray,
+    grand_idx: usize,
+    add_elem_idx: usize,
+    function_name: &str,
+) -> bool {
+    use sicompass_sdk::tags;
+
+    let Some(slice) = get_ffon_at_id_mut(ffon, grand_id) else { return false };
+    let Some(grand_obj) = slice.get_mut(grand_idx).and_then(|e| e.as_obj_mut()) else { return false };
+    let Some(add_elem_obj) = grand_obj.children.get_mut(add_elem_idx).and_then(|e| e.as_obj_mut()) else { return false };
+
+    if let Some(btn_idx) = add_elem_obj.children.iter().position(|e| {
+        e.as_str()
+            .and_then(|s| tags::extract_button_function_name(s))
+            .as_deref() == Some(function_name)
+    }) {
+        add_elem_obj.children.remove(btn_idx);
+    }
+    add_elem_obj.children.is_empty()
+}
+
 /// Navigate a specific provider to an absolute directory path.
 ///
 /// Resets the provider to `/`, refetches, then walks each path component
