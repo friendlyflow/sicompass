@@ -11,6 +11,65 @@ use sicompass_sdk::tags;
 // Public API
 // ---------------------------------------------------------------------------
 
+/// Rebuild `total_list` for `Coordinate::ExtendedSearch`.
+///
+/// Recursively walks the in-memory FFON tree at `current_id`, collecting all
+/// elements with breadcrumb paths. This is consistent across all providers.
+pub fn create_list_extended_search(renderer: &mut AppRenderer) {
+    renderer.total_list.clear();
+    renderer.filtered_list_indices.clear();
+    renderer.error_message.clear();
+
+    // Recursively walk the in-memory FFON tree.
+    let base_id = renderer.current_id.clone();
+    let ffon = &renderer.ffon;
+    let arr = match get_ffon_at_id(ffon, &base_id) {
+        Some(a) => a,
+        None => return,
+    };
+
+    let mut items: Vec<crate::app_state::RenderListItem> = Vec::new();
+    collect_items_recursive(arr, &base_id, "", &mut items);
+    renderer.total_list = items;
+    renderer.list_index = renderer.list_index.min(renderer.total_list.len().saturating_sub(1));
+}
+
+/// Recursively collect all FFON elements with breadcrumb paths.
+fn collect_items_recursive(
+    arr: &[FfonElement],
+    base_id: &sicompass_sdk::ffon::IdArray,
+    breadcrumb: &str,
+    out: &mut Vec<crate::app_state::RenderListItem>,
+) {
+    for (i, elem) in arr.iter().enumerate() {
+        let mut item_id = base_id.clone();
+        item_id.set_last(i);
+
+        let label = build_label_for_element(elem, false);
+        out.push(crate::app_state::RenderListItem {
+            id: item_id.clone(),
+            label,
+            data: if breadcrumb.is_empty() { None } else { Some(breadcrumb.to_owned()) },
+            nav_path: None,
+        });
+
+        // Recurse into object children
+        if let FfonElement::Obj(obj) = elem {
+            if !obj.children.is_empty() {
+                let display = sicompass_sdk::tags::strip_display(&obj.key);
+                let new_bc = if breadcrumb.is_empty() {
+                    format!("{} > ", display)
+                } else {
+                    format!("{}{} > ", breadcrumb, display)
+                };
+                let mut child_id = item_id.clone();
+                child_id.push(0);
+                collect_items_recursive(&obj.children, &child_id, &new_bc, out);
+            }
+        }
+    }
+}
+
 /// Rebuild `total_list` from the FFON tree at `current_id`, and restore
 /// `list_index` to the item matching `current_id.last()`.
 pub fn create_list_current_layer(renderer: &mut AppRenderer) {
@@ -24,6 +83,10 @@ pub fn create_list_current_layer(renderer: &mut AppRenderer) {
         | Coordinate::SimpleSearch
         | Coordinate::EditorGeneral
         | Coordinate::EditorInsert => {}
+        Coordinate::ExtendedSearch => {
+            create_list_extended_search(renderer);
+            return;
+        }
         Coordinate::Command => {
             build_command_list(renderer);
             return;
@@ -103,8 +166,18 @@ pub fn populate_list_current_layer(renderer: &mut AppRenderer, search: &str) {
     let needle_lower = search.to_lowercase();
 
     for (i, item) in renderer.total_list.iter().enumerate() {
-        let label_lower = item.label.to_lowercase();
-        if label_lower.contains(&needle_lower) {
+        let matches = if item.nav_path.is_some() {
+            // Deep search items: prefix-match on the bare name (skip "- " / "+ " prefix)
+            let bare = if item.label.len() >= 2 && &item.label[1..2] == " " {
+                &item.label[2..]
+            } else {
+                &item.label
+            };
+            bare.to_lowercase().starts_with(&needle_lower)
+        } else {
+            item.label.to_lowercase().contains(&needle_lower)
+        };
+        if matches {
             renderer.filtered_list_indices.push(i);
         }
     }

@@ -18,6 +18,7 @@ fn is_insert_mode(c: Coordinate) -> bool {
             | Coordinate::EditorVisual
             | Coordinate::OperatorInsert
             | Coordinate::SimpleSearch
+            | Coordinate::ExtendedSearch
             | Coordinate::Command
     )
 }
@@ -296,10 +297,11 @@ fn update_view(app: &mut AppState) {
     let insert_display: Option<String> = build_insert_display(&app.renderer);
     let search_str = if matches!(
         app.renderer.coordinate,
-        Coordinate::SimpleSearch | Coordinate::Command
+        Coordinate::SimpleSearch | Coordinate::ExtendedSearch | Coordinate::Command
     ) {
         let (prefix, text) = match app.renderer.coordinate {
             Coordinate::Command => (":", app.renderer.input_buffer.as_str()),
+            Coordinate::ExtendedSearch => ("ext search: ", app.renderer.input_buffer.as_str()),
             _ => ("search: ", app.renderer.search_string.as_str()),
         };
         Some(format!("{}{}", prefix, text))
@@ -357,19 +359,33 @@ fn update_view(app: &mut AppState) {
     let available_lines = ((win_h - first_item_y) / line_height as f32).max(1.0) as usize;
     let item_max_w = max_content_w.max(1.0);
 
+    let is_extended_search = app.renderer.coordinate == Coordinate::ExtendedSearch;
     let line_counts: Vec<usize> = {
         let fr = match app.font_renderer.as_ref() { Some(f) => f, None => return };
         list_items.iter().map(|(label, img_data, _)| {
-            if let Some(path) = img_data {
-                let img_h = app.image_renderer.as_mut()
-                    .and_then(|ir| unsafe { ir.texture_size(path) })
-                    .map(|(tw, th)| if tw == 0 { item_max_w } else { item_max_w * th as f32 / tw as f32 })
-                    .unwrap_or(item_max_w);
-                ((img_h / line_height as f32).ceil() as usize).max(1)
-            } else {
+            if !is_extended_search {
+                if let Some(path) = img_data {
+                    let img_h = app.image_renderer.as_mut()
+                        .and_then(|ir| unsafe { ir.texture_size(path) })
+                        .map(|(tw, th)| if tw == 0 { item_max_w } else { item_max_w * th as f32 / tw as f32 })
+                        .unwrap_or(item_max_w);
+                    return ((img_h / line_height as f32).ceil() as usize).max(1);
+                }
                 let (_, content) = split_label(label);
-                fr.count_wrapped_lines(content, scale, item_max_w)
+                return fr.count_wrapped_lines(content, scale, item_max_w);
             }
+            // ExtendedSearch: breadcrumb + prefix precede content — reduce available width.
+            // Use 4.0 * em_width (= item_prefix_x offset) not list_indent_px (space-based)
+            // so that the available_w matches what the rendering loop actually uses.
+            // Also subtract indicator_width when any item has an indicator, since text_prefix_x
+            // is shifted right by that amount for ALL items (for alignment).
+            let indicator_w = if list_has_indicators { indicator_width(line_height as f32, em_width) } else { 0.0 };
+            let bc_w = img_data.as_deref().filter(|s| !s.is_empty())
+                .map(|bc| fr.measure_text_width(bc, scale)).unwrap_or(0.0);
+            let (prefix_str, content) = split_label(label);
+            let prefix_w = fr.measure_text_width(prefix_str, scale);
+            let available_w = (max_content_w - 4.0 * em_width - indicator_w - bc_w - prefix_w).max(1.0);
+            fr.count_wrapped_lines(content, scale, available_w)
         }).collect()
     };
 
@@ -443,21 +459,32 @@ fn update_view(app: &mut AppState) {
         let mut metrics = Vec::with_capacity(list_items.len().saturating_sub(start_index));
         for (label, img_data, _) in list_items.iter().skip(start_index) {
             if y > win_h { break; }
-            let lines = if let Some(path) = img_data {
-                // Compute image height as aspect-ratio of content width, measured in lines.
-                let img_h = if let Some(ir) = app.image_renderer.as_mut() {
-                    unsafe { ir.texture_size(path) }
-                        .map(|(tw, th)| {
-                            if tw == 0 { item_max_w } else { item_max_w * th as f32 / tw as f32 }
-                        })
-                        .unwrap_or(item_max_w)
+            let lines = if !is_extended_search {
+                if let Some(path) = img_data {
+                    // Compute image height as aspect-ratio of content width, measured in lines.
+                    let img_h = if let Some(ir) = app.image_renderer.as_mut() {
+                        unsafe { ir.texture_size(path) }
+                            .map(|(tw, th)| {
+                                if tw == 0 { item_max_w } else { item_max_w * th as f32 / tw as f32 }
+                            })
+                            .unwrap_or(item_max_w)
+                    } else {
+                        item_max_w
+                    };
+                    ((img_h / line_height as f32).ceil() as usize).max(1)
                 } else {
-                    item_max_w
-                };
-                ((img_h / line_height as f32).ceil() as usize).max(1)
+                    let (_, content) = split_label(label);
+                    fr.count_wrapped_lines(content, scale, item_max_w)
+                }
             } else {
-                let (_, content) = split_label(label);
-                fr.count_wrapped_lines(content, scale, item_max_w)
+                // ExtendedSearch: breadcrumb + prefix precede content — reduce available width.
+                let indicator_w = if list_has_indicators { indicator_width(line_height as f32, em_width) } else { 0.0 };
+                let bc_w = img_data.as_deref().filter(|s| !s.is_empty())
+                    .map(|bc| fr.measure_text_width(bc, scale)).unwrap_or(0.0);
+                let (prefix_str, content) = split_label(label);
+                let prefix_w = fr.measure_text_width(prefix_str, scale);
+                let available_w = (max_content_w - 4.0 * em_width - indicator_w - bc_w - prefix_w).max(1.0);
+                fr.count_wrapped_lines(content, scale, available_w)
             };
             let highlight_w = (max_prefix_px + item_max_w + 20.0).min(win_w - content_x - list_indent_px);
             metrics.push((y, content_start_x, lines, highlight_w));
@@ -532,7 +559,7 @@ fn update_view(app: &mut AppState) {
 
     // ---- List items — text / images ----------------------------------------
     let item_prefix_x = text_x + 4.0 * em_width;
-    for (i, (label, img_data, is_selected)) in list_items[start_index..].iter().take(item_metrics.len()).enumerate() {
+    for (i, (label, item_data, is_selected)) in list_items[start_index..].iter().take(item_metrics.len()).enumerate() {
         let (item_y, content_start_x, _, _) = item_metrics[i];
 
         // Draw graphical indicator (radio/checkbox) and compute x shift.
@@ -555,7 +582,29 @@ fn update_view(app: &mut AppState) {
             item_prefix_x
         };
 
-        if let Some(ref path) = img_data {
+        if is_extended_search {
+            // item_data is a breadcrumb, not an image path.
+            // Render: [breadcrumb in ext_search color][prefix][content], all within 120 em column.
+            let right_edge = text_x + max_content_w;
+            let display_label = if *is_selected {
+                insert_display.as_deref().unwrap_or(label.as_str())
+            } else {
+                label.as_str()
+            };
+            let (prefix_str, content) = split_label(display_label);
+            if let Some(fr) = app.font_renderer.as_mut() {
+                let mut label_x = text_prefix_x;
+                if let Some(breadcrumb) = item_data.as_deref().filter(|s| !s.is_empty()) {
+                    let bc_w = fr.measure_text_width(breadcrumb, scale);
+                    fr.prepare_text_for_rendering(breadcrumb, label_x, item_y, scale, p.ext_search);
+                    label_x += bc_w;
+                }
+                fr.prepare_text_for_rendering(prefix_str, label_x, item_y, scale, p.text);
+                let content_x = label_x + fr.measure_text_width(prefix_str, scale);
+                let available_w = (right_edge - content_x).max(1.0);
+                fr.prepare_text_wrapped(content, content_x, item_y, scale, available_w, line_height as f32, p.text);
+            }
+        } else if let Some(ref path) = item_data {
             let (prefix, _) = split_label(label);
             if let Some(fr) = app.font_renderer.as_mut() {
                 fr.prepare_text_for_rendering(prefix, text_prefix_x, item_y, scale, p.text);
