@@ -515,6 +515,7 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
                 if r.cursor_position > 0 {
                     let before = &buf[..r.cursor_position.min(buf.len())];
                     r.cursor_position = before.char_indices().rev().next().map(|(i,_)| i).unwrap_or(0);
+                    r.caret.reset(handlers::sdl_ticks());
                     r.needs_redraw = true;
                 }
             }
@@ -528,6 +529,7 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
                 if pos < buf.len() {
                     let ch = buf[pos..].chars().next().unwrap();
                     r.cursor_position = pos + ch.len_utf8();
+                    r.caret.reset(handlers::sdl_ticks());
                     r.needs_redraw = true;
                 }
             }
@@ -565,6 +567,7 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
                     let before = &r.input_buffer[..r.cursor_position];
                     r.cursor_position = before.char_indices().rev()
                         .next().map(|(i, _)| i).unwrap_or(0);
+                    r.caret.reset(handlers::sdl_ticks());
                     r.needs_redraw = true;
                 }
             }
@@ -573,6 +576,7 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
                 if pos < r.input_buffer.len() {
                     let ch = r.input_buffer[pos..].chars().next().unwrap();
                     r.cursor_position = pos + ch.len_utf8();
+                    r.caret.reset(handlers::sdl_ticks());
                     r.needs_redraw = true;
                 }
             }
@@ -622,6 +626,7 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
                     let before = &r.input_buffer[..r.cursor_position];
                     r.cursor_position = before.char_indices().rev()
                         .next().map(|(i, _)| i).unwrap_or(0);
+                    r.caret.reset(handlers::sdl_ticks());
                     r.needs_redraw = true;
                 }
             }
@@ -630,6 +635,7 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
                 if pos < r.input_buffer.len() {
                     let ch = r.input_buffer[pos..].chars().next().unwrap();
                     r.cursor_position = pos + ch.len_utf8();
+                    r.caret.reset(handlers::sdl_ticks());
                     r.needs_redraw = true;
                 }
             }
