@@ -435,6 +435,7 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
             Some(Keycode::Home) if !ctrl && !shift => handlers::handle_home(r),
             Some(Keycode::End) if !ctrl && !shift => handlers::handle_end(r),
             Some(Keycode::Tab) => handlers::handle_tab(r),
+            Some(Keycode::Colon) if !ctrl && !shift => handlers::handle_colon(r),
             Some(Keycode::Semicolon) if shift => handlers::handle_colon(r),
             Some(Keycode::Return) | Some(Keycode::KpEnter) if !ctrl => {
                 handlers::handle_enter_operator(r);
@@ -470,6 +471,7 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
             Some(Keycode::Home) if !ctrl && !shift => handlers::handle_home(r),
             Some(Keycode::End) if !ctrl && !shift => handlers::handle_end(r),
             Some(Keycode::Tab) => handlers::handle_tab(r),
+            Some(Keycode::Colon) if !ctrl && !shift => handlers::handle_colon(r),
             Some(Keycode::Semicolon) if shift => handlers::handle_colon(r),
             Some(Keycode::Return) | Some(Keycode::KpEnter) if !ctrl => handlers::handle_append(r),
             Some(Keycode::I) if !ctrl && !shift => handlers::handle_i(r),
@@ -623,7 +625,7 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
                 }
             }
             Some(Keycode::Return) | Some(Keycode::KpEnter) => {
-                handlers::handle_escape(r);
+                handlers::handle_enter_command(r);
             }
             Some(Keycode::A) if ctrl && !shift => handlers::handle_select_all(r),
             Some(Keycode::X) if ctrl && !shift => handlers::handle_ctrl_x(r),
