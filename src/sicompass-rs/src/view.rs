@@ -420,11 +420,8 @@ fn update_view(app: &mut AppState) {
     } else {
         let scroll_offset = app.renderer.scroll_offset;
         if scroll_offset < 0 {
-            // Sentinel -1: position list_index as second-to-last visible (scroll-from-bottom).
+            // Sentinel -1: position list_index as last visible (renderer shows one extra item below).
             let mut lines_from_bottom = line_counts.get(list_index).copied().unwrap_or(1);
-            if list_index + 1 < count {
-                lines_from_bottom += line_counts.get(list_index + 1).copied().unwrap_or(1);
-            }
             let mut si = list_index;
             while si > 0 {
                 let prev = line_counts.get(si - 1).copied().unwrap_or(1);
@@ -440,22 +437,6 @@ fn update_view(app: &mut AppState) {
             while lines_to_sel > available_lines && si < list_index {
                 lines_to_sel -= line_counts.get(si).copied().unwrap_or(1);
                 si += 1;
-            }
-            // Scrolloff: try to show 1 item below the selection.
-            if list_index + 1 < count {
-                let next_lines = line_counts.get(list_index + 1).copied().unwrap_or(1);
-                if lines_to_sel + next_lines > available_lines && si < list_index {
-                    let saved_si = si;
-                    let saved_lines = lines_to_sel;
-                    while lines_to_sel + next_lines > available_lines && si < list_index {
-                        lines_to_sel -= line_counts.get(si).copied().unwrap_or(1);
-                        si += 1;
-                    }
-                    if lines_to_sel + next_lines > available_lines {
-                        si = saved_si;
-                        lines_to_sel = saved_lines;
-                    }
-                }
             }
             // Scrolloff: try to show 1 item above the selection.
             if si > 0 && si == list_index {
