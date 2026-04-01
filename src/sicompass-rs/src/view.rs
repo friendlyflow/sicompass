@@ -269,7 +269,11 @@ fn update_view(app: &mut AppState) {
     // ---- Scroll-into-view: compute start_index from scroll_offset/list_index --
     // Pre-compute per-item line counts (needed before item_metrics so the scroll
     // algorithm can run first, matching the C render.c viewport logic).
-    let extra_lines = 1 + if parent_info.radio_summary.is_some() { 1 } else { 0 };
+    let extra_lines = if search_str.is_some() {
+        1
+    } else {
+        1 + if parent_info.radio_summary.is_some() { 1 } else { 0 }
+    };
     let first_item_y = (line_height as f32) * (1.0 + extra_lines as f32) + ascender * scale + crate::text::TEXT_PADDING;
     let available_lines = ((win_h - first_item_y) / line_height as f32).max(1.0) as usize;
     let item_max_w = max_content_w.max(1.0);
@@ -415,7 +419,7 @@ fn update_view(app: &mut AppState) {
     }
 
     // ---- Parent element (when navigated into a child level) ---------------
-    if !parent_info.display_text.is_empty() {
+    if !parent_info.display_text.is_empty() && search_str.is_none() {
         let parent_y = line_height as f32 + ascender * scale + crate::text::TEXT_PADDING;
         fr.prepare_text_for_rendering(&parent_info.display_text, text_x, parent_y, scale, p.text);
         if let Some(ref summary) = parent_info.radio_summary {
@@ -432,7 +436,7 @@ fn update_view(app: &mut AppState) {
 
     // ---- Search / command line -------------------------------------------
     if let Some(ref s) = search_str {
-        let search_y = line_height as f32 * 2.0 - crate::text::TEXT_PADDING;
+        let search_y = line_height as f32 + ascender * scale + crate::text::TEXT_PADDING;
         fr.prepare_text_for_rendering(s, text_x, search_y, scale, p.text);
     }
 
