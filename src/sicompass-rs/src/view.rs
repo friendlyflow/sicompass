@@ -20,6 +20,8 @@ fn is_insert_mode(c: Coordinate) -> bool {
             | Coordinate::SimpleSearch
             | Coordinate::ExtendedSearch
             | Coordinate::Command
+            | Coordinate::ScrollSearch
+            | Coordinate::InputSearch
     )
 }
 
@@ -46,6 +48,12 @@ pub fn main_loop(app: &mut AppState) {
                         continue;
                     }
                     handle_keydown(app, keycode, keymod);
+                    // Enable/disable SDL text input based on new mode (mirrors C view.c).
+                    if is_insert_mode(app.renderer.coordinate) {
+                        app._video.text_input().start(&app.window);
+                    } else {
+                        app._video.text_input().stop(&app.window);
+                    }
                 }
 
                 Event::Window { win_event, window_id, .. } => {
@@ -110,6 +118,10 @@ pub fn main_loop(app: &mut AppState) {
                 app.window.restore();
             }
         }
+
+        // ---- Advance caret blink state --------------------------------------
+        let now_ms = handlers::sdl_ticks();
+        app.renderer.caret.update(now_ms);
 
         // ---- Continuous redraw in insert/search modes (caret blink) ---------
         if is_insert_mode(app.renderer.coordinate) {
@@ -293,8 +305,17 @@ fn update_view(app: &mut AppState) {
         return;
     }
 
-    // In insert mode the selected item shows prefix + buffer (with cursor marker)
-    let insert_display: Option<String> = build_insert_display(&app.renderer);
+    // Snapshot insert-mode state before mutable borrows
+    let in_insert_mode = matches!(
+        app.renderer.coordinate,
+        Coordinate::EditorInsert | Coordinate::EditorNormal | Coordinate::EditorVisual | Coordinate::OperatorInsert
+    );
+    let insert_buf = app.renderer.input_buffer.clone();
+    let insert_prefix = app.renderer.input_prefix.clone();
+    let insert_suffix = app.renderer.input_suffix.clone();
+    let insert_cursor = app.renderer.cursor_position;
+    let insert_sel = app.renderer.selection_anchor;
+    let caret_visible = app.renderer.caret.visible;
     let search_str = if matches!(
         app.renderer.coordinate,
         Coordinate::SimpleSearch | Coordinate::ExtendedSearch | Coordinate::Command
@@ -559,6 +580,10 @@ fn update_view(app: &mut AppState) {
 
     // ---- List items — text / images ----------------------------------------
     let item_prefix_x = text_x + 4.0 * em_width;
+    // Positions written during insert-mode rendering, read by caret/selection renderers below.
+    let mut captured_elem_x: f32 = 0.0;
+    let mut captured_elem_base_x: f32 = 0.0;
+    let mut captured_elem_y: f32 = 0.0;
     for (i, (label, item_data, is_selected)) in list_items[start_index..].iter().take(item_metrics.len()).enumerate() {
         let (item_y, content_start_x, _, _) = item_metrics[i];
 
@@ -586,12 +611,7 @@ fn update_view(app: &mut AppState) {
             // item_data is a breadcrumb, not an image path.
             // Render: [breadcrumb in ext_search color][prefix][content], all within 120 em column.
             let right_edge = text_x + max_content_w;
-            let display_label = if *is_selected {
-                insert_display.as_deref().unwrap_or(label.as_str())
-            } else {
-                label.as_str()
-            };
-            let (prefix_str, content) = split_label(display_label);
+            let (prefix_str, content) = split_label(label.as_str());
             if let Some(fr) = app.font_renderer.as_mut() {
                 let mut label_x = text_prefix_x;
                 if let Some(breadcrumb) = item_data.as_deref().filter(|s| !s.is_empty()) {
@@ -620,16 +640,185 @@ fn update_view(app: &mut AppState) {
                 unsafe { ir.prepare_image(path, content_start_x, img_y, img_w, img_h); }
             }
         } else if let Some(fr) = app.font_renderer.as_mut() {
-            let display_label = if *is_selected {
-                insert_display.as_deref().unwrap_or(label.as_str())
+            if *is_selected && in_insert_mode {
+                // Render prefix (non-editable)
+                let pfx_w = if !insert_prefix.is_empty() {
+                    let w = fr.measure_text_width(&insert_prefix, scale);
+                    fr.prepare_text_for_rendering(&insert_prefix, text_prefix_x, item_y, scale, p.text);
+                    w
+                } else {
+                    0.0
+                };
+                let after_prefix_x = text_prefix_x + pfx_w;
+                // Store positions for caret/selection rendering
+                captured_elem_x = after_prefix_x;
+                captured_elem_base_x = text_prefix_x;
+                captured_elem_y = item_y;
+
+                // Render input buffer — multiline-aware
+                let buf = insert_buf.as_str();
+                if let Some(nl_pos) = buf.find('\n') {
+                    let first_line = &buf[..nl_pos];
+                    let rest = &buf[nl_pos + 1..];
+                    fr.prepare_text_for_rendering(
+                        if first_line.is_empty() { " " } else { first_line },
+                        after_prefix_x, item_y, scale, p.text,
+                    );
+                    let mut rest_y = item_y + line_height as f32;
+                    let mut last_segment = "";
+                    for segment in rest.split('\n') {
+                        fr.prepare_text_for_rendering(
+                            if segment.is_empty() { " " } else { segment },
+                            text_prefix_x, rest_y, scale, p.text,
+                        );
+                        last_segment = segment;
+                        rest_y += line_height as f32;
+                    }
+                    if !insert_suffix.is_empty() {
+                        let last_y = rest_y - line_height as f32;
+                        let last_w = fr.measure_text_width(
+                            if last_segment.is_empty() { " " } else { last_segment }, scale,
+                        );
+                        fr.prepare_text_for_rendering(&insert_suffix, text_prefix_x + last_w, last_y, scale, p.text);
+                    }
+                } else {
+                    let buf_text = if buf.is_empty() { " " } else { buf };
+                    fr.prepare_text_for_rendering(buf_text, after_prefix_x, item_y, scale, p.text);
+                    if !insert_suffix.is_empty() {
+                        let buf_w = fr.measure_text_width(buf_text, scale);
+                        fr.prepare_text_for_rendering(&insert_suffix, after_prefix_x + buf_w, item_y, scale, p.text);
+                    }
+                }
             } else {
-                label.as_str()
-            };
-            let (prefix, content) = split_label(display_label);
-            fr.prepare_text_for_rendering(prefix, text_prefix_x, item_y, scale, p.text);
-            fr.prepare_text_wrapped(content, content_start_x, item_y, scale, max_content_w.max(1.0), line_height as f32, p.text);
+                let (prefix, content) = split_label(label.as_str());
+                fr.prepare_text_for_rendering(prefix, text_prefix_x, item_y, scale, p.text);
+                fr.prepare_text_wrapped(content, content_start_x, item_y, scale, max_content_w.max(1.0), line_height as f32, p.text);
+            }
         }
     }
+
+    // Write back element positions captured during insert-mode rendering
+    app.renderer.current_element_x = captured_elem_x;
+    app.renderer.current_element_base_x = captured_elem_base_x;
+    app.renderer.current_element_y = captured_elem_y;
+
+    // ---- Selection highlight rectangles (behind text, rendered now) ----------
+    // Selection highlights for search/command/insert modes.
+    let has_sel = handlers::has_selection(&app.renderer);
+    if has_sel {
+        if let Some((sel_start, sel_end)) = handlers::selection_range(&app.renderer) {
+            // base_y is the cell-top Y (not the baseline) so selection rects align with glyphs
+            let (base_x, base_y) = if in_insert_mode {
+                (captured_elem_x, captured_elem_y - ascender * scale)
+            } else {
+                let prefix = match app.renderer.coordinate {
+                    Coordinate::ExtendedSearch => "ext search: ",
+                    Coordinate::Command => ":",
+                    _ => "search: ",
+                };
+                let pfx_w = app.font_renderer.as_ref()
+                    .map(|fr| fr.measure_text_width(prefix, scale))
+                    .unwrap_or(0.0);
+                // search baseline is (line_height + ascender*scale + TEXT_PADDING); shift to cell top
+                (text_x + pfx_w, line_height as f32 + crate::text::TEXT_PADDING)
+            };
+            let sel_height = line_height as f32 - 2.0 * crate::text::TEXT_PADDING;
+            let buf = insert_buf.as_str();
+
+            // Build line-start offsets
+            let mut line_starts: Vec<usize> = vec![0];
+            for (i, c) in buf.char_indices() {
+                if c == '\n' { line_starts.push(i + 1); }
+            }
+            let num_lines = line_starts.len();
+
+            // Find start/end lines
+            let start_line = line_starts.partition_point(|&s| s <= sel_start).saturating_sub(1);
+            let end_line = line_starts.partition_point(|&s| s <= sel_end).saturating_sub(1);
+
+            if let Some(fr) = app.font_renderer.as_ref() {
+                for line in start_line..=end_line {
+                    let line_start_off = line_starts[line];
+                    let line_end_off = if line + 1 < num_lines { line_starts[line + 1] - 1 } else { buf.len() };
+                    let clamp_start = sel_start.max(line_start_off);
+                    let clamp_end = sel_end.min(line_end_off);
+                    let line_x = if in_insert_mode && line > 0 { captured_elem_base_x } else { base_x };
+                    let line_y = base_y + line as f32 * line_height as f32;
+
+                    let x_start = if clamp_start > line_start_off {
+                        line_x + fr.measure_text_width(&buf[line_start_off..clamp_start], scale)
+                    } else {
+                        line_x
+                    };
+                    let x_end = if clamp_end > line_start_off {
+                        line_x + fr.measure_text_width(&buf[line_start_off..clamp_end], scale)
+                    } else {
+                        line_x
+                    };
+                    let sel_w = x_end - x_start;
+                    if sel_w > 0.0 {
+                        if let Some(rr) = app.rect_renderer.as_mut() {
+                            rr.prepare_rectangle(x_start, line_y, sel_w, sel_height, p.scroll_search, 0.0);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- Caret rectangle (on top of text) ------------------------------------
+    if caret_visible {
+        let lh = line_height as f32;
+        let caret_h = lh - 2.0 * crate::text::TEXT_PADDING;
+
+        if in_insert_mode {
+            // Insert/editor mode caret using stored element position
+            let buf = insert_buf.as_str();
+            let pos = insert_cursor.min(buf.len());
+            // Count newlines before cursor
+            let cursor_line = buf[..pos].chars().filter(|&c| c == '\n').count();
+            let line_start_off = buf[..pos].rfind('\n').map(|i| i + 1).unwrap_or(0);
+            let line_x = if cursor_line == 0 { captured_elem_x } else { captured_elem_base_x };
+            let col_text = &buf[line_start_off..pos];
+            let caret_x = if let Some(fr) = app.font_renderer.as_ref() {
+                line_x + fr.measure_text_width(col_text, scale)
+            } else {
+                line_x
+            };
+            // Shift from baseline to cell top + padding so the caret sits inside the row
+            let caret_y = captured_elem_y - ascender * scale
+                + cursor_line as f32 * lh;
+            if let Some(rr) = app.rect_renderer.as_mut() {
+                rr.prepare_rectangle(caret_x, caret_y, 2.0, caret_h, p.text, 0.0);
+            }
+        } else if matches!(
+            app.renderer.coordinate,
+            Coordinate::SimpleSearch | Coordinate::ExtendedSearch | Coordinate::Command
+                | Coordinate::ScrollSearch | Coordinate::InputSearch
+        ) {
+            // Search/command caret after the prefix
+            let (prefix, buf, cursor) = match app.renderer.coordinate {
+                Coordinate::Command => (":", insert_buf.as_str(), insert_cursor),
+                Coordinate::ExtendedSearch => ("ext search: ", insert_buf.as_str(), insert_cursor),
+                _ => ("search: ", app.renderer.search_string.as_str(), app.renderer.search_string.len()),
+            };
+            // search_y is the baseline — shift to cell top + padding
+            let search_y = line_height as f32 + ascender * scale + crate::text::TEXT_PADDING;
+            let caret_top_y = search_y - ascender * scale;
+            if let Some(fr) = app.font_renderer.as_ref() {
+                let pfx_w = fr.measure_text_width(prefix, scale);
+                let base_x = text_x + pfx_w;
+                let col_text = &buf[..cursor.min(buf.len())];
+                let caret_x = base_x + fr.measure_text_width(col_text, scale);
+                if let Some(rr) = app.rect_renderer.as_mut() {
+                    rr.prepare_rectangle(caret_x, caret_top_y, 2.0, caret_h, p.text, 0.0);
+                }
+            }
+        }
+    }
+
+    // Suppress unused-variable warnings for snapshots only used by caret/selection
+    let _ = (insert_sel, insert_prefix, insert_suffix);
 }
 
 // ---------------------------------------------------------------------------
@@ -890,27 +1079,6 @@ fn collect_list_items(r: &AppRenderer) -> Vec<(String, Option<String>, bool)> {
     out
 }
 
-/// In insert modes, build the display text for the selected item:
-/// `input_prefix` + text-before-cursor + `|` + text-after-cursor + `input_suffix`.
-/// Returns `None` when not in an insert mode.
-fn build_insert_display(r: &AppRenderer) -> Option<String> {
-    if !matches!(
-        r.coordinate,
-        Coordinate::EditorInsert
-            | Coordinate::EditorNormal
-            | Coordinate::EditorVisual
-            | Coordinate::OperatorInsert
-    ) {
-        return None;
-    }
-
-    let buf = &r.input_buffer;
-    let pos = r.cursor_position.min(buf.len());
-    let before = &buf[..pos];
-    let after = &buf[pos..];
-
-    Some(format!("{}{}|{}{}", r.input_prefix, before, after, r.input_suffix))
-}
 
 // ---------------------------------------------------------------------------
 // Key dispatch

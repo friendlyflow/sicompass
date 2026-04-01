@@ -319,6 +319,12 @@ pub struct AppRenderer {
     // ---- Cached layout (filled by render loop) ----------------------------
     pub window_height: i32,
     pub cached_line_height: i32,
+    /// X position after the input prefix — first-line caret origin.
+    pub current_element_x: f32,
+    /// X position before the input prefix — continuation-line caret origin.
+    pub current_element_base_x: f32,
+    /// Y position of the editable element.
+    pub current_element_y: f32,
 
     // ---- Error display -----------------------------------------------------
     pub error_message: String,
@@ -397,6 +403,9 @@ impl AppRenderer {
             meta_return_list_index: 0,
             window_height: WINDOW_HEIGHT as i32,
             cached_line_height: 20,
+            current_element_x: 0.0,
+            current_element_base_x: 0.0,
+            current_element_y: 0.0,
             error_message: String::new(),
             current_command: CommandPhase::None,
             provider_command_name: String::new(),

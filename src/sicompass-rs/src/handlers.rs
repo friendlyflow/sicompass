@@ -1594,7 +1594,7 @@ fn populate_input_buffer(r: &mut AppRenderer) {
 // Text selection helpers
 // ---------------------------------------------------------------------------
 
-fn has_selection(r: &AppRenderer) -> bool {
+pub fn has_selection(r: &AppRenderer) -> bool {
     r.selection_anchor.map_or(false, |a| a != r.cursor_position)
 }
 
@@ -1602,7 +1602,7 @@ fn clear_selection(r: &mut AppRenderer) {
     r.selection_anchor = None;
 }
 
-fn selection_range(r: &AppRenderer) -> Option<(usize, usize)> {
+pub fn selection_range(r: &AppRenderer) -> Option<(usize, usize)> {
     let a = r.selection_anchor?;
     let b = r.cursor_position;
     if a <= b { Some((a, b)) } else { Some((b, a)) }
@@ -2175,7 +2175,7 @@ fn insert_operator_placeholder(r: &mut AppRenderer, insert_idx: usize) {
 }
 
 /// Get current time in milliseconds (used to reset caret blink).
-fn sdl_ticks() -> u64 {
+pub fn sdl_ticks() -> u64 {
     // SDL3 provides SDL_GetTicks() returning u64 ms.
     // sdl3-rs exposes this via the timer subsystem, but since we don't carry
     // a TimerSubsystem here, we fall back to std::time.
