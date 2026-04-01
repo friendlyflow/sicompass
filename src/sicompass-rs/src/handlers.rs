@@ -280,7 +280,6 @@ pub fn handle_page_down(r: &mut AppRenderer) {
                 let new_id = (cur + page_size).min(max_id);
                 r.current_id.set_last(new_id);
                 list::create_list_current_layer(r);
-                r.list_index = new_id;
                 r.scroll_offset = -1;
             }
         }
@@ -1619,7 +1618,6 @@ pub fn handle_home(r: &mut AppRenderer) {
             }
             r.last_keypress_time = now;
             list::create_list_current_layer(r);
-            r.list_index = r.current_id.last().unwrap_or(0);
             r.scroll_offset = r.list_index as i32;
             r.needs_redraw = true;
         }
@@ -1647,12 +1645,10 @@ pub fn handle_end(r: &mut AppRenderer) {
             r.needs_redraw = true;
         }
         Coordinate::OperatorGeneral | Coordinate::EditorGeneral => {
-            use sicompass_sdk::ffon::get_ffon_max_id;
             if let Some(slice) = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id) {
                 let max_id = slice.len().saturating_sub(1);
                 r.current_id.set_last(max_id);
                 list::create_list_current_layer(r);
-                r.list_index = max_id;
                 r.scroll_offset = -1;
             }
             r.needs_redraw = true;
