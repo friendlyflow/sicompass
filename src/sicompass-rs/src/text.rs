@@ -574,6 +574,65 @@ impl FontRenderer {
         count
     }
 
+    /// Word-wrap `text`, returning each line with its starting byte offset in the original text.
+    pub fn wrap_lines_with_offsets(&self, text: &str, scale: f32, max_width: f32) -> Vec<(String, usize)> {
+        Self::compute_wrap_lines_with_offsets(text, scale, max_width, &self.glyphs)
+    }
+
+    /// A wrapped line with its starting byte offset in the original text.
+    fn compute_wrap_lines_with_offsets(text: &str, scale: f32, max_width: f32, glyphs: &[GlyphInfo]) -> Vec<(String, usize)> {
+        if text.is_empty() {
+            return vec![(String::new(), 0)];
+        }
+
+        let adv = |b: u8| -> f32 {
+            let idx = if b >= 32 { b as usize } else { b' ' as usize };
+            glyphs[idx.min(255)].advance * scale
+        };
+
+        let bytes = text.as_bytes();
+        let n = bytes.len();
+        let mut lines: Vec<(String, usize)> = Vec::new();
+        let mut line_start = 0usize;
+        let mut line_width = 0.0f32;
+        let mut last_space: Option<usize> = None;
+        let mut last_fit = 0usize;
+        let mut i = 0usize;
+
+        while i < n {
+            let b = bytes[i];
+            let next_width = line_width + adv(b);
+
+            if next_width > max_width && i > line_start {
+                let break_end = if let Some(sp) = last_space {
+                    sp
+                } else {
+                    last_fit.max(line_start + 1)
+                };
+                lines.push((text[line_start..break_end].to_owned(), line_start));
+                line_start = break_end;
+                if line_start < n && bytes[line_start] == b' ' {
+                    line_start += 1;
+                }
+                line_width = 0.0;
+                last_space = None;
+                last_fit = line_start;
+                i = line_start;
+                continue;
+            }
+
+            if b == b' ' {
+                last_space = Some(i);
+            }
+            last_fit = i + 1;
+            line_width = next_width;
+            i += 1;
+        }
+
+        lines.push((text[line_start..].to_owned(), line_start));
+        lines
+    }
+
     /// Split `text` into wrapped line strings given `max_width` pixels per line.
     fn compute_wrap_lines(text: &str, scale: f32, max_width: f32, glyphs: &[GlyphInfo]) -> Vec<String> {
         if text.is_empty() {

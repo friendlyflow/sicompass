@@ -638,12 +638,20 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
         Coordinate::Scroll | Coordinate::ScrollSearch | Coordinate::InputSearch => match keycode {
             Some(Keycode::Escape) => handlers::handle_escape(r),
             Some(Keycode::Up) | Some(Keycode::K) if !ctrl && !shift => {
-                r.text_scroll_offset = (r.text_scroll_offset - 1).max(0);
-                r.needs_redraw = true;
+                if matches!(r.coordinate, Coordinate::InputSearch) {
+                    r.text_scroll_offset = (r.text_scroll_offset - 1).max(0);
+                    r.needs_redraw = true;
+                } else {
+                    handlers::handle_up(r);
+                }
             }
             Some(Keycode::Down) | Some(Keycode::J) if !ctrl && !shift => {
-                r.text_scroll_offset += 1;
-                r.needs_redraw = true;
+                if matches!(r.coordinate, Coordinate::InputSearch) {
+                    r.text_scroll_offset += 1;
+                    r.needs_redraw = true;
+                } else {
+                    handlers::handle_down(r);
+                }
             }
             Some(Keycode::PageUp) if !ctrl && !shift => handlers::handle_page_up(r),
             Some(Keycode::PageDown) if !ctrl && !shift => handlers::handle_page_down(r),
