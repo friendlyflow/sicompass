@@ -64,6 +64,7 @@
 
 use crate::app_state::{AppRenderer, Coordinate, History, Task};
 use crate::handlers;
+use crate::list;
 use sdl3::keyboard::{Keycode, Mod};
 
 #[cfg(test)]
@@ -507,30 +508,102 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
             Some(Keycode::Left) if shift => handlers::handle_shift_left(r),
             Some(Keycode::Right) if shift => handlers::handle_shift_right(r),
             Some(Keycode::Left) if !ctrl && !shift => {
-                let buf = if r.coordinate == Coordinate::ExtendedSearch {
-                    &r.input_buffer
+                // If selection is active: collapse to selection start and clear.
+                if handlers::has_selection(r) {
+                    if let Some((start, _)) = handlers::selection_range(r) {
+                        r.cursor_position = start;
+                    }
+                    handlers::clear_selection(r);
+                    r.caret.reset(handlers::sdl_ticks());
+                    r.needs_redraw = true;
+                    return false;
+                }
+                let buf_len = if r.coordinate == Coordinate::ExtendedSearch {
+                    r.input_buffer.len()
                 } else {
-                    &r.search_string
+                    r.search_string.len()
                 };
                 if r.cursor_position > 0 {
-                    let before = &buf[..r.cursor_position.min(buf.len())];
+                    let buf = if r.coordinate == Coordinate::ExtendedSearch {
+                        &r.input_buffer
+                    } else {
+                        &r.search_string
+                    };
+                    let before = &buf[..r.cursor_position.min(buf_len)];
                     r.cursor_position = before.char_indices().rev().next().map(|(i,_)| i).unwrap_or(0);
                     r.caret.reset(handlers::sdl_ticks());
+                    r.needs_redraw = true;
+                } else if handlers::navigate_left_raw(r) {
+                    // Cursor at start — navigate up in tree.
+                    if r.coordinate == Coordinate::ExtendedSearch {
+                        list::create_list_extended_search(r);
+                        let filter = r.input_buffer.clone();
+                        list::populate_list_current_layer(r, &filter);
+                    } else {
+                        r.search_string.clear();
+                        r.cursor_position = 0;
+                        list::create_list_current_layer(r);
+                    }
+                    r.list_index = r.current_id.last().unwrap_or(0)
+                        .min(r.active_list_len().saturating_sub(1));
                     r.needs_redraw = true;
                 }
             }
             Some(Keycode::Right) if !ctrl && !shift => {
-                let pos = r.cursor_position;
+                // If selection is active: collapse to selection end and clear.
+                if handlers::has_selection(r) {
+                    if let Some((_, end)) = handlers::selection_range(r) {
+                        r.cursor_position = end;
+                    }
+                    handlers::clear_selection(r);
+                    r.caret.reset(handlers::sdl_ticks());
+                    r.needs_redraw = true;
+                    return false;
+                }
                 let buf = if r.coordinate == Coordinate::ExtendedSearch {
                     r.input_buffer.clone()
                 } else {
                     r.search_string.clone()
                 };
-                if pos < buf.len() {
-                    let ch = buf[pos..].chars().next().unwrap();
-                    r.cursor_position = pos + ch.len_utf8();
+                if r.cursor_position < buf.len() {
+                    let ch = buf[r.cursor_position..].chars().next().unwrap();
+                    r.cursor_position += ch.len_utf8();
                     r.caret.reset(handlers::sdl_ticks());
                     r.needs_redraw = true;
+                } else if r.coordinate == Coordinate::ExtendedSearch {
+                    // Cursor at end in extended search — navigate into selected item.
+                    if let Some(item) = r.current_list_item().cloned() {
+                        if let Some(ref nav_path) = item.nav_path {
+                            let root_idx = item.id.get(0).unwrap_or(0);
+                            let (parent_dir, filename) = handlers::split_nav_path(nav_path);
+                            crate::provider::navigate_to_path(r, root_idx, parent_dir, filename);
+                        } else {
+                            r.current_id = item.id;
+                        }
+                        if handlers::navigate_right_raw(r) {
+                            let filter = r.input_buffer.clone();
+                            list::create_list_extended_search(r);
+                            list::populate_list_current_layer(r, &filter);
+                            r.list_index = r.current_id.last().unwrap_or(0)
+                                .min(r.active_list_len().saturating_sub(1));
+                            r.scroll_offset = r.list_index as i32;
+                            r.needs_redraw = true;
+                        }
+                    }
+                } else {
+                    // Cursor at end in simple search — navigate into selected item.
+                    r.search_string.clear();
+                    r.cursor_position = 0;
+                    if let Some(item_id) = r.current_list_item_id() {
+                        r.current_id = item_id;
+                    }
+                    if handlers::navigate_right_raw(r) {
+                        list::create_list_current_layer(r);
+                        r.list_index = r.current_id.last().unwrap_or(0)
+                            .min(r.active_list_len().saturating_sub(1));
+                        r.scroll_offset = r.list_index as i32;
+                        r.needs_redraw = true;
+                    }
                 }
             }
             Some(Keycode::Tab) => handlers::handle_tab(r),
@@ -563,7 +636,14 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
             Some(Keycode::Home) if !ctrl && !shift => handlers::handle_home(r),
             Some(Keycode::End) if !ctrl && !shift => handlers::handle_end(r),
             Some(Keycode::Left) if !ctrl && !shift => {
-                if r.cursor_position > 0 {
+                if handlers::has_selection(r) {
+                    if let Some((start, _)) = handlers::selection_range(r) {
+                        r.cursor_position = start;
+                    }
+                    handlers::clear_selection(r);
+                    r.caret.reset(handlers::sdl_ticks());
+                    r.needs_redraw = true;
+                } else if r.cursor_position > 0 {
                     let before = &r.input_buffer[..r.cursor_position];
                     r.cursor_position = before.char_indices().rev()
                         .next().map(|(i, _)| i).unwrap_or(0);
@@ -572,12 +652,21 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
                 }
             }
             Some(Keycode::Right) if !ctrl && !shift => {
-                let pos = r.cursor_position;
-                if pos < r.input_buffer.len() {
-                    let ch = r.input_buffer[pos..].chars().next().unwrap();
-                    r.cursor_position = pos + ch.len_utf8();
+                if handlers::has_selection(r) {
+                    if let Some((_, end)) = handlers::selection_range(r) {
+                        r.cursor_position = end;
+                    }
+                    handlers::clear_selection(r);
                     r.caret.reset(handlers::sdl_ticks());
                     r.needs_redraw = true;
+                } else {
+                    let pos = r.cursor_position;
+                    if pos < r.input_buffer.len() {
+                        let ch = r.input_buffer[pos..].chars().next().unwrap();
+                        r.cursor_position = pos + ch.len_utf8();
+                        r.caret.reset(handlers::sdl_ticks());
+                        r.needs_redraw = true;
+                    }
                 }
             }
             Some(Keycode::Return) | Some(Keycode::KpEnter)
@@ -622,21 +711,41 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
             Some(Keycode::Left) if shift => handlers::handle_shift_left(r),
             Some(Keycode::Right) if shift => handlers::handle_shift_right(r),
             Some(Keycode::Left) if !ctrl && !shift => {
-                if r.cursor_position > 0 {
+                if handlers::has_selection(r) {
+                    if let Some((start, _)) = handlers::selection_range(r) {
+                        r.cursor_position = start;
+                    }
+                    handlers::clear_selection(r);
+                    r.caret.reset(handlers::sdl_ticks());
+                    r.needs_redraw = true;
+                } else if r.cursor_position > 0 {
                     let before = &r.input_buffer[..r.cursor_position];
                     r.cursor_position = before.char_indices().rev()
                         .next().map(|(i, _)| i).unwrap_or(0);
                     r.caret.reset(handlers::sdl_ticks());
                     r.needs_redraw = true;
                 }
+                // cursor == 0: no-op (matches C)
             }
             Some(Keycode::Right) if !ctrl && !shift => {
-                let pos = r.cursor_position;
-                if pos < r.input_buffer.len() {
-                    let ch = r.input_buffer[pos..].chars().next().unwrap();
-                    r.cursor_position = pos + ch.len_utf8();
+                if handlers::has_selection(r) {
+                    if let Some((_, end)) = handlers::selection_range(r) {
+                        r.cursor_position = end;
+                    }
+                    handlers::clear_selection(r);
                     r.caret.reset(handlers::sdl_ticks());
                     r.needs_redraw = true;
+                } else {
+                    let pos = r.cursor_position;
+                    if pos < r.input_buffer.len() {
+                        let ch = r.input_buffer[pos..].chars().next().unwrap();
+                        r.cursor_position = pos + ch.len_utf8();
+                        r.caret.reset(handlers::sdl_ticks());
+                        r.needs_redraw = true;
+                    } else {
+                        // Cursor at end — attempt tree navigation right (mirrors C).
+                        handlers::handle_right(r);
+                    }
                 }
             }
             Some(Keycode::Return) | Some(Keycode::KpEnter) => {
