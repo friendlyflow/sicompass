@@ -99,15 +99,13 @@ pub fn handle_down(r: &mut AppRenderer) {
     }
 }
 
-/// Navigate into the selected item (Right key).
-pub fn handle_right(r: &mut AppRenderer) {
-    let item_id = match r.current_list_item_id() {
-        Some(id) => id,
-        None => return,
-    };
+/// Navigate into the item at `r.current_id` without rebuilding the list.
+/// Returns `true` if navigation happened.
+pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
+    let item_id = r.current_id.clone();
 
     if !next_layer_exists(&r.ffon, &item_id) {
-        return; // leaf node — not navigable
+        return false; // leaf node — not navigable
     }
 
     // Extract segment name + whether the Obj already has children (static vs lazy).
@@ -123,7 +121,7 @@ pub fn handle_right(r: &mut AppRenderer) {
 
     if has_children {
         // Static tree (settings, tutorial, meta): navigate deeper in-place.
-        let mut new_id = item_id.clone();
+        let mut new_id = item_id;
         new_id.push(0);
         r.current_id = new_id;
     } else {
@@ -139,17 +137,29 @@ pub fn handle_right(r: &mut AppRenderer) {
 
     // Mirror C: navigating right hides the meta menu.
     r.show_meta_menu = false;
-
-    list::create_list_current_layer(r);
-    r.sync_current_id_from_list();
-    r.caret.reset(sdl_ticks());
-    r.needs_redraw = true;
+    true
 }
 
-/// Navigate out to the parent level (Left key).
-pub fn handle_left(r: &mut AppRenderer) {
+/// Navigate into the selected item (Right key).
+pub fn handle_right(r: &mut AppRenderer) {
+    let item_id = match r.current_list_item_id() {
+        Some(id) => id,
+        None => return,
+    };
+    r.current_id = item_id;
+    if navigate_right_raw(r) {
+        list::create_list_current_layer(r);
+        r.sync_current_id_from_list();
+        r.caret.reset(sdl_ticks());
+        r.needs_redraw = true;
+    }
+}
+
+/// Navigate out to the parent level without rebuilding the list.
+/// Returns `true` if navigation happened.
+pub fn navigate_left_raw(r: &mut AppRenderer) -> bool {
     if r.current_id.depth() <= 1 {
-        return; // already at root
+        return false; // already at root
     }
 
     // Check if the parent element has a <link> or is "meta" — skip popPath for those
@@ -200,10 +210,17 @@ pub fn handle_left(r: &mut AppRenderer) {
         r.show_meta_menu = false;
     }
 
-    list::create_list_current_layer(r);
-    r.sync_current_id_from_list();
-    r.caret.reset(sdl_ticks());
-    r.needs_redraw = true;
+    true
+}
+
+/// Navigate out to the parent level (Left key).
+pub fn handle_left(r: &mut AppRenderer) {
+    if navigate_left_raw(r) {
+        list::create_list_current_layer(r);
+        r.sync_current_id_from_list();
+        r.caret.reset(sdl_ticks());
+        r.needs_redraw = true;
+    }
 }
 
 /// Page up (scroll a full screen up).
@@ -411,6 +428,7 @@ pub fn handle_tab(r: &mut AppRenderer) {
             r.previous_coordinate = r.coordinate;
             r.coordinate = Coordinate::SimpleSearch;
             r.search_string.clear();
+            r.cursor_position = 0;
             list::create_list_current_layer(r);
             r.needs_redraw = true;
         }
@@ -667,7 +685,7 @@ fn handle_enter_extended_search(r: &mut AppRenderer) {
 }
 
 /// Split a nav_path like `/a/b/c` into (`/a/b`, `c`).
-fn split_nav_path(nav_path: &str) -> (&str, &str) {
+pub fn split_nav_path(nav_path: &str) -> (&str, &str) {
     match nav_path.rfind('/') {
         Some(pos) if pos > 0 => (&nav_path[..pos], &nav_path[pos + 1..]),
         Some(_) => ("/", &nav_path[1..]),
@@ -1111,7 +1129,9 @@ pub fn handle_input(r: &mut AppRenderer, text: &str) {
 
     match r.coordinate {
         Coordinate::SimpleSearch => {
-            r.search_string.push_str(text);
+            let pos = r.cursor_position.min(r.search_string.len());
+            r.search_string.insert_str(pos, text);
+            r.cursor_position = pos + text.len();
             let search = r.search_string.clone();
             list::create_list_current_layer(r);
             list::populate_list_current_layer(r, &search);
@@ -1161,15 +1181,13 @@ pub fn handle_input(r: &mut AppRenderer, text: &str) {
 pub fn handle_backspace(r: &mut AppRenderer) {
     match r.coordinate {
         Coordinate::SimpleSearch => {
-            if !r.search_string.is_empty() {
-                // Remove last char (UTF-8 aware)
-                let new_len = r.search_string
-                    .char_indices()
-                    .rev()
-                    .next()
-                    .map(|(i, _)| i)
-                    .unwrap_or(0);
-                r.search_string.truncate(new_len);
+            if r.cursor_position > 0 {
+                // Remove char before cursor_position (UTF-8 aware)
+                let pos = r.cursor_position.min(r.search_string.len());
+                let before = &r.search_string[..pos];
+                let new_pos = before.char_indices().rev().next().map(|(i, _)| i).unwrap_or(0);
+                r.search_string.replace_range(new_pos..pos, "");
+                r.cursor_position = new_pos;
                 let search = r.search_string.clone();
                 list::create_list_current_layer(r);
                 list::populate_list_current_layer(r, &search);
@@ -1598,7 +1616,7 @@ pub fn has_selection(r: &AppRenderer) -> bool {
     r.selection_anchor.map_or(false, |a| a != r.cursor_position)
 }
 
-fn clear_selection(r: &mut AppRenderer) {
+pub fn clear_selection(r: &mut AppRenderer) {
     r.selection_anchor = None;
 }
 
@@ -2427,8 +2445,10 @@ mod tests {
         let mut r = make_renderer();
         r.coordinate = Coordinate::SimpleSearch;
         r.search_string = "abc".to_owned();
+        r.cursor_position = 3; // cursor at end, as set by handle_input
         handle_backspace(&mut r);
         assert_eq!(r.search_string, "ab");
+        assert_eq!(r.cursor_position, 2);
     }
 
     // -----------------------------------------------------------------------

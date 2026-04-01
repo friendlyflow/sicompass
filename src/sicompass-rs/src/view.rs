@@ -800,7 +800,7 @@ fn update_view(app: &mut AppState) {
             let (prefix, buf, cursor) = match app.renderer.coordinate {
                 Coordinate::Command => (":", insert_buf.as_str(), insert_cursor),
                 Coordinate::ExtendedSearch => ("ext search: ", insert_buf.as_str(), insert_cursor),
-                _ => ("search: ", app.renderer.search_string.as_str(), app.renderer.search_string.len()),
+                _ => ("search: ", app.renderer.search_string.as_str(), insert_cursor),
             };
             // search_y is the baseline — shift to cell top + padding
             let search_y = line_height as f32 + ascender * scale + crate::text::TEXT_PADDING;
