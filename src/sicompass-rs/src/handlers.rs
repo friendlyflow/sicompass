@@ -1075,6 +1075,12 @@ pub fn handle_input(r: &mut AppRenderer, text: &str) {
             r.caret.reset(sdl_ticks());
             r.needs_redraw = true;
         }
+        Coordinate::ScrollSearch => {
+            let pos = r.cursor_position.min(r.input_buffer.len());
+            r.input_buffer.insert_str(pos, text);
+            r.cursor_position = pos + text.len();
+            r.needs_redraw = true;
+        }
         _ => {}
     }
 }
@@ -1098,7 +1104,7 @@ pub fn handle_backspace(r: &mut AppRenderer) {
                 r.needs_redraw = true;
             }
         }
-        Coordinate::Command | Coordinate::EditorInsert | Coordinate::OperatorInsert => {
+        Coordinate::Command | Coordinate::EditorInsert | Coordinate::OperatorInsert | Coordinate::ScrollSearch => {
             if has_selection(r) {
                 delete_selection(r);
                 r.caret.reset(sdl_ticks());
