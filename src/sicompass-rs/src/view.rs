@@ -381,9 +381,14 @@ fn update_view(app: &mut AppState) {
     let item_max_w = max_content_w.max(1.0);
 
     let is_extended_search = app.renderer.coordinate == Coordinate::ExtendedSearch;
+    let count = list_items.len();
+    let list_index = if count > 0 { app.renderer.list_index.min(count - 1) } else { 0 };
     let line_counts: Vec<usize> = {
         let fr = match app.font_renderer.as_ref() { Some(f) => f, None => return };
-        list_items.iter().map(|(label, img_data, _)| {
+        list_items.iter().enumerate().map(|(idx, (label, img_data, _))| {
+            if in_insert_mode && idx == list_index {
+                return insert_buf.split('\n').count().max(1);
+            }
             if !is_extended_search {
                 if let Some(path) = img_data {
                     let img_h = app.image_renderer.as_mut()
@@ -410,8 +415,6 @@ fn update_view(app: &mut AppState) {
         }).collect()
     };
 
-    let count = list_items.len();
-    let list_index = if count > 0 { app.renderer.list_index.min(count - 1) } else { 0 };
     let start_index: usize = if count == 0 {
         0
     } else {
@@ -478,9 +481,11 @@ fn update_view(app: &mut AppState) {
         let content_start_x = item_prefix_x + max_prefix_px;
         let mut y = first_item_y;
         let mut metrics = Vec::with_capacity(list_items.len().saturating_sub(start_index));
-        for (label, img_data, _) in list_items.iter().skip(start_index) {
+        for (global_idx, (label, img_data, _)) in list_items.iter().enumerate().skip(start_index) {
             if y > win_h { break; }
-            let lines = if !is_extended_search {
+            let lines = if in_insert_mode && global_idx == list_index {
+                insert_buf.split('\n').count().max(1)
+            } else if !is_extended_search {
                 if let Some(path) = img_data {
                     // Compute image height as aspect-ratio of content width, measured in lines.
                     let img_h = if let Some(ir) = app.image_renderer.as_mut() {
@@ -570,6 +575,9 @@ fn update_view(app: &mut AppState) {
     // ---- List items — selection highlight rectangles ----------------------
     for (i, (_, _, is_selected)) in list_items[start_index..].iter().take(item_metrics.len()).enumerate() {
         if !is_selected { continue; }
+        // In insert mode the highlight is deferred: only the input buffer portion
+        // is highlighted (drawn in the text pass below), not the full row.
+        if in_insert_mode { continue; }
         let (item_y, _, lines, highlight_w) = item_metrics[i];
         let rect_y = item_y - ascender * scale - crate::text::TEXT_PADDING;
         let rect_h = lines as f32 * line_height as f32;
@@ -641,7 +649,7 @@ fn update_view(app: &mut AppState) {
             }
         } else if let Some(fr) = app.font_renderer.as_mut() {
             if *is_selected && in_insert_mode {
-                // Render prefix (non-editable)
+                // Render prefix (non-editable, no highlight)
                 let pfx_w = if !insert_prefix.is_empty() {
                     let w = fr.measure_text_width(&insert_prefix, scale);
                     fr.prepare_text_for_rendering(&insert_prefix, text_prefix_x, item_y, scale, p.text);
@@ -655,27 +663,46 @@ fn update_view(app: &mut AppState) {
                 captured_elem_base_x = text_prefix_x;
                 captured_elem_y = item_y;
 
-                // Render input buffer — multiline-aware
+                // Render input buffer — multiline-aware, with highlight only on the buffer
                 let buf = insert_buf.as_str();
+                let lh = line_height as f32;
                 if let Some(nl_pos) = buf.find('\n') {
                     let first_line = &buf[..nl_pos];
                     let rest = &buf[nl_pos + 1..];
-                    fr.prepare_text_for_rendering(
-                        if first_line.is_empty() { " " } else { first_line },
-                        after_prefix_x, item_y, scale, p.text,
-                    );
-                    let mut rest_y = item_y + line_height as f32;
+                    let first_text = if first_line.is_empty() { " " } else { first_line };
+                    // Highlight first line of buffer
+                    let first_w = fr.measure_text_width(first_text, scale);
+                    if let Some(rr) = app.rect_renderer.as_mut() {
+                        rr.prepare_rectangle(
+                            after_prefix_x - crate::text::TEXT_PADDING,
+                            item_y - ascender * scale - crate::text::TEXT_PADDING,
+                            first_w + 2.0 * crate::text::TEXT_PADDING,
+                            lh,
+                            p.selected, 5.0,
+                        );
+                    }
+                    fr.prepare_text_for_rendering(first_text, after_prefix_x, item_y, scale, p.text);
+                    let mut rest_y = item_y + lh;
                     let mut last_segment = "";
                     for segment in rest.split('\n') {
-                        fr.prepare_text_for_rendering(
-                            if segment.is_empty() { " " } else { segment },
-                            text_prefix_x, rest_y, scale, p.text,
-                        );
+                        let seg_text = if segment.is_empty() { " " } else { segment };
+                        // Highlight each continuation line of buffer
+                        let seg_w = fr.measure_text_width(seg_text, scale);
+                        if let Some(rr) = app.rect_renderer.as_mut() {
+                            rr.prepare_rectangle(
+                                text_prefix_x - crate::text::TEXT_PADDING,
+                                rest_y - ascender * scale - crate::text::TEXT_PADDING,
+                                seg_w + 2.0 * crate::text::TEXT_PADDING,
+                                lh,
+                                p.selected, 5.0,
+                            );
+                        }
+                        fr.prepare_text_for_rendering(seg_text, text_prefix_x, rest_y, scale, p.text);
                         last_segment = segment;
-                        rest_y += line_height as f32;
+                        rest_y += lh;
                     }
                     if !insert_suffix.is_empty() {
-                        let last_y = rest_y - line_height as f32;
+                        let last_y = rest_y - lh;
                         let last_w = fr.measure_text_width(
                             if last_segment.is_empty() { " " } else { last_segment }, scale,
                         );
@@ -683,9 +710,19 @@ fn update_view(app: &mut AppState) {
                     }
                 } else {
                     let buf_text = if buf.is_empty() { " " } else { buf };
+                    let buf_w = fr.measure_text_width(buf_text, scale);
+                    // Highlight only the buffer portion
+                    if let Some(rr) = app.rect_renderer.as_mut() {
+                        rr.prepare_rectangle(
+                            after_prefix_x - crate::text::TEXT_PADDING,
+                            item_y - ascender * scale - crate::text::TEXT_PADDING,
+                            buf_w + 2.0 * crate::text::TEXT_PADDING,
+                            lh,
+                            p.selected, 5.0,
+                        );
+                    }
                     fr.prepare_text_for_rendering(buf_text, after_prefix_x, item_y, scale, p.text);
                     if !insert_suffix.is_empty() {
-                        let buf_w = fr.measure_text_width(buf_text, scale);
                         fr.prepare_text_for_rendering(&insert_suffix, after_prefix_x + buf_w, item_y, scale, p.text);
                     }
                 }

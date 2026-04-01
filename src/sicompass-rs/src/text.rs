@@ -601,6 +601,17 @@ impl FontRenderer {
 
         while i < n {
             let b = bytes[i];
+
+            if b == b'\n' {
+                lines.push((text[line_start..i].to_owned(), line_start));
+                line_start = i + 1;
+                line_width = 0.0;
+                last_space = None;
+                last_fit = line_start;
+                i = line_start;
+                continue;
+            }
+
             let next_width = line_width + adv(b);
 
             if next_width > max_width && i > line_start {
@@ -655,6 +666,17 @@ impl FontRenderer {
 
         while i < n {
             let b = bytes[i];
+
+            if b == b'\n' {
+                lines.push(text[line_start..i].to_owned());
+                line_start = i + 1;
+                line_width = 0.0;
+                last_space = None;
+                last_fit = line_start;
+                i = line_start;
+                continue;
+            }
+
             let next_width = line_width + adv(b);
 
             if next_width > max_width && i > line_start {
