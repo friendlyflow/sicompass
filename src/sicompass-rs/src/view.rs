@@ -219,11 +219,11 @@ fn update_view(app: &mut AppState) {
         app.renderer.coordinate,
         Coordinate::SimpleSearch | Coordinate::Command
     ) {
-        let prefix = match app.renderer.coordinate {
-            Coordinate::Command => ":",
-            _ => "search: ",
+        let (prefix, text) = match app.renderer.coordinate {
+            Coordinate::Command => (":", app.renderer.input_buffer.as_str()),
+            _ => ("search: ", app.renderer.search_string.as_str()),
         };
-        Some(format!("{}{}", prefix, app.renderer.search_string))
+        Some(format!("{}{}", prefix, text))
     } else {
         None
     };

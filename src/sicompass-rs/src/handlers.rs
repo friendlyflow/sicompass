@@ -1054,7 +1054,18 @@ pub fn handle_input(r: &mut AppRenderer, text: &str) {
             list::populate_list_current_layer(r, &search);
             r.needs_redraw = true;
         }
-        Coordinate::Command | Coordinate::EditorInsert | Coordinate::OperatorInsert => {
+        Coordinate::Command => {
+            if has_selection(r) { delete_selection(r); }
+            let pos = r.cursor_position.min(r.input_buffer.len());
+            r.input_buffer.insert_str(pos, text);
+            r.cursor_position = pos + text.len();
+            r.caret.reset(sdl_ticks());
+            let filter = r.input_buffer.clone();
+            list::create_list_current_layer(r);
+            list::populate_list_current_layer(r, &filter);
+            r.needs_redraw = true;
+        }
+        Coordinate::EditorInsert | Coordinate::OperatorInsert => {
             // Replace selection if active
             if has_selection(r) { delete_selection(r); }
             // Insert text at cursor position (byte offset)
@@ -1091,6 +1102,7 @@ pub fn handle_backspace(r: &mut AppRenderer) {
             if has_selection(r) {
                 delete_selection(r);
                 r.caret.reset(sdl_ticks());
+                maybe_update_search(r);
                 r.needs_redraw = true;
             } else if r.cursor_position > 0 {
                 // Find the char boundary before cursor
@@ -1101,6 +1113,7 @@ pub fn handle_backspace(r: &mut AppRenderer) {
                 r.input_buffer.replace_range(new_end..r.cursor_position, "");
                 r.cursor_position = new_end;
                 r.caret.reset(sdl_ticks());
+                maybe_update_search(r);
                 r.needs_redraw = true;
             }
         }
@@ -1778,7 +1791,10 @@ pub fn handle_delete_forward(r: &mut AppRenderer) {
 /// Re-filter the list when editing in search/command modes.
 fn maybe_update_search(r: &mut AppRenderer) {
     if matches!(r.coordinate, Coordinate::SimpleSearch | Coordinate::Command) {
-        let s = r.search_string.clone();
+        let s = match r.coordinate {
+            Coordinate::Command => r.input_buffer.clone(),
+            _ => r.search_string.clone(),
+        };
         list::create_list_current_layer(r);
         list::populate_list_current_layer(r, &s);
     }
