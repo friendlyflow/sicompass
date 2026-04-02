@@ -395,7 +395,13 @@ fn update_view(app: &mut AppState) {
                     let prefix_lines = if has_prefix { count_text_lines(prefix) } else { 0 };
                     let suffix_lines = if suffix.is_empty() { 0 } else { count_text_lines(suffix) };
                     let header_lines = (1 + extra_lines) as f32;
-                    let max_h = (win_h - line_height as f32 * (header_lines + prefix_lines as f32 + suffix_lines as f32) - crate::text::TEXT_PADDING).max(line_height as f32);
+                    let lh = line_height as f32;
+                    let max_h_raw = win_h - lh * (header_lines + prefix_lines as f32 + suffix_lines as f32);
+                    let max_h = if suffix_lines > 0 {
+                        ((max_h_raw / lh).floor() * lh).max(lh)
+                    } else {
+                        (max_h_raw - crate::text::TEXT_PADDING).max(lh)
+                    };
                     let raw_img_h = app.image_renderer.as_mut()
                         .and_then(|ir| unsafe { ir.texture_size(path) })
                         .map(|(tw, th)| if tw == 0 { item_max_w } else { item_max_w * th as f32 / tw as f32 })
@@ -482,7 +488,13 @@ fn update_view(app: &mut AppState) {
                     let prefix_lines = if has_prefix { count_text_lines(prefix) } else { 0 };
                     let suffix_lines = if suffix.is_empty() { 0 } else { count_text_lines(suffix) };
                     let header_lines = (1 + extra_lines) as f32;
-                    let max_h = (win_h - line_height as f32 * (header_lines + prefix_lines as f32 + suffix_lines as f32) - crate::text::TEXT_PADDING).max(line_height as f32);
+                    let lh = line_height as f32;
+                    let max_h_raw = win_h - lh * (header_lines + prefix_lines as f32 + suffix_lines as f32);
+                    let max_h = if suffix_lines > 0 {
+                        ((max_h_raw / lh).floor() * lh).max(lh)
+                    } else {
+                        (max_h_raw - crate::text::TEXT_PADDING).max(lh)
+                    };
                     let img_w = item_max_w;
                     let img_h = if let Some(ir) = app.image_renderer.as_mut() {
                         unsafe { ir.texture_size(path) }
@@ -495,7 +507,7 @@ fn update_view(app: &mut AppState) {
                     };
                     let image_lines = ((img_h / line_height as f32).ceil() as usize).max(1);
                     let total_lines = prefix_lines + image_lines + suffix_lines;
-                    (total_lines, Some(ImageLayout { prefix_lines, suffix_lines, img_w, img_h }))
+                    (total_lines, Some(ImageLayout { prefix_lines, suffix_lines, image_lines, img_w, img_h }))
                 } else {
                     let (_, content) = split_label(label);
                     (fr.count_wrapped_lines(content, scale, item_max_w), None)
@@ -584,8 +596,9 @@ fn update_view(app: &mut AppState) {
             let img_y = bg_top + layout.prefix_lines as f32 * line_height as f32;
             let bg_left = content_x + 4.0 * em_width;
             let bg_right = content_start_x + layout.img_w + crate::text::TEXT_PADDING;
+            let img_display_h = layout.image_lines as f32 * line_height as f32;
             let bg_bottom = if layout.suffix_lines > 0 {
-                img_y + layout.img_h + layout.suffix_lines as f32 * line_height as f32
+                img_y + img_display_h + layout.suffix_lines as f32 * line_height as f32
             } else {
                 img_y + layout.img_h + crate::text::TEXT_PADDING
             };
@@ -1618,6 +1631,7 @@ fn count_text_lines(text: &str) -> usize {
 struct ImageLayout {
     prefix_lines: usize,
     suffix_lines: usize,
+    image_lines: usize,
     img_w: f32,
     img_h: f32,
 }
