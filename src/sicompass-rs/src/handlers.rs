@@ -5,7 +5,7 @@
 
 use crate::app_state::{AppRenderer, CommandPhase, Coordinate, History, Task};
 use crate::list;
-use sicompass_sdk::ffon::{get_ffon_at_id, next_layer_exists, IdArray};
+use sicompass_sdk::ffon::{get_ffon_at_id, next_layer_exists, FfonElement, IdArray};
 use sicompass_sdk::tags;
 
 // ---------------------------------------------------------------------------
@@ -108,16 +108,41 @@ pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
         return false; // leaf node — not navigable
     }
 
-    // Extract segment name + whether the Obj already has children (static vs lazy).
-    let (segment, has_children) = {
+    // Extract segment name + whether the Obj already has children (static vs lazy) + link URL.
+    let (segment, has_children, link_url) = {
         let depth = item_id.depth();
         let last_idx = item_id.get(depth.saturating_sub(1)).unwrap_or(0);
         get_ffon_at_id(&r.ffon, &item_id)
             .and_then(|s| s.get(last_idx))
             .and_then(|e| e.as_obj())
-            .map(|o| (tags::strip_display(&o.key).to_string(), !o.children.is_empty()))
+            .map(|o| {
+                let link = if tags::has_link(&o.key) { tags::extract_link(&o.key) } else { None };
+                (tags::strip_display(&o.key).to_string(), !o.children.is_empty(), link)
+            })
             .unwrap_or_default()
     };
+
+    // Handle <link> tags: resolve URL and load content as children.
+    if let Some(url) = link_url {
+        if !has_children {
+            let children = resolve_link_to_elements(&url);
+            if children.is_empty() {
+                return false;
+            }
+            let depth = item_id.depth();
+            let last_idx = item_id.get(depth.saturating_sub(1)).unwrap_or(0);
+            if let Some(siblings) = crate::provider::get_ffon_at_id_mut(&mut r.ffon, &item_id) {
+                if let Some(FfonElement::Obj(obj)) = siblings.get_mut(last_idx) {
+                    obj.children = children;
+                }
+            }
+        }
+        let mut new_id = item_id;
+        new_id.push(0);
+        r.current_id = new_id;
+        r.show_meta_menu = false;
+        return true;
+    }
 
     if has_children {
         // Static tree (settings, tutorial, meta): navigate deeper in-place.
@@ -138,6 +163,43 @@ pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
     // Mirror C: navigating right hides the meta menu.
     r.show_meta_menu = false;
     true
+}
+
+/// Fetch URL content via curl and parse into FFON elements.
+/// Mirrors C's `fetchUrlToElements`.
+fn fetch_url_to_elements(url: &str) -> Vec<FfonElement> {
+    let api_key = crate::provider::find_api_key_for_url(url);
+    let mut cmd = std::process::Command::new("curl");
+    cmd.args(["-sfL"]);
+    if let Some(ref key) = api_key {
+        cmd.args(["-H", &format!("Authorization: Bearer {key}")]);
+    }
+    cmd.arg(url);
+    let output = match cmd.output() {
+        Ok(o) => o,
+        Err(_) => return Vec::new(),
+    };
+    if !output.status.success() || output.stdout.is_empty() {
+        return Vec::new();
+    }
+    if url.ends_with(".ffon") {
+        sicompass_sdk::ffon::deserialize_binary(&output.stdout)
+    } else {
+        sicompass_sdk::ffon::parse_json(&String::from_utf8_lossy(&output.stdout))
+            .unwrap_or_default()
+    }
+}
+
+/// Resolve a link URL (local file or HTTP) into FFON elements.
+/// Mirrors C's `resolveLinkToElements`.
+fn resolve_link_to_elements(url: &str) -> Vec<FfonElement> {
+    if url.starts_with("http://") || url.starts_with("https://") {
+        fetch_url_to_elements(url)
+    } else if url.ends_with(".ffon") {
+        sicompass_sdk::ffon::load_ffon_file(std::path::Path::new(url)).unwrap_or_default()
+    } else {
+        sicompass_sdk::ffon::load_json_file(std::path::Path::new(url)).unwrap_or_default()
+    }
 }
 
 /// Navigate into the selected item (Right key).

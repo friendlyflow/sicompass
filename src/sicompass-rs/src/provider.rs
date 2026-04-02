@@ -693,7 +693,7 @@ pub fn navigate_right(renderer: &mut AppRenderer) -> bool {
 /// Mutable equivalent of `get_ffon_at_id` — walk to the parent level of `id`.
 ///
 /// Returns a mutable slice of siblings at depth `id.depth - 1`.
-fn get_ffon_at_id_mut<'a>(
+pub(crate) fn get_ffon_at_id_mut<'a>(
     ffon: &'a mut Vec<sicompass_sdk::ffon::FfonElement>,
     id: &sicompass_sdk::ffon::IdArray,
 ) -> Option<&'a mut Vec<sicompass_sdk::ffon::FfonElement>> {
