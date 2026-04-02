@@ -396,8 +396,7 @@ fn update_view(app: &mut AppState) {
                     let suffix_lines = if suffix.is_empty() { 0 } else { count_text_lines(suffix) };
                     let header_lines = (1 + extra_lines) as f32;
                     let lh = line_height as f32;
-                    let max_h_raw = win_h - lh * (header_lines + prefix_lines as f32 + suffix_lines as f32)
-                        - if prefix_lines == 0 { crate::text::TEXT_PADDING } else { 0.0 };
+                    let max_h_raw = win_h - lh * (header_lines + prefix_lines as f32 + suffix_lines as f32);
                     let max_h = if suffix_lines > 0 {
                         ((max_h_raw / lh).floor() * lh).max(lh)
                     } else {
@@ -490,8 +489,7 @@ fn update_view(app: &mut AppState) {
                     let suffix_lines = if suffix.is_empty() { 0 } else { count_text_lines(suffix) };
                     let header_lines = (1 + extra_lines) as f32;
                     let lh = line_height as f32;
-                    let max_h_raw = win_h - lh * (header_lines + prefix_lines as f32 + suffix_lines as f32)
-                        - if prefix_lines == 0 { crate::text::TEXT_PADDING } else { 0.0 };
+                    let max_h_raw = win_h - lh * (header_lines + prefix_lines as f32 + suffix_lines as f32);
                     let max_h = if suffix_lines > 0 {
                         ((max_h_raw / lh).floor() * lh).max(lh)
                     } else {
@@ -594,11 +592,12 @@ fn update_view(app: &mut AppState) {
         let (item_y, content_start_x, lines, highlight_w) = item_metrics[i];
         if let Some(layout) = &image_layouts[i] {
             // Tight-fitting selection background around image + prefix/suffix text.
-            let bg_top = item_y - ascender * scale - crate::text::TEXT_PADDING;
-            let img_y = bg_top + if layout.prefix_lines > 0 {
-                layout.prefix_lines as f32 * line_height as f32
+            let bg_top = item_y - ascender * scale - crate::text::TEXT_PADDING
+                - if layout.prefix_lines == 0 { crate::text::TEXT_PADDING } else { 0.0 };
+            let img_y = if layout.prefix_lines > 0 {
+                bg_top + layout.prefix_lines as f32 * line_height as f32
             } else {
-                crate::text::TEXT_PADDING
+                item_y - ascender * scale - crate::text::TEXT_PADDING
             };
             let bg_left = content_x + 4.0 * em_width;
             let bg_right = content_start_x + layout.img_w + crate::text::TEXT_PADDING;
@@ -711,11 +710,7 @@ fn update_view(app: &mut AppState) {
                         .map(|(tw, th)| if tw == 0 { img_w } else { img_w * th as f32 / tw as f32 })
                         .unwrap_or(img_w)
                 };
-                let img_y = if has_prefix {
-                    current_y - ascender * scale - crate::text::TEXT_PADDING
-                } else {
-                    current_y - ascender * scale
-                };
+                let img_y = current_y - ascender * scale - crate::text::TEXT_PADDING;
                 let border = 2.0_f32;
                 unsafe {
                     ir.prepare_image(path, content_start_x + border, img_y + border,
