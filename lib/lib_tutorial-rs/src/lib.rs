@@ -261,7 +261,6 @@ static SECTIONS: &[Node] = &[
             Leaf("Images can be displayed inline within the tree. The image below is loaded from a file path:"),
             // TEXTURE_JPG placeholder — replaced by TutorialProvider::make_interactive_elements
             Leaf("__TEXTURE_JPG__"),
-            Leaf("Images also support prefix and suffix text around them:"),
             Leaf("__IMAGE_WITH_PREFIX_SUFFIX__"),
             Leaf("__IMAGE_SUFFIX_ONLY__"),
             Leaf("__IMAGE_PREFIX_ONLY__"),
@@ -457,12 +456,12 @@ fn apply_asset_placeholders(s: &str, texture_jpg: &str, sf_json: &str) -> String
     match s {
         "__TEXTURE_JPG__" => format!("<image>{texture_jpg}</image>"),
         "__IMAGE_WITH_PREFIX_SUFFIX__" => {
-            format!("Image with prefix: <image>{texture_jpg}</image> and suffix")
+            format!("Image with prefix: <image>{texture_jpg}</image>and suffix")
         }
-        "__IMAGE_SUFFIX_ONLY__" => format!("<image>{texture_jpg}</image> and suffix"),
+        "__IMAGE_SUFFIX_ONLY__" => format!("<image>{texture_jpg}</image>and suffix"),
         "__IMAGE_PREFIX_ONLY__" => format!("Image with prefix: <image>{texture_jpg}</image>"),
         "__LINK_WITH_PREFIX_SUFFIX__" => {
-            format!("Link with prefix: <link>{sf_json}</link> and suffix")
+            format!("Link with prefix: <link>{sf_json}</link>and suffix")
         }
         "__LOREM_IPSUM__" => lorem_ipsum().to_owned(),
         other => other.to_owned(),

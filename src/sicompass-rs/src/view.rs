@@ -391,11 +391,18 @@ fn update_view(app: &mut AppState) {
             }
             if !is_extended_search {
                 if let Some(path) = img_data {
-                    let img_h = app.image_renderer.as_mut()
+                    let (prefix, suffix, has_prefix) = split_image_label(label, path);
+                    let prefix_lines = if has_prefix { count_text_lines(prefix) } else { 0 };
+                    let suffix_lines = if suffix.is_empty() { 0 } else { count_text_lines(suffix) };
+                    let header_lines = (1 + extra_lines) as f32;
+                    let max_h = (win_h - line_height as f32 * (header_lines + prefix_lines as f32 + suffix_lines as f32) - crate::text::TEXT_PADDING).max(line_height as f32);
+                    let raw_img_h = app.image_renderer.as_mut()
                         .and_then(|ir| unsafe { ir.texture_size(path) })
                         .map(|(tw, th)| if tw == 0 { item_max_w } else { item_max_w * th as f32 / tw as f32 })
                         .unwrap_or(item_max_w);
-                    return ((img_h / line_height as f32).ceil() as usize).max(1);
+                    let img_h = raw_img_h.min(max_h);
+                    let image_lines = ((img_h / line_height as f32).ceil() as usize).max(1);
+                    return prefix_lines + image_lines + suffix_lines;
                 }
                 let (_, content) = split_label(label);
                 return fr.count_wrapped_lines(content, scale, item_max_w);
@@ -453,7 +460,8 @@ fn update_view(app: &mut AppState) {
     // ---- Per-item layout metrics (immutable font borrow) ------------------
     // Each entry: (item_y, content_start_x, lines_used, highlight_w)
     // Starts from start_index so only visible items are measured/rendered.
-    let item_metrics: Vec<(f32, f32, usize, f32)> = {
+    // image_layouts is a parallel vec with Some(ImageLayout) for image items.
+    let (item_metrics, image_layouts): (Vec<(f32, f32, usize, f32)>, Vec<Option<ImageLayout>>) = {
         let fr = match app.font_renderer.as_ref() {
             Some(f) => f,
             None => return,
@@ -461,27 +469,36 @@ fn update_view(app: &mut AppState) {
         let item_prefix_x = text_x + list_indent_px;
         let content_start_x = item_prefix_x + max_prefix_px;
         let mut y = first_item_y;
-        let mut metrics = Vec::with_capacity(list_items.len().saturating_sub(start_index));
+        let cap = list_items.len().saturating_sub(start_index);
+        let mut metrics = Vec::with_capacity(cap);
+        let mut layouts: Vec<Option<ImageLayout>> = Vec::with_capacity(cap);
         for (global_idx, (label, img_data, _)) in list_items.iter().enumerate().skip(start_index) {
             if y > win_h { break; }
-            let lines = if in_insert_mode && global_idx == list_index {
-                insert_buf.split('\n').count().max(1)
+            let (lines, img_layout) = if in_insert_mode && global_idx == list_index {
+                (insert_buf.split('\n').count().max(1), None)
             } else if !is_extended_search {
                 if let Some(path) = img_data {
-                    // Compute image height as aspect-ratio of content width, measured in lines.
+                    let (prefix, suffix, has_prefix) = split_image_label(label, path);
+                    let prefix_lines = if has_prefix { count_text_lines(prefix) } else { 0 };
+                    let suffix_lines = if suffix.is_empty() { 0 } else { count_text_lines(suffix) };
+                    let header_lines = (1 + extra_lines) as f32;
+                    let max_h = (win_h - line_height as f32 * (header_lines + prefix_lines as f32 + suffix_lines as f32) - crate::text::TEXT_PADDING).max(line_height as f32);
+                    let img_w = item_max_w;
                     let img_h = if let Some(ir) = app.image_renderer.as_mut() {
                         unsafe { ir.texture_size(path) }
                             .map(|(tw, th)| {
-                                if tw == 0 { item_max_w } else { item_max_w * th as f32 / tw as f32 }
+                                if tw == 0 { img_w } else { (img_w * th as f32 / tw as f32).min(max_h) }
                             })
-                            .unwrap_or(item_max_w)
+                            .unwrap_or(img_w)
                     } else {
-                        item_max_w
+                        img_w
                     };
-                    ((img_h / line_height as f32).ceil() as usize).max(1)
+                    let image_lines = ((img_h / line_height as f32).ceil() as usize).max(1);
+                    let total_lines = prefix_lines + image_lines + suffix_lines;
+                    (total_lines, Some(ImageLayout { prefix_lines, suffix_lines, img_w, img_h }))
                 } else {
                     let (_, content) = split_label(label);
-                    fr.count_wrapped_lines(content, scale, item_max_w)
+                    (fr.count_wrapped_lines(content, scale, item_max_w), None)
                 }
             } else {
                 // ExtendedSearch: breadcrumb + prefix precede content — reduce available width.
@@ -491,13 +508,14 @@ fn update_view(app: &mut AppState) {
                 let (prefix_str, content) = split_label(label);
                 let prefix_w = fr.measure_text_width(prefix_str, scale);
                 let available_w = (max_content_w - 4.0 * em_width - indicator_w - bc_w - prefix_w).max(1.0);
-                fr.count_wrapped_lines(content, scale, available_w)
+                (fr.count_wrapped_lines(content, scale, available_w), None)
             };
             let highlight_w = (max_prefix_px + item_max_w + 20.0).min(win_w - content_x - list_indent_px);
             metrics.push((y, content_start_x, lines, highlight_w));
+            layouts.push(img_layout);
             y += lines as f32 * line_height as f32;
         }
-        metrics
+        (metrics, layouts)
     };
 
     // Cache layout metrics for handler use
@@ -559,11 +577,37 @@ fn update_view(app: &mut AppState) {
         // In insert mode the highlight is deferred: only the input buffer portion
         // is highlighted (drawn in the text pass below), not the full row.
         if in_insert_mode { continue; }
-        let (item_y, _, lines, highlight_w) = item_metrics[i];
-        let rect_y = item_y - ascender * scale - crate::text::TEXT_PADDING;
-        let rect_h = lines as f32 * line_height as f32;
-        if let Some(rr) = app.rect_renderer.as_mut() {
-            rr.prepare_rectangle(content_x + 4.0 * em_width, rect_y, highlight_w, rect_h, p.selected, 5.0);
+        let (item_y, content_start_x, lines, highlight_w) = item_metrics[i];
+        if let Some(layout) = &image_layouts[i] {
+            // Tight-fitting selection background around image + prefix/suffix text.
+            let bg_top = item_y - ascender * scale - crate::text::TEXT_PADDING;
+            let img_y = bg_top + layout.prefix_lines as f32 * line_height as f32;
+            let bg_left = content_x + 4.0 * em_width;
+            let bg_right = content_start_x + layout.img_w + crate::text::TEXT_PADDING;
+            let bg_bottom = if layout.suffix_lines > 0 {
+                img_y + layout.img_h + layout.suffix_lines as f32 * line_height as f32
+            } else {
+                img_y + layout.img_h + crate::text::TEXT_PADDING
+            };
+            let bg_w = bg_right - bg_left;
+            let bg_h = bg_bottom - bg_top;
+            if let Some(rr) = app.rect_renderer.as_mut() {
+                rr.prepare_rectangle(bg_left, bg_top, bg_w, bg_h, p.selected, 5.0);
+                // Square off top-right corner when no prefix text
+                if layout.prefix_lines == 0 {
+                    rr.prepare_rectangle(bg_right - 5.0, bg_top, 5.0, 5.0, p.selected, 0.0);
+                }
+                // Square off bottom-right corner when no suffix text
+                if layout.suffix_lines == 0 {
+                    rr.prepare_rectangle(bg_right - 5.0, bg_top + bg_h - 5.0, 5.0, 5.0, p.selected, 0.0);
+                }
+            }
+        } else {
+            let rect_y = item_y - ascender * scale - crate::text::TEXT_PADDING;
+            let rect_h = lines as f32 * line_height as f32;
+            if let Some(rr) = app.rect_renderer.as_mut() {
+                rr.prepare_rectangle(content_x + 4.0 * em_width, rect_y, highlight_w, rect_h, p.selected, 5.0);
+            }
         }
     }
 
@@ -614,19 +658,54 @@ fn update_view(app: &mut AppState) {
                 fr.prepare_text_wrapped(content, content_x, item_y, scale, available_w, line_height as f32, p.text);
             }
         } else if let Some(ref path) = item_data {
-            let (prefix, _) = split_label(label);
-            if let Some(fr) = app.font_renderer.as_mut() {
-                fr.prepare_text_for_rendering(prefix, text_prefix_x, item_y, scale, p.text);
+            let (prefix_text, suffix_text, has_prefix) = split_image_label(label, path);
+            let (prefix_lines, img_h_precomp) = image_layouts[i]
+                .as_ref()
+                .map(|l| (l.prefix_lines, l.img_h))
+                .unwrap_or((0, 0.0));
+
+            // Render prefix text above image (or bare "-p" when no meaningful prefix).
+            // The "-p" list tag always renders at text_prefix_x; content text at content_start_x.
+            let mut current_y = item_y;
+            if has_prefix {
+                let (tag, content) = split_label(prefix_text);
+                if let Some(fr) = app.font_renderer.as_mut() {
+                    fr.prepare_text_for_rendering(tag, text_prefix_x, current_y, scale, p.text);
+                    if !content.is_empty() {
+                        fr.prepare_text_for_rendering(content, content_start_x, current_y, scale, p.text);
+                    }
+                }
+                current_y += prefix_lines as f32 * line_height as f32;
+            } else {
+                if let Some(fr) = app.font_renderer.as_mut() {
+                    fr.prepare_text_for_rendering("-p", text_prefix_x, current_y, scale, p.text);
+                }
             }
+
+            // Render image with 2px border inset
             if let Some(ir) = app.image_renderer.as_mut() {
                 let img_w = max_content_w.max(1.0);
-                let img_h = unsafe { ir.texture_size(path) }
-                    .map(|(tw, th)| {
-                        if tw == 0 { img_w } else { img_w * th as f32 / tw as f32 }
-                    })
-                    .unwrap_or(img_w);
-                let img_y = item_y - ascender * scale - crate::text::TEXT_PADDING;
-                unsafe { ir.prepare_image(path, content_start_x, img_y, img_w, img_h); }
+                let img_h = if img_h_precomp > 0.0 {
+                    img_h_precomp
+                } else {
+                    unsafe { ir.texture_size(path) }
+                        .map(|(tw, th)| if tw == 0 { img_w } else { img_w * th as f32 / tw as f32 })
+                        .unwrap_or(img_w)
+                };
+                let img_y = current_y - ascender * scale - crate::text::TEXT_PADDING;
+                let border = 2.0_f32;
+                unsafe {
+                    ir.prepare_image(path, content_start_x + border, img_y + border,
+                                     img_w - 2.0 * border, img_h - 2.0 * border);
+                }
+                current_y += (img_h / line_height as f32).ceil() as f32 * line_height as f32;
+            }
+
+            // Render suffix text below image
+            if !suffix_text.is_empty() {
+                if let Some(fr) = app.font_renderer.as_mut() {
+                    fr.prepare_text_for_rendering(suffix_text, content_start_x, current_y, scale, p.text);
+                }
             }
         } else if let Some(fr) = app.font_renderer.as_mut() {
             if *is_selected && in_insert_mode {
@@ -1505,6 +1584,42 @@ fn split_label(label: &str) -> (&str, &str) {
     } else {
         (label, "")
     }
+}
+
+/// For image items, splits the label around the image path into (prefix, suffix,
+/// has_meaningful_prefix). Prefix is everything before the path (including "-p "),
+/// suffix is everything after. has_meaningful_prefix is true when there is text
+/// beyond the bare "-p " marker (prefix.len() > 3).
+fn split_image_label<'a>(label: &'a str, path: &str) -> (&'a str, &'a str, bool) {
+    if let Some(pos) = label.find(path) {
+        let prefix = &label[..pos];
+        let suffix = &label[pos + path.len()..];
+        let has_prefix = prefix.len() > 3;
+        (prefix, suffix, has_prefix)
+    } else {
+        ("-p ", "", false)
+    }
+}
+
+/// Counts display lines in text using 120-character column wrapping.
+/// Matches C render.c countTextLines().
+fn count_text_lines(text: &str) -> usize {
+    if text.is_empty() { return 1; }
+    let mut lines = 0usize;
+    for seg in text.split('\n') {
+        let len = seg.len();
+        if len <= 120 { lines += 1; } else { lines += (len + 119) / 120; }
+    }
+    if text.ends_with('\n') { lines += 1; }
+    lines.max(1)
+}
+
+/// Layout data for image items, pre-computed alongside item_metrics.
+struct ImageLayout {
+    prefix_lines: usize,
+    suffix_lines: usize,
+    img_w: f32,
+    img_h: f32,
 }
 
 
