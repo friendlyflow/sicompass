@@ -461,7 +461,7 @@ fn apply_asset_placeholders(s: &str, texture_jpg: &str, sf_json: &str) -> String
         "__IMAGE_SUFFIX_ONLY__" => format!("<image>{texture_jpg}</image>and suffix"),
         "__IMAGE_PREFIX_ONLY__" => format!("Image with prefix: <image>{texture_jpg}</image>"),
         "__LINK_WITH_PREFIX_SUFFIX__" => {
-            format!("Link with prefix: <link>{sf_json}</link>and suffix")
+            format!("Link with prefix: <link>{sf_json}</link> and suffix")
         }
         "__LOREM_IPSUM__" => lorem_ipsum().to_owned(),
         other => other.to_owned(),
