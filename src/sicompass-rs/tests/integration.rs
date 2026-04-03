@@ -589,17 +589,17 @@ fn webbrowser_url_bar_is_input() {
     press_right(h.r());
     assert_eq!(h.renderer.current_id.depth(), 2);
 
-    // Second element (index 1) should be the URL bar with <input> tag
+    // First element (index 0) should be the URL bar with <input> tag
     let wb_obj = h.renderer.ffon[wb_idx].as_obj().unwrap();
-    assert!(wb_obj.children.len() >= 2, "web browser should have meta + url bar");
+    assert!(wb_obj.children.len() >= 1, "web browser should have url bar");
 
-    let url_elem = &wb_obj.children[1];
+    let url_elem = &wb_obj.children[0];
     let url_str = url_elem.as_obj().map(|o| o.key.as_str())
         .or_else(|| url_elem.as_str())
         .unwrap_or("");
     assert!(
         sicompass_sdk::tags::has_input(url_str),
-        "second element of web browser should be <input> URL bar, got: {url_str:?}"
+        "first element of web browser should be <input> URL bar, got: {url_str:?}"
     );
 }
 
@@ -713,145 +713,84 @@ fn test_full_workflow() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn test_meta_menu_hidden_by_default() {
+fn test_meta_enters_coordinate() {
     let mut h = Harness::new();
     let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
-    assert_eq!(h.renderer.current_id.depth(), 2);
+    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
 
-    assert!(!h.renderer.show_meta_menu, "show_meta_menu should be false by default");
-    assert!(!h.renderer.inside_meta, "inside_meta should be false by default");
-
-    sicompass::list::create_list_current_layer(h.r());
-    for item in &h.renderer.total_list {
-        assert!(
-            !item.label.starts_with("+ meta"),
-            "meta should not be visible in list by default, got: '{}'",
-            item.label
-        );
-    }
+    press(h.r(), Keycode::M);
+    assert_eq!(h.renderer.coordinate, Coordinate::Meta);
+    assert!(!h.renderer.total_list.is_empty(), "meta list should have items");
 }
 
 #[test]
-fn test_m_navigates_into_meta() {
+fn test_meta_shows_hints() {
     let mut h = Harness::new();
     let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
-    assert_eq!(h.renderer.current_id.depth(), 2);
-
     press(h.r(), Keycode::M);
-    assert!(h.renderer.inside_meta, "should be inside meta after pressing M");
-    assert_eq!(h.renderer.current_id.depth(), 3, "depth should be 3 inside meta");
-
-    assert!(!h.renderer.total_list.is_empty(), "meta children should be listed");
-    for item in &h.renderer.total_list {
-        assert!(
-            !item.label.starts_with("+ meta"),
-            "meta children should not themselves be meta objects, got: '{}'",
-            item.label
-        );
-    }
+    assert_eq!(h.renderer.coordinate, Coordinate::Meta);
+    assert!(h.renderer.total_list.len() >= 3, "should have multiple shortcut hints");
 }
 
 #[test]
-fn test_m_again_restores_position() {
+fn test_escape_from_meta_restores_position() {
     let mut h = Harness::new();
     let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
-    assert_eq!(h.renderer.current_id.depth(), 2);
-
-    let saved_list_index = h.renderer.list_index;
-
-    // Enter meta, then exit
-    press(h.r(), Keycode::M);
-    assert!(h.renderer.inside_meta);
+    let saved_id = h.renderer.current_id.clone();
+    let saved_index = h.renderer.list_index;
 
     press(h.r(), Keycode::M);
-    assert!(!h.renderer.inside_meta, "inside_meta should be false after second M");
-    assert!(!h.renderer.show_meta_menu, "show_meta_menu should be false after second M");
-    assert_eq!(h.renderer.current_id.depth(), 2, "depth should be 2 after second M");
-    assert_eq!(h.renderer.list_index, saved_list_index, "list_index should be restored");
+    assert_eq!(h.renderer.coordinate, Coordinate::Meta);
 
-    // Meta should be hidden in the list
-    for item in &h.renderer.total_list {
-        assert!(
-            !item.label.starts_with("+ meta"),
-            "meta should be hidden after second M press, got: '{}'",
-            item.label
-        );
-    }
+    press(h.r(), Keycode::Escape);
+    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(h.renderer.current_id, saved_id);
+    assert_eq!(h.renderer.list_index, saved_index);
 }
 
 #[test]
-fn test_left_from_meta_shows_meta_selected() {
+fn test_left_noop_in_meta() {
     let mut h = Harness::new();
     let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
-    assert_eq!(h.renderer.current_id.depth(), 2);
-
-    // Enter meta, then press left
     press(h.r(), Keycode::M);
-    assert!(h.renderer.inside_meta);
+    let list_before = h.renderer.total_list.len();
+
     press_left(h.r());
-
-    assert!(!h.renderer.inside_meta, "inside_meta should be false after left");
-    assert!(h.renderer.show_meta_menu, "show_meta_menu should be true after left from meta");
-    assert_eq!(h.renderer.current_id.depth(), 2, "depth should be 2");
-
-    // Meta should be first item and selected
-    assert!(!h.renderer.total_list.is_empty(), "list should be populated");
-    assert!(
-        h.renderer.total_list[0].label.starts_with("+ meta"),
-        "meta should be first item after navigating left from inside meta, got: '{}'",
-        h.renderer.total_list[0].label
-    );
-    assert_eq!(h.renderer.list_index, 0, "meta should be selected (list_index = 0)");
+    assert_eq!(h.renderer.coordinate, Coordinate::Meta, "left should be noop in meta");
+    assert_eq!(h.renderer.total_list.len(), list_before);
 }
 
 #[test]
-fn test_down_from_meta_selected_navigates_list() {
+fn test_up_down_in_meta() {
     let mut h = Harness::new();
     let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
-
-    // Enter meta, press left (meta selected), press down
     press(h.r(), Keycode::M);
-    press_left(h.r());
     assert_eq!(h.renderer.list_index, 0);
 
     press_down(h.r());
     assert_eq!(h.renderer.list_index, 1);
-    assert!(!h.renderer.total_list.is_empty());
-    if h.renderer.total_list.len() > 1 {
-        assert!(
-            !h.renderer.total_list[1].label.starts_with("+ meta"),
-            "second item should not be meta, got: '{}'",
-            h.renderer.total_list[1].label
-        );
-    }
+    press_up(h.r());
+    assert_eq!(h.renderer.list_index, 0);
 }
 
 #[test]
-fn test_right_from_meta_selected_hides_meta() {
+fn test_right_noop_in_meta() {
     let mut h = Harness::new();
     let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
-
-    // Enter meta, press left (meta selected at index 0), press right into meta
     press(h.r(), Keycode::M);
-    press_left(h.r());
-    assert!(h.renderer.show_meta_menu);
-    assert_eq!(h.renderer.list_index, 0);
 
-    press_right(h.r()); // navigate into meta (it's an object with children)
-    assert!(
-        !h.renderer.show_meta_menu,
-        "show_meta_menu should be false after navigating right into meta"
-    );
+    press_right(h.r());
+    assert_eq!(h.renderer.coordinate, Coordinate::Meta, "right should be noop in meta");
 }

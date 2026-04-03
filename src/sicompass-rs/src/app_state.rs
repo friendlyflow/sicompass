@@ -118,6 +118,7 @@ pub enum Coordinate {
     ScrollSearch,
     InputSearch,
     Dashboard,
+    Meta,
 }
 
 impl Coordinate {
@@ -136,6 +137,7 @@ impl Coordinate {
             Coordinate::ScrollSearch => "scroll search",
             Coordinate::InputSearch => "input search",
             Coordinate::Dashboard => "dashboard",
+            Coordinate::Meta => "meta",
         }
     }
 }
@@ -311,10 +313,6 @@ pub struct AppRenderer {
     pub needs_redraw: bool,
     pub input_down: bool,
     pub prefixed_insert_mode: bool,
-    pub show_meta_menu: bool,
-    pub inside_meta: bool,
-    pub meta_return_id: IdArray,
-    pub meta_return_list_index: usize,
 
     // ---- Cached layout (filled by render loop) ----------------------------
     pub window_height: i32,
@@ -397,10 +395,6 @@ impl AppRenderer {
             needs_redraw: true,
             input_down: false,
             prefixed_insert_mode: false,
-            show_meta_menu: false,
-            inside_meta: false,
-            meta_return_id: IdArray::new(),
-            meta_return_list_index: 0,
             window_height: WINDOW_HEIGHT as i32,
             cached_line_height: 20,
             current_element_x: 0.0,

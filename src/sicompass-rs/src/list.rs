@@ -91,6 +91,10 @@ pub fn create_list_current_layer(renderer: &mut AppRenderer) {
             build_command_list(renderer);
             return;
         }
+        Coordinate::Meta => {
+            build_meta_list(renderer);
+            return;
+        }
         _ => {
             renderer.list_index = 0;
             return;
@@ -105,8 +109,6 @@ pub fn create_list_current_layer(renderer: &mut AppRenderer) {
         }
     };
 
-    let show_meta = renderer.show_meta_menu;
-
     // Check if parent has <radio> tag (for -r prefix on string children)
     let parent_has_radio = check_parent_has_radio(renderer);
 
@@ -115,15 +117,6 @@ pub fn create_list_current_layer(renderer: &mut AppRenderer) {
     let mut items: Vec<RenderListItem> = Vec::with_capacity(ffon_slice.len());
 
     for (i, elem) in ffon_slice.iter().enumerate() {
-        // Skip meta objects unless show_meta_menu
-        if !show_meta {
-            if let FfonElement::Obj(obj) = elem {
-                if obj.key == "meta" {
-                    continue;
-                }
-            }
-        }
-
         let mut item_id = base_id.clone();
         item_id.set_last(i);
 
@@ -304,6 +297,22 @@ fn check_parent_has_radio(renderer: &AppRenderer) -> bool {
 // Command mode list building
 // ---------------------------------------------------------------------------
 
+/// Build the list for `Coordinate::Meta` — shortcut hints from the active provider.
+fn build_meta_list(renderer: &mut AppRenderer) {
+    renderer.list_index = 0;
+    let hints = crate::provider::get_meta(renderer);
+    let items: Vec<RenderListItem> = hints
+        .into_iter()
+        .enumerate()
+        .map(|(i, label)| {
+            let mut id = IdArray::new();
+            id.push(i);
+            RenderListItem { id, label, data: None, nav_path: None }
+        })
+        .collect();
+    renderer.total_list = items;
+}
+
 /// Build the list for `Coordinate::Command`.
 ///
 /// - `CommandPhase::None`: show the available command names for the active element.
@@ -419,34 +428,6 @@ mod tests {
 
         assert_eq!(r.total_list.len(), 1);
         assert!(r.total_list[0].label.starts_with('-'));
-    }
-
-    #[test]
-    fn meta_hidden_by_default() {
-        let mut root = FfonElement::new_obj("provider");
-        root.as_obj_mut().unwrap().push(FfonElement::new_str("visible"));
-        root.as_obj_mut().unwrap().push(FfonElement::new_obj("meta"));
-
-        let mut r = make_renderer_with_ffon(vec![root]);
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
-        create_list_current_layer(&mut r);
-
-        assert_eq!(r.total_list.len(), 1);
-        assert!(r.total_list[0].label.contains("visible"));
-    }
-
-    #[test]
-    fn meta_shown_when_enabled() {
-        let mut root = FfonElement::new_obj("provider");
-        root.as_obj_mut().unwrap().push(FfonElement::new_str("visible"));
-        root.as_obj_mut().unwrap().push(FfonElement::new_obj("meta"));
-
-        let mut r = make_renderer_with_ffon(vec![root]);
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
-        r.show_meta_menu = true;
-        create_list_current_layer(&mut r);
-
-        assert_eq!(r.total_list.len(), 2);
     }
 
     #[test]

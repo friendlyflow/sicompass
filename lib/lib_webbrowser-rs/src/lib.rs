@@ -81,17 +81,6 @@ impl Provider for WebbrowserProvider {
     fn fetch(&mut self) -> Vec<FfonElement> {
         let mut result = Vec::new();
 
-        // meta: shortcut hints
-        let mut meta = FfonElement::new_obj("meta");
-        {
-            let m = meta.as_obj_mut().unwrap();
-            m.push(FfonElement::new_str("I   Edit URL"));
-            m.push(FfonElement::new_str("/   Search"));
-            m.push(FfonElement::new_str("F5  Refresh"));
-            m.push(FfonElement::new_str(":   Commands"));
-        }
-        result.push(meta);
-
         // URL bar element
         let url_bar = format!(
             "<input>{}</input>",
@@ -125,6 +114,15 @@ impl Provider for WebbrowserProvider {
         };
         self.load_url(&full_url);
         true
+    }
+
+    fn meta(&self) -> Vec<String> {
+        vec![
+            "I   Edit URL".to_owned(),
+            "/   Search".to_owned(),
+            "F5  Refresh".to_owned(),
+            ":   Commands".to_owned(),
+        ]
     }
 
     fn commands(&self) -> Vec<String> {
@@ -541,17 +539,15 @@ mod tests {
     fn test_fetch_returns_meta_and_url_bar() {
         let mut p = WebbrowserProvider::new();
         let items = p.fetch();
-        // Index 0: meta obj
-        assert!(items[0].as_obj().map_or(false, |o| o.key == "meta"));
-        // Index 1: url bar (no page loaded → str)
-        assert!(items[1].as_str().is_some());
+        // Index 0: url bar (no page loaded → str)
+        assert!(items[0].as_str().is_some());
     }
 
     #[test]
     fn test_fetch_url_bar_contains_input_tag() {
         let mut p = WebbrowserProvider::new();
         let items = p.fetch();
-        let url_bar = items[1].as_str().unwrap();
+        let url_bar = items[0].as_str().unwrap();
         assert!(url_bar.contains("<input>") && url_bar.contains("</input>"));
     }
 

@@ -31,11 +31,11 @@ pub fn handle_up(r: &mut AppRenderer) {
             }
             r.needs_redraw = true;
         }
-        Coordinate::SimpleSearch | Coordinate::Command | Coordinate::ExtendedSearch => {
+        Coordinate::SimpleSearch | Coordinate::Command | Coordinate::ExtendedSearch | Coordinate::Meta => {
             r.error_message.clear();
             if r.list_index > 0 {
                 r.list_index -= 1;
-                if r.coordinate != Coordinate::Command {
+                if r.coordinate != Coordinate::Command && r.coordinate != Coordinate::Meta {
                     r.sync_current_id_from_list();
                 }
             }
@@ -74,7 +74,7 @@ pub fn handle_down(r: &mut AppRenderer) {
             }
             r.needs_redraw = true;
         }
-        Coordinate::SimpleSearch | Coordinate::Command | Coordinate::ExtendedSearch => {
+        Coordinate::SimpleSearch | Coordinate::Command | Coordinate::ExtendedSearch | Coordinate::Meta => {
             r.error_message.clear();
             let max_index = if r.filtered_list_indices.is_empty() {
                 r.total_list.len().saturating_sub(1)
@@ -83,7 +83,7 @@ pub fn handle_down(r: &mut AppRenderer) {
             };
             if r.list_index < max_index {
                 r.list_index += 1;
-                if r.coordinate != Coordinate::Command {
+                if r.coordinate != Coordinate::Command && r.coordinate != Coordinate::Meta {
                     r.sync_current_id_from_list();
                 }
             }
@@ -140,7 +140,6 @@ pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
         let mut new_id = item_id;
         new_id.push(0);
         r.current_id = new_id;
-        r.show_meta_menu = false;
         return true;
     }
 
@@ -160,8 +159,6 @@ pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
         r.current_id = new_id;
     }
 
-    // Mirror C: navigating right hides the meta menu.
-    r.show_meta_menu = false;
     true
 }
 
@@ -261,15 +258,6 @@ pub fn navigate_left_raw(r: &mut AppRenderer) -> bool {
         r.current_id.set(1, 0);
     } else {
         r.current_id.pop();
-    }
-
-    // Mirror C: navigating left out of meta children shows meta in parent list;
-    // navigating left from a meta-selected level hides meta again.
-    if r.inside_meta {
-        r.inside_meta = false;
-        r.show_meta_menu = true;
-    } else if r.show_meta_menu {
-        r.show_meta_menu = false;
     }
 
     true
@@ -451,32 +439,10 @@ pub fn handle_meta(r: &mut AppRenderer) {
         return;
     }
 
-    if r.inside_meta {
-        // Restore saved position
-        r.inside_meta = false;
-        r.show_meta_menu = false;
-        r.current_id = r.meta_return_id.clone();
-        r.list_index = r.meta_return_list_index;
-        list::create_list_current_layer(r);
-    } else {
-        // Navigate into meta's children (meta is always at index 0 at current level)
-        let meta_exists = {
-            let arr = get_ffon_at_id(&r.ffon, &r.current_id);
-            arr.and_then(|a| a.first())
-                .and_then(|e| e.as_obj())
-                .map_or(false, |o| o.key == "meta" && !o.children.is_empty())
-        };
-        if meta_exists {
-            r.meta_return_id = r.current_id.clone();
-            r.meta_return_list_index = r.list_index;
-            r.current_id.set_last(0);
-            r.current_id.push(0);
-            r.inside_meta = true;
-            r.show_meta_menu = false;
-            r.list_index = 0;
-            list::create_list_current_layer(r);
-        }
-    }
+    r.previous_coordinate = r.coordinate;
+    r.coordinate = Coordinate::Meta;
+    r.list_index = 0;
+    list::create_list_current_layer(r);
     r.needs_redraw = true;
 }
 
@@ -1510,6 +1476,15 @@ pub fn handle_escape(r: &mut AppRenderer) {
             list::create_list_current_layer(r);
             r.list_index = r.current_id.last().unwrap_or(0);
             r.scroll_offset = 0;
+            r.needs_redraw = true;
+            return;
+        }
+        Coordinate::Meta => {
+            r.coordinate = r.previous_coordinate;
+            list::create_list_current_layer(r);
+            r.list_index = r.current_id.last().unwrap_or(0);
+            r.scroll_offset = 0;
+            r.caret.reset(sdl_ticks());
             r.needs_redraw = true;
             return;
         }

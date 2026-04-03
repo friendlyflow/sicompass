@@ -186,7 +186,7 @@ impl EmailClientProvider {
     // ---- FFON tree builders -----------------------------------------------
 
     fn build_root(&mut self) -> Vec<FfonElement> {
-        let mut items = vec![build_meta_root()];
+        let mut items = vec![];
 
         // Compose entry
         items.push(FfonElement::new_obj("compose"));
@@ -216,7 +216,7 @@ impl EmailClientProvider {
     }
 
     fn build_folder(&mut self, folder: &str) -> Vec<FfonElement> {
-        let mut items = vec![build_meta_folder()];
+        let mut items = vec![];
 
         if let Some(ref mut imap) = self.imap {
             match imap.list_messages(folder, 50) {
@@ -267,7 +267,7 @@ impl EmailClientProvider {
     }
 
     fn build_compose_view(&self) -> Vec<FfonElement> {
-        let mut items = vec![build_meta_compose()];
+        let mut items = vec![];
         items.push(FfonElement::new_str(format!(
             "To: <input>{}</input>",
             self.draft.to
@@ -384,6 +384,27 @@ impl Provider for EmailClientProvider {
         self.current_path = path.to_owned();
     }
 
+    fn meta(&self) -> Vec<String> {
+        let segs = self.path_segments().len();
+        match segs {
+            0 => vec![
+                "/   Search".to_owned(),
+                "F5  Refresh".to_owned(),
+                ":   Commands".to_owned(),
+            ],
+            1 if matches!(
+                self.path_segments().first().copied().unwrap_or(""),
+                "compose" | "reply" | "reply all" | "forward"
+            ) => vec![
+                "Tab  Next field".to_owned(),
+            ],
+            _ => vec![
+                "/   Search".to_owned(),
+                "F5  Refresh".to_owned(),
+            ],
+        }
+    }
+
     fn commit_edit(&mut self, _old: &str, new_content: &str) -> bool {
         // Determine which draft field to update from the last path segment
         // e.g. "/compose/To" → field = "To"
@@ -442,33 +463,8 @@ impl Provider for EmailClientProvider {
 // FFON tree helpers
 // ---------------------------------------------------------------------------
 
-fn build_meta_root() -> FfonElement {
-    let mut meta = FfonElement::new_obj("meta");
-    let m = meta.as_obj_mut().unwrap();
-    m.push(FfonElement::new_str("/   Search".to_owned()));
-    m.push(FfonElement::new_str("F5  Refresh".to_owned()));
-    m.push(FfonElement::new_str(":   Commands".to_owned()));
-    meta
-}
-
-fn build_meta_folder() -> FfonElement {
-    let mut meta = FfonElement::new_obj("meta");
-    let m = meta.as_obj_mut().unwrap();
-    m.push(FfonElement::new_str("/   Search".to_owned()));
-    m.push(FfonElement::new_str("F5  Refresh".to_owned()));
-    meta
-}
-
-fn build_meta_compose() -> FfonElement {
-    let mut meta = FfonElement::new_obj("meta");
-    let m = meta.as_obj_mut().unwrap();
-    m.push(FfonElement::new_str("Tab  Next field".to_owned()));
-    meta
-}
-
 fn build_message_view(msg: &EmailMessage) -> Vec<FfonElement> {
     let mut items = vec![
-        build_meta_folder(),
         FfonElement::new_str(format!("From: {}", msg.from)),
         FfonElement::new_str(format!("To: {}", msg.to)),
         FfonElement::new_str(format!("Date: {}", msg.date)),
@@ -589,14 +585,6 @@ mod tests {
         assert!(items.iter().any(|e| {
             e.as_str().map_or(false, |s| s.contains("not configured"))
         }));
-    }
-
-    #[test]
-    fn test_fetch_root_meta_always_first() {
-        let imap = MockImap::new().with_folders(&[]);
-        let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
-        let items = p.fetch();
-        assert!(items[0].as_obj().map_or(false, |o| o.key == "meta"));
     }
 
     #[test]
