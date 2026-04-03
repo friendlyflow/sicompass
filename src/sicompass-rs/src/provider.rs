@@ -202,6 +202,13 @@ pub fn get_commands(renderer: &AppRenderer) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Get meta/shortcut hints from the active provider.
+pub fn get_meta(renderer: &AppRenderer) -> Vec<String> {
+    get_active_provider_ref(renderer)
+        .map(|p| p.meta())
+        .unwrap_or_default()
+}
+
 /// Handle a command invocation (`:command`). Returns optional result element.
 pub fn handle_command(
     renderer: &mut AppRenderer,

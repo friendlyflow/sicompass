@@ -105,9 +105,22 @@ impl Provider for FilebrowserProvider {
     }
 
     fn fetch(&mut self) -> Vec<FfonElement> {
-        let mut items = vec![build_meta()];
-        items.extend(self.list_directory());
-        items
+        self.list_directory()
+    }
+
+    fn meta(&self) -> Vec<String> {
+        vec![
+            "Ctrl+I  Insert before".to_owned(),
+            "Ctrl+A  Append after".to_owned(),
+            "Del     Delete".to_owned(),
+            "Ctrl+X  Cut".to_owned(),
+            "Ctrl+C  Copy".to_owned(),
+            "Ctrl+V  Paste".to_owned(),
+            "I       Rename".to_owned(),
+            ":       Commands".to_owned(),
+            "/       Search".to_owned(),
+            "F5      Refresh".to_owned(),
+        ]
     }
 
     fn push_path(&mut self, segment: &str) {
@@ -327,29 +340,6 @@ impl FilebrowserProvider {
 }
 
 // ---------------------------------------------------------------------------
-// Meta element (keyboard shortcut hints)
-// ---------------------------------------------------------------------------
-
-fn build_meta() -> FfonElement {
-    let mut meta = FfonElement::new_obj("meta");
-    let obj = meta.as_obj_mut().unwrap();
-    for hint in &[
-        "Ctrl+I  Insert before",
-        "Ctrl+A  Append after",
-        "Del     Delete",
-        "Ctrl+X  Cut",
-        "Ctrl+C  Copy",
-        "Ctrl+V  Paste",
-        "I       Rename",
-        ":       Commands",
-        "/       Search",
-        "F5      Refresh",
-    ] {
-        obj.push(FfonElement::Str(hint.to_string()));
-    }
-    meta
-}
-
 // ---------------------------------------------------------------------------
 // Raw directory entry
 // ---------------------------------------------------------------------------
@@ -494,27 +484,18 @@ mod tests {
     // ---- fetch structure ---------------------------------------------------
 
     #[test]
-    fn test_fetch_starts_with_meta() {
-        let (mut p, _dir) = make_provider();
-        let items = p.fetch();
-        assert!(!items.is_empty());
-        assert!(items[0].as_obj().map_or(false, |o| o.key == "meta"));
-    }
-
-    #[test]
     fn test_fetch_meta_has_shortcuts() {
-        let (mut p, _dir) = make_provider();
-        let items = p.fetch();
-        let meta = items[0].as_obj().unwrap();
-        assert!(!meta.children.is_empty());
-        assert!(meta.children.iter().any(|c| c.as_str().map_or(false, |s| s.contains("Rename"))));
+        let (p, _dir) = make_provider();
+        let hints = p.meta();
+        assert!(!hints.is_empty());
+        assert!(hints.iter().any(|s| s.contains("Rename")));
     }
 
     #[test]
     fn test_fetch_empty_dir_only_meta() {
         let (mut p, _dir) = make_provider();
         let items = p.fetch();
-        assert_eq!(items.len(), 1); // only meta
+        assert_eq!(items.len(), 0);
     }
 
     #[test]
@@ -522,9 +503,8 @@ mod tests {
         let (mut p, dir) = make_provider();
         std::fs::write(dir.path().join("hello.txt"), b"hi").unwrap();
         let items = p.fetch();
-        let file_items: Vec<_> = items.iter().skip(1).collect();
-        assert!(!file_items.is_empty());
-        assert!(file_items[0].as_str().is_some());
+        assert!(!items.is_empty());
+        assert!(items[0].as_str().is_some());
     }
 
     #[test]
@@ -532,9 +512,8 @@ mod tests {
         let (mut p, dir) = make_provider();
         std::fs::create_dir(dir.path().join("subdir")).unwrap();
         let items = p.fetch();
-        let dir_items: Vec<_> = items.iter().skip(1).collect();
-        assert!(!dir_items.is_empty());
-        assert!(dir_items[0].as_obj().is_some());
+        assert!(!items.is_empty());
+        assert!(items[0].as_obj().is_some());
     }
 
     #[test]
@@ -542,7 +521,7 @@ mod tests {
         let (mut p, dir) = make_provider();
         std::fs::write(dir.path().join("notes.txt"), b"").unwrap();
         let items = p.fetch();
-        let label = items[1].as_str().unwrap();
+        let label = items[0].as_str().unwrap();
         assert!(tags::has_input(label));
         assert_eq!(tags::strip_display(label), "notes.txt");
     }
@@ -556,7 +535,7 @@ mod tests {
         std::fs::write(dir.path().join("apple.txt"), b"").unwrap();
         p.sort_mode = SortMode::Alpha;
         let items = p.fetch();
-        let names: Vec<_> = items.iter().skip(1)
+        let names: Vec<_> = items.iter()
             .map(|e| tags::strip_display(e.as_str().or_else(|| e.as_obj().map(|o| o.key.as_str())).unwrap_or("")))
             .collect();
         assert_eq!(names, vec!["apple.txt".to_string(), "zebra.txt".to_string()]);
@@ -745,9 +724,7 @@ mod tests {
         p.handle_command("sort alphanumerically", "", 0, &mut err);
         assert_eq!(p.sort_mode, SortMode::Alpha);
         let items = p.fetch();
-        // items[0] is meta, files follow
         let file_labels: Vec<_> = items.iter()
-            .skip(1)
             .filter_map(|e| e.as_str())
             .map(|s| sicompass_sdk::tags::strip_display(s).to_string())
             .collect();
@@ -843,9 +820,8 @@ mod tests {
         let mut p = FilebrowserProvider::new();
         p.set_current_path("/nonexistent/path/xyz/abc");
         let items = p.fetch();
-        // On a nonexistent path the listing is empty, so only meta is returned
-        assert_eq!(items.len(), 1);
-        assert!(items[0].as_obj().map_or(false, |o| o.key == "meta"));
+        // On a nonexistent path the listing is empty
+        assert_eq!(items.len(), 0);
     }
 
     #[test]
@@ -891,8 +867,7 @@ mod tests {
         std::fs::write(dir.path().join("hello world.txt"), b"").unwrap();
         std::fs::write(dir.path().join("file-with-dashes.txt"), b"").unwrap();
         let items = p.fetch();
-        // Should have meta + 2 files
-        assert_eq!(items.len(), 3);
+        assert_eq!(items.len(), 2);
     }
 
     #[test]
@@ -963,8 +938,7 @@ mod tests {
 
         p.sort_mode = SortMode::Chrono;
         let items = p.fetch();
-        // Skip meta element (index 0); file entries are Str
-        let names: Vec<String> = items.iter().skip(1)
+        let names: Vec<String> = items.iter()
             .filter_map(|e| e.as_str())
             .map(|s| tags::strip_display(s).to_string())
             .collect();
@@ -989,8 +963,8 @@ mod tests {
 
         // Rust filebrowser always shows executables — no separate "commands mode"
         let items = p.fetch();
-        // Should have meta + script.sh + data.txt = 3 entries
-        assert_eq!(items.len(), 3, "expected meta + 2 files, got {}", items.len());
+        // Should have script.sh + data.txt = 2 entries
+        assert_eq!(items.len(), 2, "expected 2 files, got {}", items.len());
     }
 
     // ---- execute_command open file with ------------------------------------
@@ -1028,9 +1002,9 @@ mod tests {
         let link = dir.path().join("link.txt");
         std::os::unix::fs::symlink(&target, &link).unwrap();
         let items = p.fetch();
-        // Should have meta + real.txt + link.txt = 3 entries
-        assert_eq!(items.len(), 3);
-        let names: Vec<_> = items.iter().skip(1)
+        // Should have real.txt + link.txt = 2 entries
+        assert_eq!(items.len(), 2);
+        let names: Vec<_> = items.iter()
             .filter_map(|e| e.as_str())
             .map(|s| tags::strip_display(s).to_string())
             .collect();

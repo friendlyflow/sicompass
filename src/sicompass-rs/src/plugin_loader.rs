@@ -143,6 +143,10 @@ pub struct ProviderOpsC {
     /// `const char** (*getCommands)(int *outCount)`
     pub get_commands:
         Option<unsafe extern "C" fn(out_count: *mut c_int) -> *mut *const c_char>,
+
+    /// `const char** (*getMeta)(int *outCount)`
+    pub get_meta:
+        Option<unsafe extern "C" fn(out_count: *mut c_int) -> *mut *const c_char>,
 }
 
 // Safety: ProviderOpsC is a read-only vtable living in the loaded .so.
@@ -314,6 +318,22 @@ impl Provider for NativePlugin {
     fn commands(&self) -> Vec<String> {
         let ops = unsafe { &*self.ops };
         let Some(f) = ops.get_commands else { return Vec::new(); };
+        let mut count: c_int = 0;
+        let ptr = unsafe { f(&mut count) };
+        if ptr.is_null() || count <= 0 {
+            return Vec::new();
+        }
+        let slice = unsafe { std::slice::from_raw_parts(ptr, count as usize) };
+        slice
+            .iter()
+            .filter(|&&p| !p.is_null())
+            .map(|&p| unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    fn meta(&self) -> Vec<String> {
+        let ops = unsafe { &*self.ops };
+        let Some(f) = ops.get_meta else { return Vec::new(); };
         let mut count: c_int = 0;
         let ptr = unsafe { f(&mut count) };
         if ptr.is_null() || count <= 0 {
@@ -516,6 +536,13 @@ impl Provider for ScriptProvider {
         };
         serde_json::from_str::<Vec<String>>(&json).unwrap_or_default()
     }
+
+    fn meta(&self) -> Vec<String> {
+        let Some(json) = self.run(&["getmeta"]) else {
+            return Vec::new();
+        };
+        serde_json::from_str::<Vec<String>>(&json).unwrap_or_default()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -641,6 +668,7 @@ mod tests {
             create_file: None,
             delete_item: None,
             get_commands: None,
+            get_meta: None,
         }));
         // SAFETY: We construct a NativePlugin without calling dlopen.
         // The _lib field is replaced with a dummy that does nothing on drop.

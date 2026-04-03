@@ -130,6 +130,12 @@ pub trait Provider: Send + 'static {
     /// Returns `None` to fall back to FFON-tree traversal.
     fn collect_deep_search_items(&self) -> Option<Vec<SearchResultItem>> { None }
 
+    // ---- Optional: meta/help -----------------------------------------------
+
+    /// Keyboard shortcut hints shown when the user presses M.
+    /// Returns strings like `"Ctrl+I  Insert before"`.
+    fn meta(&self) -> Vec<String> { vec![] }
+
     // ---- Optional: persistent config ---------------------------------------
 
     fn load_config(&mut self, _path: &Path) -> bool { false }

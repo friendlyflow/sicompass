@@ -288,25 +288,19 @@ impl Provider for ChatClientProvider {
     fn display_name(&self) -> &str { "chat client" }
 
     fn fetch(&mut self) -> Vec<FfonElement> {
-        let mut result = Vec::new();
-
-        // meta
-        let mut meta = FfonElement::new_obj("meta");
-        {
-            let m = meta.as_obj_mut().unwrap();
-            m.push(FfonElement::new_str("/   Search".to_owned()));
-            m.push(FfonElement::new_str("F5  Refresh".to_owned()));
-            m.push(FfonElement::new_str(":   Commands".to_owned()));
-        }
-        result.push(meta);
-
         if let Some(room_name) = self.room_name_from_path().map(|s| s.to_owned()) {
-            result.extend(self.fetch_room_messages(&room_name));
+            self.fetch_room_messages(&room_name)
         } else {
-            result.extend(self.fetch_joined_rooms());
+            self.fetch_joined_rooms()
         }
+    }
 
-        result
+    fn meta(&self) -> Vec<String> {
+        vec![
+            "/   Search".to_owned(),
+            "F5  Refresh".to_owned(),
+            ":   Commands".to_owned(),
+        ]
     }
 
     fn push_path(&mut self, segment: &str) {
@@ -423,20 +417,6 @@ mod tests {
         assert!(items.iter().any(|e| {
             e.as_str().map_or(false, |s| s.contains("not configured"))
         }));
-    }
-
-    #[test]
-    fn test_fetch_root_meta_always_first() {
-        let (rt, server) = start_mock_server();
-        mount(&rt, &server, Mock::given(method("GET"))
-            .and(path("/_matrix/client/v3/joined_rooms"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(
-                serde_json::json!({ "joined_rooms": [] }),
-            )));
-        let mut p = provider_for(&server);
-        let items = p.fetch();
-        assert!(items[0].as_obj().map_or(false, |o| o.key == "meta"));
-        drop(rt);
     }
 
     #[test]

@@ -795,6 +795,14 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
             _ => {}
         },
 
+        // ---- Meta mode -------------------------------------------------------
+        Coordinate::Meta => match keycode {
+            Some(Keycode::Escape) => handlers::handle_escape(r),
+            Some(Keycode::Up) | Some(Keycode::K) if !ctrl && !shift => handlers::handle_up(r),
+            Some(Keycode::Down) | Some(Keycode::J) if !ctrl && !shift => handlers::handle_down(r),
+            _ => {}
+        },
+
         _ => {}
     }
 
