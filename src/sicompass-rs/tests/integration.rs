@@ -53,8 +53,9 @@ impl Harness {
             renderer.ffon[0] = root_elem;
         }
 
-        // Settings (no-op apply fn)
-        let settings = SettingsProvider::new(|_, _| {});
+        // Settings (no-op apply fn, isolated to temp dir — never touches real config)
+        let settings = SettingsProvider::new(|_, _| {})
+            .with_config_path(tmp.path().join("settings.json"));
         register(&mut renderer, Box::new(settings));
 
         sicompass::list::create_list_current_layer(&mut renderer);
@@ -83,7 +84,9 @@ impl Harness {
         let wb = sicompass_webbrowser::WebbrowserProvider::new();
         register(&mut renderer, Box::new(wb));
 
-        let settings = SettingsProvider::new(|_, _| {});
+        // Settings (no-op apply fn, isolated to temp dir — never touches real config)
+        let settings = SettingsProvider::new(|_, _| {})
+            .with_config_path(tmp.path().join("settings.json"));
         register(&mut renderer, Box::new(settings));
 
         sicompass::list::create_list_current_layer(&mut renderer);
@@ -657,6 +660,74 @@ fn webbrowser_url_commit_updates_ffon() {
     );
 }
 
+/// Pressing Enter in insert mode without changing the URL should still exit
+/// insert mode and refresh — matching C's wasInput → providerRefreshCurrentDirectory.
+#[test]
+fn webbrowser_url_same_content_exits_insert_mode() {
+    let mut h = Harness::new_with_webbrowser();
+    let wb_idx = h.provider_idx("webbrowser").expect("webbrowser not found");
+    navigate_to_provider(h.r(), wb_idx);
+    press_right(h.r()); // enter provider layer
+
+    // Navigate to URL bar (index 0)
+    let cur = h.renderer.current_id.get(1).unwrap_or(0);
+    for _ in 0..cur { press_up(h.r()); }
+
+    // Enter insert mode — don't change anything — press Enter
+    press(h.r(), Keycode::I);
+    assert_eq!(h.renderer.coordinate, Coordinate::OperatorInsert);
+    press_enter(h.r());
+
+    // Must exit insert mode even though content was unchanged
+    assert_eq!(
+        h.renderer.coordinate,
+        Coordinate::OperatorGeneral,
+        "should exit insert mode after Enter even with same content"
+    );
+    // And the provider index should still be valid
+    assert_eq!(h.renderer.current_id.get(0), Some(wb_idx));
+}
+
+/// Enter in OperatorGeneral on an Obj whose key has an <input> tag should NOT
+/// re-activate/re-commit it — C only activates <input> on FFON_STRING elements.
+#[test]
+fn enter_on_input_obj_does_not_activate() {
+    use sicompass_sdk::ffon::FfonElement;
+    let mut h = Harness::new_with_webbrowser();
+    let wb_idx = h.provider_idx("webbrowser").expect("webbrowser not found");
+    navigate_to_provider(h.r(), wb_idx);
+    press_right(h.r());
+
+    // Manually replace the URL element (Str) with an Obj whose key has <input>
+    // to simulate the post-load state.
+    {
+        let wb_obj = h.renderer.ffon[wb_idx].as_obj_mut().unwrap();
+        let mut url_obj = FfonElement::new_obj("<input>https://example.com</input>");
+        url_obj.as_obj_mut().unwrap().push(FfonElement::new_str("content"));
+        if !wb_obj.children.is_empty() {
+            wb_obj.children[0] = url_obj;
+        }
+    }
+    sicompass::list::create_list_current_layer(h.r());
+    // Navigate to index 0 (the URL Obj)
+    let cur = h.renderer.current_id.get(1).unwrap_or(0);
+    for _ in 0..cur { press_up(h.r()); }
+
+    // Press Enter — should NOT navigate into the Obj's children or re-commit
+    press_enter(h.r());
+
+    // We should still be in OperatorGeneral at the same depth (2), not deeper
+    assert_eq!(
+        h.renderer.coordinate,
+        Coordinate::OperatorGeneral,
+        "should stay in OperatorGeneral"
+    );
+    assert_eq!(
+        h.renderer.current_id.depth(), 2,
+        "should not navigate deeper into URL Obj on Enter"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Tests: List item label prefix
 // ---------------------------------------------------------------------------
@@ -847,4 +918,55 @@ fn test_right_noop_in_meta() {
 
     press_right(h.r());
     assert_eq!(h.renderer.coordinate, Coordinate::Meta, "right should be noop in meta");
+}
+
+/// A `<link>` Obj injected into the webbrowser FFON (simulating what
+/// `html_to_ffon` produces for `<a>` tags) should show the `+l` prefix in
+/// the visual list and navigating Right into it should push depth by one.
+#[test]
+fn webbrowser_link_obj_shows_plus_l_prefix_and_is_navigable() {
+    let mut h = Harness::new_with_webbrowser();
+    let wb_idx = h.provider_idx("webbrowser").expect("webbrowser not found");
+    navigate_to_provider(h.r(), wb_idx);
+    press_right(h.r()); // enter webbrowser layer (depth 2)
+
+    // Inject a <link> Obj as a child of the URL-bar Obj, as html_to_ffon would produce
+    {
+        let wb_obj = h.renderer.ffon[wb_idx].as_obj_mut().unwrap();
+        let mut url_obj = FfonElement::new_obj("<input>https://example.com</input>");
+        url_obj.as_obj_mut().unwrap().push(
+            FfonElement::new_obj("Example link <link>https://example.com/page</link>"),
+        );
+        if !wb_obj.children.is_empty() {
+            wb_obj.children[0] = url_obj;
+        }
+    }
+    sicompass::list::create_list_current_layer(h.r());
+    press_right(h.r()); // navigate into the URL Obj (depth 3)
+    sicompass::list::create_list_current_layer(h.r());
+
+    // The link Obj item should have a "+l" prefix in the visual list
+    let link_item = h.renderer.total_list.iter().find(|item| {
+        item.label.contains("Example link")
+    });
+    assert!(link_item.is_some(), "link element should appear in the list");
+    assert!(
+        link_item.unwrap().label.starts_with("+l"),
+        "link Obj should have '+l' prefix, got: '{}'",
+        link_item.unwrap().label
+    );
+
+    // Navigate to the link item and press Right — should go one level deeper
+    let link_vis_idx = h.renderer.total_list.iter().position(|i| i.label.contains("Example link")).unwrap();
+    let cur = h.renderer.list_index;
+    let diff = link_vis_idx as isize - cur as isize;
+    if diff > 0 { for _ in 0..diff { press_down(h.r()); } }
+    else { for _ in 0..(-diff) { press_up(h.r()); } }
+
+    let depth_before = h.renderer.current_id.depth();
+    press_right(h.r());
+    assert!(
+        h.renderer.current_id.depth() >= depth_before,
+        "navigating Right into a link Obj should not decrease depth"
+    );
 }

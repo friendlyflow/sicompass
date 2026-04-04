@@ -448,6 +448,7 @@ impl Provider for SettingsProvider {
         if let Some(e) = self.text_entries.iter_mut()
             .find(|e| e.section == section && e.label == label)
         {
+            if e.current_value == new_content { return true; }
             e.current_value = new_content.to_owned();
             let config_key = e.config_key.clone();
             self.save_config_if_possible();
@@ -459,12 +460,14 @@ impl Provider for SettingsProvider {
 
     fn on_radio_change(&mut self, group_key: &str, selected_value: &str) {
         if group_key == "color scheme" {
+            if self.color_scheme == selected_value { return; }
             self.color_scheme = selected_value.to_owned();
             self.save_config_if_possible();
             self.fire_apply("colorScheme", selected_value);
             return;
         }
         if let Some(e) = self.radio_entries.iter_mut().find(|e| e.radio_key == group_key) {
+            if e.current_value == selected_value { return; }
             e.current_value = selected_value.to_owned();
             let config_key = e.config_key.clone();
             self.save_config_if_possible();
@@ -712,6 +715,23 @@ mod tests {
         assert!(entries.iter().any(|(k, v)| k == "sortOrder" && v == "date"));
     }
 
+    #[test]
+    fn test_on_radio_change_color_scheme_same_value_is_noop() {
+        let (mut p, log) = with_callback();
+        // default is "dark" — changing to "dark" again must not fire callback or save
+        p.on_radio_change("color scheme", "dark");
+        assert!(log.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_on_radio_change_custom_same_value_is_noop() {
+        let (mut p, log) = with_callback();
+        p.add_radio("sec", "sort", "sortOrder", &["name", "date"], "name");
+        // "name" is the default — firing same value must not fire callback or save
+        p.on_radio_change("sort", "name");
+        assert!(log.lock().unwrap().is_empty());
+    }
+
     // --- on_checkbox_change ---
 
     #[test]
@@ -743,6 +763,17 @@ mod tests {
         assert_eq!(p.text_entries[0].current_value, "new_value");
         let entries = log.lock().unwrap();
         assert!(entries.iter().any(|(k, v)| k == "serverKey" && v == "new_value"));
+    }
+
+    #[test]
+    fn test_commit_edit_same_value_is_noop() {
+        let (mut p, log) = with_callback();
+        p.add_text("sec", "Server", "serverKey", "existing");
+        p.set_current_path("/sec/Server");
+        // Same value — must return true but not fire callback or save
+        let ok = p.commit_edit("existing", "existing");
+        assert!(ok);
+        assert!(log.lock().unwrap().is_empty());
     }
 
     #[test]

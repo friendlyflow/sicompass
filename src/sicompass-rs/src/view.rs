@@ -34,6 +34,19 @@ pub fn main_loop(app: &mut AppState) {
     update_window_title(app);
 
     while app.running {
+        // ---- Apply pending window commands BEFORE polling events ------------
+        // This must happen first to avoid a startup race where SDL fires a
+        // Restored event (window created non-maximized) before pending_maximized
+        // is consumed, which would write `maximized: false` to settings.json.
+        if let Some(maximize) = app.renderer.pending_maximized.take() {
+            if maximize {
+                app.window.maximize();
+            } else {
+                app.window.restore();
+            }
+            app.maximized_ready = true;
+        }
+
         // ---- Collect all pending SDL events (avoids split borrow) -----------
         let events: Vec<Event> = app.event_pump.poll_iter().collect();
 
@@ -68,9 +81,14 @@ pub fn main_loop(app: &mut AppState) {
                         }
                         WindowEvent::Maximized | WindowEvent::Restored => {
                             app.framebuffer_resized = true;
-                            let is_maximized = matches!(win_event, WindowEvent::Maximized);
-                            if let Some(s) = app.renderer.providers.iter_mut().find(|p| p.name() == "settings") {
-                                s.on_checkbox_change("maximized", is_maximized);
+                            // Only update the setting once the initial pending_maximized
+                            // has been applied; ignoring earlier events prevents writing
+                            // a stale value during the startup window-creation sequence.
+                            if app.maximized_ready {
+                                let is_maximized = matches!(win_event, WindowEvent::Maximized);
+                                if let Some(s) = app.renderer.providers.iter_mut().find(|p| p.name() == "settings") {
+                                    s.on_checkbox_change("maximized", is_maximized);
+                                }
                             }
                         }
                         WindowEvent::CloseRequested => {
@@ -108,15 +126,6 @@ pub fn main_loop(app: &mut AppState) {
         // ---- Drain settings apply-callback events ---------------------------
         if let Some(q) = app.settings_queue.clone() {
             crate::programs::apply_pending_settings(&mut app.renderer, &q, false);
-        }
-
-        // ---- Apply pending window commands from settings --------------------
-        if let Some(maximize) = app.renderer.pending_maximized.take() {
-            if maximize {
-                app.window.maximize();
-            } else {
-                app.window.restore();
-            }
         }
 
         // ---- Advance caret blink state --------------------------------------

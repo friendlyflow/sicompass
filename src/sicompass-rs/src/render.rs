@@ -782,6 +782,7 @@ pub fn build_app() -> Result<AppState, SiError> {
         image_renderer: None,
         accesskit_adapter: None,
         settings_queue: None,
+        maximized_ready: false,
     })
 }
 
