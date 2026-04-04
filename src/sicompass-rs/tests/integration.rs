@@ -604,6 +604,60 @@ fn webbrowser_url_bar_is_input() {
 }
 
 // ---------------------------------------------------------------------------
+// Tests: Web browser URL input commit triggers refresh
+// ---------------------------------------------------------------------------
+
+/// Pressing I on the URL bar, typing a new URL and pressing Enter should
+/// update the FFON tree (via refresh_current_directory), not silently no-op.
+/// After commit, the URL bar key should contain the new URL.
+#[test]
+fn webbrowser_url_commit_updates_ffon() {
+    let mut h = Harness::new_with_webbrowser();
+    let wb_idx = h.provider_idx("webbrowser").expect("webbrowser not found");
+    navigate_to_provider(h.r(), wb_idx);
+    press_right(h.r()); // enter provider layer
+
+    // Navigate to the URL bar (first child, index 0)
+    let cur = h.renderer.current_id.get(1).unwrap_or(0);
+    for _ in 0..cur { press_up(h.r()); }
+
+    // Enter insert mode
+    press(h.r(), Keycode::I);
+    assert_eq!(
+        h.renderer.coordinate,
+        Coordinate::OperatorInsert,
+        "should be in insert mode after I"
+    );
+    assert!(
+        h.renderer.input_buffer.contains("https://"),
+        "input_buffer should contain the default URL prefix"
+    );
+
+    // Type a URL (will fail to fetch, but commit_edit still sets current_url)
+    type_text(h.r(), "https://example.invalid");
+    press_enter(h.r());
+
+    // After Enter, we should be back in operator mode
+    assert_eq!(
+        h.renderer.coordinate,
+        Coordinate::OperatorGeneral,
+        "should exit insert mode after Enter"
+    );
+
+    // The URL bar in the FFON tree must now contain the new URL.
+    // This verifies that refresh_current_directory was called (re-fetching from provider).
+    let wb_obj = h.renderer.ffon[wb_idx].as_obj().unwrap();
+    let url_elem = &wb_obj.children[0];
+    let url_text = url_elem.as_obj().map(|o| o.key.as_str())
+        .or_else(|| url_elem.as_str())
+        .unwrap_or("");
+    assert!(
+        url_text.contains("example.invalid"),
+        "URL bar FFON should contain the committed URL after refresh, got: {url_text:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Tests: List item label prefix
 // ---------------------------------------------------------------------------
 

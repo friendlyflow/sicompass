@@ -653,7 +653,7 @@ pub fn handle_enter_operator(r: &mut AppRenderer) {
             tags::extract_input(&elem_text).unwrap_or_default()
         };
         crate::provider::commit_edit(r, &content, &content);
-        crate::provider::refresh_if_needed(r);
+        crate::provider::refresh_current_directory(r);
         list::create_list_current_layer(r);
         r.needs_redraw = true;
         return;
@@ -1384,7 +1384,7 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
     }
 
     if committed {
-        crate::provider::refresh_if_needed(r);
+        crate::provider::refresh_current_directory(r);
     }
 
     handle_escape(r);

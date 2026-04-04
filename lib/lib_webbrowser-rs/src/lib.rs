@@ -172,16 +172,219 @@ fn fetch_html(url: &str) -> Result<String, String> {
 /// Tags we skip entirely (including all their children).
 const SKIP_TAGS: &[&str] = &[
     "script", "style", "noscript", "svg", "head", "nav", "footer",
-    "header", "aside",
 ];
 
-/// Tags that produce objects (sections/headings) vs strings (text/inline).
-const BLOCK_TAGS: &[&str] = &[
-    "div", "section", "article", "main", "h1", "h2", "h3", "h4", "h5", "h6",
-    "blockquote", "figure", "details", "summary",
+/// Block container tags — recurse into children without emitting a wrapper element.
+const CONTAINER_TAGS: &[&str] = &[
+    "div", "section", "article", "main", "header", "aside", "figure",
+    "blockquote", "details", "summary",
 ];
 
-const HEADING_TAGS: &[&str] = &["h1", "h2", "h3", "h4", "h5", "h6"];
+/// Collapse all whitespace (including newlines/tabs) to single spaces, trim ends.
+fn normalize_whitespace(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut prev_ws = true; // start true → leading whitespace is trimmed
+    for c in s.chars() {
+        if c.is_whitespace() {
+            if !prev_ws {
+                out.push(' ');
+                prev_ws = true;
+            }
+        } else {
+            out.push(c);
+            prev_ws = false;
+        }
+    }
+    if out.ends_with(' ') { out.pop(); }
+    out
+}
+
+fn heading_level(tag: &str) -> Option<u8> {
+    match tag {
+        "h1" => Some(1), "h2" => Some(2), "h3" => Some(3),
+        "h4" => Some(4), "h5" => Some(5), "h6" => Some(6),
+        _ => None,
+    }
+}
+
+/// Builds a document outline using a heading stack, mirroring the C `ParseContext`.
+///
+/// Headings create Obj nodes that collect all following content (paragraphs,
+/// lists, etc.) as children until a same-or-higher-level heading replaces them.
+struct ParseCtx<'a> {
+    base_url: &'a str,
+    /// Top-level elements (before the first heading, or after all headings are popped).
+    root: Vec<FfonElement>,
+    /// Open heading stack: (level, accumulated Obj). Innermost is last.
+    stack: Vec<(u8, FfonElement)>,
+}
+
+impl<'a> ParseCtx<'a> {
+    fn new(base_url: &'a str) -> Self {
+        ParseCtx { base_url, root: Vec::new(), stack: Vec::new() }
+    }
+
+    /// Add `elem` as a child of the current heading, or to root if no heading is open.
+    fn add_to_current(&mut self, elem: FfonElement) {
+        if let Some((_, ref mut h)) = self.stack.last_mut() {
+            h.as_obj_mut().unwrap().push(elem);
+        } else {
+            self.root.push(elem);
+        }
+    }
+
+    /// Pop all stack entries with level >= `level`, nesting each into its parent.
+    fn pop_until_level(&mut self, level: u8) {
+        while self.stack.last().map_or(false, |(l, _)| *l >= level) {
+            let (_, entry) = self.stack.pop().unwrap();
+            if let Some((_, ref mut parent)) = self.stack.last_mut() {
+                parent.as_obj_mut().unwrap().push(entry);
+            } else {
+                self.root.push(entry);
+            }
+        }
+    }
+
+    /// Drain the stack (innermost first) and return the completed top-level elements.
+    fn finalize(mut self) -> Vec<FfonElement> {
+        while let Some((_, entry)) = self.stack.pop() {
+            if let Some((_, ref mut parent)) = self.stack.last_mut() {
+                parent.as_obj_mut().unwrap().push(entry);
+            } else {
+                self.root.push(entry);
+            }
+        }
+        self.root
+    }
+
+    fn process_children(&mut self, node: scraper::ElementRef) {
+        for child in node.children().filter_map(scraper::ElementRef::wrap) {
+            self.process_node(child);
+        }
+    }
+
+    fn process_node(&mut self, node: scraper::ElementRef) {
+        let tag = node.value().name();
+
+        if SKIP_TAGS.contains(&tag) { return; }
+
+        // Headings push onto the stack; following content becomes their children.
+        if let Some(level) = heading_level(tag) {
+            let text = collect_text(node, self.base_url);
+            if text.is_empty() { return; }
+            self.pop_until_level(level);
+            self.stack.push((level, FfonElement::new_obj(text)));
+            return;
+        }
+
+        match tag {
+            "p" => {
+                let text = collect_text(node, self.base_url);
+                if !text.is_empty() {
+                    self.add_to_current(FfonElement::new_str(text));
+                }
+            }
+            "ul" | "ol" => {
+                let label = if tag == "ol" { "ordered list" } else { "list" };
+                let mut list_obj = FfonElement::new_obj(label);
+                let li_sel = scraper::Selector::parse("li").unwrap();
+                for (i, li) in node.select(&li_sel).enumerate() {
+                    let text = collect_text(li, self.base_url);
+                    if !text.is_empty() {
+                        let item = if tag == "ol" {
+                            format!("{}. {}", i + 1, text)
+                        } else {
+                            format!("- {}", text)
+                        };
+                        list_obj.as_obj_mut().unwrap().push(FfonElement::new_str(item));
+                    }
+                }
+                if list_obj.as_obj().map_or(false, |o| !o.children.is_empty()) {
+                    self.add_to_current(list_obj);
+                }
+            }
+            "table" => {
+                let mut rows: Vec<FfonElement> = Vec::new();
+                collect_table_rows(node, &mut rows);
+                for row in rows {
+                    self.add_to_current(row);
+                }
+            }
+            "pre" | "code" => {
+                let text = node.text().collect::<String>();
+                let trimmed = text.trim().to_owned();
+                if !trimmed.is_empty() {
+                    self.add_to_current(FfonElement::new_str(trimmed));
+                }
+            }
+            "img" => {
+                let alt = node.value().attr("alt").unwrap_or("");
+                if !alt.is_empty() && alt != "image" {
+                    self.add_to_current(FfonElement::new_str(format!("{alt} [img]")));
+                }
+            }
+            "a" => {
+                let href = resolve_href(node.value().attr("href").unwrap_or(""), self.base_url);
+                let text = collect_text(node, self.base_url);
+                if !text.is_empty() && !href.is_empty() {
+                    self.add_to_current(FfonElement::new_str(format!("{text} <link>{href}</link>")));
+                } else if !text.is_empty() {
+                    self.add_to_current(FfonElement::new_str(text));
+                }
+            }
+            "dl" => {
+                let mut dl_obj = FfonElement::new_obj("definition list");
+                let mut current_dt: Option<FfonElement> = None;
+                for child in node.children().filter_map(scraper::ElementRef::wrap) {
+                    let text = collect_text(child, self.base_url);
+                    if text.is_empty() { continue; }
+                    match child.value().name() {
+                        "dt" => {
+                            if let Some(dt) = current_dt.take() {
+                                dl_obj.as_obj_mut().unwrap().push(dt);
+                            }
+                            current_dt = Some(FfonElement::new_obj(text));
+                        }
+                        "dd" => {
+                            if let Some(ref mut dt) = current_dt {
+                                dt.as_obj_mut().unwrap().push(FfonElement::new_str(text));
+                            } else {
+                                dl_obj.as_obj_mut().unwrap().push(FfonElement::new_str(text));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if let Some(dt) = current_dt { dl_obj.as_obj_mut().unwrap().push(dt); }
+                if dl_obj.as_obj().map_or(false, |o| !o.children.is_empty()) {
+                    self.add_to_current(dl_obj);
+                }
+            }
+            t if CONTAINER_TAGS.contains(&t) => {
+                self.process_children(node);
+            }
+            _ => {
+                // Unknown element: recurse if it has block-level children, else emit text.
+                let has_block = node.children()
+                    .filter_map(scraper::ElementRef::wrap)
+                    .any(|c| {
+                        let t = c.value().name();
+                        heading_level(t).is_some()
+                            || matches!(t, "p" | "ul" | "ol" | "table" | "dl")
+                            || CONTAINER_TAGS.contains(&t)
+                    });
+                if has_block {
+                    self.process_children(node);
+                } else {
+                    let text = collect_text(node, self.base_url);
+                    if !text.is_empty() {
+                        self.add_to_current(FfonElement::new_str(text));
+                    }
+                }
+            }
+        }
+    }
+}
 
 /// Convert an HTML string to a flat list of FfonElements.
 fn html_to_ffon(html: &str, base_url: &str) -> Vec<FfonElement> {
@@ -195,108 +398,19 @@ fn html_to_ffon(html: &str, base_url: &str) -> Vec<FfonElement> {
         None => return vec![FfonElement::new_str("(empty page)")],
     };
 
-    let mut out: Vec<FfonElement> = Vec::new();
-    convert_node(body, base_url, &mut out, 0);
-    out
-}
+    let mut ctx = ParseCtx::new(base_url);
+    ctx.process_children(body);
+    let result = ctx.finalize();
 
-fn convert_node(
-    node: scraper::ElementRef,
-    base_url: &str,
-    out: &mut Vec<FfonElement>,
-    depth: usize,
-) {
-    let tag = node.value().name();
-
-    if SKIP_TAGS.contains(&tag) {
-        return;
-    }
-
-    match tag {
-        t if HEADING_TAGS.contains(&t) => {
-            let text = collect_text(node, base_url).trim().to_owned();
-            if !text.is_empty() {
-                let obj = FfonElement::new_obj(text);
-                // Recurse children into this heading's obj
-                for child in node.children().filter_map(scraper::ElementRef::wrap) {
-                    let child_tag = child.value().name();
-                    if !HEADING_TAGS.contains(&child_tag) {
-                        convert_node(child, base_url, &mut Vec::new(), depth + 1);
-                    }
-                }
-                out.push(obj);
-            }
-        }
-        "p" => {
-            let text = collect_text(node, base_url).trim().to_owned();
-            if !text.is_empty() {
-                out.push(FfonElement::new_str(text));
-            }
-        }
-        "ul" | "ol" => {
-            let list_label = if tag == "ol" { "ordered list" } else { "list" };
-            let mut list_obj = FfonElement::new_obj(list_label);
-            let li_sel = scraper::Selector::parse("li").unwrap();
-            for (i, li) in node.select(&li_sel).enumerate() {
-                let text = collect_text(li, base_url).trim().to_owned();
-                if !text.is_empty() {
-                    let item = if tag == "ol" {
-                        format!("{}. {}", i + 1, text)
-                    } else {
-                        format!("- {}", text)
-                    };
-                    list_obj.as_obj_mut().unwrap().push(FfonElement::new_str(item));
-                }
-            }
-            if list_obj.as_obj().map_or(false, |o| !o.children.is_empty()) {
-                out.push(list_obj);
-            }
-        }
-        "table" => {
-            convert_table(node, out);
-        }
-        "pre" | "code" => {
-            let text = node.text().collect::<String>();
-            let trimmed = text.trim();
-            if !trimmed.is_empty() {
-                out.push(FfonElement::new_str(trimmed.to_owned()));
-            }
-        }
-        "img" => {
-            let alt = node.value().attr("alt").unwrap_or("image");
-            if !alt.is_empty() && alt != "image" {
-                out.push(FfonElement::new_str(format!("{alt} [img]")));
-            }
-        }
-        "a" => {
-            let href = resolve_href(node.value().attr("href").unwrap_or(""), base_url);
-            let text = node.text().collect::<String>().trim().to_owned();
-            if !text.is_empty() && !href.is_empty() {
-                out.push(FfonElement::new_str(format!("{text} <link>{href}</link>")));
-            } else if !text.is_empty() {
-                out.push(FfonElement::new_str(text));
-            }
-        }
-        "dl" => {
-            convert_dl(node, base_url, out);
-        }
-        t if BLOCK_TAGS.contains(&t) || depth == 0 => {
-            // Generic block: recurse into children
-            for child in node.children().filter_map(scraper::ElementRef::wrap) {
-                convert_node(child, base_url, out, depth + 1);
-            }
-        }
-        _ => {
-            // Text-level: emit text if it has any
-            let text = collect_text(node, base_url).trim().to_owned();
-            if !text.is_empty() {
-                out.push(FfonElement::new_str(text));
-            }
-        }
+    if result.is_empty() {
+        vec![FfonElement::new_str("(empty page)")]
+    } else {
+        result
     }
 }
 
-/// Collect all text within a node, converting <a> tags to `text <link>url</link>`.
+/// Collect all text within a node, converting <a> tags to `text <link>url</link>`,
+/// normalizing all whitespace sequences to single spaces.
 fn collect_text(node: scraper::ElementRef, base_url: &str) -> String {
     use scraper::Node;
     let mut buf = String::new();
@@ -306,17 +420,14 @@ fn collect_text(node: scraper::ElementRef, base_url: &str) -> String {
             Node::Element(e) => {
                 if let Some(elem_ref) = scraper::ElementRef::wrap(child) {
                     let name = e.name();
-                    if SKIP_TAGS.contains(&name) {
-                        continue;
-                    }
+                    if SKIP_TAGS.contains(&name) { continue; }
                     if name == "a" {
                         let href = resolve_href(e.attr("href").unwrap_or(""), base_url);
                         let text = collect_text(elem_ref, base_url);
-                        let text = text.trim();
                         if !text.is_empty() && !href.is_empty() {
                             buf.push_str(&format!("{text} <link>{href}</link>"));
                         } else if !text.is_empty() {
-                            buf.push_str(text);
+                            buf.push_str(&text);
                         }
                     } else {
                         buf.push_str(&collect_text(elem_ref, base_url));
@@ -326,52 +437,21 @@ fn collect_text(node: scraper::ElementRef, base_url: &str) -> String {
             _ => {}
         }
     }
-    buf
+    normalize_whitespace(&buf)
 }
 
-fn convert_table(node: scraper::ElementRef, out: &mut Vec<FfonElement>) {
+fn collect_table_rows(node: scraper::ElementRef, out: &mut Vec<FfonElement>) {
     let row_sel = scraper::Selector::parse("tr").unwrap();
     for row in node.select(&row_sel) {
         let cell_sel = scraper::Selector::parse("th, td").unwrap();
         let cells: Vec<String> = row
             .select(&cell_sel)
-            .map(|c| c.text().collect::<String>().trim().to_owned())
+            .map(|c| normalize_whitespace(&c.text().collect::<String>()))
             .filter(|s| !s.is_empty())
             .collect();
         if !cells.is_empty() {
             out.push(FfonElement::new_str(cells.join(" | ")));
         }
-    }
-}
-
-fn convert_dl(node: scraper::ElementRef, base_url: &str, out: &mut Vec<FfonElement>) {
-    let mut current_dt: Option<FfonElement> = None;
-    for child in node.children().filter_map(scraper::ElementRef::wrap) {
-        match child.value().name() {
-            "dt" => {
-                if let Some(dt) = current_dt.take() {
-                    out.push(dt);
-                }
-                let text = collect_text(child, base_url).trim().to_owned();
-                if !text.is_empty() {
-                    current_dt = Some(FfonElement::new_obj(text));
-                }
-            }
-            "dd" => {
-                let text = collect_text(child, base_url).trim().to_owned();
-                if !text.is_empty() {
-                    if let Some(ref mut dt) = current_dt {
-                        dt.as_obj_mut().unwrap().push(FfonElement::new_str(text));
-                    } else {
-                        out.push(FfonElement::new_str(text));
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    if let Some(dt) = current_dt {
-        out.push(dt);
     }
 }
 
@@ -401,6 +481,49 @@ mod tests {
     use super::*;
 
     // ---- html_to_ffon unit tests ----
+
+    #[test]
+    fn test_paragraph_under_heading_becomes_child() {
+        let result = html_to_ffon(
+            "<html><body><h2>Section</h2><p>Content</p></body></html>",
+            "https://example.com",
+        );
+        let section = result.iter().find(|e| e.as_obj().map_or(false, |o| o.key == "Section"));
+        assert!(section.is_some(), "h2 should become an Obj");
+        let children = &section.unwrap().as_obj().unwrap().children;
+        assert!(
+            children.iter().any(|c| c.as_str().map_or(false, |s| s.contains("Content"))),
+            "paragraph should be a child of the heading, not a sibling"
+        );
+    }
+
+    #[test]
+    fn test_nested_headings_build_outline() {
+        let result = html_to_ffon(
+            "<html><body><h1>Top</h1><h2>Sub</h2><p>Leaf</p></body></html>",
+            "https://example.com",
+        );
+        let top = result.iter().find(|e| e.as_obj().map_or(false, |o| o.key == "Top"));
+        assert!(top.is_some(), "h1 should be at the top level");
+        let top_children = &top.unwrap().as_obj().unwrap().children;
+        let sub = top_children.iter().find(|e| e.as_obj().map_or(false, |o| o.key == "Sub"));
+        assert!(sub.is_some(), "h2 should be a child of h1");
+        let sub_children = &sub.unwrap().as_obj().unwrap().children;
+        assert!(
+            sub_children.iter().any(|c| c.as_str().map_or(false, |s| s.contains("Leaf"))),
+            "paragraph should be a child of h2"
+        );
+    }
+
+    #[test]
+    fn test_whitespace_normalized_in_paragraph() {
+        let result = html_to_ffon(
+            "<html><body><p>Hello\n    world\t  here</p></body></html>",
+            "https://example.com",
+        );
+        assert!(result.iter().any(|e| e.as_str().map_or(false, |s| s == "Hello world here")),
+            "internal whitespace should be collapsed to single spaces");
+    }
 
     #[test]
     fn test_empty_page_returns_placeholder() {
