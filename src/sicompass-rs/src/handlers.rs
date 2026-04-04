@@ -1385,12 +1385,6 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
 
     if committed {
         crate::provider::refresh_current_directory(r);
-        // If the element transitioned from leaf (Str) to container (Obj),
-        // auto-navigate into it so the user sees the content immediately
-        // (e.g. web browser: URL bar gains page content after load).
-        if !is_obj {
-            navigate_right_raw(r);
-        }
     }
 
     handle_escape(r);
@@ -1404,7 +1398,6 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
     }
     r.list_index = r.current_id.last().unwrap_or(0);
     r.scroll_offset = 0;
-    r.needs_redraw = true;
 }
 
 /// Parse "- name" (file) or "+ name" (directory) creation prefixes.
