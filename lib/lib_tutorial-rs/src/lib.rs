@@ -436,23 +436,23 @@ fn get_children_at_path<'a>(
 // Convert static tree to FfonElement vec, substituting asset paths
 // ---------------------------------------------------------------------------
 
-fn node_to_ffon(node: &Node, texture_jpg: &str, sf_json: &str) -> FfonElement {
+fn node_to_ffon(node: &Node, texture_jpg: &str, ffon_json: &str) -> FfonElement {
     match node {
-        Node::Leaf(s) => FfonElement::Str(apply_asset_placeholders(s, texture_jpg, sf_json)),
+        Node::Leaf(s) => FfonElement::Str(apply_asset_placeholders(s, texture_jpg, ffon_json)),
         Node::Branch { key, children } => {
-            let resolved_key = apply_asset_placeholders(key, texture_jpg, sf_json);
+            let resolved_key = apply_asset_placeholders(key, texture_jpg, ffon_json);
             let mut obj = FfonElement::new_obj(resolved_key);
             for child in *children {
                 obj.as_obj_mut()
                     .unwrap()
-                    .push(node_to_ffon(child, texture_jpg, sf_json));
+                    .push(node_to_ffon(child, texture_jpg, ffon_json));
             }
             obj
         }
     }
 }
 
-fn apply_asset_placeholders(s: &str, texture_jpg: &str, sf_json: &str) -> String {
+fn apply_asset_placeholders(s: &str, texture_jpg: &str, ffon_json: &str) -> String {
     match s {
         "__TEXTURE_JPG__" => format!("<image>{texture_jpg}</image>"),
         "__IMAGE_WITH_PREFIX_SUFFIX__" => {
@@ -461,15 +461,15 @@ fn apply_asset_placeholders(s: &str, texture_jpg: &str, sf_json: &str) -> String
         "__IMAGE_SUFFIX_ONLY__" => format!("<image>{texture_jpg}</image>and suffix"),
         "__IMAGE_PREFIX_ONLY__" => format!("Image with prefix: <image>{texture_jpg}</image>"),
         "__LINK_WITH_PREFIX_SUFFIX__" => {
-            format!("Link with prefix: <link>{sf_json}</link> and suffix")
+            format!("Playground based on html <link>{ffon_json}</link> which can be with prefix and suffix")
         }
         "__LOREM_IPSUM__" => lorem_ipsum().to_owned(),
         other => other.to_owned(),
     }
 }
 
-fn nodes_to_ffon(nodes: &[Node], texture_jpg: &str, sf_json: &str) -> Vec<FfonElement> {
-    nodes.iter().map(|n| node_to_ffon(n, texture_jpg, sf_json)).collect()
+fn nodes_to_ffon(nodes: &[Node], texture_jpg: &str, ffon_json: &str) -> Vec<FfonElement> {
+    nodes.iter().map(|n| node_to_ffon(n, texture_jpg, ffon_json)).collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -483,18 +483,18 @@ fn nodes_to_ffon(nodes: &[Node], texture_jpg: &str, sf_json: &str) -> Vec<FfonEl
 pub struct TutorialProvider {
     current_path: String,
     texture_jpg: String,
-    sf_json: String,
+    ffon_json: String,
 }
 
 impl TutorialProvider {
     /// Create with explicit asset directory.
     pub fn new(assets_dir: &Path) -> Self {
         let texture_jpg = assets_dir.join("texture.jpg").to_string_lossy().replace('\\', "/");
-        let sf_json = assets_dir.join("sf.json").to_string_lossy().replace('\\', "/");
+        let ffon_json = assets_dir.join("ffon.json").to_string_lossy().replace('\\', "/");
         TutorialProvider {
             current_path: "/".to_owned(),
             texture_jpg,
-            sf_json,
+            ffon_json,
         }
     }
 
@@ -503,7 +503,7 @@ impl TutorialProvider {
         TutorialProvider {
             current_path: "/".to_owned(),
             texture_jpg: "/missing/texture.jpg".to_owned(),
-            sf_json: "/missing/sf.json".to_owned(),
+            ffon_json: "/missing/ffon.json".to_owned(),
         }
     }
 
@@ -526,7 +526,7 @@ impl Provider for TutorialProvider {
     fn fetch(&mut self) -> Vec<FfonElement> {
         let parts = self.path_parts();
         match get_children_at_path(SECTIONS, &parts) {
-            Some(nodes) => nodes_to_ffon(nodes, &self.texture_jpg, &self.sf_json),
+            Some(nodes) => nodes_to_ffon(nodes, &self.texture_jpg, &self.ffon_json),
             None => vec![],
         }
     }

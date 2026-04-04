@@ -229,8 +229,8 @@ fn load_user_plugins(renderer: &mut AppRenderer, settings: &mut SettingsProvider
 fn tutorial_assets_dir() -> PathBuf {
     std::env::current_exe()
         .ok()
-        .and_then(|p| p.parent().map(|d| d.join("../../lib/lib_tutorial/assets")))
-        .unwrap_or_else(|| PathBuf::from("lib/lib_tutorial/assets"))
+        .and_then(|p| p.parent().map(|d| d.join("../../lib/lib_tutorial-rs/assets")))
+        .unwrap_or_else(|| PathBuf::from("lib/lib_tutorial-rs/assets"))
 }
 
 /// Resolve the sales demo script path relative to the running executable.
