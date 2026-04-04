@@ -419,10 +419,29 @@ void programsLoad(Provider *settingsProvider) {
         if (root) {
             json_object_object_get_ex(root, "Available programs:", &availableSection);
 
-            // Migration: remove obsolete programsToLoad
+            // Migration: convert obsolete programsToLoad into enable_* keys
             json_object *sicompassObj;
             if (json_object_object_get_ex(root, "sicompass", &sicompassObj)) {
-                if (json_object_object_get_ex(sicompassObj, "programsToLoad", NULL)) {
+                json_object *programsToLoad;
+                if (json_object_object_get_ex(sicompassObj, "programsToLoad", &programsToLoad)) {
+                    // Ensure "Available programs:" section exists
+                    if (!availableSection) {
+                        availableSection = json_object_new_object();
+                        json_object_object_add(root, "Available programs:", availableSection);
+                    }
+                    // Copy each program name into enable_* keys
+                    if (json_object_is_type(programsToLoad, json_type_array)) {
+                        int n = json_object_array_length(programsToLoad);
+                        for (int i = 0; i < n; i++) {
+                            json_object *item = json_object_array_get_idx(programsToLoad, i);
+                            const char *name = json_object_get_string(item);
+                            if (!name || !name[0]) continue;
+                            char key[80];
+                            snprintf(key, sizeof(key), "enable_%s", name);
+                            json_object_object_add(availableSection,
+                                                   key, json_object_new_boolean(true));
+                        }
+                    }
                     json_object_object_del(sicompassObj, "programsToLoad");
                     json_object_to_file_ext(configPath, root, JSON_C_TO_STRING_PRETTY);
                 }
