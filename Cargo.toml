@@ -70,3 +70,20 @@ libloading = "0.8"
 mockall = "0.13"
 tempfile = "3"
 wiremock = "0.6"
+
+# Optimize heavy third-party deps even in debug builds — html5ever and the
+# TLS/HTTP stack are 10-50x slower without optimizations.
+[profile.dev.package.html5ever]
+opt-level = 2
+[profile.dev.package.scraper]
+opt-level = 2
+[profile.dev.package.reqwest]
+opt-level = 2
+[profile.dev.package.hyper]
+opt-level = 2
+[profile.dev.package.hyper-util]
+opt-level = 2
+[profile.dev.package.rustls]
+opt-level = 2
+[profile.dev.package.ring]
+opt-level = 2

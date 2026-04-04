@@ -151,13 +151,24 @@ impl Provider for WebbrowserProvider {
 // HTTP fetch
 // ---------------------------------------------------------------------------
 
+// Build the HTTP client once. reqwest::blocking::Client::build() spins up a
+// Tokio runtime internally — rebuilding it on every fetch causes multi-second
+// startup overhead.
+static HTTP_CLIENT: std::sync::OnceLock<reqwest::blocking::Client> = std::sync::OnceLock::new();
+
+pub fn http_client() -> &'static reqwest::blocking::Client {
+    HTTP_CLIENT.get_or_init(|| {
+        reqwest::blocking::Client::builder()
+            .user_agent("sicompass/1.0")
+            .timeout(std::time::Duration::from_secs(30))
+            .redirect(reqwest::redirect::Policy::limited(10))
+            .build()
+            .expect("failed to build HTTP client")
+    })
+}
+
 fn fetch_html(url: &str) -> Result<String, String> {
-    reqwest::blocking::Client::builder()
-        .user_agent("sicompass/1.0")
-        .timeout(std::time::Duration::from_secs(30))
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .build()
-        .map_err(|e| e.to_string())?
+    http_client()
         .get(url)
         .send()
         .map_err(|e| e.to_string())?
@@ -279,9 +290,8 @@ impl<'a> ParseCtx<'a> {
 
         match tag {
             "p" => {
-                let text = collect_text(node, self.base_url);
-                if !text.is_empty() {
-                    self.add_to_current(FfonElement::new_str(text));
+                for elem in collect_elements(node, self.base_url) {
+                    self.add_to_current(elem);
                 }
             }
             "ul" | "ol" => {
@@ -289,14 +299,20 @@ impl<'a> ParseCtx<'a> {
                 let mut list_obj = FfonElement::new_obj(label);
                 let li_sel = scraper::Selector::parse("li").unwrap();
                 for (i, li) in node.select(&li_sel).enumerate() {
-                    let text = collect_text(li, self.base_url);
-                    if !text.is_empty() {
-                        let item = if tag == "ol" {
-                            format!("{}. {}", i + 1, text)
-                        } else {
-                            format!("- {}", text)
+                    let elems = collect_elements(li, self.base_url);
+                    for elem in elems {
+                        let prefixed = match &elem {
+                            FfonElement::Str(s) => {
+                                let item = if tag == "ol" {
+                                    format!("{}. {}", i + 1, s)
+                                } else {
+                                    format!("- {}", s)
+                                };
+                                FfonElement::new_str(item)
+                            }
+                            FfonElement::Obj(_) => elem,
                         };
-                        list_obj.as_obj_mut().unwrap().push(FfonElement::new_str(item));
+                        list_obj.as_obj_mut().unwrap().push(prefixed);
                     }
                 }
                 if list_obj.as_obj().map_or(false, |o| !o.children.is_empty()) {
@@ -327,7 +343,7 @@ impl<'a> ParseCtx<'a> {
                 let href = resolve_href(node.value().attr("href").unwrap_or(""), self.base_url);
                 let text = collect_text(node, self.base_url);
                 if !text.is_empty() && !href.is_empty() {
-                    self.add_to_current(FfonElement::new_str(format!("{text} <link>{href}</link>")));
+                    self.add_to_current(FfonElement::new_obj(format!("{text} <link>{href}</link>")));
                 } else if !text.is_empty() {
                     self.add_to_current(FfonElement::new_str(text));
                 }
@@ -387,7 +403,7 @@ impl<'a> ParseCtx<'a> {
 }
 
 /// Convert an HTML string to a flat list of FfonElements.
-fn html_to_ffon(html: &str, base_url: &str) -> Vec<FfonElement> {
+pub fn html_to_ffon(html: &str, base_url: &str) -> Vec<FfonElement> {
     use scraper::{Html, Selector};
 
     let document = Html::parse_document(html);
@@ -438,6 +454,54 @@ fn collect_text(node: scraper::ElementRef, base_url: &str) -> String {
         }
     }
     normalize_whitespace(&buf)
+}
+
+/// Walk a node's direct inline content, splitting text runs as Str and
+/// `<a>` tags as Obj with `<link>` in the key. Used for `<p>` and `<li>`.
+fn collect_elements(node: scraper::ElementRef, base_url: &str) -> Vec<FfonElement> {
+    use scraper::Node;
+    let mut result: Vec<FfonElement> = Vec::new();
+    let mut text_buf = String::new();
+
+    for child in node.children() {
+        match child.value() {
+            Node::Text(t) => text_buf.push_str(t),
+            Node::Element(e) => {
+                if let Some(elem_ref) = scraper::ElementRef::wrap(child) {
+                    let name = e.name();
+                    if SKIP_TAGS.contains(&name) { continue; }
+                    if name == "a" {
+                        // Flush accumulated text before the link
+                        let normalized = normalize_whitespace(&text_buf);
+                        if !normalized.is_empty() {
+                            result.push(FfonElement::new_str(normalized));
+                        }
+                        text_buf.clear();
+                        let href = resolve_href(e.attr("href").unwrap_or(""), base_url);
+                        let link_text = collect_text(elem_ref, base_url);
+                        if !link_text.is_empty() && !href.is_empty() {
+                            result.push(FfonElement::new_obj(
+                                format!("{link_text} <link>{href}</link>"),
+                            ));
+                        } else if !link_text.is_empty() {
+                            text_buf.push_str(&link_text);
+                        }
+                    } else {
+                        text_buf.push_str(&collect_text(elem_ref, base_url));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Flush remaining text
+    let normalized = normalize_whitespace(&text_buf);
+    if !normalized.is_empty() {
+        result.push(FfonElement::new_str(normalized));
+    }
+
+    result
 }
 
 fn collect_table_rows(node: scraper::ElementRef, out: &mut Vec<FfonElement>) {
@@ -584,10 +648,11 @@ mod tests {
             "<html><body><p><a href='https://rust-lang.org'>Rust</a></p></body></html>",
             "https://example.com",
         );
+        // Links inside <p> are now Obj elements with <link> in the key
         let found = result.iter().any(|e| {
-            e.as_str().map_or(false, |s| s.contains("<link>") && s.contains("rust-lang.org"))
+            e.as_obj().map_or(false, |o| o.key.contains("<link>") && o.key.contains("rust-lang.org"))
         });
-        assert!(found);
+        assert!(found, "link should be an Obj with <link> tag in key");
     }
 
     #[test]
@@ -596,10 +661,11 @@ mod tests {
             "<html><body><p><a href='/page'>Page</a></p></body></html>",
             "https://example.com",
         );
+        // Links inside <p> are now Obj elements with <link> in the key
         let found = result.iter().any(|e| {
-            e.as_str().map_or(false, |s| s.contains("example.com/page"))
+            e.as_obj().map_or(false, |o| o.key.contains("example.com/page"))
         });
-        assert!(found);
+        assert!(found, "relative link should be resolved and appear as Obj key");
     }
 
     #[test]

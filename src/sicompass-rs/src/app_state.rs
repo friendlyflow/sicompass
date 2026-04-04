@@ -537,6 +537,13 @@ pub struct AppState {
     /// Receives (key, value) events fired by the settings provider's ApplyFn.
     /// Drained each frame in the main loop via `programs::apply_pending_settings`.
     pub settings_queue: Option<crate::programs::SettingsQueue>,
+
+    // ---- Startup guard -----------------------------------------------------
+    /// Set to `true` once the initial `pending_maximized` has been applied.
+    /// Window Maximized/Restored events are ignored until then to prevent the
+    /// startup race where SDL fires a Restored event before the window is
+    /// maximized, which would write `maximized: false` to settings.json.
+    pub maximized_ready: bool,
 }
 
 impl AppState {

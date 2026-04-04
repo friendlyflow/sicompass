@@ -162,29 +162,27 @@ pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
     true
 }
 
-/// Fetch URL content via curl and parse into FFON elements.
+/// Fetch URL content and parse into FFON elements.
 /// Mirrors C's `fetchUrlToElements`.
 fn fetch_url_to_elements(url: &str) -> Vec<FfonElement> {
-    let api_key = crate::provider::find_api_key_for_url(url);
-    let mut cmd = std::process::Command::new("curl");
-    cmd.args(["-sfL"]);
-    if let Some(ref key) = api_key {
-        cmd.args(["-H", &format!("Authorization: Bearer {key}")]);
+    let client = sicompass_webbrowser::http_client();
+    let mut req = client.get(url);
+    if let Some(key) = crate::provider::find_api_key_for_url(url) {
+        req = req.header("Authorization", format!("Bearer {key}"));
     }
-    cmd.arg(url);
-    let output = match cmd.output() {
-        Ok(o) => o,
+    let body = match req.send().and_then(|r| r.text()) {
+        Ok(b) => b,
         Err(_) => return Vec::new(),
     };
-    if !output.status.success() || output.stdout.is_empty() {
-        return Vec::new();
-    }
+    if body.is_empty() { return Vec::new(); }
     if url.ends_with(".ffon") {
-        sicompass_sdk::ffon::deserialize_binary(&output.stdout)
-    } else {
-        sicompass_sdk::ffon::parse_json(&String::from_utf8_lossy(&output.stdout))
-            .unwrap_or_default()
+        return sicompass_sdk::ffon::deserialize_binary(body.as_bytes());
     }
+    // Try JSON first; fall back to HTML
+    if let Ok(elems) = sicompass_sdk::ffon::parse_json(&body) {
+        if !elems.is_empty() { return elems; }
+    }
+    sicompass_webbrowser::html_to_ffon(&body, url)
 }
 
 /// Resolve a link URL (local file or HTTP) into FFON elements.
@@ -646,7 +644,7 @@ pub fn handle_enter_operator(r: &mut AppRenderer) {
         .map(|p| p.name() == "filebrowser")
         .unwrap_or(false);
 
-    if (tags::has_input(&elem_text) || tags::has_input_all(&elem_text)) && !is_filebrowser {
+    if !_is_obj_elem && (tags::has_input(&elem_text) || tags::has_input_all(&elem_text)) && !is_filebrowser {
         let content = if tags::has_input_all(&elem_text) {
             tags::extract_input_all(&elem_text).unwrap_or_default()
         } else {
@@ -1045,7 +1043,16 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
     let new_content = r.input_buffer.clone();
 
     if old_content == new_content {
+        // Match C: wasInput → refresh even when content unchanged, then exit cleanly.
+        crate::provider::refresh_current_directory(r);
         handle_escape(r);
+        r.input_buffer.clear();
+        r.cursor_position = 0;
+        let saved_error = r.error_message.clone();
+        list::create_list_current_layer(r);
+        if !saved_error.is_empty() { r.error_message = saved_error; }
+        r.list_index = r.current_id.last().unwrap_or(0);
+        r.scroll_offset = 0;
         return;
     }
 
@@ -1385,6 +1392,10 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
 
     if committed {
         crate::provider::refresh_current_directory(r);
+        // Auto-navigate into the element if it now has children after refresh
+        // (e.g. web browser URL bar gains page content after load).
+        // Works for both fresh loads (Str→Obj) and URL changes (Obj→Obj).
+        navigate_right_raw(r);
     }
 
     handle_escape(r);
