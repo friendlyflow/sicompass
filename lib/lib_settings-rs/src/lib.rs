@@ -503,8 +503,14 @@ mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
 
+    /// Shared temp dir for test helpers — prevents tests from writing to real config.
+    fn test_config_path() -> PathBuf {
+        std::env::temp_dir().join("sicompass-test-settings.json")
+    }
+
     fn headless() -> SettingsProvider {
         SettingsProvider::new_headless()
+            .with_config_path(test_config_path())
     }
 
     fn with_callback() -> (SettingsProvider, Arc<Mutex<Vec<(String, String)>>>) {
@@ -512,7 +518,7 @@ mod tests {
         let log2 = Arc::clone(&log);
         let p = SettingsProvider::new(move |k, v| {
             log2.lock().unwrap().push((k.to_owned(), v.to_owned()));
-        });
+        }).with_config_path(test_config_path());
         (p, log)
     }
 
