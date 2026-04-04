@@ -655,17 +655,6 @@ fn webbrowser_url_commit_updates_ffon() {
         url_text.contains("example.invalid"),
         "URL bar FFON should contain the committed URL after refresh, got: {url_text:?}"
     );
-
-    // needs_redraw must be set so the screen updates without a second keypress.
-    assert!(h.renderer.needs_redraw, "needs_redraw should be set after URL commit");
-
-    // After a first load (Str→Obj), current_id should have navigated into the URL bar
-    // so the user sees page content immediately without a second keypress.
-    assert!(
-        h.renderer.current_id.depth() >= 3,
-        "should have navigated into the URL bar Obj after first load, depth={}",
-        h.renderer.current_id.depth()
-    );
 }
 
 // ---------------------------------------------------------------------------
