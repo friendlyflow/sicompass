@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=SiCompass
+Comment=Modal UI navigator
+Icon=sicompass
+Exec=sicompass
+Type=Application
+Categories=Utility;
+StartupWMClass=sicompass
