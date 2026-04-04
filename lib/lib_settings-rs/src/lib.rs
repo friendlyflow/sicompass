@@ -474,6 +474,7 @@ impl Provider for SettingsProvider {
 
     fn on_checkbox_change(&mut self, label: &str, checked: bool) {
         if let Some(e) = self.checkbox_entries.iter_mut().find(|e| e.label == label) {
+            if e.checked == checked { return; }
             e.checked = checked;
             let config_key = e.config_key.clone();
             self.save_config_if_possible();
@@ -720,6 +721,14 @@ mod tests {
         p.on_checkbox_change("my label", true);
         let entries = log.lock().unwrap();
         assert!(entries.iter().any(|(k, v)| k == "myKey" && v == "true"));
+    }
+
+    #[test]
+    fn test_on_checkbox_change_same_value_is_noop() {
+        let (mut p, log) = with_callback();
+        p.add_checkbox("sec", "my label", "myKey", false);
+        p.on_checkbox_change("my label", false); // same as default — no callback, no save
+        assert!(log.lock().unwrap().is_empty());
     }
 
     // --- commit_edit (text entries) ---
