@@ -211,6 +211,14 @@ fn update_view(app: &mut AppState) {
         get_radio_type(label) != RadioType::None || get_checkbox_type(label) != CheckboxType::None
     });
 
+    // Command/meta mode items are plain strings without a type-indicator prefix,
+    // so skip column alignment there (matches C render.c which renders all items
+    // at a fixed itemX with no prefix-column offset).
+    let is_flat_list = matches!(
+        app.renderer.coordinate,
+        Coordinate::Command | Coordinate::Meta
+    );
+
     // Compute indent and max prefix width before centering so the full visual
     // width (indent + prefix + content) can be centered in the window.
     let (list_indent_px, max_prefix_px) = {
@@ -219,15 +227,19 @@ fn update_view(app: &mut AppState) {
             None => return,
         };
         let indent = fr.measure_text_width("    ", scale);
-        let prefix = list_items.iter()
-            .map(|(label, _, _)| {
-                let (p, _) = split_label(label);
-                let text_w = fr.measure_text_width(p, scale);
-                // When any item has an indicator, all items reserve the same indicator width
-                let indicator_w = if list_has_indicators { indicator_width(line_height as f32, em_width) } else { 0.0 };
-                text_w + indicator_w
-            })
-            .fold(0.0_f32, f32::max);
+        let prefix = if is_flat_list {
+            0.0_f32
+        } else {
+            list_items.iter()
+                .map(|(label, _, _)| {
+                    let (p, _) = split_label(label);
+                    let text_w = fr.measure_text_width(p, scale);
+                    // When any item has an indicator, all items reserve the same indicator width
+                    let indicator_w = if list_has_indicators { indicator_width(line_height as f32, em_width) } else { 0.0 };
+                    text_w + indicator_w
+                })
+                .fold(0.0_f32, f32::max)
+        };
         (indent, prefix)
     };
     let left_inset = 10.0 + list_indent_px + max_prefix_px;
@@ -517,6 +529,9 @@ fn update_view(app: &mut AppState) {
                     let image_lines = ((img_h / line_height as f32).ceil() as usize).max(1);
                     let total_lines = prefix_lines + image_lines + suffix_lines;
                     (total_lines, Some(ImageLayout { prefix_lines, suffix_lines, image_lines, img_w, img_h }))
+                } else if is_flat_list {
+                    // Command/Meta items: no prefix split — measure the full label
+                    (fr.count_wrapped_lines(label, scale, item_max_w), None)
                 } else {
                     let (_, content) = split_label(label);
                     (fr.count_wrapped_lines(content, scale, item_max_w), None)
@@ -813,6 +828,9 @@ fn update_view(app: &mut AppState) {
                         fr.prepare_text_for_rendering(&insert_suffix, after_prefix_x + buf_w, item_y, scale, p.text);
                     }
                 }
+            } else if is_flat_list {
+                // Command/Meta: no prefix split — render the full label as a single string.
+                fr.prepare_text_wrapped(label.as_str(), text_prefix_x, item_y, scale, max_content_w.max(1.0), line_height as f32, p.text);
             } else {
                 let (prefix, content) = split_label(label.as_str());
                 fr.prepare_text_for_rendering(prefix, text_prefix_x, item_y, scale, p.text);

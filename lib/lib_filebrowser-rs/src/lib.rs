@@ -348,6 +348,16 @@ struct RawEntry {
     name: String,
     mtime: SystemTime,
     is_dir: bool,
+    #[cfg(unix)]
+    mode: u32,
+    #[cfg(unix)]
+    nlink: u64,
+    #[cfg(unix)]
+    uid: u32,
+    #[cfg(unix)]
+    gid: u32,
+    #[cfg(unix)]
+    size: u64,
 }
 
 fn collect_raw_entries(path: &Path) -> Vec<RawEntry> {
@@ -364,9 +374,22 @@ fn collect_raw_entries(path: &Path) -> Vec<RawEntry> {
             Err(_) => continue,
         };
         let is_dir = meta.is_dir();
-        // Skip executables (non-dir with execute bit) unless we're in commands mode —
-        // the Rust port always shows executables (no separate commands mode needed).
         let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            entries.push(RawEntry {
+                name,
+                mtime,
+                is_dir,
+                mode: meta.mode(),
+                nlink: meta.nlink(),
+                uid: meta.uid(),
+                gid: meta.gid(),
+                size: meta.size(),
+            });
+        }
+        #[cfg(not(unix))]
         entries.push(RawEntry { name, mtime, is_dir });
     }
     entries
@@ -378,35 +401,70 @@ fn collect_raw_entries(path: &Path) -> Vec<RawEntry> {
 
 #[cfg(unix)]
 fn format_properties(e: &RawEntry) -> String {
-    use std::os::unix::fs::MetadataExt;
-    // We only have metadata in RawEntry via SystemTime, so emit minimal info.
-    // Full stat (permissions, owner) requires re-statting — keep it simple.
-    let mtime = e.mtime
+    use libc::{getgrgid, getpwuid};
+    use std::ffi::CStr;
+
+    // Permission string (e.g. "drwxr-xr-x")
+    let mode = e.mode;
+    let mut perm = [b'-'; 10];
+    perm[0] = if mode & libc::S_IFMT == libc::S_IFDIR { b'd' }
+              else if mode & libc::S_IFMT == libc::S_IFLNK { b'l' }
+              else { b'-' };
+    perm[1] = if mode & libc::S_IRUSR != 0 { b'r' } else { b'-' };
+    perm[2] = if mode & libc::S_IWUSR != 0 { b'w' } else { b'-' };
+    perm[3] = if mode & libc::S_IXUSR != 0 { b'x' } else { b'-' };
+    perm[4] = if mode & libc::S_IRGRP != 0 { b'r' } else { b'-' };
+    perm[5] = if mode & libc::S_IWGRP != 0 { b'w' } else { b'-' };
+    perm[6] = if mode & libc::S_IXGRP != 0 { b'x' } else { b'-' };
+    perm[7] = if mode & libc::S_IROTH != 0 { b'r' } else { b'-' };
+    perm[8] = if mode & libc::S_IWOTH != 0 { b'w' } else { b'-' };
+    perm[9] = if mode & libc::S_IXOTH != 0 { b'x' } else { b'-' };
+    let perm_str = std::str::from_utf8(&perm).unwrap_or("----------");
+
+    // Owner and group names (fall back to numeric ids)
+    let owner = unsafe {
+        let pw = getpwuid(e.uid);
+        if !pw.is_null() {
+            CStr::from_ptr((*pw).pw_name).to_string_lossy().into_owned()
+        } else {
+            e.uid.to_string()
+        }
+    };
+    let group = unsafe {
+        let gr = getgrgid(e.gid);
+        if !gr.is_null() {
+            CStr::from_ptr((*gr).gr_name).to_string_lossy().into_owned()
+        } else {
+            e.gid.to_string()
+        }
+    };
+
+    // Date formatted like ls -l: "Mon DD HH:MM" (recent) or "Mon DD  YYYY" (older)
+    let mtime_secs = e.mtime
         .duration_since(SystemTime::UNIX_EPOCH)
         .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let dt = unix_ts_to_string(mtime);
-    format!("{:<8} {} ", if e.is_dir { "dir" } else { "file" }, dt)
+        .unwrap_or(0) as libc::time_t;
+    let date_str = unsafe {
+        let now = libc::time(std::ptr::null_mut());
+        let mut tm: libc::tm = std::mem::zeroed();
+        libc::localtime_r(&mtime_secs, &mut tm);
+        let fmt = if now - mtime_secs < 6 * 30 * 24 * 3600 {
+            b"%b %e %H:%M\0".as_ptr() as *const libc::c_char
+        } else {
+            b"%b %e  %Y\0".as_ptr() as *const libc::c_char
+        };
+        let mut buf = [0i8; 16];
+        libc::strftime(buf.as_mut_ptr(), buf.len(), fmt, &tm);
+        CStr::from_ptr(buf.as_ptr()).to_string_lossy().into_owned()
+    };
+
+    format!("{} {:2} {:<8} {:<8} {:5} {} ",
+        perm_str, e.nlink, owner, group, e.size, date_str)
 }
 
 #[cfg(not(unix))]
 fn format_properties(_e: &RawEntry) -> String {
     String::new()
-}
-
-fn unix_ts_to_string(ts: u64) -> String {
-    // Very simple: YYYY-MM-DD
-    use std::time::{Duration, UNIX_EPOCH};
-    let d = UNIX_EPOCH + Duration::from_secs(ts);
-    // Without chrono, produce a minimal UTC representation
-    let secs = ts;
-    // Use a simple calculation: days since epoch
-    let days = secs / 86400;
-    // Zeller-style date (approximate, good enough for display)
-    let year_approx = 1970 + days / 365;
-    let _ = year_approx; // suppress warning if unused
-    // Return raw seconds for now — full formatting requires chrono
-    format!("{ts}")
 }
 
 // ---------------------------------------------------------------------------

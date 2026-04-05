@@ -539,9 +539,18 @@ pub fn handle_enter_command(r: &mut AppRenderer) {
                 r.scroll_offset = 0;
 
                 if r.total_list.is_empty() {
-                    // Command was a state toggle — return to previous mode
+                    // Command was a state toggle — return to previous mode and refresh
                     r.current_command = CommandPhase::None;
                     r.coordinate = r.previous_coordinate;
+                    r.previous_coordinate = Coordinate::OperatorGeneral;
+
+                    // Navigate back to provider root if deeper (matches C: while depth > 2)
+                    while r.current_id.depth() > 2 {
+                        navigate_left_raw(r);
+                    }
+
+                    // Re-fetch the directory with the updated provider state
+                    crate::provider::refresh_current_directory(r);
                     list::create_list_current_layer(r);
                 }
                 r.needs_redraw = true;

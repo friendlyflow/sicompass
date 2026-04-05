@@ -970,3 +970,99 @@ fn webbrowser_link_obj_shows_plus_l_prefix_and_is_navigable() {
         "navigating Right into a link Obj should not decrease depth"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Tests: Filebrowser state-toggle commands refresh the listing immediately
+// ---------------------------------------------------------------------------
+
+/// Helper: enter command mode and navigate to the command with the given name,
+/// then press Enter to execute it.
+fn execute_provider_command(h: &mut Harness, command: &str) {
+    press(h.r(), Keycode::Colon);
+    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::Command,
+        "should be in Command mode after :");
+
+    // Find the command in the list and navigate to it
+    let idx = h.renderer.total_list.iter().position(|item| item.label == command)
+        .unwrap_or_else(|| panic!("command '{command}' not found in command list"));
+    let cur = h.renderer.list_index;
+    if idx > cur {
+        for _ in 0..(idx - cur) { press_down(h.r()); }
+    } else {
+        for _ in 0..(cur - idx) { press_up(h.r()); }
+    }
+    press_enter(h.r());
+}
+
+/// After toggling "show/hide properties", the listing should immediately update —
+/// items must include a properties prefix (permissions/size/date).
+#[test]
+fn filebrowser_show_properties_refreshes_listing() {
+    let mut h = Harness::new();
+    let fb_idx = h.renderer.providers.iter().position(|p| p.name() == "filebrowser")
+        .expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r()); // enter filebrowser layer
+
+    // Capture labels before toggling
+    let labels_before: Vec<String> = h.renderer.total_list.iter()
+        .map(|i| i.label.clone()).collect();
+
+    execute_provider_command(&mut h, "show/hide properties");
+
+    // Should be back in OperatorGeneral after a state-toggle
+    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::OperatorGeneral,
+        "should return to OperatorGeneral after show/hide properties");
+
+    // Labels must have changed — properties prefix should now be present
+    let labels_after: Vec<String> = h.renderer.total_list.iter()
+        .map(|i| i.label.clone()).collect();
+    assert_ne!(labels_before, labels_after,
+        "labels should change after toggling show/hide properties");
+
+    // Toggle back — labels should return to original
+    execute_provider_command(&mut h, "show/hide properties");
+    let labels_restored: Vec<String> = h.renderer.total_list.iter()
+        .map(|i| i.label.clone()).collect();
+    assert_eq!(labels_before, labels_restored,
+        "labels should match original after toggling properties twice");
+}
+
+/// After running "sort chronologically", the listing should immediately reorder.
+/// alpha.txt and beta.txt are created at slightly different times, so they may
+/// already be in chrono order — we just verify the command returns to normal mode
+/// and the list is non-empty (i.e. a refresh happened).
+#[test]
+fn filebrowser_sort_chrono_refreshes_listing() {
+    let mut h = Harness::new();
+    let fb_idx = h.renderer.providers.iter().position(|p| p.name() == "filebrowser")
+        .expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+
+    let count_before = h.renderer.total_list.len();
+    execute_provider_command(&mut h, "sort chronologically");
+
+    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::OperatorGeneral,
+        "should return to OperatorGeneral after sort chronologically");
+    assert_eq!(h.renderer.total_list.len(), count_before,
+        "item count should be unchanged after sort");
+}
+
+/// After running "sort alphanumerically", the listing should immediately reorder.
+#[test]
+fn filebrowser_sort_alpha_refreshes_listing() {
+    let mut h = Harness::new();
+    let fb_idx = h.renderer.providers.iter().position(|p| p.name() == "filebrowser")
+        .expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+
+    let count_before = h.renderer.total_list.len();
+    execute_provider_command(&mut h, "sort alphanumerically");
+
+    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::OperatorGeneral,
+        "should return to OperatorGeneral after sort alphanumerically");
+    assert_eq!(h.renderer.total_list.len(), count_before,
+        "item count should be unchanged after sort");
+}
