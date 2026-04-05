@@ -471,6 +471,9 @@ pub fn handle_tab(r: &mut AppRenderer) {
 
 /// Enter command mode (:).
 pub fn handle_colon(r: &mut AppRenderer) {
+    if r.current_id.depth() <= 1 {
+        return;
+    }
     r.previous_coordinate = r.coordinate;
     r.coordinate = Coordinate::Command;
     r.current_command = CommandPhase::None;

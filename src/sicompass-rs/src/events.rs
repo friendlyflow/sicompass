@@ -88,11 +88,29 @@ mod tests {
 
     // --- Colon (Shift+Semicolon) ---
 
+    fn make_renderer_inside_provider() -> AppRenderer {
+        use sicompass_sdk::ffon::{FfonElement, IdArray};
+        let mut root = FfonElement::new_obj("provider");
+        root.as_obj_mut().unwrap().push(FfonElement::new_str("item"));
+        let mut r = AppRenderer::new();
+        r.ffon = vec![root];
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        list::create_list_current_layer(&mut r);
+        r
+    }
+
     #[test]
     fn colon_in_operator_switches_to_command() {
-        let mut r = AppRenderer::new();
+        let mut r = make_renderer_inside_provider();
         dispatch_key(&mut r, Some(Keycode::Semicolon), shift());
         assert_eq!(r.coordinate, Coordinate::Command);
+    }
+
+    #[test]
+    fn colon_blocked_at_root() {
+        let mut r = AppRenderer::new();
+        dispatch_key(&mut r, Some(Keycode::Semicolon), shift());
+        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
     }
 
     #[test]

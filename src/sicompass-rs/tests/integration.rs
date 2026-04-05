@@ -1049,6 +1049,17 @@ fn filebrowser_sort_chrono_refreshes_listing() {
         "item count should be unchanged after sort");
 }
 
+/// Pressing `:` at root level (depth 1) must NOT enter command mode.
+#[test]
+fn colon_blocked_at_root() {
+    let mut h = Harness::new();
+    // Ensure we're at root
+    while h.renderer.current_id.depth() > 1 { press_left(h.r()); }
+    dispatch_key(h.r(), Some(Keycode::Semicolon), Mod::LSHIFTMOD);
+    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::OperatorGeneral,
+        "command mode must not activate at root depth");
+}
+
 /// After running "sort alphanumerically", the listing should immediately reorder.
 #[test]
 fn filebrowser_sort_alpha_refreshes_listing() {
