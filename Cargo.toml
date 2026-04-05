@@ -66,6 +66,9 @@ url = "2"
 # Plugin loading
 libloading = "0.8"
 
+# System
+libc = "0.2"
+
 # Windows .exe icon embedding (build-time only)
 winres = "0.1"
 

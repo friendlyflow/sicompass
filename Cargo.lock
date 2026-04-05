@@ -3779,6 +3779,7 @@ dependencies = [
 name = "sicompass-filebrowser"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "sicompass-sdk",
  "tempfile",
 ]
