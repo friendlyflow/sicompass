@@ -255,14 +255,32 @@ pub fn navigate_left_raw(r: &mut AppRenderer) -> bool {
         crate::provider::pop_path(r);
     }
 
-    let path_changed = path_before
-        .map(|before| before != crate::provider::current_path(r))
-        .unwrap_or(false);
+    let (path_changed, folder_name) = match path_before {
+        Some(before) => {
+            let changed = before != crate::provider::current_path(r);
+            let name = std::path::Path::new(&before)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned());
+            (changed, name)
+        }
+        None => (false, None),
+    };
 
     if path_changed {
         // Path moved to parent dir — stay inside the provider and re-fetch.
         crate::provider::refresh_current_directory(r);
-        r.current_id.set(1, 0);
+        // Restore cursor to the folder we just came from.
+        let target_index = folder_name
+            .and_then(|name| {
+                let provider_idx = r.current_id.get(0)?;
+                let children = r.ffon.get(provider_idx)?.as_obj()?.children.as_slice();
+                children.iter().position(|child| match child {
+                    sicompass_sdk::ffon::FfonElement::Obj(obj) => tags::strip_display(&obj.key) == name,
+                    _ => false,
+                })
+            })
+            .unwrap_or(0);
+        r.current_id.set(1, target_index);
     } else {
         r.current_id.pop();
     }
