@@ -284,12 +284,18 @@ pub struct AppRenderer {
     // ---- Scroll state ------------------------------------------------------
     pub scroll_offset: i32,
     pub text_scroll_offset: i32,
-    pub text_scroll_line_count: i32,
+    pub text_scroll_total_height: i32,
     pub input_search_scroll_offset: i32,
 
     // ---- Scroll search state -----------------------------------------------
     pub scroll_search_match_count: usize,
     pub scroll_search_current_match: usize,
+    /// When true the renderer picks the first match in/after the current viewport
+    /// on the next frame, then clears this flag. Set only by Ctrl+F entry.
+    pub scroll_search_needs_position: bool,
+    /// When true the renderer snaps the viewport to the current match on the
+    /// next frame, then clears this flag. Set by Up/Down navigation in ScrollSearch.
+    pub scroll_search_snap: bool,
 
     // ---- Dashboard state ---------------------------------------------------
     pub dashboard_image_path: String,
@@ -383,10 +389,12 @@ impl AppRenderer {
             input_suffix: String::new(),
             scroll_offset: 0,
             text_scroll_offset: 0,
-            text_scroll_line_count: 0,
+            text_scroll_total_height: 0,
             input_search_scroll_offset: 0,
             scroll_search_match_count: 0,
             scroll_search_current_match: 0,
+            scroll_search_needs_position: false,
+            scroll_search_snap: false,
             dashboard_image_path: String::new(),
             last_keypress_time: 0,
             search_string: String::new(),
