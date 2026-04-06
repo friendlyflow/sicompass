@@ -348,8 +348,11 @@ fn build_command_list(renderer: &mut AppRenderer) {
                     RenderListItem {
                         id,
                         label: li.label,
-                        data: if li.data.is_empty() { None } else { Some(li.data) },
-                        nav_path: None,
+                        // Store the exec/data payload in nav_path — not in `data`,
+                        // because the renderer treats a non-None `data` field as an
+                        // image path and attempts to load it as a texture.
+                        data: None,
+                        nav_path: if li.data.is_empty() { None } else { Some(li.data) },
                     }
                 })
                 .collect();

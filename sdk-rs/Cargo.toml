@@ -13,6 +13,9 @@ unicode-normalization = { workspace = true }
 [target.'cfg(target_os = "linux")'.dependencies]
 xdg = "2"
 
+[target.'cfg(target_os = "windows")'.dependencies]
+winreg = "0.52"
+
 [dev-dependencies]
 mockall = { workspace = true }
 tempfile = { workspace = true }
