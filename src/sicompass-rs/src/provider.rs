@@ -68,9 +68,17 @@ pub fn refresh_current_directory(renderer: &mut AppRenderer) {
     if idx >= renderer.providers.len() { return; }
 
     let children = renderer.providers[idx].fetch();
-    let display_name = renderer.providers[idx].display_name().to_owned();
+    let cur_path = renderer.providers[idx].current_path().to_owned();
+    let root_key = if cur_path == "/" {
+        renderer.providers[idx].display_name().to_owned()
+    } else {
+        std::path::Path::new(&cur_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| renderer.providers[idx].display_name().to_owned())
+    };
 
-    let mut root = sicompass_sdk::ffon::FfonElement::new_obj(&display_name);
+    let mut root = sicompass_sdk::ffon::FfonElement::new_obj(&root_key);
     for child in children {
         root.as_obj_mut().unwrap().push(child);
     }

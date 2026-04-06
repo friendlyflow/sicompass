@@ -1107,6 +1107,61 @@ fn navigate_right_empty_dir_shows_placeholder() {
     assert!(label.starts_with("-i"), "placeholder label should start with '-i', got: {label:?}");
 }
 
+/// Navigating into a subdirectory updates the root FFON element's key to the
+/// directory name, so the parent line reflects the current location.
+/// Navigating back out shows the parent directory name.
+/// Only at filesystem root "/" does the key fall back to "file browser".
+#[test]
+fn navigate_right_updates_parent_key() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    let root_name = root.file_name().unwrap().to_str().unwrap().to_owned();
+    std::fs::create_dir(root.join("subdir")).unwrap();
+    std::fs::write(root.join("subdir/file.txt"), "").unwrap();
+
+    let mut renderer = AppRenderer::new();
+    register(&mut renderer, Box::new(FilebrowserProvider::new()));
+    renderer.providers[0].set_current_path(root.to_str().unwrap());
+    {
+        let children = renderer.providers[0].fetch();
+        let display_name = renderer.providers[0].display_name().to_owned();
+        let mut root_elem = FfonElement::new_obj(&display_name);
+        for child in children { root_elem.as_obj_mut().unwrap().push(child); }
+        renderer.ffon[0] = root_elem;
+    }
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    // Initially the root element has the display name set during setup
+    assert_eq!(renderer.ffon[0].as_obj().unwrap().key, "file browser");
+
+    // Enter provider layer (static children already loaded, no refresh yet)
+    press_right(&mut renderer);
+    assert_eq!(renderer.ffon[0].as_obj().unwrap().key, "file browser",
+        "key should still be display name before navigating into subdir");
+
+    // Navigate to subdir
+    let subdir_idx = renderer.total_list.iter()
+        .position(|item| item.label.contains("subdir"))
+        .expect("subdir not found in list");
+    let cur = renderer.list_index;
+    if subdir_idx > cur {
+        for _ in 0..(subdir_idx - cur) { press_down(&mut renderer); }
+    } else {
+        for _ in 0..(cur - subdir_idx) { press_up(&mut renderer); }
+    }
+
+    // Enter subdir — root key should update to "subdir"
+    press_right(&mut renderer);
+    assert_eq!(renderer.current_id.depth(), 2);
+    assert_eq!(renderer.ffon[0].as_obj().unwrap().key, "subdir",
+        "root FFON key should be the directory name after navigating in");
+
+    // Navigate back left — key returns to the parent dir name (the temp dir basename)
+    press_left(&mut renderer);
+    assert_eq!(renderer.ffon[0].as_obj().unwrap().key, root_name,
+        "root FFON key should be the parent directory name after navigating back");
+}
+
 /// Deleting the last file in a directory causes the placeholder to reappear.
 #[test]
 fn delete_last_item_leaves_placeholder() {
