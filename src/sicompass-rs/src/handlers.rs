@@ -153,6 +153,15 @@ pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
         let provider_idx = item_id.get(0).unwrap_or(0);
         crate::provider::push_path(r, &segment);
         crate::provider::refresh_current_directory(r);
+        // If the directory is empty, insert a placeholder so the user can create files
+        // (mirrors C providerNavigateRight: childCount == 0 → add <input></input>)
+        if let Some(root) = r.ffon.get_mut(provider_idx) {
+            if let Some(obj) = root.as_obj_mut() {
+                if obj.children.is_empty() {
+                    obj.children.push(FfonElement::Str("<input></input>".to_owned()));
+                }
+            }
+        }
         let mut new_id = IdArray::new();
         new_id.push(provider_idx);
         new_id.push(0);
@@ -517,14 +526,30 @@ pub fn handle_enter_command(r: &mut AppRenderer) {
             let result = crate::provider::handle_command(r, &cmd, &element_key, element_type);
 
             if let Some(new_elem) = result {
-                // Provider returned a new element — insert it after the current position
-                let insert_idx = r.current_id.last().unwrap_or(0) + 1;
-                insert_ffon_element(r, insert_idx, new_elem);
-                r.current_id.set_last(insert_idx);
+                let current_idx = r.current_id.last().unwrap_or(0);
+
+                // If the current element is an empty placeholder, replace it in-place;
+                // otherwise insert after the current position.
+                // (mirrors C handlers.c:2724-2751)
+                let current_is_placeholder = {
+                    let arr = get_ffon_at_id(&r.ffon, &r.current_id);
+                    match arr.and_then(|a| a.get(current_idx)) {
+                        Some(sicompass_sdk::ffon::FfonElement::Str(s)) => is_empty_placeholder(s),
+                        _ => false,
+                    }
+                };
+
+                if current_is_placeholder {
+                    replace_ffon_element(r, current_idx, new_elem);
+                } else {
+                    let insert_idx = current_idx + 1;
+                    insert_ffon_element(r, insert_idx, new_elem);
+                    r.current_id.set_last(insert_idx);
+                }
                 r.current_command = CommandPhase::None;
                 r.coordinate = Coordinate::OperatorGeneral;
                 list::create_list_current_layer(r);
-                r.list_index = insert_idx;
+                r.list_index = r.current_id.last().unwrap_or(0);
                 r.scroll_offset = 0;
                 // Enter insert mode on the new element
                 handle_i(r);
@@ -1195,6 +1220,17 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
 
         r.prefixed_insert_mode = false;
         crate::provider::refresh_current_directory(r);
+        // Clamp current_id to the refreshed directory size — the placeholder was at
+        // some index N, but after refresh there may be fewer items.
+        {
+            let new_len = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)
+                .map(|a| a.len())
+                .unwrap_or(0);
+            let cur = r.current_id.last().unwrap_or(0);
+            if new_len > 0 && cur >= new_len {
+                r.current_id.set_last(new_len - 1);
+            }
+        }
         list::create_list_current_layer(r);
 
         r.coordinate = Coordinate::OperatorGeneral;
@@ -1663,6 +1699,17 @@ pub fn handle_delete(r: &mut AppRenderer, history: crate::app_state::History) {
 pub fn handle_file_delete(r: &mut AppRenderer) {
     let ok = crate::provider::delete_item(r);
     if ok {
+        // If the directory is now empty, insert a placeholder so the user can create files
+        // (mirrors C update.c: after deletion, if _ffon_count == 0 → add <input></input>)
+        let provider_idx = r.current_id.get(0).unwrap_or(0);
+        if let Some(root) = r.ffon.get_mut(provider_idx) {
+            if let Some(obj) = root.as_obj_mut() {
+                if obj.children.is_empty() {
+                    obj.children.push(FfonElement::Str("<input></input>".to_owned()));
+                    r.current_id.set_last(0);
+                }
+            }
+        }
         // Clamp current_id to valid range after deletion + refresh
         let new_len = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)
             .map(|a| a.len())
@@ -2565,7 +2612,8 @@ pub fn handle_ctrl_i_operator(r: &mut AppRenderer) {
         if r.current_id.depth() <= 1 { return; }
         0
     } else {
-        r.current_id.last().unwrap_or(0)
+        // Clamp in case current_id drifted out of bounds after a refresh
+        r.current_id.last().unwrap_or(0).min(slice.len().saturating_sub(1))
     };
     insert_operator_placeholder(r, insert_idx);
 }
@@ -2582,7 +2630,8 @@ pub fn handle_ctrl_a_operator(r: &mut AppRenderer) {
         if r.current_id.depth() <= 1 { return; }
         0
     } else {
-        r.current_id.last().unwrap_or(0) + 1
+        // Clamp in case current_id drifted out of bounds after a refresh
+        r.current_id.last().unwrap_or(0).min(slice.len().saturating_sub(1)) + 1
     };
     insert_operator_placeholder(r, insert_idx);
 }
@@ -2638,8 +2687,58 @@ pub fn sdl_ticks() -> u64 {
 }
 
 // ---------------------------------------------------------------------------
-// FFON insertion helper (for handle_enter_command)
+// FFON insertion/replacement helpers (for handle_enter_command)
 // ---------------------------------------------------------------------------
+
+/// Returns true if `key` is an empty `<input></input>` placeholder.
+fn is_empty_placeholder(key: &str) -> bool {
+    use sicompass_sdk::tags;
+    if let Some(content) = tags::extract_input(key) {
+        return content.is_empty();
+    }
+    if let Some(content) = tags::extract_input_all(key) {
+        return content.is_empty();
+    }
+    false
+}
+
+/// Replace the element at `replace_idx` in the FFON tree at the current navigation depth.
+fn replace_ffon_element(r: &mut AppRenderer, replace_idx: usize, elem: sicompass_sdk::ffon::FfonElement) {
+    if r.current_id.depth() <= 1 {
+        if replace_idx < r.ffon.len() {
+            r.ffon[replace_idx] = elem;
+        }
+        return;
+    }
+
+    let mut parent_id = r.current_id.clone();
+    parent_id.pop();
+
+    let parent_idx = parent_id.last().unwrap_or(0);
+    if get_ffon_at_id(&r.ffon, &parent_id).and_then(|s| s.get(parent_idx)).is_none() {
+        return;
+    }
+
+    let mut current: &mut Vec<sicompass_sdk::ffon::FfonElement> = &mut r.ffon;
+    let depth = parent_id.depth();
+    for d in 0..depth {
+        let idx = parent_id.get(d).unwrap_or(0);
+        if d + 1 == depth {
+            if let Some(sicompass_sdk::ffon::FfonElement::Obj(obj)) = current.get_mut(idx) {
+                if replace_idx < obj.children.len() {
+                    obj.children[replace_idx] = elem;
+                }
+            }
+            return;
+        }
+        match current.get_mut(idx) {
+            Some(sicompass_sdk::ffon::FfonElement::Obj(obj)) => {
+                current = &mut obj.children;
+            }
+            _ => return,
+        }
+    }
+}
 
 /// Insert `elem` at `insert_idx` in the FFON tree at the current navigation depth.
 ///
