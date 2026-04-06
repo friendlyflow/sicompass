@@ -458,6 +458,18 @@ pub fn handle_space(r: &mut AppRenderer) {
     r.needs_redraw = true;
 }
 
+/// Enter scroll mode (S key in OperatorGeneral).
+pub fn handle_s(r: &mut AppRenderer) {
+    if r.coordinate != Coordinate::OperatorGeneral {
+        return;
+    }
+    r.previous_coordinate = r.coordinate;
+    r.coordinate = Coordinate::Scroll;
+    r.text_scroll_offset = 0;
+    r.text_scroll_line_count = 0;
+    r.needs_redraw = true;
+}
+
 /// Navigate into / out of the meta object (M key in OperatorGeneral).
 pub fn handle_meta(r: &mut AppRenderer) {
     if r.coordinate != Coordinate::OperatorGeneral {
@@ -483,13 +495,6 @@ pub fn handle_tab(r: &mut AppRenderer) {
             r.search_string.clear();
             r.cursor_position = 0;
             list::create_list_current_layer(r);
-            r.needs_redraw = true;
-        }
-        Coordinate::SimpleSearch => {
-            // Tab again → scroll mode (C: no previous_coordinate update)
-            r.coordinate = Coordinate::Scroll;
-            r.text_scroll_offset = 0;
-            r.text_scroll_line_count = 0;
             r.needs_redraw = true;
         }
         _ => {}
@@ -1610,11 +1615,9 @@ pub fn handle_escape(r: &mut AppRenderer) {
             r.scroll_search_current_match = 0;
         }
         Coordinate::Scroll => {
-            r.coordinate = Coordinate::SimpleSearch;
-            r.search_string.clear();
-            r.scroll_offset = 0;
-            list::create_list_current_layer(r);
-            r.list_index = r.current_id.last().unwrap_or(0);
+            r.coordinate = r.previous_coordinate;
+            r.text_scroll_offset = 0;
+            r.text_scroll_line_count = 0;
         }
         _ => {
             // EditorGeneral, EditorNormal, EditorVisual, OperatorGeneral, etc.
@@ -3470,11 +3473,11 @@ mod tests {
     }
 
     #[test]
-    fn tab_from_simple_search_enters_scroll() {
+    fn tab_from_simple_search_is_noop() {
         let mut r = make_renderer();
         r.coordinate = Coordinate::SimpleSearch;
         handle_tab(&mut r);
-        assert_eq!(r.coordinate, Coordinate::Scroll);
+        assert_eq!(r.coordinate, Coordinate::SimpleSearch);
     }
 
     // -----------------------------------------------------------------------
@@ -3508,11 +3511,12 @@ mod tests {
     }
 
     #[test]
-    fn escape_from_scroll_enters_simple_search() {
+    fn escape_from_scroll_returns_to_previous() {
         let mut r = make_renderer();
         r.coordinate = Coordinate::Scroll;
+        r.previous_coordinate = Coordinate::OperatorGeneral;
         handle_escape(&mut r);
-        assert_eq!(r.coordinate, Coordinate::SimpleSearch);
+        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
     }
 
     #[test]
@@ -3531,6 +3535,29 @@ mod tests {
         r.coordinate = Coordinate::EditorInsert;
         handle_escape(&mut r);
         assert_eq!(r.coordinate, Coordinate::EditorGeneral);
+    }
+
+    // -----------------------------------------------------------------------
+    // handle_s
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn s_from_operator_enters_scroll() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::OperatorGeneral;
+        handle_s(&mut r);
+        assert_eq!(r.coordinate, Coordinate::Scroll);
+        assert_eq!(r.previous_coordinate, Coordinate::OperatorGeneral);
+        assert_eq!(r.text_scroll_offset, 0);
+        assert_eq!(r.text_scroll_line_count, 0);
+    }
+
+    #[test]
+    fn s_noop_outside_operator() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::SimpleSearch;
+        handle_s(&mut r);
+        assert_eq!(r.coordinate, Coordinate::SimpleSearch);
     }
 
     // -----------------------------------------------------------------------

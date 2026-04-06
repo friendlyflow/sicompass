@@ -49,6 +49,7 @@
 //! | D             | Ctrl     | EditorGeneral, OperatorGeneral      | handle_delete              |
 //! | Delete        | —        | OperatorGeneral                    | handle_delete              |
 //! | Delete        | —        | insert/search/command              | handle_delete_forward      |
+//! | S             | —        | OperatorGeneral                    | handle_s (enter Scroll)    |
 //! | M             | —        | OperatorGeneral                    | handle_meta                |
 //! | Space         | —        | OperatorGeneral, EditorGeneral      | handle_space               |
 //! | Z             | Ctrl     | navigation modes                   | handle_undo                |
@@ -466,6 +467,7 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
             Some(Keycode::D) if ctrl && !shift => handlers::handle_file_delete(r),
             Some(Keycode::Delete) if !ctrl && !shift => handlers::handle_file_delete(r),
             Some(Keycode::D) if !ctrl && !shift => handlers::handle_dashboard(r),
+            Some(Keycode::S) if !ctrl && !shift => handlers::handle_s(r),
             Some(Keycode::M) if !ctrl && !shift => handlers::handle_meta(r),
             Some(Keycode::Space) if !ctrl && !shift => handlers::handle_space(r),
             Some(Keycode::Z) if ctrl && !shift => handlers::handle_undo(r),
