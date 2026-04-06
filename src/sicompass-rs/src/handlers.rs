@@ -1220,18 +1220,23 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
 
         r.prefixed_insert_mode = false;
         crate::provider::refresh_current_directory(r);
-        // Clamp current_id to the refreshed directory size — the placeholder was at
-        // some index N, but after refresh there may be fewer items.
+        list::create_list_current_layer(r);
+        // Move cursor to the newly created item by name (list may have re-sorted).
+        // Labels have the form "{prefix} {content}" (e.g. "-i newfile.txt"),
+        // so compare the content after the first space.
         {
-            let new_len = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)
-                .map(|a| a.len())
-                .unwrap_or(0);
-            let cur = r.current_id.last().unwrap_or(0);
-            if new_len > 0 && cur >= new_len {
-                r.current_id.set_last(new_len - 1);
+            let name = item_name.as_str();
+            let found_idx = r.total_list.iter().position(|item| {
+                let content = item.label.split_once(' ').map(|(_, c)| c).unwrap_or(&item.label);
+                content == name
+            });
+            if let Some(i) = found_idx {
+                if let Some(id) = r.total_list.get(i).map(|it| it.id.clone()) {
+                    r.current_id = id;
+                    r.list_index = i;
+                }
             }
         }
-        list::create_list_current_layer(r);
 
         r.coordinate = Coordinate::OperatorGeneral;
         r.previous_coordinate = Coordinate::OperatorGeneral;
@@ -1304,11 +1309,11 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
                 crate::provider::refresh_current_directory(r);
                 list::create_list_current_layer(r);
 
-                // Find the created item and move cursor to it
+                // Find the created item and move cursor to it.
+                // Labels have the form "{prefix} {content}", compare content after the first space.
                 let found_idx = r.total_list.iter().position(|item| {
-                    use sicompass_sdk::tags;
-                    let raw = item.label.as_str();
-                    tags::strip_display(raw) == effective_name || raw == effective_name
+                    let content = item.label.split_once(' ').map(|(_, c)| c).unwrap_or(&item.label);
+                    content == effective_name
                 });
                 if let Some(i) = found_idx {
                     if let Some(id) = r.total_list.get(i).map(|it| it.id.clone()) {
@@ -1352,10 +1357,23 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
             crate::state::update_history(r, Task::FsCreate, &undo_id, None, Some(FfonElement::new_obj(&new_content)), History::None);
             crate::provider::refresh_current_directory(r);
             list::create_list_current_layer(r);
+            {
+                let name = new_content.as_str();
+                let found = r.total_list.iter().position(|item| {
+                    let content = item.label.split_once(' ').map(|(_, c)| c).unwrap_or(&item.label);
+                    content == name
+                });
+                if let Some(i) = found {
+                    if let Some(id) = r.total_list.get(i).map(|it| it.id.clone()) {
+                        r.current_id = id;
+                    }
+                }
+            }
             r.coordinate = Coordinate::OperatorGeneral;
             r.previous_coordinate = Coordinate::OperatorGeneral;
             r.input_buffer.clear();
             r.cursor_position = 0;
+            r.list_index = r.current_id.last().unwrap_or(0);
             r.needs_redraw = true;
         } else if !r.error_message.is_empty() {
             r.needs_redraw = true;
@@ -1373,10 +1391,23 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
             crate::state::update_history(r, Task::FsCreate, &undo_id, None, Some(FfonElement::new_str(new_content.clone())), History::None);
             crate::provider::refresh_current_directory(r);
             list::create_list_current_layer(r);
+            {
+                let name = new_content.as_str();
+                let found = r.total_list.iter().position(|item| {
+                    let content = item.label.split_once(' ').map(|(_, c)| c).unwrap_or(&item.label);
+                    content == name
+                });
+                if let Some(i) = found {
+                    if let Some(id) = r.total_list.get(i).map(|it| it.id.clone()) {
+                        r.current_id = id;
+                    }
+                }
+            }
             r.coordinate = Coordinate::OperatorGeneral;
             r.previous_coordinate = Coordinate::OperatorGeneral;
             r.input_buffer.clear();
             r.cursor_position = 0;
+            r.list_index = r.current_id.last().unwrap_or(0);
             r.needs_redraw = true;
             return;
         } else if r.error_message.is_empty() {

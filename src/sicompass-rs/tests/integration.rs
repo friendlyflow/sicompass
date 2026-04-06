@@ -1320,6 +1320,57 @@ fn ctrl_a_after_prefixed_creation_no_panic() {
         "Ctrl+A after creation should enter OperatorInsert without panic");
 }
 
+/// After creating a file whose name sorts last (e.g. "zzz.txt"), the cursor
+/// must land on that file, not stay at the old placeholder index.
+#[test]
+fn prefixed_create_cursor_follows_sorted_file() {
+    let mut h = Harness::new();
+
+    // Harness starts with alpha.txt, beta.txt, subdir/ — navigate into filebrowser
+    press_right(h.r());
+
+    // Create a file that sorts last alphabetically
+    press_ctrl(h.r(), Keycode::I);
+    type_text(h.r(), "- zzz.txt");
+    press_enter(h.r());
+
+    assert!(h.tmp_path().join("zzz.txt").exists(), "zzz.txt should be created");
+    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+
+    // Cursor label content should be "zzz.txt" — both current_id and list_index must agree
+    let cur_idx = h.renderer.current_id.last().unwrap_or(0);
+    let list_idx = h.renderer.list_index;
+    assert_eq!(cur_idx, list_idx, "current_id and list_index must be in sync");
+    let label = h.renderer.total_list.get(list_idx).map(|i| i.label.as_str()).unwrap_or("");
+    assert!(label.contains("zzz.txt"),
+        "cursor should be on zzz.txt after sorted insertion, got: {label:?}");
+}
+
+/// After creating a directory that sorts first (e.g. "aaa/"), the cursor
+/// must land on that directory, not on whatever was at the old placeholder index.
+#[test]
+fn prefixed_create_cursor_follows_sorted_dir() {
+    let mut h = Harness::new();
+
+    // Navigate into filebrowser
+    press_right(h.r());
+
+    // Create a directory that sorts first alphabetically
+    press_ctrl(h.r(), Keycode::I);
+    type_text(h.r(), "+ aaa");
+    press_enter(h.r());
+
+    assert!(h.tmp_path().join("aaa").is_dir(), "aaa/ should be created");
+    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+
+    let cur_idx = h.renderer.current_id.last().unwrap_or(0);
+    let list_idx = h.renderer.list_index;
+    assert_eq!(cur_idx, list_idx, "current_id and list_index must be in sync");
+    let label = h.renderer.total_list.get(list_idx).map(|i| i.label.as_str()).unwrap_or("");
+    assert!(label.contains("aaa"),
+        "cursor should be on aaa/ after sorted insertion, got: {label:?}");
+}
+
 /// After running "sort alphanumerically", the listing should immediately reorder.
 #[test]
 fn filebrowser_sort_alpha_refreshes_listing() {
