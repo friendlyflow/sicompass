@@ -480,12 +480,16 @@ fn mode_transitions_tab_escape_chain() {
     press_tab(h.r());
     assert_eq!(h.renderer.coordinate, Coordinate::SimpleSearch);
 
-    // Second Tab from search -> Scroll
+    // Tab from SimpleSearch is now a no-op
     press_tab(h.r());
-    assert_eq!(h.renderer.coordinate, Coordinate::Scroll);
+    assert_eq!(h.renderer.coordinate, Coordinate::SimpleSearch);
 
     press_escape(h.r());
-    assert_eq!(h.renderer.coordinate, Coordinate::SimpleSearch);
+    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+
+    // S key enters Scroll directly from OperatorGeneral
+    press(h.r(), Keycode::S);
+    assert_eq!(h.renderer.coordinate, Coordinate::Scroll);
 
     press_escape(h.r());
     assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
@@ -495,8 +499,7 @@ fn mode_transitions_tab_escape_chain() {
 fn scroll_search_esc_chain() {
     let mut h = Harness::new();
 
-    press_tab(h.r());  // -> SimpleSearch
-    press_tab(h.r());  // -> Scroll
+    press(h.r(), Keycode::S);  // -> Scroll
     assert_eq!(h.renderer.coordinate, Coordinate::Scroll);
 
     press_ctrl(h.r(), Keycode::F);
@@ -504,9 +507,6 @@ fn scroll_search_esc_chain() {
 
     press_escape(h.r());
     assert_eq!(h.renderer.coordinate, Coordinate::Scroll);
-
-    press_escape(h.r());
-    assert_eq!(h.renderer.coordinate, Coordinate::SimpleSearch);
 
     press_escape(h.r());
     assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);

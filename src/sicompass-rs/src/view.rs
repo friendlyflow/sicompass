@@ -1529,7 +1529,11 @@ fn handle_keydown_old(app: &mut AppState, keycode: Option<Keycode>, keymod: Mod)
 
         // ---- Scroll / scroll-search modes -----------------------------------
         Coordinate::Scroll | Coordinate::ScrollSearch | Coordinate::InputSearch => match keycode {
-            Some(Keycode::Escape) | Some(Keycode::Tab) => handlers::handle_escape(r),
+            Some(Keycode::Escape) => handlers::handle_escape(r),
+            Some(Keycode::Tab) if matches!(r.coordinate, Coordinate::InputSearch) => {
+                handlers::handle_escape(r)
+            }
+            Some(Keycode::Tab) => {} // no-op in Scroll/ScrollSearch
             Some(Keycode::Up) | Some(Keycode::K) if !ctrl && !shift => {
                 r.text_scroll_offset = (r.text_scroll_offset - 1).max(0);
                 r.needs_redraw = true;
