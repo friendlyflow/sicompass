@@ -254,22 +254,14 @@ fn update_view(app: &mut AppState) {
         app.renderer.window_height = win_h as i32;
         app.renderer.cached_line_height = line_height;
 
-        // Snapshot all renderer state we need before taking mutable borrows
-        let element_text: String = {
-            let r = &app.renderer;
-            let arr = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id);
-            let idx = r.current_id.last().unwrap_or(0);
-            arr.and_then(|a| a.get(idx))
-                .map(|elem| match elem {
-                    sicompass_sdk::ffon::FfonElement::Str(s) => s.clone(),
-                    sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.clone(),
-                })
-                .unwrap_or_default()
-        };
+        // Snapshot state needed before mutable borrows
         let text_scroll_offset = app.renderer.text_scroll_offset;
+        let list_index = app.renderer.list_index;
         let search_query = app.renderer.input_buffer.clone();
         let search_match_count = app.renderer.scroll_search_match_count;
         let search_current_match = app.renderer.scroll_search_current_match;
+        let search_needs_position = app.renderer.scroll_search_needs_position;
+        let search_snap = app.renderer.scroll_search_snap;
         let is_scroll_search = app.renderer.coordinate == Coordinate::ScrollSearch;
         let error_msg = app.renderer.error_message.clone();
 
@@ -295,33 +287,41 @@ fn update_view(app: &mut AppState) {
             fr.prepare_text_for_rendering(&error_msg, err_x, header_baseline, scale, p.error);
         }
 
-        // Render scroll content
+        // Render scroll content — full list with pixel-smooth scrolling
         if is_scroll_search {
-            let result = render_scroll_search(
+            let result = render_scroll_search_full(
                 app.font_renderer.as_mut().unwrap(),
                 app.rect_renderer.as_mut(),
-                app.image_renderer.as_mut(),
-                &element_text,
+                &list_items,
+                list_index,
                 text_scroll_offset,
                 &search_query,
                 search_match_count,
                 search_current_match,
+                search_needs_position,
+                search_snap,
                 scale, line_height, ascender, em_width, text_x, max_content_w, win_h, &p,
             );
-            app.renderer.text_scroll_line_count = result.line_count;
+            app.renderer.text_scroll_total_height = result.total_height;
             app.renderer.scroll_search_match_count = result.match_count;
             app.renderer.scroll_search_current_match = result.current_match;
             app.renderer.text_scroll_offset = result.scroll_offset;
+            // needs_position is cleared by Up/Down navigation (not by the renderer);
+            // while the user is still typing it stays true so viewport-aware selection
+            // re-fires on every frame with an updated match set.
+            app.renderer.scroll_search_snap = false;
         } else {
-            let line_count = render_scroll(
+            let (total_height, resolved_offset) = render_scroll_full(
                 app.font_renderer.as_mut().unwrap(),
                 app.rect_renderer.as_mut(),
                 app.image_renderer.as_mut(),
-                &element_text,
+                &list_items,
+                list_index,
                 text_scroll_offset,
-                scale, line_height, ascender, em_width, text_x, max_content_w, &p,
+                scale, line_height, ascender, em_width, text_x, max_content_w, win_h, &p,
             );
-            app.renderer.text_scroll_line_count = line_count;
+            app.renderer.text_scroll_total_height = total_height;
+            app.renderer.text_scroll_offset = resolved_offset;
         }
         return;
     }
@@ -985,13 +985,29 @@ fn update_view(app: &mut AppState) {
 // Scroll mode rendering
 // ---------------------------------------------------------------------------
 
-/// Render the selected element's text in scroll mode. Returns total wrapped line count.
+/// Compute the pixel height of one list item in scroll mode.
+/// Uses the full label (including prefix) for text measurement.
+fn scroll_item_height(
+    fr: &crate::text::FontRenderer,
+    label: &str,
+    scale: f32,
+    line_height: i32,
+    max_w: f32,
+) -> i32 {
+    let stripped = sicompass_sdk::tags::strip_display(label);
+    let lines = fr.count_wrapped_lines(&stripped, scale, max_w).max(1);
+    lines as i32 * line_height
+}
+
+/// Render the full list with pixel-smooth scrolling.
+/// Returns `(total_height_px, resolved_scroll_offset_px)`.
 #[allow(clippy::too_many_arguments)]
-fn render_scroll(
+fn render_scroll_full(
     fr: &mut crate::text::FontRenderer,
-    rr: Option<&mut crate::rectangle::RectangleRenderer>,
-    ir: Option<&mut crate::image::ImageRenderer>,
-    element_text: &str,
+    mut rr: Option<&mut crate::rectangle::RectangleRenderer>,
+    _ir: Option<&mut crate::image::ImageRenderer>,
+    list_items: &[(String, Option<String>, bool, Vec<u32>)],
+    list_index: usize,
     text_scroll_offset: i32,
     scale: f32,
     line_height: i32,
@@ -999,79 +1015,68 @@ fn render_scroll(
     em_width: f32,
     text_x: f32,
     max_content_w: f32,
+    win_h: f32,
     p: &crate::app_state::ColorPalette,
-) -> i32 {
-    let _ = (rr, ascender, em_width);
+) -> (i32, i32) {
+    let _ = em_width;
     let clip_y = line_height as f32;
-    let content_y_base = clip_y;
+    let viewport_h = win_h - clip_y;
     let max_w = max_content_w.max(1.0);
+    let lh = line_height as f32;
 
-    // Render wrapped lines, skipping any whose top edge is above the header clip boundary.
-    let render_lines_clipped = |fr: &mut crate::text::FontRenderer, text: &str, first_line_y: f32| -> i32 {
-        let wrapped = fr.wrap_lines_with_offsets(text, scale, max_w);
-        let count = wrapped.len() as i32;
-        for (n, (line, _)) in wrapped.iter().enumerate() {
-            let line_top = first_line_y + n as f32 * line_height as f32;
-            if line_top < clip_y { continue; }
-            let line_y = line_top + ascender * scale + crate::text::TEXT_PADDING;
-            fr.prepare_text_for_rendering(line, text_x, line_y, scale, p.text);
-        }
-        count
+    // Phase 1: compute per-item heights and cumulative tops
+    let mut item_tops: Vec<i32> = Vec::with_capacity(list_items.len());
+    let mut y_accum: i32 = 0;
+    for (label, _, _, _) in list_items.iter() {
+        item_tops.push(y_accum);
+        y_accum += scroll_item_height(fr, label, scale, line_height, max_w);
+    }
+    let total_height = y_accum;
+
+    // Resolve sentinel (-1): place selected item at viewport top
+    let max_offset = (total_height - viewport_h as i32).max(0);
+    let scroll_offset = if text_scroll_offset < 0 {
+        item_tops.get(list_index).copied().unwrap_or(0).min(max_offset)
+    } else {
+        text_scroll_offset.clamp(0, max_offset)
     };
 
-    if sicompass_sdk::tags::has_image(element_text) {
-        let img_path = sicompass_sdk::tags::extract_image(element_text);
-        let prefix_text;
-        let suffix_text;
-        {
-            const IMAGE_OPEN: &str = "<image>";
-            const IMAGE_CLOSE: &str = "</image>";
-            let open_pos = element_text.find(IMAGE_OPEN).unwrap_or(element_text.len());
-            let raw_prefix = &element_text[..open_pos];
-            let close_pos = element_text.find(IMAGE_CLOSE)
-                .map(|p| p + IMAGE_CLOSE.len())
-                .unwrap_or(element_text.len());
-            let raw_suffix = if close_pos < element_text.len() { &element_text[close_pos..] } else { "" };
-            prefix_text = sicompass_sdk::tags::strip_display(raw_prefix);
-            suffix_text = sicompass_sdk::tags::strip_display(raw_suffix);
+    // Phase 2: selection highlight rectangle for the selected item
+    if let Some(item_top) = item_tops.get(list_index) {
+        let item_top_screen = clip_y + (item_top - scroll_offset) as f32;
+        let item_h = (item_tops.get(list_index + 1).copied().unwrap_or(total_height) - item_top) as f32;
+        let rect_top = item_top_screen.max(clip_y);
+        let rect_bottom = (item_top_screen + item_h).min(win_h);
+        if rect_bottom > rect_top {
+            if let Some(rr) = rr.as_deref_mut() {
+                rr.prepare_rectangle(text_x - 4.0, rect_top, max_w + 8.0, rect_bottom - rect_top, p.selected, 5.0);
+            }
         }
-
-        let start_y = content_y_base - text_scroll_offset as f32 * line_height as f32;
-        let prefix_lines = render_lines_clipped(fr, &prefix_text, start_y);
-
-        let img_w = max_w;
-        let img_y = start_y + prefix_lines as f32 * line_height as f32;
-        let image_lines;
-        if let Some(ref path) = img_path {
-            let img_h = if let Some(ir_mut) = ir {
-                let h = unsafe { ir_mut.texture_size(path) }
-                    .map(|(tw, th)| if tw == 0 { img_w } else { img_w * th as f32 / tw as f32 })
-                    .unwrap_or(img_w);
-                if img_y + (h / line_height as f32).ceil() * line_height as f32 > clip_y {
-                    unsafe { ir_mut.prepare_image(path, text_x, img_y.max(clip_y), img_w, h); }
-                }
-                h
-            } else {
-                img_w
-            };
-            image_lines = (img_h / line_height as f32).ceil() as i32;
-        } else {
-            image_lines = 0;
-        }
-
-        let suffix_y = img_y + image_lines as f32 * line_height as f32;
-        let suffix_lines = render_lines_clipped(fr, &suffix_text, suffix_y);
-
-        prefix_lines + image_lines + suffix_lines
-    } else {
-        let stripped = sicompass_sdk::tags::strip_display(element_text);
-        let start_y = content_y_base - text_scroll_offset as f32 * line_height as f32;
-        render_lines_clipped(fr, &stripped, start_y)
     }
+
+    // Phase 3: render text for all visible items (full label including prefix)
+    for (i, (label, _, _, _)) in list_items.iter().enumerate() {
+        let item_top_screen = clip_y + (item_tops[i] - scroll_offset) as f32;
+        let item_h = (item_tops.get(i + 1).copied().unwrap_or(total_height) - item_tops[i]) as f32;
+        if item_top_screen + item_h <= clip_y { continue; } // above viewport
+        if item_top_screen >= win_h { break; }               // below viewport
+
+        let stripped = sicompass_sdk::tags::strip_display(label);
+        let wrapped = fr.wrap_lines_with_offsets(&stripped, scale, max_w);
+        for (n, (line, _)) in wrapped.iter().enumerate() {
+            let line_top = item_top_screen + n as f32 * lh;
+            if line_top + lh <= clip_y { continue; }
+            if line_top >= win_h { break; }
+            let line_baseline = line_top + ascender * scale + crate::text::TEXT_PADDING;
+            fr.prepare_text_for_rendering(line, text_x, line_baseline, scale, p.text);
+        }
+    }
+
+    (total_height, scroll_offset)
 }
 
 struct ScrollSearchResult {
-    line_count: i32,
+    total_height: i32,
     match_count: usize,
     current_match: usize,
     scroll_offset: i32,
@@ -1099,17 +1104,19 @@ fn find_matches_ci(text: &str, query: &str) -> Vec<(usize, usize)> {
     matches
 }
 
-/// Render scroll-search mode. Returns computed state for write-back.
+/// Render scroll-search mode across all list items. Returns computed state for write-back.
 #[allow(clippy::too_many_arguments)]
-fn render_scroll_search(
+fn render_scroll_search_full(
     fr: &mut crate::text::FontRenderer,
     mut rr: Option<&mut crate::rectangle::RectangleRenderer>,
-    ir: Option<&mut crate::image::ImageRenderer>,
-    element_text: &str,
+    list_items: &[(String, Option<String>, bool, Vec<u32>)],
+    list_index: usize,
     text_scroll_offset: i32,
     search_query: &str,
     _search_match_count: usize,
     search_current_match: usize,
+    needs_position: bool,
+    snap: bool,
     scale: f32,
     line_height: i32,
     ascender: f32,
@@ -1119,87 +1126,128 @@ fn render_scroll_search(
     win_h: f32,
     p: &crate::app_state::ColorPalette,
 ) -> ScrollSearchResult {
-    let _ = (ir, ascender, em_width);
+    let _ = em_width;
+    // Search bar occupies line 1 (below header), content starts at line 2
+    let clip_y = line_height as f32 * 2.0;
+    let viewport_h = win_h - clip_y;
+    let max_w = max_content_w.max(1.0);
+    let lh = line_height as f32;
 
-    // Build the searchable (stripped) text
-    let stripped = sicompass_sdk::tags::strip_display(element_text);
+    // Phase 1: per-item heights, cumulative tops, texts, and pre-computed wrapped lines.
+    // Wrapping once here avoids re-wrapping in later phases.
+    let mut item_tops: Vec<i32> = Vec::with_capacity(list_items.len());
+    let mut item_texts: Vec<String> = Vec::with_capacity(list_items.len());
+    let mut item_wraps: Vec<Vec<(String, usize)>> = Vec::with_capacity(list_items.len());
+    let mut y_accum: i32 = 0;
+    for (label, _, _, _) in list_items.iter() {
+        item_tops.push(y_accum);
+        let stripped = sicompass_sdk::tags::strip_display(label);
+        let wrap = fr.wrap_lines_with_offsets(&stripped, scale, max_w);
+        y_accum += (wrap.len().max(1) as i32) * line_height;
+        item_texts.push(stripped);
+        item_wraps.push(wrap);
+    }
+    let total_height = y_accum;
 
-    // Word-wrap with byte offsets
-    let wrap_lines = fr.wrap_lines_with_offsets(&stripped, scale, max_content_w.max(1.0));
-    let line_count = wrap_lines.len() as i32;
-
-    // Find matches
-    let all_matches = find_matches_ci(&stripped, search_query);
+    // Phase 2: collect all matches across all items.
+    // Each entry: (item_idx, byte_off, match_len, match_virtual_y)
+    // match_virtual_y is the virtual-space top of the wrapped line containing the match.
+    let mut all_matches: Vec<(usize, usize, usize, i32)> = Vec::new();
+    for (item_idx, text) in item_texts.iter().enumerate() {
+        let wrap = &item_wraps[item_idx];
+        for (byte_off, mlen) in find_matches_ci(text, search_query) {
+            let li = wrap.partition_point(|(_, off)| *off <= byte_off).saturating_sub(1);
+            let li = li.min(wrap.len().saturating_sub(1));
+            let virtual_y = item_tops[item_idx] + li as i32 * line_height;
+            all_matches.push((item_idx, byte_off, mlen, virtual_y));
+        }
+    }
     let match_count = all_matches.len();
 
-    // Clamp current match
+    // Resolve the current viewport top from the input scroll offset.
+    let viewport_top = if text_scroll_offset < 0 {
+        item_tops.get(list_index).copied().unwrap_or(0)
+    } else {
+        text_scroll_offset
+    };
+
+    // Select current match.
+    // needs_position (first entry with matches): pick the first match whose line
+    //   is visible in the current viewport (match_virtual_y + line_height > viewport_top),
+    //   falling back to match 0 if none qualify.
+    // Otherwise: use clamped search_current_match directly (explicit navigation or typing).
     let current_match = if match_count == 0 {
         0
     } else {
-        search_current_match.min(match_count - 1)
+        let clamped = search_current_match.min(match_count - 1);
+        if needs_position {
+            // Always find the first match whose line is in/after the viewport top.
+            // Never short-circuit via clamped — it may not be the first visible match.
+            all_matches.iter().enumerate()
+                .find(|(_, &(_, _, _, vy))| vy + line_height > viewport_top)
+                .map(|(mi, _)| mi)
+                .unwrap_or(0)
+        } else {
+            clamped
+        }
     };
 
-    // Auto-scroll so current match is visible
-    let visible_lines = ((win_h as i32 - line_height * 2) / line_height).max(1);
-    let mut scroll_offset = text_scroll_offset;
-    if match_count > 0 {
-        // Find which wrapped line the current match is on
-        let match_byte = all_matches[current_match].0;
-        let match_line = wrap_lines.partition_point(|(_, off)| *off <= match_byte).saturating_sub(1);
-        let match_line = match_line.min(wrap_lines.len().saturating_sub(1)) as i32;
-        if match_line < scroll_offset {
-            scroll_offset = match_line;
-        } else if match_line >= scroll_offset + visible_lines {
-            scroll_offset = match_line - visible_lines + 1;
-        }
-    }
-    let max_offset = (line_count - visible_lines).max(0);
-    scroll_offset = scroll_offset.clamp(0, max_offset);
+    // Snap the viewport only on explicit Up/Down navigation (snap flag).
+    // On entry (needs_position) and while typing, keep the viewport where it is.
+    let max_offset = (total_height - viewport_h as i32).max(0);
+    let scroll_offset = if snap && match_count > 0 {
+        let match_item = all_matches[current_match].0;
+        item_tops.get(match_item).copied().unwrap_or(0).clamp(0, max_offset)
+    } else {
+        viewport_top.clamp(0, max_offset)
+    };
 
     // Render search bar at line 1 (immediately below header separator)
     let search_bar_y = line_height as f32 + ascender * scale + crate::text::TEXT_PADDING;
     let search_bar = format!("search: {} [{} items]", search_query, match_count);
     fr.prepare_text_for_rendering(&search_bar, text_x, search_bar_y, scale, p.text);
 
-    // Render visible lines with match highlights
-    // Build a list of matches per line for efficient lookup
-    let mut matches_per_line: Vec<Vec<(usize, usize, bool)>> = vec![Vec::new(); wrap_lines.len()];
-    for (mi, &(byte_off, mlen)) in all_matches.iter().enumerate() {
-        // Find which wrapped line this match starts on
-        let li = wrap_lines.partition_point(|(_, off)| *off <= byte_off).saturating_sub(1);
-        let li = li.min(wrap_lines.len().saturating_sub(1));
-        let line_byte_off = wrap_lines[li].1;
-        let local_start = byte_off - line_byte_off;
-        let is_current = mi == current_match;
-        matches_per_line[li].push((local_start, mlen, is_current));
-    }
+    // Phase 3: render visible items with match highlights
+    for (i, (text, wrap_lines)) in item_texts.iter().zip(item_wraps.iter()).enumerate() {
+        let item_top_screen = clip_y + (item_tops[i] - scroll_offset) as f32;
+        let item_h = (item_tops.get(i + 1).copied().unwrap_or(total_height) - item_tops[i]) as f32;
+        if item_top_screen + item_h <= clip_y { continue; }
+        if item_top_screen >= win_h { break; }
 
-    for (li, (line_text, _)) in wrap_lines.iter().enumerate() {
-        let line_screen_y = (li as i32 - scroll_offset) * line_height + line_height * 2;
-        if line_screen_y < line_height * 2 || line_screen_y > win_h as i32 {
-            continue;
+        // Collect matches within this item mapped to their wrapped line index
+        let mut matches_per_line: Vec<Vec<(usize, usize, bool)>> = vec![Vec::new(); wrap_lines.len()];
+        for (mi, &(match_item, byte_off, mlen, _)) in all_matches.iter().enumerate() {
+            if match_item != i { continue; }
+            let li = wrap_lines.partition_point(|(_, off)| *off <= byte_off).saturating_sub(1);
+            let li = li.min(wrap_lines.len().saturating_sub(1));
+            let line_byte_off = wrap_lines[li].1;
+            let local_start = byte_off.saturating_sub(line_byte_off);
+            matches_per_line[li].push((local_start, mlen, mi == current_match));
         }
-        let line_y = line_screen_y as f32 + ascender * scale + crate::text::TEXT_PADDING;
 
-        // Draw highlight rectangles
-        if let Some(rr) = rr.as_deref_mut() {
-            for &(local_start, mlen, is_current) in &matches_per_line[li] {
-                let safe_start = local_start.min(line_text.len());
-                let safe_end = (local_start + mlen).min(line_text.len());
-                let match_x = text_x + fr.measure_text_width(&line_text[..safe_start], scale);
-                let match_w = fr.measure_text_width(&line_text[safe_start..safe_end], scale).max(2.0);
-                let rect_y = line_screen_y as f32;
-                let rect_h = line_height as f32;
-                let color = if is_current { p.scroll_search } else { p.selected };
-                rr.prepare_rectangle(match_x, rect_y, match_w, rect_h, color, 3.0);
+        for (n, (line_text, _)) in wrap_lines.iter().enumerate() {
+            let line_top = item_top_screen + n as f32 * lh;
+            if line_top + lh <= clip_y { continue; }
+            if line_top >= win_h { break; }
+            let line_baseline = line_top + ascender * scale + crate::text::TEXT_PADDING;
+
+            if let Some(rr) = rr.as_deref_mut() {
+                for &(local_start, mlen, is_current) in &matches_per_line[n] {
+                    let safe_start = local_start.min(line_text.len());
+                    let safe_end = (local_start + mlen).min(line_text.len());
+                    let match_x = text_x + fr.measure_text_width(&line_text[..safe_start], scale);
+                    let match_w = fr.measure_text_width(&line_text[safe_start..safe_end], scale).max(2.0);
+                    let color = if is_current { p.scroll_search } else { p.selected };
+                    rr.prepare_rectangle(match_x, line_top, match_w, lh, color, 3.0);
+                }
             }
-        }
 
-        // Draw line text
-        fr.prepare_text_for_rendering(line_text, text_x, line_y, scale, p.text);
+            fr.prepare_text_for_rendering(line_text, text_x, line_baseline, scale, p.text);
+        }
+        let _ = text;
     }
 
-    ScrollSearchResult { line_count, match_count, current_match, scroll_offset }
+    ScrollSearchResult { total_height, match_count, current_match, scroll_offset }
 }
 
 /// Convert a packed 0xRRGGBBAA color to `[r, g, b, a]` floats in 0.0..=1.0.

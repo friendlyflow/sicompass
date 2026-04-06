@@ -22,13 +22,14 @@ pub fn handle_up(r: &mut AppRenderer) {
                 } else {
                     r.scroll_search_current_match = r.scroll_search_match_count - 1;
                 }
+                r.scroll_search_snap = true;
+                r.scroll_search_needs_position = false; // user took explicit control
             }
             r.needs_redraw = true;
         }
         Coordinate::Scroll => {
-            if r.text_scroll_offset > 0 {
-                r.text_scroll_offset -= 1;
-            }
+            let step = r.cached_line_height.max(1);
+            r.text_scroll_offset = (r.text_scroll_offset - step).max(0);
             r.needs_redraw = true;
         }
         Coordinate::SimpleSearch | Coordinate::Command | Coordinate::ExtendedSearch | Coordinate::Meta => {
@@ -61,17 +62,16 @@ pub fn handle_down(r: &mut AppRenderer) {
                 } else {
                     r.scroll_search_current_match = 0;
                 }
+                r.scroll_search_snap = true;
+                r.scroll_search_needs_position = false; // user took explicit control
             }
             r.needs_redraw = true;
         }
         Coordinate::Scroll => {
-            let line_height = r.cached_line_height.max(1);
-            let header_lines = 2;
-            let visible_lines = ((r.window_height - line_height * header_lines) / line_height).max(1);
-            let max_offset = (r.text_scroll_line_count - visible_lines).max(0);
-            if r.text_scroll_offset < max_offset {
-                r.text_scroll_offset += 1;
-            }
+            let step = r.cached_line_height.max(1);
+            let viewport_h = r.window_height - step; // area below header
+            let max_offset = (r.text_scroll_total_height - viewport_h).max(0);
+            r.text_scroll_offset = (r.text_scroll_offset + step).min(max_offset);
             r.needs_redraw = true;
         }
         Coordinate::SimpleSearch | Coordinate::Command | Coordinate::ExtendedSearch | Coordinate::Meta => {
@@ -313,7 +313,8 @@ pub fn handle_page_up(r: &mut AppRenderer) {
             r.input_search_scroll_offset = (r.input_search_scroll_offset - page_size as i32).max(0);
         }
         Coordinate::Scroll | Coordinate::ScrollSearch => {
-            r.text_scroll_offset = (r.text_scroll_offset - page_size as i32).max(0);
+            let viewport_h = r.window_height - line_height;
+            r.text_scroll_offset = (r.text_scroll_offset - viewport_h).max(0);
         }
         Coordinate::SimpleSearch | Coordinate::Command | Coordinate::ExtendedSearch => {
             r.error_message.clear();
@@ -351,11 +352,9 @@ pub fn handle_page_down(r: &mut AppRenderer) {
             // No upper clamp here — renderer will clamp when it knows the line count
         }
         Coordinate::Scroll | Coordinate::ScrollSearch => {
-            let header_lines = 2;
-            let available_height = r.window_height - (line_height * header_lines);
-            let visible_lines = (available_height / line_height).max(1);
-            let max_offset = (r.text_scroll_line_count - visible_lines).max(0);
-            r.text_scroll_offset = (r.text_scroll_offset + page_size as i32).min(max_offset);
+            let viewport_h = r.window_height - line_height;
+            let max_offset = (r.text_scroll_total_height - viewport_h).max(0);
+            r.text_scroll_offset = (r.text_scroll_offset + viewport_h).min(max_offset);
         }
         Coordinate::SimpleSearch | Coordinate::Command | Coordinate::ExtendedSearch => {
             r.error_message.clear();
@@ -465,8 +464,8 @@ pub fn handle_s(r: &mut AppRenderer) {
     }
     r.previous_coordinate = r.coordinate;
     r.coordinate = Coordinate::Scroll;
-    r.text_scroll_offset = 0;
-    r.text_scroll_line_count = 0;
+    r.text_scroll_offset = -1; // sentinel: renderer computes initial offset (selected item at top)
+    r.text_scroll_total_height = 0;
     r.needs_redraw = true;
 }
 
@@ -1617,7 +1616,7 @@ pub fn handle_escape(r: &mut AppRenderer) {
         Coordinate::Scroll => {
             r.coordinate = r.previous_coordinate;
             r.text_scroll_offset = 0;
-            r.text_scroll_line_count = 0;
+            r.text_scroll_total_height = 0;
         }
         _ => {
             // EditorGeneral, EditorNormal, EditorVisual, OperatorGeneral, etc.
@@ -2280,10 +2279,8 @@ pub fn handle_end(r: &mut AppRenderer) {
     match r.coordinate {
         Coordinate::Scroll => {
             let line_height = r.cached_line_height.max(1);
-            let header_lines = 2;
-            let available_height = r.window_height - (line_height * header_lines);
-            let visible_lines = (available_height / line_height).max(1);
-            let max_offset = (r.text_scroll_line_count - visible_lines).max(0);
+            let viewport_h = r.window_height - line_height;
+            let max_offset = (r.text_scroll_total_height - viewport_h).max(0);
             r.text_scroll_offset = max_offset;
             r.needs_redraw = true;
         }
@@ -2584,6 +2581,7 @@ pub fn handle_ctrl_f(r: &mut AppRenderer) {
             r.selection_anchor = None;
             r.scroll_search_match_count = 0;
             r.scroll_search_current_match = 0;
+            r.scroll_search_needs_position = true;
             r.needs_redraw = true;
         }
         Coordinate::ScrollSearch | Coordinate::InputSearch => {
@@ -3548,8 +3546,8 @@ mod tests {
         handle_s(&mut r);
         assert_eq!(r.coordinate, Coordinate::Scroll);
         assert_eq!(r.previous_coordinate, Coordinate::OperatorGeneral);
-        assert_eq!(r.text_scroll_offset, 0);
-        assert_eq!(r.text_scroll_line_count, 0);
+        assert_eq!(r.text_scroll_offset, -1); // sentinel: renderer computes initial offset
+        assert_eq!(r.text_scroll_total_height, 0);
     }
 
     #[test]
@@ -4136,9 +4134,10 @@ mod tests {
     fn up_in_scroll_mode_decrements_offset() {
         let mut r = make_renderer();
         r.coordinate = Coordinate::Scroll;
-        r.text_scroll_offset = 5;
+        // step = cached_line_height (20); start above step so clamp doesn't apply
+        r.text_scroll_offset = 50;
         handle_up(&mut r);
-        assert_eq!(r.text_scroll_offset, 4);
+        assert_eq!(r.text_scroll_offset, 30); // 50 - 20
     }
 
     #[test]
@@ -4685,9 +4684,10 @@ mod tests {
     fn page_up_scroll_decreases_offset() {
         let mut r = make_renderer_paged();
         r.coordinate = Coordinate::Scroll;
-        r.text_scroll_offset = 5;
+        // viewport_h = window_height(40) - line_height(10) = 30; start above that
+        r.text_scroll_offset = 50;
         handle_page_up(&mut r);
-        assert_eq!(r.text_scroll_offset, 4); // page_size=1
+        assert_eq!(r.text_scroll_offset, 20); // 50 - 30
         assert!(r.needs_redraw);
     }
 
@@ -4705,7 +4705,7 @@ mod tests {
         let mut r = make_renderer_paged();
         r.coordinate = Coordinate::Scroll;
         r.text_scroll_offset = 0;
-        r.text_scroll_line_count = 100;
+        r.text_scroll_total_height = 100;
         handle_page_down(&mut r);
         assert!(r.text_scroll_offset > 0);
         assert!(r.needs_redraw);
