@@ -240,6 +240,38 @@ fn filebrowser_left_in_subdir_stays_at_depth_2() {
 }
 
 #[test]
+fn filebrowser_left_from_subdir_restores_cursor_to_entered_folder() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r()); // enter filebrowser at depth 2
+
+    // Find "subdir" in the listing and navigate to it.
+    let subdir_idx = {
+        let obj = h.renderer.ffon[fb_idx].as_obj().unwrap();
+        obj.children.iter().position(|c| {
+            c.as_obj().map(|o| sicompass_sdk::tags::strip_display(&o.key) == "subdir").unwrap_or(false)
+        }).expect("subdir should exist")
+    };
+    let cur = h.renderer.current_id.get(1).unwrap_or(0);
+    for _ in 0..(subdir_idx as isize - cur as isize).max(0) { press_down(h.r()); }
+
+    press_right(h.r()); // enter subdir
+    press_left(h.r());  // navigate back to parent
+
+    // Cursor should land on "subdir", not index 0.
+    assert_eq!(
+        h.renderer.current_id.get(1),
+        Some(subdir_idx),
+        "cursor should be on subdir after navigating back"
+    );
+    assert_eq!(
+        h.renderer.list_index, subdir_idx,
+        "list_index should match subdir position"
+    );
+}
+
+#[test]
 fn filebrowser_shows_temp_files() {
     let mut h = Harness::new();
     let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
