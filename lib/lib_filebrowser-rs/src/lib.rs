@@ -60,7 +60,7 @@ impl FilebrowserProvider {
 
         match self.sort_mode {
             SortMode::Alpha => raw.sort_by(|a, b| {
-                a.name.to_ascii_lowercase().cmp(&b.name.to_ascii_lowercase())
+                natord::compare_ignore_case(&a.name, &b.name)
             }),
             SortMode::Chrono => raw.sort_by(|a, b| b.mtime.cmp(&a.mtime)),
         }
@@ -787,6 +787,23 @@ mod tests {
             .map(|s| sicompass_sdk::tags::strip_display(s).to_string())
             .collect();
         assert_eq!(file_labels, vec!["apple.txt", "banana.txt", "cherry.txt"]);
+    }
+
+    #[test]
+    fn test_sort_alpha_natural_order() {
+        let (mut p, dir) = make_provider();
+        std::fs::write(dir.path().join("file10.txt"), b"").unwrap();
+        std::fs::write(dir.path().join("file2.txt"), b"").unwrap();
+        std::fs::write(dir.path().join("file1.txt"), b"").unwrap();
+        let mut err = String::new();
+        p.handle_command("sort alphanumerically", "", 0, &mut err);
+        let items = p.fetch();
+        let file_labels: Vec<_> = items.iter()
+            .filter_map(|e| e.as_str())
+            .map(|s| sicompass_sdk::tags::strip_display(s).to_string())
+            .collect();
+        assert_eq!(file_labels, vec!["file1.txt", "file2.txt", "file10.txt"],
+            "natural sort should order file2 before file10");
     }
 
     #[test]
