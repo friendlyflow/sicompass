@@ -8,6 +8,7 @@ description = "Sicompass file browser provider"
 [dependencies]
 sicompass-sdk = { workspace = true }
 libc = { workspace = true }
+natord = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

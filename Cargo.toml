@@ -53,6 +53,9 @@ accesskit_unix = "0.12"
 # Unicode
 unicode-normalization = "0.1"
 
+# Natural sort
+natord = "1"
+
 # Async / networking (library providers, later phases)
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", features = ["json", "blocking"] }
