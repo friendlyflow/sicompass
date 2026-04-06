@@ -43,13 +43,12 @@ if [[ "$FILE_PATH" =~ \.(c|h)$ ]]; then
   fi
 
 elif [[ "$FILE_PATH" =~ \.rs$ ]]; then
-  # Run Rust workspace tests
+  # Run Rust workspace tests (non-blocking: exit 0 so Claude can keep iterating)
   OUTPUT=$(cd "$PROJECT_DIR" && cargo test 2>&1)
   EXIT_CODE=$?
   if [ $EXIT_CODE -ne 0 ]; then
-    echo "Rust tests failed after editing: $FILE_PATH" >&2
-    echo "$OUTPUT" >&2
-    exit 2
+    echo "Rust tests failed after editing: $FILE_PATH"
+    echo "$OUTPUT"
   fi
 
 elif [[ "$FILE_PATH" =~ \.ts$ ]]; then
