@@ -263,6 +263,9 @@ pub struct AppRenderer {
     /// Indices into `total_list` matching the current search string.
     /// Empty = no filter active, use `total_list` directly.
     pub filtered_list_indices: Vec<usize>,
+    /// Per-filtered-item matched character positions (parallel to `filtered_list_indices`).
+    /// Each inner Vec contains the character indices within the label that matched.
+    pub fuzzy_match_positions: Vec<Vec<u32>>,
     /// Currently selected item in the active list.
     pub list_index: usize,
 
@@ -371,6 +374,7 @@ impl AppRenderer {
             previous_coordinate: Coordinate::OperatorGeneral,
             total_list: Vec::new(),
             filtered_list_indices: Vec::new(),
+            fuzzy_match_positions: Vec::new(),
             list_index: 0,
             input_buffer: String::new(),
             cursor_position: 0,

@@ -40,6 +40,8 @@ accesskit_unix = { workspace = true }
 
 unicode-normalization = { workspace = true }
 
+nucleo-matcher = { workspace = true }
+
 tokio = { workspace = true }
 
 libloading = { workspace = true }
