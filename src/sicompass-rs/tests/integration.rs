@@ -1420,3 +1420,60 @@ fn filebrowser_sort_alpha_refreshes_listing() {
     assert_eq!(h.renderer.total_list.len(), count_before,
         "item count should be unchanged after sort");
 }
+
+/// "open file with" secondary list must store the exec payload in `nav_path`,
+/// not in `data`. The renderer treats a non-None `data` field as an image path
+/// and attempts to load it as a texture — putting the exec command there caused
+/// spurious "image load failed" errors and a stray "-p image tag" in the UI.
+#[test]
+fn open_file_with_secondary_list_uses_nav_path_not_data() {
+    let mut h = Harness::new();
+    let fb_idx = h.renderer.providers.iter().position(|p| p.name() == "filebrowser")
+        .expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+
+    // Navigate to the first file (non-directory) in the listing
+    let file_idx = h.renderer.total_list.iter().position(|item| {
+        // Objects are directories; strings are files
+        !item.label.is_empty() && item.data.is_none()
+    });
+    if let Some(idx) = file_idx {
+        let cur = h.renderer.list_index;
+        if idx > cur {
+            for _ in 0..(idx - cur) { press_down(h.r()); }
+        } else {
+            for _ in 0..(cur - idx) { press_up(h.r()); }
+        }
+    }
+
+    // Enter command mode and navigate to "open file with"
+    press(h.r(), Keycode::Colon);
+    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::Command);
+
+    let idx = h.renderer.total_list.iter().position(|item| item.label == "open file with")
+        .expect("open file with command not found");
+    let cur = h.renderer.list_index;
+    if idx > cur {
+        for _ in 0..(idx - cur) { press_down(h.r()); }
+    } else {
+        for _ in 0..(cur - idx) { press_up(h.r()); }
+    }
+    press_enter(h.r());
+
+    // Should now be in CommandPhase::Provider showing the app list
+    assert_eq!(h.renderer.current_command, sicompass::app_state::CommandPhase::Provider,
+        "should be in Provider phase after selecting 'open file with'");
+
+    // The secondary list must be non-empty (there are applications installed)
+    // and every item must carry its payload in nav_path, never in data.
+    // A non-None `data` would be treated as an image path by the renderer.
+    assert!(!h.renderer.total_list.is_empty(),
+        "open file with should show at least one application");
+    for item in &h.renderer.total_list {
+        assert!(item.data.is_none(),
+            "item '{}': data should be None (exec must be in nav_path to avoid image load)", item.label);
+        assert!(item.nav_path.is_some(),
+            "item '{}': nav_path should hold the exec command", item.label);
+    }
+}

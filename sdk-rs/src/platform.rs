@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -174,13 +175,24 @@ pub struct Application {
     pub exec: String,
 }
 
-/// List installed applications. On Linux, parses `.desktop` files.
+/// List installed applications.
+/// - Linux: parses `.desktop` files from XDG application directories.
+/// - macOS: scans `/Applications` and `~/Applications` for `.app` bundles.
+/// - Windows: enumerates `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths`.
 pub fn get_applications() -> Vec<Application> {
     #[cfg(target_os = "linux")]
     {
         get_applications_linux()
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
+    {
+        get_applications_macos()
+    }
+    #[cfg(target_os = "windows")]
+    {
+        get_applications_windows()
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     {
         Vec::new()
     }
@@ -188,7 +200,6 @@ pub fn get_applications() -> Vec<Application> {
 
 #[cfg(target_os = "linux")]
 fn get_applications_linux() -> Vec<Application> {
-    let mut apps = Vec::new();
     let dirs = [
         PathBuf::from("/usr/share/applications"),
         PathBuf::from("/usr/local/share/applications"),
@@ -196,36 +207,187 @@ fn get_applications_linux() -> Vec<Application> {
             .map(|h| h.join(".local/share/applications"))
             .unwrap_or_default(),
     ];
-    for dir in &dirs {
+    get_applications_from_dirs(&dirs)
+}
+
+/// Parse a single `.desktop` file's text content.
+/// Returns `Some((name, exec))` if the entry is a valid, visible application,
+/// or `None` if it should be excluded.
+#[cfg(target_os = "linux")]
+fn parse_desktop_file(content: &str) -> Option<(String, String)> {
+    let mut name = String::new();
+    let mut exec_raw = String::new();
+    let mut no_display = false;
+    let mut hidden = false;
+    let mut type_app = false;
+    let mut in_desktop_entry = false;
+
+    for line in content.lines() {
+        // Section headers
+        if line.starts_with('[') {
+            in_desktop_entry = line == "[Desktop Entry]";
+            continue;
+        }
+        if !in_desktop_entry {
+            continue;
+        }
+
+        if line.starts_with("Name=") && name.is_empty() {
+            name = line[5..].to_owned();
+        } else if line.starts_with("Exec=") && exec_raw.is_empty() {
+            exec_raw = line[5..].to_owned();
+        } else if line.starts_with("NoDisplay=") {
+            no_display = &line[10..] == "true";
+        } else if line.starts_with("Hidden=") {
+            hidden = &line[7..] == "true";
+        } else if line.starts_with("Type=") {
+            type_app = &line[5..] == "Application";
+        }
+    }
+
+    if !type_app || no_display || hidden || name.is_empty() || exec_raw.is_empty() {
+        return None;
+    }
+
+    // Strip field codes character-by-character, matching the C version.
+    // Codes: %f %F %u %U %d %D %n %N %i %c %k %v %m — skip the code + optional trailing space.
+    let bytes = exec_raw.as_bytes();
+    let mut clean: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 1 < bytes.len() {
+            let code = bytes[i + 1];
+            if matches!(
+                code,
+                b'f' | b'F' | b'u' | b'U' | b'd' | b'D'
+                    | b'n' | b'N' | b'i' | b'c' | b'k' | b'v' | b'm'
+            ) {
+                i += 2;
+                if i < bytes.len() && bytes[i] == b' ' {
+                    i += 1;
+                }
+                continue;
+            }
+        }
+        clean.push(bytes[i]);
+        i += 1;
+    }
+
+    let exec = String::from_utf8_lossy(&clean).trim_end().to_string();
+    if exec.is_empty() {
+        return None;
+    }
+
+    Some((name, exec))
+}
+
+#[cfg(target_os = "linux")]
+fn get_applications_from_dirs(dirs: &[PathBuf]) -> Vec<Application> {
+    let mut apps = Vec::new();
+    let mut seen_execs: HashSet<String> = HashSet::new();
+    for dir in dirs {
         let Ok(entries) = std::fs::read_dir(dir) else { continue };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) != Some("desktop") {
                 continue;
             }
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                let mut name = String::new();
-                let mut exec = String::new();
-                let mut no_display = false;
-                for line in content.lines() {
-                    if line.starts_with("Name=") && name.is_empty() {
-                        name = line[5..].to_owned();
-                    } else if line.starts_with("Exec=") && exec.is_empty() {
-                        // Strip %f %u %F %U etc.
-                        exec = line[5..]
-                            .split_whitespace()
-                            .filter(|t| !t.starts_with('%'))
-                            .collect::<Vec<_>>()
-                            .join(" ");
-                    } else if line == "NoDisplay=true" {
-                        no_display = true;
-                        break;
+            let Ok(content) = std::fs::read_to_string(&path) else { continue };
+            if let Some((name, exec)) = parse_desktop_file(&content) {
+                if seen_execs.contains(&exec) {
+                    continue;
+                }
+                seen_execs.insert(exec.clone());
+                apps.push(Application { name, exec });
+            }
+        }
+    }
+    apps
+}
+
+// ---------------------------------------------------------------------------
+// macOS: scan .app bundles
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "macos")]
+fn get_applications_macos() -> Vec<Application> {
+    let mut apps = Vec::new();
+    let mut seen_names: HashSet<String> = HashSet::new();
+
+    let dirs: Vec<PathBuf> = {
+        let mut v = vec![PathBuf::from("/Applications")];
+        if let Some(h) = home_dir() {
+            v.push(h.join("Applications"));
+        }
+        v
+    };
+
+    for dir in &dirs {
+        let Ok(entries) = std::fs::read_dir(dir) else { continue };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if name_str.starts_with('.') {
+                continue;
+            }
+            if name_str.ends_with(".app") {
+                let display = name_str[..name_str.len() - 4].to_string();
+                if seen_names.insert(display.clone()) {
+                    apps.push(Application { name: display.clone(), exec: display });
+                }
+            } else {
+                // One level deep into subdirectories (e.g. /Applications/Utilities/)
+                let sub_path = entry.path();
+                if !sub_path.is_dir() {
+                    continue;
+                }
+                let Ok(sub_entries) = std::fs::read_dir(&sub_path) else { continue };
+                for sub_entry in sub_entries.flatten() {
+                    let sub_name = sub_entry.file_name();
+                    let sub_str = sub_name.to_string_lossy();
+                    if sub_str.starts_with('.') || !sub_str.ends_with(".app") {
+                        continue;
+                    }
+                    let display = sub_str[..sub_str.len() - 4].to_string();
+                    if seen_names.insert(display.clone()) {
+                        apps.push(Application { name: display.clone(), exec: display });
                     }
                 }
-                if !no_display && !name.is_empty() && !exec.is_empty() {
-                    apps.push(Application { name, exec });
-                }
             }
+        }
+    }
+    apps
+}
+
+// ---------------------------------------------------------------------------
+// Windows: enumerate App Paths registry key
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "windows")]
+fn get_applications_windows() -> Vec<Application> {
+    use winreg::enums::*;
+    use winreg::RegKey;
+
+    let mut apps = Vec::new();
+    let mut seen_names: HashSet<String> = HashSet::new();
+
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    let Ok(key) = hklm.open_subkey(
+        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths",
+    ) else {
+        return apps;
+    };
+
+    for sub_key_name in key.enum_keys().flatten() {
+        // Display name: strip .exe extension (case-insensitive)
+        let display = if sub_key_name.to_ascii_lowercase().ends_with(".exe") {
+            sub_key_name[..sub_key_name.len() - 4].to_string()
+        } else {
+            sub_key_name.clone()
+        };
+
+        if seen_names.insert(display.to_ascii_lowercase()) {
+            apps.push(Application { name: display, exec: sub_key_name });
         }
     }
     apps
@@ -298,5 +460,121 @@ mod tests {
         let nested = tmp.path().join("a").join("b").join("c");
         make_dirs(&nested);
         assert!(nested.exists());
+    }
+}
+
+#[cfg(test)]
+#[cfg(target_os = "linux")]
+mod linux_tests {
+    use super::*;
+    use std::fs;
+
+    fn desktop(body: &str) -> String {
+        format!("[Desktop Entry]\n{}", body)
+    }
+
+    #[test]
+    fn test_basic_valid_entry() {
+        let content = desktop("Type=Application\nName=Foo\nExec=foo\n");
+        let result = parse_desktop_file(&content);
+        assert_eq!(result, Some(("Foo".into(), "foo".into())));
+    }
+
+    #[test]
+    fn test_missing_type_filtered() {
+        let content = desktop("Name=Foo\nExec=foo\n");
+        assert_eq!(parse_desktop_file(&content), None);
+    }
+
+    #[test]
+    fn test_wrong_type_filtered() {
+        let content = desktop("Type=Link\nName=Foo\nExec=foo\n");
+        assert_eq!(parse_desktop_file(&content), None);
+    }
+
+    #[test]
+    fn test_hidden_true_filtered() {
+        let content = desktop("Type=Application\nName=Foo\nExec=foo\nHidden=true\n");
+        assert_eq!(parse_desktop_file(&content), None);
+    }
+
+    #[test]
+    fn test_no_display_true_filtered() {
+        let content = desktop("Type=Application\nName=Foo\nExec=foo\nNoDisplay=true\n");
+        assert_eq!(parse_desktop_file(&content), None);
+    }
+
+    #[test]
+    fn test_no_display_does_not_prevent_type_check() {
+        // NoDisplay appears before Type — must still read all fields (no early break)
+        let content = desktop("NoDisplay=true\nType=Application\nName=Foo\nExec=foo\n");
+        assert_eq!(parse_desktop_file(&content), None);
+    }
+
+    #[test]
+    fn test_action_section_ignored() {
+        let content = "[Desktop Entry]\nType=Application\nName=Real\nExec=real\n\
+                       [Desktop Action NewWindow]\nName=Shadow\nExec=shadow\n";
+        let result = parse_desktop_file(content);
+        assert_eq!(result, Some(("Real".into(), "real".into())));
+    }
+
+    #[test]
+    fn test_fields_before_desktop_entry_ignored() {
+        // Fields appearing before any section header are outside [Desktop Entry]
+        let content = "Name=Ghost\nExec=ghost\n[Desktop Entry]\nType=Application\nName=Real\nExec=real\n";
+        let result = parse_desktop_file(content);
+        assert_eq!(result, Some(("Real".into(), "real".into())));
+    }
+
+    #[test]
+    fn test_field_codes_stripped() {
+        let content = desktop("Type=Application\nName=Foo\nExec=foo %f bar %U\n");
+        let result = parse_desktop_file(&content);
+        assert_eq!(result, Some(("Foo".into(), "foo bar".into())));
+    }
+
+    #[test]
+    fn test_field_code_at_end_of_exec() {
+        let content = desktop("Type=Application\nName=Foo\nExec=foo %f\n");
+        let result = parse_desktop_file(&content);
+        assert_eq!(result, Some(("Foo".into(), "foo".into())));
+    }
+
+    #[test]
+    fn test_trailing_whitespace_trimmed() {
+        let content = desktop("Type=Application\nName=Foo\nExec=foo   \n");
+        let result = parse_desktop_file(&content);
+        assert_eq!(result, Some(("Foo".into(), "foo".into())));
+    }
+
+    #[test]
+    fn test_percent_percent_preserved() {
+        // %% is not a known field code — should be kept as-is
+        let content = desktop("Type=Application\nName=Foo\nExec=foo %%bar\n");
+        let result = parse_desktop_file(&content);
+        assert_eq!(result, Some(("Foo".into(), "foo %%bar".into())));
+    }
+
+    #[test]
+    fn test_dedup_same_exec() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = tmp.path().join("a.desktop");
+        let b = tmp.path().join("b.desktop");
+        fs::write(&a, "[Desktop Entry]\nType=Application\nName=AppA\nExec=myapp\n").unwrap();
+        fs::write(&b, "[Desktop Entry]\nType=Application\nName=AppB\nExec=myapp\n").unwrap();
+        let apps = get_applications_from_dirs(&[tmp.path().to_path_buf()]);
+        assert_eq!(apps.len(), 1, "duplicate exec should be deduplicated");
+    }
+
+    #[test]
+    fn test_different_execs_both_included() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = tmp.path().join("a.desktop");
+        let b = tmp.path().join("b.desktop");
+        fs::write(&a, "[Desktop Entry]\nType=Application\nName=AppA\nExec=app-a\n").unwrap();
+        fs::write(&b, "[Desktop Entry]\nType=Application\nName=AppB\nExec=app-b\n").unwrap();
+        let apps = get_applications_from_dirs(&[tmp.path().to_path_buf()]);
+        assert_eq!(apps.len(), 2);
     }
 }

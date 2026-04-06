@@ -606,7 +606,9 @@ pub fn handle_enter_command(r: &mut AppRenderer) {
         CommandPhase::Provider => {
             // Phase 2: user chose a secondary item (e.g. an application to open with)
             let selection = match r.current_list_item() {
-                Some(item) => item.data.clone().unwrap_or_else(|| item.label.clone()),
+                Some(item) => item.nav_path.clone()
+                    .or_else(|| item.data.clone())
+                    .unwrap_or_else(|| item.label.clone()),
                 None => { handle_escape(r); return; }
             };
             let cmd = r.provider_command_name.clone();
