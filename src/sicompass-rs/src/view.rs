@@ -206,8 +206,8 @@ fn update_view(app: &mut AppState) {
     let header = build_header_text(&app.renderer, line_height);
     let win_w = app.swapchain_extent.width as f32;
     let win_h = app.swapchain_extent.height as f32;
-    let list_items: Vec<(String, Option<String>, bool)> = collect_list_items(&app.renderer);
-    let list_has_indicators = list_items.iter().any(|(label, _, _)| {
+    let list_items: Vec<(String, Option<String>, bool, Vec<u32>)> = collect_list_items(&app.renderer);
+    let list_has_indicators = list_items.iter().any(|(label, _, _, _)| {
         get_radio_type(label) != RadioType::None || get_checkbox_type(label) != CheckboxType::None
     });
 
@@ -231,7 +231,7 @@ fn update_view(app: &mut AppState) {
             0.0_f32
         } else {
             list_items.iter()
-                .map(|(label, _, _)| {
+                .map(|(label, _, _, _)| {
                     let (p, _) = split_label(label);
                     let text_w = fr.measure_text_width(p, scale);
                     // When any item has an indicator, all items reserve the same indicator width
@@ -406,7 +406,7 @@ fn update_view(app: &mut AppState) {
     let list_index = if count > 0 { app.renderer.list_index.min(count - 1) } else { 0 };
     let line_counts: Vec<usize> = {
         let fr = match app.font_renderer.as_ref() { Some(f) => f, None => return };
-        list_items.iter().enumerate().map(|(idx, (label, img_data, _))| {
+        list_items.iter().enumerate().map(|(idx, (label, img_data, _, _))| {
             if in_insert_mode && idx == list_index {
                 return insert_buf.split('\n').count().max(1);
             }
@@ -499,7 +499,7 @@ fn update_view(app: &mut AppState) {
         let cap = list_items.len().saturating_sub(start_index);
         let mut metrics = Vec::with_capacity(cap);
         let mut layouts: Vec<Option<ImageLayout>> = Vec::with_capacity(cap);
-        for (global_idx, (label, img_data, _)) in list_items.iter().enumerate().skip(start_index) {
+        for (global_idx, (label, img_data, _, _)) in list_items.iter().enumerate().skip(start_index) {
             if y > win_h { break; }
             let (lines, img_layout) = if in_insert_mode && global_idx == list_index {
                 (insert_buf.split('\n').count().max(1), None)
@@ -608,7 +608,7 @@ fn update_view(app: &mut AppState) {
     }
 
     // ---- List items — selection highlight rectangles ----------------------
-    for (i, (_, _, is_selected)) in list_items[start_index..].iter().take(item_metrics.len()).enumerate() {
+    for (i, (_, _, is_selected, _)) in list_items[start_index..].iter().take(item_metrics.len()).enumerate() {
         if !is_selected { continue; }
         // In insert mode the highlight is deferred: only the input buffer portion
         // is highlighted (drawn in the text pass below), not the full row.
@@ -659,7 +659,7 @@ fn update_view(app: &mut AppState) {
     let mut captured_elem_x: f32 = 0.0;
     let mut captured_elem_base_x: f32 = 0.0;
     let mut captured_elem_y: f32 = 0.0;
-    for (i, (label, item_data, is_selected)) in list_items[start_index..].iter().take(item_metrics.len()).enumerate() {
+    for (i, (label, item_data, is_selected, match_pos)) in list_items[start_index..].iter().take(item_metrics.len()).enumerate() {
         let (item_y, content_start_x, _, _) = item_metrics[i];
 
         // Draw graphical indicator (radio/checkbox) and compute x shift.
@@ -689,7 +689,7 @@ fn update_view(app: &mut AppState) {
             let (prefix_str, content) = split_label(label.as_str());
             if let Some(fr) = app.font_renderer.as_mut() {
                 let mut label_x = text_prefix_x;
-                if let Some(breadcrumb) = item_data.as_deref().filter(|s| !s.is_empty()) {
+                if let Some(breadcrumb) = item_data.as_deref().filter(|s: &&str| !s.is_empty()) {
                     let bc_w = fr.measure_text_width(breadcrumb, scale);
                     fr.prepare_text_for_rendering(breadcrumb, label_x, item_y, scale, p.ext_search);
                     label_x += bc_w;
@@ -697,7 +697,15 @@ fn update_view(app: &mut AppState) {
                 fr.prepare_text_for_rendering(prefix_str, label_x, item_y, scale, p.text);
                 let content_x = label_x + fr.measure_text_width(prefix_str, scale);
                 let available_w = (right_edge - content_x).max(1.0);
-                fr.prepare_text_wrapped(content, content_x, item_y, scale, available_w, line_height as f32, p.text);
+                // Adjust match positions to be relative to content (subtract prefix char count)
+                let prefix_char_count = prefix_str.chars().count() as u32;
+                let content_positions: Vec<u32> = match_pos.iter()
+                    .filter(|&&p| p >= prefix_char_count)
+                    .map(|&p| p - prefix_char_count)
+                    .collect();
+                let rr = app.rect_renderer.as_mut();
+                render_with_highlights(fr, rr, content, content_x, item_y, scale, ascender, line_height as f32, p.text, p.scroll_search, &content_positions);
+                let _ = available_w;
             }
         } else if let Some(ref path) = item_data {
             let (prefix_text, suffix_text, has_prefix) = split_image_label(label, path);
@@ -833,8 +841,18 @@ fn update_view(app: &mut AppState) {
                 fr.prepare_text_wrapped(label.as_str(), text_prefix_x, item_y, scale, max_content_w.max(1.0), line_height as f32, p.text);
             } else {
                 let (prefix, content) = split_label(label.as_str());
+                let prefix_char_count = prefix.chars().count() as u32;
                 fr.prepare_text_for_rendering(prefix, text_prefix_x, item_y, scale, p.text);
-                fr.prepare_text_wrapped(content, content_start_x, item_y, scale, max_content_w.max(1.0), line_height as f32, p.text);
+                let content_positions: Vec<u32> = match_pos.iter()
+                    .filter(|&&p| p >= prefix_char_count)
+                    .map(|&p| p - prefix_char_count)
+                    .collect();
+                if content_positions.is_empty() {
+                    fr.prepare_text_wrapped(content, content_start_x, item_y, scale, max_content_w.max(1.0), line_height as f32, p.text);
+                } else {
+                    let rr = app.rect_renderer.as_mut();
+                    render_with_highlights(fr, rr, content, content_start_x, item_y, scale, ascender, line_height as f32, p.text, p.scroll_search, &content_positions);
+                }
             }
         }
     }
@@ -1205,20 +1223,68 @@ fn build_header_text(r: &AppRenderer, line_height: i32) -> String {
 }
 
 /// Snapshot the active list for rendering (avoids mixed borrows later).
-fn collect_list_items(r: &AppRenderer) -> Vec<(String, Option<String>, bool)> {
+/// Returns `(label, item_data, is_selected, fuzzy_match_positions)`.
+fn collect_list_items(r: &AppRenderer) -> Vec<(String, Option<String>, bool, Vec<u32>)> {
     let len = r.active_list_len();
     let mut out = Vec::with_capacity(len);
+    let has_filter = !r.filtered_list_indices.is_empty();
     for i in 0..len {
-        let item = if r.filtered_list_indices.is_empty() {
-            r.total_list.get(i)
-        } else {
+        let item = if has_filter {
             r.filtered_list_indices.get(i).and_then(|&raw| r.total_list.get(raw))
+        } else {
+            r.total_list.get(i)
         };
         if let Some(item) = item {
-            out.push((item.label.clone(), item.data.clone(), i == r.list_index));
+            let positions = if has_filter {
+                r.fuzzy_match_positions.get(i).cloned().unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+            out.push((item.label.clone(), item.data.clone(), i == r.list_index, positions));
         }
     }
     out
+}
+
+/// Render `text` at `(x, y)` with background highlight rectangles behind
+/// characters at `match_positions`, matching scroll-search style. Text is
+/// rendered in `text_color`; highlights use `highlight_color` as background.
+fn render_with_highlights(
+    fr: &mut crate::text::FontRenderer,
+    rr: Option<&mut crate::rectangle::RectangleRenderer>,
+    text: &str,
+    x: f32,
+    y: f32,
+    scale: f32,
+    ascender: f32,
+    line_height: f32,
+    text_color: u32,
+    highlight_color: u32,
+    match_positions: &[u32],
+) {
+    if let Some(rr) = rr {
+        // Draw background rectangles behind matched character runs
+        let chars: Vec<char> = text.chars().collect();
+        let mut i = 0usize;
+        let mut byte_off = 0usize;
+        while i < chars.len() {
+            if match_positions.binary_search(&(i as u32)).is_ok() {
+                let start_byte = byte_off;
+                while i < chars.len() && match_positions.binary_search(&(i as u32)).is_ok() {
+                    byte_off += chars[i].len_utf8();
+                    i += 1;
+                }
+                let match_x = x + fr.measure_text_width(&text[..start_byte], scale);
+                let match_w = fr.measure_text_width(&text[start_byte..byte_off], scale);
+                let rect_y = y - ascender * scale - crate::text::TEXT_PADDING;
+                rr.prepare_rectangle(match_x, rect_y, match_w, line_height, highlight_color, 3.0);
+            } else {
+                byte_off += chars[i].len_utf8();
+                i += 1;
+            }
+        }
+    }
+    fr.prepare_text_for_rendering(text, x, y, scale, text_color);
 }
 
 

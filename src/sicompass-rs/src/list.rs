@@ -4,6 +4,8 @@
 //! navigation path, then optionally filters it by a search string.
 
 use crate::app_state::{AppRenderer, CommandPhase, Coordinate, RenderListItem};
+use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
+use nucleo_matcher::{Config, Matcher, Utf32Str};
 use sicompass_sdk::ffon::{get_ffon_at_id, FfonElement, IdArray};
 use sicompass_sdk::tags;
 
@@ -147,33 +149,40 @@ pub fn create_list_current_layer(renderer: &mut AppRenderer) {
     }
 }
 
-/// Filter `total_list` by `search_string` and store matching indices in
-/// `filtered_list_indices`. Passing an empty string clears the filter.
+/// Filter `total_list` by `search_string` using fuzzy matching and store
+/// matching indices (sorted by score) in `filtered_list_indices`.
+/// Matched character positions are stored in `fuzzy_match_positions`.
+/// Passing an empty string clears the filter.
 pub fn populate_list_current_layer(renderer: &mut AppRenderer, search: &str) {
     renderer.filtered_list_indices.clear();
+    renderer.fuzzy_match_positions.clear();
 
     if search.is_empty() {
         return;
     }
 
-    let needle_lower = search.to_lowercase();
+    let mut matcher = Matcher::new(Config::DEFAULT);
+    let pattern = Pattern::parse(search, CaseMatching::Ignore, Normalization::Smart);
+
+    let mut scored: Vec<(usize, u32, Vec<u32>)> = Vec::new();
+    let mut char_buf: Vec<char> = Vec::new();
+    let mut indices_buf: Vec<u32> = Vec::new();
 
     for (i, item) in renderer.total_list.iter().enumerate() {
-        let matches = if item.nav_path.is_some() {
-            // Deep search items: prefix-match on the bare name (skip "- " / "+ " prefix)
-            let bare = if item.label.len() >= 2 && &item.label[1..2] == " " {
-                &item.label[2..]
-            } else {
-                &item.label
-            };
-            bare.to_lowercase().starts_with(&needle_lower)
-        } else {
-            item.label.to_lowercase().contains(&needle_lower)
-        };
-        if matches {
-            renderer.filtered_list_indices.push(i);
+        char_buf.clear();
+        let haystack = Utf32Str::new(&item.label, &mut char_buf);
+        indices_buf.clear();
+        if let Some(score) = pattern.indices(haystack, &mut matcher, &mut indices_buf) {
+            indices_buf.sort_unstable();
+            scored.push((i, score, indices_buf.clone()));
         }
     }
+
+    // Sort by score descending; preserve original order for equal scores
+    scored.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+
+    renderer.filtered_list_indices = scored.iter().map(|(i, _, _)| *i).collect();
+    renderer.fuzzy_match_positions = scored.into_iter().map(|(_, _, pos)| pos).collect();
 
     // Clamp list_index into the filtered range
     let active_len = renderer.filtered_list_indices.len();
@@ -528,5 +537,36 @@ mod tests {
         assert_eq!(r.filtered_list_indices.len(), 2);
         populate_list_current_layer(&mut r, "hello"); // 1 match
         assert_eq!(r.filtered_list_indices.len(), 1);
+    }
+
+    #[test]
+    fn fuzzy_non_contiguous_match() {
+        // "dcmt" should match "Documents" via fuzzy (non-contiguous subsequence)
+        let mut r = make_renderer_with_items(&["Documents", "Downloads", "Desktop"]);
+        populate_list_current_layer(&mut r, "dcmt");
+        assert!(r.filtered_list_indices.len() >= 1);
+        let labels: Vec<&str> = r.filtered_list_indices.iter()
+            .map(|&i| r.total_list[i].label.as_str())
+            .collect();
+        assert!(labels.iter().any(|l| l.contains("Documents")), "expected Documents in {labels:?}");
+    }
+
+    #[test]
+    fn fuzzy_results_sorted_by_score() {
+        // Exact match should score higher than a distant fuzzy match
+        let mut r = make_renderer_with_items(&["xdocx", "doc"]);
+        populate_list_current_layer(&mut r, "doc");
+        assert_eq!(r.filtered_list_indices.len(), 2);
+        // "doc" is an exact match — should rank first
+        let first_label = &r.total_list[r.filtered_list_indices[0]].label;
+        assert!(first_label.contains("doc") && !first_label.contains("xdocx"),
+            "expected exact match first, got {first_label}");
+    }
+
+    #[test]
+    fn fuzzy_match_positions_parallel_to_indices() {
+        let mut r = make_renderer_with_items(&["hello", "world"]);
+        populate_list_current_layer(&mut r, "hel");
+        assert_eq!(r.filtered_list_indices.len(), r.fuzzy_match_positions.len());
     }
 }
