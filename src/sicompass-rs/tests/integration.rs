@@ -1060,6 +1060,211 @@ fn colon_blocked_at_root() {
         "command mode must not activate at root depth");
 }
 
+/// Navigating right into an empty directory shows a single `<input></input>` placeholder.
+/// The filebrowser is a flat (lazy-fetch) provider: depth stays at 2 when entering subdirs.
+#[test]
+fn navigate_right_empty_dir_shows_placeholder() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join("file.txt"), "").unwrap();
+    std::fs::create_dir(root.join("emptydir")).unwrap();
+
+    let mut renderer = AppRenderer::new();
+    register(&mut renderer, Box::new(FilebrowserProvider::new()));
+    renderer.providers[0].set_current_path(root.to_str().unwrap());
+    {
+        let children = renderer.providers[0].fetch();
+        let display_name = renderer.providers[0].display_name().to_owned();
+        let mut root_elem = FfonElement::new_obj(&display_name);
+        for child in children { root_elem.as_obj_mut().unwrap().push(child); }
+        renderer.ffon[0] = root_elem;
+    }
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    // Enter filebrowser (static: children already loaded → depth 2)
+    press_right(&mut renderer);
+    assert_eq!(renderer.current_id.depth(), 2);
+
+    // Navigate to emptydir in the list
+    let emptydir_idx = renderer.total_list.iter()
+        .position(|item| item.label.contains("emptydir"))
+        .expect("emptydir not found in list");
+    let cur = renderer.list_index;
+    if emptydir_idx > cur {
+        for _ in 0..(emptydir_idx - cur) { press_down(&mut renderer); }
+    } else {
+        for _ in 0..(cur - emptydir_idx) { press_up(&mut renderer); }
+    }
+
+    // Enter emptydir (lazy-fetch: path changes but depth stays at 2)
+    press_right(&mut renderer);
+    assert_eq!(renderer.current_id.depth(), 2, "filebrowser stays at depth 2 after entering subdir");
+
+    // Placeholder is the only list item
+    assert_eq!(renderer.total_list.len(), 1, "empty dir should show exactly one placeholder");
+    let label = &renderer.total_list[0].label;
+    // <input></input> renders as "-i " (str prefix + empty input tag content)
+    assert!(label.starts_with("-i"), "placeholder label should start with '-i', got: {label:?}");
+}
+
+/// Deleting the last file in a directory causes the placeholder to reappear.
+#[test]
+fn delete_last_item_leaves_placeholder() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    std::fs::create_dir(root.join("mydir")).unwrap();
+    std::fs::write(root.join("mydir/only.txt"), "").unwrap();
+
+    let mut renderer = AppRenderer::new();
+    register(&mut renderer, Box::new(FilebrowserProvider::new()));
+    renderer.providers[0].set_current_path(root.to_str().unwrap());
+    {
+        let children = renderer.providers[0].fetch();
+        let display_name = renderer.providers[0].display_name().to_owned();
+        let mut root_elem = FfonElement::new_obj(&display_name);
+        for child in children { root_elem.as_obj_mut().unwrap().push(child); }
+        renderer.ffon[0] = root_elem;
+    }
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    // Enter filebrowser → mydir
+    press_right(&mut renderer);
+    let mydir_idx = renderer.total_list.iter()
+        .position(|item| item.label.contains("mydir"))
+        .expect("mydir not found");
+    let cur = renderer.list_index;
+    if mydir_idx > cur {
+        for _ in 0..(mydir_idx - cur) { press_down(&mut renderer); }
+    } else {
+        for _ in 0..(cur - mydir_idx) { press_up(&mut renderer); }
+    }
+    press_right(&mut renderer); // enters mydir (lazy-fetch, depth 2)
+
+    assert_eq!(renderer.total_list.len(), 1, "mydir should have one item");
+
+    // Delete the only item
+    press_ctrl(&mut renderer, Keycode::D);
+
+    // Placeholder must now be the only item
+    assert_eq!(renderer.total_list.len(), 1, "placeholder should be the only item after delete");
+    let label = &renderer.total_list[0].label;
+    assert!(label.starts_with("-i"),
+        "placeholder should appear after deleting last item, got: {label:?}");
+    assert_eq!(renderer.current_id.last(), Some(0), "current_id should point at placeholder");
+}
+
+/// Running "create file" command when on the empty placeholder replaces it in-place.
+#[test]
+fn create_file_on_placeholder_replaces_in_place() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    std::fs::create_dir(root.join("emptydir")).unwrap();
+
+    let mut renderer = AppRenderer::new();
+    register(&mut renderer, Box::new(FilebrowserProvider::new()));
+    renderer.providers[0].set_current_path(root.to_str().unwrap());
+    {
+        let children = renderer.providers[0].fetch();
+        let display_name = renderer.providers[0].display_name().to_owned();
+        let mut root_elem = FfonElement::new_obj(&display_name);
+        for child in children { root_elem.as_obj_mut().unwrap().push(child); }
+        renderer.ffon[0] = root_elem;
+    }
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    // Navigate into filebrowser → emptydir
+    press_right(&mut renderer);
+    let emptydir_idx = renderer.total_list.iter()
+        .position(|item| item.label.contains("emptydir"))
+        .expect("emptydir not found");
+    let cur = renderer.list_index;
+    if emptydir_idx > cur {
+        for _ in 0..(emptydir_idx - cur) { press_down(&mut renderer); }
+    } else {
+        for _ in 0..(cur - emptydir_idx) { press_up(&mut renderer); }
+    }
+    press_right(&mut renderer); // enters emptydir — shows placeholder
+
+    assert_eq!(renderer.total_list.len(), 1, "emptydir should show placeholder");
+    assert_eq!(renderer.current_id.last(), Some(0));
+
+    // Execute "create file" command from command mode
+    let mut h = Harness { renderer, tmp };
+    execute_provider_command(&mut h, "create file");
+    let renderer = h.r();
+
+    // Placeholder replaced in-place → still at index 0
+    assert_eq!(renderer.current_id.last(), Some(0),
+        "create file on placeholder should stay at idx 0 (replaced in-place)");
+
+    // Should enter insert mode to type the filename
+    assert_eq!(renderer.coordinate, sicompass::app_state::Coordinate::OperatorInsert,
+        "should enter insert mode after create file");
+}
+
+/// Ctrl+A after creating a file (prefixed insert mode) must not panic.
+/// Regression: after refresh, current_id could be out-of-bounds → insert at invalid index.
+#[test]
+fn ctrl_a_after_prefixed_creation_no_panic() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().to_path_buf();
+    std::fs::create_dir(root.join("testdir")).unwrap();
+
+    let mut h = Harness { renderer: AppRenderer::new(), tmp };
+    register(h.r(), Box::new(FilebrowserProvider::new()));
+    h.renderer.providers[0].set_current_path(root.to_str().unwrap());
+    {
+        let children = h.renderer.providers[0].fetch();
+        let display_name = h.renderer.providers[0].display_name().to_owned();
+        let mut root_elem = FfonElement::new_obj(&display_name);
+        for child in children { root_elem.as_obj_mut().unwrap().push(child); }
+        h.renderer.ffon[0] = root_elem;
+    }
+    sicompass::list::create_list_current_layer(h.r());
+
+    // Navigate into filebrowser, then into testdir (empty → shows placeholder)
+    press_right(h.r());
+    let dir_idx = h.renderer.total_list.iter()
+        .position(|item| item.label.contains("testdir"))
+        .expect("testdir not found");
+    let cur = h.renderer.list_index;
+    if dir_idx > cur {
+        for _ in 0..(dir_idx - cur) { press_down(h.r()); }
+    } else {
+        for _ in 0..(cur - dir_idx) { press_up(h.r()); }
+    }
+    press_right(h.r()); // enter testdir → placeholder at index 0
+
+    assert_eq!(h.renderer.current_id.last(), Some(0));
+
+    // Ctrl+A → append placeholder after index 0, enter OperatorInsert
+    press_ctrl(h.r(), Keycode::A);
+    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::OperatorInsert);
+
+    // Create a file
+    type_text(h.r(), "- newfile.txt");
+    press_enter(h.r());
+
+    assert!(h.tmp.path().join("testdir/newfile.txt").exists(),
+        "newfile.txt should be created");
+    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::OperatorGeneral);
+
+    // current_id must be in-bounds after refresh
+    let cur_last = h.renderer.current_id.last().unwrap_or(0);
+    let prov_idx = h.renderer.current_id.get(0).unwrap_or(0);
+    let child_len = h.renderer.ffon.get(prov_idx)
+        .and_then(|e| e.as_obj())
+        .map(|o| o.children.len())
+        .unwrap_or(0);
+    assert!(cur_last < child_len.max(1),
+        "current_id ({cur_last}) should be in-bounds after refresh (len={child_len})");
+
+    // Ctrl+A again — must not panic
+    press_ctrl(h.r(), Keycode::A);
+    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::OperatorInsert,
+        "Ctrl+A after creation should enter OperatorInsert without panic");
+}
+
 /// After running "sort alphanumerically", the listing should immediately reorder.
 #[test]
 fn filebrowser_sort_alpha_refreshes_listing() {
