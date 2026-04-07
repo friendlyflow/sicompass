@@ -1477,3 +1477,51 @@ fn open_file_with_secondary_list_uses_nav_path_not_data() {
             "item '{}': nav_path should hold the exec command", item.label);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Tests: Undo/redo available from all modes
+// ---------------------------------------------------------------------------
+
+#[test]
+fn undo_from_search_mode() {
+    // Ctrl+Z while in SimpleSearch should undo and return to OperatorGeneral.
+    let mut h = Harness::new();
+    let tmp = h.tmp_path().to_path_buf();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+
+    press_ctrl(h.r(), Keycode::I);
+    type_text(h.r(), "- searchundo.txt");
+    press_enter(h.r());
+    assert!(tmp.join("searchundo.txt").exists(), "file should exist after creation");
+
+    // Enter search mode, then undo
+    press_tab(h.r());
+    assert_eq!(h.renderer.coordinate, Coordinate::SimpleSearch);
+    press_ctrl(h.r(), Keycode::Z);
+    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral, "undo should exit search mode");
+    assert!(!tmp.join("searchundo.txt").exists(), "file should be deleted after undo from search mode");
+}
+
+#[test]
+fn undo_from_insert_mode() {
+    // Ctrl+Z while in OperatorInsert should undo and return to OperatorGeneral.
+    let mut h = Harness::new();
+    let tmp = h.tmp_path().to_path_buf();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+
+    press_ctrl(h.r(), Keycode::I);
+    type_text(h.r(), "- insertundo.txt");
+    press_enter(h.r());
+    assert!(tmp.join("insertundo.txt").exists(), "file should exist after creation");
+
+    // Re-enter insert mode, then undo
+    press_ctrl(h.r(), Keycode::I);
+    assert_eq!(h.renderer.coordinate, Coordinate::OperatorInsert);
+    press_ctrl(h.r(), Keycode::Z);
+    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral, "undo should exit insert mode");
+    assert!(!tmp.join("insertundo.txt").exists(), "file should be deleted after undo from insert mode");
+}
