@@ -2045,3 +2045,129 @@ fn test_d_key_noop_without_dashboard_image() {
     press(h.r(), Keycode::D);
     assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral, "D without dashboard image should not enter Dashboard mode");
 }
+
+// ---------------------------------------------------------------------------
+// Tests: Ctrl+A/I insert_operator_placeholder with createElement provider
+// ---------------------------------------------------------------------------
+
+/// Ctrl+A in OperatorGeneral for a createElement provider should clone the
+/// "Add element:" section rather than inserting a raw `<input></input>`.
+/// The cursor should land on the clone and stay in OperatorGeneral (not EditorInsert).
+#[test]
+fn ctrl_a_operator_clones_add_element_section_for_create_element_provider() {
+    let mut renderer = AppRenderer::new();
+    register(&mut renderer, Box::new(ButtonTestProvider::new()));
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    // Navigate into provider root (depth 1→2).
+    renderer.current_id.set(0, 0);
+    press_right(&mut renderer);
+
+    // Cursor is inside the provider now. "Add element:" should be in the list.
+    assert!(
+        renderer.total_list.iter().any(|item| item.label.contains("Add element:")),
+        "Add element: should be visible before Ctrl+A"
+    );
+    let count_before = renderer.total_list.len();
+
+    // Place cursor on "existing" (index 0 in the provider children).
+    let existing_idx = renderer.total_list.iter()
+        .position(|item| item.label.contains("existing"))
+        .expect("existing item should be in list");
+    renderer.list_index = existing_idx;
+    renderer.current_id = renderer.total_list[existing_idx].id.clone();
+
+    // Ctrl+A — should clone "Add element:" and insert it after current item.
+    press_ctrl(&mut renderer, Keycode::A);
+
+    // Must stay in OperatorGeneral (no insert mode for createElement providers).
+    assert_eq!(renderer.coordinate, Coordinate::OperatorGeneral,
+        "Ctrl+A with createElement provider must stay in OperatorGeneral");
+
+    // List should now have one more item.
+    sicompass::list::create_list_current_layer(&mut renderer);
+    assert_eq!(renderer.total_list.len(), count_before + 1,
+        "one extra item (the cloned Add element:) should appear after Ctrl+A");
+
+    // The new item should be an "Add element:" clone.
+    let clone_count = renderer.total_list.iter()
+        .filter(|item| item.label.contains("Add element:"))
+        .count();
+    assert_eq!(clone_count, 2, "both the original and the clone should be visible");
+}
+
+/// Ctrl+I in OperatorGeneral for a createElement provider should clone the
+/// "Add element:" section before the current item (same logic as Ctrl+A but different index).
+#[test]
+fn ctrl_i_operator_clones_add_element_section_for_create_element_provider() {
+    let mut renderer = AppRenderer::new();
+    register(&mut renderer, Box::new(ButtonTestProvider::new()));
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    renderer.current_id.set(0, 0);
+    press_right(&mut renderer);
+
+    let count_before = renderer.total_list.len();
+
+    let existing_idx = renderer.total_list.iter()
+        .position(|item| item.label.contains("existing"))
+        .expect("existing item should be in list");
+    renderer.list_index = existing_idx;
+    renderer.current_id = renderer.total_list[existing_idx].id.clone();
+
+    press_ctrl(&mut renderer, Keycode::I);
+
+    assert_eq!(renderer.coordinate, Coordinate::OperatorGeneral,
+        "Ctrl+I with createElement provider must stay in OperatorGeneral");
+
+    sicompass::list::create_list_current_layer(&mut renderer);
+    assert_eq!(renderer.total_list.len(), count_before + 1,
+        "one extra item (the cloned Add element:) should appear after Ctrl+I");
+
+    let clone_count = renderer.total_list.iter()
+        .filter(|item| item.label.contains("Add element:"))
+        .count();
+    assert_eq!(clone_count, 2, "both original and clone should be visible after Ctrl+I");
+}
+
+// ---------------------------------------------------------------------------
+// Tests: handle_ctrl_a double-tap in EditorGeneral
+// ---------------------------------------------------------------------------
+
+/// In EditorGeneral, pressing Ctrl+A twice quickly should undo the first append
+/// and perform AppendAppend (mirroring C handleCtrlA double-tap behavior).
+///
+/// We set the coordinate directly since EditorGeneral is reached via the FFON
+/// editor (after escaping EditorInsert), not via list navigation.
+#[test]
+fn ctrl_a_editor_general_double_tap_does_append_append() {
+    use sicompass::app_state::Task;
+
+    // Set up a renderer with two items in an obj (depth-2 EditorGeneral context).
+    let mut r = AppRenderer::new();
+    let mut root = FfonElement::new_obj("section");
+    root.as_obj_mut().unwrap().push(FfonElement::new_str("alpha"));
+    root.as_obj_mut().unwrap().push(FfonElement::new_str("beta"));
+    r.ffon = vec![root];
+    r.current_id = { let mut id = sicompass_sdk::ffon::IdArray::new(); id.push(0); id.push(0); id };
+    r.coordinate = Coordinate::EditorGeneral;
+    r.previous_coordinate = Coordinate::EditorGeneral;
+    sicompass::list::create_list_current_layer(&mut r);
+
+    // First Ctrl+A — single tap append.
+    sicompass::handlers::handle_ctrl_a(&mut r, sicompass::app_state::History::None);
+    let count_after_first = r.ffon[0].as_obj().unwrap().children.len();
+    assert_eq!(count_after_first, 3, "first Ctrl+A should append one element (3 total)");
+
+    // Record a recent keypress time so the next call is within DELTA_MS.
+    r.last_keypress_time = sicompass::handlers::sdl_ticks();
+
+    // Second Ctrl+A immediately — double tap: undo + AppendAppend.
+    sicompass::handlers::handle_ctrl_a(&mut r, sicompass::app_state::History::None);
+
+    let last_task = r.undo_history.last().map(|e| e.task);
+    assert!(
+        matches!(last_task, Some(Task::AppendAppend)),
+        "double-tap Ctrl+A should record AppendAppend in undo history, got {last_task:?}"
+    );
+}

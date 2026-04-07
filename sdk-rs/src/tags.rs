@@ -282,17 +282,18 @@ pub fn strip_display(text: &str) -> String {
         return strip_display(strip_many_opt(text));
     }
 
-    // 2. Button: keep text before <button> + display text after </button>
+    // 2. Button: keep text before <button> + display text after </button>,
+    //    then recurse to strip any remaining tags (e.g. <input>) in the display text.
     if let Some(btn_open) = find_unescaped(text, BUTTON_OPEN) {
         let before = &text[..btn_open];
         if let Some(btn_close) = text[btn_open..].find(BUTTON_CLOSE) {
             let display_start = btn_open + btn_close + BUTTON_CLOSE.len();
             let result = format!("{}{}", before, &text[display_start..]);
-            return unescape(&result);
+            return strip_display(&unescape(&result));
         }
         // Fallback: extract display text
         return extract_button_display_text(text)
-            .map(|s| unescape(&s))
+            .map(|s| strip_display(&unescape(&s)))
             .unwrap_or_else(|| unescape(text));
     }
 
@@ -724,6 +725,25 @@ mod tests {
     #[test]
     fn test_strip_display_button_with_prefix() {
         assert_eq!(strip_display("Add: <button>fn</button>Click me"), "Add: Click me");
+    }
+
+    #[test]
+    fn test_strip_display_button_with_input_in_display() {
+        // Button display text itself contains <input> tags — should be stripped recursively.
+        // Mirrors the sales demo case: one-opt key like "max pressure: <input>100</input> Pa"
+        assert_eq!(
+            strip_display("<button>one-opt:max pressure: <input>100</input> Pa</button>max pressure: <input>100</input> Pa"),
+            "max pressure: 100 Pa"
+        );
+    }
+
+    #[test]
+    fn test_strip_display_button_with_radio_in_display() {
+        // Button display text contains <radio> tag — should be stripped recursively.
+        assert_eq!(
+            strip_display("<button>one-opt:<radio>paint</button><radio>paint"),
+            "paint"
+        );
     }
 
     #[test]

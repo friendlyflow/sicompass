@@ -504,8 +504,8 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
             Some(Keycode::Return) | Some(Keycode::KpEnter) if !ctrl => handlers::handle_append(r),
             Some(Keycode::I) if !ctrl && !shift => handlers::handle_i(r),
             Some(Keycode::A) if !ctrl && !shift => handlers::handle_a(r),
-            Some(Keycode::A) if ctrl && !shift => handlers::handle_append(r),
-            Some(Keycode::I) if ctrl && !shift => handlers::handle_insert(r),
+            Some(Keycode::A) if ctrl && !shift => handlers::handle_ctrl_a(r, History::None),
+            Some(Keycode::I) if ctrl && !shift => handlers::handle_ctrl_i(r, History::None),
             Some(Keycode::D) if ctrl && !shift => handlers::handle_delete(r, History::None),
             Some(Keycode::Space) if !ctrl && !shift => handlers::handle_space(r),
             Some(Keycode::Z) if ctrl && !shift => handlers::handle_undo(r),
@@ -713,6 +713,16 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
                 if r.coordinate == Coordinate::OperatorInsert =>
             {
                 handlers::handle_enter_operator_insert(r);
+            }
+            Some(Keycode::A) if ctrl && shift && r.coordinate == Coordinate::EditorInsert => {
+                handlers::handle_escape(r);
+                handlers::handle_ctrl_a(r, History::None);
+                handlers::handle_a(r);
+            }
+            Some(Keycode::I) if ctrl && shift && r.coordinate == Coordinate::EditorInsert => {
+                handlers::handle_escape(r);
+                handlers::handle_ctrl_i(r, History::None);
+                handlers::handle_i(r);
             }
             Some(Keycode::A) if ctrl && !shift => handlers::handle_select_all(r),
             Some(Keycode::X) if ctrl && !shift => handlers::handle_ctrl_x(r),
