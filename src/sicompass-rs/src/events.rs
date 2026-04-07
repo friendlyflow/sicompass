@@ -483,6 +483,20 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
             Some(Keycode::C) if ctrl && !shift && !at_root => handlers::handle_ctrl_c(r),
             Some(Keycode::V) if ctrl && !shift && !at_root => handlers::handle_ctrl_v(r),
             Some(Keycode::F) if ctrl && !shift => handlers::handle_ctrl_f(r),
+            Some(Keycode::S) if ctrl && !shift => handlers::handle_save_provider_config(r),
+            Some(Keycode::S) if ctrl && shift => {
+                if r.providers.get(r.current_id.get(0).unwrap_or(0))
+                    .map(|p| p.supports_config_files()).unwrap_or(false) {
+                    handlers::handle_save_as_provider_config(r);
+                }
+            }
+            Some(Keycode::O) if ctrl && !shift => {
+                if r.providers.get(r.current_id.get(0).unwrap_or(0))
+                    .map(|p| p.supports_config_files()).unwrap_or(false) {
+                    handlers::handle_file_browser_open(r);
+                }
+            }
+            Some(Keycode::Escape) => handlers::handle_escape(r),
             Some(Keycode::F5) if !at_root => handlers::handle_f5(r),
             Some(Keycode::Backspace) if !at_root => handlers::handle_backspace(r),
             _ => {}

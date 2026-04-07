@@ -365,6 +365,7 @@ pub struct ScriptProvider {
     current_path: String,
     error_message: String,
     dashboard_image: String,
+    supports_config_files: bool,
 }
 
 impl ScriptProvider {
@@ -376,7 +377,13 @@ impl ScriptProvider {
             current_path: "/".to_owned(),
             error_message: String::new(),
             dashboard_image: String::new(),
+            supports_config_files: false,
         }
+    }
+
+    pub fn with_supports_config_files(mut self, val: bool) -> Self {
+        self.supports_config_files = val;
+        self
     }
 
     /// Run the script with the given arguments and return trimmed stdout.
@@ -475,6 +482,10 @@ impl Provider for ScriptProvider {
 
     fn display_name(&self) -> &str {
         &self.display_name
+    }
+
+    fn supports_config_files(&self) -> bool {
+        self.supports_config_files
     }
 
     fn fetch(&mut self) -> Vec<FfonElement> {

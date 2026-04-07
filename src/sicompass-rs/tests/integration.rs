@@ -2171,3 +2171,287 @@ fn ctrl_a_editor_general_double_tap_does_append_append() {
         "double-tap Ctrl+A should record AppendAppend in undo history, got {last_task:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Tests: Ctrl+O (file-browser open) flow
+// ---------------------------------------------------------------------------
+
+/// A minimal provider that supports config files, used to test the open flow.
+struct ConfigProvider {
+    path: String,
+    data: Vec<FfonElement>,
+}
+
+impl ConfigProvider {
+    fn new() -> Self {
+        ConfigProvider {
+            path: "/".to_owned(),
+            data: vec![FfonElement::new_str("initial-item")],
+        }
+    }
+}
+
+impl Provider for ConfigProvider {
+    fn name(&self) -> &str { "configprovider" }
+    fn display_name(&self) -> &str { "Config Provider" }
+    fn supports_config_files(&self) -> bool { true }
+    fn fetch(&mut self) -> Vec<FfonElement> { self.data.clone() }
+    fn push_path(&mut self, segment: &str) {
+        if self.path == "/" { self.path = format!("/{segment}"); }
+        else { self.path.push('/'); self.path.push_str(segment); }
+    }
+    fn pop_path(&mut self) {
+        if self.path == "/" { return; }
+        if let Some(idx) = self.path.rfind('/') {
+            self.path = if idx == 0 { "/".to_owned() } else { self.path[..idx].to_owned() };
+        }
+    }
+    fn current_path(&self) -> &str { &self.path }
+    fn set_current_path(&mut self, path: &str) { self.path = path.to_owned(); }
+}
+
+/// Helper: create a harness with ConfigProvider (idx 0), FilebrowserProvider (idx 1).
+/// The filebrowser is rooted at `tmp` and the save folder is set to `tmp`.
+fn harness_with_config_provider() -> (AppRenderer, TempDir) {
+    let tmp = TempDir::new().expect("temp dir");
+    let mut renderer = AppRenderer::new();
+
+    // ConfigProvider at index 0
+    register(&mut renderer, Box::new(ConfigProvider::new()));
+
+    // Filebrowser at index 1
+    let root = tmp.path().to_str().unwrap().to_owned();
+    register(&mut renderer, Box::new(FilebrowserProvider::new()));
+    renderer.providers[1].set_current_path(&root);
+    {
+        let children = renderer.providers[1].fetch();
+        let display_name = renderer.providers[1].display_name().to_owned();
+        let mut root_elem = FfonElement::new_obj(&display_name);
+        for child in children { root_elem.as_obj_mut().unwrap().push(child); }
+        renderer.ffon[1] = root_elem;
+    }
+
+    renderer.save_folder_path = tmp.path().to_str().unwrap().to_owned();
+
+    sicompass::list::create_list_current_layer(&mut renderer);
+    (renderer, tmp)
+}
+
+/// Ctrl+O on a provider that supports_config_files navigates to the filebrowser
+/// and sets pending_file_browser_open = true.
+#[test]
+fn ctrl_o_navigates_to_filebrowser_and_sets_pending_flag() {
+    let (mut r, _tmp) = harness_with_config_provider();
+
+    // Start at ConfigProvider (index 0)
+    assert_eq!(r.current_id.get(0), Some(0));
+
+    press_ctrl(&mut r, Keycode::O);
+
+    assert!(r.pending_file_browser_open, "pending_file_browser_open should be set after Ctrl+O");
+    assert_eq!(r.current_id.get(0), Some(1), "should have navigated to filebrowser (index 1)");
+    assert_eq!(r.save_as_source_root_idx, 0, "source root idx should be the config provider");
+}
+
+/// Pressing Escape after Ctrl+O cancels the open flow and returns to the source provider.
+#[test]
+fn escape_after_ctrl_o_cancels_open_and_returns_to_source() {
+    let (mut r, _tmp) = harness_with_config_provider();
+
+    press_ctrl(&mut r, Keycode::O);
+    assert!(r.pending_file_browser_open);
+
+    press(&mut r, Keycode::Escape);
+
+    assert!(!r.pending_file_browser_open, "pending_file_browser_open should be cleared after Escape");
+    assert_eq!(r.current_id.get(0), Some(0), "should be back at config provider after Escape");
+}
+
+/// Selecting a .json file in the filebrowser during the open flow loads it into the
+/// source provider and clears pending_file_browser_open.
+///
+/// Sets up the filebrowser state directly (bypassing navigate_to_path filesystem
+/// traversal) so the test is hermetic and doesn't depend on deep tmpdir navigation.
+#[test]
+fn open_flow_loads_json_file_into_source_provider() {
+    let (mut r, tmp) = harness_with_config_provider();
+
+    // Write a JSON file on disk that the load handler will read
+    let json_path = tmp.path().join("config.json");
+    // Save format: children array (no root wrapper), matching C and the fixed Rust save
+    std::fs::write(&json_path, r#"[{"loaded-item":[]}]"#).unwrap();
+
+    // Set up filebrowser state directly: inject config.json as the first child of the
+    // filebrowser root obj, set current_id to point at it, set provider path to tmpdir.
+    // This simulates the user having navigated to config.json without requiring
+    // navigate_to_path to traverse a deep tmpdir path.
+    r.ffon[1].as_obj_mut().unwrap().children.insert(
+        0,
+        FfonElement::Str("<input>config.json</input>".to_owned()),
+    );
+    r.providers[1].set_current_path(tmp.path().to_str().unwrap());
+    r.pending_file_browser_open = true;
+    r.save_as_source_root_idx = 0;
+    r.save_as_return_id = {
+        let mut id = sicompass_sdk::ffon::IdArray::new();
+        id.push(0);
+        id.push(0);
+        id
+    };
+    // Navigate current_id to [1, 0] — pointing at config.json in the filebrowser root
+    r.current_id = {
+        let mut id = sicompass_sdk::ffon::IdArray::new();
+        id.push(1);
+        id.push(0);
+        id
+    };
+    sicompass::list::create_list_current_layer(&mut r);
+
+    let json_idx = r.total_list.iter()
+        .position(|item| item.label.contains("config.json"))
+        .expect("config.json entry should be visible in filebrowser list");
+    r.list_index = json_idx;
+    r.current_id = r.total_list[json_idx].id.clone();
+
+    press(&mut r, Keycode::Return);
+
+    assert!(!r.pending_file_browser_open, "pending flag should be cleared after loading");
+    assert_eq!(r.current_id.get(0), Some(0), "should be back at config provider after open");
+    assert_eq!(r.current_save_path, json_path.to_str().unwrap(),
+        "current_save_path should point to the loaded file");
+
+    // The loaded FFON should have replaced the original "initial-item"
+    if let Some(FfonElement::Obj(root_obj)) = r.ffon.get(0) {
+        let has_loaded = root_obj.children.iter().any(|c| match c {
+            FfonElement::Obj(o) => o.key == "loaded-item",
+            _ => false,
+        });
+        assert!(has_loaded, "loaded FFON should contain 'loaded-item' from the JSON file");
+    } else {
+        panic!("config provider FFON root should be an Obj");
+    }
+}
+
+/// Selecting a non-.json file during the open flow shows an error and keeps the flag set.
+#[test]
+fn open_flow_rejects_non_json_file() {
+    let (mut r, _tmp) = harness_with_config_provider();
+
+    // Inject a non-.json entry directly into the filebrowser root
+    r.ffon[1].as_obj_mut().unwrap().children.insert(
+        0,
+        FfonElement::Str("<input>notes.txt</input>".to_owned()),
+    );
+    r.pending_file_browser_open = true;
+    r.save_as_source_root_idx = 0;
+    r.save_as_return_id = {
+        let mut id = sicompass_sdk::ffon::IdArray::new();
+        id.push(0);
+        id.push(0);
+        id
+    };
+    r.current_id = {
+        let mut id = sicompass_sdk::ffon::IdArray::new();
+        id.push(1);
+        id.push(0);
+        id
+    };
+    sicompass::list::create_list_current_layer(&mut r);
+
+    let txt_idx = r.total_list.iter()
+        .position(|item| item.label.contains("notes.txt"))
+        .expect("notes.txt entry should be visible in filebrowser list");
+    r.list_index = txt_idx;
+    r.current_id = r.total_list[txt_idx].id.clone();
+
+    press(&mut r, Keycode::Return);
+
+    assert!(r.pending_file_browser_open, "flag should still be set after rejecting non-.json file");
+    assert!(r.error_message.contains("Please select a .json file"),
+        "error message should instruct user to select a .json file, got: {}", r.error_message);
+}
+
+/// Selecting a JSON file via SimpleSearch Enter during the open flow triggers the load.
+#[test]
+fn open_flow_simple_search_enter_triggers_load() {
+    let (mut r, tmp) = harness_with_config_provider();
+
+    let json_path = tmp.path().join("found.json");
+    std::fs::write(&json_path, r#"[{"found-item":[]}]"#).unwrap();
+
+    // Set up filebrowser state directly (same as other open tests)
+    r.ffon[1].as_obj_mut().unwrap().children.insert(
+        0,
+        FfonElement::Str("<input>found.json</input>".to_owned()),
+    );
+    r.providers[1].set_current_path(tmp.path().to_str().unwrap());
+    r.pending_file_browser_open = true;
+    r.save_as_source_root_idx = 0;
+    r.save_as_return_id = {
+        let mut id = sicompass_sdk::ffon::IdArray::new();
+        id.push(0); id.push(0); id
+    };
+    r.current_id = {
+        let mut id = sicompass_sdk::ffon::IdArray::new();
+        id.push(1); id.push(0); id
+    };
+    sicompass::list::create_list_current_layer(&mut r);
+
+    // Simulate the user using SimpleSearch: set coordinate and list state
+    r.coordinate = Coordinate::SimpleSearch;
+    r.previous_coordinate = Coordinate::OperatorGeneral;
+
+    // The search result points at the found.json entry
+    let json_idx = r.total_list.iter()
+        .position(|item| item.label.contains("found.json"))
+        .expect("found.json should be in list");
+    r.list_index = json_idx;
+
+    // Enter in SimpleSearch exits search and navigates → then triggers the open flow
+    press(&mut r, Keycode::Return);
+
+    assert!(!r.pending_file_browser_open, "pending flag should be cleared after SimpleSearch Enter");
+    assert_eq!(r.current_id.get(0), Some(0), "should be back at config provider");
+    assert!(r.error_message.contains("found.json") || r.current_save_path.contains("found.json"),
+        "should have loaded found.json");
+}
+
+/// Save writes only children (not the root wrapper), matching C behaviour.
+#[test]
+fn save_as_writes_children_not_root_wrapper() {
+    let (mut r, tmp) = harness_with_config_provider();
+
+    // Add a child item to the config provider's FFON
+    r.ffon[0].as_obj_mut().unwrap().children.push(FfonElement::new_str("my-item"));
+
+    let dest = tmp.path().join("out.json");
+    sicompass::handlers::handle_load_provider_config(&mut r, "");  // no-op
+    // Directly save using the save handler path
+    r.current_save_path = dest.to_str().unwrap().to_owned();
+    press_ctrl(&mut r, Keycode::S);
+
+    let raw = std::fs::read_to_string(&dest).expect("save should have written a file");
+    let parsed: serde_json::Value = serde_json::from_str(&raw).expect("save output should be valid JSON");
+    // Must be an array (children), not an object with the root key
+    assert!(parsed.is_array(), "saved JSON must be a top-level array of children, got: {raw}");
+    // Must NOT contain the provider name as a wrapper key
+    assert!(!raw.contains("\"Config Provider\"") && !raw.contains("\"configprovider\""),
+        "saved JSON must not contain root wrapper key, got: {raw}");
+}
+
+/// Ctrl+S + Escape during save-as (OperatorInsert) cancels and returns to source provider.
+#[test]
+fn escape_in_save_as_insert_cancels_and_returns_to_source() {
+    let (mut r, _tmp) = harness_with_config_provider();
+
+    // Trigger save-as (no existing save path → falls through to file-browser save-as)
+    press_ctrl(&mut r, Keycode::S);
+    assert!(r.pending_file_browser_save_as, "save-as should be pending after Ctrl+S with no path");
+    assert_eq!(r.coordinate, Coordinate::OperatorInsert, "should be in OperatorInsert for filename entry");
+
+    press(&mut r, Keycode::Escape);
+
+    assert!(!r.pending_file_browser_save_as, "save-as flag should be cleared after Escape");
+    assert_eq!(r.current_id.get(0), Some(0), "should be back at config provider after Escape");
+    assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+}

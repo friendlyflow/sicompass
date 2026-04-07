@@ -1499,8 +1499,7 @@ fn handle_keydown_old(app: &mut AppState, keycode: Option<Keycode>, keymod: Mod)
             Some(Keycode::O) if ctrl && !shift => {
                 if r.providers.get(r.current_id.get(0).unwrap_or(0))
                     .map(|p| p.supports_config_files()).unwrap_or(false) {
-                    r.error_message = "Ctrl+O: navigate to a JSON file in the file browser and press Enter".to_owned();
-                    r.needs_redraw = true;
+                    handlers::handle_file_browser_open(r);
                 }
             }
             Some(Keycode::F5) => handlers::handle_f5(r),
