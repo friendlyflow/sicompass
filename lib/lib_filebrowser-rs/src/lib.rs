@@ -185,7 +185,7 @@ impl Provider for FilebrowserProvider {
         let name_clean = tags::strip_display(name);
         let name_clean = name_clean.trim_end_matches('/').trim_end_matches('\\');
         let full = self.current_path.join(name_clean);
-        delete_recursive(&full)
+        trash::delete(&full).is_ok()
     }
 
     fn create_directory(&mut self, name: &str) -> bool {
@@ -469,22 +469,8 @@ fn format_properties(_e: &RawEntry) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Recursive delete / copy
+// Copy
 // ---------------------------------------------------------------------------
-
-fn delete_recursive(path: &Path) -> bool {
-    if !path.exists() { return false; }
-    if path.is_dir() && !path.is_symlink() {
-        if let Ok(entries) = std::fs::read_dir(path) {
-            for entry in entries.flatten() {
-                if !delete_recursive(&entry.path()) { return false; }
-            }
-        }
-        std::fs::remove_dir(path).is_ok()
-    } else {
-        std::fs::remove_file(path).is_ok()
-    }
-}
 
 fn copy_recursive(src: &Path, dst: &Path) -> bool {
     if src.is_dir() {
