@@ -326,6 +326,56 @@ fn update_view(app: &mut AppState) {
         return;
     }
 
+    // ---- Dashboard early dispatch --------------------------------------------
+    if app.renderer.coordinate == Coordinate::Dashboard {
+        let dashboard_path = app.renderer.dashboard_image_path.clone();
+
+        // Begin render passes
+        let fr = match app.font_renderer.as_mut() { Some(f) => f, None => return };
+        fr.begin_text_rendering();
+        if let Some(rr) = app.rect_renderer.as_mut() {
+            rr.begin_rect_rendering();
+        }
+        if let Some(ir) = app.image_renderer.as_mut() {
+            ir.begin_image_rendering();
+        }
+
+        // Header separator and text
+        if let Some(rr) = app.rect_renderer.as_mut() {
+            rr.prepare_rectangle(0.0, line_height as f32, win_w, 1.0, p.header_sep, 0.0);
+        }
+        let header_baseline = (ascender * scale + crate::text::TEXT_PADDING) as f32;
+        app.font_renderer.as_mut().unwrap().prepare_text_for_rendering(&header, text_x, header_baseline, scale, p.text);
+        let error_msg = app.renderer.error_message.clone();
+        if !error_msg.is_empty() {
+            let fr = app.font_renderer.as_mut().unwrap();
+            let err_x = text_x + (header.len() as f32 * fr.get_width_em(scale)) + 10.0;
+            fr.prepare_text_for_rendering(&error_msg, err_x, header_baseline, scale, p.error);
+        }
+
+        // Render the dashboard image
+        if !dashboard_path.is_empty() {
+            if let Some(ir) = app.image_renderer.as_mut() {
+                let avail_w = win_w - 100.0;
+                let avail_h = win_h - line_height as f32 * 2.0;
+                if let Some((img_w, img_h)) = unsafe { ir.texture_size(&dashboard_path) } {
+                    let img_w = img_w as f32;
+                    let img_h = img_h as f32;
+                    let mut display_scale = 1.0_f32;
+                    if img_w > avail_w { display_scale = avail_w / img_w; }
+                    if img_h * display_scale > avail_h { display_scale = avail_h / img_h; }
+                    let display_w = img_w * display_scale;
+                    let display_h = img_h * display_scale;
+                    let img_x = (win_w - display_w) / 2.0;
+                    let img_y = line_height as f32 + (avail_h - display_h) / 2.0;
+                    unsafe { ir.prepare_image(&dashboard_path, img_x, img_y, display_w, display_h); }
+                }
+            }
+        }
+
+        return;
+    }
+
     // Snapshot insert-mode state before mutable borrows
     let in_insert_mode = matches!(
         app.renderer.coordinate,

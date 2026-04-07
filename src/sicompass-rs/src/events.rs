@@ -832,7 +832,12 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
             _ => {}
         },
 
-        _ => {}
+        // ---- Dashboard mode ---------------------------------------------------
+        Coordinate::Dashboard => match keycode {
+            Some(Keycode::Escape) => handlers::handle_escape(r),
+            _ => {}
+        },
+
     }
 
     false

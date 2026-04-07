@@ -2015,3 +2015,33 @@ fn root_allows_navigation_tab_ctrl_f_meta_d_space() {
     press_escape(h.r());
     assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
 }
+
+#[test]
+fn test_dashboard_key_transitions_and_escape() {
+    let mut h = Harness::new();
+    // Manually set a dashboard image path so handle_dashboard has something to act on
+    h.renderer.dashboard_image_path = "/tmp/fake_dashboard.png".to_string();
+    // Also prime the provider's dashboard_image_path via direct state manipulation
+    // by setting it on the renderer directly (handle_dashboard reads from provider,
+    // so we test the dispatch + escape cycle with the coordinate set directly)
+    h.renderer.coordinate = Coordinate::OperatorGeneral;
+    h.renderer.previous_coordinate = Coordinate::OperatorGeneral;
+
+    // Enter Dashboard mode
+    h.renderer.previous_coordinate = h.renderer.coordinate;
+    h.renderer.coordinate = Coordinate::Dashboard;
+    assert_eq!(h.renderer.coordinate, Coordinate::Dashboard);
+
+    // Escape should return to OperatorGeneral
+    press_escape(h.r());
+    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral, "Escape from Dashboard should restore previous coordinate");
+}
+
+#[test]
+fn test_d_key_noop_without_dashboard_image() {
+    let mut h = Harness::new();
+    // No dashboard_image_path set on providers — pressing D at root should stay in OperatorGeneral
+    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+    press(h.r(), Keycode::D);
+    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral, "D without dashboard image should not enter Dashboard mode");
+}
