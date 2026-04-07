@@ -394,6 +394,24 @@ impl ScriptProvider {
         }
     }
 
+    /// Mirror C's `scriptResponseOk`: returns `true` only when the JSON response
+    /// is an object with `"ok": true` and no `"error"` field.
+    ///
+    /// Scripts must output `{"ok":true}` to signal a successful mutation
+    /// (commit, createDirectory, createFile, deleteItem, copyItem).
+    /// Any other output — including arrays, empty strings, or `{"error":...}` —
+    /// is treated as failure so callers do NOT trigger side-effects like refreshing
+    /// the FFON tree.
+    fn script_response_ok(output: &str) -> bool {
+        let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(output) else {
+            return false;
+        };
+        if map.contains_key("error") {
+            return false;
+        }
+        map.get("ok").and_then(|v| v.as_bool()).unwrap_or(false)
+    }
+
     /// Parse a JSON string into FFON elements.
     ///
     /// Accepts either a plain JSON array (backward compat) or an object with a
@@ -478,7 +496,9 @@ impl Provider for ScriptProvider {
 
     fn commit_edit(&mut self, old: &str, new: &str) -> bool {
         let path = self.current_path.clone();
-        self.run(&["commit", &path, old, new]).is_some()
+        self.run(&["commit", &path, old, new])
+            .map(|out| Self::script_response_ok(&out))
+            .unwrap_or(false)
     }
 
     fn push_path(&mut self, segment: &str) {
@@ -517,17 +537,56 @@ impl Provider for ScriptProvider {
 
     fn create_directory(&mut self, name: &str) -> bool {
         let path = self.current_path.clone();
-        self.run(&["create-dir", &path, name]).is_some()
+        self.run(&["create-dir", &path, name])
+            .map(|out| Self::script_response_ok(&out))
+            .unwrap_or(false)
     }
 
     fn create_file(&mut self, name: &str) -> bool {
         let path = self.current_path.clone();
-        self.run(&["create-file", &path, name]).is_some()
+        self.run(&["create-file", &path, name])
+            .map(|out| Self::script_response_ok(&out))
+            .unwrap_or(false)
     }
 
     fn delete_item(&mut self, name: &str) -> bool {
         let path = self.current_path.clone();
-        self.run(&["delete", &path, name]).is_some()
+        self.run(&["delete", &path, name])
+            .map(|out| Self::script_response_ok(&out))
+            .unwrap_or(false)
+    }
+
+    fn create_element(&mut self, element_key: &str) -> Option<FfonElement> {
+        let is_one_opt = element_key.starts_with("one-opt:");
+        let key = if is_one_opt { &element_key[8..] } else { element_key };
+
+        let tagged = if is_one_opt {
+            sicompass_sdk::tags::format_one_opt(key)
+        } else {
+            sicompass_sdk::tags::format_many_opt(key)
+        };
+
+        if sicompass_sdk::tags::has_input(key) || sicompass_sdk::tags::has_input_all(key) {
+            return Some(FfonElement::Str(tagged));
+        }
+
+        let mut obj = FfonElement::new_obj(&tagged);
+        let child_path = if self.current_path.ends_with('/') {
+            format!("{}{}", self.current_path, key)
+        } else {
+            format!("{}/{}", self.current_path, key)
+        };
+
+        if let Some(json) = self.run(&[&child_path]) {
+            let (children, _) = Self::parse_json_output(&json);
+            if let Some(obj_inner) = obj.as_obj_mut() {
+                for child in children {
+                    obj_inner.push(child);
+                }
+            }
+        }
+
+        Some(obj)
     }
 
     fn commands(&self) -> Vec<String> {
@@ -627,6 +686,26 @@ mod tests {
         let (elems, dashboard) = ScriptProvider::parse_json_output(json);
         assert_eq!(elems.len(), 1);
         assert!(dashboard.is_empty());
+    }
+
+    // --- ScriptProvider script_response_ok ---
+
+    #[test]
+    fn script_response_ok_requires_ok_true() {
+        // Success case: {"ok":true}
+        assert!(ScriptProvider::script_response_ok(r#"{"ok":true}"#));
+        // Error field present → false even with ok:true
+        assert!(!ScriptProvider::script_response_ok(r#"{"ok":true,"error":"oops"}"#));
+        // ok:false → false
+        assert!(!ScriptProvider::script_response_ok(r#"{"ok":false}"#));
+        // No ok field → false
+        assert!(!ScriptProvider::script_response_ok(r#"{"result":"done"}"#));
+        // Array (sales demo commit returns []) → false
+        assert!(!ScriptProvider::script_response_ok("[]"));
+        // Empty string → false
+        assert!(!ScriptProvider::script_response_ok(""));
+        // SDK error convention → false
+        assert!(!ScriptProvider::script_response_ok(r#"{"error":"unsupported: commit"}"#));
     }
 
     // --- ScriptProvider path management ---
