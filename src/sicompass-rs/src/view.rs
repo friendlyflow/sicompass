@@ -1479,7 +1479,7 @@ fn handle_keydown_old(app: &mut AppState, keycode: Option<Keycode>, keymod: Mod)
             Some(Keycode::Return) | Some(Keycode::KpEnter) if !ctrl => handlers::handle_append(r),
             Some(Keycode::I) if !ctrl && !shift => handlers::handle_i(r),
             Some(Keycode::A) if !ctrl && !shift => handlers::handle_a(r),
-            Some(Keycode::A) if ctrl && !shift => handlers::handle_append(r),
+            Some(Keycode::A) if ctrl && !shift => handlers::handle_ctrl_a(r, History::None),
             Some(Keycode::I) if ctrl && !shift => handlers::handle_ctrl_i(r, History::None),
             Some(Keycode::D) if ctrl && !shift => handlers::handle_delete(r, History::None),
             Some(Keycode::Space) if !ctrl && !shift => handlers::handle_space(r),
@@ -1555,6 +1555,12 @@ fn handle_keydown_old(app: &mut AppState, keycode: Option<Keycode>, keymod: Mod)
         // ---- Insert / normal / visual modes ---------------------------------
         Coordinate::EditorInsert | Coordinate::EditorNormal
         | Coordinate::EditorVisual | Coordinate::OperatorInsert => match keycode {
+            // Ctrl+Shift+A in EditorInsert: escape current edit, double-tap append, re-enter insert
+            Some(Keycode::A) if ctrl && shift && r.coordinate == Coordinate::EditorInsert => {
+                handlers::handle_escape(r);
+                handlers::handle_ctrl_a(r, History::None);
+                handlers::handle_a(r);
+            }
             // Ctrl+Shift+I in EditorInsert: escape current edit, double-tap insert, re-enter insert
             Some(Keycode::I) if ctrl && shift && r.coordinate == Coordinate::EditorInsert => {
                 handlers::handle_escape(r);

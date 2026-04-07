@@ -1965,7 +1965,25 @@ pub fn handle_file_paste(r: &mut AppRenderer) {
     r.needs_redraw = true;
 }
 
-/// Ctrl+I in OperatorGeneral — double-tap undo+insert.
+/// Ctrl+A in EditorGeneral — double-tap undo+append.
+///
+/// A single tap appends a new element after the current one.
+/// A double tap (within DELTA_MS) undoes the previous append and performs append-append.
+/// Mirrors C `handleCtrlA`.
+pub fn handle_ctrl_a(r: &mut AppRenderer, history: crate::app_state::History) {
+    let now = sdl_ticks();
+    if now.saturating_sub(r.last_keypress_time) <= DELTA_MS {
+        r.last_keypress_time = 0;
+        crate::state::handle_history_action(r, History::Undo);
+        crate::state::update_state(r, Task::AppendAppend, History::None);
+    } else {
+        crate::state::update_state(r, Task::Append, history);
+    }
+    r.last_keypress_time = now;
+    r.needs_redraw = true;
+}
+
+/// Ctrl+I in EditorGeneral — double-tap undo+insert.
 ///
 /// A single tap inserts a new item (same as Ctrl+I operator).
 /// A double tap (within DELTA_MS) undoes the previous insert and re-enters insert.
@@ -2787,19 +2805,72 @@ pub fn handle_ctrl_a_operator(r: &mut AppRenderer) {
     insert_operator_placeholder(r, insert_idx);
 }
 
-/// Insert a `<input></input>` placeholder at `insert_idx` in the current parent,
-/// navigate the cursor there, and immediately enter insert mode.
+/// Insert a placeholder at `insert_idx` in the current parent.
+///
+/// For providers with `create_element` support: find the "Add element:" sibling object,
+/// clone it, and insert the clone at `insert_idx`. Stays in OperatorGeneral — the user
+/// then navigates into the clone and presses Enter on a button to create the element.
+///
+/// For other providers (e.g. filebrowser): insert a `<input></input>` string placeholder
+/// and immediately enter insert mode.
+///
+/// Mirrors C `insertOperatorPlaceholder`.
 fn insert_operator_placeholder(r: &mut AppRenderer, insert_idx: usize) {
     use sicompass_sdk::ffon::FfonElement;
+
+    let depth = r.current_id.depth();
+
+    // Check for "Add element:" among siblings (indicates a createElement provider).
+    // navigate_to_slice_pub(current_id) returns the Vec that contains the current item.
+    // Must be done before any mutation due to borrow checker.
+    let add_elem_clone: Option<FfonElement> = {
+        let siblings: Vec<FfonElement> = if depth == 1 {
+            r.ffon.clone()
+        } else {
+            crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id)
+                .map(|s| s.to_vec())
+                .unwrap_or_default()
+        };
+        siblings.into_iter().find(|e| {
+            if let FfonElement::Obj(obj) = e { obj.key == "Add element:" } else { false }
+        })
+    };
+
+    if let Some(clone) = add_elem_clone {
+        // createElement provider: insert the cloned "Add element:" section.
+        if depth == 1 {
+            r.ffon.insert(insert_idx, clone);
+        } else {
+            let mut parent_id = r.current_id.clone();
+            parent_id.pop();
+            if let Some(parent_slice) = crate::state::navigate_to_slice_pub(&mut r.ffon, &parent_id) {
+                let parent_idx = parent_id.last().unwrap_or(0);
+                if let Some(FfonElement::Obj(obj)) = parent_slice.get_mut(parent_idx) {
+                    obj.children.insert(insert_idx, clone);
+                } else {
+                    return;
+                }
+            } else {
+                return;
+            }
+        }
+        r.current_id.set_last(insert_idx);
+        list::create_list_current_layer(r);
+        r.list_index = insert_idx;
+        r.scroll_offset = 0;
+        r.needs_redraw = true;
+        return;
+    }
+
+    // Fallback: simple <input></input> placeholder + enter insert mode.
     let placeholder = FfonElement::Str("<input></input>".to_owned());
 
-    // Check provider before any mutation (borrow checker: can't hold ref while mutating)
+    // Check provider before mutation (borrow checker)
     let is_filebrowser = r.current_id.get(0)
         .and_then(|idx| r.providers.get(idx))
         .map(|p| p.name() == "filebrowser")
         .unwrap_or(false);
 
-    let depth = r.current_id.depth();
     if depth == 1 {
         r.ffon.insert(insert_idx, placeholder);
     } else {
