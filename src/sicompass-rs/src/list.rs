@@ -120,7 +120,21 @@ pub fn create_list_current_layer(renderer: &mut AppRenderer) {
 
     let mut items: Vec<RenderListItem> = Vec::with_capacity(ffon_slice.len());
 
+    let filter_json = renderer.pending_file_browser_open;
+
     for (i, elem) in ffon_slice.iter().enumerate() {
+        // In the Ctrl+O open flow, hide non-.json files (directories still shown).
+        if filter_json {
+            if let FfonElement::Str(s) = elem {
+                let name = tags::extract_input(s)
+                    .or_else(|| tags::extract_input_all(s))
+                    .unwrap_or_else(|| s.clone());
+                if !name.ends_with(".json") {
+                    continue;
+                }
+            }
+        }
+
         let mut item_id = base_id.clone();
         item_id.set_last(i);
 

@@ -2332,43 +2332,95 @@ fn open_flow_loads_json_file_into_source_provider() {
     }
 }
 
-/// Selecting a non-.json file during the open flow shows an error and keeps the flag set.
+/// In the open flow the file browser hides non-.json files; only .json files and
+/// directories are shown in the list.
 #[test]
-fn open_flow_rejects_non_json_file() {
+fn open_flow_hides_non_json_files_in_list() {
     let (mut r, _tmp) = harness_with_config_provider();
 
-    // Inject a non-.json entry directly into the filebrowser root
-    r.ffon[1].as_obj_mut().unwrap().children.insert(
-        0,
-        FfonElement::Str("<input>notes.txt</input>".to_owned()),
-    );
+    // Inject mixed entries: a .txt file, a .json file, and a directory
+    let children = r.ffon[1].as_obj_mut().unwrap();
+    children.children.clear();
+    children.children.push(FfonElement::Str("<input>notes.txt</input>".to_owned()));
+    children.children.push(FfonElement::Str("<input>config.json</input>".to_owned()));
+    children.children.push(FfonElement::new_obj("<input>some-dir</input>"));
+
     r.pending_file_browser_open = true;
-    r.save_as_source_root_idx = 0;
-    r.save_as_return_id = {
-        let mut id = sicompass_sdk::ffon::IdArray::new();
-        id.push(0);
-        id.push(0);
-        id
-    };
     r.current_id = {
         let mut id = sicompass_sdk::ffon::IdArray::new();
-        id.push(1);
-        id.push(0);
-        id
+        id.push(1); id.push(0); id
     };
     sicompass::list::create_list_current_layer(&mut r);
 
-    let txt_idx = r.total_list.iter()
-        .position(|item| item.label.contains("notes.txt"))
-        .expect("notes.txt entry should be visible in filebrowser list");
-    r.list_index = txt_idx;
-    r.current_id = r.total_list[txt_idx].id.clone();
+    // .txt file must not appear
+    assert!(!r.total_list.iter().any(|item| item.label.contains("notes.txt")),
+        "non-.json file should be hidden from list during open flow");
+    // .json file and directory must appear
+    assert!(r.total_list.iter().any(|item| item.label.contains("config.json")),
+        ".json file should be visible during open flow");
+    assert!(r.total_list.iter().any(|item| item.label.contains("some-dir")),
+        "directory should be visible during open flow");
+}
 
-    press(&mut r, Keycode::Return);
+/// Outside the open flow, all files appear (no extension filtering).
+#[test]
+fn file_browser_shows_all_files_outside_open_flow() {
+    let (mut r, _tmp) = harness_with_config_provider();
 
-    assert!(r.pending_file_browser_open, "flag should still be set after rejecting non-.json file");
-    assert!(r.error_message.contains("Please select a .json file"),
-        "error message should instruct user to select a .json file, got: {}", r.error_message);
+    let children = r.ffon[1].as_obj_mut().unwrap();
+    children.children.clear();
+    children.children.push(FfonElement::Str("<input>notes.txt</input>".to_owned()));
+    children.children.push(FfonElement::Str("<input>config.json</input>".to_owned()));
+
+    // pending_file_browser_open is false by default
+    r.current_id = {
+        let mut id = sicompass_sdk::ffon::IdArray::new();
+        id.push(1); id.push(0); id
+    };
+    sicompass::list::create_list_current_layer(&mut r);
+
+    assert!(r.total_list.iter().any(|item| item.label.contains("notes.txt")),
+        "non-.json file should be visible when not in open flow");
+    assert!(r.total_list.iter().any(|item| item.label.contains("config.json")),
+        ".json file should be visible when not in open flow");
+}
+
+/// Destructive keys (Ctrl+A, Ctrl+I, Delete) are no-ops in OperatorGeneral
+/// while pending_file_browser_open is true.
+#[test]
+fn open_flow_blocks_destructive_keys() {
+    let (mut r, _tmp) = harness_with_config_provider();
+
+    // Navigate to filebrowser and inject some entries
+    let children = r.ffon[1].as_obj_mut().unwrap();
+    children.children.clear();
+    children.children.push(FfonElement::Str("<input>config.json</input>".to_owned()));
+
+    r.pending_file_browser_open = true;
+    r.save_as_source_root_idx = 0;
+    r.current_id = {
+        let mut id = sicompass_sdk::ffon::IdArray::new();
+        id.push(1); id.push(0); id
+    };
+    r.coordinate = Coordinate::OperatorGeneral;
+    sicompass::list::create_list_current_layer(&mut r);
+    let initial_list_len = r.total_list.len();
+
+    // Ctrl+A (append) must be blocked
+    press_ctrl(&mut r, Keycode::A);
+    assert_eq!(r.coordinate, Coordinate::OperatorGeneral,
+        "Ctrl+A should not enter insert mode during open flow");
+
+    // Ctrl+I (insert) must be blocked
+    press_ctrl(&mut r, Keycode::I);
+    assert_eq!(r.coordinate, Coordinate::OperatorGeneral,
+        "Ctrl+I should not enter insert mode during open flow");
+
+    // Delete must be blocked — filebrowser children count should be unchanged
+    press(&mut r, Keycode::Delete);
+    let after_list_len = r.ffon[1].as_obj().unwrap().children.len();
+    assert_eq!(after_list_len, initial_list_len,
+        "Delete should not remove items during open flow");
 }
 
 /// Selecting a JSON file via SimpleSearch Enter during the open flow triggers the load.

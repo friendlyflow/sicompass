@@ -450,6 +450,44 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
     let shift = keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD);
     let at_root = r.current_id.depth() <= 1;
 
+    // In the Ctrl+O open-file flow the file browser is a read-only .json picker.
+    // Restrict OperatorGeneral/EditorGeneral to navigation+selection only.
+    // SimpleSearch/ExtendedSearch fall through to normal dispatch so the user
+    // can still type search queries; only clipboard/undo ops are blocked there.
+    if r.pending_file_browser_open {
+        match r.coordinate {
+            Coordinate::OperatorGeneral | Coordinate::EditorGeneral => {
+                match keycode {
+                    Some(Keycode::Up) | Some(Keycode::K) if !ctrl && !shift => handlers::handle_up(r),
+                    Some(Keycode::Down) | Some(Keycode::J) if !ctrl && !shift => handlers::handle_down(r),
+                    Some(Keycode::Right) | Some(Keycode::L) if !ctrl && !shift => handlers::handle_right(r),
+                    Some(Keycode::Left) | Some(Keycode::H) if !ctrl && !shift => handlers::handle_left(r),
+                    Some(Keycode::PageUp) if !ctrl && !shift => handlers::handle_page_up(r),
+                    Some(Keycode::PageDown) if !ctrl && !shift => handlers::handle_page_down(r),
+                    Some(Keycode::Home) if !ctrl && !shift => handlers::handle_home(r),
+                    Some(Keycode::End) if !ctrl && !shift => handlers::handle_end(r),
+                    Some(Keycode::Return) | Some(Keycode::KpEnter) if !ctrl => handlers::handle_enter_operator(r),
+                    Some(Keycode::Escape) => handlers::handle_escape(r),
+                    Some(Keycode::Backspace) => handlers::handle_backspace(r),
+                    Some(Keycode::Tab) => handlers::handle_tab(r),
+                    Some(Keycode::F) if ctrl && !shift => handlers::handle_ctrl_f(r),
+                    _ => {}
+                }
+                return false;
+            }
+            Coordinate::SimpleSearch | Coordinate::ExtendedSearch => {
+                // Block clipboard and undo; let all other search-mode keys through.
+                match keycode {
+                    Some(Keycode::X) if ctrl => return false,
+                    Some(Keycode::V) if ctrl => return false,
+                    Some(Keycode::Z) if ctrl => return false,
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
     match r.coordinate {
         // ---- Operator general -----------------------------------------------
         Coordinate::OperatorGeneral => match keycode {
