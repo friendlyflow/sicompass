@@ -119,6 +119,7 @@ impl Provider for FilebrowserProvider {
             "I       Rename".to_owned(),
             ":       Commands".to_owned(),
             "/       Search".to_owned(),
+            "Ctrl+F  Extended search".to_owned(),
             "F5      Refresh".to_owned(),
         ]
     }

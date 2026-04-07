@@ -120,6 +120,7 @@ impl Provider for WebbrowserProvider {
         vec![
             "I   Edit URL".to_owned(),
             "/   Search".to_owned(),
+            "Ctrl+F  Extended search".to_owned(),
             "F5  Refresh".to_owned(),
             ":   Commands".to_owned(),
         ]

@@ -389,6 +389,7 @@ impl Provider for EmailClientProvider {
         match segs {
             0 => vec![
                 "/   Search".to_owned(),
+                "Ctrl+F  Extended search".to_owned(),
                 "F5  Refresh".to_owned(),
                 ":   Commands".to_owned(),
             ],
@@ -400,6 +401,7 @@ impl Provider for EmailClientProvider {
             ],
             _ => vec![
                 "/   Search".to_owned(),
+                "Ctrl+F  Extended search".to_owned(),
                 "F5  Refresh".to_owned(),
             ],
         }
