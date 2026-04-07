@@ -442,6 +442,7 @@ mod tests {
 pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) -> bool {
     let ctrl  = keymod.intersects(Mod::LCTRLMOD  | Mod::RCTRLMOD);
     let shift = keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD);
+    let at_root = r.current_id.depth() <= 1;
 
     match r.coordinate {
         // ---- Operator general -----------------------------------------------
@@ -455,29 +456,29 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
             Some(Keycode::Home) if !ctrl && !shift => handlers::handle_home(r),
             Some(Keycode::End) if !ctrl && !shift => handlers::handle_end(r),
             Some(Keycode::Tab) => handlers::handle_tab(r),
-            Some(Keycode::Colon) if !ctrl && !shift => handlers::handle_colon(r),
-            Some(Keycode::Semicolon) if shift => handlers::handle_colon(r),
-            Some(Keycode::Return) | Some(Keycode::KpEnter) if !ctrl => {
+            Some(Keycode::Colon) if !ctrl && !shift && !at_root => handlers::handle_colon(r),
+            Some(Keycode::Semicolon) if shift && !at_root => handlers::handle_colon(r),
+            Some(Keycode::Return) | Some(Keycode::KpEnter) if !ctrl && !at_root => {
                 handlers::handle_enter_operator(r);
             }
-            Some(Keycode::I) if !ctrl && !shift => handlers::handle_i(r),
-            Some(Keycode::A) if !ctrl && !shift => handlers::handle_a(r),
-            Some(Keycode::A) if ctrl && !shift => handlers::handle_ctrl_a_operator(r),
-            Some(Keycode::I) if ctrl && !shift => handlers::handle_ctrl_i_operator(r),
-            Some(Keycode::D) if ctrl && !shift => handlers::handle_file_delete(r),
-            Some(Keycode::Delete) if !ctrl && !shift => handlers::handle_file_delete(r),
+            Some(Keycode::I) if !ctrl && !shift && !at_root => handlers::handle_i(r),
+            Some(Keycode::A) if !ctrl && !shift && !at_root => handlers::handle_a(r),
+            Some(Keycode::A) if ctrl && !shift && !at_root => handlers::handle_ctrl_a_operator(r),
+            Some(Keycode::I) if ctrl && !shift && !at_root => handlers::handle_ctrl_i_operator(r),
+            Some(Keycode::D) if ctrl && !shift && !at_root => handlers::handle_file_delete(r),
+            Some(Keycode::Delete) if !ctrl && !shift && !at_root => handlers::handle_file_delete(r),
             Some(Keycode::D) if !ctrl && !shift => handlers::handle_dashboard(r),
-            Some(Keycode::S) if !ctrl && !shift => handlers::handle_s(r),
+            Some(Keycode::S) if !ctrl && !shift && !at_root => handlers::handle_s(r),
             Some(Keycode::M) if !ctrl && !shift => handlers::handle_meta(r),
             Some(Keycode::Space) if !ctrl && !shift => handlers::handle_space(r),
-            Some(Keycode::Z) if ctrl && !shift => handlers::handle_undo(r),
-            Some(Keycode::Z) if ctrl && shift => handlers::handle_redo(r),
-            Some(Keycode::X) if ctrl && !shift => handlers::handle_ctrl_x(r),
-            Some(Keycode::C) if ctrl && !shift => handlers::handle_ctrl_c(r),
-            Some(Keycode::V) if ctrl && !shift => handlers::handle_ctrl_v(r),
+            Some(Keycode::Z) if ctrl && !shift && !at_root => handlers::handle_undo(r),
+            Some(Keycode::Z) if ctrl && shift && !at_root => handlers::handle_redo(r),
+            Some(Keycode::X) if ctrl && !shift && !at_root => handlers::handle_ctrl_x(r),
+            Some(Keycode::C) if ctrl && !shift && !at_root => handlers::handle_ctrl_c(r),
+            Some(Keycode::V) if ctrl && !shift && !at_root => handlers::handle_ctrl_v(r),
             Some(Keycode::F) if ctrl && !shift => handlers::handle_ctrl_f(r),
-            Some(Keycode::F5) => handlers::handle_f5(r),
-            Some(Keycode::Backspace) => handlers::handle_backspace(r),
+            Some(Keycode::F5) if !at_root => handlers::handle_f5(r),
+            Some(Keycode::Backspace) if !at_root => handlers::handle_backspace(r),
             _ => {}
         },
 

@@ -487,7 +487,10 @@ fn mode_transitions_tab_escape_chain() {
     press_escape(h.r());
     assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
 
-    // S key enters Scroll directly from OperatorGeneral
+    // S key enters Scroll from inside a provider (not at root)
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
     press(h.r(), Keycode::S);
     assert_eq!(h.renderer.coordinate, Coordinate::Scroll);
 
@@ -499,6 +502,10 @@ fn mode_transitions_tab_escape_chain() {
 fn scroll_search_esc_chain() {
     let mut h = Harness::new();
 
+    // S only works inside a provider, not at root
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
     press(h.r(), Keycode::S);  // -> Scroll
     assert_eq!(h.renderer.coordinate, Coordinate::Scroll);
 
@@ -1931,4 +1938,65 @@ fn button_press_two_level_nested_creates_element() {
         "after Left from subwidget, depth must be 3");
     let subwidget_visible = renderer.total_list.iter().any(|item| item.label.contains("subwidget"));
     assert!(subwidget_visible, "subwidget must still be visible in widget's list after Left");
+}
+
+#[test]
+fn root_blocks_editing_keys() {
+    // At root (depth 1), editing/action keys must be no-ops.
+    let mut h = Harness::new();
+    assert_eq!(h.renderer.current_id.depth(), 1, "should start at root");
+
+    let coord_before = h.renderer.coordinate;
+
+    // S — should not enter Scroll at root
+    press(h.r(), Keycode::S);
+    assert_eq!(h.renderer.coordinate, coord_before, "S must be no-op at root");
+
+    // I — should not enter EditorInsert at root
+    press(h.r(), Keycode::I);
+    assert_eq!(h.renderer.coordinate, coord_before, "I must be no-op at root");
+
+    // A — should not enter EditorInsert at root
+    press(h.r(), Keycode::A);
+    assert_eq!(h.renderer.coordinate, coord_before, "A must be no-op at root");
+
+    // Ctrl+I — should not enter EditorInsert at root
+    press_ctrl(h.r(), Keycode::I);
+    assert_eq!(h.renderer.coordinate, coord_before, "Ctrl+I must be no-op at root");
+
+    // Ctrl+A — should not enter EditorInsert at root
+    press_ctrl(h.r(), Keycode::A);
+    assert_eq!(h.renderer.coordinate, coord_before, "Ctrl+A must be no-op at root");
+
+    // Enter — should not trigger enter_operator at root
+    press_enter(h.r());
+    assert_eq!(h.renderer.coordinate, coord_before, "Enter must be no-op at root");
+
+    // depth must still be 1 (no navigation happened)
+    assert_eq!(h.renderer.current_id.depth(), 1, "depth must remain 1");
+}
+
+#[test]
+fn root_allows_navigation_tab_ctrl_f_meta_d_space() {
+    // At root, these keys must work.
+    let mut h = Harness::new();
+    assert_eq!(h.renderer.current_id.depth(), 1);
+
+    // Tab enters SimpleSearch
+    press_tab(h.r());
+    assert_eq!(h.renderer.coordinate, Coordinate::SimpleSearch);
+    press_escape(h.r());
+    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+
+    // Ctrl+F enters ExtendedSearch
+    press_ctrl(h.r(), Keycode::F);
+    assert_eq!(h.renderer.coordinate, Coordinate::ExtendedSearch);
+    press_escape(h.r());
+    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+
+    // M enters Meta
+    press(h.r(), Keycode::M);
+    assert_eq!(h.renderer.coordinate, Coordinate::Meta);
+    press_escape(h.r());
+    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
 }
