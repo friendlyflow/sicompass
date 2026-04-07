@@ -317,6 +317,9 @@ pub fn update_history(
             | Task::Cut
             | Task::Paste
             | Task::FsCreate
+            | Task::FsRename
+            | Task::FsPaste
+            | Task::FsNavigate
     ) {
         return;
     }
@@ -364,6 +367,7 @@ pub fn handle_history_action(r: &mut AppRenderer, history: History) {
         let entry_id = r.undo_history[entry_idx].id.clone();
         let entry_task = r.undo_history[entry_idx].task;
         let entry_prev = r.undo_history[entry_idx].prev_element.clone();
+        let entry_new_for_undo = r.undo_history[entry_idx].new_element.clone();
 
         match entry_task {
             Task::Append | Task::AppendAppend | Task::Insert | Task::InsertInsert => {
@@ -430,6 +434,53 @@ pub fn handle_history_action(r: &mut AppRenderer, history: History) {
                     }
                 }
             }
+            Task::FsNavigate => {
+                // Undo navigation: restore path_before, set current_id to pre-nav id.
+                if let Some(prev_elem) = entry_prev {
+                    let path_before = elem_key_str(&prev_elem);
+                    let provider_idx = entry_id.get(0).unwrap_or(0);
+                    let mut restore_id = sicompass_sdk::ffon::IdArray::new();
+                    restore_id.push(provider_idx);
+                    r.current_id = restore_id.clone();
+                    crate::provider::set_provider_path(r, &path_before);
+                    crate::provider::refresh_current_directory(r);
+                    // cursor: use last component of entry_id as the item index at that level
+                    let item_idx = r.undo_history[entry_idx].id.get(1).unwrap_or(0);
+                    restore_id.push(item_idx);
+                    r.current_id = restore_id;
+                }
+            }
+            Task::FsRename => {
+                // Undo rename: call commit_edit in reverse (new→old), restore prev element.
+                if let (Some(prev_elem), Some(new_elem)) = (entry_prev, entry_new_for_undo) {
+                    let old_str = elem_key_str(&new_elem); // current name on disk
+                    let new_str = elem_key_str(&prev_elem); // name to restore
+                    r.current_id = entry_id.clone();
+                    crate::provider::commit_edit(r, &old_str, &new_str);
+                    replace_element_at_id(r, &entry_id, prev_elem);
+                    crate::provider::refresh_current_directory(r);
+                    r.current_id = entry_id;
+                }
+            }
+            Task::FsPaste => {
+                // Undo paste: delete the pasted file by name.
+                if let Some(new_elem) = entry_new_for_undo {
+                    let name = sicompass_sdk::tags::strip_display(&elem_key_str(&new_elem)).to_owned();
+                    r.current_id = entry_id.clone();
+                    crate::provider::delete_item_by_name(r, &name);
+                    crate::provider::refresh_current_directory(r);
+                    let parent_len = get_parent_len(&r.ffon, &entry_id);
+                    if parent_len == 0 {
+                        insert_at(&mut r.ffon, &entry_id, 0,
+                            sicompass_sdk::ffon::FfonElement::new_str("<input></input>"));
+                        r.current_id.set_last(0);
+                    } else if let Some(idx) = r.current_id.last() {
+                        if idx >= parent_len {
+                            r.current_id.set_last(parent_len - 1);
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     } else if history == History::Redo {
@@ -442,6 +493,7 @@ pub fn handle_history_action(r: &mut AppRenderer, history: History) {
         r.undo_position -= 1;
         let entry_id = r.undo_history[entry_idx].id.clone();
         let entry_task = r.undo_history[entry_idx].task;
+        let entry_prev_for_redo = r.undo_history[entry_idx].prev_element.clone();
         let entry_new = r.undo_history[entry_idx].new_element.clone();
 
         match entry_task {
@@ -500,17 +552,70 @@ pub fn handle_history_action(r: &mut AppRenderer, history: History) {
                     }
                 }
             }
+            Task::FsNavigate => {
+                // Redo navigation: restore path_after, go back to depth-2 index 0.
+                if let Some(new_elem) = entry_new {
+                    let path_after = elem_key_str(&new_elem);
+                    let provider_idx = entry_id.get(0).unwrap_or(0);
+                    let mut new_id = sicompass_sdk::ffon::IdArray::new();
+                    new_id.push(provider_idx);
+                    r.current_id = new_id;
+                    crate::provider::set_provider_path(r, &path_after);
+                    crate::provider::refresh_current_directory(r);
+                    let mut nav_id = sicompass_sdk::ffon::IdArray::new();
+                    nav_id.push(provider_idx);
+                    nav_id.push(0);
+                    r.current_id = nav_id;
+                }
+            }
+            Task::FsRename => {
+                // Redo rename: call commit_edit forward (old→new), restore new element.
+                if let (Some(prev_elem), Some(new_elem)) = (entry_prev_for_redo, entry_new) {
+                    let old_str = elem_key_str(&prev_elem); // current name on disk
+                    let new_str = elem_key_str(&new_elem);  // name to restore
+                    r.current_id = entry_id.clone();
+                    crate::provider::commit_edit(r, &old_str, &new_str);
+                    replace_element_at_id(r, &entry_id, new_elem);
+                    crate::provider::refresh_current_directory(r);
+                    r.current_id = entry_id;
+                }
+            }
+            Task::FsPaste => {
+                // Redo paste: re-copy from src_path (stored in prev_element) to current dir.
+                // prev_element holds the source path as a Str; new_element holds the dest element.
+                if let (Some(src_elem), Some(dest_elem)) = (entry_prev_for_redo, entry_new) {
+                    let src_path = match &src_elem { sicompass_sdk::ffon::FfonElement::Str(s) => s.clone(), sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.clone() };
+                    let dest_name = sicompass_sdk::tags::strip_display(&elem_key_str(&dest_elem)).to_owned();
+                    let slash = src_path.rfind('/').unwrap_or(0);
+                    let src_dir = &src_path[..slash];
+                    let src_name = &src_path[slash + 1..];
+                    r.current_id = entry_id.clone();
+                    let dest_dir = crate::provider::current_path(r).to_owned();
+                    crate::provider::copy_item(r, src_dir, src_name, &dest_dir, &dest_name);
+                    crate::provider::refresh_current_directory(r);
+                    r.current_id = entry_id;
+                }
+            }
             _ => {}
         }
     }
 
     list::create_list_current_layer(r);
     r.list_index = r.current_id.last().unwrap_or(0);
+    r.scroll_offset = r.list_index as i32;
 }
 
 // ---------------------------------------------------------------------------
 // Helpers — FFON mutation primitives
 // ---------------------------------------------------------------------------
+
+/// Extract the key/string from an FfonElement (used by FsRename/FsPaste undo/redo).
+fn elem_key_str(elem: &sicompass_sdk::ffon::FfonElement) -> String {
+    match elem {
+        sicompass_sdk::ffon::FfonElement::Str(s) => s.clone(),
+        sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.clone(),
+    }
+}
 
 /// True if the last character of `line` is `':'`.
 pub fn is_line_key(line: &str) -> bool {

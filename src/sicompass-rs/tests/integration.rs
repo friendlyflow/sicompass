@@ -1525,3 +1525,109 @@ fn undo_from_insert_mode() {
     assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral, "undo should exit insert mode");
     assert!(!tmp.join("insertundo.txt").exists(), "file should be deleted after undo from insert mode");
 }
+
+// ---------------------------------------------------------------------------
+// Tests: FsRename undo/redo
+// ---------------------------------------------------------------------------
+
+#[test]
+fn undo_redo_rename() {
+    let mut h = Harness::new();
+    let tmp = h.tmp_path().to_path_buf();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+
+    // Navigate to alpha.txt and rename it
+    let alpha_idx = h.renderer.total_list.iter().position(|item| {
+        item.label.contains("alpha.txt")
+    }).expect("alpha.txt not in list");
+    h.renderer.list_index = alpha_idx;
+    h.renderer.current_id = h.renderer.total_list[alpha_idx].id.clone();
+
+    press(h.r(), Keycode::I); // enter rename mode
+    assert_eq!(h.renderer.coordinate, Coordinate::OperatorInsert);
+    // Clear the buffer and type new name
+    h.renderer.input_buffer.clear();
+    h.renderer.cursor_position = 0;
+    type_text(h.r(), "renamed.txt");
+    press_enter(h.r());
+
+    assert!(tmp.join("renamed.txt").exists(), "file should be renamed");
+    assert!(!tmp.join("alpha.txt").exists(), "old name should be gone");
+
+    // Undo rename
+    press_ctrl(h.r(), Keycode::Z);
+    assert!(tmp.join("alpha.txt").exists(), "undo should restore original name");
+    assert!(!tmp.join("renamed.txt").exists(), "renamed file should be gone after undo");
+
+    // Redo rename
+    press_ctrl_shift(h.r(), Keycode::Z);
+    assert!(tmp.join("renamed.txt").exists(), "redo should re-apply rename");
+    assert!(!tmp.join("alpha.txt").exists(), "original name should be gone after redo");
+}
+
+#[test]
+fn rename_directory_does_not_navigate_into_it() {
+    // Renaming a directory must leave the user at OperatorGeneral in the parent,
+    // not navigate inside the renamed directory.
+    let mut h = Harness::new();
+    let tmp = h.tmp_path().to_path_buf();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+
+    // Find subdir in the list
+    let subdir_idx = h.renderer.total_list.iter().position(|item| {
+        item.label.contains("subdir")
+    }).expect("subdir not in list");
+    h.renderer.list_index = subdir_idx;
+    h.renderer.current_id = h.renderer.total_list[subdir_idx].id.clone();
+
+    press(h.r(), Keycode::I); // enter rename mode
+    h.renderer.input_buffer.clear();
+    h.renderer.cursor_position = 0;
+    type_text(h.r(), "subdir2");
+    press_enter(h.r());
+
+    assert!(tmp.join("subdir2").is_dir(), "directory should be renamed");
+    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral,
+        "should stay in OperatorGeneral, not navigate into the renamed dir");
+    assert_eq!(h.renderer.current_id.depth(), 2,
+        "should remain at depth 2 (inside filebrowser root), not deeper");
+}
+
+// ---------------------------------------------------------------------------
+// Tests: FsNavigate undo/redo
+// ---------------------------------------------------------------------------
+
+#[test]
+fn undo_redo_navigate_into_directory() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r()); // enter filebrowser root
+
+    let root_path = h.renderer.providers[fb_idx].current_path().to_owned();
+
+    // Navigate into subdir
+    let subdir_idx = h.renderer.total_list.iter().position(|item| item.label.contains("subdir"))
+        .expect("subdir not in list");
+    h.renderer.list_index = subdir_idx;
+    h.renderer.current_id = h.renderer.total_list[subdir_idx].id.clone();
+    press_right(h.r());
+
+    let subdir_path = h.renderer.providers[fb_idx].current_path().to_owned();
+    assert!(subdir_path.ends_with("subdir"), "should be inside subdir after navigating right");
+
+    // Undo navigate: should return to root
+    press_ctrl(h.r(), Keycode::Z);
+    assert_eq!(h.renderer.providers[fb_idx].current_path(), root_path,
+        "undo should restore provider path to root");
+    assert_eq!(h.renderer.current_id.depth(), 2, "should be back at depth 2");
+
+    // Redo navigate: should go back into subdir
+    press_ctrl_shift(h.r(), Keycode::Z);
+    assert_eq!(h.renderer.providers[fb_idx].current_path(), subdir_path,
+        "redo should restore path to subdir");
+}

@@ -161,6 +161,9 @@ pub enum Task {
     Copy,
     Paste,
     FsCreate,
+    FsRename,
+    FsPaste,
+    FsNavigate,
 }
 
 impl Task {
@@ -181,6 +184,9 @@ impl Task {
             Task::Copy => "copy",
             Task::Paste => "paste",
             Task::FsCreate => "fs create",
+            Task::FsRename => "fs rename",
+            Task::FsPaste => "fs paste",
+            Task::FsNavigate => "fs navigate",
         }
     }
 }
