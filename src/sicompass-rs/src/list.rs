@@ -31,7 +31,7 @@ pub fn create_list_extended_search(renderer: &mut AppRenderer) {
     };
 
     let mut items: Vec<crate::app_state::RenderListItem> = Vec::new();
-    collect_items_recursive(arr, &base_id, "", &mut items);
+    collect_items_recursive(arr, &base_id, "", false, &mut items);
     renderer.total_list = items;
     renderer.list_index = renderer.list_index.min(renderer.total_list.len().saturating_sub(1));
 }
@@ -41,13 +41,14 @@ fn collect_items_recursive(
     arr: &[FfonElement],
     base_id: &sicompass_sdk::ffon::IdArray,
     breadcrumb: &str,
+    parent_has_radio: bool,
     out: &mut Vec<crate::app_state::RenderListItem>,
 ) {
     for (i, elem) in arr.iter().enumerate() {
         let mut item_id = base_id.clone();
         item_id.set_last(i);
 
-        let label = build_label_for_element(elem, false);
+        let label = build_label_for_element(elem, parent_has_radio);
         out.push(crate::app_state::RenderListItem {
             id: item_id.clone(),
             label,
@@ -66,7 +67,8 @@ fn collect_items_recursive(
                 };
                 let mut child_id = item_id.clone();
                 child_id.push(0);
-                collect_items_recursive(&obj.children, &child_id, &new_bc, out);
+                let child_parent_has_radio = sicompass_sdk::tags::has_radio(&obj.key);
+                collect_items_recursive(&obj.children, &child_id, &new_bc, child_parent_has_radio, out);
             }
         }
     }
