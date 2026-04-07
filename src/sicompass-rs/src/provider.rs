@@ -52,6 +52,17 @@ pub fn current_path(renderer: &AppRenderer) -> &str {
         .unwrap_or("/")
 }
 
+/// Set the current path of the active provider directly (used by undo/redo).
+pub fn set_provider_path(renderer: &mut AppRenderer, path: &str) {
+    let idx = match renderer.current_id.get(0) {
+        Some(i) => i,
+        None => return,
+    };
+    if let Some(p) = renderer.providers.get_mut(idx) {
+        p.set_current_path(path);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Refresh / re-fetch
 // ---------------------------------------------------------------------------

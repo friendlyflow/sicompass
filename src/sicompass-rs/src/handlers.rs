@@ -212,8 +212,27 @@ pub fn handle_right(r: &mut AppRenderer) {
         Some(id) => id,
         None => return,
     };
+    // Only record filebrowser navigation (path-based); non-filebrowser navigation
+    // is purely in-memory FFON traversal and needs no undo entry.
+    let is_fb = active_provider_is_filebrowser(r);
+    let path_before = if is_fb { Some(crate::provider::current_path(r).to_owned()) } else { None };
+    let pre_nav_id = item_id.clone();
     r.current_id = item_id;
     if navigate_right_raw(r) {
+        if is_fb {
+            if let Some(pb) = path_before {
+                let path_after = crate::provider::current_path(r).to_owned();
+                if path_after != pb {
+                    // id stored = pre-nav id (so undo knows where cursor was)
+                    crate::state::update_history(
+                        r, Task::FsNavigate, &pre_nav_id,
+                        Some(FfonElement::new_str(pb)),
+                        Some(FfonElement::new_str(path_after)),
+                        History::None,
+                    );
+                }
+            }
+        }
         list::create_list_current_layer(r);
         r.sync_current_id_from_list();
         r.caret.reset(sdl_ticks());
@@ -290,7 +309,23 @@ pub fn navigate_left_raw(r: &mut AppRenderer) -> bool {
 
 /// Navigate out to the parent level (Left key).
 pub fn handle_left(r: &mut AppRenderer) {
+    let is_fb = active_provider_is_filebrowser(r);
+    let path_before = if is_fb { Some(crate::provider::current_path(r).to_owned()) } else { None };
+    let pre_nav_id = r.current_id.clone();
     if navigate_left_raw(r) {
+        if is_fb {
+            if let Some(pb) = path_before {
+                let path_after = crate::provider::current_path(r).to_owned();
+                if path_after != pb {
+                    crate::state::update_history(
+                        r, Task::FsNavigate, &pre_nav_id,
+                        Some(FfonElement::new_str(pb)),
+                        Some(FfonElement::new_str(path_after)),
+                        History::None,
+                    );
+                }
+            }
+        }
         list::create_list_current_layer(r);
         r.sync_current_id_from_list();
         r.caret.reset(sdl_ticks());
@@ -1463,6 +1498,18 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
         false
     };
 
+    // Capture prev element before commit (for FsRename undo).
+    let is_filebrowser_rename = active_provider_is_filebrowser(r) && !old_content.is_empty();
+    let rename_id = r.current_id.clone();
+    let prev_elem_for_rename = if is_filebrowser_rename {
+        let idx = rename_id.last().unwrap_or(0);
+        sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &rename_id)
+            .and_then(|arr| arr.get(idx))
+            .cloned()
+    } else {
+        None
+    };
+
     // Try provider commit first
     let committed = crate::provider::commit_edit(r, &old_content, &new_content);
 
@@ -1493,12 +1540,25 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
         }
     }
 
+    // Record FsRename undo entry for filebrowser renames.
+    if committed && is_filebrowser_rename {
+        let new_idx = rename_id.last().unwrap_or(0);
+        let new_elem_for_rename = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &rename_id)
+            .and_then(|arr| arr.get(new_idx))
+            .cloned();
+        if let (Some(prev), Some(new)) = (prev_elem_for_rename, new_elem_for_rename) {
+            crate::state::update_history(r, Task::FsRename, &rename_id, Some(prev), Some(new), History::None);
+        }
+    }
+
     if committed {
         crate::provider::refresh_current_directory(r);
         // Auto-navigate into the element if it now has children after refresh
         // (e.g. web browser URL bar gains page content after load).
-        // Works for both fresh loads (Str→Obj) and URL changes (Obj→Obj).
-        navigate_right_raw(r);
+        // Skip for filebrowser — renaming a directory must not navigate into it.
+        if !is_filebrowser_rename {
+            navigate_right_raw(r);
+        }
     }
 
     handle_escape(r);
@@ -1873,7 +1933,9 @@ pub fn handle_file_paste(r: &mut AppRenderer) {
     crate::provider::refresh_current_directory(r);
     list::create_list_current_layer(r);
 
-    // Move cursor to the newly pasted element
+    // Move cursor to the newly pasted element and record FsPaste undo entry.
+    let paste_id = r.current_id.clone();
+    let src_path_elem = sicompass_sdk::ffon::FfonElement::new_str(format!("{src_dir}/{src_name}"));
     if let Some(arr) = get_ffon_at_id(&r.ffon, &r.current_id) {
         for (i, elem) in arr.iter().enumerate() {
             let key = match elem {
@@ -1883,6 +1945,12 @@ pub fn handle_file_paste(r: &mut AppRenderer) {
             if tags::strip_display(key) == dest_name {
                 r.current_id.set_last(i);
                 r.list_index = i;
+                let dest_elem = elem.clone();
+                // prev_element = source path (for redo), new_element = dest element (for undo delete)
+                let mut record_id = paste_id.clone();
+                record_id.set_last(i);
+                crate::state::update_history(r, Task::FsPaste, &record_id,
+                    Some(src_path_elem), Some(dest_elem), History::None);
                 break;
             }
         }
