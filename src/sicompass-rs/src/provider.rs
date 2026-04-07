@@ -466,15 +466,19 @@ pub fn notify_button_pressed(renderer: &mut AppRenderer) {
             };
 
             if grand_is_obj {
+                // Pop "Add element:" from the provider path before calling create_element.
+                // navigate_right_raw now pushes the path even for in-place navigation
+                // (depth >= 2), so "Add element:" is on the path. Popping it first means
+                // create_element sees the grandparent path (e.g. /ahu) and can construct
+                // the correct child fetch path (e.g. /ahu/supply).
+                if let Some(p) = renderer.providers.get_mut(provider_idx) {
+                    p.pop_path();
+                }
+
                 let new_elem = renderer.providers.get_mut(provider_idx)
                     .and_then(|p| p.create_element(&function_name));
 
                 if let Some(new_elem) = new_elem {
-                    // Pop "Add element:" path segment from provider path.
-                    if let Some(p) = renderer.providers.get_mut(provider_idx) {
-                        p.pop_path();
-                    }
-
                     // Insert new_elem before "Add element:" in grandparent's children.
                     {
                         if let Some(slice) = get_ffon_at_id_mut(&mut renderer.ffon, &grand_id) {

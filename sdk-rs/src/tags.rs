@@ -240,6 +240,14 @@ pub fn strip_one_opt(text: &str) -> &str {
     text.strip_prefix(ONE_OPT_TAG).unwrap_or(text)
 }
 
+pub fn format_many_opt(key: &str) -> String {
+    format!("{MANY_OPT_TAG}{key}")
+}
+
+pub fn format_one_opt(key: &str) -> String {
+    format!("{ONE_OPT_TAG}{key}")
+}
+
 // ---------------------------------------------------------------------------
 // <button>function_name</button>Display Text
 // ---------------------------------------------------------------------------
@@ -608,6 +616,16 @@ mod tests {
     #[test]
     fn test_strip_opt_no_tag() {
         assert_eq!(strip_one_opt("no tag"), "no tag");
+    }
+
+    #[test]
+    fn test_format_many_opt() {
+        assert_eq!(format_many_opt("key"), "<many-opt></many-opt>key");
+    }
+
+    #[test]
+    fn test_format_one_opt() {
+        assert_eq!(format_one_opt("key"), "<one-opt></one-opt>key");
     }
 
     // --- button ---

@@ -144,7 +144,14 @@ pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
     }
 
     if has_children {
-        // Static tree (settings, tutorial, meta): navigate deeper in-place.
+        // In-place navigation: the object already has children (pre-loaded).
+        // Push the path segment so the provider path stays in sync with the navigation
+        // depth — mirrors C's providerNavigateRight which always pushes (shouldPushPath =
+        // currentId.depth > 1). Skip at depth 1 (that's choosing which provider to enter,
+        // not a real path segment).
+        if item_id.depth() >= 2 {
+            crate::provider::push_path(r, &segment);
+        }
         let mut new_id = item_id;
         new_id.push(0);
         r.current_id = new_id;

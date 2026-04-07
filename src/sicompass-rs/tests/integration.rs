@@ -1631,3 +1631,304 @@ fn undo_redo_navigate_into_directory() {
     assert_eq!(h.renderer.providers[fb_idx].current_path(), subdir_path,
         "redo should restore path to subdir");
 }
+
+// ---------------------------------------------------------------------------
+// Tests: button press / create_element (Add element: section)
+// ---------------------------------------------------------------------------
+
+/// A minimal provider that has an "Add element:" section with a button.
+/// Used to test that pressing Enter on a button creates an element and
+/// does NOT corrupt the provider path.
+struct ButtonTestProvider {
+    path: String,
+}
+
+impl ButtonTestProvider {
+    fn new() -> Self {
+        ButtonTestProvider { path: "/".to_owned() }
+    }
+}
+
+impl Provider for ButtonTestProvider {
+    fn name(&self) -> &str { "buttontest" }
+    fn display_name(&self) -> &str { "Button Test" }
+
+    fn fetch(&mut self) -> Vec<FfonElement> {
+        match self.path.as_str() {
+            "/" => {
+                // Root: one mandatory item + "Add element:" with a widget button
+                let add_section = {
+                    let mut obj = FfonElement::new_obj("Add element:");
+                    obj.as_obj_mut().unwrap().push(
+                        FfonElement::Str("<button>widget</button>widget".to_owned())
+                    );
+                    obj
+                };
+                vec![
+                    FfonElement::Str("existing".to_owned()),
+                    add_section,
+                ]
+            }
+            "/widget" => {
+                // Widget level: one child + "Add element:" with a subwidget button.
+                // create_element("subwidget") will push_path("subwidget") onto "/" + "widget"
+                // = "/widget" and call fetch() → only returns children for correct path.
+                let add_section = {
+                    let mut obj = FfonElement::new_obj("Add element:");
+                    obj.as_obj_mut().unwrap().push(
+                        FfonElement::Str("<button>subwidget</button>subwidget".to_owned())
+                    );
+                    obj
+                };
+                vec![
+                    FfonElement::Str("wchild1".to_owned()),
+                    add_section,
+                ]
+            }
+            "/widget/subwidget" => {
+                // Subwidget level: leaf children.
+                vec![
+                    FfonElement::Str("leaf1".to_owned()),
+                    FfonElement::Str("leaf2".to_owned()),
+                ]
+            }
+            _ => {
+                // Wrong path → empty (makes path-correctness detectable in tests)
+                vec![]
+            }
+        }
+    }
+
+    fn push_path(&mut self, segment: &str) {
+        if self.path == "/" {
+            self.path = format!("/{segment}");
+        } else {
+            self.path.push('/');
+            self.path.push_str(segment);
+        }
+    }
+
+    fn pop_path(&mut self) {
+        if self.path == "/" { return; }
+        if let Some(idx) = self.path.rfind('/') {
+            self.path = if idx == 0 { "/".to_owned() } else { self.path[..idx].to_owned() };
+        }
+    }
+
+    fn current_path(&self) -> &str { &self.path }
+
+    fn create_element(&mut self, element_key: &str) -> Option<FfonElement> {
+        let key = element_key.strip_prefix("one-opt:").unwrap_or(element_key);
+        let tagged = format!("<many-opt></many-opt>{key}");
+        let mut obj = FfonElement::new_obj(&tagged);
+        // Fetch children: reuse fetch() for the child path
+        let saved = self.path.clone();
+        self.push_path(key);
+        let children = self.fetch();
+        self.path = saved;
+        for child in children {
+            obj.as_obj_mut().unwrap().push(child);
+        }
+        Some(obj)
+    }
+}
+
+/// Pressing Enter on a button inside "Add element:" creates the element with the
+/// correct provider path and leaves path in the right state for further navigation.
+///
+/// Covers the full lifecycle:
+/// - in-place navigation pushes path at depth >= 2 (matching C providerNavigateRight)
+/// - notify_button_pressed pops "Add element:" before calling create_element
+/// - create_element receives the grandparent path so child fetch is correct
+/// - Left from inside the new element returns to it in the parent list
+#[test]
+fn button_press_creates_element_without_corrupting_path() {
+    let mut renderer = AppRenderer::new();
+    register(&mut renderer, Box::new(ButtonTestProvider::new()));
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    let provider_idx = 0;
+
+    // Navigate right into the provider root.
+    // ButtonTestProvider root has pre-loaded children → in-place, depth 1→2.
+    // At depth 1, push_path is NOT called (depth < 2). Path stays "/".
+    renderer.current_id.set(0, provider_idx);
+    press_right(&mut renderer);
+    assert_eq!(renderer.providers[provider_idx].current_path(), "/",
+        "navigating into provider root (depth 1→2) must not push path");
+
+    // Navigate into "Add element:" — pre-loaded children → in-place, depth 2→3.
+    // At depth 2, push_path IS called. Path becomes "/Add element:".
+    let add_idx = renderer.total_list.iter().position(|item| item.label.contains("Add element:"))
+        .expect("Add element: should appear in list");
+    renderer.list_index = add_idx;
+    renderer.current_id = renderer.total_list[add_idx].id.clone();
+    press_right(&mut renderer);
+    assert_eq!(renderer.providers[provider_idx].current_path(), "/Add element:",
+        "navigating into 'Add element:' (in-place, depth>=2) must push path");
+
+    // Find the button inside "Add element:".
+    let btn_idx = renderer.total_list.iter().position(|item| item.label.contains("widget"))
+        .expect("widget button should appear inside Add element:");
+    renderer.list_index = btn_idx;
+    renderer.current_id = renderer.total_list[btn_idx].id.clone();
+
+    // Press Enter — should create the element.
+    // notify_button_pressed pops "Add element:" BEFORE create_element, so
+    // create_element sees path "/" and fetches children of "/widget" correctly.
+    // After insertion the path stays at "/" (grandparent level).
+    press_enter(&mut renderer);
+
+    assert_eq!(
+        renderer.providers[provider_idx].current_path(), "/",
+        "path must be at grandparent level ('/') after button press"
+    );
+
+    // Cursor should be at the new element (depth 2, same level as "Add element:").
+    assert_eq!(renderer.current_id.depth(), 2,
+        "cursor should be at grandparent depth (2) after element creation");
+
+    // The new "widget" object should appear in the list.
+    sicompass::list::create_list_current_layer(&mut renderer);
+    let widget_in_list = renderer.total_list.iter().any(|item| item.label.contains("widget"));
+    assert!(widget_in_list, "newly created widget element should appear in list");
+
+    // Navigate into the new widget element (in-place, pre-loaded children).
+    // push_path("widget") → path "/widget".
+    press_right(&mut renderer);
+    assert_eq!(renderer.providers[provider_idx].current_path(), "/widget",
+        "navigating into new element must push path");
+
+    // Press Left — should pop path back to "/" and land on widget in the list.
+    press_left(&mut renderer);
+    assert_eq!(renderer.providers[provider_idx].current_path(), "/",
+        "pressing Left from inside widget must restore path to '/'");
+    assert_eq!(renderer.current_id.depth(), 2,
+        "after Left, should be back at depth 2");
+    let on_widget = renderer.total_list.iter().any(|item| item.label.contains("widget"));
+    assert!(on_widget, "widget should still be visible in list after Left");
+}
+
+/// Two-level nested button press: mirrors the AHU → supply → filter scenario.
+///
+/// After creating "widget" (level 1), navigate into it, then create "subwidget"
+/// (level 2) from widget's own "Add element:" section.  Verifies that:
+/// - The provider path is correct at each level when create_element is called
+/// - Subwidget receives children (requires path "/widget" at call time, not "/")
+/// - Path and cursor are correct after creating subwidget and navigating into/out of it
+#[test]
+fn button_press_two_level_nested_creates_element() {
+    let mut renderer = AppRenderer::new();
+    register(&mut renderer, Box::new(ButtonTestProvider::new()));
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    let provider_idx = 0;
+
+    // --- Level 1: create widget from root "Add element:" ---
+
+    // Navigate into provider root (depth 1→2, no push — has pre-loaded children, depth < 2).
+    renderer.current_id.set(0, provider_idx);
+    press_right(&mut renderer);
+
+    // Navigate into "Add element:" (depth 2→3, push "Add element:").
+    let add_idx = renderer.total_list.iter().position(|item| item.label.contains("Add element:"))
+        .expect("root Add element: should appear in list");
+    renderer.list_index = add_idx;
+    renderer.current_id = renderer.total_list[add_idx].id.clone();
+    press_right(&mut renderer);
+
+    // Press Enter on "widget" button — creates widget with children from path "/widget".
+    let btn_idx = renderer.total_list.iter().position(|item| item.label.contains("widget"))
+        .expect("widget button should appear");
+    renderer.list_index = btn_idx;
+    renderer.current_id = renderer.total_list[btn_idx].id.clone();
+    press_enter(&mut renderer);
+
+    assert_eq!(renderer.providers[provider_idx].current_path(), "/",
+        "after level-1 button press, path must be at grandparent '/'");
+    assert_eq!(renderer.current_id.depth(), 2,
+        "cursor must be at depth 2 (grandparent level) after widget creation");
+
+    // Widget must have received children (fetch was called at path "/widget").
+    sicompass::list::create_list_current_layer(&mut renderer);
+    // Label is "+ widget" (build_obj_label strips many-opt tag, adds "+" prefix)
+    let widget_idx = renderer.total_list.iter()
+        .position(|item| item.label.contains("widget") && !item.label.contains("subwidget"))
+        .expect("widget should be in list after creation");
+
+    // Verify widget has children by checking its FFON obj has children populated.
+    {
+        use sicompass_sdk::ffon::get_ffon_at_id;
+        let item_id = renderer.total_list[widget_idx].id.clone();
+        let slice = get_ffon_at_id(&renderer.ffon, &item_id).unwrap();
+        let last = item_id.last().unwrap();
+        let widget_obj = slice[last].as_obj().expect("widget should be an Obj");
+        assert!(!widget_obj.children.is_empty(),
+            "widget must have children (create_element fetched from '/widget')");
+    }
+
+    // --- Navigate into widget ---
+
+    renderer.list_index = widget_idx;
+    renderer.current_id = renderer.total_list[widget_idx].id.clone();
+    press_right(&mut renderer);
+    assert_eq!(renderer.providers[provider_idx].current_path(), "/widget",
+        "after navigating into widget, path must be '/widget'");
+    assert_eq!(renderer.current_id.depth(), 3, "inside widget: depth 3");
+
+    // --- Level 2: create subwidget from widget's "Add element:" ---
+
+    // Navigate into widget's "Add element:" (depth 3→4, push "Add element:").
+    let wadd_idx = renderer.total_list.iter().position(|item| item.label.contains("Add element:"))
+        .expect("widget's Add element: should appear");
+    renderer.list_index = wadd_idx;
+    renderer.current_id = renderer.total_list[wadd_idx].id.clone();
+    press_right(&mut renderer);
+    assert_eq!(renderer.providers[provider_idx].current_path(), "/widget/Add element:",
+        "after navigating into widget's Add element:, path must be '/widget/Add element:'");
+
+    // Press Enter on "subwidget" button — create_element must see path "/widget".
+    let sbtn_idx = renderer.total_list.iter().position(|item| item.label.contains("subwidget"))
+        .expect("subwidget button should appear inside widget's Add element:");
+    renderer.list_index = sbtn_idx;
+    renderer.current_id = renderer.total_list[sbtn_idx].id.clone();
+    press_enter(&mut renderer);
+
+    assert_eq!(renderer.providers[provider_idx].current_path(), "/widget",
+        "after level-2 button press, path must be at '/widget' (widget's grandparent)");
+    assert_eq!(renderer.current_id.depth(), 3,
+        "cursor must be at depth 3 (inside widget) after subwidget creation");
+
+    // Subwidget must have received children (fetch called at "/widget/subwidget").
+    sicompass::list::create_list_current_layer(&mut renderer);
+    let subwidget_idx = renderer.total_list.iter()
+        .position(|item| item.label.contains("subwidget"))
+        .expect("subwidget should be in widget's list after creation");
+
+    {
+        use sicompass_sdk::ffon::get_ffon_at_id;
+        let item_id = renderer.total_list[subwidget_idx].id.clone();
+        let slice = get_ffon_at_id(&renderer.ffon, &item_id).unwrap();
+        let last = item_id.last().unwrap();
+        let subwidget_obj = slice[last].as_obj().expect("subwidget should be an Obj");
+        assert!(!subwidget_obj.children.is_empty(),
+            "subwidget must have children (create_element fetched from '/widget/subwidget')");
+    }
+
+    // Navigate into subwidget — path must go to "/widget/subwidget".
+    renderer.list_index = subwidget_idx;
+    renderer.current_id = renderer.total_list[subwidget_idx].id.clone();
+    press_right(&mut renderer);
+    assert_eq!(renderer.providers[provider_idx].current_path(), "/widget/subwidget",
+        "after navigating into subwidget, path must be '/widget/subwidget'");
+    assert_eq!(renderer.current_id.depth(), 4, "inside subwidget: depth 4");
+
+    // Press Left — must pop back to "/widget" with cursor on subwidget.
+    press_left(&mut renderer);
+    assert_eq!(renderer.providers[provider_idx].current_path(), "/widget",
+        "Left from subwidget must restore path to '/widget'");
+    assert_eq!(renderer.current_id.depth(), 3,
+        "after Left from subwidget, depth must be 3");
+    let subwidget_visible = renderer.total_list.iter().any(|item| item.label.contains("subwidget"));
+    assert!(subwidget_visible, "subwidget must still be visible in widget's list after Left");
+}
