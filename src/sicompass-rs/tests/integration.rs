@@ -959,6 +959,21 @@ fn test_right_noop_in_meta() {
     assert_eq!(h.renderer.coordinate, Coordinate::Meta, "right should be noop in meta");
 }
 
+#[test]
+fn test_meta_at_root_shows_root_hints() {
+    let mut h = Harness::new();
+    assert_eq!(h.renderer.current_id.depth(), 1, "should be at root");
+
+    press(h.r(), Keycode::M);
+    assert_eq!(h.renderer.coordinate, Coordinate::Meta);
+    assert!(!h.renderer.total_list.is_empty(), "root meta list should not be empty");
+
+    // Root hints should mention Tab and Ctrl+F which work at root
+    let labels: Vec<&str> = h.renderer.total_list.iter().map(|i| i.label.as_str()).collect();
+    assert!(labels.iter().any(|l| l.contains("Tab")), "root meta should mention Tab");
+    assert!(labels.iter().any(|l| l.contains("Ctrl+F")), "root meta should mention Ctrl+F");
+}
+
 /// A `<link>` Obj injected into the webbrowser FFON (simulating what
 /// `html_to_ffon` produces for `<a>` tags) should show the `+l` prefix in
 /// the visual list and navigating Right into it should push depth by one.
