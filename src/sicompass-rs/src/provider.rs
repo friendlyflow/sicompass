@@ -223,6 +223,14 @@ pub fn get_commands(renderer: &AppRenderer) -> Vec<String> {
 
 /// Get meta/shortcut hints from the active provider.
 pub fn get_meta(renderer: &AppRenderer) -> Vec<String> {
+    if renderer.current_id.depth() <= 1 {
+        return vec![
+            "Tab     Search providers".to_owned(),
+            "Ctrl+F  Extended search".to_owned(),
+            "D       Dashboard".to_owned(),
+            "Space   Collapse/expand".to_owned(),
+        ];
+    }
     get_active_provider_ref(renderer)
         .map(|p| p.meta())
         .unwrap_or_default()
