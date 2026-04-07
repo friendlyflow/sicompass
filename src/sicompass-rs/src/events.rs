@@ -212,7 +212,7 @@ mod tests {
     fn shift_right_in_simple_search_starts_selection() {
         let mut r = AppRenderer::new();
         r.coordinate = Coordinate::SimpleSearch;
-        r.input_buffer = "hello".to_string();
+        r.search_string = "hello".to_string();
         r.cursor_position = 2;
         dispatch_key(&mut r, Some(Keycode::Right), shift());
         assert_eq!(r.selection_anchor, Some(2));
@@ -633,6 +633,8 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
             Some(Keycode::C) if ctrl && !shift => handlers::handle_ctrl_c(r),
             Some(Keycode::V) if ctrl && !shift => handlers::handle_ctrl_v(r),
             Some(Keycode::F) if ctrl && !shift => handlers::handle_ctrl_f(r),
+            Some(Keycode::Z) if ctrl && !shift => handlers::handle_undo(r),
+            Some(Keycode::Z) if ctrl && shift => handlers::handle_redo(r),
             Some(Keycode::Backspace) => handlers::handle_backspace(r),
             Some(Keycode::Delete) if !ctrl && !shift => handlers::handle_delete_forward(r),
             Some(Keycode::Escape) => handlers::handle_escape(r),
@@ -710,6 +712,8 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
             Some(Keycode::C) if ctrl && !shift => handlers::handle_ctrl_c(r),
             Some(Keycode::V) if ctrl && !shift => handlers::handle_ctrl_v(r),
             Some(Keycode::F) if ctrl && !shift => handlers::handle_ctrl_f(r),
+            Some(Keycode::Z) if ctrl && !shift => handlers::handle_undo(r),
+            Some(Keycode::Z) if ctrl && shift => handlers::handle_redo(r),
             _ => {}
         },
 
@@ -775,6 +779,8 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
             Some(Keycode::X) if ctrl && !shift => handlers::handle_ctrl_x(r),
             Some(Keycode::C) if ctrl && !shift => handlers::handle_ctrl_c(r),
             Some(Keycode::V) if ctrl && !shift => handlers::handle_ctrl_v(r),
+            Some(Keycode::Z) if ctrl && !shift => handlers::handle_undo(r),
+            Some(Keycode::Z) if ctrl && shift => handlers::handle_redo(r),
             _ => {}
         },
 
@@ -802,6 +808,8 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
             Some(Keycode::Home) if !ctrl && !shift => handlers::handle_home(r),
             Some(Keycode::End) if !ctrl && !shift => handlers::handle_end(r),
             Some(Keycode::F) if ctrl && !shift => handlers::handle_ctrl_f(r),
+            Some(Keycode::Z) if ctrl && !shift => handlers::handle_undo(r),
+            Some(Keycode::Z) if ctrl && shift => handlers::handle_redo(r),
             Some(Keycode::Backspace) if matches!(r.coordinate,
                 Coordinate::ScrollSearch | Coordinate::InputSearch) =>
             {

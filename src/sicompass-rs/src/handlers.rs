@@ -2162,7 +2162,11 @@ pub fn selection_range(r: &AppRenderer) -> Option<(usize, usize)> {
 /// Delete the selected text, placing cursor at the start of the deleted range.
 fn delete_selection(r: &mut AppRenderer) {
     if let Some((start, end)) = selection_range(r) {
-        r.input_buffer.replace_range(start..end, "");
+        if r.coordinate == Coordinate::SimpleSearch {
+            r.search_string.replace_range(start..end, "");
+        } else {
+            r.input_buffer.replace_range(start..end, "");
+        }
         r.cursor_position = start;
         r.selection_anchor = None;
     }
@@ -2208,11 +2212,22 @@ fn utf8_advance_n(buf: &str, from: usize, n: usize, limit: usize) -> usize {
 // Selection-extending handlers
 // ---------------------------------------------------------------------------
 
+/// Returns a reference to the active text buffer for the current coordinate.
+/// SimpleSearch edits `search_string`; all other text-edit modes use `input_buffer`.
+fn active_text_buf(r: &AppRenderer) -> &str {
+    if r.coordinate == Coordinate::SimpleSearch {
+        &r.search_string
+    } else {
+        &r.input_buffer
+    }
+}
+
 /// Ctrl+A in text-input modes — select all.
 pub fn handle_select_all(r: &mut AppRenderer) {
-    if r.input_buffer.is_empty() { return; }
+    let len = active_text_buf(r).len();
+    if len == 0 { return; }
     r.selection_anchor = Some(0);
-    r.cursor_position = r.input_buffer.len();
+    r.cursor_position = len;
     r.caret.reset(sdl_ticks());
     r.needs_redraw = true;
 }
@@ -2223,7 +2238,8 @@ pub fn handle_shift_left(r: &mut AppRenderer) {
     if r.selection_anchor.is_none() {
         r.selection_anchor = Some(r.cursor_position);
     }
-    let before = &r.input_buffer[..r.cursor_position];
+    let pos = r.cursor_position.min(active_text_buf(r).len());
+    let before = &active_text_buf(r)[..pos];
     r.cursor_position = before.char_indices().rev().next().map(|(i, _)| i).unwrap_or(0);
     r.caret.reset(sdl_ticks());
     r.needs_redraw = true;
@@ -2231,11 +2247,11 @@ pub fn handle_shift_left(r: &mut AppRenderer) {
 
 /// Shift+Right — extend selection one character to the right.
 pub fn handle_shift_right(r: &mut AppRenderer) {
-    if r.cursor_position >= r.input_buffer.len() { return; }
+    if r.cursor_position >= active_text_buf(r).len() { return; }
     if r.selection_anchor.is_none() {
         r.selection_anchor = Some(r.cursor_position);
     }
-    let ch = r.input_buffer[r.cursor_position..].chars().next().unwrap();
+    let ch = active_text_buf(r)[r.cursor_position..].chars().next().unwrap();
     r.cursor_position += ch.len_utf8();
     r.caret.reset(sdl_ticks());
     r.needs_redraw = true;
@@ -2309,8 +2325,9 @@ pub fn handle_shift_home(r: &mut AppRenderer) {
     if r.selection_anchor.is_none() {
         r.selection_anchor = Some(r.cursor_position);
     }
-    let pos = r.cursor_position;
-    r.cursor_position = find_line_start(&r.input_buffer, pos);
+    let pos = r.cursor_position.min(active_text_buf(r).len());
+    let buf = active_text_buf(r).to_owned();
+    r.cursor_position = find_line_start(&buf, pos);
     r.caret.reset(sdl_ticks());
     r.needs_redraw = true;
 }
@@ -2320,9 +2337,10 @@ pub fn handle_shift_end(r: &mut AppRenderer) {
     if r.selection_anchor.is_none() {
         r.selection_anchor = Some(r.cursor_position);
     }
-    let pos = r.cursor_position;
-    let buf_len = r.input_buffer.len();
-    r.cursor_position = find_line_end(&r.input_buffer, pos).min(buf_len);
+    let buf = active_text_buf(r).to_owned();
+    let buf_len = buf.len();
+    let pos = r.cursor_position.min(buf_len);
+    r.cursor_position = find_line_end(&buf, pos).min(buf_len);
     r.caret.reset(sdl_ticks());
     r.needs_redraw = true;
 }
@@ -2483,7 +2501,7 @@ pub fn handle_ctrl_x(r: &mut AppRenderer) {
     if is_text_edit_mode(r) {
         if !has_selection(r) { return; }
         if let Some((start, end)) = selection_range(r) {
-            sdl_set_clipboard(&r.input_buffer[start..end].to_owned());
+            sdl_set_clipboard(&active_text_buf(r)[start..end].to_owned());
         }
         delete_selection(r);
         r.caret.reset(sdl_ticks());
@@ -2516,7 +2534,7 @@ pub fn handle_ctrl_c(r: &mut AppRenderer) {
     if is_text_edit_mode(r) {
         if !has_selection(r) { return; }
         if let Some((start, end)) = selection_range(r) {
-            sdl_set_clipboard(&r.input_buffer[start..end].to_owned());
+            sdl_set_clipboard(&active_text_buf(r)[start..end].to_owned());
         }
         r.needs_redraw = true;
         return;
@@ -2544,9 +2562,15 @@ pub fn handle_ctrl_v(r: &mut AppRenderer) {
     if is_text_edit_mode(r) {
         let text = match sdl_get_clipboard() { Some(t) => t, None => return };
         if has_selection(r) { delete_selection(r); }
-        let pos = r.cursor_position.min(r.input_buffer.len());
-        r.input_buffer.insert_str(pos, &text);
-        r.cursor_position = pos + text.len();
+        if r.coordinate == Coordinate::SimpleSearch {
+            let pos = r.cursor_position.min(r.search_string.len());
+            r.search_string.insert_str(pos, &text);
+            r.cursor_position = pos + text.len();
+        } else {
+            let pos = r.cursor_position.min(r.input_buffer.len());
+            r.input_buffer.insert_str(pos, &text);
+            r.cursor_position = pos + text.len();
+        }
         r.caret.reset(sdl_ticks());
         maybe_update_search(r);
         r.needs_redraw = true;
@@ -3154,6 +3178,36 @@ mod tests {
         delete_selection(&mut r);
         assert_eq!(r.input_buffer, "helo");
         assert_eq!(r.input_buffer.len(), 4);
+    }
+
+    #[test]
+    fn delete_selection_in_simple_search_modifies_search_string_not_input_buffer() {
+        // In SimpleSearch, delete_selection must mutate search_string, not input_buffer.
+        // This was the root cause of the Ctrl+X/C panic and paste-target bug.
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::SimpleSearch;
+        r.search_string = "hello".to_string();
+        r.input_buffer = "unrelated".to_string();
+        r.selection_anchor = Some(1);
+        r.cursor_position = 4;
+        delete_selection(&mut r);
+        assert_eq!(r.search_string, "ho", "search_string should have selection removed");
+        assert_eq!(r.input_buffer, "unrelated", "input_buffer must not be modified");
+        assert_eq!(r.cursor_position, 1);
+        assert_eq!(r.selection_anchor, None);
+    }
+
+    #[test]
+    fn active_text_buf_returns_search_string_in_simple_search() {
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::SimpleSearch;
+        r.search_string = "query".to_string();
+        r.input_buffer = "other".to_string();
+        // shift_left must move within search_string, not panic on input_buffer
+        r.cursor_position = 3;
+        handle_shift_left(&mut r);
+        assert_eq!(r.cursor_position, 2);
+        assert_eq!(r.selection_anchor, Some(3));
     }
 
     // -----------------------------------------------------------------------

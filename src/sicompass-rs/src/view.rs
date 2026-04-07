@@ -837,8 +837,14 @@ fn update_view(app: &mut AppState) {
                     }
                 }
             } else if is_flat_list {
-                // Command/Meta: no prefix split — render the full label as a single string.
-                fr.prepare_text_wrapped(label.as_str(), text_prefix_x, item_y, scale, max_content_w.max(1.0), line_height as f32, p.text);
+                // Command/Meta: no prefix split — render the full label.
+                // Use fuzzy highlights when match positions are available.
+                if match_pos.is_empty() {
+                    fr.prepare_text_wrapped(label.as_str(), text_prefix_x, item_y, scale, max_content_w.max(1.0), line_height as f32, p.text);
+                } else {
+                    let rr = app.rect_renderer.as_mut();
+                    render_with_highlights(fr, rr, label.as_str(), text_prefix_x, item_y, scale, ascender, line_height as f32, p.text, p.scroll_search, &match_pos);
+                }
             } else {
                 let (prefix, content) = split_label(label.as_str());
                 let prefix_char_count = prefix.chars().count() as u32;
@@ -883,7 +889,13 @@ fn update_view(app: &mut AppState) {
                 (text_x + pfx_w, line_height as f32 + crate::text::TEXT_PADDING)
             };
             let sel_height = line_height as f32 - 2.0 * crate::text::TEXT_PADDING;
-            let buf = insert_buf.as_str();
+            let search_buf;
+            let buf = if app.renderer.coordinate == Coordinate::SimpleSearch {
+                search_buf = app.renderer.search_string.clone();
+                search_buf.as_str()
+            } else {
+                insert_buf.as_str()
+            };
 
             // Build line-start offsets
             let mut line_starts: Vec<usize> = vec![0];

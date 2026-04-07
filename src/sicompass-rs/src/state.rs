@@ -393,13 +393,38 @@ pub fn handle_history_action(r: &mut AppRenderer, history: History) {
                         sicompass_sdk::ffon::FfonElement::Str(s) => s.clone(),
                         sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.clone(),
                     };
+                    // Navigate back to the level where the item was created.
+                    // In the Rust filebrowser, navigation into a directory does NOT
+                    // increase current_id.depth — ffon[0] is replaced in-place and
+                    // depth stays at 2. So we can't use the C-style depth comparison.
+                    // Instead: for a directory, check if the provider's current path
+                    // ends with the directory name (meaning we navigated into it).
+                    let is_dir = matches!(elem, sicompass_sdk::ffon::FfonElement::Obj(_));
+                    if is_dir {
+                        let cur_path = crate::provider::current_path(r).to_owned();
+                        let tail = format!("/{}", name);
+                        if cur_path.ends_with(&tail) || cur_path == name {
+                            crate::provider::pop_path(r);
+                        }
+                    }
+                    // Also handle the rare case where C-style depth nesting did occur
+                    // (e.g. non-filebrowser providers that do increase depth).
+                    while r.current_id.depth() > entry_id.depth() && r.current_id.depth() > 1 {
+                        crate::provider::pop_path(r);
+                        r.current_id.pop();
+                    }
                     r.current_id = entry_id.clone();
                     crate::provider::delete_item_by_name(r, &name);
                     crate::provider::refresh_current_directory(r);
-                    // Clamp cursor if out of bounds
+                    // If the directory is now empty, insert a placeholder so the
+                    // list is never blank — mirrors what update_ffon does for Task::Delete.
                     let parent_len = get_parent_len(&r.ffon, &entry_id);
-                    if let Some(idx) = r.current_id.last() {
-                        if idx >= parent_len && parent_len > 0 {
+                    if parent_len == 0 {
+                        insert_at(&mut r.ffon, &entry_id, 0,
+                            sicompass_sdk::ffon::FfonElement::new_str("<input></input>"));
+                        r.current_id.set_last(0);
+                    } else if let Some(idx) = r.current_id.last() {
+                        if idx >= parent_len {
                             r.current_id.set_last(parent_len - 1);
                         }
                     }
@@ -452,11 +477,27 @@ pub fn handle_history_action(r: &mut AppRenderer, history: History) {
                     r.current_id = entry_id.clone();
                     if is_dir {
                         crate::provider::create_directory(r, &name);
+                        // Mirror navigate_right_raw for filebrowser: push_path THEN refresh,
+                        // keep current_id at depth 2 (don't increase depth).
+                        crate::provider::push_path(r, &name);
+                        crate::provider::refresh_current_directory(r);
+                        let provider_idx = r.current_id.get(0).unwrap_or(0);
+                        // Insert placeholder if the new directory is empty
+                        if let Some(root) = r.ffon.get_mut(provider_idx) {
+                            if let Some(obj) = root.as_obj_mut() {
+                                if obj.children.is_empty() {
+                                    obj.children.push(sicompass_sdk::ffon::FfonElement::new_str("<input></input>"));
+                                }
+                            }
+                        }
+                        let mut new_id = sicompass_sdk::ffon::IdArray::new();
+                        new_id.push(provider_idx);
+                        new_id.push(0);
+                        r.current_id = new_id;
                     } else {
                         crate::provider::create_file(r, &name);
+                        crate::provider::refresh_current_directory(r);
                     }
-                    crate::provider::refresh_current_directory(r);
-                    r.current_id = entry_id;
                 }
             }
             _ => {}
@@ -464,6 +505,7 @@ pub fn handle_history_action(r: &mut AppRenderer, history: History) {
     }
 
     list::create_list_current_layer(r);
+    r.list_index = r.current_id.last().unwrap_or(0);
 }
 
 // ---------------------------------------------------------------------------
