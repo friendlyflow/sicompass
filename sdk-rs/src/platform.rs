@@ -69,6 +69,39 @@ pub fn cache_home() -> Option<PathBuf> {
     }
 }
 
+/// Returns the user's XDG state directory.
+/// - Linux: `$XDG_STATE_HOME` or `~/.local/state`
+/// - macOS: `~/Library/Logs`
+/// - Windows: `%LOCALAPPDATA%`
+pub fn state_home() -> Option<PathBuf> {
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(xdg) = std::env::var("XDG_STATE_HOME") {
+            if !xdg.is_empty() {
+                return Some(PathBuf::from(xdg));
+            }
+        }
+        home_dir().map(|h| h.join(".local").join("state"))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        home_dir().map(|h| h.join("Library").join("Logs"))
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var("LOCALAPPDATA").ok().map(PathBuf::from)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    {
+        home_dir().map(|h| h.join(".local").join("state"))
+    }
+}
+
+/// Returns `~/.local/state/sicompass/` (or platform equivalent) for log files.
+pub fn log_dir() -> Option<PathBuf> {
+    state_home().map(|s| s.join("sicompass"))
+}
+
 /// Returns the user's Downloads directory.
 pub fn downloads_dir() -> Option<PathBuf> {
     home_dir().map(|h| h.join("Downloads"))

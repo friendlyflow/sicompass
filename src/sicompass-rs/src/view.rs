@@ -8,6 +8,7 @@ use crate::handlers;
 use crate::render;
 use sdl3::event::{Event, WindowEvent};
 use sdl3::keyboard::{Keycode, Mod};
+use tracing;
 
 // Modes where the caret blinks and we need continuous redraw
 fn is_insert_mode(c: Coordinate) -> bool {
@@ -60,6 +61,11 @@ pub fn main_loop(app: &mut AppState) {
                     if window_id != app.window.id() {
                         continue;
                     }
+                    tracing::debug!(
+                        ?keycode, ?keymod,
+                        mode = app.renderer.coordinate.as_str(),
+                        "keydown"
+                    );
                     handle_keydown(app, keycode, keymod);
                     // Enable/disable SDL text input based on new mode (mirrors C view.c).
                     if is_insert_mode(app.renderer.coordinate) {
@@ -112,6 +118,11 @@ pub fn main_loop(app: &mut AppState) {
                     if window_id != app.window.id() {
                         continue;
                     }
+                    tracing::debug!(
+                        text = %text,
+                        mode = app.renderer.coordinate.as_str(),
+                        "text_input"
+                    );
                     handlers::handle_input(&mut app.renderer, &text);
                 }
 

@@ -67,6 +67,7 @@ use crate::app_state::{AppRenderer, Coordinate, History, Task};
 use crate::handlers;
 use crate::list;
 use sdl3::keyboard::{Keycode, Mod};
+use tracing;
 
 #[cfg(test)]
 mod tests {
@@ -440,6 +441,11 @@ mod tests {
 /// This function is the central key dispatcher — used by the main event loop
 /// (via `view::handle_keydown`) and directly by the integration test harness.
 pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) -> bool {
+    tracing::debug!(
+        ?keycode, ?keymod,
+        mode = r.coordinate.as_str(),
+        "dispatch_key"
+    );
     let ctrl  = keymod.intersects(Mod::LCTRLMOD  | Mod::RCTRLMOD);
     let shift = keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD);
     let at_root = r.current_id.depth() <= 1;
