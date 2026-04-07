@@ -760,6 +760,80 @@ pub fn handle_enter_operator(r: &mut AppRenderer) {
         return;
     }
 
+    // File-browser open (Ctrl+O flow): user selected a file → load it into source provider.
+    if r.pending_file_browser_open && is_filebrowser && matches!(elem_clone, FfonElement::Str(_)) {
+        let fname_opt = if tags::has_input(&elem_text) {
+            tags::extract_input(&elem_text)
+        } else if tags::has_input_all(&elem_text) {
+            tags::extract_input_all(&elem_text)
+        } else {
+            Some(elem_text.clone())
+        };
+
+        if let Some(fname) = fname_opt {
+            if !fname.ends_with(".json") {
+                r.error_message = "Please select a .json file".to_owned();
+                r.needs_redraw = true;
+                return;
+            }
+
+            let cur_path = crate::provider::current_path(r).to_owned();
+            let sep = if cur_path.ends_with('/') { "" } else { "/" };
+            let full_path = format!("{cur_path}{sep}{fname}");
+
+            let src_idx = r.save_as_source_root_idx;
+            let return_id = r.save_as_return_id.clone();
+
+            // Reset filebrowser to root
+            let fb_idx = r.current_id.get(0).unwrap_or(0);
+            if let Some(p) = r.providers.get_mut(fb_idx) { p.set_current_path("/"); }
+            if let Some(FfonElement::Obj(obj)) = r.ffon.get_mut(fb_idx) { obj.children.clear(); }
+            if let Some(p) = r.providers.get_mut(fb_idx) {
+                let children = p.fetch();
+                if let Some(FfonElement::Obj(obj)) = r.ffon.get_mut(fb_idx) { obj.children = children; }
+            }
+
+            // Load the JSON file into the source provider
+            let load_ok = {
+                match sicompass_sdk::ffon::load_json_file(std::path::Path::new(&full_path)) {
+                    Ok(new_children) => {
+                        if let Some(FfonElement::Obj(root_obj)) = r.ffon.get_mut(src_idx) {
+                            root_obj.children = new_children;
+                        }
+                        if let Some(p) = r.providers.get_mut(src_idx) { p.set_current_path("/"); }
+                        r.undo_history.clear();
+                        r.undo_position = 0;
+                        r.current_save_path = full_path.clone();
+                        r.error_message = format!("Loaded from {full_path}");
+                        true
+                    }
+                    Err(e) => {
+                        r.error_message = format!("Failed to load: {e}");
+                        false
+                    }
+                }
+            };
+
+            // Navigate back: on success go to src provider root, on failure restore return id
+            if load_ok {
+                r.current_id = sicompass_sdk::ffon::IdArray::new();
+                r.current_id.push(src_idx);
+                r.current_id.push(0);
+            } else {
+                r.current_id = return_id;
+            }
+
+            r.pending_file_browser_open = false;
+            let saved_error = r.error_message.clone();
+            list::create_list_current_layer(r);
+            r.error_message = saved_error;
+            r.list_index = r.current_id.last().unwrap_or(0);
+            r.scroll_offset = 0;
+            r.needs_redraw = true;
+            return;
+        }
+    }
+
     // For filebrowser string elements: open file with the system default program.
     if matches!(elem_clone, FfonElement::Str(_)) {
         let filename = if tags::has_input(&elem_text) {
@@ -850,6 +924,12 @@ pub fn handle_enter_search(r: &mut AppRenderer) {
     list::create_list_current_layer(r);
     r.list_index = r.current_id.last().unwrap_or(0).min(r.active_list_len().saturating_sub(1));
     r.needs_redraw = true;
+
+    // If a file-browser open is pending, immediately process the selected item as a
+    // file to load (same logic as Enter in OperatorGeneral).
+    if r.pending_file_browser_open {
+        handle_enter_operator(r);
+    }
 }
 
 fn handle_enter_extended_search(r: &mut AppRenderer) {
@@ -1180,13 +1260,10 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
         }
         let dest_full = format!("{save_dir}/{dest_name}");
 
-        // Save source provider FFON to file
+        // Save source provider FFON children to file (matching C: saves children, not root wrapper)
         let src_idx = r.save_as_source_root_idx;
-        let save_result = if let Some(sicompass_sdk::ffon::FfonElement::Obj(root_obj)) = r.ffon.get(src_idx).cloned() {
-            sicompass_sdk::ffon::save_json_file(
-                &[sicompass_sdk::ffon::FfonElement::Obj(root_obj)],
-                std::path::Path::new(&dest_full),
-            )
+        let save_result = if let Some(sicompass_sdk::ffon::FfonElement::Obj(root_obj)) = r.ffon.get(src_idx) {
+            sicompass_sdk::ffon::save_json_file(&root_obj.children, std::path::Path::new(&dest_full))
         } else {
             Err(std::io::Error::new(std::io::ErrorKind::NotFound, "source provider not found"))
         };
@@ -1626,6 +1703,42 @@ pub fn handle_escape(r: &mut AppRenderer) {
             r.coordinate = Coordinate::EditorGeneral;
         }
         Coordinate::OperatorInsert => {
+            // Cancel file-browser save-as: remove placeholder and return to source provider
+            if r.pending_file_browser_save_as {
+                use sicompass_sdk::ffon::FfonElement;
+                let remove_idx = r.current_id.last().unwrap_or(0);
+                let mut parent_id = r.current_id.clone();
+                parent_id.pop();
+                let parent_idx = parent_id.last().unwrap_or(0);
+                if let Some(parent_slice) = crate::state::navigate_to_slice_pub(&mut r.ffon, &parent_id) {
+                    if let Some(FfonElement::Obj(obj)) = parent_slice.get_mut(parent_idx) {
+                        if remove_idx < obj.children.len() {
+                            obj.children.remove(remove_idx);
+                        }
+                    }
+                }
+                // Reset filebrowser to root
+                let fb_idx = r.current_id.get(0).unwrap_or(0);
+                if let Some(p) = r.providers.get_mut(fb_idx) { p.set_current_path("/"); }
+                if let Some(FfonElement::Obj(obj)) = r.ffon.get_mut(fb_idx) { obj.children.clear(); }
+                if let Some(p) = r.providers.get_mut(fb_idx) {
+                    let children = p.fetch();
+                    if let Some(FfonElement::Obj(obj)) = r.ffon.get_mut(fb_idx) { obj.children = children; }
+                }
+                let return_id = r.save_as_return_id.clone();
+                r.current_id = return_id;
+                r.pending_file_browser_save_as = false;
+                r.coordinate = Coordinate::OperatorGeneral;
+                r.previous_coordinate = Coordinate::OperatorGeneral;
+                r.input_buffer.clear();
+                r.cursor_position = 0;
+                list::create_list_current_layer(r);
+                r.list_index = r.current_id.last().unwrap_or(0);
+                r.scroll_offset = 0;
+                r.caret.reset(sdl_ticks());
+                r.needs_redraw = true;
+                return;
+            }
             // Discard changes, return to OperatorGeneral
             r.coordinate = Coordinate::OperatorGeneral;
         }
@@ -1686,6 +1799,26 @@ pub fn handle_escape(r: &mut AppRenderer) {
             r.text_scroll_total_height = 0;
         }
         _ => {
+            // Cancel file-browser open: reset filebrowser and return to source provider
+            if r.pending_file_browser_open {
+                use sicompass_sdk::ffon::FfonElement;
+                let fb_idx = r.current_id.get(0).unwrap_or(0);
+                if let Some(p) = r.providers.get_mut(fb_idx) { p.set_current_path("/"); }
+                if let Some(FfonElement::Obj(obj)) = r.ffon.get_mut(fb_idx) { obj.children.clear(); }
+                if let Some(p) = r.providers.get_mut(fb_idx) {
+                    let children = p.fetch();
+                    if let Some(FfonElement::Obj(obj)) = r.ffon.get_mut(fb_idx) { obj.children = children; }
+                }
+                let return_id = r.save_as_return_id.clone();
+                r.current_id = return_id;
+                r.pending_file_browser_open = false;
+                list::create_list_current_layer(r);
+                r.list_index = r.current_id.last().unwrap_or(0);
+                r.scroll_offset = 0;
+                r.caret.reset(sdl_ticks());
+                r.needs_redraw = true;
+                return;
+            }
             // EditorGeneral, EditorNormal, EditorVisual, OperatorGeneral, etc.
             // Go to previous if it was an operator mode, else editor
             if r.previous_coordinate == Coordinate::OperatorGeneral
@@ -2026,7 +2159,7 @@ pub fn handle_save_provider_config(r: &mut AppRenderer) {
     let path = r.current_save_path.clone();
     if let Some(sicompass_sdk::ffon::FfonElement::Obj(root_obj)) = r.ffon.get(idx) {
         match sicompass_sdk::ffon::save_json_file(
-            &[sicompass_sdk::ffon::FfonElement::Obj(root_obj.clone())],
+            &root_obj.children,
             std::path::Path::new(&path),
         ) {
             Ok(()) => {
@@ -2100,6 +2233,41 @@ pub fn handle_save_as_provider_config(r: &mut AppRenderer) {
 
     // Immediately enter insert mode
     handle_i(r);
+    r.needs_redraw = true;
+}
+
+/// Open a JSON config file into the current provider (Ctrl+O).
+///
+/// Navigates the filebrowser to the save folder so the user can select a file.
+/// Mirrors C `handleFileBrowserOpen`.
+pub fn handle_file_browser_open(r: &mut AppRenderer) {
+    // Record which provider we're loading into, and where to return
+    let src_idx = match r.current_id.get(0) { Some(i) => i, None => return };
+    r.save_as_source_root_idx = src_idx;
+    r.save_as_return_id = r.current_id.clone();
+
+    // Find the filebrowser provider index
+    let Some(fb_idx) = r.providers.iter().position(|p| p.name() == "filebrowser") else {
+        r.error_message = "File browser not available".to_owned();
+        r.needs_redraw = true;
+        return;
+    };
+
+    // Resolve the save folder
+    let save_dir = resolve_save_folder(r);
+    if !std::path::Path::new(&save_dir).is_dir() {
+        r.error_message = format!("Save folder does not exist: {save_dir}");
+        r.needs_redraw = true;
+        return;
+    }
+
+    // Navigate filebrowser to the save folder
+    crate::provider::navigate_to_path(r, fb_idx, &save_dir, "");
+
+    r.pending_file_browser_open = true;
+    list::create_list_current_layer(r);
+    r.list_index = 0;
+    r.scroll_offset = 0;
     r.needs_redraw = true;
 }
 

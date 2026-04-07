@@ -138,7 +138,7 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
             "sales demo" => {
                 register_provider(renderer, Box::new(ScriptProvider::new(
                     "sales demo", "sales demo", sales_demo_script_path(),
-                )));
+                ).with_supports_config_files(true)));
                 settings.add_text("sales demo", "save folder (product configuration)", "saveFolder", "Downloads");
             }
             other => {
@@ -209,7 +209,7 @@ fn load_user_plugins(renderer: &mut AppRenderer, settings: &mut SettingsProvider
                 &m.name,
                 &m.display_name,
                 plugin.entry_path.clone(),
-            ))),
+            ).with_supports_config_files(m.supports_config_files))),
         };
 
         if let Some(p) = provider {
@@ -260,7 +260,7 @@ pub fn enable_provider(renderer: &mut AppRenderer, name: &str) {
         "email client"=> Box::new(EmailClientProvider::new()),
         "sales demo"  => Box::new(ScriptProvider::new(
             "sales demo", "sales demo", sales_demo_script_path(),
-        )),
+        ).with_supports_config_files(true)),
         other => {
             eprintln!("sicompass: cannot enable unknown provider '{other}'");
             return;
