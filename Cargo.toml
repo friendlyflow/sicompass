@@ -61,7 +61,7 @@ natord = "1"
 
 # Async / networking (library providers, later phases)
 tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.12", features = ["json", "blocking"] }
+reqwest = { version = "0.12", features = ["json", "blocking", "cookies"] }
 
 # HTML parsing
 scraper = "0.22"

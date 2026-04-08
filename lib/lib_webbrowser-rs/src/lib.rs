@@ -160,9 +160,10 @@ static HTTP_CLIENT: std::sync::OnceLock<reqwest::blocking::Client> = std::sync::
 pub fn http_client() -> &'static reqwest::blocking::Client {
     HTTP_CLIENT.get_or_init(|| {
         reqwest::blocking::Client::builder()
-            .user_agent("sicompass/1.0")
+            .user_agent("Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0")
             .timeout(std::time::Duration::from_secs(30))
             .redirect(reqwest::redirect::Policy::limited(10))
+            .cookie_store(true)
             .build()
             .expect("failed to build HTTP client")
     })
@@ -171,7 +172,11 @@ pub fn http_client() -> &'static reqwest::blocking::Client {
 fn fetch_html(url: &str) -> Result<String, String> {
     http_client()
         .get(url)
+        .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+        .header("Accept-Language", "nl-BE,nl;q=0.9,en-US;q=0.8,en;q=0.7")
         .send()
+        .map_err(|e| e.to_string())?
+        .error_for_status()
         .map_err(|e| e.to_string())?
         .text()
         .map_err(|e| e.to_string())
