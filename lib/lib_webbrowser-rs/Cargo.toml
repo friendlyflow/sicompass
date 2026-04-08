@@ -8,6 +8,7 @@ description = "Sicompass web browser provider"
 [dependencies]
 sicompass-sdk = { workspace = true }
 reqwest = { workspace = true }
+primp = "1.2.2"
 scraper = "0.22"
 tokio = { workspace = true }
 url = "2"
