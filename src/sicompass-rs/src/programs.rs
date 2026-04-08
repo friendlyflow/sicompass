@@ -157,31 +157,7 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
     let enabled = enabled_programs();
     for name in &enabled {
         if let Some(p) = instantiate_builtin(name.as_str()) {
-            // Inject per-program text settings (mirrors BUILTIN_MANIFESTS in programs.c).
-            match name.as_str() {
-                "sales demo" => {
-                    settings.add_text("sales demo",
-                        "save folder (product configuration)", "saveFolder", "Downloads");
-                }
-                "chat client" => {
-                    settings.add_text("chat client", "homeserver URL",
-                        "chatHomeserver", "https://matrix.org");
-                    settings.add_text("chat client", "access token",  "chatAccessToken", "");
-                    settings.add_text("chat client", "username",      "chatUsername",    "");
-                    settings.add_text("chat client", "password",      "chatPassword",    "");
-                }
-                "email client" => {
-                    settings.add_text("email client", "IMAP URL",
-                        "emailImapUrl", "imaps://imap.gmail.com");
-                    settings.add_text("email client", "SMTP URL",
-                        "emailSmtpUrl", "smtps://smtp.gmail.com");
-                    settings.add_text("email client", "username",             "emailUsername",     "");
-                    settings.add_text("email client", "password",             "emailPassword",     "");
-                    settings.add_text("email client", "client ID (OAuth)",    "emailClientId",     "");
-                    settings.add_text("email client", "client secret (OAuth)","emailClientSecret", "");
-                }
-                _ => {}
-            }
+            inject_builtin_settings(&mut settings, name.as_str());
             register_provider(renderer, p);
         } else {
             eprintln!("sicompass: unknown program '{name}' — skipping");
@@ -212,6 +188,36 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
     register_provider(renderer, Box::new(settings));
 
     queue
+}
+
+/// Inject the text settings for a built-in program. Mirrors C's
+/// `applyManifestSettings` over `BUILTIN_MANIFESTS` (src/sicompass/programs.c:187).
+/// Called from both the startup load loop and `enable_provider` so hot-enable
+/// registers identical settings to startup-enable.
+fn inject_builtin_settings(settings: &mut dyn Provider, name: &str) {
+    match name {
+        "sales demo" => {
+            settings.add_text_setting("sales demo",
+                "save folder (product configuration)", "saveFolder", "Downloads");
+        }
+        "chat client" => {
+            settings.add_text_setting("chat client", "homeserver URL",    "chatHomeserver", "https://matrix.org");
+            settings.add_text_setting("chat client", "access token",      "chatAccessToken", "");
+            settings.add_text_setting("chat client", "username",          "chatUsername",    "");
+            settings.add_text_setting("chat client", "password",          "chatPassword",    "");
+        }
+        "email client" => {
+            settings.add_text_setting("email client", "IMAP URL",
+                "emailImapUrl", "imaps://imap.gmail.com");
+            settings.add_text_setting("email client", "SMTP URL",
+                "emailSmtpUrl", "smtps://smtp.gmail.com");
+            settings.add_text_setting("email client", "username",              "emailUsername",     "");
+            settings.add_text_setting("email client", "password",              "emailPassword",     "");
+            settings.add_text_setting("email client", "client ID (OAuth)",     "emailClientId",     "");
+            settings.add_text_setting("email client", "client secret (OAuth)", "emailClientSecret", "");
+        }
+        _ => {}
+    }
 }
 
 /// Instantiate a built-in provider by display name.
@@ -479,7 +485,14 @@ pub fn enable_provider(renderer: &mut AppRenderer, name: &str) {
 
     // Try built-ins first.
     if let Some(provider) = instantiate_builtin(name) {
-        insert_provider_alphabetically(renderer, provider, None);
+        let name_owned = name.to_owned();
+        insert_provider_alphabetically(
+            renderer,
+            provider,
+            Some(Box::new(move |settings: &mut dyn Provider| {
+                inject_builtin_settings(settings, &name_owned);
+            })),
+        );
         return;
     }
 
@@ -1090,5 +1103,73 @@ mod tests {
         // ScriptProvider is created (even if bun fails, the provider object is inserted)
         assert_eq!(r.providers.len(), before + 1);
         assert!(r.providers.iter().any(|p| p.name() == "my-demo"));
+    }
+
+    // --- inject_builtin_settings registers text entries on hot-enable ---
+
+    /// Helper: register a headless SettingsProvider last, call enable_provider for
+    /// `name`, then return the FFON fetch output from the settings provider.
+    fn settings_ffon_after_enable(name: &str) -> Vec<FfonElement> {
+        use sicompass_settings::SettingsProvider;
+        let mut r = AppRenderer::new();
+        _reset_user_plugin_cache(vec![]);
+        register_provider(&mut r, Box::new(SettingsProvider::new_headless()));
+        enable_provider(&mut r, name);
+        r.providers.last_mut().unwrap().fetch()
+    }
+
+    fn section_children<'a>(ffon: &'a [FfonElement], section_name: &str) -> Option<&'a Vec<FfonElement>> {
+        ffon.iter()
+            .find_map(|e| e.as_obj().filter(|o| o.key == section_name))
+            .map(|o| &o.children)
+    }
+
+    #[test]
+    fn hot_enable_email_client_registers_settings() {
+        let ffon = settings_ffon_after_enable("email client");
+        let children = section_children(&ffon, "email client")
+            .expect("email client section should be present");
+        // Should have 6 text entries, not the fallback "no settings"
+        assert!(
+            !children.iter().any(|e| e.as_str() == Some("no settings")),
+            "email client section should not show 'no settings'"
+        );
+        let inputs: Vec<_> = children.iter()
+            .filter_map(|e| e.as_str())
+            .filter(|s| s.contains("<input>"))
+            .collect();
+        assert_eq!(inputs.len(), 6, "expected 6 text settings, got {}: {:?}", inputs.len(), inputs);
+    }
+
+    #[test]
+    fn hot_enable_chat_client_registers_settings() {
+        let ffon = settings_ffon_after_enable("chat client");
+        let children = section_children(&ffon, "chat client")
+            .expect("chat client section should be present");
+        assert!(
+            !children.iter().any(|e| e.as_str() == Some("no settings")),
+            "chat client section should not show 'no settings'"
+        );
+        let inputs: Vec<_> = children.iter()
+            .filter_map(|e| e.as_str())
+            .filter(|s| s.contains("<input>"))
+            .collect();
+        assert_eq!(inputs.len(), 4, "expected 4 text settings, got {}: {:?}", inputs.len(), inputs);
+    }
+
+    #[test]
+    fn hot_enable_sales_demo_registers_settings() {
+        let ffon = settings_ffon_after_enable("sales demo");
+        let children = section_children(&ffon, "sales demo")
+            .expect("sales demo section should be present");
+        assert!(
+            !children.iter().any(|e| e.as_str() == Some("no settings")),
+            "sales demo section should not show 'no settings'"
+        );
+        let inputs: Vec<_> = children.iter()
+            .filter_map(|e| e.as_str())
+            .filter(|s| s.contains("<input>"))
+            .collect();
+        assert_eq!(inputs.len(), 1, "expected 1 text setting, got {}: {:?}", inputs.len(), inputs);
     }
 }
