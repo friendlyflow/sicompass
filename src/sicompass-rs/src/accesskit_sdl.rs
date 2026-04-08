@@ -2,8 +2,12 @@
 //!
 //! Mirrors `accesskit_sdl.c` / `accesskit_sdl.h` from the C source.
 //!
-//! Wraps [`accesskit_unix::Adapter`] (AT-SPI2) and exposes two public
-//! operations:
+//! Platform dispatch:
+//! * Linux   — [`accesskit_unix::Adapter`] (AT-SPI2)
+//! * Windows — [`accesskit_windows::SubclassingAdapter`] (UI Automation)
+//! * macOS   — [`accesskit_macos::SubclassingAdapter`] (NSAccessibility)
+//!
+//! Exposes two public operations:
 //!
 //! * [`AccessKitAdapter::new`] — create the adapter from the SDL3 window.
 //! * [`AccessKitAdapter::update_if_active`] — rebuild the accessibility tree
@@ -29,19 +33,21 @@ const ROOT_ID: NodeId = NodeId(0);
 pub struct AccessKitAdapter {
     #[cfg(target_os = "linux")]
     adapter: accesskit_unix::Adapter,
+    #[cfg(target_os = "windows")]
+    adapter: accesskit_windows::SubclassingAdapter,
+    #[cfg(target_os = "macos")]
+    adapter: accesskit_macos::SubclassingAdapter,
 }
 
 impl AccessKitAdapter {
     /// Create the adapter.
     ///
-    /// Returns `None` if no assistive technology is active or if the platform
-    /// is not supported.  The caller should treat `None` as "accessibility
-    /// disabled" and skip all subsequent calls.
-    ///
-    /// `window` is passed in so that future macOS / Windows ports can extract
-    /// the native window handle needed by their respective platform adapters.
+    /// Returns `None` if the native window handle cannot be obtained or if the
+    /// platform is not supported.  The caller should treat `None` as
+    /// "accessibility disabled" and skip all subsequent calls.
     #[allow(unused_variables)]
-    pub fn new(_window: &sdl3::video::Window, renderer: &AppRenderer) -> Option<Self> {
+    pub fn new(window: &sdl3::video::Window, renderer: &AppRenderer) -> Option<Self> {
+        // ---- Linux (AT-SPI2) ------------------------------------------------
         #[cfg(target_os = "linux")]
         {
             let initial_tree = build_tree(renderer);
@@ -50,13 +56,72 @@ impl AccessKitAdapter {
                 NoopActionHandler,
                 NoopDeactivationHandler,
             );
-            Some(AccessKitAdapter { adapter })
+            return Some(AccessKitAdapter { adapter });
         }
 
-        #[cfg(not(target_os = "linux"))]
+        // ---- Windows (UI Automation) ----------------------------------------
+        #[cfg(target_os = "windows")]
         {
-            None
+            use sdl3::sys::properties::SDL_GetPointerProperty;
+            use sdl3::sys::video::{SDL_GetWindowProperties, SDL_PROP_WINDOW_WIN32_HWND_POINTER};
+            use windows::Win32::Foundation::HWND;
+
+            let props = unsafe { SDL_GetWindowProperties(window.raw()) };
+            let hwnd_ptr = unsafe {
+                SDL_GetPointerProperty(
+                    props,
+                    SDL_PROP_WINDOW_WIN32_HWND_POINTER,
+                    std::ptr::null_mut(),
+                )
+            };
+            if hwnd_ptr.is_null() {
+                return None;
+            }
+            let initial_tree = build_tree(renderer);
+            let adapter = accesskit_windows::SubclassingAdapter::new(
+                HWND(hwnd_ptr),
+                ActivationHandlerImpl { initial_tree: Some(initial_tree) },
+                NoopActionHandler,
+            );
+            return Some(AccessKitAdapter { adapter });
         }
+
+        // ---- macOS (NSAccessibility) ----------------------------------------
+        #[cfg(target_os = "macos")]
+        {
+            use sdl3::sys::properties::SDL_GetPointerProperty;
+            use sdl3::sys::video::{
+                SDL_GetWindowProperties, SDL_PROP_WINDOW_COCOA_WINDOW_POINTER,
+            };
+
+            let props = unsafe { SDL_GetWindowProperties(window.raw()) };
+            // SDL3 exposes the NSWindow pointer here (not NSView); we pass it
+            // to `for_window` which subclasses the content view automatically,
+            // mirroring the C code's `is_view=false` path.
+            let ns_window = unsafe {
+                SDL_GetPointerProperty(
+                    props,
+                    SDL_PROP_WINDOW_COCOA_WINDOW_POINTER,
+                    std::ptr::null_mut(),
+                )
+            };
+            if ns_window.is_null() {
+                return None;
+            }
+            let initial_tree = build_tree(renderer);
+            let adapter = unsafe {
+                accesskit_macos::SubclassingAdapter::for_window(
+                    ns_window,
+                    ActivationHandlerImpl { initial_tree: Some(initial_tree) },
+                    NoopActionHandler,
+                )
+            };
+            return Some(AccessKitAdapter { adapter });
+        }
+
+        // ---- Unsupported platform -------------------------------------------
+        #[allow(unreachable_code)]
+        None
     }
 
     /// Rebuild the accessibility tree from `renderer` and push it to the
@@ -65,6 +130,16 @@ impl AccessKitAdapter {
     pub fn update_if_active(&mut self, renderer: &AppRenderer) {
         #[cfg(target_os = "linux")]
         self.adapter.update_if_active(|| build_tree(renderer));
+
+        #[cfg(target_os = "windows")]
+        if let Some(events) = self.adapter.update_if_active(|| build_tree(renderer)) {
+            events.raise();
+        }
+
+        #[cfg(target_os = "macos")]
+        if let Some(events) = self.adapter.update_if_active(|| build_tree(renderer)) {
+            events.raise();
+        }
     }
 
     /// Notify the adapter that the window gained or lost keyboard focus.
@@ -72,6 +147,16 @@ impl AccessKitAdapter {
     pub fn update_window_focus(&mut self, focused: bool) {
         #[cfg(target_os = "linux")]
         self.adapter.update_window_focus_state(focused);
+
+        // Windows: the subclassing adapter handles focus internally; no call
+        // needed (same as the C source).
+        #[cfg(target_os = "windows")]
+        let _ = focused;
+
+        #[cfg(target_os = "macos")]
+        if let Some(events) = self.adapter.update_view_focus_state(focused) {
+            events.raise();
+        }
     }
 }
 
@@ -127,28 +212,25 @@ fn build_tree(renderer: &AppRenderer) -> TreeUpdate {
 // ---------------------------------------------------------------------------
 
 /// Provides the initial tree to the platform adapter when an AT connects.
-#[cfg(target_os = "linux")]
 struct ActivationHandlerImpl {
     initial_tree: Option<TreeUpdate>,
 }
 
-#[cfg(target_os = "linux")]
 impl accesskit::ActivationHandler for ActivationHandlerImpl {
     fn request_initial_tree(&mut self) -> Option<TreeUpdate> {
         self.initial_tree.take()
     }
 }
 
-/// No-op action handler: sicompass keyboard navigation is modal, so AT-SPI2
+/// No-op action handler: sicompass keyboard navigation is modal, so AT
 /// "activate" actions are not needed.
-#[cfg(target_os = "linux")]
 struct NoopActionHandler;
 
-#[cfg(target_os = "linux")]
 impl accesskit::ActionHandler for NoopActionHandler {
     fn do_action(&mut self, _request: accesskit::ActionRequest) {}
 }
 
+/// No-op deactivation handler (AT-SPI2 / Unix only).
 #[cfg(target_os = "linux")]
 struct NoopDeactivationHandler;
 
