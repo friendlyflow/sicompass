@@ -727,6 +727,43 @@ fn webbrowser_url_same_content_exits_insert_mode() {
     assert_eq!(h.renderer.current_id.get(0), Some(wb_idx));
 }
 
+/// Fragment link (`href="#id"`) in the webbrowser FFON tree should jump the
+/// cursor to the element tagged with `<id>…</id>` when Right is pressed.
+#[test]
+fn webbrowser_fragment_link_navigates_to_target() {
+    let mut h = Harness::new_with_webbrowser();
+    let wb_idx = h.provider_idx("webbrowser").expect("webbrowser not found");
+
+    // Build a webbrowser-style FFON page directly, bypassing real URL fetch.
+    // Structure: Obj("<input>https://example.com</input>") with two children:
+    //   [0] Obj("skip to content <link>#main</link>")   ← skip link
+    //   [1] Str("<id>main</id>Main content")              ← target
+    let link_row = FfonElement::new_obj("skip to content <link>#main</link>");
+    let target_row = FfonElement::new_str("<id>main</id>Main content");
+    let mut page = FfonElement::new_obj("<input>https://example.com</input>");
+    page.as_obj_mut().unwrap().push(link_row);
+    page.as_obj_mut().unwrap().push(target_row);
+    h.renderer.ffon[wb_idx] = page;
+    sicompass::list::create_list_current_layer(h.r());
+
+    // Navigate to the webbrowser provider
+    navigate_to_provider(h.r(), wb_idx);
+    press_right(h.r()); // enter the page layer (now at [wb_idx, 0])
+
+    // The skip-link is at list index 0; sync current_id to that row.
+    h.renderer.list_index = 0;
+    h.renderer.sync_current_id_from_list();
+
+    // Press Right — should jump to the target (no fetch, no descend)
+    press_right(h.r());
+
+    // Cursor must now be on the target row (index 1 in the page children)
+    assert_eq!(
+        h.renderer.current_id.last(), Some(1),
+        "cursor should be on the target row (index 1) after fragment nav"
+    );
+}
+
 /// Enter in OperatorGeneral on an Obj whose key has an <input> tag should NOT
 /// re-activate/re-commit it — C only activates <input> on FFON_STRING elements.
 #[test]
