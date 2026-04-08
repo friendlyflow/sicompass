@@ -7,6 +7,7 @@ members = [
     "lib/lib_webbrowser-rs",
     "lib/lib_chatclient-rs",
     "lib/lib_emailclient-rs",
+    "lib/lib_remote-rs",
     "src/sicompass-rs",
     "src/desicompass-rs",
     "src/loginsicompass-rs",
@@ -27,6 +28,7 @@ sicompass-filebrowser = { path = "lib/lib_filebrowser-rs" }
 sicompass-webbrowser = { path = "lib/lib_webbrowser-rs" }
 sicompass-chatclient = { path = "lib/lib_chatclient-rs" }
 sicompass-emailclient = { path = "lib/lib_emailclient-rs" }
+sicompass-remote = { path = "lib/lib_remote-rs" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

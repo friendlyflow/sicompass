@@ -493,6 +493,21 @@ impl Provider for SettingsProvider {
     fn remove_settings_section(&mut self, name: &str) {
         self.remove_section(name);
     }
+
+    fn add_text_setting(&mut self, section: &str, label: &str,
+                        config_key: &str, default: &str) {
+        self.add_text(section, label, config_key, default);
+    }
+
+    fn add_checkbox_setting(&mut self, section: &str, label: &str,
+                            config_key: &str, default_checked: bool) {
+        self.add_checkbox(section, label, config_key, default_checked);
+    }
+
+    fn add_radio_setting(&mut self, section: &str, label: &str,
+                         config_key: &str, options: &[&str], default: &str) {
+        self.add_radio(section, label, config_key, options, default);
+    }
 }
 
 // ---------------------------------------------------------------------------

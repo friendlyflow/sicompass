@@ -115,6 +115,21 @@ pub trait Provider: Send + 'static {
     /// Remove a named section from this provider.
     fn remove_settings_section(&mut self, _name: &str) {}
 
+    /// Register a text entry in a settings section.
+    /// Mirrors `settingsAddSectionText` in C. Default: no-op.
+    fn add_text_setting(&mut self, _section: &str, _label: &str,
+                        _config_key: &str, _default: &str) {}
+
+    /// Register a checkbox entry in a settings section.
+    /// Mirrors `settingsAddSectionCheckbox` in C. Default: no-op.
+    fn add_checkbox_setting(&mut self, _section: &str, _label: &str,
+                            _config_key: &str, _default_checked: bool) {}
+
+    /// Register a radio group in a settings section.
+    /// Mirrors `settingsAddSectionRadio` in C. Default: no-op.
+    fn add_radio_setting(&mut self, _section: &str, _label: &str,
+                         _config_key: &str, _options: &[&str], _default: &str) {}
+
     /// Called when any setting changes (key/value pair from the settings apply callback).
     ///
     /// Providers implement this to react to settings that affect them
