@@ -66,6 +66,12 @@ natord = "1"
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", features = ["json", "blocking", "cookies"] }
 
+# Email client
+imap = { version = "2", default-features = false, features = ["tls"] }
+imap-proto = "0.10"
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "native-tls", "builder"] }
+native-tls = "0.2"
+
 # HTML parsing
 scraper = "0.22"
 
