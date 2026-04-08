@@ -26,6 +26,7 @@ use sicompass_tutorial::TutorialProvider;
 use sicompass_chatclient::ChatClientProvider;
 use sicompass_emailclient::EmailClientProvider;
 use sicompass_webbrowser::WebbrowserProvider;
+use sicompass_remote::RemoteProvider;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -156,9 +157,30 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
     let enabled = enabled_programs();
     for name in &enabled {
         if let Some(p) = instantiate_builtin(name.as_str()) {
-            // sales demo needs an extra text setting
-            if name == "sales demo" {
-                settings.add_text("sales demo", "save folder (product configuration)", "saveFolder", "Downloads");
+            // Inject per-program text settings (mirrors BUILTIN_MANIFESTS in programs.c).
+            match name.as_str() {
+                "sales demo" => {
+                    settings.add_text("sales demo",
+                        "save folder (product configuration)", "saveFolder", "Downloads");
+                }
+                "chat client" => {
+                    settings.add_text("chat client", "homeserver URL",
+                        "chatHomeserver", "https://matrix.org");
+                    settings.add_text("chat client", "access token",  "chatAccessToken", "");
+                    settings.add_text("chat client", "username",      "chatUsername",    "");
+                    settings.add_text("chat client", "password",      "chatPassword",    "");
+                }
+                "email client" => {
+                    settings.add_text("email client", "IMAP URL",
+                        "emailImapUrl", "imaps://imap.gmail.com");
+                    settings.add_text("email client", "SMTP URL",
+                        "emailSmtpUrl", "smtps://smtp.gmail.com");
+                    settings.add_text("email client", "username",             "emailUsername",     "");
+                    settings.add_text("email client", "password",             "emailPassword",     "");
+                    settings.add_text("email client", "client ID (OAuth)",    "emailClientId",     "");
+                    settings.add_text("email client", "client secret (OAuth)","emailClientSecret", "");
+                }
+                _ => {}
             }
             register_provider(renderer, p);
         } else {
@@ -177,6 +199,11 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
 
     // ---- Load user-installed plugins ----------------------------------------
     load_user_plugins(renderer, &mut settings);
+
+    // ---- Load remote service providers from Available programs: config ------
+    // Scans for enable_*=true entries that don't match any known program and
+    // routes them through RemoteProvider (mirrors C's loadProgram remote branch).
+    load_remote_programs(renderer, &mut settings);
 
     // ---- Sort all registered providers alphabetically ----------------------
     sort_providers_alphabetically(renderer);
@@ -366,10 +393,81 @@ fn sales_demo_script_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("lib/lib_sales_demo/sales_demo.ts"))
 }
 
+/// Read `remoteUrl` and `apiKey` from settings.json for the given section.
+/// Returns `None` if the file or section is absent, or if `remoteUrl` is empty.
+fn read_remote_config(section: &str) -> Option<(String, String)> {
+    let path = sicompass_sdk::platform::main_config_path()?;
+    let data = std::fs::read_to_string(&path).ok()?;
+    let root = serde_json::from_str::<serde_json::Value>(&data).ok()?;
+    let sec = root.get(section)?.as_object()?;
+    let remote_url = sec.get("remoteUrl")?.as_str()?.to_owned();
+    if remote_url.is_empty() { return None; }
+    let api_key = sec.get("apiKey").and_then(|v| v.as_str()).unwrap_or("").to_owned();
+    Some((remote_url, api_key))
+}
+
+/// Scan `Available programs:` for `enable_*=true` entries whose names don't
+/// match any known built-in or user plugin, and register them as remote FFON
+/// providers.  Mirrors the "unknown program → remote service" branch of C's
+/// `loadProgram` (src/sicompass/programs.c:247-273) but applied at startup so
+/// remote services are reachable without requiring a hot-enable action.
+fn load_remote_programs(renderer: &mut AppRenderer, settings: &mut SettingsProvider) {
+    let path = match sicompass_sdk::platform::main_config_path() {
+        Some(p) => p,
+        None => return,
+    };
+    let data = match std::fs::read_to_string(&path) {
+        Ok(d) => d,
+        Err(_) => return,
+    };
+    let root = match serde_json::from_str::<serde_json::Value>(&data) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    let available = match root.get("Available programs:").and_then(|v| v.as_object()) {
+        Some(m) => m,
+        None => return,
+    };
+
+    for (key, val) in available {
+        // Only process enable_*=true keys.
+        let name = match key.strip_prefix("enable_") {
+            Some(n) => n,
+            None => continue,
+        };
+        if val.as_bool() != Some(true) { continue; }
+
+        // Skip known builtins and already-registered providers.
+        if PROGRAM_ENTRIES.iter().any(|&(n, _, _)| n == name) { continue; }
+        if renderer.providers.iter().any(|p| name_matches_provider(name, p.name())) { continue; }
+
+        // Read remoteUrl; skip if absent.
+        let (remote_url, api_key) = match read_remote_config(name) {
+            Some(cfg) => cfg,
+            None => continue,
+        };
+
+        if !api_key.is_empty() {
+            crate::provider::register_auth(&remote_url, &api_key);
+        }
+
+        let provider: Box<dyn Provider> =
+            Box::new(RemoteProvider::new(name, remote_url, api_key));
+        register_provider(renderer, provider);
+
+        // Register the two settings text entries for this remote service.
+        settings.add_text(name, "remote URL", "remoteUrl", "");
+        settings.add_text(name, "API key",    "apiKey",    "");
+        settings.add_section(name);
+    }
+}
+
 /// Enable a provider by name at runtime (hot-load).
 ///
 /// Checks built-in names first, then looks up the `USER_PLUGIN_CACHE` for
-/// user-installed plugins. Mirrors C's `programsEnableProvider` + `findManifest`.
+/// user-installed plugins. Unknown names are tried as remote FFON services if
+/// `settings.json` contains a `remoteUrl` for them. Mirrors C's
+/// `programsEnableProvider` + `findManifest`.
 ///
 /// The new provider is inserted alphabetically by name between the filebrowser
 /// (always index 0) and settings (always last). If the current root navigation
@@ -381,7 +479,7 @@ pub fn enable_provider(renderer: &mut AppRenderer, name: &str) {
 
     // Try built-ins first.
     if let Some(provider) = instantiate_builtin(name) {
-        insert_provider_alphabetically(renderer, provider);
+        insert_provider_alphabetically(renderer, provider, None);
         return;
     }
 
@@ -392,9 +490,25 @@ pub fn enable_provider(renderer: &mut AppRenderer, name: &str) {
     };
     if let Some(plugin) = cached {
         if let Some(provider) = instantiate_user_plugin(&plugin) {
-            insert_provider_alphabetically(renderer, provider);
+            insert_provider_alphabetically(renderer, provider, None);
             return;
         }
+    }
+
+    // Unknown name: try remote FFON service fallback. Mirrors the
+    // loadProgram remote branch in src/sicompass/programs.c:247-273.
+    if let Some((remote_url, api_key)) = read_remote_config(name) {
+        if !api_key.is_empty() {
+            crate::provider::register_auth(&remote_url, &api_key);
+        }
+        let provider: Box<dyn Provider> =
+            Box::new(RemoteProvider::new(name, remote_url, api_key));
+        let section_name = name.to_owned();
+        insert_provider_alphabetically(renderer, provider, Some(Box::new(move |settings: &mut dyn Provider| {
+            settings.add_text_setting(&section_name, "remote URL", "remoteUrl", "");
+            settings.add_text_setting(&section_name, "API key",    "apiKey",    "");
+        })));
+        return;
     }
 
     eprintln!("sicompass: cannot enable unknown provider '{name}'");
@@ -427,7 +541,15 @@ fn sort_providers_alphabetically(renderer: &mut AppRenderer) {
 /// The insertion point is found by scanning indices `0..len-1` and picking
 /// the first slot where the existing provider's name sorts after the new name
 /// (case-insensitive ASCII). Falls back to just before settings.
-fn insert_provider_alphabetically(renderer: &mut AppRenderer, mut provider: Box<dyn Provider>) {
+///
+/// `extra_settings` — optional closure called on the settings provider (the
+/// last entry) after the section is registered.  Used by the remote-service
+/// fallback to inject `remoteUrl` / `apiKey` text entries.
+fn insert_provider_alphabetically(
+    renderer: &mut AppRenderer,
+    mut provider: Box<dyn Provider>,
+    extra_settings: Option<Box<dyn FnOnce(&mut dyn Provider)>>,
+) {
     provider.init();
     let children = provider.fetch();
     let display_name = provider.display_name().to_owned();
@@ -457,6 +579,9 @@ fn insert_provider_alphabetically(renderer: &mut AppRenderer, mut provider: Box<
     renderer.providers.insert(insert_idx, provider);
     if let Some(settings) = renderer.providers.last_mut() {
         settings.add_settings_section(&section_name);
+        if let Some(cb) = extra_settings {
+            cb(settings.as_mut());
+        }
     }
     rebuild_settings_ffon(renderer);
 
@@ -762,7 +887,7 @@ mod tests {
         let mut r = AppRenderer::new();
         register_provider(&mut r, Box::new(MockProv::new("filebrowser")));
         register_provider(&mut r, Box::new(MockProv::new("settings")));
-        insert_provider_alphabetically(&mut r, Box::new(MockProv::new("tutorial")));
+        insert_provider_alphabetically(&mut r, Box::new(MockProv::new("tutorial")), None);
         assert_eq!(r.providers.len(), 3);
         assert_eq!(r.providers[0].name(), "filebrowser");
         assert_eq!(r.providers[1].name(), "tutorial");
@@ -775,8 +900,8 @@ mod tests {
         register_provider(&mut r, Box::new(MockProv::new("filebrowser")));
         register_provider(&mut r, Box::new(MockProv::new("tutorial")));
         register_provider(&mut r, Box::new(MockProv::new("settings")));
-        insert_provider_alphabetically(&mut r, Box::new(MockProv::new("chat client")));
-        insert_provider_alphabetically(&mut r, Box::new(MockProv::new("email client")));
+        insert_provider_alphabetically(&mut r, Box::new(MockProv::new("chat client")), None);
+        insert_provider_alphabetically(&mut r, Box::new(MockProv::new("email client")), None);
         assert_eq!(r.providers.len(), 5);
         assert_eq!(r.providers[0].name(), "chat client");
         assert_eq!(r.providers[1].name(), "email client");
@@ -793,7 +918,7 @@ mod tests {
         register_provider(&mut r, Box::new(MockProv::new("settings")));
         r.current_id.set_last(1);
         r.current_id.push(3);
-        insert_provider_alphabetically(&mut r, Box::new(MockProv::new("chat client")));
+        insert_provider_alphabetically(&mut r, Box::new(MockProv::new("chat client")), None);
         assert_eq!(r.current_id.get(0), Some(2));
         assert_eq!(r.current_id.get(1), Some(3));
     }
@@ -804,7 +929,7 @@ mod tests {
         register_provider(&mut r, Box::new(MockProv::new("filebrowser")));
         register_provider(&mut r, Box::new(MockProv::new("chat client")));
         register_provider(&mut r, Box::new(MockProv::new("settings")));
-        insert_provider_alphabetically(&mut r, Box::new(MockProv::new("tutorial")));
+        insert_provider_alphabetically(&mut r, Box::new(MockProv::new("tutorial")), None);
         assert_eq!(r.current_id.get(0), Some(0));
     }
 

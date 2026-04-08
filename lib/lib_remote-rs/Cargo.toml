@@ -1,0 +1,15 @@
+[package]
+name = "sicompass-remote"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Sicompass remote FFON provider — Rust port of lib/lib_remote/remote.ts"
+
+[dependencies]
+sicompass-sdk = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { workspace = true, features = ["blocking", "json"] }
+
+[dev-dependencies]
+wiremock = { workspace = true }
+tokio = { workspace = true }

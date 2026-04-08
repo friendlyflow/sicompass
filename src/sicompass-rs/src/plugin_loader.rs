@@ -635,47 +635,9 @@ impl ScriptProvider {
     }
 }
 
-/// Port of C's `parseJsonValue` from `lib/lib_ffon/src/ffon.c`.
-///
-/// Converts any JSON value to an `FfonElement`:
-/// - null → `Str("null")`
-/// - bool → `Str("true")` / `Str("false")`
-/// - number → `Str("<decimal representation>")`
-/// - string → `Str(s)`
-/// - array → `Obj("array", [children...])`
-/// - object → `Obj(first_key, [children if first_value is array])`
-/// - empty object → `Str("")`
+/// Delegate to the canonical parser now in `sicompass_sdk::ffon::parse_json_value`.
 fn parse_ffon_json_value(v: &serde_json::Value) -> FfonElement {
-    match v {
-        serde_json::Value::Null => FfonElement::Str("null".to_owned()),
-        serde_json::Value::Bool(b) => {
-            FfonElement::Str(if *b { "true" } else { "false" }.to_owned())
-        }
-        serde_json::Value::Number(n) => FfonElement::Str(n.to_string()),
-        serde_json::Value::String(s) => FfonElement::Str(s.clone()),
-        serde_json::Value::Array(arr) => {
-            let mut obj = FfonElement::new_obj("array");
-            for item in arr {
-                obj.as_obj_mut().unwrap().push(parse_ffon_json_value(item));
-            }
-            obj
-        }
-        serde_json::Value::Object(map) => {
-            // Use first key-value pair (C behavior: only first entry is used)
-            if let Some((key, val)) = map.iter().next() {
-                let mut obj = FfonElement::new_obj(key);
-                if let serde_json::Value::Array(arr) = val {
-                    for item in arr {
-                        obj.as_obj_mut().unwrap().push(parse_ffon_json_value(item));
-                    }
-                }
-                obj
-            } else {
-                // Empty object → empty string (matches C)
-                FfonElement::Str(String::new())
-            }
-        }
-    }
+    sicompass_sdk::ffon::parse_json_value(v)
 }
 
 impl Provider for ScriptProvider {
