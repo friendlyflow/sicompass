@@ -160,7 +160,7 @@ static HTTP_CLIENT: std::sync::OnceLock<reqwest::blocking::Client> = std::sync::
 pub fn http_client() -> &'static reqwest::blocking::Client {
     HTTP_CLIENT.get_or_init(|| {
         reqwest::blocking::Client::builder()
-            .user_agent("Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0")
+            .user_agent("Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)")
             .timeout(std::time::Duration::from_secs(30))
             .redirect(reqwest::redirect::Policy::limited(10))
             .cookie_store(true)
@@ -170,17 +170,96 @@ pub fn http_client() -> &'static reqwest::blocking::Client {
 }
 
 fn fetch_html(url: &str) -> Result<String, String> {
-    http_client()
+    let resp = http_client()
         .get(url)
         .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
         .header("Accept-Language", "nl-BE,nl;q=0.9,en-US;q=0.8,en;q=0.7")
         .send()
-        .map_err(|e| e.to_string())?
-        .error_for_status()
-        .map_err(|e| e.to_string())?
-        .text()
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+
+    if resp.status() == reqwest::StatusCode::FORBIDDEN {
+        // Cloudflare (and similar) TLS-fingerprint block — retry with primp which
+        // impersonates a real browser TLS handshake.
+        return fetch_html_primp(url);
+    }
+
+    let resp = resp.error_for_status().map_err(|e| e.to_string())?;
+
+    let final_url = resp.url().clone();
+    if is_consent_wall(&final_url) {
+        return Err(format!(
+            "Site redirected to a cookie-consent page ({}) — sicompass cannot complete \
+             JS-based consent flows.",
+            final_url.host_str().unwrap_or("?")
+        ));
+    }
+
+    resp.text().map_err(|e| e.to_string())
 }
+
+/// Fallback fetch using primp, which impersonates a real browser's TLS fingerprint
+/// (JA3/JA4) to bypass Cloudflare bot detection.  primp is async-only, so we spin
+/// up a dedicated single-thread Tokio runtime for the call.
+fn fetch_html_primp(url: &str) -> Result<String, String> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string())?
+        .block_on(async {
+            let client = primp::Client::builder()
+                .impersonate(primp::Impersonate::FirefoxV148)
+                .build()
+                .map_err(|e| e.to_string())?;
+
+            let resp = client
+                .get(url)
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .header("Accept-Language", "nl-BE,nl;q=0.9,en-US;q=0.8,en;q=0.7")
+                .send()
+                .await
+                .map_err(|e| {
+                    let msg = e.to_string();
+                    if msg.contains("redirect") {
+                        format!(
+                            "{url} could not be loaded — the site uses a multi-step \
+                             authentication flow (Cloudflare JS challenge) that requires a real \
+                             browser."
+                        )
+                    } else {
+                        msg
+                    }
+                })?;
+
+            if resp.status() == 403u16 {
+                return Err(format!(
+                    "{url} blocked the request (HTTP 403) even with browser impersonation. \
+                     The site may require JavaScript or a logged-in session."
+                ));
+            }
+
+            let final_url = resp.url().clone();
+            if is_consent_wall(&final_url) {
+                return Err(format!(
+                    "Site redirected to a cookie-consent page ({}) — sicompass cannot complete \
+                     JS-based consent flows.",
+                    final_url.host_str().unwrap_or("?")
+                ));
+            }
+
+            resp.text().await.map_err(|e| e.to_string())
+        })
+}
+
+fn is_consent_wall(url: &url::Url) -> bool {
+    is_consent_wall_str(url.as_str())
+}
+
+fn is_consent_wall_str(url: &str) -> bool {
+    url.contains("myprivacy.dpgmedia.be")
+        || url.contains("/consent")
+        || url.contains("cookie-consent")
+}
+
 
 // ---------------------------------------------------------------------------
 // HTML → FFON conversion
@@ -779,5 +858,33 @@ mod tests {
     fn test_resolve_href_anchor_empty() {
         let result = resolve_href("#section", "https://example.com");
         assert!(result.is_empty());
+    }
+
+    // ---- is_consent_wall unit tests ----
+
+    #[test]
+    fn test_is_consent_wall_detects_dpgmedia() {
+        let url = url::Url::parse(
+            "https://myprivacy.dpgmedia.be/consent?siteKey=Uqxf9TXhjmaG4pbQ&callbackUrl=https%3A%2F%2Fwww.hln.be%2F"
+        ).unwrap();
+        assert!(is_consent_wall(&url));
+    }
+
+    #[test]
+    fn test_is_consent_wall_passes_normal_url() {
+        let url = url::Url::parse("https://www.hln.be/sport").unwrap();
+        assert!(!is_consent_wall(&url));
+    }
+
+    #[test]
+    fn test_is_consent_wall_detects_generic_consent_path() {
+        let url = url::Url::parse("https://example.com/consent?redirect=/").unwrap();
+        assert!(is_consent_wall(&url));
+    }
+
+    #[test]
+    fn test_is_consent_wall_detects_cookie_consent_path() {
+        let url = url::Url::parse("https://example.com/page/cookie-consent/accept").unwrap();
+        assert!(is_consent_wall(&url));
     }
 }
