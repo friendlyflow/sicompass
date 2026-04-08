@@ -18,14 +18,138 @@
 //!
 //! ## Configuration
 //!
-//! Set via `on_text_change` from the settings provider:
+//! Set via `on_setting_change` from the settings provider:
 //! - `chatHomeserver`   — Matrix homeserver URL
 //! - `chatAccessToken`  — Bearer access token
-//! - `chatUsername`     — Username (for login)
-//! - `chatPassword`     — Password (for login)
+//! - `chatUsername`     — Username (for login/register)
+//! - `chatPassword`     — Password (for login/register)
 
 use sicompass_sdk::ffon::FfonElement;
 use sicompass_sdk::provider::Provider;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+// ---------------------------------------------------------------------------
+// Monotonic transaction ID counter (mirrors C's `static uint64_t g_txnId`)
+// ---------------------------------------------------------------------------
+
+static TXN_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+// ---------------------------------------------------------------------------
+// Auth result (mirrors C's ChatAuthResult)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Default, Clone)]
+struct AuthResult {
+    success: bool,
+    requires_auth: bool,
+    access_token: String,
+    user_id: String,
+    device_id: String,
+    session: String,
+    next_stage: String,
+    error: String,
+}
+
+/// Parse a Matrix auth/login/register JSON response body into an AuthResult.
+/// Mirrors `parseAuthResponse` in `lib_chatclient/src/chatclient.c`.
+fn parse_auth_response(resp: serde_json::Value) -> AuthResult {
+    let mut result = AuthResult::default();
+
+    // UIA: both "session" and "flows" present
+    if let (Some(session_val), Some(flows_val)) =
+        (resp.get("session"), resp.get("flows"))
+    {
+        if let Some(session) = session_val.as_str() {
+            result.requires_auth = true;
+            result.session = session.to_owned();
+
+            // Find the first incomplete stage
+            let completed_count = resp
+                .get("completed")
+                .and_then(|c| c.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+
+            if let Some(stage) = flows_val
+                .as_array()
+                .and_then(|fs| fs.first())
+                .and_then(|f| f.get("stages"))
+                .and_then(|s| s.as_array())
+                .and_then(|stages| stages.get(completed_count))
+                .and_then(|s| s.as_str())
+            {
+                result.next_stage = stage.to_owned();
+            }
+
+            result.error = if result.next_stage.is_empty() {
+                "interactive auth required: unknown stage".to_owned()
+            } else {
+                format!("interactive auth required: {}", result.next_stage)
+            };
+            return result;
+        }
+    }
+
+    // Error response
+    if let Some(errcode) = resp.get("errcode").and_then(|v| v.as_str()) {
+        let errmsg = resp
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        result.error = format!("{errcode}: {errmsg}");
+        return result;
+    }
+
+    // Success response
+    if let Some(token) = resp.get("access_token").and_then(|v| v.as_str()) {
+        result.access_token = token.to_owned();
+        result.success = true;
+    }
+    if let Some(uid) = resp.get("user_id").and_then(|v| v.as_str()) {
+        result.user_id = uid.to_owned();
+    }
+    if let Some(did) = resp.get("device_id").and_then(|v| v.as_str()) {
+        result.device_id = did.to_owned();
+    }
+    if !result.success {
+        result.error = "no access_token in response".to_owned();
+    }
+    result
+}
+
+// ---------------------------------------------------------------------------
+// Access token persistence (mirrors C's `ccSaveAccessToken`)
+// ---------------------------------------------------------------------------
+
+fn save_access_token_to_settings(token: &str) {
+    use serde_json::{Map, Value};
+
+    let Some(path) = sicompass_sdk::platform::main_config_path() else {
+        return;
+    };
+    let mut root: Map<String, Value> = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| if let Value::Object(m) = v { Some(m) } else { None })
+        .unwrap_or_default();
+
+    let section = root
+        .entry("chat client".to_owned())
+        .or_insert_with(|| Value::Object(Map::new()));
+    if let Value::Object(m) = section {
+        m.insert(
+            "chatAccessToken".to_owned(),
+            Value::String(token.to_owned()),
+        );
+    }
+
+    if let Some(parent) = path.parent() {
+        sicompass_sdk::platform::make_dirs(parent);
+    }
+    if let Ok(json) = serde_json::to_string_pretty(&Value::Object(root)) {
+        let _ = std::fs::write(&path, json);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Room cache entry
@@ -47,6 +171,8 @@ pub struct ChatClientProvider {
     password: String,
     current_path: String,
     room_cache: Vec<RoomEntry>,
+    /// Pending UIA session for multi-stage registration
+    uia_session: String,
 }
 
 impl ChatClientProvider {
@@ -58,6 +184,7 @@ impl ChatClientProvider {
             password: String::new(),
             current_path: "/".to_owned(),
             room_cache: Vec::new(),
+            uia_session: String::new(),
         }
     }
 
@@ -82,7 +209,8 @@ impl ChatClientProvider {
     fn fetch_joined_rooms(&mut self) -> Vec<FfonElement> {
         if self.homeserver.is_empty() || self.access_token.is_empty() {
             return vec![FfonElement::new_str(
-                "not configured — set homeserver and access token in Settings".to_owned(),
+                "configure homeserver URL, username and password in settings, then run login command"
+                    .to_owned(),
             )];
         }
 
@@ -220,11 +348,8 @@ impl ChatClientProvider {
             Err(_) => return false,
         };
         let encoded_id = encode_room_id(&room_id);
-        // Millisecond-based transaction ID
-        let txn_id = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or(0);
+        // Monotonic transaction ID (mirrors C's static uint64_t g_txnId)
+        let txn_id = TXN_COUNTER.fetch_add(1, Ordering::Relaxed) + 1;
         let url = self.api(&format!(
             "/_matrix/client/v3/rooms/{encoded_id}/send/m.room.message/m{txn_id}"
         ));
@@ -241,13 +366,21 @@ impl ChatClientProvider {
             .unwrap_or(false)
     }
 
-    fn do_login(&mut self) -> bool {
+    fn do_login(&mut self) -> AuthResult {
         if self.homeserver.is_empty() || self.username.is_empty() || self.password.is_empty() {
-            return false;
+            return AuthResult {
+                error: "homeserver, username, and password are required".to_owned(),
+                ..Default::default()
+            };
         }
         let client = match self.client() {
             Ok(c) => c,
-            Err(_) => return false,
+            Err(e) => {
+                return AuthResult {
+                    error: format!("HTTP client error: {e}"),
+                    ..Default::default()
+                }
+            }
         };
         let url = self.api("/_matrix/client/v3/login");
         let payload = serde_json::json!({
@@ -257,17 +390,109 @@ impl ChatClientProvider {
         });
         let resp = match client.post(&url).json(&payload).send() {
             Ok(r) => r,
-            Err(_) => return false,
+            Err(e) => {
+                return AuthResult {
+                    error: format!("request failed: {e}"),
+                    ..Default::default()
+                }
+            }
         };
-        let body: serde_json::Value = match resp.json() {
-            Ok(v) => v,
-            Err(_) => return false,
+        match resp.json::<serde_json::Value>() {
+            Ok(body) => {
+                let result = parse_auth_response(body);
+                if result.success {
+                    self.access_token = result.access_token.clone();
+                }
+                result
+            }
+            Err(_) => AuthResult {
+                error: "failed to parse server response".to_owned(),
+                ..Default::default()
+            },
+        }
+    }
+
+    fn do_register(&self) -> AuthResult {
+        if self.homeserver.is_empty() || self.username.is_empty() || self.password.is_empty() {
+            return AuthResult {
+                error: "homeserver, username, and password are required".to_owned(),
+                ..Default::default()
+            };
+        }
+        let client = match self.client() {
+            Ok(c) => c,
+            Err(e) => {
+                return AuthResult {
+                    error: format!("HTTP client error: {e}"),
+                    ..Default::default()
+                }
+            }
         };
-        if let Some(token) = body["access_token"].as_str() {
-            self.access_token = token.to_owned();
-            true
-        } else {
-            false
+        let url = self.api("/_matrix/client/v3/register");
+        let payload = serde_json::json!({
+            "auth": { "type": "m.login.dummy" },
+            "username": self.username,
+            "password": self.password,
+        });
+        let resp = match client.post(&url).json(&payload).send() {
+            Ok(r) => r,
+            Err(e) => {
+                return AuthResult {
+                    error: format!("request failed: {e}"),
+                    ..Default::default()
+                }
+            }
+        };
+        match resp.json::<serde_json::Value>() {
+            Ok(body) => parse_auth_response(body),
+            Err(_) => AuthResult {
+                error: "failed to parse server response".to_owned(),
+                ..Default::default()
+            },
+        }
+    }
+
+    fn do_register_complete(&self, session: &str) -> AuthResult {
+        if self.homeserver.is_empty()
+            || session.is_empty()
+            || self.username.is_empty()
+            || self.password.is_empty()
+        {
+            return AuthResult {
+                error: "homeserver, session, username, and password are required".to_owned(),
+                ..Default::default()
+            };
+        }
+        let client = match self.client() {
+            Ok(c) => c,
+            Err(e) => {
+                return AuthResult {
+                    error: format!("HTTP client error: {e}"),
+                    ..Default::default()
+                }
+            }
+        };
+        let url = self.api("/_matrix/client/v3/register");
+        let payload = serde_json::json!({
+            "auth": { "session": session },
+            "username": self.username,
+            "password": self.password,
+        });
+        let resp = match client.post(&url).json(&payload).send() {
+            Ok(r) => r,
+            Err(e) => {
+                return AuthResult {
+                    error: format!("request failed: {e}"),
+                    ..Default::default()
+                }
+            }
+        };
+        match resp.json::<serde_json::Value>() {
+            Ok(body) => parse_auth_response(body),
+            Err(_) => AuthResult {
+                error: "failed to parse server response".to_owned(),
+                ..Default::default()
+            },
         }
     }
 
@@ -297,10 +522,10 @@ impl Provider for ChatClientProvider {
 
     fn meta(&self) -> Vec<String> {
         vec![
-            "/   Search".to_owned(),
+            "/       Search".to_owned(),
             "Ctrl+F  Extended search".to_owned(),
-            "F5  Refresh".to_owned(),
-            ":   Commands".to_owned(),
+            "F5      Refresh".to_owned(),
+            ":       Commands".to_owned(),
         ]
     }
 
@@ -331,6 +556,8 @@ impl Provider for ChatClientProvider {
             "send message".to_owned(),
             "refresh".to_owned(),
             "login".to_owned(),
+            "register".to_owned(),
+            "complete registration".to_owned(),
         ]
     }
 
@@ -342,13 +569,99 @@ impl Provider for ChatClientProvider {
         error: &mut String,
     ) -> Option<FfonElement> {
         match cmd {
+            "send message" => Some(FfonElement::new_str("<input></input>".to_owned())),
+
+            "refresh" => None,
+
             "login" => {
-                if !self.do_login() {
-                    *error = "Login failed — check homeserver, username, and password in Settings".to_owned();
+                if self.homeserver.is_empty()
+                    || self.username.is_empty()
+                    || self.password.is_empty()
+                {
+                    *error = "set homeserver, username, and password first".to_owned();
+                    return None;
                 }
-                None
+                let result = self.do_login();
+                if result.success {
+                    save_access_token_to_settings(&result.access_token);
+                    Some(FfonElement::new_str(format!("logged in as {}", result.user_id)))
+                } else {
+                    *error = format!("login failed: {}", result.error);
+                    None
+                }
             }
-            "refresh" | "send message" => None, // no UI element needed
+
+            "register" => {
+                if self.homeserver.is_empty()
+                    || self.username.is_empty()
+                    || self.password.is_empty()
+                {
+                    *error = "set homeserver, username, and password first".to_owned();
+                    return None;
+                }
+                let result = self.do_register();
+                if result.success {
+                    self.access_token = result.access_token.clone();
+                    save_access_token_to_settings(&result.access_token);
+                    self.uia_session.clear();
+                    Some(FfonElement::new_str(format!("registered as {}", result.user_id)))
+                } else if result.requires_auth && !result.session.is_empty() {
+                    self.uia_session = result.session.clone();
+                    #[cfg(not(test))]
+                    {
+                        let fallback_url = format!(
+                            "{}/_matrix/client/v3/auth/{}/fallback/web?session={}",
+                            self.homeserver.trim_end_matches('/'),
+                            result.next_stage,
+                            result.session,
+                        );
+                        sicompass_sdk::platform::open_with_default(&fallback_url);
+                    }
+                    Some(FfonElement::new_str(format!(
+                        "complete {} in browser, then run complete registration",
+                        result.next_stage,
+                    )))
+                } else {
+                    *error = format!("registration failed: {}", result.error);
+                    None
+                }
+            }
+
+            "complete registration" => {
+                if self.uia_session.is_empty() {
+                    *error = "no registration in progress".to_owned();
+                    return None;
+                }
+                let session = self.uia_session.clone();
+                let result = self.do_register_complete(&session);
+                if result.success {
+                    self.access_token = result.access_token.clone();
+                    save_access_token_to_settings(&result.access_token);
+                    self.uia_session.clear();
+                    Some(FfonElement::new_str(format!("registered as {}", result.user_id)))
+                } else if result.requires_auth && !result.session.is_empty() {
+                    self.uia_session = result.session.clone();
+                    #[cfg(not(test))]
+                    {
+                        let fallback_url = format!(
+                            "{}/_matrix/client/v3/auth/{}/fallback/web?session={}",
+                            self.homeserver.trim_end_matches('/'),
+                            result.next_stage,
+                            result.session,
+                        );
+                        sicompass_sdk::platform::open_with_default(&fallback_url);
+                    }
+                    Some(FfonElement::new_str(format!(
+                        "complete {} in browser, then run complete registration",
+                        result.next_stage,
+                    )))
+                } else {
+                    self.uia_session.clear();
+                    *error = format!("registration failed: {}", result.error);
+                    None
+                }
+            }
+
             _ => None,
         }
     }
@@ -368,11 +681,19 @@ impl Provider for ChatClientProvider {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// URL-encode a Matrix room ID (encodes `!` → `%21`, `:` → `%3A`).
+/// Percent-encode a Matrix room ID per RFC 3986: keep only unreserved characters
+/// (A-Z a-z 0-9 - _ . ~) and percent-encode everything else.
+/// Mirrors `urlEncodeRoomId` in `lib_chatclient/src/chatclient.c`.
 fn encode_room_id(room_id: &str) -> String {
-    room_id
-        .replace('!', "%21")
-        .replace(':', "%3A")
+    let mut out = String::with_capacity(room_id.len() * 3);
+    for b in room_id.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -411,12 +732,14 @@ mod tests {
         p
     }
 
+    // ---- original 25 tests (adapted) ---------------------------------------
+
     #[test]
     fn test_fetch_root_no_config_returns_error() {
         let mut p = ChatClientProvider::new();
         let items = p.fetch();
         assert!(items.iter().any(|e| {
-            e.as_str().map_or(false, |s| s.contains("not configured"))
+            e.as_str().map_or(false, |s| s.contains("configure homeserver"))
         }));
     }
 
@@ -559,14 +882,14 @@ mod tests {
         mount(&rt, &server, Mock::given(method("POST"))
             .and(path("/_matrix/client/v3/login"))
             .respond_with(ResponseTemplate::new(200).set_body_json(
-                serde_json::json!({ "access_token": "new_token_xyz" }),
+                serde_json::json!({ "access_token": "new_token_xyz", "user_id": "@user:server" }),
             )));
         let mut p = ChatClientProvider::new();
         p.homeserver = server.uri();
         p.username = "user".to_owned();
         p.password = "pass".to_owned();
-        let ok = p.do_login();
-        assert!(ok);
+        let result = p.do_login();
+        assert!(result.success);
         assert_eq!(p.access_token, "new_token_xyz");
         drop(rt);
     }
@@ -583,8 +906,9 @@ mod tests {
         p.homeserver = server.uri();
         p.username = "user".to_owned();
         p.password = "wrongpass".to_owned();
-        let ok = p.do_login();
-        assert!(!ok);
+        let result = p.do_login();
+        assert!(!result.success);
+        assert!(result.error.contains("M_FORBIDDEN"));
         drop(rt);
     }
 
@@ -623,6 +947,8 @@ mod tests {
         assert!(cmds.contains(&"login".to_owned()));
         assert!(cmds.contains(&"refresh".to_owned()));
         assert!(cmds.contains(&"send message".to_owned()));
+        assert!(cmds.contains(&"register".to_owned()));
+        assert!(cmds.contains(&"complete registration".to_owned()));
     }
 
     #[test]
@@ -685,7 +1011,6 @@ mod tests {
     fn test_handle_command_login_without_credentials() {
         let mut p = ChatClientProvider::new();
         let mut err = String::new();
-        // No homeserver/credentials set — login should fail and set error
         let result = p.handle_command("login", "", 0, &mut err);
         assert!(result.is_none());
         assert!(!err.is_empty(), "error message should be set on failed login");
@@ -697,5 +1022,259 @@ mod tests {
         let mut err = String::new();
         let result = p.handle_command("refresh", "", 0, &mut err);
         assert!(result.is_none());
+    }
+
+    // ---- new tests for ported features ------------------------------------
+
+    #[test]
+    fn test_handle_command_send_message_returns_input() {
+        let mut p = ChatClientProvider::new();
+        let mut err = String::new();
+        let result = p.handle_command("send message", "", 0, &mut err);
+        assert!(result.is_some(), "send message command should return an input element");
+        assert!(
+            result.unwrap().as_str().map_or(false, |s| s.contains("<input>")),
+            "returned element should contain <input>",
+        );
+    }
+
+    #[test]
+    fn test_login_success_returns_user_id_element() {
+        let (rt, server) = start_mock_server();
+        mount(&rt, &server, Mock::given(method("POST"))
+            .and(path("/_matrix/client/v3/login"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({
+                    "access_token": "syt_xyz",
+                    "user_id": "@alice:server.org",
+                })
+            )));
+        let mut p = ChatClientProvider::new();
+        p.homeserver = server.uri();
+        p.username = "alice".to_owned();
+        p.password = "pass".to_owned();
+        let mut err = String::new();
+        let elem = p.handle_command("login", "", 0, &mut err);
+        assert!(err.is_empty(), "no error on success, got: {err}");
+        assert!(elem.is_some(), "login success should return an element");
+        assert!(
+            elem.unwrap().as_str().map_or(false, |s| s.contains("@alice:server.org")),
+            "success element should contain userId",
+        );
+        drop(rt);
+    }
+
+    #[test]
+    fn test_register_without_credentials() {
+        let mut p = ChatClientProvider::new();
+        p.homeserver = "http://localhost".to_owned();
+        // no username/password set
+        let mut err = String::new();
+        let result = p.handle_command("register", "", 0, &mut err);
+        assert!(result.is_none());
+        assert!(!err.is_empty(), "should set an error when credentials missing");
+    }
+
+    #[test]
+    fn test_register_success_sets_access_token() {
+        let (rt, server) = start_mock_server();
+        mount(&rt, &server, Mock::given(method("POST"))
+            .and(path("/_matrix/client/v3/register"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({
+                    "access_token": "reg_token_abc",
+                    "user_id": "@newuser:server.org",
+                })
+            )));
+        let mut p = ChatClientProvider::new();
+        p.homeserver = server.uri();
+        p.username = "newuser".to_owned();
+        p.password = "pass123".to_owned();
+        let mut err = String::new();
+        let elem = p.handle_command("register", "", 0, &mut err);
+        assert!(err.is_empty(), "no error on success, got: {err}");
+        assert!(elem.is_some(), "register success should return an element");
+        assert!(
+            elem.unwrap().as_str().map_or(false, |s| s.contains("@newuser:server.org")),
+            "success element should contain userId",
+        );
+        assert_eq!(p.access_token, "reg_token_abc");
+        assert!(p.uia_session.is_empty(), "uia_session should be cleared on success");
+        drop(rt);
+    }
+
+    #[test]
+    fn test_register_requires_uia_stores_session() {
+        let (rt, server) = start_mock_server();
+        mount(&rt, &server, Mock::given(method("POST"))
+            .and(path("/_matrix/client/v3/register"))
+            .respond_with(ResponseTemplate::new(401).set_body_json(
+                serde_json::json!({
+                    "session": "uia_session_xyz",
+                    "flows": [{ "stages": ["m.login.recaptcha"] }],
+                    "completed": [],
+                })
+            )));
+        let mut p = ChatClientProvider::new();
+        p.homeserver = server.uri();
+        p.username = "alice".to_owned();
+        p.password = "pass".to_owned();
+        let mut err = String::new();
+        let elem = p.handle_command("register", "", 0, &mut err);
+        assert!(err.is_empty(), "UIA requires-auth is not an error, got: {err}");
+        assert!(elem.is_some(), "should return a status element for UIA");
+        assert!(
+            elem.unwrap().as_str().map_or(false, |s| s.contains("m.login.recaptcha")),
+            "element should mention the next stage",
+        );
+        assert_eq!(p.uia_session, "uia_session_xyz");
+        drop(rt);
+    }
+
+    #[test]
+    fn test_complete_registration_no_session() {
+        let mut p = ChatClientProvider::new();
+        p.homeserver = "http://localhost".to_owned();
+        p.username = "alice".to_owned();
+        p.password = "pass".to_owned();
+        let mut err = String::new();
+        let result = p.handle_command("complete registration", "", 0, &mut err);
+        assert!(result.is_none());
+        assert!(err.contains("no registration in progress"), "got: {err}");
+    }
+
+    #[test]
+    fn test_complete_registration_success() {
+        let (rt, server) = start_mock_server();
+        mount(&rt, &server, Mock::given(method("POST"))
+            .and(path("/_matrix/client/v3/register"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({
+                    "access_token": "final_token",
+                    "user_id": "@alice:server.org",
+                })
+            )));
+        let mut p = ChatClientProvider::new();
+        p.homeserver = server.uri();
+        p.username = "alice".to_owned();
+        p.password = "pass".to_owned();
+        p.uia_session = "pending_session_abc".to_owned();
+        let mut err = String::new();
+        let elem = p.handle_command("complete registration", "", 0, &mut err);
+        assert!(err.is_empty(), "no error on success, got: {err}");
+        assert!(elem.is_some(), "should return success element");
+        assert!(
+            elem.unwrap().as_str().map_or(false, |s| s.contains("@alice:server.org")),
+            "element should contain userId",
+        );
+        assert_eq!(p.access_token, "final_token");
+        assert!(p.uia_session.is_empty(), "uia_session should be cleared on success");
+        drop(rt);
+    }
+
+    #[test]
+    fn test_encode_room_id_at_sign() {
+        let encoded = encode_room_id("@user:server.org");
+        assert_eq!(encoded, "%40user%3Aserver.org");
+    }
+
+    #[test]
+    fn test_encode_room_id_slash() {
+        assert_eq!(encode_room_id("a/b"), "a%2Fb");
+    }
+
+    #[test]
+    fn test_encode_room_id_multibyte() {
+        // UTF-8 bytes: "é" = 0xC3 0xA9
+        let encoded = encode_room_id("caf\u{e9}");
+        assert_eq!(encoded, "caf%C3%A9");
+    }
+
+    #[test]
+    fn test_encode_room_id_unreserved_pass_through() {
+        // Unreserved chars: A-Z a-z 0-9 - _ . ~
+        assert_eq!(encode_room_id("abc-123_test.room~"), "abc-123_test.room~");
+    }
+
+    #[test]
+    fn test_txn_id_is_monotonic() {
+        // Capture the starting counter value then send two messages and verify
+        // the second URL has a higher suffix than the first.
+        let (rt, server) = start_mock_server();
+        // Match any PUT — we just need to capture both requests
+        mount(&rt, &server, Mock::given(method("PUT"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({ "event_id": "$e" }),
+            )));
+
+        let mut p = provider_for(&server);
+        p.room_cache.push(RoomEntry {
+            display_name: "Room".to_owned(),
+            room_id: "!x:x".to_owned(),
+        });
+
+        let before = TXN_COUNTER.load(Ordering::Relaxed);
+        let ok1 = p.send_message("Room", "first");
+        let mid = TXN_COUNTER.load(Ordering::Relaxed);
+        let ok2 = p.send_message("Room", "second");
+        let after = TXN_COUNTER.load(Ordering::Relaxed);
+
+        assert!(ok1, "first send should succeed");
+        assert!(ok2, "second send should succeed");
+        assert!(mid > before, "counter should advance after first send");
+        assert!(after > mid, "counter should advance after second send");
+        drop(rt);
+    }
+
+    #[test]
+    fn test_parse_auth_response_uia() {
+        let resp = serde_json::json!({
+            "session": "sess123",
+            "flows": [{ "stages": ["m.login.recaptcha", "m.login.email"] }],
+            "completed": [],
+        });
+        let result = parse_auth_response(resp);
+        assert!(result.requires_auth);
+        assert_eq!(result.session, "sess123");
+        assert_eq!(result.next_stage, "m.login.recaptcha");
+        assert!(!result.success);
+    }
+
+    #[test]
+    fn test_parse_auth_response_uia_with_completed() {
+        let resp = serde_json::json!({
+            "session": "sess456",
+            "flows": [{ "stages": ["m.login.recaptcha", "m.login.email"] }],
+            "completed": ["m.login.recaptcha"],
+        });
+        let result = parse_auth_response(resp);
+        assert!(result.requires_auth);
+        assert_eq!(result.next_stage, "m.login.email");
+    }
+
+    #[test]
+    fn test_parse_auth_response_error() {
+        let resp = serde_json::json!({
+            "errcode": "M_FORBIDDEN",
+            "error": "Invalid password",
+        });
+        let result = parse_auth_response(resp);
+        assert!(!result.success);
+        assert!(result.error.contains("M_FORBIDDEN"));
+        assert!(result.error.contains("Invalid password"));
+    }
+
+    #[test]
+    fn test_parse_auth_response_success() {
+        let resp = serde_json::json!({
+            "access_token": "syt_abc",
+            "user_id": "@user:server",
+            "device_id": "ABCDEF",
+        });
+        let result = parse_auth_response(resp);
+        assert!(result.success);
+        assert_eq!(result.access_token, "syt_abc");
+        assert_eq!(result.user_id, "@user:server");
+        assert_eq!(result.device_id, "ABCDEF");
     }
 }
