@@ -29,7 +29,7 @@ Built for users who prefer or require keyboard-driven interaction, Sicompass off
 
 Sicompass ships with a comprehensive, hands-on tutorial that loads automatically as the first program when you launch the app. Rather than reading external documentation, you learn by doing — the tutorial itself is a fully navigable Sicompass tree, so you practice the exact interactions you'll use every day as you work through it.
 
-The tutorial walks you through nine progressive sections covering everything from basic navigation and editing, to commands, all built-in programs, interactive element types (checkboxes, radio buttons, text inputs, images, links), configuration, and even a complete plugin development guide for both TypeScript and C. Because the tutorial is itself a Sicompass provider, everything it describes is immediately demonstrable in context — when it explains checkboxes, you're toggling real checkboxes; when it describes navigation, you're already navigating.
+The tutorial walks you through nine progressive sections covering everything from basic navigation and editing, to commands, all built-in programs, interactive element types (checkboxes, radio buttons, text inputs, images, links), configuration, and even a complete plugin development guide for both TypeScript and Rust. Because the tutorial is itself a Sicompass provider, everything it describes is immediately demonstrable in context — when it explains checkboxes, you're toggling real checkboxes; when it describes navigation, you're already navigating.
 
 Whether you're a new user exploring the interface or a developer looking to build plugins, the in-app tutorial is the fastest way to get up to speed.
 
@@ -50,7 +50,7 @@ Sicompass is the foundation for a unified, accessible platform. Future developme
 
 - **Email & Chat** — Integrated communication tools using IMAP/SMTP and Matrix protocol
 - **Notebook** — Structured note-taking with server-side sync
-- **IDE** — Code as a navigable structure, with C code generation
+- **IDE** — Code as a navigable structure, with Rust code generation
 - **Terminal** — A terminal emulator integrated as a provider
 - **Blog** — Publish content with paid access, viewable in browsers too
 - **Mobile Support** — Android and iOS versions
@@ -63,8 +63,7 @@ The goal is to provide a comprehensive environment where functionality and acces
 # Optional: use Nix for dependency management
 nix develop
 
-meson setup build
-ninja -C build
+cargo build --release
 ```
 
 ### Intermezzo
