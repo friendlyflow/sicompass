@@ -7,12 +7,12 @@ description = "Sicompass web browser provider"
 
 [dependencies]
 sicompass-sdk = { workspace = true }
-reqwest = { workspace = true }
-primp = "1.2.2"
+chromiumoxide = "0.9"
+futures = "0.3"
+which = "7"
 scraper = "0.22"
 tokio = { workspace = true }
 url = "2"
 
 [dev-dependencies]
-wiremock = { workspace = true }
 tokio = { workspace = true }

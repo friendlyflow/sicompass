@@ -93,6 +93,12 @@ wiremock = "0.6"
 
 # Optimize heavy third-party deps even in debug builds — html5ever and the
 # TLS/HTTP stack are 10-50x slower without optimizations.
+[profile.dev.package.chromiumoxide]
+opt-level = 2
+[profile.dev.package.chromiumoxide_cdp]
+opt-level = 2
+[profile.dev.package.async-tungstenite]
+opt-level = 2
 [profile.dev.package.html5ever]
 opt-level = 2
 [profile.dev.package.scraper]
