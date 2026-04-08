@@ -99,6 +99,35 @@ pub fn handle_down(r: &mut AppRenderer) {
     }
 }
 
+/// Recursively search `arr` for the first element whose key/text contains
+/// `<id>{target}</id>`, returning its full path as an `IdArray`.
+///
+/// `base_id` must end with a dummy slot (e.g. `push(0)`) that gets overwritten
+/// with the actual index at each level — mirrors `collect_items_recursive` in list.rs.
+fn find_id_path(arr: &[FfonElement], base_id: &IdArray, target: &str) -> Option<IdArray> {
+    for (i, elem) in arr.iter().enumerate() {
+        let mut item_id = base_id.clone();
+        item_id.set_last(i);
+        let key = match elem {
+            FfonElement::Obj(o) => o.key.as_str(),
+            FfonElement::Str(s) => s.as_str(),
+        };
+        if tags::extract_id(key).as_deref() == Some(target) {
+            return Some(item_id);
+        }
+        if let FfonElement::Obj(obj) = elem {
+            if !obj.children.is_empty() {
+                let mut child_base = item_id.clone();
+                child_base.push(0);
+                if let Some(p) = find_id_path(&obj.children, &child_base, target) {
+                    return Some(p);
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Navigate into the item at `r.current_id` without rebuilding the list.
 /// Returns `true` if navigation happened.
 pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
@@ -124,6 +153,23 @@ pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
 
     // Handle <link> tags: resolve URL and load content as children.
     if let Some(url) = link_url {
+        // Fragment-only link: jump the cursor to the matching <id> tag in the current page.
+        if let Some(frag) = url.strip_prefix('#') {
+            if !frag.is_empty() {
+                let provider_idx = item_id.get(0).unwrap_or(0);
+                if let Some(FfonElement::Obj(provider_root)) = r.ffon.get(provider_idx) {
+                    let mut base = IdArray::new();
+                    base.push(provider_idx);
+                    base.push(0); // dummy slot; set_last overwrites it at each level
+                    if let Some(target_path) = find_id_path(&provider_root.children, &base, frag) {
+                        r.current_id = target_path;
+                        return true;
+                    }
+                }
+            }
+            return false; // unresolved or empty fragment — stay put
+        }
+
         if !has_children {
             let children = resolve_link_to_elements(&url);
             if children.is_empty() {
@@ -181,24 +227,7 @@ pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
 /// Fetch URL content and parse into FFON elements.
 /// Mirrors C's `fetchUrlToElements`.
 fn fetch_url_to_elements(url: &str) -> Vec<FfonElement> {
-    let client = sicompass_webbrowser::http_client();
-    let mut req = client.get(url);
-    if let Some(key) = crate::provider::find_api_key_for_url(url) {
-        req = req.header("Authorization", format!("Bearer {key}"));
-    }
-    let body = match req.send().and_then(|r| r.text()) {
-        Ok(b) => b,
-        Err(_) => return Vec::new(),
-    };
-    if body.is_empty() { return Vec::new(); }
-    if url.ends_with(".ffon") {
-        return sicompass_sdk::ffon::deserialize_binary(body.as_bytes());
-    }
-    // Try JSON first; fall back to HTML
-    if let Ok(elems) = sicompass_sdk::ffon::parse_json(&body) {
-        if !elems.is_empty() { return elems; }
-    }
-    sicompass_webbrowser::html_to_ffon(&body, url)
+    sicompass_webbrowser::fetch_url_to_ffon(url)
 }
 
 /// Resolve a link URL (local file or HTTP) into FFON elements.
@@ -5223,5 +5252,92 @@ mod tests {
         handle_enter_operator_insert(&mut r);
         // Unchanged → escape
         assert_ne!(r.coordinate, Coordinate::OperatorInsert);
+    }
+
+    // ---- find_id_path ----
+
+    #[test]
+    fn find_id_path_flat() {
+        // [str "plain", str "<id>target</id>Main content", obj "other"]
+        let arr = vec![
+            FfonElement::new_str("plain"),
+            FfonElement::new_str("<id>target</id>Main content"),
+            FfonElement::new_obj("other"),
+        ];
+        let mut base = IdArray::new();
+        base.push(0); // provider index
+        base.push(0); // dummy slot
+        let result = find_id_path(&arr, &base, "target");
+        assert!(result.is_some(), "should find the element with id=target");
+        let path = result.unwrap();
+        assert_eq!(path.last(), Some(1), "should point to index 1 in arr");
+    }
+
+    #[test]
+    fn find_id_path_nested() {
+        // provider → section (obj) → "<id>deep</id>Deep heading"
+        let mut section = FfonElement::new_obj("section");
+        section.as_obj_mut().unwrap().push(FfonElement::new_str("<id>deep</id>Deep heading"));
+        let arr = vec![FfonElement::new_str("before"), section];
+        let mut base = IdArray::new();
+        base.push(0);
+        base.push(0); // dummy slot
+        let result = find_id_path(&arr, &base, "deep");
+        assert!(result.is_some(), "should find nested element");
+    }
+
+    #[test]
+    fn find_id_path_not_found() {
+        let arr = vec![FfonElement::new_str("no id here")];
+        let mut base = IdArray::new();
+        base.push(0);
+        base.push(0);
+        assert!(find_id_path(&arr, &base, "missing").is_none());
+    }
+
+    // ---- navigate_right_raw fragment jump ----
+
+    #[test]
+    fn navigate_right_raw_fragment_link_jumps_to_target() {
+        // Build a webbrowser-style provider tree:
+        //   r.ffon[0] = Obj("web") with children:
+        //     [0] Obj("skip <link>#main</link>")   ← link row
+        //     [1] Str("<id>main</id>Main content")  ← target row
+        let mut provider = FfonElement::new_obj("web");
+        let link_obj = FfonElement::new_obj("skip <link>#main</link>");
+        let target_str = FfonElement::new_str("<id>main</id>Main content");
+        provider.as_obj_mut().unwrap().push(link_obj);
+        provider.as_obj_mut().unwrap().push(target_str);
+
+        let mut r = AppRenderer::new();
+        r.ffon = vec![provider];
+        // Position cursor on the link row: [provider=0, child=0]
+        let mut id = IdArray::new();
+        id.push(0);
+        id.push(0);
+        r.current_id = id;
+
+        let navigated = navigate_right_raw(&mut r);
+        assert!(navigated, "navigate_right_raw should return true for a fragment link");
+        // Cursor should now be on the target row [0, 1]
+        assert_eq!(r.current_id.last(), Some(1), "cursor should point to target at index 1");
+    }
+
+    #[test]
+    fn navigate_right_raw_unresolved_fragment_returns_false() {
+        // Fragment link pointing to a non-existent id → cursor stays, returns false
+        let mut provider = FfonElement::new_obj("web");
+        provider.as_obj_mut().unwrap().push(FfonElement::new_obj("go <link>#nowhere</link>"));
+
+        let mut r = AppRenderer::new();
+        r.ffon = vec![provider];
+        let mut id = IdArray::new();
+        id.push(0);
+        id.push(0);
+        r.current_id = id.clone();
+
+        let navigated = navigate_right_raw(&mut r);
+        assert!(!navigated, "unresolved fragment should return false");
+        assert_eq!(r.current_id, id, "cursor should be unchanged");
     }
 }

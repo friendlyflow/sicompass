@@ -24,6 +24,7 @@ use chromiumoxide::cdp::browser_protocol::page::AddScriptToEvaluateOnNewDocument
 use futures::StreamExt as _;
 use sicompass_sdk::ffon::FfonElement;
 use sicompass_sdk::provider::Provider;
+use sicompass_sdk::tags;
 
 // ---------------------------------------------------------------------------
 // Cached page
@@ -434,11 +435,35 @@ fn fetch_html_chromium(url: &str) -> Result<String, String> {
             .await
             .map_err(|e| format!("navigation to {url} failed: {e}"))?;
 
-        page.wait_for_navigation()
-            .await
-            .map_err(|e| format!("navigation failed: {e}"))?;
+        // Wait briefly for JS-initiated redirects (e.g. consent-wall redirects).
+        // A short timeout avoids blocking 30 s on pages with no redirect.
+        let _ = tokio::time::timeout(
+            tokio::time::Duration::from_secs(3),
+            page.wait_for_navigation(),
+        ).await;
 
-        let final_url = page.url().await.ok().flatten();
+        // If we landed on a consent wall, try to auto-accept and follow back.
+        let current_url = page.url().await.ok().flatten().unwrap_or_default();
+        if is_consent_wall_str(&current_url) {
+            let accepted = try_accept_consent(&page).await;
+            if accepted {
+                let _ = tokio::time::timeout(
+                    tokio::time::Duration::from_secs(5),
+                    page.wait_for_navigation(),
+                ).await;
+            }
+            // Whether or not we auto-accepted, re-check where we are.
+            let post_url = page.url().await.ok().flatten().unwrap_or_default();
+            if is_consent_wall_str(&post_url) {
+                let _ = page.close().await;
+                return Err(format!(
+                    "Site redirected to a cookie-consent page that could not be \
+                     auto-accepted. Try visiting the site in a real browser first \
+                     to accept cookies, then reload here."
+                ));
+            }
+        }
+
         let html = page.content().await
             .map_err(|e| format!("failed to get page content: {e}"))?;
         let _ = page.close().await;
@@ -449,20 +474,38 @@ fn fetch_html_chromium(url: &str) -> Result<String, String> {
                  restricted automated access entirely."
             ));
         }
-        if let Some(u) = final_url {
-            if is_consent_wall_str(&u) {
-                return Err(format!(
-                    "Site redirected to a cookie-consent page ({}) — sicompass cannot \
-                     complete JS-based consent flows.",
-                    url::Url::parse(&u)
-                        .ok()
-                        .and_then(|p| p.host_str().map(str::to_owned))
-                        .unwrap_or(u)
-                ));
-            }
-        }
         Ok(html)
     })
+}
+
+/// Attempt to accept a GDPR consent wall on the current page by clicking a
+/// common "accept all" button. Returns `true` if a button was found and clicked.
+async fn try_accept_consent(page: &chromiumoxide::Page) -> bool {
+    let js = r#"(function() {
+        const attrSels = [
+            '[data-role="accept-all"]', '[data-testid="accept-all"]',
+            'button[id*="accept-all"]', 'button[class*="accept-all"]',
+            'button[class*="acceptAll"]', '[aria-label*="Accept all"]',
+            '[aria-label*="Alles accepteren"]',
+        ];
+        for (const sel of attrSels) {
+            const el = document.querySelector(sel);
+            if (el) { el.click(); return true; }
+        }
+        const keywords = [
+            'accept all', 'alles accepteren', 'accepteer alles',
+            'tout accepter', 'alle akzeptieren', 'alles annehmen',
+        ];
+        for (const btn of document.querySelectorAll('button, [role="button"]')) {
+            const t = btn.textContent.trim().toLowerCase();
+            if (keywords.some(k => t.includes(k))) { btn.click(); return true; }
+        }
+        return false;
+    })()"#;
+    page.evaluate(js).await
+        .ok()
+        .and_then(|r| r.into_value::<bool>().ok())
+        .unwrap_or(false)
 }
 
 fn is_consent_wall_str(url: &str) -> bool {
@@ -524,15 +567,27 @@ struct ParseCtx<'a> {
     root: Vec<FfonElement>,
     /// Open heading stack: (level, accumulated Obj). Innermost is last.
     stack: Vec<(u8, FfonElement)>,
+    /// HTML `id` attribute to attach to the next element emitted via `add_to_current`.
+    /// Set when entering a node with an `id`; cleared after the first emission.
+    pending_id: Option<String>,
 }
 
 impl<'a> ParseCtx<'a> {
     fn new(base_url: &'a str) -> Self {
-        ParseCtx { base_url, root: Vec::new(), stack: Vec::new() }
+        ParseCtx { base_url, root: Vec::new(), stack: Vec::new(), pending_id: None }
     }
 
     /// Add `elem` as a child of the current heading, or to root if no heading is open.
-    fn add_to_current(&mut self, elem: FfonElement) {
+    /// If `pending_id` is set, the `<id>` tag is prepended to the element's key/text
+    /// to mark it as the jump target for fragment links pointing to that HTML id.
+    fn add_to_current(&mut self, mut elem: FfonElement) {
+        if let Some(id) = self.pending_id.take() {
+            let prefix = tags::format_id(&id);
+            match &mut elem {
+                FfonElement::Obj(o) => o.key.insert_str(0, &prefix),
+                FfonElement::Str(s) => s.insert_str(0, &prefix),
+            }
+        }
         if let Some((_, ref mut h)) = self.stack.last_mut() {
             h.as_obj_mut().unwrap().push(elem);
         } else {
@@ -575,12 +630,33 @@ impl<'a> ParseCtx<'a> {
 
         if SKIP_TAGS.contains(&tag) { return; }
 
+        // Install any `id` attribute as a pending annotation for the first emitted element.
+        // Save and restore so sibling nodes don't inherit it.
+        let prev_id = if let Some(id) = node.value().attr("id").filter(|s| !s.is_empty()) {
+            let prev = self.pending_id.take();
+            self.pending_id = Some(id.to_owned());
+            prev
+        } else {
+            // No id on this node — leave pending_id as-is (outer container may have set it)
+            None
+        };
+        let had_own_id = node.value().attr("id").filter(|s| !s.is_empty()).is_some();
+
         // Headings push onto the stack; following content becomes their children.
+        // Headings don't go through add_to_current, so take pending_id explicitly here.
         if let Some(level) = heading_level(tag) {
             let text = collect_text(node, self.base_url);
-            if text.is_empty() { return; }
+            if text.is_empty() {
+                if had_own_id { self.pending_id = prev_id; }
+                return;
+            }
             self.pop_until_level(level);
-            self.stack.push((level, FfonElement::new_obj(text)));
+            let id_prefix = self.pending_id.take()
+                .map(|i| tags::format_id(&i))
+                .unwrap_or_default();
+            let key = format!("{id_prefix}{text}");
+            self.stack.push((level, FfonElement::new_obj(key)));
+            if had_own_id { self.pending_id = prev_id; }
             return;
         }
 
@@ -592,7 +668,11 @@ impl<'a> ParseCtx<'a> {
             }
             "ul" | "ol" => {
                 let label = if tag == "ol" { "ordered list" } else { "list" };
-                let mut list_obj = FfonElement::new_obj(label);
+                // Claim the pending_id for the list wrapper, not its first item.
+                let id_prefix = self.pending_id.take()
+                    .map(|i| tags::format_id(&i))
+                    .unwrap_or_default();
+                let mut list_obj = FfonElement::new_obj(format!("{id_prefix}{label}"));
                 let li_sel = scraper::Selector::parse("li").unwrap();
                 for (i, li) in node.select(&li_sel).enumerate() {
                     let elems = collect_elements(li, self.base_url);
@@ -645,7 +725,11 @@ impl<'a> ParseCtx<'a> {
                 }
             }
             "dl" => {
-                let mut dl_obj = FfonElement::new_obj("definition list");
+                // Claim the pending_id for the definition-list wrapper.
+                let id_prefix = self.pending_id.take()
+                    .map(|i| tags::format_id(&i))
+                    .unwrap_or_default();
+                let mut dl_obj = FfonElement::new_obj(format!("{id_prefix}definition list"));
                 let mut current_dt: Option<FfonElement> = None;
                 for child in node.children().filter_map(scraper::ElementRef::wrap) {
                     let text = collect_text(child, self.base_url);
@@ -673,6 +757,7 @@ impl<'a> ParseCtx<'a> {
                 }
             }
             t if CONTAINER_TAGS.contains(&t) => {
+                // pending_id stays installed; first emission from children will claim it.
                 self.process_children(node);
             }
             _ => {
@@ -695,7 +780,30 @@ impl<'a> ParseCtx<'a> {
                 }
             }
         }
+
+        // Restore the previously saved pending_id when this node set its own.
+        if had_own_id {
+            // If pending_id was consumed by an emission inside this node, that's correct.
+            // If nothing was emitted (e.g. empty container), discard it and restore the outer one.
+            self.pending_id = prev_id;
+        }
     }
+}
+
+/// Fetch `url` using the browser engine, parse to FFON, and return the elements.
+///
+/// This is the public entry point used by `handlers.rs` when the user navigates
+/// into a `<link>` element. JSON content is tried first; otherwise HTML is parsed.
+pub fn fetch_url_to_ffon(url: &str) -> Vec<FfonElement> {
+    let html = match fetch_html_chromium(url) {
+        Ok(h) => h,
+        Err(_) => return Vec::new(),
+    };
+    if html.is_empty() { return Vec::new(); }
+    if let Ok(elems) = sicompass_sdk::ffon::parse_json(&html) {
+        if !elems.is_empty() { return elems; }
+    }
+    html_to_ffon(&html, url)
 }
 
 /// Convert an HTML string to a flat list of FfonElements.
@@ -817,8 +925,12 @@ fn collect_table_rows(node: scraper::ElementRef, out: &mut Vec<FfonElement>) {
 
 /// Resolve a potentially relative href against the base URL.
 fn resolve_href(href: &str, base_url: &str) -> String {
-    if href.is_empty() || href.starts_with('#') {
+    if href.is_empty() {
         return String::new();
+    }
+    // Fragment-only hrefs are preserved as-is; they navigate within the current page.
+    if href.starts_with('#') {
+        return href.to_owned();
     }
     if href.contains("://") || href.starts_with("mailto:") || href.starts_with("tel:") {
         return href.to_owned();
@@ -1066,9 +1178,102 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_href_anchor_empty() {
+    fn test_resolve_href_anchor_preserved() {
+        // Fragment-only hrefs are returned as-is for in-page navigation.
         let result = resolve_href("#section", "https://example.com");
-        assert!(result.is_empty());
+        assert_eq!(result, "#section");
+    }
+
+    #[test]
+    fn test_resolve_href_anchor_complex() {
+        let result = resolve_href("#page-main-content", "https://www.hln.be/");
+        assert_eq!(result, "#page-main-content");
+    }
+
+    // ---- fragment link parsing ----
+
+    #[test]
+    fn test_fragment_link_in_p_becomes_navigable_obj() {
+        // <a href="#foo"> inside a paragraph should produce an Obj with <link>#foo</link>
+        let result = html_to_ffon(
+            "<html><body><p><a href=\"#foo\">skip to foo</a></p></body></html>",
+            "https://example.com",
+        );
+        let found = result.iter().any(|e| {
+            e.as_obj().map_or(false, |o| o.key.contains("<link>#foo</link>"))
+        });
+        assert!(found, "fragment link should become an Obj with <link>#foo</link>: {result:?}");
+    }
+
+    #[test]
+    fn test_heading_with_id_gets_id_tag() {
+        let result = html_to_ffon(
+            "<html><body><h2 id=\"bar\">Section</h2></body></html>",
+            "https://example.com",
+        );
+        let heading = result.iter().find(|e| e.as_obj().map_or(false, |o| o.key.contains("Section")));
+        assert!(heading.is_some(), "heading should exist: {result:?}");
+        let key = &heading.unwrap().as_obj().unwrap().key;
+        assert!(key.contains("<id>bar</id>"), "heading key should contain <id>bar</id>: {key}");
+    }
+
+    #[test]
+    fn test_container_with_id_propagates_to_first_child() {
+        // <main id="x"><p>hi</p></main> — main is a CONTAINER_TAG, its id
+        // should propagate to the first emitted element (the paragraph).
+        let result = html_to_ffon(
+            "<html><body><main id=\"x\"><p>hi</p></main></body></html>",
+            "https://example.com",
+        );
+        let has_id_tag = result.iter().any(|e| match e {
+            FfonElement::Str(s) => s.contains("<id>x</id>"),
+            FfonElement::Obj(o) => o.key.contains("<id>x</id>"),
+        });
+        assert!(has_id_tag, "first element inside <main id=x> should have <id>x</id>: {result:?}");
+    }
+
+    #[test]
+    fn test_ul_with_id_annotates_wrapper_not_item() {
+        let result = html_to_ffon(
+            "<html><body><ul id=\"things\"><li>a</li><li>b</li></ul></body></html>",
+            "https://example.com",
+        );
+        // The list wrapper Obj (not an li) should carry the id tag.
+        let list = result.iter().find(|e| {
+            e.as_obj().map_or(false, |o| o.key.contains("list") && o.key.contains("<id>things</id>"))
+        });
+        assert!(list.is_some(), "list wrapper should have <id>things</id>: {result:?}");
+        // Items should NOT have the id tag
+        if let Some(FfonElement::Obj(l)) = list {
+            let item_has_id = l.children.iter().any(|c| match c {
+                FfonElement::Str(s) => s.contains("<id>things</id>"),
+                FfonElement::Obj(o) => o.key.contains("<id>things</id>"),
+            });
+            assert!(!item_has_id, "list items should not have the id tag");
+        }
+    }
+
+    #[test]
+    fn test_skip_link_and_target_end_to_end() {
+        // Full skip-link scenario: <a href="#foo"> + <main id="foo">
+        let result = html_to_ffon(
+            "<html><body>\
+             <a href=\"#foo\">skip</a>\
+             <main id=\"foo\"><p>Main content</p></main>\
+             </body></html>",
+            "https://example.com",
+        );
+        // Should contain a link obj pointing to #foo
+        let has_link = result.iter().any(|e| {
+            e.as_obj().map_or(false, |o| o.key.contains("<link>#foo</link>"))
+        });
+        assert!(has_link, "should have a navigable link to #foo: {result:?}");
+        // Should contain an element tagged with <id>foo</id>
+        let has_target = result.iter().any(|e| match e {
+            FfonElement::Str(s) => s.contains("<id>foo</id>"),
+            FfonElement::Obj(o) => o.key.contains("<id>foo</id>"),
+        });
+        assert!(has_target, "should have a target element with <id>foo</id>: {result:?}");
     }
 
     // ---- is_consent_wall unit tests ----

@@ -91,6 +91,8 @@ const LINK_OPEN: &str = "<link>";
 const LINK_CLOSE: &str = "</link>";
 const IMAGE_OPEN: &str = "<image>";
 const IMAGE_CLOSE: &str = "</image>";
+const ID_OPEN: &str = "<id>";
+const ID_CLOSE: &str = "</id>";
 const BUTTON_OPEN: &str = "<button>";
 const BUTTON_CLOSE: &str = "</button>";
 const MANY_OPT_TAG: &str = "<many-opt></many-opt>";
@@ -221,6 +223,26 @@ pub fn extract_image(text: &str) -> Option<String> {
 }
 
 // ---------------------------------------------------------------------------
+// <id>...</id>
+// ---------------------------------------------------------------------------
+
+/// Returns true if `text` contains `<id>...</id>` (HTML element id metadata).
+pub fn has_id(text: &str) -> bool {
+    find_unescaped(text, ID_OPEN).is_some()
+        && find_unescaped(text, ID_CLOSE).is_some()
+}
+
+/// Extracts the id value between `<id>` and `</id>`.
+pub fn extract_id(text: &str) -> Option<String> {
+    extract_between(text, ID_OPEN, ID_OPEN.len(), ID_CLOSE).map(|s| s.to_owned())
+}
+
+/// Wraps `id` in `<id>...</id>`.
+pub fn format_id(id: &str) -> String {
+    format!("{ID_OPEN}{id}{ID_CLOSE}")
+}
+
+// ---------------------------------------------------------------------------
 // <many-opt></many-opt> / <one-opt></one-opt> prefixes
 // ---------------------------------------------------------------------------
 
@@ -297,7 +319,18 @@ pub fn strip_display(text: &str) -> String {
             .unwrap_or_else(|| unescape(text));
     }
 
-    // 3. Find the first recognized tag pair and strip it
+    // 3. <id>...</id>: metadata tag — strip the tag AND its content (id is not display text)
+    if let Some(open_pos) = find_unescaped(text, ID_OPEN) {
+        let before = &text[..open_pos];
+        let after_open = &text[open_pos + ID_OPEN.len()..];
+        let after = after_open.find(ID_CLOSE)
+            .map(|p| &after_open[p + ID_CLOSE.len()..])
+            .unwrap_or("");
+        let result = format!("{before}{after}");
+        return strip_display(&unescape(&result));
+    }
+
+    // 4. Find the first recognized tag pair and strip it
     let candidates: &[(&str, usize, &str)] = &[
         (INPUT_ALL_OPEN,         INPUT_ALL_OPEN.len(),         INPUT_ALL_CLOSE),
         (INPUT_OPEN,             INPUT_OPEN.len(),             INPUT_CLOSE),
@@ -949,5 +982,62 @@ mod tests {
             strip_display("prefix \\<b\\> <input>editable</input> suffix"),
             "prefix <b> editable suffix"
         );
+    }
+
+    // --- <id> tag ---
+
+    #[test]
+    fn test_has_id_true() {
+        assert!(has_id("<id>section-1</id>Heading"));
+    }
+
+    #[test]
+    fn test_has_id_false_no_tag() {
+        assert!(!has_id("plain text"));
+    }
+
+    #[test]
+    fn test_has_id_false_missing_close() {
+        assert!(!has_id("<id>unclosed"));
+    }
+
+    #[test]
+    fn test_extract_id() {
+        assert_eq!(extract_id("<id>page-main-content</id>Main"), Some("page-main-content".to_owned()));
+    }
+
+    #[test]
+    fn test_extract_id_no_tags() {
+        assert_eq!(extract_id("no id here"), None);
+    }
+
+    #[test]
+    fn test_format_id() {
+        assert_eq!(format_id("section"), "<id>section</id>");
+    }
+
+    #[test]
+    fn test_strip_display_id_strips_tag_and_content() {
+        // <id> content is metadata, not display text — must be stripped entirely
+        assert_eq!(strip_display("<id>page-main-content</id>Main heading"), "Main heading");
+    }
+
+    #[test]
+    fn test_strip_display_id_with_link() {
+        // id tag stripped, then link tag processed normally
+        assert_eq!(
+            strip_display("<id>foo</id>text <link>#foo</link>"),
+            "text #foo"
+        );
+    }
+
+    #[test]
+    fn test_strip_display_id_empty_content() {
+        assert_eq!(strip_display("<id></id>visible"), "visible");
+    }
+
+    #[test]
+    fn test_escaped_id_not_recognized() {
+        assert!(!has_id("\\<id>section\\</id>"));
     }
 }
