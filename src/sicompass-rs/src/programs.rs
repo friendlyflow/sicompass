@@ -15,17 +15,17 @@
 
 use crate::app_state::AppRenderer;
 use crate::plugin_loader::{NativePlugin, ScriptProvider};
-use crate::plugin_manifest::{PluginType, discover_user_plugins};
+use crate::plugin_manifest::{DiscoveredPlugin, PluginManifest, PluginType, discover_user_plugins};
 use sicompass_sdk::ffon::FfonElement;
 use sicompass_sdk::provider::Provider;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 use sicompass_filebrowser::FilebrowserProvider;
 use sicompass_settings::SettingsProvider;
 use sicompass_tutorial::TutorialProvider;
 use sicompass_chatclient::ChatClientProvider;
 use sicompass_emailclient::EmailClientProvider;
 use sicompass_webbrowser::WebbrowserProvider;
-use std::sync::{Arc, Mutex};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,6 +36,32 @@ pub type SettingEvent = (String, String); // (key, value)
 
 /// Shared queue populated by the settings `ApplyFn`.
 pub type SettingsQueue = Arc<Mutex<Vec<SettingEvent>>>;
+
+// ---------------------------------------------------------------------------
+// User plugin cache (mirrors C's s_userPlugins)
+// ---------------------------------------------------------------------------
+
+/// Cache of all discovered user plugins, populated once at startup by
+/// `load_user_plugins`. Used by `enable_provider` to hot-load user plugins
+/// at runtime without re-scanning the filesystem.
+///
+/// **Locking rule**: clone a `DiscoveredPlugin` out of the lock, drop the
+/// guard, THEN call `instantiate_user_plugin` or `register_provider`.
+/// Never hold this mutex across a call that mutates `AppRenderer`.
+static USER_PLUGIN_CACHE: OnceLock<Mutex<Vec<DiscoveredPlugin>>> = OnceLock::new();
+
+fn user_plugin_cache() -> &'static Mutex<Vec<DiscoveredPlugin>> {
+    USER_PLUGIN_CACHE.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// Seed the cache (test helper). Only the first call to `OnceLock::get_or_init`
+/// wins; tests that need a fresh cache use this to replace the contents.
+#[cfg(test)]
+pub(crate) fn _reset_user_plugin_cache(plugins: Vec<DiscoveredPlugin>) {
+    // The OnceLock may already be initialized; update the Vec inside the Mutex.
+    let cache = user_plugin_cache();
+    *cache.lock().unwrap() = plugins;
+}
 
 // ---------------------------------------------------------------------------
 // Register a provider
@@ -89,6 +115,11 @@ fn rebuild_settings_ffon(renderer: &mut AppRenderer) {
 /// settings provider is live.  Pass it to [`apply_pending_settings`] to
 /// process those events against `AppRenderer`.
 pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
+    // Run one-time migration of obsolete programsToLoad config key.
+    if let Some(path) = sicompass_sdk::platform::main_config_path() {
+        migrate_programs_to_load(&path);
+    }
+
     let queue: SettingsQueue = Arc::new(Mutex::new(Vec::new()));
     let queue_clone = Arc::clone(&queue);
 
@@ -110,7 +141,9 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
         &["alphanumerically", "chronologically"], "alphanumerically",
     );
 
-    // "Available programs:" priority section (registered before loading)
+    // "Available programs:" priority section.
+    // Built-in program checkboxes are added first; user-plugin checkboxes are
+    // added by load_user_plugins() below (after discovery).
     settings.add_priority_section("Available programs:");
     for &(name, config_key, default) in PROGRAM_ENTRIES {
         settings.add_checkbox("Available programs:", name, config_key, default);
@@ -122,38 +155,18 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
     // ---- Load enabled content providers (before registering settings) -------
     let enabled = enabled_programs();
     for name in &enabled {
-        match name.as_str() {
-            "tutorial" => {
-                register_provider(renderer, Box::new(TutorialProvider::new(&tutorial_assets_dir())));
-            }
-            "web browser" => {
-                register_provider(renderer, Box::new(WebbrowserProvider::new()));
-            }
-            "chat client" => {
-                register_provider(renderer, Box::new(ChatClientProvider::new()));
-            }
-            "email client" => {
-                register_provider(renderer, Box::new(EmailClientProvider::new()));
-            }
-            "sales demo" => {
-                register_provider(renderer, Box::new(ScriptProvider::new(
-                    "sales demo", "sales demo", sales_demo_script_path(),
-                ).with_supports_config_files(true)));
+        if let Some(p) = instantiate_builtin(name.as_str()) {
+            // sales demo needs an extra text setting
+            if name == "sales demo" {
                 settings.add_text("sales demo", "save folder (product configuration)", "saveFolder", "Downloads");
             }
-            other => {
-                eprintln!("sicompass: unknown program '{other}' — skipping");
-            }
+            register_provider(renderer, p);
+        } else {
+            eprintln!("sicompass: unknown program '{name}' — skipping");
         }
     }
 
     // ---- Register a settings section for each loaded program ---------------
-    // Only programs that actually have a provider registered get a section.
-    // Using renderer.providers (not `enabled`) as the source of truth ensures
-    // that only checked programs with a working implementation appear in settings.
-    // Use the PROGRAM_ENTRIES name (e.g. "chat client") rather than provider.name()
-    // (e.g. "chatclient") so section names are consistent across initial load and
-    // dynamic enable/disable.
     for p in renderer.providers.iter() {
         if let Some(&(entry_name, _, _)) = PROGRAM_ENTRIES.iter()
             .find(|&&(n, _, _)| name_matches_provider(n, p.name()))
@@ -174,53 +187,164 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
     queue
 }
 
-/// Discover plugins in `~/.config/sicompass/plugins/`, inject their settings
-/// entries, and register them as providers.
-fn load_user_plugins(renderer: &mut AppRenderer, settings: &mut SettingsProvider) {
-    for plugin in discover_user_plugins() {
-        let m = &plugin.manifest;
+/// Instantiate a built-in provider by display name.
+///
+/// Factory match keys use display names (e.g. `"chat client"` with a space),
+/// not internal names like `"chatclient"`. This same function is used from
+/// both `load_programs` and the `Factory` branch of `instantiate_user_plugin`.
+fn instantiate_builtin(name: &str) -> Option<Box<dyn Provider>> {
+    match name {
+        "filebrowser" => Some(Box::new(FilebrowserProvider::new())),
+        "tutorial"    => Some(Box::new(TutorialProvider::new(&tutorial_assets_dir()))),
+        "web browser" => Some(Box::new(WebbrowserProvider::new())),
+        "chat client" => Some(Box::new(ChatClientProvider::new())),
+        "email client"=> Some(Box::new(EmailClientProvider::new())),
+        "sales demo"  => Some(Box::new(ScriptProvider::new(
+            "sales demo", "sales demo", sales_demo_script_path(),
+        ).with_supports_config_files(true))),
+        _ => None,
+    }
+}
 
-        // Inject per-plugin settings into the settings provider.
-        for s in &m.settings {
-            use crate::plugin_manifest::SettingKind;
-            match s.kind {
-                SettingKind::Text => {
-                    settings.add_text(&m.display_name, &s.label, &s.key, &s.default);
-                }
-                SettingKind::Checkbox => {
-                    settings.add_checkbox(
-                        &m.display_name, &s.label, &s.key, s.default_checked,
-                    );
-                }
-                SettingKind::Radio => {
-                    let opts: Vec<&str> = s.options.iter().map(String::as_str).collect();
-                    settings.add_radio(
-                        &m.display_name, &s.label, &s.key, &opts, &s.default,
-                    );
-                }
+/// Instantiate a user plugin (Script, Native, or Factory) from its discovered manifest.
+fn instantiate_user_plugin(plugin: &DiscoveredPlugin) -> Option<Box<dyn Provider>> {
+    let m = &plugin.manifest;
+    match m.plugin_type {
+        PluginType::Native => NativePlugin::open(&plugin.entry_path)
+            .map(|p| Box::new(p) as Box<dyn Provider>),
+        PluginType::Script => Some(Box::new(ScriptProvider::new(
+            &m.name,
+            &m.display_name,
+            plugin.entry_path.clone(),
+        ).with_supports_config_files(m.supports_config_files))),
+        PluginType::Factory => instantiate_builtin(&m.name),
+    }
+}
+
+/// Inject a plugin manifest's settings entries into the settings provider.
+fn inject_plugin_settings(settings: &mut SettingsProvider, manifest: &PluginManifest) {
+    use crate::plugin_manifest::SettingKind;
+    for s in &manifest.settings {
+        match s.kind {
+            SettingKind::Text => {
+                settings.add_text(&manifest.display_name, &s.label, &s.key, &s.default);
+            }
+            SettingKind::Checkbox => {
+                settings.add_checkbox(
+                    &manifest.display_name, &s.label, &s.key, s.default_checked,
+                );
+            }
+            SettingKind::Radio => {
+                let opts: Vec<&str> = s.options.iter().map(String::as_str).collect();
+                settings.add_radio(
+                    &manifest.display_name, &s.label, &s.key, &opts, &s.default,
+                );
             }
         }
+    }
+}
+
+/// Discover plugins in `~/.config/sicompass/plugins/`, add their checkboxes to
+/// "Available programs:", and register those that are enabled.
+///
+/// Mirrors `discoverUserPlugins` + `registerProgramsSection` (user half) +
+/// the user-plugin loading loop in `programsLoad` from `src/sicompass/programs.c`.
+fn load_user_plugins(renderer: &mut AppRenderer, settings: &mut SettingsProvider) {
+    let discovered = discover_user_plugins();
+
+    // Populate the global cache so hot-enable can find manifests later.
+    *user_plugin_cache().lock().unwrap() = discovered.clone();
+
+    for plugin in &discovered {
+        let m = &plugin.manifest;
+
+        // Add the enable checkbox to "Available programs:" (same as C's registerProgramsSection).
+        let config_key = format!("enable_{}", m.name);
+        let currently_enabled = is_plugin_enabled_in_config(&m.name);
+        settings.add_checkbox("Available programs:", &m.display_name, &config_key, currently_enabled);
+
+        // Skip disabled plugins (mirrors C's isEnabledInConfig check in programsLoad).
+        if !currently_enabled {
+            continue;
+        }
+
+        // Inject per-plugin settings.
+        inject_plugin_settings(settings, m);
+
+        // Register a section in settings for this plugin.
+        settings.add_section(&m.display_name);
 
         // Construct and register the provider.
-        let provider: Option<Box<dyn Provider>> = match m.plugin_type {
-            PluginType::Native => NativePlugin::open(&plugin.entry_path)
-                .map(|p| Box::new(p) as Box<dyn Provider>),
-            PluginType::Script => Some(Box::new(ScriptProvider::new(
-                &m.name,
-                &m.display_name,
-                plugin.entry_path.clone(),
-            ).with_supports_config_files(m.supports_config_files))),
-        };
-
-        if let Some(p) = provider {
-            register_provider(renderer, p);
-        } else {
-            eprintln!(
+        match instantiate_user_plugin(plugin) {
+            Some(p) => register_provider(renderer, p),
+            None => eprintln!(
                 "sicompass: failed to load plugin '{}' from {}",
                 m.name,
                 plugin.entry_path.display()
-            );
+            ),
         }
+    }
+}
+
+/// Check whether a user plugin (by manifest `name`) is enabled in `settings.json`.
+/// Returns `false` if the file doesn't exist, the section is absent, or the key
+/// is missing (user plugins are opt-in, default disabled — matches C behavior).
+fn is_plugin_enabled_in_config(name: &str) -> bool {
+    let Some(path) = sicompass_sdk::platform::main_config_path() else {
+        return false;
+    };
+    let Ok(data) = std::fs::read_to_string(&path) else {
+        return false;
+    };
+    let Ok(root) = serde_json::from_str::<serde_json::Value>(&data) else {
+        return false;
+    };
+    let config_key = format!("enable_{}", name);
+    root.get("Available programs:")
+        .and_then(|s| s.get(&config_key))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
+/// Migrate obsolete `sicompass.programsToLoad` array to individual
+/// `Available programs:.enable_<name> = true` entries.
+///
+/// Mirrors `programs.c:422-448`. Runs once at startup; if the key is absent
+/// the function is a no-op.
+fn migrate_programs_to_load(path: &Path) {
+    let Ok(data) = std::fs::read_to_string(path) else { return; };
+    let Ok(mut root) = serde_json::from_str::<serde_json::Value>(&data) else { return; };
+
+    let programs_to_load: Vec<String> = {
+        let Some(sc) = root.get("sicompass").and_then(|v| v.as_object()) else { return; };
+        let Some(ptl) = sc.get("programsToLoad").and_then(|v| v.as_array()) else { return; };
+        ptl.iter()
+            .filter_map(|v| v.as_str().map(|s| s.to_owned()))
+            .filter(|s| !s.is_empty())
+            .collect()
+    };
+
+    // Insert enable_<name> = true into "Available programs:"
+    {
+        let available = root
+            .as_object_mut().unwrap()
+            .entry("Available programs:")
+            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+        let map = available.as_object_mut().unwrap();
+        for name in &programs_to_load {
+            let key = format!("enable_{name}");
+            map.entry(key).or_insert(serde_json::Value::Bool(true));
+        }
+    }
+
+    // Remove programsToLoad
+    if let Some(sc) = root.get_mut("sicompass").and_then(|v| v.as_object_mut()) {
+        sc.remove("programsToLoad");
+    }
+
+    // Write back
+    if let Ok(json) = serde_json::to_string_pretty(&root) {
+        let _ = std::fs::write(path, json);
     }
 }
 
@@ -244,29 +368,36 @@ fn sales_demo_script_path() -> PathBuf {
 
 /// Enable a provider by name at runtime (hot-load).
 ///
+/// Checks built-in names first, then looks up the `USER_PLUGIN_CACHE` for
+/// user-installed plugins. Mirrors C's `programsEnableProvider` + `findManifest`.
+///
 /// The new provider is inserted alphabetically by name between the filebrowser
 /// (always index 0) and settings (always last). If the current root navigation
 /// index points at or after the insertion point, it is incremented so the
 /// selection stays on the same provider.
 pub fn enable_provider(renderer: &mut AppRenderer, name: &str) {
     // Never double-load an already-registered provider.
-    // Use name_matches_provider so "chat client" matches provider.name() "chatclient".
     if renderer.providers.iter().any(|p| name_matches_provider(name, p.name())) { return; }
-    let provider: Box<dyn Provider> = match name {
-        "filebrowser" => Box::new(FilebrowserProvider::new()),
-        "tutorial"    => Box::new(TutorialProvider::new(&tutorial_assets_dir())),
-        "web browser" => Box::new(WebbrowserProvider::new()),
-        "chat client" => Box::new(ChatClientProvider::new()),
-        "email client"=> Box::new(EmailClientProvider::new()),
-        "sales demo"  => Box::new(ScriptProvider::new(
-            "sales demo", "sales demo", sales_demo_script_path(),
-        ).with_supports_config_files(true)),
-        other => {
-            eprintln!("sicompass: cannot enable unknown provider '{other}'");
+
+    // Try built-ins first.
+    if let Some(provider) = instantiate_builtin(name) {
+        insert_provider_alphabetically(renderer, provider);
+        return;
+    }
+
+    // Try user-plugin cache (clone to avoid holding the lock across provider init).
+    let cached: Option<DiscoveredPlugin> = {
+        let guard = user_plugin_cache().lock().unwrap();
+        guard.iter().find(|p| p.manifest.name == name || p.manifest.display_name == name).cloned()
+    };
+    if let Some(plugin) = cached {
+        if let Some(provider) = instantiate_user_plugin(&plugin) {
+            insert_provider_alphabetically(renderer, provider);
             return;
         }
-    };
-    insert_provider_alphabetically(renderer, provider);
+    }
+
+    eprintln!("sicompass: cannot enable unknown provider '{name}'");
 }
 
 /// Sort all currently registered providers (and their ffon entries) alphabetically
@@ -309,8 +440,7 @@ fn insert_provider_alphabetically(renderer: &mut AppRenderer, mut provider: Box<
     // Find insertion index: anywhere before settings (last).
     let settings_idx = renderer.providers.len().saturating_sub(1);
     let new_name_lower = provider.name().to_ascii_lowercase();
-    // Determine the canonical settings section name (PROGRAM_ENTRIES name, e.g. "chat client")
-    // before consuming `provider` below.
+    // Determine the canonical settings section name before consuming `provider`.
     let section_name = PROGRAM_ENTRIES.iter()
         .find(|&&(n, _, _)| name_matches_provider(n, provider.name()))
         .map(|&(n, _, _)| n.to_owned())
@@ -340,18 +470,24 @@ fn insert_provider_alphabetically(renderer: &mut AppRenderer, mut provider: Box<
 
 /// Disable and remove a provider by name.
 pub fn disable_provider(renderer: &mut AppRenderer, name: &str) {
-    // Use name_matches_provider so "chat client" matches provider.name() "chatclient".
     let Some(idx) = renderer.providers.iter().position(|p| name_matches_provider(name, p.name())) else {
         return;
     };
 
     let removed_provider_name = renderer.providers[idx].name().to_owned();
-    // Use the PROGRAM_ENTRIES canonical name for section removal (e.g. "chat client"
-    // not "chatclient") to match what was added during load or dynamic enable.
+    // Use the PROGRAM_ENTRIES canonical name for section removal when available.
+    // For user plugins, fall back to the provider name itself (which equals manifest.display_name).
     let removed_section_name = PROGRAM_ENTRIES.iter()
         .find(|&&(n, _, _)| name_matches_provider(n, &removed_provider_name))
         .map(|&(n, _, _)| n.to_owned())
-        .unwrap_or_else(|| removed_provider_name.clone());
+        .unwrap_or_else(|| {
+            // Check user plugin cache for display_name
+            let guard = user_plugin_cache().lock().unwrap();
+            guard.iter()
+                .find(|p| p.manifest.name == removed_provider_name || p.manifest.display_name == removed_provider_name)
+                .map(|p| p.manifest.display_name.clone())
+                .unwrap_or(removed_provider_name.clone())
+        });
     renderer.ffon.remove(idx);
     renderer.providers.remove(idx);
 
@@ -490,8 +626,10 @@ fn enabled_programs() -> Vec<String> {
 mod tests {
     use super::*;
     use crate::app_state::AppRenderer;
+    use crate::plugin_manifest::{PluginManifest, PluginType};
     use sicompass_sdk::ffon::FfonElement;
     use sicompass_sdk::provider::Provider;
+    use std::io::Write;
 
     struct MockProv { name: String }
     impl MockProv { fn new(n: &str) -> Self { MockProv { name: n.to_owned() } } }
@@ -625,7 +763,6 @@ mod tests {
         register_provider(&mut r, Box::new(MockProv::new("filebrowser")));
         register_provider(&mut r, Box::new(MockProv::new("settings")));
         insert_provider_alphabetically(&mut r, Box::new(MockProv::new("tutorial")));
-        // Expected: filebrowser, tutorial, settings
         assert_eq!(r.providers.len(), 3);
         assert_eq!(r.providers[0].name(), "filebrowser");
         assert_eq!(r.providers[1].name(), "tutorial");
@@ -640,7 +777,6 @@ mod tests {
         register_provider(&mut r, Box::new(MockProv::new("settings")));
         insert_provider_alphabetically(&mut r, Box::new(MockProv::new("chat client")));
         insert_provider_alphabetically(&mut r, Box::new(MockProv::new("email client")));
-        // Expected: chat client, email client, filebrowser, tutorial, settings
         assert_eq!(r.providers.len(), 5);
         assert_eq!(r.providers[0].name(), "chat client");
         assert_eq!(r.providers[1].name(), "email client");
@@ -655,12 +791,9 @@ mod tests {
         register_provider(&mut r, Box::new(MockProv::new("filebrowser")));
         register_provider(&mut r, Box::new(MockProv::new("tutorial")));
         register_provider(&mut r, Box::new(MockProv::new("settings")));
-        // Simulate user navigated inside tutorial (depth 2): current_id = [1, 3]
-        r.current_id.set_last(1); // root → tutorial (index 1)
-        r.current_id.push(3);     // navigated one level deeper
+        r.current_id.set_last(1);
+        r.current_id.push(3);
         insert_provider_alphabetically(&mut r, Box::new(MockProv::new("chat client")));
-        // chat client inserts at index 1, tutorial shifts to index 2
-        // Root index (depth 0) must be incremented; deeper index (depth 1) must be unchanged
         assert_eq!(r.current_id.get(0), Some(2));
         assert_eq!(r.current_id.get(1), Some(3));
     }
@@ -671,9 +804,7 @@ mod tests {
         register_provider(&mut r, Box::new(MockProv::new("filebrowser")));
         register_provider(&mut r, Box::new(MockProv::new("chat client")));
         register_provider(&mut r, Box::new(MockProv::new("settings")));
-        // Stay at filebrowser (index 0) — AppRenderer::new() already sets current_id to [0]
         insert_provider_alphabetically(&mut r, Box::new(MockProv::new("tutorial")));
-        // tutorial inserts at index 2, filebrowser stays at index 0
         assert_eq!(r.current_id.get(0), Some(0));
     }
 
@@ -738,5 +869,101 @@ mod tests {
         apply_setting(&mut r, "unknownKey", "someValue", false);
         assert_eq!(r.pending_maximized, None);
         assert_eq!(r.palette_theme, crate::app_state::PaletteTheme::Dark);
+    }
+
+    // --- migrate_programs_to_load ---
+
+    #[test]
+    fn migrate_programs_to_load_creates_enable_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, r#"{
+            "sicompass": {
+                "programsToLoad": ["tutorial", "web browser"],
+                "colorScheme": "dark"
+            }
+        }"#).unwrap();
+
+        migrate_programs_to_load(&path);
+
+        let data = std::fs::read_to_string(&path).unwrap();
+        let root: serde_json::Value = serde_json::from_str(&data).unwrap();
+
+        // enable keys should be set
+        let available = root.get("Available programs:").unwrap();
+        assert_eq!(available.get("enable_tutorial").unwrap().as_bool(), Some(true));
+        assert_eq!(available.get("enable_web browser").unwrap().as_bool(), Some(true));
+
+        // programsToLoad should be removed
+        assert!(root["sicompass"].get("programsToLoad").is_none());
+        // colorScheme should still be present
+        assert_eq!(root["sicompass"]["colorScheme"].as_str(), Some("dark"));
+    }
+
+    #[test]
+    fn migrate_programs_to_load_no_programs_to_load_is_noop() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let original = r#"{"sicompass":{"colorScheme":"dark"}}"#;
+        std::fs::write(&path, original).unwrap();
+
+        migrate_programs_to_load(&path);
+
+        let data = std::fs::read_to_string(&path).unwrap();
+        // File should be unchanged (no programsToLoad key means no migration needed)
+        assert!(data.contains("colorScheme"));
+        assert!(!data.contains("Available programs:"));
+    }
+
+    // --- enable_provider with user plugin cache ---
+
+    fn make_test_manifest(name: &str) -> PluginManifest {
+        PluginManifest {
+            name: name.to_owned(),
+            display_name: name.to_owned(),
+            plugin_type: PluginType::Script,
+            entry: "plugin.ts".to_owned(),
+            supports_config_files: false,
+            settings: vec![],
+        }
+    }
+
+    fn make_discovered_plugin(name: &str) -> DiscoveredPlugin {
+        DiscoveredPlugin {
+            manifest: make_test_manifest(name),
+            entry_path: PathBuf::from("/nonexistent/plugin.ts"),
+        }
+    }
+
+    #[test]
+    fn enable_provider_unknown_name_logs_and_returns() {
+        let mut r = AppRenderer::new();
+        // Seed empty cache so we don't accidentally pick up real plugins
+        _reset_user_plugin_cache(vec![]);
+        register_provider(&mut r, Box::new(MockProv::new("settings")));
+        let len_before = r.providers.len();
+        enable_provider(&mut r, "completely-unknown-plugin");
+        // No provider should be added (ScriptProvider init would fail loading
+        // /nonexistent/plugin.ts, but with an empty cache the early return fires first)
+        assert_eq!(r.providers.len(), len_before);
+    }
+
+    #[test]
+    fn disable_then_reenable_user_plugin_via_cache() {
+        // This test validates that enable_provider finds the user plugin in the cache.
+        // ScriptProvider doesn't actually run `bun` in tests (init() is a no-op,
+        // fetch() calls bun which will fail silently returning []).
+        let mut r = AppRenderer::new();
+        let plugin = make_discovered_plugin("my-demo");
+        _reset_user_plugin_cache(vec![plugin]);
+
+        // Pre-register a settings sentinel at the end
+        register_provider(&mut r, Box::new(MockProv::new("settings")));
+        let before = r.providers.len();
+
+        enable_provider(&mut r, "my-demo");
+        // ScriptProvider is created (even if bun fails, the provider object is inserted)
+        assert_eq!(r.providers.len(), before + 1);
+        assert!(r.providers.iter().any(|p| p.name() == "my-demo"));
     }
 }

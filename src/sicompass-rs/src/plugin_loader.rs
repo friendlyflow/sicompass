@@ -16,13 +16,14 @@
 //! ## Script providers
 //!
 //! A script provider is a TypeScript/JavaScript file executed via `bun run`.
-//! The script receives subcommands on `argv`: `fetch <path>`,
-//! `commit <path> <old> <new>`, `getcommands`, etc.  JSON is written to
-//! stdout.  [`ScriptProvider`] implements [`Provider`] by spawning the
-//! interpreter and parsing the output.
+//! The script receives subcommands on `argv`: `<path>` (fetch), `commit`,
+//! `createDirectory`, `createFile`, `deleteItem`, `copyItem`, `commands`,
+//! `handleCommand`, `commandListItems`, `executeCommand`, `deepSearch`.
+//! JSON is written to stdout.  [`ScriptProvider`] implements [`Provider`] by
+//! spawning the interpreter and parsing the output.
 
 use sicompass_sdk::ffon::FfonElement;
-use sicompass_sdk::provider::Provider;
+use sicompass_sdk::provider::{ListItem, Provider, SearchResultItem};
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::path::PathBuf;
@@ -56,6 +57,21 @@ struct FfonElementC {
     data: *mut std::ffi::c_void,
 }
 
+/// Mirror of C's `ProviderListItem` (sdk/include/provider_interface.h:20-23).
+#[repr(C)]
+struct ProviderListItemC {
+    label: *mut c_char,
+    data: *mut c_char,
+}
+
+/// Mirror of C's `SearchResultItem` (sdk/include/provider_interface.h:11-15).
+#[repr(C)]
+struct SearchResultItemC {
+    label: *mut c_char,
+    breadcrumb: *mut c_char,
+    nav_path: *mut c_char,
+}
+
 /// Convert a `*mut *mut FfonElementC` array into a Rust `Vec<FfonElement>`.
 ///
 /// # Safety
@@ -71,45 +87,61 @@ unsafe fn c_elements_to_rust(ptr: *mut *mut FfonElementC, count: c_int) -> Vec<F
         if elem_ptr.is_null() {
             continue;
         }
-        let elem = unsafe { &*elem_ptr };
-        if elem.element_type == FfonTypeC::Object as u32 {
-            let obj_ptr = elem.data as *mut FfonObjectC;
-            if obj_ptr.is_null() {
-                continue;
-            }
-            let obj = unsafe { &*obj_ptr };
-            let key = if obj.key.is_null() {
-                String::new()
-            } else {
-                unsafe { CStr::from_ptr(obj.key) }
-                    .to_string_lossy()
-                    .into_owned()
-            };
-            let children = unsafe { c_elements_to_rust(obj.elements, obj.count) };
-            let mut rust_obj = FfonElement::new_obj(&key);
-            for child in children {
-                rust_obj.as_obj_mut().unwrap().push(child);
-            }
-            out.push(rust_obj);
-        } else {
-            // FFON_STRING
-            let s = if elem.data.is_null() {
-                String::new()
-            } else {
-                unsafe { CStr::from_ptr(elem.data as *const c_char) }
-                    .to_string_lossy()
-                    .into_owned()
-            };
-            out.push(FfonElement::Str(s));
+        if let Some(elem) = unsafe { c_element_to_rust(elem_ptr) } {
+            out.push(elem);
         }
     }
     out
 }
 
-/// Mirror of C's `ProviderOpsC` vtable that native plugins export.
+/// Convert a single `*mut FfonElementC` into a Rust `FfonElement`.
 ///
-/// All function pointers except `name` and `display_name` may be null,
-/// which means "not supported".
+/// Returns `None` if `ptr` is null.
+///
+/// # Safety
+/// `ptr` must be a valid, non-null `FfonElementC` pointer.
+unsafe fn c_element_to_rust(ptr: *mut FfonElementC) -> Option<FfonElement> {
+    if ptr.is_null() {
+        return None;
+    }
+    let elem = unsafe { &*ptr };
+    if elem.element_type == FfonTypeC::Object as u32 {
+        let obj_ptr = elem.data as *mut FfonObjectC;
+        if obj_ptr.is_null() {
+            return None;
+        }
+        let obj = unsafe { &*obj_ptr };
+        let key = if obj.key.is_null() {
+            String::new()
+        } else {
+            unsafe { CStr::from_ptr(obj.key) }
+                .to_string_lossy()
+                .into_owned()
+        };
+        let children = unsafe { c_elements_to_rust(obj.elements, obj.count) };
+        let mut rust_obj = FfonElement::new_obj(&key);
+        for child in children {
+            rust_obj.as_obj_mut().unwrap().push(child);
+        }
+        Some(rust_obj)
+    } else {
+        // FFON_STRING
+        let s = if elem.data.is_null() {
+            String::new()
+        } else {
+            unsafe { CStr::from_ptr(elem.data as *const c_char) }
+                .to_string_lossy()
+                .into_owned()
+        };
+        Some(FfonElement::Str(s))
+    }
+}
+
+/// Mirror of C's `ProviderOps` vtable that native plugins export.
+///
+/// Field order and types MUST match `ProviderOps` in
+/// `sdk/include/provider_interface.h` exactly — `#[repr(C)]` layout is
+/// position-based, so any divergence corrupts function-pointer reads.
 #[repr(C)]
 pub struct ProviderOpsC {
     pub name: *const c_char,
@@ -134,19 +166,66 @@ pub struct ProviderOpsC {
         unsafe extern "C" fn(path: *const c_char, name: *const c_char) -> bool,
     >,
 
-    pub create_file:
-        Option<unsafe extern "C" fn(path: *const c_char, name: *const c_char) -> bool>,
+    pub create_file: Option<
+        unsafe extern "C" fn(path: *const c_char, name: *const c_char) -> bool,
+    >,
 
-    pub delete_item:
-        Option<unsafe extern "C" fn(path: *const c_char, name: *const c_char) -> bool>,
+    pub delete_item: Option<
+        unsafe extern "C" fn(path: *const c_char, name: *const c_char) -> bool,
+    >,
+
+    /// `bool (*copyItem)(const char *srcDir, const char *srcName, const char *destDir, const char *destName)`
+    pub copy_item: Option<
+        unsafe extern "C" fn(
+            src_dir: *const c_char,
+            src_name: *const c_char,
+            dest_dir: *const c_char,
+            dest_name: *const c_char,
+        ) -> bool,
+    >,
 
     /// `const char** (*getCommands)(int *outCount)`
-    pub get_commands:
-        Option<unsafe extern "C" fn(out_count: *mut c_int) -> *mut *const c_char>,
+    pub get_commands: Option<
+        unsafe extern "C" fn(out_count: *mut c_int) -> *mut *const c_char,
+    >,
 
-    /// `const char** (*getMeta)(int *outCount)`
-    pub get_meta:
-        Option<unsafe extern "C" fn(out_count: *mut c_int) -> *mut *const c_char>,
+    /// `FfonElement* (*handleCommand)(const char *path, const char *command, const char *elementKey, int elementType, char *errorMsg, int errorMsgSize)`
+    pub handle_command: Option<
+        unsafe extern "C" fn(
+            path: *const c_char,
+            command: *const c_char,
+            element_key: *const c_char,
+            element_type: c_int,
+            error_msg: *mut c_char,
+            error_msg_size: c_int,
+        ) -> *mut FfonElementC,
+    >,
+
+    /// `ProviderListItem* (*getCommandListItems)(const char *path, const char *command, int *outCount)`
+    pub get_command_list_items: Option<
+        unsafe extern "C" fn(
+            path: *const c_char,
+            command: *const c_char,
+            out_count: *mut c_int,
+        ) -> *mut ProviderListItemC,
+    >,
+
+    /// `bool (*executeCommand)(const char *path, const char *command, const char *selection)`
+    pub execute_command: Option<
+        unsafe extern "C" fn(
+            path: *const c_char,
+            command: *const c_char,
+            selection: *const c_char,
+        ) -> bool,
+    >,
+
+    /// `SearchResultItem* (*collectDeepSearchItems)(const char *rootPath, int *outCount)`
+    pub collect_deep_search_items: Option<
+        unsafe extern "C" fn(
+            root_path: *const c_char,
+            out_count: *mut c_int,
+        ) -> *mut SearchResultItemC,
+    >,
 }
 
 // Safety: ProviderOpsC is a read-only vtable living in the loaded .so.
@@ -315,6 +394,16 @@ impl Provider for NativePlugin {
         unsafe { f(c_path.as_ptr(), c_name.as_ptr()) }
     }
 
+    fn copy_item(&mut self, src_dir: &str, src_name: &str, dest_dir: &str, dest_name: &str) -> bool {
+        let ops = unsafe { &*self.ops };
+        let Some(f) = ops.copy_item else { return false; };
+        let c_src_dir = CString::new(src_dir).unwrap_or_default();
+        let c_src_name = CString::new(src_name).unwrap_or_default();
+        let c_dest_dir = CString::new(dest_dir).unwrap_or_default();
+        let c_dest_name = CString::new(dest_name).unwrap_or_default();
+        unsafe { f(c_src_dir.as_ptr(), c_src_name.as_ptr(), c_dest_dir.as_ptr(), c_dest_name.as_ptr()) }
+    }
+
     fn commands(&self) -> Vec<String> {
         let ops = unsafe { &*self.ops };
         let Some(f) = ops.get_commands else { return Vec::new(); };
@@ -331,20 +420,109 @@ impl Provider for NativePlugin {
             .collect()
     }
 
-    fn meta(&self) -> Vec<String> {
+    fn handle_command(
+        &mut self,
+        cmd: &str,
+        elem_key: &str,
+        elem_type: i32,
+        error: &mut String,
+    ) -> Option<FfonElement> {
         let ops = unsafe { &*self.ops };
-        let Some(f) = ops.get_meta else { return Vec::new(); };
+        let Some(f) = ops.handle_command else { return None; };
+        let c_path = CString::new(self.current_path.as_str()).unwrap_or_default();
+        let c_cmd = CString::new(cmd).unwrap_or_default();
+        let c_key = CString::new(elem_key).unwrap_or_default();
+        let mut err_buf = [0u8; 1024];
+        let result_ptr = unsafe {
+            f(
+                c_path.as_ptr(),
+                c_cmd.as_ptr(),
+                c_key.as_ptr(),
+                elem_type as c_int,
+                err_buf.as_mut_ptr() as *mut c_char,
+                err_buf.len() as c_int,
+            )
+        };
+        if err_buf[0] != 0 {
+            let err_str = unsafe { CStr::from_ptr(err_buf.as_ptr() as *const c_char) }
+                .to_string_lossy()
+                .into_owned();
+            error.push_str(&err_str);
+            return None;
+        }
+        unsafe { c_element_to_rust(result_ptr) }
+    }
+
+    fn command_list_items(&self, cmd: &str) -> Vec<ListItem> {
+        let ops = unsafe { &*self.ops };
+        let Some(f) = ops.get_command_list_items else { return vec![]; };
+        let c_path = CString::new(self.current_path.as_str()).unwrap_or_default();
+        let c_cmd = CString::new(cmd).unwrap_or_default();
         let mut count: c_int = 0;
-        let ptr = unsafe { f(&mut count) };
+        let ptr = unsafe { f(c_path.as_ptr(), c_cmd.as_ptr(), &mut count) };
         if ptr.is_null() || count <= 0 {
-            return Vec::new();
+            return vec![];
         }
         let slice = unsafe { std::slice::from_raw_parts(ptr, count as usize) };
         slice
             .iter()
-            .filter(|&&p| !p.is_null())
-            .map(|&p| unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned())
+            .map(|item| {
+                let label = if item.label.is_null() {
+                    String::new()
+                } else {
+                    unsafe { CStr::from_ptr(item.label) }.to_string_lossy().into_owned()
+                };
+                let data = if item.data.is_null() {
+                    String::new()
+                } else {
+                    unsafe { CStr::from_ptr(item.data) }.to_string_lossy().into_owned()
+                };
+                ListItem { label, data }
+            })
             .collect()
+    }
+
+    fn execute_command(&mut self, cmd: &str, selection: &str) -> bool {
+        let ops = unsafe { &*self.ops };
+        let Some(f) = ops.execute_command else { return false; };
+        let c_path = CString::new(self.current_path.as_str()).unwrap_or_default();
+        let c_cmd = CString::new(cmd).unwrap_or_default();
+        let c_sel = CString::new(selection).unwrap_or_default();
+        unsafe { f(c_path.as_ptr(), c_cmd.as_ptr(), c_sel.as_ptr()) }
+    }
+
+    fn collect_deep_search_items(&self) -> Option<Vec<SearchResultItem>> {
+        let ops = unsafe { &*self.ops };
+        let Some(f) = ops.collect_deep_search_items else { return None; };
+        let c_path = CString::new(self.current_path.as_str()).unwrap_or_default();
+        let mut count: c_int = 0;
+        let ptr = unsafe { f(c_path.as_ptr(), &mut count) };
+        if ptr.is_null() || count <= 0 {
+            return Some(vec![]);
+        }
+        let slice = unsafe { std::slice::from_raw_parts(ptr, count as usize) };
+        let items = slice
+            .iter()
+            .map(|item| {
+                let label = if item.label.is_null() {
+                    String::new()
+                } else {
+                    unsafe { CStr::from_ptr(item.label) }.to_string_lossy().into_owned()
+                };
+                let breadcrumb = if item.breadcrumb.is_null() {
+                    String::new()
+                } else {
+                    unsafe { CStr::from_ptr(item.breadcrumb) }.to_string_lossy().into_owned()
+                };
+                let nav_path = if item.nav_path.is_null() {
+                    String::new()
+                } else {
+                    unsafe { CStr::from_ptr(item.nav_path) }.to_string_lossy().into_owned()
+                };
+                SearchResultItem { label, breadcrumb, nav_path }
+            })
+            .collect();
+        Some(items)
     }
 }
 
@@ -354,8 +532,11 @@ impl Provider for NativePlugin {
 
 /// A provider backed by a `bun run <script>` subprocess.
 ///
-/// The script receives subcommands on argv (e.g. `fetch /`, `getcommands`).
-/// JSON arrays / strings are written to stdout.
+/// The script receives subcommands on argv matching the C vocabulary
+/// (`createDirectory`, `createFile`, `deleteItem`, `copyItem`, `commands`,
+/// `handleCommand`, `commandListItems`, `executeCommand`, `deepSearch`).
+/// A bare path with no subcommand is the fetch call.
+/// JSON is written to stdout.
 ///
 /// Mirrors `scriptProviderCreate()` in `lib/lib_provider/src/provider.c`.
 pub struct ScriptProvider {
@@ -422,56 +603,78 @@ impl ScriptProvider {
     /// Parse a JSON string into FFON elements.
     ///
     /// Accepts either a plain JSON array (backward compat) or an object with a
-    /// `"children"` array plus optional `"dashboardImage"` string metadata —
+    /// `"children"` array plus optional `"dashboardImage"` and `"meta"` fields —
     /// matching the C ScriptProvider's protocol.
     ///
-    /// Returns `(elements, dashboard_image_path)`.
-    fn parse_json_output(json: &str) -> (Vec<FfonElement>, String) {
+    /// Returns `(elements, dashboard_image_path, meta_element)`.
+    fn parse_json_output(json: &str) -> (Vec<FfonElement>, String, Option<FfonElement>) {
         let Ok(val) = serde_json::from_str::<serde_json::Value>(json) else {
-            return (Vec::new(), String::new());
+            return (Vec::new(), String::new(), None);
         };
         match val {
             serde_json::Value::Array(arr) => {
-                let elems = arr.into_iter().filter_map(json_value_to_ffon).collect();
-                (elems, String::new())
+                let elems = arr.iter().map(parse_ffon_json_value).collect();
+                (elems, String::new(), None)
             }
             serde_json::Value::Object(ref map) => {
                 let children = map
                     .get("children")
                     .and_then(|v| v.as_array())
-                    .map(|arr| arr.iter().cloned().filter_map(json_value_to_ffon).collect())
+                    .map(|arr| arr.iter().map(parse_ffon_json_value).collect())
                     .unwrap_or_default();
                 let dashboard = map
                     .get("dashboardImage")
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_owned();
-                (children, dashboard)
+                let meta = map.get("meta").map(parse_ffon_json_value);
+                (children, dashboard, meta)
             }
-            _ => (Vec::new(), String::new()),
+            _ => (Vec::new(), String::new(), None),
         }
     }
 }
 
-fn json_value_to_ffon(v: serde_json::Value) -> Option<FfonElement> {
+/// Port of C's `parseJsonValue` from `lib/lib_ffon/src/ffon.c`.
+///
+/// Converts any JSON value to an `FfonElement`:
+/// - null → `Str("null")`
+/// - bool → `Str("true")` / `Str("false")`
+/// - number → `Str("<decimal representation>")`
+/// - string → `Str(s)`
+/// - array → `Obj("array", [children...])`
+/// - object → `Obj(first_key, [children if first_value is array])`
+/// - empty object → `Str("")`
+fn parse_ffon_json_value(v: &serde_json::Value) -> FfonElement {
     match v {
-        serde_json::Value::String(s) => Some(FfonElement::Str(s)),
-        serde_json::Value::Object(map) => {
-            // Each object should have exactly one key whose value is an array.
-            let (key, children_val) = map.into_iter().next()?;
-            let children: Vec<FfonElement> = match children_val {
-                serde_json::Value::Array(arr) => {
-                    arr.into_iter().filter_map(json_value_to_ffon).collect()
-                }
-                _ => Vec::new(),
-            };
-            let mut obj = FfonElement::new_obj(&key);
-            for child in children {
-                obj.as_obj_mut().unwrap().push(child);
-            }
-            Some(obj)
+        serde_json::Value::Null => FfonElement::Str("null".to_owned()),
+        serde_json::Value::Bool(b) => {
+            FfonElement::Str(if *b { "true" } else { "false" }.to_owned())
         }
-        _ => None,
+        serde_json::Value::Number(n) => FfonElement::Str(n.to_string()),
+        serde_json::Value::String(s) => FfonElement::Str(s.clone()),
+        serde_json::Value::Array(arr) => {
+            let mut obj = FfonElement::new_obj("array");
+            for item in arr {
+                obj.as_obj_mut().unwrap().push(parse_ffon_json_value(item));
+            }
+            obj
+        }
+        serde_json::Value::Object(map) => {
+            // Use first key-value pair (C behavior: only first entry is used)
+            if let Some((key, val)) = map.iter().next() {
+                let mut obj = FfonElement::new_obj(key);
+                if let serde_json::Value::Array(arr) = val {
+                    for item in arr {
+                        obj.as_obj_mut().unwrap().push(parse_ffon_json_value(item));
+                    }
+                }
+                obj
+            } else {
+                // Empty object → empty string (matches C)
+                FfonElement::Str(String::new())
+            }
+        }
     }
 }
 
@@ -493,8 +696,14 @@ impl Provider for ScriptProvider {
         let path = self.current_path.clone();
         match self.run(&[&path]) {
             Some(json) => {
-                let (elems, dashboard) = Self::parse_json_output(&json);
+                let (mut elems, dashboard, meta) = Self::parse_json_output(&json);
                 self.dashboard_image = dashboard;
+                // Prepend meta element if provided and there are children (matches C).
+                if !elems.is_empty() {
+                    if let Some(meta_elem) = meta {
+                        elems.insert(0, meta_elem);
+                    }
+                }
                 elems
             }
             None => Vec::new(),
@@ -548,23 +757,102 @@ impl Provider for ScriptProvider {
 
     fn create_directory(&mut self, name: &str) -> bool {
         let path = self.current_path.clone();
-        self.run(&["create-dir", &path, name])
+        self.run(&["createDirectory", &path, name])
             .map(|out| Self::script_response_ok(&out))
             .unwrap_or(false)
     }
 
     fn create_file(&mut self, name: &str) -> bool {
         let path = self.current_path.clone();
-        self.run(&["create-file", &path, name])
+        self.run(&["createFile", &path, name])
             .map(|out| Self::script_response_ok(&out))
             .unwrap_or(false)
     }
 
     fn delete_item(&mut self, name: &str) -> bool {
         let path = self.current_path.clone();
-        self.run(&["delete", &path, name])
+        self.run(&["deleteItem", &path, name])
             .map(|out| Self::script_response_ok(&out))
             .unwrap_or(false)
+    }
+
+    fn copy_item(&mut self, src_dir: &str, src_name: &str, dest_dir: &str, dest_name: &str) -> bool {
+        self.run(&["copyItem", src_dir, src_name, dest_dir, dest_name])
+            .map(|out| Self::script_response_ok(&out))
+            .unwrap_or(false)
+    }
+
+    fn commands(&self) -> Vec<String> {
+        let Some(json) = self.run(&["commands"]) else {
+            return Vec::new();
+        };
+        serde_json::from_str::<Vec<String>>(&json).unwrap_or_default()
+    }
+
+    fn handle_command(
+        &mut self,
+        cmd: &str,
+        elem_key: &str,
+        elem_type: i32,
+        error: &mut String,
+    ) -> Option<FfonElement> {
+        let path = self.current_path.clone();
+        let type_str = elem_type.to_string();
+        let output = self.run(&["handleCommand", &path, cmd, elem_key, &type_str])?;
+        let Ok(val) = serde_json::from_str::<serde_json::Value>(&output) else {
+            return None;
+        };
+        if let serde_json::Value::Object(ref map) = val {
+            if let Some(err_val) = map.get("error") {
+                *error = err_val.as_str().unwrap_or("unknown error").to_owned();
+                return None;
+            }
+        }
+        Some(parse_ffon_json_value(&val))
+    }
+
+    fn command_list_items(&self, cmd: &str) -> Vec<ListItem> {
+        let path = self.current_path.clone();
+        let Some(json) = self.run(&["commandListItems", &path, cmd]) else {
+            return vec![];
+        };
+        let Ok(serde_json::Value::Array(arr)) = serde_json::from_str::<serde_json::Value>(&json) else {
+            return vec![];
+        };
+        arr.into_iter()
+            .filter_map(|v| {
+                let obj = v.as_object()?.clone();
+                let label = obj.get("label").and_then(|v| v.as_str()).unwrap_or("").to_owned();
+                let data = obj.get("data").and_then(|v| v.as_str()).unwrap_or("").to_owned();
+                Some(ListItem { label, data })
+            })
+            .collect()
+    }
+
+    fn execute_command(&mut self, cmd: &str, selection: &str) -> bool {
+        let path = self.current_path.clone();
+        self.run(&["executeCommand", &path, cmd, selection])
+            .map(|out| Self::script_response_ok(&out))
+            .unwrap_or(false)
+    }
+
+    fn collect_deep_search_items(&self) -> Option<Vec<SearchResultItem>> {
+        let path = self.current_path.clone();
+        let json = self.run(&["deepSearch", &path])?;
+        let Ok(serde_json::Value::Array(arr)) = serde_json::from_str::<serde_json::Value>(&json) else {
+            return None;
+        };
+        let items = arr
+            .into_iter()
+            .filter_map(|v| {
+                let obj = v.as_object()?.clone();
+                let label = obj.get("label").and_then(|v| v.as_str()).unwrap_or("").to_owned();
+                let breadcrumb = obj.get("breadcrumb").and_then(|v| v.as_str()).unwrap_or("").to_owned();
+                let nav_path = obj.get("navPath").and_then(|v| v.as_str()).unwrap_or("").to_owned();
+                Some(SearchResultItem { label, breadcrumb, nav_path })
+            })
+            .collect();
+        Some(items)
     }
 
     fn create_element(&mut self, element_key: &str) -> Option<FfonElement> {
@@ -589,7 +877,7 @@ impl Provider for ScriptProvider {
         };
 
         if let Some(json) = self.run(&[&child_path]) {
-            let (children, _) = Self::parse_json_output(&json);
+            let (children, _, _) = Self::parse_json_output(&json);
             if let Some(obj_inner) = obj.as_obj_mut() {
                 for child in children {
                     obj_inner.push(child);
@@ -598,20 +886,6 @@ impl Provider for ScriptProvider {
         }
 
         Some(obj)
-    }
-
-    fn commands(&self) -> Vec<String> {
-        let Some(json) = self.run(&["getcommands"]) else {
-            return Vec::new();
-        };
-        serde_json::from_str::<Vec<String>>(&json).unwrap_or_default()
-    }
-
-    fn meta(&self) -> Vec<String> {
-        let Some(json) = self.run(&["getmeta"]) else {
-            return Vec::new();
-        };
-        serde_json::from_str::<Vec<String>>(&json).unwrap_or_default()
     }
 }
 
@@ -623,12 +897,12 @@ impl Provider for ScriptProvider {
 mod tests {
     use super::*;
 
-    // --- json_value_to_ffon ---
+    // --- parse_ffon_json_value ---
 
     #[test]
     fn json_string_becomes_ffon_string() {
         let v = serde_json::Value::String("hello".to_owned());
-        let elem = json_value_to_ffon(v).unwrap();
+        let elem = parse_ffon_json_value(&v);
         assert!(matches!(elem, FfonElement::Str(s) if s == "hello"));
     }
 
@@ -636,20 +910,51 @@ mod tests {
     fn json_object_becomes_ffon_obj() {
         let json = r#"{"mykey": ["child1", "child2"]}"#;
         let v: serde_json::Value = serde_json::from_str(json).unwrap();
-        let elem = json_value_to_ffon(v).unwrap();
+        let elem = parse_ffon_json_value(&v);
         let obj = elem.as_obj().unwrap();
         assert_eq!(obj.key, "mykey");
         assert_eq!(obj.children.len(), 2);
     }
 
     #[test]
-    fn json_null_returns_none() {
-        assert!(json_value_to_ffon(serde_json::Value::Null).is_none());
+    fn json_null_becomes_str_null() {
+        let elem = parse_ffon_json_value(&serde_json::Value::Null);
+        assert!(matches!(elem, FfonElement::Str(s) if s == "null"));
     }
 
     #[test]
-    fn json_number_returns_none() {
-        assert!(json_value_to_ffon(serde_json::Value::Number(42.into())).is_none());
+    fn json_number_becomes_str() {
+        let elem = parse_ffon_json_value(&serde_json::Value::Number(42.into()));
+        assert!(matches!(elem, FfonElement::Str(s) if s == "42"));
+    }
+
+    #[test]
+    fn json_bool_true_becomes_str() {
+        let elem = parse_ffon_json_value(&serde_json::Value::Bool(true));
+        assert!(matches!(elem, FfonElement::Str(s) if s == "true"));
+    }
+
+    #[test]
+    fn json_bool_false_becomes_str() {
+        let elem = parse_ffon_json_value(&serde_json::Value::Bool(false));
+        assert!(matches!(elem, FfonElement::Str(s) if s == "false"));
+    }
+
+    #[test]
+    fn json_array_becomes_obj_named_array() {
+        let json = r#"["x", "y"]"#;
+        let v: serde_json::Value = serde_json::from_str(json).unwrap();
+        let elem = parse_ffon_json_value(&v);
+        let obj = elem.as_obj().unwrap();
+        assert_eq!(obj.key, "array");
+        assert_eq!(obj.children.len(), 2);
+    }
+
+    #[test]
+    fn json_empty_object_becomes_empty_str() {
+        let v: serde_json::Value = serde_json::from_str("{}").unwrap();
+        let elem = parse_ffon_json_value(&v);
+        assert!(matches!(elem, FfonElement::Str(s) if s.is_empty()));
     }
 
     // --- parse_json_output ---
@@ -661,14 +966,14 @@ mod tests {
 
     #[test]
     fn parse_string_array() {
-        let (elems, _) = ScriptProvider::parse_json_output(r#"["a","b","c"]"#);
+        let (elems, _, _) = ScriptProvider::parse_json_output(r#"["a","b","c"]"#);
         assert_eq!(elems.len(), 3);
         assert!(matches!(&elems[0], FfonElement::Str(s) if s == "a"));
     }
 
     #[test]
     fn parse_mixed_array() {
-        let (elems, _) =
+        let (elems, _, _) =
             ScriptProvider::parse_json_output(r#"["hello",{"mySection":["item1","item2"]}]"#);
         assert_eq!(elems.len(), 2);
         assert!(matches!(&elems[0], FfonElement::Str(_)));
@@ -685,7 +990,7 @@ mod tests {
     #[test]
     fn parse_wrapped_object_with_children() {
         let json = r#"{"children":["a","b"],"dashboardImage":"/path/to/img.webp"}"#;
-        let (elems, dashboard) = ScriptProvider::parse_json_output(json);
+        let (elems, dashboard, _meta) = ScriptProvider::parse_json_output(json);
         assert_eq!(elems.len(), 2);
         assert!(matches!(&elems[0], FfonElement::Str(s) if s == "a"));
         assert_eq!(dashboard, "/path/to/img.webp");
@@ -694,9 +999,20 @@ mod tests {
     #[test]
     fn parse_wrapped_object_no_dashboard() {
         let json = r#"{"children":["item"]}"#;
-        let (elems, dashboard) = ScriptProvider::parse_json_output(json);
+        let (elems, dashboard, _meta) = ScriptProvider::parse_json_output(json);
         assert_eq!(elems.len(), 1);
         assert!(dashboard.is_empty());
+    }
+
+    #[test]
+    fn parse_json_output_extracts_meta() {
+        let json = r#"{"children":["item"],"meta":{"Shortcuts":["Ctrl+X Cut"]}}"#;
+        let (elems, _, meta) = ScriptProvider::parse_json_output(json);
+        assert_eq!(elems.len(), 1);
+        let meta_elem = meta.expect("meta should be present");
+        let obj = meta_elem.as_obj().unwrap();
+        assert_eq!(obj.key, "Shortcuts");
+        assert_eq!(obj.children.len(), 1);
     }
 
     // --- ScriptProvider script_response_ok ---
@@ -757,8 +1073,12 @@ mod tests {
             create_directory: None,
             create_file: None,
             delete_item: None,
+            copy_item: None,
             get_commands: None,
-            get_meta: None,
+            handle_command: None,
+            get_command_list_items: None,
+            execute_command: None,
+            collect_deep_search_items: None,
         }));
         // SAFETY: We construct a NativePlugin without calling dlopen.
         // The _lib field is replaced with a dummy that does nothing on drop.
@@ -809,6 +1129,38 @@ mod tests {
     fn native_plugin_commit_null_ops_returns_false() {
         let mut p = make_native_plugin_stub();
         assert!(!p.commit_edit("old", "new"));
+    }
+
+    #[test]
+    fn native_plugin_copy_item_null_ops_returns_false() {
+        let mut p = make_native_plugin_stub();
+        assert!(!p.copy_item("/src", "file.txt", "/dst", "file.txt"));
+    }
+
+    #[test]
+    fn native_plugin_execute_command_null_ops_returns_false() {
+        let mut p = make_native_plugin_stub();
+        assert!(!p.execute_command("open", "file.txt"));
+    }
+
+    #[test]
+    fn native_plugin_command_list_items_null_ops_returns_empty() {
+        let p = make_native_plugin_stub();
+        assert!(p.command_list_items("open with").is_empty());
+    }
+
+    #[test]
+    fn native_plugin_collect_deep_search_null_ops_returns_none() {
+        let p = make_native_plugin_stub();
+        assert!(p.collect_deep_search_items().is_none());
+    }
+
+    #[test]
+    fn native_plugin_handle_command_null_ops_returns_none() {
+        let mut p = make_native_plugin_stub();
+        let mut error = String::new();
+        assert!(p.handle_command("cmd", "key", 0, &mut error).is_none());
+        assert!(error.is_empty());
     }
 
     #[test]

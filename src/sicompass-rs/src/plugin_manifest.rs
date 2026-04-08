@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 // ---------------------------------------------------------------------------
 
 /// How the plugin is executed.
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum PluginType {
     /// Native shared library (`.so` / `.dll` / `.dylib`).  The loader calls
@@ -24,7 +24,11 @@ pub enum PluginType {
     Native,
     /// Script executed through `bun run` — same subcommand protocol as the
     /// built-in TypeScript providers.
+    #[default]
     Script,
+    /// Instantiate a built-in factory provider by the manifest's `name` field.
+    /// Mirrors C's `PLUGIN_FACTORY` in `src/sicompass/programs.c`.
+    Factory,
 }
 
 /// Kind of a per-plugin setting entry.
@@ -58,7 +62,7 @@ pub struct PluginSetting {
 pub struct PluginManifest {
     pub name: String,
     pub display_name: String,
-    #[serde(rename = "type")]
+    #[serde(rename = "type", default)]
     pub plugin_type: PluginType,
     /// Relative entry path (resolved relative to the manifest directory).
     pub entry: String,
@@ -95,11 +99,11 @@ pub struct DiscoveredPlugin {
 ///
 /// Mirrors `discoverUserPlugins()` in `src/sicompass/programs.c`.
 pub fn discover_user_plugins() -> Vec<DiscoveredPlugin> {
-    let Some(plugins_dir) = plugins_dir() else {
+    let Some(dir) = sicompass_sdk::platform::plugins_dir() else {
         return Vec::new();
     };
 
-    let Ok(entries) = std::fs::read_dir(&plugins_dir) else {
+    let Ok(entries) = std::fs::read_dir(&dir) else {
         return Vec::new();
     };
 
@@ -113,16 +117,6 @@ pub fn discover_user_plugins() -> Vec<DiscoveredPlugin> {
         }
     }
     found
-}
-
-// ---------------------------------------------------------------------------
-// Path helper
-// ---------------------------------------------------------------------------
-
-/// Returns `~/.config/sicompass/plugins/` or `None` on unsupported platforms.
-pub fn plugins_dir() -> Option<PathBuf> {
-    sicompass_sdk::platform::main_config_path()
-        .map(|p| p.parent().unwrap_or(&p).join("plugins"))
 }
 
 // ---------------------------------------------------------------------------
@@ -229,6 +223,30 @@ mod tests {
             r#"{"name":"p","displayName":"P","type":"unknown","entry":"p.so"}"#,
         );
         assert!(load_manifest(&path).is_none());
+    }
+
+    #[test]
+    fn load_manifest_missing_type_defaults_to_script() {
+        // Matches the C behavior: absent "type" field → PLUGIN_SCRIPT.
+        // Also ensures sdk/examples/typescript/plugin.json (no type) loads correctly.
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_manifest(
+            &dir,
+            r#"{"name":"ts-plugin","displayName":"TS Plugin","entry":"plugin.ts"}"#,
+        );
+        let m = load_manifest(&path).unwrap();
+        assert_eq!(m.plugin_type, PluginType::Script);
+    }
+
+    #[test]
+    fn load_manifest_factory_type() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_manifest(
+            &dir,
+            r#"{"name":"web browser","displayName":"web browser","type":"factory","entry":""}"#,
+        );
+        let m = load_manifest(&path).unwrap();
+        assert_eq!(m.plugin_type, PluginType::Factory);
     }
 
     // --- discover_user_plugins ---
