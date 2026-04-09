@@ -108,22 +108,6 @@ impl Provider for FilebrowserProvider {
         self.list_directory()
     }
 
-    fn meta(&self) -> Vec<String> {
-        vec![
-            "Ctrl+I  Insert before".to_owned(),
-            "Ctrl+A  Append after".to_owned(),
-            "Del     Delete".to_owned(),
-            "Ctrl+X  Cut".to_owned(),
-            "Ctrl+C  Copy".to_owned(),
-            "Ctrl+V  Paste".to_owned(),
-            "I       Rename".to_owned(),
-            ":       Commands".to_owned(),
-            "/       Search".to_owned(),
-            "Ctrl+F  Extended search".to_owned(),
-            "F5      Refresh".to_owned(),
-        ]
-    }
-
     fn push_path(&mut self, segment: &str) {
         #[cfg(windows)]
         {

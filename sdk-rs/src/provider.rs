@@ -149,7 +149,13 @@ pub trait Provider: Send + 'static {
 
     /// Keyboard shortcut hints shown when the user presses M.
     /// Returns strings like `"Ctrl+I  Insert before"`.
-    fn meta(&self) -> Vec<String> { vec![] }
+    ///
+    /// Default implementation looks up the provider's name in the central
+    /// [`crate::meta`] registry. Override only if you need dynamic,
+    /// context-sensitive hints (e.g. the email client).
+    fn meta(&self) -> Vec<String> {
+        crate::meta::lookup_with_context(self.name(), self.current_path()).unwrap_or_default()
+    }
 
     // ---- Optional: persistent config ---------------------------------------
 

@@ -658,12 +658,19 @@ impl Provider for ScriptProvider {
         let path = self.current_path.clone();
         match self.run(&[&path]) {
             Some(json) => {
-                let (mut elems, dashboard, meta) = Self::parse_json_output(&json);
+                let (elems, dashboard, meta) = Self::parse_json_output(&json);
                 self.dashboard_image = dashboard;
-                // Prepend meta element if provided and there are children (matches C).
-                if !elems.is_empty() {
-                    if let Some(meta_elem) = meta {
-                        elems.insert(0, meta_elem);
+                // Register meta hints into the central SDK registry (Rust consumers
+                // query it via Provider::meta(); C consumers still use the FFON
+                // prepend convention, which is handled by the C build separately).
+                if let Some(meta_elem) = meta {
+                    if let sicompass_sdk::FfonElement::Obj(obj) = &meta_elem {
+                        let entries: Vec<sicompass_sdk::MetaEntry> = obj.children
+                            .iter()
+                            .filter_map(|e| e.as_str())
+                            .map(|s| sicompass_sdk::MetaEntry::new(s))
+                            .collect();
+                        sicompass_sdk::meta::register(self.name.clone(), entries);
                     }
                 }
                 elems
@@ -848,6 +855,10 @@ impl Provider for ScriptProvider {
         }
 
         Some(obj)
+    }
+
+    fn cleanup(&mut self) {
+        sicompass_sdk::meta::unregister(&self.name);
     }
 }
 
