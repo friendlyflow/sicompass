@@ -209,6 +209,9 @@ pub struct EmailClientProvider {
     // Injected backends (None until init() or with_imap/with_smtp).
     imap: Option<Box<dyn ImapBackend>>,
     smtp: Option<Box<dyn SmtpBackend>>,
+
+    // Pending error message to surface via take_error.
+    error_message: Option<String>,
 }
 
 impl EmailClientProvider {
@@ -231,6 +234,7 @@ impl EmailClientProvider {
             idle: IdleController::new(needs_refresh_flag),
             imap: None,
             smtp: None,
+            error_message: None,
         }
     }
 
@@ -243,6 +247,12 @@ impl EmailClientProvider {
     /// Inject an SMTP backend.
     pub fn with_smtp(mut self, backend: Box<dyn SmtpBackend>) -> Self {
         self.smtp = Some(backend);
+        self
+    }
+
+    /// Set a fake OAuth access token (used in tests to simulate logged-in state).
+    pub fn with_oauth_token(mut self, token: impl Into<String>) -> Self {
+        self.config.oauth_access_token = token.into();
         self
     }
 
@@ -305,6 +315,12 @@ impl EmailClientProvider {
                 l == label
             })
             .map(|h| h.uid)
+    }
+
+    // ---- Login state ---------------------------------------------------------
+
+    fn is_logged_in(&self) -> bool {
+        !self.config.oauth_access_token.is_empty()
     }
 
     // ---- Token refresh -------------------------------------------------------
@@ -398,11 +414,59 @@ impl EmailClientProvider {
         self.smtp.as_deref_mut()
     }
 
+    // ---- Login logic ---------------------------------------------------------
+
+    fn do_login(&mut self) -> Result<(), String> {
+        if self.config.client_id.is_empty() || self.config.client_secret.is_empty() {
+            return Err("set client ID and client secret in settings first".to_owned());
+        }
+        let result = oauth2::authorize(&self.config.client_id, &self.config.client_secret, 120);
+        if !result.success {
+            return Err(format!("OAuth2 failed: {}", result.error));
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        self.config.oauth_access_token = result.access_token;
+        self.config.oauth_refresh_token = result.refresh_token;
+        self.config.token_expiry = now + result.expires_in;
+        self.save_oauth_tokens();
+        if self.config.imap_url.is_empty() {
+            self.config.imap_url = "imaps://imap.gmail.com:993".to_owned();
+        }
+        if self.config.smtp_url.is_empty() {
+            self.config.smtp_url = "smtps://smtp.gmail.com:465".to_owned();
+        }
+        if self.config.username.is_empty() {
+            if let Some(email) = oauth2::fetch_email(&self.config.oauth_access_token) {
+                self.config.username = email;
+            }
+        }
+        self.save_server_config();
+        self.imap = None;
+        self.smtp = None;
+        self.rebuild_backends();
+        self.current_path = "/".to_owned();
+        self.folder_cache = None;
+        self.envelope_cache = None;
+        self.envelope_cache_folder.clear();
+        Ok(())
+    }
+
     // ---- FFON tree builders -----------------------------------------------
 
     fn build_root(&mut self) -> Vec<FfonElement> {
         // Stop IDLE when leaving a folder (returning to root).
         self.idle.stop();
+
+        // When not logged in, show a single login button.
+        if !self.is_logged_in() {
+            self.folder_cache = None;
+            return vec![FfonElement::new_str(
+                "<button>login</button>Log in with Google".to_owned(),
+            )];
+        }
 
         // Serve folder cache on back-navigation.
         if let Some(cached) = &self.folder_cache {
@@ -978,17 +1042,31 @@ impl Provider for EmailClientProvider {
     }
 
     fn on_button_press(&mut self, function_name: &str) {
-        if function_name == "send" {
-            self.send_draft();
-            self.compose = ComposeState::default();
-            self.compose_sent = true;
+        match function_name {
+            "send" => {
+                self.send_draft();
+                self.compose = ComposeState::default();
+                self.compose_sent = true;
+            }
+            "login" => {
+                if let Err(e) = self.do_login() {
+                    self.error_message = Some(e);
+                }
+            }
+            _ => {}
         }
     }
 
+    fn take_error(&mut self) -> Option<String> {
+        self.error_message.take()
+    }
+
     fn commands(&self) -> Vec<String> {
+        if !self.is_logged_in() {
+            return vec![];
+        }
         vec![
             "compose".to_owned(),
-            "login".to_owned(),
             "logout".to_owned(),
             "refresh".to_owned(),
         ]
@@ -1013,65 +1091,27 @@ impl Provider for EmailClientProvider {
                 self.envelope_cache = None;
                 None
             }
-            "login" => {
-                if self.config.client_id.is_empty() || self.config.client_secret.is_empty() {
-                    *error = "set client ID and client secret in settings first".to_owned();
-                    return None;
-                }
-                let result = oauth2::authorize(
-                    &self.config.client_id,
-                    &self.config.client_secret,
-                    120,
-                );
-                if result.success {
-                    let now = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_secs() as i64)
-                        .unwrap_or(0);
-                    self.config.oauth_access_token = result.access_token;
-                    self.config.oauth_refresh_token = result.refresh_token;
-                    self.config.token_expiry = now + result.expires_in;
-                    self.save_oauth_tokens();
-                    // Auto-configure Gmail server endpoints and username if not set.
-                    // Since we only support Google OAuth2, these are always correct.
-                    if self.config.imap_url.is_empty() {
-                        self.config.imap_url = "imaps://imap.gmail.com:993".to_owned();
-                    }
-                    if self.config.smtp_url.is_empty() {
-                        self.config.smtp_url = "smtps://smtp.gmail.com:465".to_owned();
-                    }
-                    if self.config.username.is_empty() {
-                        if let Some(email) = oauth2::fetch_email(&self.config.oauth_access_token) {
-                            self.config.username = email;
-                        }
-                    }
-                    self.save_server_config();
-                    // Rebuild backends with new OAuth credentials.
-                    self.imap = None;
-                    self.smtp = None;
-                    self.rebuild_backends();
-                    // Reset to the root folder list so the handler navigates back to
-                    // depth 2 and re-fetches, showing INBOX and other folders directly.
-                    self.current_path = "/".to_owned();
-                    self.folder_cache = None;
-                    self.envelope_cache = None;
-                    self.envelope_cache_folder.clear();
-                    None
-                } else {
-                    *error = format!("OAuth2 failed: {}", result.error);
-                    None
-                }
-            }
             "logout" => {
+                self.idle.stop();
                 self.config.oauth_access_token.clear();
                 self.config.oauth_refresh_token.clear();
                 self.config.token_expiry = 0;
                 self.save_oauth_tokens();
-                // Rebuild backends (password auth now).
                 self.imap = None;
                 self.smtp = None;
-                self.rebuild_backends();
-                Some(FfonElement::new_str("logged out".to_owned()))
+                // Invalidate all session state so build_root serves the login button
+                // on the next fetch.
+                self.current_path = "/".to_owned();
+                self.folder_cache = None;
+                self.envelope_cache = None;
+                self.envelope_cache_folder.clear();
+                self.message_cache.clear();
+                self.message_detail = None;
+                self.compose = ComposeState::default();
+                self.compose_sent = false;
+                self.history_folder.clear();
+                self.history_refs.clear();
+                None  // triggers state-toggle refresh in handlers.rs
             }
             _ => {
                 *error = format!("unknown command: {cmd}");
@@ -1250,8 +1290,16 @@ mod tests {
     // ---- Root fetch ----
 
     #[test]
-    fn test_fetch_root_no_imap_shows_placeholder() {
+    fn test_fetch_root_not_logged_in_shows_login_button() {
         let mut p = EmailClientProvider::new();
+        let items = p.fetch();
+        assert_eq!(items.len(), 1);
+        assert!(items[0].as_str().map_or(false, |s| s.contains("<button>login</button>")));
+    }
+
+    #[test]
+    fn test_fetch_root_no_imap_logged_in_shows_placeholder() {
+        let mut p = EmailClientProvider::new().with_oauth_token("fake");
         let items = p.fetch();
         assert!(items.iter().any(|e| {
             e.as_str().map_or(false, |s| s.contains("not configured"))
@@ -1261,7 +1309,7 @@ mod tests {
     #[test]
     fn test_fetch_root_compose_always_present() {
         let imap = MockImap::new().with_folders(&[]);
-        let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
         let items = p.fetch();
         assert!(items.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "compose")));
     }
@@ -1269,7 +1317,7 @@ mod tests {
     #[test]
     fn test_fetch_root_folders_become_objs() {
         let imap = MockImap::new().with_folders(&["INBOX", "Sent", "Drafts"]);
-        let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
         let items = p.fetch();
         assert!(items.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "INBOX")));
         assert!(items.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "Sent")));
@@ -1279,7 +1327,7 @@ mod tests {
     #[test]
     fn test_fetch_root_imap_error_shows_message() {
         let imap = MockImap::new().with_error("connection refused");
-        let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
         let items = p.fetch();
         assert!(items.iter().any(|e| e.as_str().map_or(false, |s| s.contains("IMAP error"))));
     }
@@ -1287,7 +1335,7 @@ mod tests {
     #[test]
     fn test_fetch_root_compose_inserted_after_inbox() {
         let imap = MockImap::new().with_folders(&["INBOX", "Sent"]);
-        let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
         let items = p.fetch();
         let inbox_pos = items.iter().position(|e| e.as_obj().map_or(false, |o| o.key == "INBOX")).unwrap();
         let compose_pos = items.iter().position(|e| e.as_obj().map_or(false, |o| o.key == "compose")).unwrap();
@@ -1298,10 +1346,67 @@ mod tests {
     fn test_fetch_root_hierarchy_containers_filtered() {
         // "[Gmail]" is a container (has child "[Gmail]/Sent") and should be skipped.
         let imap = MockImap::new().with_folders(&["INBOX", "[Gmail]", "[Gmail]/Sent"]);
-        let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
         let items = p.fetch();
         assert!(!items.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "[Gmail]")));
         assert!(items.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "Sent")));
+    }
+
+    // ---- Login/logout state ----
+
+    #[test]
+    fn test_commands_empty_when_not_logged_in() {
+        let p = EmailClientProvider::new();
+        assert!(p.commands().is_empty());
+    }
+
+    #[test]
+    fn test_commands_no_login_when_logged_in() {
+        let p = EmailClientProvider::new().with_oauth_token("fake");
+        let cmds = p.commands();
+        assert!(!cmds.contains(&"login".to_owned()));
+        assert!(cmds.contains(&"logout".to_owned()));
+        assert!(cmds.contains(&"compose".to_owned()));
+        assert!(cmds.contains(&"refresh".to_owned()));
+    }
+
+    #[test]
+    fn test_logout_clears_state_and_returns_none() {
+        let imap = MockImap::new().with_folders(&["INBOX"]);
+        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        // Prime the folder cache.
+        let _ = p.fetch();
+        assert!(p.folder_cache.is_some());
+
+        let mut error = String::new();
+        let result = p.handle_command("logout", "", 0, &mut error);
+        assert!(result.is_none(), "logout must return None to trigger state-toggle refresh");
+        assert!(p.config.oauth_access_token.is_empty());
+        assert!(p.folder_cache.is_none());
+        assert!(p.envelope_cache.is_none());
+        assert_eq!(p.current_path, "/");
+    }
+
+    #[test]
+    fn test_logout_then_fetch_shows_login_button() {
+        let imap = MockImap::new().with_folders(&["INBOX"]);
+        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        let _ = p.fetch();
+        let mut error = String::new();
+        p.handle_command("logout", "", 0, &mut error);
+        let items = p.fetch();
+        assert_eq!(items.len(), 1);
+        assert!(items[0].as_str().map_or(false, |s| s.contains("<button>login</button>")));
+    }
+
+    #[test]
+    fn test_button_login_missing_credentials_sets_error() {
+        let mut p = EmailClientProvider::new();
+        // client_id and client_secret are empty by default.
+        p.on_button_press("login");
+        let err = p.take_error();
+        assert!(err.is_some(), "expected an error message");
+        assert!(err.unwrap().contains("client ID"));
     }
 
     #[test]
@@ -1356,7 +1461,7 @@ mod tests {
     #[test]
     fn test_folder_cache_avoids_refetch() {
         let imap = MockImap::new().with_folders(&["INBOX"]);
-        let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
         // First fetch populates cache.
         p.fetch();
         // Second fetch should use cache (call count stays at 1).
@@ -1863,13 +1968,13 @@ mod tests {
     // ---- commands ----
 
     #[test]
-    fn test_commands_include_compose_login_logout_refresh() {
-        let p = EmailClientProvider::new();
+    fn test_commands_include_compose_logout_refresh_when_logged_in() {
+        let p = EmailClientProvider::new().with_oauth_token("fake");
         let cmds = p.commands();
         assert!(cmds.contains(&"compose".to_owned()));
-        assert!(cmds.contains(&"login".to_owned()));
         assert!(cmds.contains(&"logout".to_owned()));
         assert!(cmds.contains(&"refresh".to_owned()));
+        assert!(!cmds.contains(&"login".to_owned()));
     }
 
     #[test]
@@ -1907,7 +2012,7 @@ mod tests {
     #[test]
     fn test_handle_command_refresh_invalidates_caches() {
         let imap = MockImap::new().with_folders(&["INBOX"]);
-        let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
         p.fetch(); // populate caches
         assert!(p.folder_cache.is_some());
         let mut err = String::new();
@@ -1916,11 +2021,13 @@ mod tests {
     }
 
     #[test]
-    fn test_handle_command_login_without_credentials() {
+    fn test_handle_command_login_is_unknown() {
+        // login is no longer a command — it is only accessible via the login button.
         let mut p = EmailClientProvider::new();
         let mut err = String::new();
         p.handle_command("login", "", 0, &mut err);
-        assert!(!err.is_empty(), "should report error when no client ID");
+        assert!(!err.is_empty(), "unknown command should set error");
+        assert!(err.contains("unknown command"), "expected 'unknown command' message");
     }
 
     #[test]

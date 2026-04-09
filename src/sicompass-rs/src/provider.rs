@@ -560,6 +560,9 @@ pub fn notify_button_pressed(renderer: &mut AppRenderer) {
     if !handled {
         if let Some(p) = renderer.providers.get_mut(provider_idx) {
             p.on_button_press(&function_name);
+            if let Some(err) = p.take_error() {
+                renderer.error_message = err;
+            }
         }
         refresh_current_directory(renderer);
     }
