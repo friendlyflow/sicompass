@@ -50,14 +50,15 @@ impl IdleController {
         }));
     }
 
-    /// Stop the background IDLE thread and join it.
+    /// Stop the background IDLE thread.
+    ///
+    /// Sets the running flag to false and drops the handle without joining.
+    /// The thread will exit on its own within IDLE_POLL_INTERVAL (30 s) once
+    /// it wakes from wait_with_timeout and sees running=false.  Not joining
+    /// avoids blocking the main thread for up to 29 minutes on wait_keepalive.
     pub fn stop(&mut self) {
         self.running.store(false, Ordering::Relaxed);
-        if let Some(handle) = self.thread.take() {
-            // Give the thread up to 15 seconds to notice the flag and exit.
-            // In practice it will exit on the next IDLE timeout (~poll_interval).
-            let _ = handle.join();
-        }
+        let _ = self.thread.take(); // drop handle without joining
     }
 }
 
@@ -134,16 +135,20 @@ fn run_idle_session(
     session.select(folder).map_err(|e| e.to_string())?;
 
     // Inner IDLE loop.
-    // `wait_keepalive()` blocks until the server sends any untagged response,
-    // automatically re-issuing IDLE before the ~29-minute server timeout.
-    // After each keepalive, drain the session's unsolicited-response channel
-    // for EXISTS/EXPUNGE notifications. Each Handle is consumed by wait_keepalive,
-    // so we re-enter via `session.idle()` each iteration.
+    // Use wait_with_timeout so the thread wakes every IDLE_POLL_INTERVAL and
+    // can check the running flag.  This keeps stop() non-blocking — the thread
+    // exits on its own within one poll interval after running is set to false.
+    const IDLE_POLL_INTERVAL: Duration = Duration::from_secs(30);
     while running.load(Ordering::Relaxed) {
         let idle = session.idle().map_err(|e| e.to_string())?;
-        idle.wait_keepalive().map_err(|e| e.to_string())?;
-        // Handle consumed — session borrow released; drain unsolicited responses.
-        if running.load(Ordering::Relaxed) {
+        let outcome = idle
+            .wait_with_timeout(IDLE_POLL_INTERVAL)
+            .map_err(|e| e.to_string())?;
+        // Handle consumed — session borrow released; drain unsolicited responses
+        // only when the server actually notified us (not on a poll timeout).
+        if running.load(Ordering::Relaxed)
+            && matches!(outcome, imap::extensions::idle::WaitOutcome::MailboxChanged)
+        {
             while let Ok(response) = session.unsolicited_responses.try_recv() {
                 if matches!(
                     response,

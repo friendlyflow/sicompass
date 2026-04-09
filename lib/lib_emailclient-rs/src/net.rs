@@ -114,7 +114,7 @@ impl ImapBackend for RealImap {
         let fetch_range = format!("{start}:{total}");
 
         let messages = session
-            .fetch(&fetch_range, "UID ENVELOPE")
+            .fetch(&fetch_range, "(UID ENVELOPE)")
             .map_err(|e| e.to_string())?;
 
         let mut headers: Vec<MessageHeader> = messages
