@@ -231,6 +231,26 @@ impl SettingsProvider {
         }
     }
 
+    // On first run (settings.json absent), write a seed file containing only the
+    // priority section's currently-checked entries (i.e. the default programs).
+    // Nothing else is written — no colorScheme, no maximized, no other sections.
+    fn seed_priority_section_on_disk(&self, path: &Path) {
+        let Some(section_name) = self.priority_section.clone() else { return };
+        if let Some(parent) = path.parent() { platform::make_dirs(parent); }
+        let mut section_map = Map::new();
+        for e in &self.checkbox_entries {
+            if e.section == section_name && e.checked {
+                section_map.insert(e.config_key.clone(), Value::Bool(true));
+            }
+        }
+        if section_map.is_empty() { return; }
+        let mut root = Map::new();
+        root.insert(section_name, Value::Object(section_map));
+        if let Ok(json) = serde_json::to_string_pretty(&Value::Object(root)) {
+            let _ = std::fs::write(path, json);
+        }
+    }
+
     // Write a single string key into section, preserving everything else in the file.
     fn write_key_string(&self, section: &str, key: &str, value: &str) {
         let Some(path) = self.config_path() else { return };
@@ -401,7 +421,11 @@ impl Provider for SettingsProvider {
     fn init(&mut self) {
         self.current_path = "/".to_owned();
         if let Some(path) = self.config_path() {
-            self.load_config(&path);
+            if path.exists() {
+                self.load_config(&path);
+            } else {
+                self.seed_priority_section_on_disk(&path);
+            }
         }
         self.fire_all_apply();
     }
@@ -1074,5 +1098,57 @@ mod tests {
         assert_eq!(keys[3], "email client");
         assert_eq!(keys[4], "tutorial");
         assert_eq!(keys[5], "web browser");
+    }
+
+    // --- init seeds only enabled-by-default programs when file is missing ---
+
+    #[test]
+    fn test_init_seeds_only_default_programs_when_file_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let mut p = SettingsProvider::new_headless().with_config_path(path.clone());
+        p.add_priority_section("Available programs:");
+        p.add_checkbox("Available programs:", "tutorial",     "enable_tutorial",     true);
+        p.add_checkbox("Available programs:", "sales demo",   "enable_sales demo",   false);
+        p.add_checkbox("Available programs:", "chat client",  "enable_chat client",  false);
+        // Unrelated settings that must NOT appear in the seeded file:
+        p.add_radio("sicompass", "color scheme", "colorScheme", &["dark", "light"], "dark");
+        p.add_checkbox("sicompass", "maximized", "maximized", false);
+        p.add_radio("file browser", "sort order", "sortOrder",
+            &["alphanumerically", "chronologically"], "alphanumerically");
+
+        p.init();
+
+        let data = std::fs::read_to_string(&path).expect("settings.json should have been created");
+        let root: serde_json::Value = serde_json::from_str(&data).unwrap();
+
+        // Only the enabled-by-default entry is written.
+        let available = root.get("Available programs:").expect("Available programs: section missing");
+        assert_eq!(available.get("enable_tutorial").and_then(|v| v.as_bool()), Some(true));
+        assert!(available.get("enable_sales demo").is_none(), "disabled-by-default entries must not be written");
+        assert!(available.get("enable_chat client").is_none(), "disabled-by-default entries must not be written");
+
+        // No other sections.
+        assert!(root.get("sicompass").is_none(), "sicompass section must not appear in seed");
+        assert!(root.get("file browser").is_none(), "file browser section must not appear in seed");
+    }
+
+    #[test]
+    fn test_init_does_not_overwrite_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, r#"{"sicompass":{"colorScheme":"light"}}"#).unwrap();
+
+        let mut p = SettingsProvider::new_headless().with_config_path(path.clone());
+        p.add_priority_section("Available programs:");
+        p.add_checkbox("Available programs:", "tutorial", "enable_tutorial", true);
+        p.init();
+
+        // Existing file must be unchanged (loaded, not overwritten).
+        let data = std::fs::read_to_string(&path).unwrap();
+        let root: serde_json::Value = serde_json::from_str(&data).unwrap();
+        assert_eq!(root["sicompass"]["colorScheme"].as_str(), Some("light"));
+        // Seed must not have added Available programs: on top of the existing file.
+        assert!(root.get("Available programs:").is_none());
     }
 }
