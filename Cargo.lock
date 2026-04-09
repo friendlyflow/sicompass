@@ -4227,10 +4227,12 @@ dependencies = [
 name = "sicompass-emailclient"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "imap",
  "imap-proto",
  "lettre",
  "native-tls",
+ "quoted_printable",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -4265,10 +4267,12 @@ name = "sicompass-sdk"
 version = "0.1.0"
 dependencies = [
  "mockall",
+ "scraper",
  "serde",
  "serde_json",
  "tempfile",
  "unicode-normalization",
+ "url",
  "winreg",
  "xdg",
 ]
@@ -4298,10 +4302,8 @@ version = "0.1.0"
 dependencies = [
  "chromiumoxide",
  "futures",
- "scraper",
  "sicompass-sdk",
  "tokio",
- "url",
  "which 7.0.3",
 ]
 

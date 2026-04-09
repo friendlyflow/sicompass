@@ -14,6 +14,8 @@ imap = { workspace = true }
 imap-proto = { workspace = true }
 lettre = { workspace = true }
 native-tls = { workspace = true }
+quoted_printable = "0.5"
+base64 = "0.22"
 
 [dev-dependencies]
 tempfile = { workspace = true }

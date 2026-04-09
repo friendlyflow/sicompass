@@ -50,11 +50,73 @@ pub mod oauth2;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use sicompass_sdk::ffon::FfonElement;
+use sicompass_sdk::ffon::{FfonElement, FfonObject};
 use sicompass_sdk::platform;
 use sicompass_sdk::provider::Provider;
 
 use idle::IdleController;
+
+// ---------------------------------------------------------------------------
+// Mail body type
+// ---------------------------------------------------------------------------
+
+/// The body of an email message, tagged with its content kind.
+///
+/// - `Text`  — plain text (`text/plain`)
+/// - `Html`  — raw HTML source (`text/html`)
+/// - `Ffon`  — a structured FFON tree (`application/json` that passes `is_ffon`)
+#[derive(Debug, Clone)]
+pub enum MailBody {
+    Text(String),
+    Html(String),
+    Ffon(Vec<FfonElement>),
+}
+
+impl Default for MailBody {
+    fn default() -> Self {
+        MailBody::Text(String::new())
+    }
+}
+
+impl MailBody {
+    /// Return a plain-text representation for quoting or fallback display.
+    pub fn as_plain(&self) -> String {
+        match self {
+            MailBody::Text(s) => s.clone(),
+            MailBody::Html(s) => {
+                // Convert HTML to FFON then flatten leaves to text.
+                let elems = sicompass_sdk::ffon::html_to_ffon(s, "");
+                flatten_ffon_to_text(&elems)
+            }
+            MailBody::Ffon(elems) => {
+                sicompass_sdk::ffon::to_json_string(elems).unwrap_or_default()
+            }
+        }
+    }
+}
+
+/// Recursively flatten an FFON tree to a plain-text string.
+fn flatten_ffon_to_text(elems: &[FfonElement]) -> String {
+    let mut out = String::new();
+    for elem in elems {
+        match elem {
+            FfonElement::Str(s) => {
+                if !out.is_empty() { out.push('\n'); }
+                out.push_str(s);
+            }
+            FfonElement::Obj(o) => {
+                if !out.is_empty() { out.push('\n'); }
+                out.push_str(&o.key);
+                let children_text = flatten_ffon_to_text(&o.children);
+                if !children_text.is_empty() {
+                    out.push('\n');
+                    out.push_str(&children_text);
+                }
+            }
+        }
+    }
+    out
+}
 
 // ---------------------------------------------------------------------------
 // Domain types
@@ -92,7 +154,7 @@ pub struct EmailMessage {
     pub to: String,
     pub subject: String,
     pub date: String,
-    pub body: String,
+    pub body: MailBody,
     pub message_id: String,
     pub in_reply_to: String,
     pub references: String,
@@ -103,7 +165,7 @@ pub struct EmailMessage {
 pub struct Draft {
     pub to: String,
     pub subject: String,
-    pub body: String,
+    pub body: MailBody,
 }
 
 /// Which kind of compose action is in progress.
@@ -151,7 +213,7 @@ pub trait ImapBackend: Send {
 
 /// SMTP backend — send an email message.
 pub trait SmtpBackend: Send {
-    fn send(&mut self, from: &str, to: &str, subject: &str, body: &str) -> Result<(), String>;
+    fn send(&mut self, from: &str, to: &str, subject: &str, body: &MailBody) -> Result<(), String>;
 }
 
 // ---------------------------------------------------------------------------
@@ -691,10 +753,15 @@ impl EmailClientProvider {
             "Subject: <input>{}</input>",
             self.compose.draft.subject
         )));
-        items.push(FfonElement::new_str(format!(
-            "Body: <input>{}</input>",
-            self.compose.draft.body
-        )));
+
+        // Body: is a structured subtree — Ctrl+A/I/Delete work on its children.
+        // The key includes the current format so the user sees it live.
+        let body_children = body_to_compose_children(&self.compose.draft.body);
+        items.push(FfonElement::Obj(FfonObject {
+            key: body_format_label(&self.compose.draft.body).to_owned(),
+            children: body_children,
+        }));
+
         items.push(FfonElement::new_str("<button>send</button>Send".to_owned()));
 
         // Add History link for reply/reply-all if there are refs.
@@ -713,7 +780,7 @@ impl EmailClientProvider {
             let from = self.config.username.clone();
             let to = self.compose.draft.to.clone();
             let subject = self.compose.draft.subject.clone();
-            let body = self.compose.draft.body.clone();
+            let body = normalize_body_for_send(&self.compose.draft.body);
             smtp.send(&from, &to, &subject, &body).is_ok()
         } else {
             false
@@ -761,37 +828,46 @@ impl EmailClientProvider {
 
 fn prefill_compose(compose: &mut ComposeState, msg: &EmailMessage, mode: ComposeMode, username: &str) {
     match mode {
-        ComposeMode::Reply => {
-            compose.draft.to = msg.from.clone();
-            compose.draft.subject = if msg.subject.to_lowercase().starts_with("re:") {
-                msg.subject.clone()
+        ComposeMode::Reply | ComposeMode::ReplyAll => {
+            if matches!(mode, ComposeMode::Reply) {
+                compose.draft.to = msg.from.clone();
             } else {
-                format!("Re: {}", msg.subject)
-            };
-            compose.draft.body = format!(
-                "\n\nOn {} <{}> wrote:\n{}",
-                msg.date, msg.from, msg.body
-            );
-        }
-        ComposeMode::ReplyAll => {
-            // Start with original sender; add To recipients except ourselves.
-            let mut recipients = vec![msg.from.clone()];
-            for tok in msg.to.split(',') {
-                let t = tok.trim();
-                if !t.is_empty() && !t.contains(username) {
-                    recipients.push(t.to_owned());
+                let mut recipients = vec![msg.from.clone()];
+                for tok in msg.to.split(',') {
+                    let t = tok.trim();
+                    if !t.is_empty() && !t.contains(username) {
+                        recipients.push(t.to_owned());
+                    }
                 }
+                compose.draft.to = recipients.join(", ");
             }
-            compose.draft.to = recipients.join(", ");
             compose.draft.subject = if msg.subject.to_lowercase().starts_with("re:") {
                 msg.subject.clone()
             } else {
                 format!("Re: {}", msg.subject)
             };
-            compose.draft.body = format!(
-                "\n\nOn {} <{}> wrote:\n{}",
-                msg.date, msg.from, msg.body
-            );
+            compose.draft.body = match &msg.body {
+                MailBody::Text(s) => {
+                    let quoted = s.lines()
+                        .map(|l| format!("> {l}"))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    MailBody::Text(format!(
+                        "\n\nOn {} <{}> wrote:\n{}", msg.date, msg.from, quoted
+                    ))
+                }
+                MailBody::Html(s) => MailBody::Html(format!(
+                    "<p></p><p>On {} &lt;{}&gt; wrote:</p><blockquote>{}</blockquote>",
+                    msg.date, msg.from, s
+                )),
+                MailBody::Ffon(elems) => MailBody::Ffon(vec![
+                    FfonElement::new_str("".to_owned()),
+                    FfonElement::Obj(FfonObject {
+                        key: format!("On {} <{}> wrote:", msg.date, msg.from),
+                        children: elems.clone(),
+                    }),
+                ]),
+            };
         }
         ComposeMode::Forward => {
             compose.draft.to.clear();
@@ -800,10 +876,33 @@ fn prefill_compose(compose: &mut ComposeState, msg: &EmailMessage, mode: Compose
             } else {
                 format!("Fwd: {}", msg.subject)
             };
-            compose.draft.body = format!(
-                "\n\n---------- Forwarded message ----------\nFrom: {}\nTo: {}\nDate: {}\nSubject: {}\n\n{}",
-                msg.from, msg.to, msg.date, msg.subject, msg.body
-            );
+            compose.draft.body = match &msg.body {
+                MailBody::Text(s) => MailBody::Text(format!(
+                    "\n\n---------- Forwarded message ----------\nFrom: {}\nTo: {}\nDate: {}\nSubject: {}\n\n{}",
+                    msg.from, msg.to, msg.date, msg.subject, s
+                )),
+                MailBody::Html(s) => MailBody::Html(format!(
+                    "<p></p><hr><p><b>---------- Forwarded message ----------</b><br>\
+                     From: {}<br>To: {}<br>Date: {}<br>Subject: {}</p>{}",
+                    msg.from, msg.to, msg.date, msg.subject, s
+                )),
+                MailBody::Ffon(elems) => MailBody::Ffon(vec![
+                    FfonElement::new_str("".to_owned()),
+                    FfonElement::Obj(FfonObject {
+                        key: "---------- Forwarded message ----------".to_owned(),
+                        children: vec![
+                            FfonElement::new_str(format!("From: {}", msg.from)),
+                            FfonElement::new_str(format!("To: {}", msg.to)),
+                            FfonElement::new_str(format!("Date: {}", msg.date)),
+                            FfonElement::new_str(format!("Subject: {}", msg.subject)),
+                            FfonElement::Obj(FfonObject {
+                                key: "body:".to_owned(),
+                                children: elems.clone(),
+                            }),
+                        ],
+                    }),
+                ]),
+            };
         }
         ComposeMode::New => {}
     }
@@ -819,8 +918,23 @@ fn build_message_view(msg: &EmailMessage) -> Vec<FfonElement> {
         FfonElement::new_str(format!("To: {}", msg.to)),
         FfonElement::new_str(format!("Date: {}", msg.date)),
         FfonElement::new_str(format!("Subject: {}", msg.subject)),
-        FfonElement::new_str(msg.body.clone()),
     ];
+
+    // Render body according to its kind.
+    match &msg.body {
+        MailBody::Text(s) => {
+            items.push(FfonElement::new_str(s.clone()));
+        }
+        MailBody::Html(s) => {
+            // Convert HTML to FFON via the shared html crate, same as webbrowser.
+            let html_elems = sicompass_sdk::ffon::html_to_ffon(s, "");
+            items.extend(html_elems);
+        }
+        MailBody::Ffon(elems) => {
+            items.extend(elems.clone());
+        }
+    }
+
     if !msg.references.is_empty() {
         items.push(FfonElement::new_obj("History"));
     }
@@ -828,6 +942,182 @@ fn build_message_view(msg: &EmailMessage) -> Vec<FfonElement> {
     items.push(FfonElement::new_obj("reply all"));
     items.push(FfonElement::new_obj("forward"));
     items
+}
+
+// ---------------------------------------------------------------------------
+// Body helper functions
+// ---------------------------------------------------------------------------
+
+/// Build the children list for the `Body:` Obj in the compose view.
+///
+/// - Text / Html: one `<input>` leaf with the current content.
+/// - Ffon: the stored elements directly (each leaf should already carry `<input>` tags).
+///
+/// Always appends a `<button>body_new_line</button>New text line` button at the end
+/// so the user can add elements via Enter as well as via Ctrl+A/I.
+fn body_to_compose_children(body: &MailBody) -> Vec<FfonElement> {
+    let mut children: Vec<FfonElement> = match body {
+        MailBody::Text(s) => vec![FfonElement::new_str(format!("<input>{s}</input>"))],
+        MailBody::Html(s) => vec![FfonElement::new_str(format!("<input>{s}</input>"))],
+        MailBody::Ffon(elems) => elems.clone(),
+    };
+    children.push(FfonElement::new_str(
+        "<button>body_new_line</button>New text line".to_owned(),
+    ));
+    children
+}
+
+/// Update a body leaf after a text edit in the compose form.
+///
+/// Called from `commit_edit` when the path ends in `"Body:"`.
+/// Matches the element whose stripped input content equals `old_content`
+/// and replaces it with `new_content`.  When `old_content` is empty
+/// (a freshly-inserted placeholder), the first empty leaf is filled.
+/// If the body was `Text` and a new element is being added (no match),
+/// it is upgraded to `Ffon` to hold multiple elements.
+fn update_body_leaf(body: &mut MailBody, old_content: &str, new_content: &str) {
+    use sicompass_sdk::tags;
+
+    match body {
+        MailBody::Text(s) | MailBody::Html(s) => {
+            if old_content.is_empty() && !s.is_empty() {
+                // A new element is being inserted alongside existing content — upgrade to Ffon.
+                let existing = s.clone();
+                let is_html = matches!(*body, MailBody::Html(_));
+                *body = MailBody::Ffon(vec![
+                    FfonElement::new_str(format!("<input>{existing}</input>")),
+                    FfonElement::new_str(format!("<input>{new_content}</input>")),
+                ]);
+                let _ = is_html; // future: preserve HTML kind if needed
+            } else {
+                // Simple replacement.
+                *s = new_content.to_owned();
+            }
+        }
+        MailBody::Ffon(elems) => {
+            // Find the element whose input-stripped content matches old_content.
+            let pos = elems.iter().position(|e| {
+                if let FfonElement::Str(s) = e {
+                    let stripped = tags::extract_input(s).unwrap_or_else(|| s.clone());
+                    stripped == old_content
+                } else {
+                    false
+                }
+            });
+            if let Some(idx) = pos {
+                elems[idx] = FfonElement::new_str(format!("<input>{new_content}</input>"));
+            } else {
+                // No match — append as a new element.
+                elems.push(FfonElement::new_str(format!("<input>{new_content}</input>")));
+            }
+        }
+    }
+}
+
+/// Add a new empty text-line element to the body (used by the "body_new_line" button).
+fn body_add_element(body: &mut MailBody) {
+    match body {
+        MailBody::Text(s) if s.is_empty() => {
+            // Still empty — nothing to do yet; leave as single empty input.
+        }
+        MailBody::Text(s) => {
+            let existing = s.clone();
+            *body = MailBody::Ffon(vec![
+                FfonElement::new_str(format!("<input>{existing}</input>")),
+                FfonElement::new_str("<input></input>".to_owned()),
+            ]);
+        }
+        MailBody::Html(s) => {
+            let existing = s.clone();
+            *body = MailBody::Ffon(vec![
+                FfonElement::new_str(format!("<input>{existing}</input>")),
+                FfonElement::new_str("<input></input>".to_owned()),
+            ]);
+        }
+        MailBody::Ffon(elems) => {
+            elems.push(FfonElement::new_str("<input></input>".to_owned()));
+        }
+    }
+}
+
+/// Normalise a draft body before sending (auto-detect format, collapse trivial Ffon).
+///
+/// - Single-element `Ffon([Str("<input>text</input>")])` → `Text(text)`.
+/// - `Text` that parses as valid FFON JSON → `Ffon(parsed)`.
+/// - `Text` that looks like HTML → `Html(text)`.
+/// - Everything else: unchanged.
+fn normalize_body_for_send(body: &MailBody) -> MailBody {
+    use sicompass_sdk::ffon::to_json_string;
+    use sicompass_sdk::tags;
+
+    match body {
+        MailBody::Ffon(elems) if elems.len() == 1 => {
+            if let FfonElement::Str(s) = &elems[0] {
+                let plain = tags::extract_input(s).unwrap_or_else(|| s.clone());
+                // Collapse single-element Ffon back to Text (or re-detect as HTML/Ffon).
+                return normalize_body_for_send(&MailBody::Text(plain.to_owned()));
+            }
+            body.clone()
+        }
+        MailBody::Text(s) => {
+            // Try FFON detection.
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(s) {
+                if sicompass_sdk::ffon::is_ffon(&v) {
+                    if let Ok(elems) = serde_json::from_value::<Vec<sicompass_sdk::ffon::FfonElement>>(v) {
+                        return MailBody::Ffon(elems);
+                    }
+                }
+            }
+            // Try HTML detection (conservative: must start with a block-level HTML tag).
+            let trimmed = s.trim();
+            let looks_html = trimmed.starts_with("<!DOCTYPE")
+                || trimmed.starts_with("<html")
+                || trimmed.starts_with("<HTML");
+            if looks_html {
+                return MailBody::Html(s.clone());
+            }
+            body.clone()
+        }
+        _ => body.clone(),
+    }
+}
+
+/// Display label for the `Body:` Obj key — reflects the current format live.
+fn body_format_label(body: &MailBody) -> &'static str {
+    match body {
+        MailBody::Text(_) => "Body: [text]",
+        MailBody::Html(_) => "Body: [html]",
+        MailBody::Ffon(_) => "Body: [ffon]",
+    }
+}
+
+/// One-way format promotion for live detection after each body edit.
+///
+/// Unlike `normalize_body_for_send`, this never collapses `Ffon`→`Text`, so
+/// the user stays in the mode they've chosen once structure has been added.
+fn detect_body_format_live(body: MailBody) -> MailBody {
+    match body {
+        MailBody::Text(ref s) => {
+            // Try FFON: only promote when the text is valid JSON FFON.
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(s) {
+                if sicompass_sdk::ffon::is_ffon(&v) {
+                    if let Ok(elems) = serde_json::from_value::<Vec<FfonElement>>(v) {
+                        return MailBody::Ffon(elems);
+                    }
+                }
+            }
+            // Try HTML: must start with a recognised block-level tag.
+            let trimmed = s.trim();
+            if trimmed.starts_with("<!DOCTYPE")
+                || trimmed.starts_with("<html")
+                || trimmed.starts_with("<HTML")
+            {
+                return MailBody::Html(s.clone());
+            }
+            body
+        }
+        other => other,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -999,27 +1289,38 @@ impl Provider for EmailClientProvider {
     }
 
     fn meta(&self) -> Vec<String> {
-        let segs_len = self.path_segments().len();
-        if segs_len == 0
-            || (segs_len >= 1
-                && !matches!(
-                    self.path_segments().first().copied().unwrap_or(""),
-                    "compose" | "reply" | "reply all" | "forward"
-                ))
-        {
-            vec![
+        let segs = self.path_segments();
+        let segs_len = segs.len();
+        let at_compose = segs_len >= 1 && matches!(
+            segs[0],
+            "compose" | "reply" | "reply all" | "forward"
+        );
+
+        if !at_compose {
+            return vec![
                 "/       Search".to_owned(),
                 "F5      Refresh".to_owned(),
                 ":       Commands".to_owned(),
+            ];
+        }
+
+        // Inside compose: check if we've navigated into the Body: subtree.
+        // Path is /compose/Body: or deeper (/compose/Body:/seg/...).
+        let in_body = segs_len >= 2 && segs.iter().any(|s| s.starts_with("Body:"));
+        if in_body {
+            vec![
+                "Tab     Next field".to_owned(),
+                "Ctrl+I  Insert before".to_owned(),
+                "Ctrl+A  Append after".to_owned(),
+                "D       Delete".to_owned(),
             ]
         } else {
-            // Compose form
             vec!["Tab     Next field".to_owned()]
         }
     }
 
-    fn commit_edit(&mut self, _old: &str, new_content: &str) -> bool {
-        // Path: /compose/To, /compose/Subject, /compose/Body (or deeper compose paths)
+    fn commit_edit(&mut self, old_content: &str, new_content: &str) -> bool {
+        // Path: /compose/To, /compose/Subject, /compose/Body:  (or deeper body paths)
         let field = self.current_path
             .rfind('/')
             .map(|i| &self.current_path[i + 1..])
@@ -1033,8 +1334,21 @@ impl Provider for EmailClientProvider {
                 self.compose.draft.subject = new_content.to_owned();
                 true
             }
-            "Body" => {
-                self.compose.draft.body = new_content.to_owned();
+            // Body: is now a subtree; commit_edit fires for any leaf edit inside it.
+            // The framework pushes no extra path segment for naked <input> elements,
+            // so the last segment is always "Body:" regardless of which child was edited.
+            // We match by old_content to find the right leaf, or add a new element when
+            // old_content="" (a newly-inserted placeholder being committed for the first time).
+            f if f.starts_with("Body:") => {
+                update_body_leaf(&mut self.compose.draft.body, old_content, new_content);
+                // Live format detection — one-way promotion only (never collapses Ffon).
+                let promoted = detect_body_format_live(std::mem::take(&mut self.compose.draft.body));
+                self.compose.draft.body = promoted;
+                // Sync the path segment to the new label so meta() stays correct.
+                let new_label = body_format_label(&self.compose.draft.body);
+                if let Some(slash) = self.current_path.rfind('/') {
+                    self.current_path = format!("{}/{new_label}", &self.current_path[..slash]);
+                }
                 true
             }
             _ => false,
@@ -1052,6 +1366,10 @@ impl Provider for EmailClientProvider {
                 if let Err(e) = self.do_login() {
                     self.error_message = Some(e);
                 }
+            }
+            // "Add new line" button inside the Body: subtree.
+            "body_new_line" => {
+                body_add_element(&mut self.compose.draft.body);
             }
             _ => {}
         }
@@ -1226,7 +1544,7 @@ mod tests {
     }
 
     struct MockSmtp {
-        sent: std::sync::Arc<std::sync::Mutex<Vec<(String, String, String, String)>>>,
+        sent: std::sync::Arc<std::sync::Mutex<Vec<(String, String, String, MailBody)>>>,
         fail: bool,
     }
 
@@ -1240,10 +1558,10 @@ mod tests {
     }
 
     impl SmtpBackend for MockSmtp {
-        fn send(&mut self, from: &str, to: &str, subject: &str, body: &str) -> Result<(), String> {
+        fn send(&mut self, from: &str, to: &str, subject: &str, body: &MailBody) -> Result<(), String> {
             if self.fail { return Err("SMTP error".to_owned()); }
             self.sent.lock().unwrap().push((
-                from.to_owned(), to.to_owned(), subject.to_owned(), body.to_owned()
+                from.to_owned(), to.to_owned(), subject.to_owned(), body.clone()
             ));
             Ok(())
         }
@@ -1265,7 +1583,7 @@ mod tests {
             to: "bob@example.com".to_owned(),
             subject: "Hello".to_owned(),
             date: "2025-01-01".to_owned(),
-            body: "Hi Bob!".to_owned(),
+            body: MailBody::Text("Hi Bob!".to_owned()),
             message_id: "<1@example.com>".to_owned(),
             in_reply_to: String::new(),
             references: String::new(),
@@ -1565,7 +1883,7 @@ mod tests {
             to: "bob@example.com".to_owned(),
             subject: "Previous".to_owned(),
             date: "2024-12-31".to_owned(),
-            body: "Old message body".to_owned(),
+            body: MailBody::Text("Old message body".to_owned()),
             message_id: "<prev@example.com>".to_owned(),
             in_reply_to: String::new(),
             references: String::new(),
@@ -1608,7 +1926,13 @@ mod tests {
         let items = p.fetch();
         assert!(items.iter().any(|e| e.as_str().map_or(false, |s| s.contains("To:") && s.contains("<input>"))));
         assert!(items.iter().any(|e| e.as_str().map_or(false, |s| s.contains("Subject:") && s.contains("<input>"))));
-        assert!(items.iter().any(|e| e.as_str().map_or(false, |s| s.contains("Body:") && s.contains("<input>"))));
+        // Body: is now an Obj node whose children contain the <input> leaf.
+        assert!(items.iter().any(|e| {
+            if let FfonElement::Obj(obj) = e {
+                obj.key.starts_with("Body:") && obj.children.iter().any(|c|
+                    c.as_str().map_or(false, |s| s.contains("<input>")))
+            } else { false }
+        }));
     }
 
     #[test]
@@ -1744,8 +2068,8 @@ mod tests {
         p.fetch();
         p.push_path("forward");
         p.fetch();
-        assert!(p.compose.draft.body.contains("Forwarded message"));
-        assert!(p.compose.draft.body.contains("alice@example.com"));
+        assert!(matches!(&p.compose.draft.body, MailBody::Text(s) if s.contains("Forwarded message")));
+        assert!(matches!(&p.compose.draft.body, MailBody::Text(s) if s.contains("alice@example.com")));
     }
 
     // ---- Send ----
@@ -1758,7 +2082,7 @@ mod tests {
         p.push_path("compose");
         p.compose.draft.to = "test@x.com".to_owned();
         p.compose.draft.subject = "Greet".to_owned();
-        p.compose.draft.body = "Hello!".to_owned();
+        p.compose.draft.body = MailBody::Text("Hello!".to_owned());
         p.on_button_press("send");
         assert_eq!(sent.lock().unwrap().len(), 1);
         assert_eq!(sent.lock().unwrap()[0].1, "test@x.com");
@@ -1863,9 +2187,9 @@ mod tests {
     fn test_commit_stores_body_field() {
         let mut p = EmailClientProvider::new();
         p.push_path("compose");
-        p.push_path("Body");
+        p.push_path("Body:");
         assert!(p.commit_edit("", "Hello world!"));
-        assert_eq!(p.compose.draft.body, "Hello world!");
+        assert!(matches!(&p.compose.draft.body, MailBody::Text(s) if s == "Hello world!"));
     }
 
     #[test]

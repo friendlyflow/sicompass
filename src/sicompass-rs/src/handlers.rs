@@ -1970,6 +1970,7 @@ pub fn handle_backspace(r: &mut AppRenderer) {
 
 /// Delete the currently selected item.
 pub fn handle_delete(r: &mut AppRenderer, history: crate::app_state::History) {
+    if !provider_allows_shortcut(r, "Delete") { return; }
     crate::state::update_state(r, crate::app_state::Task::Delete, history);
     r.needs_redraw = true;
 }
@@ -2133,6 +2134,7 @@ pub fn handle_file_paste(r: &mut AppRenderer) {
 /// A double tap (within DELTA_MS) undoes the previous append and performs append-append.
 /// Mirrors C `handleCtrlA`.
 pub fn handle_ctrl_a(r: &mut AppRenderer, history: crate::app_state::History) {
+    if !provider_allows_shortcut(r, "Ctrl+A") { return; }
     let now = sdl_ticks();
     if now.saturating_sub(r.last_keypress_time) <= DELTA_MS {
         r.last_keypress_time = 0;
@@ -2151,6 +2153,7 @@ pub fn handle_ctrl_a(r: &mut AppRenderer, history: crate::app_state::History) {
 /// A double tap (within DELTA_MS) undoes the previous insert and re-enters insert.
 /// Mirrors C `handleCtrlI`.
 pub fn handle_ctrl_i(r: &mut AppRenderer, history: crate::app_state::History) {
+    if !provider_allows_shortcut(r, "Ctrl+I") { return; }
     let now = sdl_ticks();
     if now.saturating_sub(r.last_keypress_time) <= DELTA_MS {
         r.last_keypress_time = 0;
@@ -2786,6 +2789,18 @@ fn active_provider_is_filebrowser(r: &AppRenderer) -> bool {
         .unwrap_or(false)
 }
 
+/// Returns `false` when the active provider has a non-empty `meta()` list that does NOT
+/// include a hint containing `shortcut`.
+///
+/// When `meta()` is empty the provider places no restriction — returns `true`.
+/// This lets providers opt in to scoped structural editing via their `meta()` output.
+fn provider_allows_shortcut(r: &AppRenderer, shortcut: &str) -> bool {
+    let meta = crate::provider::get_active_provider_ref(r)
+        .map(|p| p.meta())
+        .unwrap_or_default();
+    meta.is_empty() || meta.iter().any(|m| m.contains(shortcut))
+}
+
 /// Ctrl+X — cut selected text (insert modes) or cut FFON element (editor general).
 pub fn handle_ctrl_x(r: &mut AppRenderer) {
     if is_text_edit_mode(r) {
@@ -2970,6 +2985,7 @@ pub fn handle_dashboard(r: &mut AppRenderer) {
 /// current item and immediately enter insert mode.
 pub fn handle_ctrl_i_operator(r: &mut AppRenderer) {
     if !matches!(r.coordinate, Coordinate::OperatorGeneral) { return; }
+    if !provider_allows_shortcut(r, "Ctrl+I") { return; }
     let slice = match sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id) {
         Some(s) => s,
         None => return,
@@ -2988,6 +3004,7 @@ pub fn handle_ctrl_i_operator(r: &mut AppRenderer) {
 /// current item and immediately enter insert mode.
 pub fn handle_ctrl_a_operator(r: &mut AppRenderer) {
     if !matches!(r.coordinate, Coordinate::OperatorGeneral) { return; }
+    if !provider_allows_shortcut(r, "Ctrl+A") { return; }
     let slice = match sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id) {
         Some(s) => s,
         None => return,

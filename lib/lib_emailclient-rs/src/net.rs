@@ -5,11 +5,12 @@
 //!
 //! Both are instantiated lazily from `EmailClientConfig` inside `init()`.
 
-use crate::{EmailClientConfig, EmailMessage, ImapBackend, MessageHeader, SmtpBackend};
+use crate::{EmailClientConfig, EmailMessage, ImapBackend, MailBody, MessageHeader, SmtpBackend};
 use crate::idle::parse_imap_url;
 
 use imap_proto::types::Address;
 use lettre::message::header::ContentType;
+use lettre::message::{MultiPart, SinglePart};
 use lettre::transport::smtp::authentication::{Credentials, Mechanism};
 use lettre::{Message, SmtpTransport, Transport};
 use native_tls::TlsConnector;
@@ -229,17 +230,45 @@ fn parse_smtp_url(url: &str) -> Option<(String, u16)> {
 }
 
 impl SmtpBackend for RealSmtp {
-    fn send(&mut self, from: &str, to: &str, subject: &str, body: &str) -> Result<(), String> {
+    fn send(&mut self, from: &str, to: &str, subject: &str, body: &MailBody) -> Result<(), String> {
         let (host, port) = parse_smtp_url(&self.config.smtp_url)
             .ok_or_else(|| format!("cannot parse SMTP URL: {}", self.config.smtp_url))?;
 
-        let email = Message::builder()
+        let builder = Message::builder()
             .from(from.parse().map_err(|e: lettre::address::AddressError| e.to_string())?)
             .to(to.parse().map_err(|e: lettre::address::AddressError| e.to_string())?)
-            .subject(subject)
-            .header(ContentType::TEXT_PLAIN)
-            .body(body.to_owned())
-            .map_err(|e| e.to_string())?;
+            .subject(subject);
+
+        let email = match body {
+            MailBody::Text(s) => builder
+                .header(ContentType::TEXT_PLAIN)
+                .body(s.clone())
+                .map_err(|e| e.to_string())?,
+            MailBody::Html(s) => {
+                let plain_fallback = sicompass_sdk::ffon::html_to_ffon(s, "");
+                let plain = crate::flatten_ffon_to_text(&plain_fallback);
+                builder
+                    .multipart(MultiPart::alternative_plain_html(plain, s.clone()))
+                    .map_err(|e| e.to_string())?
+            }
+            MailBody::Ffon(elems) => {
+                let json = sicompass_sdk::ffon::to_json_string(elems)
+                    .map_err(|e| e.to_string())?;
+                let plain_text = crate::flatten_ffon_to_text(elems);
+                builder
+                    .multipart(
+                        MultiPart::alternative()
+                            .singlepart(SinglePart::plain(plain_text))
+                            .singlepart(
+                                SinglePart::builder()
+                                    .header(ContentType::parse("application/json; charset=utf-8")
+                                        .map_err(|e| e.to_string())?)
+                                    .body(json)
+                            )
+                    )
+                    .map_err(|e| e.to_string())?
+            }
+        };
 
         let transport = if self.config.oauth_access_token.is_empty() {
             let creds = Credentials::new(
@@ -295,12 +324,12 @@ fn parse_rfc2822(uid: u32, raw: &[u8]) -> EmailMessage {
     let text = String::from_utf8_lossy(raw);
 
     // Split headers from body at the first blank line.
-    let (header_block, body) = if let Some(pos) = text.find("\r\n\r\n") {
-        (&text[..pos], text[pos + 4..].to_string())
+    let (header_block, raw_body) = if let Some(pos) = text.find("\r\n\r\n") {
+        (&text[..pos], &text[pos + 4..])
     } else if let Some(pos) = text.find("\n\n") {
-        (&text[..pos], text[pos + 2..].to_string())
+        (&text[..pos], &text[pos + 2..])
     } else {
-        (text.as_ref(), String::new())
+        (text.as_ref(), "")
     };
 
     let mut from = String::new();
@@ -310,36 +339,140 @@ fn parse_rfc2822(uid: u32, raw: &[u8]) -> EmailMessage {
     let mut message_id = String::new();
     let mut in_reply_to = String::new();
     let mut references = String::new();
+    let mut content_type = String::new();
+    let mut content_transfer_encoding = String::new();
 
-    for line in header_block.lines() {
-        if let Some(v) = line.strip_prefix("From: ").or_else(|| line.strip_prefix("from: ")) {
-            from = v.to_owned();
-        } else if let Some(v) = line.strip_prefix("To: ").or_else(|| line.strip_prefix("to: ")) {
-            to = v.to_owned();
-        } else if let Some(v) = line.strip_prefix("Subject: ").or_else(|| line.strip_prefix("subject: ")) {
-            subject = v.to_owned();
-        } else if let Some(v) = line.strip_prefix("Date: ").or_else(|| line.strip_prefix("date: ")) {
-            date = v.to_owned();
-        } else if let Some(v) = line.strip_prefix("Message-ID: ").or_else(|| line.strip_prefix("Message-Id: ")) {
-            message_id = v.to_owned();
-        } else if let Some(v) = line.strip_prefix("In-Reply-To: ").or_else(|| line.strip_prefix("in-reply-to: ")) {
-            in_reply_to = v.to_owned();
-        } else if let Some(v) = line.strip_prefix("References: ").or_else(|| line.strip_prefix("references: ")) {
-            references = v.to_owned();
+    // Header parsing with folded-line support (RFC 2822 §2.2.3).
+    let mut lines = header_block.lines().peekable();
+    while let Some(line) = lines.next() {
+        // Unfold continuation lines (lines starting with whitespace).
+        let mut value = line.to_owned();
+        while lines.peek().map_or(false, |l| l.starts_with(' ') || l.starts_with('\t')) {
+            value.push(' ');
+            value.push_str(lines.next().unwrap().trim());
+        }
+        let lc = value.to_ascii_lowercase();
+        if lc.starts_with("from: ") { from = value[6..].to_owned(); }
+        else if lc.starts_with("to: ") { to = value[4..].to_owned(); }
+        else if lc.starts_with("subject: ") { subject = value[9..].to_owned(); }
+        else if lc.starts_with("date: ") { date = value[6..].to_owned(); }
+        else if lc.starts_with("message-id: ") { message_id = value[12..].to_owned(); }
+        else if lc.starts_with("in-reply-to: ") { in_reply_to = value[13..].to_owned(); }
+        else if lc.starts_with("references: ") { references = value[12..].to_owned(); }
+        else if lc.starts_with("content-type: ") { content_type = value[14..].to_owned(); }
+        else if lc.starts_with("content-transfer-encoding: ") {
+            content_transfer_encoding = value[27..].trim().to_ascii_lowercase();
         }
     }
 
-    EmailMessage {
-        uid,
-        from,
-        to,
-        subject,
-        date,
-        body,
-        message_id,
-        in_reply_to,
-        references,
+    let body = parse_body_part(raw_body, &content_type, &content_transfer_encoding);
+
+    EmailMessage { uid, from, to, subject, date, body, message_id, in_reply_to, references }
+}
+
+/// Parse a MIME body part given its content-type and transfer-encoding headers.
+fn parse_body_part(raw: &str, content_type: &str, cte: &str) -> MailBody {
+    let ct_lc = content_type.to_ascii_lowercase();
+    let mime = ct_lc.split(';').next().unwrap_or("").trim();
+
+    // Handle multipart/* by extracting the best sub-part.
+    if mime.starts_with("multipart/") {
+        if let Some(boundary) = extract_boundary(content_type) {
+            return parse_multipart(raw, &boundary);
+        }
+        return MailBody::Text(raw.to_owned());
     }
+
+    let decoded = decode_transfer_encoding(raw, cte);
+
+    match mime {
+        "text/html" => MailBody::Html(decoded),
+        "application/json" => {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&decoded) {
+                if sicompass_sdk::ffon::is_ffon(&v) {
+                    if let Ok(elems) = serde_json::from_value(v) {
+                        return MailBody::Ffon(elems);
+                    }
+                }
+            }
+            MailBody::Text(decoded)
+        }
+        // text/plain or unknown/empty — treat as plain text.
+        _ => MailBody::Text(decoded),
+    }
+}
+
+/// Decode a transfer-encoded body string.
+fn decode_transfer_encoding(raw: &str, cte: &str) -> String {
+    match cte.trim() {
+        "quoted-printable" => {
+            quoted_printable::decode(raw.as_bytes(), quoted_printable::ParseMode::Robust)
+                .map(|b| String::from_utf8_lossy(&b).into_owned())
+                .unwrap_or_else(|_| raw.to_owned())
+        }
+        "base64" => {
+            use base64::Engine as _;
+            let compact: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
+            base64::engine::general_purpose::STANDARD
+                .decode(compact.as_bytes())
+                .map(|b| String::from_utf8_lossy(&b).into_owned())
+                .unwrap_or_else(|_| raw.to_owned())
+        }
+        _ => raw.to_owned(),
+    }
+}
+
+/// Extract the `boundary=` parameter from a Content-Type value.
+fn extract_boundary(content_type: &str) -> Option<String> {
+    for part in content_type.split(';').skip(1) {
+        let p = part.trim();
+        let lc = p.to_ascii_lowercase();
+        if lc.starts_with("boundary=") {
+            let val = &p[9..].trim_matches('"');
+            return Some(val.to_string());
+        }
+    }
+    None
+}
+
+/// Split a multipart body and return the best available part.
+/// Preference order: FFON (application/json) > HTML > plain text.
+fn parse_multipart(raw: &str, boundary: &str) -> MailBody {
+    let delimiter = format!("--{boundary}");
+    let mut parts: Vec<MailBody> = Vec::new();
+
+    for chunk in raw.split(&delimiter) {
+        let chunk = chunk.trim_start_matches('-').trim();
+        if chunk.is_empty() { continue; }
+
+        // Split chunk into its own headers and body.
+        let (part_headers, part_body) = if let Some(pos) = chunk.find("\r\n\r\n") {
+            (&chunk[..pos], &chunk[pos + 4..])
+        } else if let Some(pos) = chunk.find("\n\n") {
+            (&chunk[..pos], &chunk[pos + 2..])
+        } else {
+            continue;
+        };
+
+        let mut part_ct = String::new();
+        let mut part_cte = String::new();
+        for line in part_headers.lines() {
+            let lc = line.to_ascii_lowercase();
+            if lc.starts_with("content-type: ") { part_ct = line[14..].to_owned(); }
+            else if lc.starts_with("content-transfer-encoding: ") {
+                part_cte = line[27..].trim().to_ascii_lowercase();
+            }
+        }
+        parts.push(parse_body_part(part_body, &part_ct, &part_cte));
+    }
+
+    // Pick in preference order: Ffon > Html > Text.
+    let ffon = parts.iter().find(|p| matches!(p, MailBody::Ffon(_)));
+    if let Some(f) = ffon { return f.clone(); }
+    let html = parts.iter().find(|p| matches!(p, MailBody::Html(_)));
+    if let Some(h) = html { return h.clone(); }
+    parts.into_iter().find(|p| matches!(p, MailBody::Text(_)))
+        .unwrap_or_else(|| MailBody::Text(String::new()))
 }
 
 /// Format an IMAP address struct as "Name <mailbox@host>" or "mailbox@host".
@@ -425,7 +558,7 @@ mod tests {
         assert_eq!(msg.subject, "Hello");
         assert_eq!(msg.message_id, "<abc@example.com>");
         assert_eq!(msg.references, "<prev@example.com>");
-        assert!(msg.body.contains("Hi there!"));
+        assert!(matches!(&msg.body, MailBody::Text(s) if s.contains("Hi there!")));
     }
 
     #[test]
@@ -433,7 +566,7 @@ mod tests {
         let raw = b"From: a@b.com\nSubject: Test\n\nBody text\n";
         let msg = parse_rfc2822(1, raw);
         assert_eq!(msg.subject, "Test");
-        assert!(msg.body.contains("Body text"));
+        assert!(matches!(&msg.body, MailBody::Text(s) if s.contains("Body text")));
     }
 
     #[test]
@@ -441,7 +574,47 @@ mod tests {
         let raw = b"From: a@b.com\r\nSubject: Empty\r\n\r\n";
         let msg = parse_rfc2822(1, raw);
         assert_eq!(msg.subject, "Empty");
-        assert!(msg.body.is_empty());
+        assert!(matches!(&msg.body, MailBody::Text(s) if s.is_empty()));
+    }
+
+    #[test]
+    fn test_parse_rfc2822_html_content_type() {
+        let raw = b"From: a@b.com\r\nSubject: Html\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<p>Hello</p>\r\n";
+        let msg = parse_rfc2822(1, raw);
+        assert!(matches!(&msg.body, MailBody::Html(s) if s.contains("<p>Hello</p>")));
+    }
+
+    #[test]
+    fn test_parse_rfc2822_multipart_alternative_prefers_html() {
+        let boundary = "bound1";
+        let body = format!(
+            "--{boundary}\r\nContent-Type: text/plain\r\n\r\nPlain text\r\n\
+             --{boundary}\r\nContent-Type: text/html\r\n\r\n<p>Rich</p>\r\n\
+             --{boundary}--\r\n"
+        );
+        let raw = format!(
+            "From: a@b.com\r\nSubject: Multi\r\nContent-Type: multipart/alternative; boundary=\"{boundary}\"\r\n\r\n{body}"
+        );
+        let msg = parse_rfc2822(1, raw.as_bytes());
+        assert!(matches!(&msg.body, MailBody::Html(s) if s.contains("<p>Rich</p>")));
+    }
+
+    #[test]
+    fn test_parse_rfc2822_application_json_ffon() {
+        let ffon_json = r#"[{"Heading:":["line1","line2"]}]"#;
+        let raw = format!(
+            "From: a@b.com\r\nSubject: Ffon\r\nContent-Type: application/json; charset=utf-8\r\n\r\n{ffon_json}\r\n"
+        );
+        let msg = parse_rfc2822(1, raw.as_bytes());
+        assert!(matches!(&msg.body, MailBody::Ffon(elems) if !elems.is_empty()));
+    }
+
+    #[test]
+    fn test_parse_rfc2822_quoted_printable_decode() {
+        // "café" in quoted-printable
+        let raw = b"From: a@b.com\r\nSubject: QP\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\ncaf=C3=A9\r\n";
+        let msg = parse_rfc2822(1, raw);
+        assert!(matches!(&msg.body, MailBody::Text(s) if s.contains("café")));
     }
 
     #[test]
