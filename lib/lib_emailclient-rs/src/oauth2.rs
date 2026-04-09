@@ -10,7 +10,8 @@ use std::net::TcpListener;
 
 const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
-const OAUTH2_SCOPE: &str = "https://mail.google.com/";
+const GOOGLE_USERINFO_URL: &str = "https://www.googleapis.com/oauth2/v2/userinfo";
+const OAUTH2_SCOPE: &str = "https://mail.google.com/ email profile";
 
 /// Result of an OAuth2 token operation — mirrors `OAuth2TokenResult` from C.
 #[derive(Debug, Clone, Default)]
@@ -66,6 +67,18 @@ pub fn authorize(client_id: &str, client_secret: &str, timeout_secs: u64) -> OAu
     };
 
     exchange_code(&code, client_id, client_secret, &redirect_uri)
+}
+
+/// Fetch the authenticated user's email address from Google's userinfo endpoint.
+/// Returns `None` on any network or parse error (caller treats it as optional).
+pub fn fetch_email(access_token: &str) -> Option<String> {
+    let response = Client::new()
+        .get(GOOGLE_USERINFO_URL)
+        .bearer_auth(access_token)
+        .send()
+        .ok()?;
+    let json: serde_json::Value = response.json().ok()?;
+    json.get("email")?.as_str().map(|s| s.to_owned())
 }
 
 /// Refresh an expired access token using a refresh token.

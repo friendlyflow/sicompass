@@ -340,6 +340,30 @@ impl EmailClientProvider {
         }
     }
 
+    /// Persist server connection fields (IMAP URL, SMTP URL, username) to settings.json.
+    fn save_server_config(&self) {
+        let Some(path) = platform::main_config_path() else { return };
+        let content = std::fs::read_to_string(&path).unwrap_or_default();
+        let mut root: serde_json::Value =
+            serde_json::from_str(&content).unwrap_or_else(|_| serde_json::Value::Object(Default::default()));
+        let section = root
+            .as_object_mut()
+            .and_then(|o| {
+                if !o.contains_key("email client") {
+                    o.insert("email client".to_owned(), serde_json::Value::Object(Default::default()));
+                }
+                o.get_mut("email client")?.as_object_mut()
+            });
+        if let Some(sec) = section {
+            sec.insert("emailImapUrl".to_owned(), self.config.imap_url.clone().into());
+            sec.insert("emailSmtpUrl".to_owned(), self.config.smtp_url.clone().into());
+            sec.insert("emailUsername".to_owned(), self.config.username.clone().into());
+        }
+        if let Ok(json) = serde_json::to_string_pretty(&root) {
+            let _ = std::fs::write(&path, json);
+        }
+    }
+
     /// Persist OAuth tokens to settings.json.
     fn save_oauth_tokens(&self) {
         let Some(path) = platform::main_config_path() else { return };
@@ -620,6 +644,7 @@ impl EmailClientProvider {
     }
 
     fn send_draft(&mut self) -> bool {
+        self.ensure_fresh_token();
         if let Some(ref mut smtp) = self.smtp {
             let from = self.config.username.clone();
             let to = self.compose.draft.to.clone();
@@ -628,6 +653,21 @@ impl EmailClientProvider {
             smtp.send(&from, &to, &subject, &body).is_ok()
         } else {
             false
+        }
+    }
+
+    /// Refresh OAuth2 token if expired; rebuild backends if the token changed.
+    /// Mirrors C `ensureOAuth2Token()`, which is called before every IMAP/SMTP
+    /// operation to keep the backends in sync with a live token.
+    fn ensure_fresh_token(&mut self) {
+        let old = self.config.oauth_access_token.clone();
+        self.ensure_token();
+        if self.config.oauth_access_token != old {
+            // Token was refreshed — drop backends so rebuild_backends recreates
+            // them with the new token (backends store their own config clone).
+            self.imap = None;
+            self.smtp = None;
+            self.rebuild_backends();
         }
     }
 
@@ -794,6 +834,7 @@ impl Provider for EmailClientProvider {
     }
 
     fn fetch(&mut self) -> Vec<FfonElement> {
+        self.ensure_fresh_token();
         let segs = self.path_segments().iter().map(|s| s.to_string()).collect::<Vec<_>>();
 
         match segs.len() {
@@ -991,11 +1032,31 @@ impl Provider for EmailClientProvider {
                     self.config.oauth_refresh_token = result.refresh_token;
                     self.config.token_expiry = now + result.expires_in;
                     self.save_oauth_tokens();
+                    // Auto-configure Gmail server endpoints and username if not set.
+                    // Since we only support Google OAuth2, these are always correct.
+                    if self.config.imap_url.is_empty() {
+                        self.config.imap_url = "imaps://imap.gmail.com:993".to_owned();
+                    }
+                    if self.config.smtp_url.is_empty() {
+                        self.config.smtp_url = "smtps://smtp.gmail.com:465".to_owned();
+                    }
+                    if self.config.username.is_empty() {
+                        if let Some(email) = oauth2::fetch_email(&self.config.oauth_access_token) {
+                            self.config.username = email;
+                        }
+                    }
+                    self.save_server_config();
                     // Rebuild backends with new OAuth credentials.
                     self.imap = None;
                     self.smtp = None;
                     self.rebuild_backends();
-                    Some(FfonElement::new_str("Google OAuth2 login successful".to_owned()))
+                    // Reset to the root folder list so the handler navigates back to
+                    // depth 2 and re-fetches, showing INBOX and other folders directly.
+                    self.current_path = "/".to_owned();
+                    self.folder_cache = None;
+                    self.envelope_cache = None;
+                    self.envelope_cache_folder.clear();
+                    None
                 } else {
                     *error = format!("OAuth2 failed: {}", result.error);
                     None
@@ -1818,6 +1879,29 @@ mod tests {
         p.handle_command("compose", "", 0, &mut err);
         // compose command resets state but doesn't navigate (navigation done by app layer)
         assert!(err.is_empty());
+    }
+
+    #[test]
+    fn test_ensure_fresh_token_noop_when_valid() {
+        // Token present and not expired → ensure_fresh_token is a no-op.
+        let imap = MockImap::new().with_folders(&["INBOX"]);
+        let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
+        p.config.oauth_access_token = "valid_token".to_owned();
+        p.config.token_expiry = i64::MAX; // never expires
+        p.ensure_fresh_token();
+        // Token unchanged, backend still present.
+        assert_eq!(p.config.oauth_access_token, "valid_token");
+        assert!(p.imap.is_some());
+    }
+
+    #[test]
+    fn test_ensure_fresh_token_noop_in_password_mode() {
+        // No OAuth token → password mode, ensure_fresh_token must not touch backends.
+        let imap = MockImap::new().with_folders(&["INBOX"]);
+        let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
+        p.config.oauth_access_token = String::new();
+        p.ensure_fresh_token();
+        assert!(p.imap.is_some(), "backend untouched in password mode");
     }
 
     #[test]
