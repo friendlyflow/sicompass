@@ -637,6 +637,10 @@ impl EmailClientProvider {
         if self.config.imap_url.is_empty() || self.config.username.is_empty() {
             return;
         }
+        // In password-auth mode, refuse to connect with an empty password.
+        if self.config.oauth_access_token.is_empty() && self.config.password.is_empty() {
+            return;
+        }
         // Only build if no backend is already injected (e.g. in tests).
         if self.imap.is_none() {
             self.imap = Some(Box::new(net::RealImap::from_config(&self.config)));
@@ -1769,6 +1773,30 @@ mod tests {
         let mut p = EmailClientProvider::new();
         p.on_setting_change("emailTokenExpiry", "9999999999");
         assert_eq!(p.config.token_expiry, 9999999999);
+    }
+
+    #[test]
+    fn test_rebuild_backends_no_backend_without_password() {
+        // URL + username set but no password and no OAuth token → backend must
+        // NOT be created (would otherwise LOGIN with empty password and get
+        // "No Response: empty user name or password" from the server).
+        let mut p = EmailClientProvider::new();
+        p.on_setting_change("emailImapUrl", "imaps://imap.gmail.com");
+        p.on_setting_change("emailUsername", "user@example.com");
+        // password deliberately left empty, no OAuth token set
+        assert!(p.imap.is_none(), "backend should not be created without password");
+    }
+
+    #[test]
+    fn test_rebuild_backends_allows_oauth_without_password() {
+        // URL + username + OAuth token → backend should be created even without
+        // a plain password (XOAUTH2 auth path).
+        let mut p = EmailClientProvider::new();
+        p.on_setting_change("emailImapUrl", "imaps://imap.gmail.com");
+        p.on_setting_change("emailUsername", "user@example.com");
+        p.on_setting_change("emailOAuthAccessToken", "ya29.sometoken");
+        // RealImap is created (won't connect until first use); imap.is_some().
+        assert!(p.imap.is_some(), "backend should be created when OAuth token is present");
     }
 
     // ---- commands ----
