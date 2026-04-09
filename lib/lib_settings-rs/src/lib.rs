@@ -165,11 +165,18 @@ impl SettingsProvider {
 
     /// Programmatically set a checkbox state (without firing the apply callback).
     pub fn set_checkbox_state(&mut self, config_key: &str, checked: bool) {
-        if let Some(e) = self.checkbox_entries.iter_mut().find(|e| e.config_key == config_key) {
+        let write = if let Some(e) = self.checkbox_entries.iter_mut().find(|e| e.config_key == config_key) {
             if e.checked != checked {
                 e.checked = checked;
-                self.save_config_if_possible();
+                Some((e.section.clone(), e.config_key.clone()))
+            } else {
+                None
             }
+        } else {
+            None
+        };
+        if let Some((section, key)) = write {
+            self.write_key_bool(&section, &key, checked);
         }
     }
 
@@ -224,52 +231,39 @@ impl SettingsProvider {
         }
     }
 
-    fn save_config_to(&self, path: &Path) {
-        // Ensure parent dirs exist
-        if let Some(parent) = path.parent() {
-            platform::make_dirs(parent);
-        }
-
-        // Read existing file to preserve fields we don't own
-        let mut root: Map<String, Value> = std::fs::read_to_string(path)
+    // Write a single string key into section, preserving everything else in the file.
+    fn write_key_string(&self, section: &str, key: &str, value: &str) {
+        let Some(path) = self.config_path() else { return };
+        if let Some(parent) = path.parent() { platform::make_dirs(parent); }
+        let mut root: Map<String, Value> = std::fs::read_to_string(&path)
             .ok()
             .and_then(|s| serde_json::from_str::<Value>(&s).ok())
             .and_then(|v| if let Value::Object(m) = v { Some(m) } else { None })
             .unwrap_or_default();
-
-        // sicompass: colorScheme
-        let sc = root.entry("sicompass".to_owned()).or_insert_with(|| Value::Object(Map::new()));
-        if let Value::Object(m) = sc {
-            m.insert("colorScheme".to_owned(), Value::String(self.color_scheme.clone()));
+        let sec = root.entry(section.to_owned()).or_insert_with(|| Value::Object(Map::new()));
+        if let Value::Object(m) = sec {
+            m.insert(key.to_owned(), Value::String(value.to_owned()));
         }
-
-        for e in &self.radio_entries {
-            let sec = root.entry(e.section.clone()).or_insert_with(|| Value::Object(Map::new()));
-            if let Value::Object(m) = sec {
-                m.insert(e.config_key.clone(), Value::String(e.current_value.clone()));
-            }
-        }
-        for e in &self.text_entries {
-            let sec = root.entry(e.section.clone()).or_insert_with(|| Value::Object(Map::new()));
-            if let Value::Object(m) = sec {
-                m.insert(e.config_key.clone(), Value::String(e.current_value.clone()));
-            }
-        }
-        for e in &self.checkbox_entries {
-            let sec = root.entry(e.section.clone()).or_insert_with(|| Value::Object(Map::new()));
-            if let Value::Object(m) = sec {
-                m.insert(e.config_key.clone(), Value::Bool(e.checked));
-            }
-        }
-
         if let Ok(json) = serde_json::to_string_pretty(&Value::Object(root)) {
-            let _ = std::fs::write(path, json);
+            let _ = std::fs::write(&path, json);
         }
     }
 
-    fn save_config_if_possible(&self) {
-        if let Some(path) = self.config_path() {
-            self.save_config_to(&path);
+    // Write a single boolean key into section, preserving everything else in the file.
+    fn write_key_bool(&self, section: &str, key: &str, value: bool) {
+        let Some(path) = self.config_path() else { return };
+        if let Some(parent) = path.parent() { platform::make_dirs(parent); }
+        let mut root: Map<String, Value> = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+            .and_then(|v| if let Value::Object(m) = v { Some(m) } else { None })
+            .unwrap_or_default();
+        let sec = root.entry(section.to_owned()).or_insert_with(|| Value::Object(Map::new()));
+        if let Value::Object(m) = sec {
+            m.insert(key.to_owned(), Value::Bool(value));
+        }
+        if let Ok(json) = serde_json::to_string_pretty(&Value::Object(root)) {
+            let _ = std::fs::write(&path, json);
         }
     }
 
@@ -451,8 +445,8 @@ impl Provider for SettingsProvider {
         {
             if e.current_value == new_content { return true; }
             e.current_value = new_content.to_owned();
-            let config_key = e.config_key.clone();
-            self.save_config_if_possible();
+            let (sec, config_key) = (e.section.clone(), e.config_key.clone());
+            self.write_key_string(&sec, &config_key, new_content);
             self.fire_apply(&config_key, new_content);
             return true;
         }
@@ -463,15 +457,15 @@ impl Provider for SettingsProvider {
         if group_key == "color scheme" {
             if self.color_scheme == selected_value { return; }
             self.color_scheme = selected_value.to_owned();
-            self.save_config_if_possible();
+            self.write_key_string("sicompass", "colorScheme", selected_value);
             self.fire_apply("colorScheme", selected_value);
             return;
         }
         if let Some(e) = self.radio_entries.iter_mut().find(|e| e.radio_key == group_key) {
             if e.current_value == selected_value { return; }
             e.current_value = selected_value.to_owned();
-            let config_key = e.config_key.clone();
-            self.save_config_if_possible();
+            let (section, config_key) = (e.section.clone(), e.config_key.clone());
+            self.write_key_string(&section, &config_key, selected_value);
             self.fire_apply(&config_key, selected_value);
         }
     }
@@ -480,8 +474,8 @@ impl Provider for SettingsProvider {
         if let Some(e) = self.checkbox_entries.iter_mut().find(|e| e.label == label) {
             if e.checked == checked { return; }
             e.checked = checked;
-            let config_key = e.config_key.clone();
-            self.save_config_if_possible();
+            let (section, config_key) = (e.section.clone(), e.config_key.clone());
+            self.write_key_bool(&section, &config_key, checked);
             self.fire_apply(&config_key, if checked { "true" } else { "false" });
         }
     }
@@ -812,8 +806,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
         let mut p = SettingsProvider::new_headless().with_config_path(path.clone());
-        p.color_scheme = "light".to_owned();
-        p.save_config_to(&path);
+        p.on_radio_change("color scheme", "light");
 
         let mut p2 = SettingsProvider::new_headless().with_config_path(path.clone());
         p2.init();
@@ -875,8 +868,7 @@ mod tests {
         ).unwrap();
 
         let mut p = SettingsProvider::new_headless().with_config_path(path.clone());
-        p.color_scheme = "light".to_owned();
-        p.save_config_to(&path);
+        p.on_radio_change("color scheme", "light");
 
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("untouched"));
