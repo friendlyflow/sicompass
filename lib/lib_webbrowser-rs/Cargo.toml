@@ -10,9 +10,7 @@ sicompass-sdk = { workspace = true }
 chromiumoxide = "0.9"
 futures = "0.3"
 which = "7"
-scraper = "0.22"
 tokio = { workspace = true }
-url = "2"
 
 [dev-dependencies]
 tokio = { workspace = true }

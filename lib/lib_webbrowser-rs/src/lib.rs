@@ -24,7 +24,7 @@ use chromiumoxide::cdp::browser_protocol::page::AddScriptToEvaluateOnNewDocument
 use futures::StreamExt as _;
 use sicompass_sdk::ffon::FfonElement;
 use sicompass_sdk::provider::Provider;
-use sicompass_sdk::tags;
+use sicompass_sdk::ffon::{html_to_ffon, html_resolve_href};
 
 // ---------------------------------------------------------------------------
 // Cached page
@@ -418,6 +418,15 @@ fn is_cf_blocked_html(html: &str) -> bool {
         || html.contains("cf-error-1020")
 }
 
+/// Fetch a URL via Chromium, parse the HTML, and return as FFON elements.
+/// Used by the main app's `fetch_url_to_elements` bridge.
+pub fn fetch_url_to_ffon(url: &str) -> Vec<FfonElement> {
+    match fetch_html_chromium(url) {
+        Ok(html) => html_to_ffon(&html, url),
+        Err(e) => vec![FfonElement::new_str(format!("Error loading {url}: {e}"))],
+    }
+}
+
 fn fetch_html_chromium(url: &str) -> Result<String, String> {
     let browser: &'static Browser = acquire_browser()?;
 
@@ -515,434 +524,8 @@ fn is_consent_wall_str(url: &str) -> bool {
 }
 
 
-// ---------------------------------------------------------------------------
-// HTML → FFON conversion
-// ---------------------------------------------------------------------------
+// html_to_ffon and resolve_href live in sicompass-html (re-exported above).
 
-/// Tags we skip entirely (including all their children).
-const SKIP_TAGS: &[&str] = &[
-    "script", "style", "noscript", "svg", "head", "nav", "footer",
-];
-
-/// Block container tags — recurse into children without emitting a wrapper element.
-const CONTAINER_TAGS: &[&str] = &[
-    "div", "section", "article", "main", "header", "aside", "figure",
-    "blockquote", "details", "summary",
-];
-
-/// Collapse all whitespace (including newlines/tabs) to single spaces, trim ends.
-fn normalize_whitespace(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut prev_ws = true; // start true → leading whitespace is trimmed
-    for c in s.chars() {
-        if c.is_whitespace() {
-            if !prev_ws {
-                out.push(' ');
-                prev_ws = true;
-            }
-        } else {
-            out.push(c);
-            prev_ws = false;
-        }
-    }
-    if out.ends_with(' ') { out.pop(); }
-    out
-}
-
-fn heading_level(tag: &str) -> Option<u8> {
-    match tag {
-        "h1" => Some(1), "h2" => Some(2), "h3" => Some(3),
-        "h4" => Some(4), "h5" => Some(5), "h6" => Some(6),
-        _ => None,
-    }
-}
-
-/// Builds a document outline using a heading stack, mirroring the C `ParseContext`.
-///
-/// Headings create Obj nodes that collect all following content (paragraphs,
-/// lists, etc.) as children until a same-or-higher-level heading replaces them.
-struct ParseCtx<'a> {
-    base_url: &'a str,
-    /// Top-level elements (before the first heading, or after all headings are popped).
-    root: Vec<FfonElement>,
-    /// Open heading stack: (level, accumulated Obj). Innermost is last.
-    stack: Vec<(u8, FfonElement)>,
-    /// HTML `id` attribute to attach to the next element emitted via `add_to_current`.
-    /// Set when entering a node with an `id`; cleared after the first emission.
-    pending_id: Option<String>,
-}
-
-impl<'a> ParseCtx<'a> {
-    fn new(base_url: &'a str) -> Self {
-        ParseCtx { base_url, root: Vec::new(), stack: Vec::new(), pending_id: None }
-    }
-
-    /// Add `elem` as a child of the current heading, or to root if no heading is open.
-    /// If `pending_id` is set, the `<id>` tag is prepended to the element's key/text
-    /// to mark it as the jump target for fragment links pointing to that HTML id.
-    fn add_to_current(&mut self, mut elem: FfonElement) {
-        if let Some(id) = self.pending_id.take() {
-            let prefix = tags::format_id(&id);
-            match &mut elem {
-                FfonElement::Obj(o) => o.key.insert_str(0, &prefix),
-                FfonElement::Str(s) => s.insert_str(0, &prefix),
-            }
-        }
-        if let Some((_, ref mut h)) = self.stack.last_mut() {
-            h.as_obj_mut().unwrap().push(elem);
-        } else {
-            self.root.push(elem);
-        }
-    }
-
-    /// Pop all stack entries with level >= `level`, nesting each into its parent.
-    fn pop_until_level(&mut self, level: u8) {
-        while self.stack.last().map_or(false, |(l, _)| *l >= level) {
-            let (_, entry) = self.stack.pop().unwrap();
-            if let Some((_, ref mut parent)) = self.stack.last_mut() {
-                parent.as_obj_mut().unwrap().push(entry);
-            } else {
-                self.root.push(entry);
-            }
-        }
-    }
-
-    /// Drain the stack (innermost first) and return the completed top-level elements.
-    fn finalize(mut self) -> Vec<FfonElement> {
-        while let Some((_, entry)) = self.stack.pop() {
-            if let Some((_, ref mut parent)) = self.stack.last_mut() {
-                parent.as_obj_mut().unwrap().push(entry);
-            } else {
-                self.root.push(entry);
-            }
-        }
-        self.root
-    }
-
-    fn process_children(&mut self, node: scraper::ElementRef) {
-        for child in node.children().filter_map(scraper::ElementRef::wrap) {
-            self.process_node(child);
-        }
-    }
-
-    fn process_node(&mut self, node: scraper::ElementRef) {
-        let tag = node.value().name();
-
-        if SKIP_TAGS.contains(&tag) { return; }
-
-        // Install any `id` attribute as a pending annotation for the first emitted element.
-        // Save and restore so sibling nodes don't inherit it.
-        let prev_id = if let Some(id) = node.value().attr("id").filter(|s| !s.is_empty()) {
-            let prev = self.pending_id.take();
-            self.pending_id = Some(id.to_owned());
-            prev
-        } else {
-            // No id on this node — leave pending_id as-is (outer container may have set it)
-            None
-        };
-        let had_own_id = node.value().attr("id").filter(|s| !s.is_empty()).is_some();
-
-        // Headings push onto the stack; following content becomes their children.
-        // Headings don't go through add_to_current, so take pending_id explicitly here.
-        if let Some(level) = heading_level(tag) {
-            let text = collect_text(node, self.base_url);
-            if text.is_empty() {
-                if had_own_id { self.pending_id = prev_id; }
-                return;
-            }
-            self.pop_until_level(level);
-            let id_prefix = self.pending_id.take()
-                .map(|i| tags::format_id(&i))
-                .unwrap_or_default();
-            let key = format!("{id_prefix}{text}");
-            self.stack.push((level, FfonElement::new_obj(key)));
-            if had_own_id { self.pending_id = prev_id; }
-            return;
-        }
-
-        match tag {
-            "p" => {
-                for elem in collect_elements(node, self.base_url) {
-                    self.add_to_current(elem);
-                }
-            }
-            "ul" | "ol" => {
-                let label = if tag == "ol" { "ordered list" } else { "list" };
-                // Claim the pending_id for the list wrapper, not its first item.
-                let id_prefix = self.pending_id.take()
-                    .map(|i| tags::format_id(&i))
-                    .unwrap_or_default();
-                let mut list_obj = FfonElement::new_obj(format!("{id_prefix}{label}"));
-                let li_sel = scraper::Selector::parse("li").unwrap();
-                for (i, li) in node.select(&li_sel).enumerate() {
-                    let elems = collect_elements(li, self.base_url);
-                    for elem in elems {
-                        let prefixed = match &elem {
-                            FfonElement::Str(s) => {
-                                let item = if tag == "ol" {
-                                    format!("{}. {}", i + 1, s)
-                                } else {
-                                    format!("- {}", s)
-                                };
-                                FfonElement::new_str(item)
-                            }
-                            FfonElement::Obj(_) => elem,
-                        };
-                        list_obj.as_obj_mut().unwrap().push(prefixed);
-                    }
-                }
-                if list_obj.as_obj().map_or(false, |o| !o.children.is_empty()) {
-                    self.add_to_current(list_obj);
-                }
-            }
-            "table" => {
-                let mut rows: Vec<FfonElement> = Vec::new();
-                collect_table_rows(node, &mut rows);
-                for row in rows {
-                    self.add_to_current(row);
-                }
-            }
-            "pre" | "code" => {
-                let text = node.text().collect::<String>();
-                let trimmed = text.trim().to_owned();
-                if !trimmed.is_empty() {
-                    self.add_to_current(FfonElement::new_str(trimmed));
-                }
-            }
-            "img" => {
-                let alt = node.value().attr("alt").unwrap_or("");
-                if !alt.is_empty() && alt != "image" {
-                    self.add_to_current(FfonElement::new_str(format!("{alt} [img]")));
-                }
-            }
-            "a" => {
-                let href = resolve_href(node.value().attr("href").unwrap_or(""), self.base_url);
-                let text = collect_text(node, self.base_url);
-                if !text.is_empty() && !href.is_empty() {
-                    self.add_to_current(FfonElement::new_obj(format!("{text} <link>{href}</link>")));
-                } else if !text.is_empty() {
-                    self.add_to_current(FfonElement::new_str(text));
-                }
-            }
-            "dl" => {
-                // Claim the pending_id for the definition-list wrapper.
-                let id_prefix = self.pending_id.take()
-                    .map(|i| tags::format_id(&i))
-                    .unwrap_or_default();
-                let mut dl_obj = FfonElement::new_obj(format!("{id_prefix}definition list"));
-                let mut current_dt: Option<FfonElement> = None;
-                for child in node.children().filter_map(scraper::ElementRef::wrap) {
-                    let text = collect_text(child, self.base_url);
-                    if text.is_empty() { continue; }
-                    match child.value().name() {
-                        "dt" => {
-                            if let Some(dt) = current_dt.take() {
-                                dl_obj.as_obj_mut().unwrap().push(dt);
-                            }
-                            current_dt = Some(FfonElement::new_obj(text));
-                        }
-                        "dd" => {
-                            if let Some(ref mut dt) = current_dt {
-                                dt.as_obj_mut().unwrap().push(FfonElement::new_str(text));
-                            } else {
-                                dl_obj.as_obj_mut().unwrap().push(FfonElement::new_str(text));
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                if let Some(dt) = current_dt { dl_obj.as_obj_mut().unwrap().push(dt); }
-                if dl_obj.as_obj().map_or(false, |o| !o.children.is_empty()) {
-                    self.add_to_current(dl_obj);
-                }
-            }
-            t if CONTAINER_TAGS.contains(&t) => {
-                // pending_id stays installed; first emission from children will claim it.
-                self.process_children(node);
-            }
-            _ => {
-                // Unknown element: recurse if it has block-level children, else emit text.
-                let has_block = node.children()
-                    .filter_map(scraper::ElementRef::wrap)
-                    .any(|c| {
-                        let t = c.value().name();
-                        heading_level(t).is_some()
-                            || matches!(t, "p" | "ul" | "ol" | "table" | "dl")
-                            || CONTAINER_TAGS.contains(&t)
-                    });
-                if has_block {
-                    self.process_children(node);
-                } else {
-                    let text = collect_text(node, self.base_url);
-                    if !text.is_empty() {
-                        self.add_to_current(FfonElement::new_str(text));
-                    }
-                }
-            }
-        }
-
-        // Restore the previously saved pending_id when this node set its own.
-        if had_own_id {
-            // If pending_id was consumed by an emission inside this node, that's correct.
-            // If nothing was emitted (e.g. empty container), discard it and restore the outer one.
-            self.pending_id = prev_id;
-        }
-    }
-}
-
-/// Fetch `url` using the browser engine, parse to FFON, and return the elements.
-///
-/// This is the public entry point used by `handlers.rs` when the user navigates
-/// into a `<link>` element. JSON content is tried first; otherwise HTML is parsed.
-pub fn fetch_url_to_ffon(url: &str) -> Vec<FfonElement> {
-    let html = match fetch_html_chromium(url) {
-        Ok(h) => h,
-        Err(_) => return Vec::new(),
-    };
-    if html.is_empty() { return Vec::new(); }
-    if let Ok(elems) = sicompass_sdk::ffon::parse_json(&html) {
-        if !elems.is_empty() { return elems; }
-    }
-    html_to_ffon(&html, url)
-}
-
-/// Convert an HTML string to a flat list of FfonElements.
-pub fn html_to_ffon(html: &str, base_url: &str) -> Vec<FfonElement> {
-    use scraper::{Html, Selector};
-
-    let document = Html::parse_document(html);
-    let body_sel = Selector::parse("body").unwrap();
-
-    let body = match document.select(&body_sel).next() {
-        Some(b) => b,
-        None => return vec![FfonElement::new_str("(empty page)")],
-    };
-
-    let mut ctx = ParseCtx::new(base_url);
-    ctx.process_children(body);
-    let result = ctx.finalize();
-
-    if result.is_empty() {
-        vec![FfonElement::new_str("(empty page)")]
-    } else {
-        result
-    }
-}
-
-/// Collect all text within a node, converting <a> tags to `text <link>url</link>`,
-/// normalizing all whitespace sequences to single spaces.
-fn collect_text(node: scraper::ElementRef, base_url: &str) -> String {
-    use scraper::Node;
-    let mut buf = String::new();
-    for child in node.children() {
-        match child.value() {
-            Node::Text(t) => buf.push_str(t),
-            Node::Element(e) => {
-                if let Some(elem_ref) = scraper::ElementRef::wrap(child) {
-                    let name = e.name();
-                    if SKIP_TAGS.contains(&name) { continue; }
-                    if name == "a" {
-                        let href = resolve_href(e.attr("href").unwrap_or(""), base_url);
-                        let text = collect_text(elem_ref, base_url);
-                        if !text.is_empty() && !href.is_empty() {
-                            buf.push_str(&format!("{text} <link>{href}</link>"));
-                        } else if !text.is_empty() {
-                            buf.push_str(&text);
-                        }
-                    } else {
-                        buf.push_str(&collect_text(elem_ref, base_url));
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    normalize_whitespace(&buf)
-}
-
-/// Walk a node's direct inline content, splitting text runs as Str and
-/// `<a>` tags as Obj with `<link>` in the key. Used for `<p>` and `<li>`.
-fn collect_elements(node: scraper::ElementRef, base_url: &str) -> Vec<FfonElement> {
-    use scraper::Node;
-    let mut result: Vec<FfonElement> = Vec::new();
-    let mut text_buf = String::new();
-
-    for child in node.children() {
-        match child.value() {
-            Node::Text(t) => text_buf.push_str(t),
-            Node::Element(e) => {
-                if let Some(elem_ref) = scraper::ElementRef::wrap(child) {
-                    let name = e.name();
-                    if SKIP_TAGS.contains(&name) { continue; }
-                    if name == "a" {
-                        // Flush accumulated text before the link
-                        let normalized = normalize_whitespace(&text_buf);
-                        if !normalized.is_empty() {
-                            result.push(FfonElement::new_str(normalized));
-                        }
-                        text_buf.clear();
-                        let href = resolve_href(e.attr("href").unwrap_or(""), base_url);
-                        let link_text = collect_text(elem_ref, base_url);
-                        if !link_text.is_empty() && !href.is_empty() {
-                            result.push(FfonElement::new_obj(
-                                format!("{link_text} <link>{href}</link>"),
-                            ));
-                        } else if !link_text.is_empty() {
-                            text_buf.push_str(&link_text);
-                        }
-                    } else {
-                        text_buf.push_str(&collect_text(elem_ref, base_url));
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    // Flush remaining text
-    let normalized = normalize_whitespace(&text_buf);
-    if !normalized.is_empty() {
-        result.push(FfonElement::new_str(normalized));
-    }
-
-    result
-}
-
-fn collect_table_rows(node: scraper::ElementRef, out: &mut Vec<FfonElement>) {
-    let row_sel = scraper::Selector::parse("tr").unwrap();
-    for row in node.select(&row_sel) {
-        let cell_sel = scraper::Selector::parse("th, td").unwrap();
-        let cells: Vec<String> = row
-            .select(&cell_sel)
-            .map(|c| normalize_whitespace(&c.text().collect::<String>()))
-            .filter(|s| !s.is_empty())
-            .collect();
-        if !cells.is_empty() {
-            out.push(FfonElement::new_str(cells.join(" | ")));
-        }
-    }
-}
-
-/// Resolve a potentially relative href against the base URL.
-fn resolve_href(href: &str, base_url: &str) -> String {
-    if href.is_empty() {
-        return String::new();
-    }
-    // Fragment-only hrefs are preserved as-is; they navigate within the current page.
-    if href.starts_with('#') {
-        return href.to_owned();
-    }
-    if href.contains("://") || href.starts_with("mailto:") || href.starts_with("tel:") {
-        return href.to_owned();
-    }
-    // Relative URL resolution
-    if let Ok(base) = url::Url::parse(base_url) {
-        if let Ok(resolved) = base.join(href) {
-            return resolved.to_string();
-        }
-    }
-    href.to_owned()
-}
 
 // ---------------------------------------------------------------------------
 // Tests — port of tests/lib_webbrowser/test_webbrowser.c (16 tests)
@@ -1167,26 +750,26 @@ mod tests {
 
     #[test]
     fn test_resolve_href_absolute() {
-        let result = resolve_href("https://other.com/page", "https://base.com");
+        let result = html_resolve_href("https://other.com/page", "https://base.com");
         assert_eq!(result, "https://other.com/page");
     }
 
     #[test]
     fn test_resolve_href_relative() {
-        let result = resolve_href("/path/to/page", "https://example.com/current");
+        let result = html_resolve_href("/path/to/page", "https://example.com/current");
         assert!(result.contains("example.com/path/to/page"));
     }
 
     #[test]
     fn test_resolve_href_anchor_preserved() {
         // Fragment-only hrefs are returned as-is for in-page navigation.
-        let result = resolve_href("#section", "https://example.com");
+        let result = html_resolve_href("#section", "https://example.com");
         assert_eq!(result, "#section");
     }
 
     #[test]
     fn test_resolve_href_anchor_complex() {
-        let result = resolve_href("#page-main-content", "https://www.hln.be/");
+        let result = html_resolve_href("#page-main-content", "https://www.hln.be/");
         assert_eq!(result, "#page-main-content");
     }
 
@@ -1280,28 +863,24 @@ mod tests {
 
     #[test]
     fn test_is_consent_wall_detects_dpgmedia() {
-        let url = url::Url::parse(
+        assert!(is_consent_wall_str(
             "https://myprivacy.dpgmedia.be/consent?siteKey=Uqxf9TXhjmaG4pbQ&callbackUrl=https%3A%2F%2Fwww.hln.be%2F"
-        ).unwrap();
-        assert!(is_consent_wall_str(url.as_str()));
+        ));
     }
 
     #[test]
     fn test_is_consent_wall_passes_normal_url() {
-        let url = url::Url::parse("https://www.hln.be/sport").unwrap();
-        assert!(!is_consent_wall_str(url.as_str()));
+        assert!(!is_consent_wall_str("https://www.hln.be/sport"));
     }
 
     #[test]
     fn test_is_consent_wall_detects_generic_consent_path() {
-        let url = url::Url::parse("https://example.com/consent?redirect=/").unwrap();
-        assert!(is_consent_wall_str(url.as_str()));
+        assert!(is_consent_wall_str("https://example.com/consent?redirect=/"));
     }
 
     #[test]
     fn test_is_consent_wall_detects_cookie_consent_path() {
-        let url = url::Url::parse("https://example.com/page/cookie-consent/accept").unwrap();
-        assert!(is_consent_wall_str(url.as_str()));
+        assert!(is_consent_wall_str("https://example.com/page/cookie-consent/accept"));
     }
 
     // ---- is_cf_blocked_html unit tests ----

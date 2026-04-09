@@ -9,6 +9,8 @@ description = "Sicompass provider SDK — FFON types, Provider trait, tag parsin
 serde = { workspace = true }
 serde_json = { workspace = true }
 unicode-normalization = { workspace = true }
+scraper = { workspace = true }
+url = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 xdg = "2"
