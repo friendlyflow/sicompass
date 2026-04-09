@@ -274,6 +274,10 @@ pub struct EmailClientProvider {
 
     // Pending error message to surface via take_error.
     error_message: Option<String>,
+
+    // Override for the settings.json path (used in tests to avoid touching
+    // the real user config file).
+    config_path_override: Option<std::path::PathBuf>,
 }
 
 impl EmailClientProvider {
@@ -297,7 +301,18 @@ impl EmailClientProvider {
             imap: None,
             smtp: None,
             error_message: None,
+            config_path_override: None,
         }
+    }
+
+    /// Override the settings.json path (used in tests to avoid touching real config).
+    pub fn with_config_path(mut self, path: std::path::PathBuf) -> Self {
+        self.config_path_override = Some(path);
+        self
+    }
+
+    fn config_path(&self) -> Option<std::path::PathBuf> {
+        self.config_path_override.clone().or_else(|| platform::main_config_path())
     }
 
     /// Inject an IMAP backend (used in tests and production setup).
@@ -420,7 +435,7 @@ impl EmailClientProvider {
 
     /// Persist server connection fields (IMAP URL, SMTP URL, username) to settings.json.
     fn save_server_config(&self) {
-        let Some(path) = platform::main_config_path() else { return };
+        let Some(path) = self.config_path() else { return };
         let content = std::fs::read_to_string(&path).unwrap_or_default();
         let mut root: serde_json::Value =
             serde_json::from_str(&content).unwrap_or_else(|_| serde_json::Value::Object(Default::default()));
@@ -444,7 +459,7 @@ impl EmailClientProvider {
 
     /// Persist OAuth tokens to settings.json.
     fn save_oauth_tokens(&self) {
-        let Some(path) = platform::main_config_path() else { return };
+        let Some(path) = self.config_path() else { return };
         let content = std::fs::read_to_string(&path).unwrap_or_default();
         let mut root: serde_json::Value =
             serde_json::from_str(&content).unwrap_or_else(|_| serde_json::Value::Object(Default::default()));
@@ -1153,7 +1168,7 @@ impl Provider for EmailClientProvider {
         self.envelope_cache_folder.clear();
 
         // Load config from ~/.config/sicompass/settings.json.
-        let Some(path) = platform::main_config_path() else { return };
+        let Some(path) = self.config_path() else { return };
         let Ok(content) = std::fs::read_to_string(&path) else { return };
         let Ok(root) = serde_json::from_str::<serde_json::Value>(&content) else { return };
         let Some(section) = root.get("email client").and_then(|v| v.as_object()) else { return };
@@ -1690,8 +1705,12 @@ mod tests {
 
     #[test]
     fn test_logout_clears_state_and_returns_none() {
+        let dir = tempfile::tempdir().unwrap();
         let imap = MockImap::new().with_folders(&["INBOX"]);
-        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new()
+            .with_config_path(dir.path().join("settings.json"))
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
         // Prime the folder cache.
         let _ = p.fetch();
         assert!(p.folder_cache.is_some());
@@ -1707,8 +1726,12 @@ mod tests {
 
     #[test]
     fn test_logout_then_fetch_shows_login_button() {
+        let dir = tempfile::tempdir().unwrap();
         let imap = MockImap::new().with_folders(&["INBOX"]);
-        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new()
+            .with_config_path(dir.path().join("settings.json"))
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
         let _ = p.fetch();
         let mut error = String::new();
         p.handle_command("logout", "", 0, &mut error);
@@ -2356,7 +2379,9 @@ mod tests {
 
     #[test]
     fn test_handle_command_logout_clears_tokens() {
-        let mut p = EmailClientProvider::new();
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = EmailClientProvider::new()
+            .with_config_path(dir.path().join("settings.json"));
         p.config.oauth_access_token = "tok".to_owned();
         p.config.oauth_refresh_token = "ref".to_owned();
         p.config.token_expiry = 999;

@@ -118,40 +118,6 @@ fn parse_auth_response(resp: serde_json::Value) -> AuthResult {
 }
 
 // ---------------------------------------------------------------------------
-// Access token persistence (mirrors C's `ccSaveAccessToken`)
-// ---------------------------------------------------------------------------
-
-fn save_access_token_to_settings(token: &str) {
-    use serde_json::{Map, Value};
-
-    let Some(path) = sicompass_sdk::platform::main_config_path() else {
-        return;
-    };
-    let mut root: Map<String, Value> = std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-        .and_then(|v| if let Value::Object(m) = v { Some(m) } else { None })
-        .unwrap_or_default();
-
-    let section = root
-        .entry("chat client".to_owned())
-        .or_insert_with(|| Value::Object(Map::new()));
-    if let Value::Object(m) = section {
-        m.insert(
-            "chatAccessToken".to_owned(),
-            Value::String(token.to_owned()),
-        );
-    }
-
-    if let Some(parent) = path.parent() {
-        sicompass_sdk::platform::make_dirs(parent);
-    }
-    if let Ok(json) = serde_json::to_string_pretty(&Value::Object(root)) {
-        let _ = std::fs::write(&path, json);
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Room cache entry
 // ---------------------------------------------------------------------------
 
@@ -173,6 +139,9 @@ pub struct ChatClientProvider {
     room_cache: Vec<RoomEntry>,
     /// Pending UIA session for multi-stage registration
     uia_session: String,
+    /// Override for the settings.json path (used in tests to avoid touching
+    /// the real user config file).
+    config_path_override: Option<std::path::PathBuf>,
 }
 
 impl ChatClientProvider {
@@ -185,6 +154,39 @@ impl ChatClientProvider {
             current_path: "/".to_owned(),
             room_cache: Vec::new(),
             uia_session: String::new(),
+            config_path_override: None,
+        }
+    }
+
+    pub fn with_config_path(mut self, path: std::path::PathBuf) -> Self {
+        self.config_path_override = Some(path);
+        self
+    }
+
+    fn config_path(&self) -> Option<std::path::PathBuf> {
+        self.config_path_override.clone()
+            .or_else(|| sicompass_sdk::platform::main_config_path())
+    }
+
+    fn save_access_token(&self, token: &str) {
+        use serde_json::{Map, Value};
+        let Some(path) = self.config_path() else { return };
+        let mut root: Map<String, Value> = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+            .and_then(|v| if let Value::Object(m) = v { Some(m) } else { None })
+            .unwrap_or_default();
+        let section = root
+            .entry("chat client".to_owned())
+            .or_insert_with(|| Value::Object(Map::new()));
+        if let Value::Object(m) = section {
+            m.insert("chatAccessToken".to_owned(), Value::String(token.to_owned()));
+        }
+        if let Some(parent) = path.parent() {
+            sicompass_sdk::platform::make_dirs(parent);
+        }
+        if let Ok(json) = serde_json::to_string_pretty(&Value::Object(root)) {
+            let _ = std::fs::write(&path, json);
         }
     }
 
@@ -583,7 +585,7 @@ impl Provider for ChatClientProvider {
                 }
                 let result = self.do_login();
                 if result.success {
-                    save_access_token_to_settings(&result.access_token);
+                    self.save_access_token(&result.access_token);
                     Some(FfonElement::new_str(format!("logged in as {}", result.user_id)))
                 } else {
                     *error = format!("login failed: {}", result.error);
@@ -602,7 +604,7 @@ impl Provider for ChatClientProvider {
                 let result = self.do_register();
                 if result.success {
                     self.access_token = result.access_token.clone();
-                    save_access_token_to_settings(&result.access_token);
+                    self.save_access_token(&result.access_token);
                     self.uia_session.clear();
                     Some(FfonElement::new_str(format!("registered as {}", result.user_id)))
                 } else if result.requires_auth && !result.session.is_empty() {
@@ -636,7 +638,7 @@ impl Provider for ChatClientProvider {
                 let result = self.do_register_complete(&session);
                 if result.success {
                     self.access_token = result.access_token.clone();
-                    save_access_token_to_settings(&result.access_token);
+                    self.save_access_token(&result.access_token);
                     self.uia_session.clear();
                     Some(FfonElement::new_str(format!("registered as {}", result.user_id)))
                 } else if result.requires_auth && !result.session.is_empty() {
@@ -1049,7 +1051,9 @@ mod tests {
                     "user_id": "@alice:server.org",
                 })
             )));
-        let mut p = ChatClientProvider::new();
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = ChatClientProvider::new()
+            .with_config_path(dir.path().join("settings.json"));
         p.homeserver = server.uri();
         p.username = "alice".to_owned();
         p.password = "pass".to_owned();
@@ -1086,7 +1090,9 @@ mod tests {
                     "user_id": "@newuser:server.org",
                 })
             )));
-        let mut p = ChatClientProvider::new();
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = ChatClientProvider::new()
+            .with_config_path(dir.path().join("settings.json"));
         p.homeserver = server.uri();
         p.username = "newuser".to_owned();
         p.password = "pass123".to_owned();
@@ -1154,7 +1160,9 @@ mod tests {
                     "user_id": "@alice:server.org",
                 })
             )));
-        let mut p = ChatClientProvider::new();
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = ChatClientProvider::new()
+            .with_config_path(dir.path().join("settings.json"));
         p.homeserver = server.uri();
         p.username = "alice".to_owned();
         p.password = "pass".to_owned();
