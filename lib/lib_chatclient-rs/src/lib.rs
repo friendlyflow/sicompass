@@ -522,15 +522,6 @@ impl Provider for ChatClientProvider {
         }
     }
 
-    fn meta(&self) -> Vec<String> {
-        vec![
-            "/       Search".to_owned(),
-            "Ctrl+F  Extended search".to_owned(),
-            "F5      Refresh".to_owned(),
-            ":       Commands".to_owned(),
-        ]
-    }
-
     fn push_path(&mut self, segment: &str) {
         self.current_path = format!("/{segment}");
     }

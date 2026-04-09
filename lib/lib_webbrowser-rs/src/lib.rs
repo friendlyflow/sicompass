@@ -121,16 +121,6 @@ impl Provider for WebbrowserProvider {
         true
     }
 
-    fn meta(&self) -> Vec<String> {
-        vec![
-            "I   Edit URL".to_owned(),
-            "/   Search".to_owned(),
-            "Ctrl+F  Extended search".to_owned(),
-            "F5  Refresh".to_owned(),
-            ":   Commands".to_owned(),
-        ]
-    }
-
     fn commands(&self) -> Vec<String> {
         vec!["refresh".to_owned()]
     }

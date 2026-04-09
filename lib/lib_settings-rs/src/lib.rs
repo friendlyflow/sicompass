@@ -361,14 +361,6 @@ impl SettingsProvider {
 impl Provider for SettingsProvider {
     fn name(&self) -> &str { "settings" }
 
-    fn meta(&self) -> Vec<String> {
-        vec![
-            "/   Search".to_owned(),
-            "Ctrl+F  Extended search".to_owned(),
-            "F5  Refresh".to_owned(),
-        ]
-    }
-
     fn fetch(&mut self) -> Vec<FfonElement> {
         let mut result = Vec::new();
 

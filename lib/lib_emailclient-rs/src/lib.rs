@@ -1303,37 +1303,6 @@ impl Provider for EmailClientProvider {
         self.current_path = path.to_owned();
     }
 
-    fn meta(&self) -> Vec<String> {
-        let segs = self.path_segments();
-        let segs_len = segs.len();
-        let at_compose = segs_len >= 1 && matches!(
-            segs[0],
-            "compose" | "reply" | "reply all" | "forward"
-        );
-
-        if !at_compose {
-            return vec![
-                "/       Search".to_owned(),
-                "F5      Refresh".to_owned(),
-                ":       Commands".to_owned(),
-            ];
-        }
-
-        // Inside compose: check if we've navigated into the Body: subtree.
-        // Path is /compose/Body: or deeper (/compose/Body:/seg/...).
-        let in_body = segs_len >= 2 && segs.iter().any(|s| s.starts_with("Body:"));
-        if in_body {
-            vec![
-                "Tab     Next field".to_owned(),
-                "Ctrl+I  Insert before".to_owned(),
-                "Ctrl+A  Append after".to_owned(),
-                "D       Delete".to_owned(),
-            ]
-        } else {
-            vec!["Tab     Next field".to_owned()]
-        }
-    }
-
     fn commit_edit(&mut self, old_content: &str, new_content: &str) -> bool {
         // Path: /compose/To, /compose/Subject, /compose/Body:  (or deeper body paths)
         let field = self.current_path
