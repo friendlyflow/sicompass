@@ -352,6 +352,9 @@ pub struct AppRenderer {
     // ---- Pending window commands (set by settings apply, consumed by main loop) --
     /// `Some(true)` → maximize window, `Some(false)` → restore, `None` → no-op.
     pub pending_maximized: Option<bool>,
+    /// Set by `apply_setting("fontScale")` — consumed by the main loop to
+    /// rebuild the font renderer without a restart.
+    pub rebuild_font_renderer: bool,
 
     // ---- Save/load path (set by save-as dialog, used by Ctrl+S) ------------
     /// The filesystem path last used for Ctrl+S / save-as. Empty = no path set yet.
@@ -425,6 +428,7 @@ impl AppRenderer {
             provider_command_name: String::new(),
             palette_theme: PaletteTheme::Dark,
             pending_maximized: None,
+            rebuild_font_renderer: false,
             current_save_path: String::new(),
             pending_file_browser_save_as: false,
             pending_file_browser_open: false,

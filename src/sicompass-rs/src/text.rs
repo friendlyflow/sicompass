@@ -449,6 +449,24 @@ impl FontRenderer {
         })
     }
 
+    /// Free all Vulkan and FreeType resources.
+    /// The caller must ensure the device is idle before calling this
+    /// (e.g. `device.device_wait_idle().unwrap()`).
+    pub unsafe fn destroy(&self, device: &ash::Device) {
+        device.destroy_pipeline(self.pipeline, None);
+        device.destroy_pipeline_layout(self.pipeline_layout, None);
+        device.destroy_descriptor_pool(self.descriptor_pool, None);
+        device.destroy_descriptor_set_layout(self.descriptor_set_layout, None);
+        device.destroy_buffer(self.vertex_buffer, None);
+        device.free_memory(self.vertex_buffer_memory, None);
+        device.destroy_sampler(self.font_atlas_sampler, None);
+        device.destroy_image_view(self.font_atlas_view, None);
+        device.destroy_image(self.font_atlas_image, None);
+        device.free_memory(self.font_atlas_memory, None);
+        ft::FT_Done_Face(self.ft_face);
+        ft::FT_Done_FreeType(self.ft_library);
+    }
+
     // ---- Frame helpers -----------------------------------------------------
 
     /// Reset the CPU-side vertex accumulator.
