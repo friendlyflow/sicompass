@@ -406,11 +406,17 @@ async fn launch_browser() -> Result<BrowserSession, String> {
             .to_owned()
     })?;
 
+    // Use a fixed profile dir so Chrome doesn't open first-run dialogs and so
+    // we can clean up any stale SingletonLock left by a previous crashed launch.
+    let profile_dir = std::env::temp_dir().join("sicompass-chrome");
+    let _ = std::fs::remove_file(profile_dir.join("SingletonLock"));
+
     let config = BrowserConfig::builder()
         .with_head()
         .arg("--disable-blink-features=AutomationControlled")
         .arg("--no-first-run")
         .arg("--no-default-browser-check")
+        .user_data_dir(&profile_dir)
         .window_size(1920, 1080)
         .chrome_executable(&exe)
         .build()
