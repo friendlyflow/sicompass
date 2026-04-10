@@ -135,6 +135,7 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
         &["dark", "light"], "dark",
     );
     settings.add_checkbox("sicompass", "maximized", "maximized", false);
+    settings.add_text("sicompass", "font scale (restart)", "fontScale", "1.0");
 
     // File-browser settings
     settings.add_radio(
@@ -397,6 +398,24 @@ fn sales_demo_script_path() -> PathBuf {
         .ok()
         .and_then(|p| p.parent().map(|d| d.join("../../lib/lib_sales_demo/sales_demo.ts")))
         .unwrap_or_else(|| PathBuf::from("lib/lib_sales_demo/sales_demo.ts"))
+}
+
+/// Read `sicompass.fontScale` from settings.json.
+/// Returns 1.0 if absent or unparseable. Clamped to [0.5, 4.0].
+pub fn read_font_scale() -> f32 {
+    let Some(path) = sicompass_sdk::platform::main_config_path() else { return 1.0 };
+    let Ok(data) = std::fs::read_to_string(&path) else { return 1.0 };
+    let Ok(root) = serde_json::from_str::<serde_json::Value>(&data) else { return 1.0 };
+    let raw = root.get("sicompass")
+        .and_then(|v| v.as_object())
+        .and_then(|s| s.get("fontScale"))
+        .and_then(|v| {
+            v.as_str().map(|s| s.to_owned())
+                .or_else(|| v.as_f64().map(|f| f.to_string()))
+        });
+    raw.and_then(|s| s.parse::<f32>().ok())
+        .map(|f| f.clamp(0.5, 4.0))
+        .unwrap_or(1.0)
 }
 
 /// Read `remoteUrl` and `apiKey` from settings.json for the given section.

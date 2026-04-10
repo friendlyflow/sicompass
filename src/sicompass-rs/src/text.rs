@@ -95,6 +95,7 @@ impl FontRenderer {
         command_pool: vk::CommandPool,
         graphics_queue: vk::Queue,
         render_pass: vk::RenderPass,
+        dpi: u32,
     ) -> Result<Self, SiError> {
         // ----------------------------------------------------------------
         // 1. Init FreeType
@@ -112,8 +113,7 @@ impl FontRenderer {
             return Err(SiError::Other("Failed to load font 'fonts/Consolas-Regular.ttf'".into()));
         }
 
-        // 64pt at 96 DPI (same as C code)
-        let dpi = 96u32;
+        // 64pt rasterised at the supplied DPI (typically 96 × content_scale × font_scale)
         if ft::FT_Set_Char_Size(ft_face, 0, 64 * 64, dpi, dpi) != 0 {
             return Err(SiError::Other("FT_Set_Char_Size failed".into()));
         }

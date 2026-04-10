@@ -541,13 +541,15 @@ pub fn build_app() -> Result<AppState, SiError> {
     let sdl = sdl3::init().map_err(SiError::Sdl)?;
     let video = sdl.video().map_err(SiError::Sdl)?;
 
-    let mut window = video
-        .window(WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT)
-        .vulkan()
-        .resizable()
-        .hidden()
-        .build()
-        .map_err(|e| SiError::Sdl(e.to_string()))?;
+    let mut wb = video.window(WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT);
+    wb.vulkan().resizable().hidden();
+    // Enable high-pixel-density backbuffer so SDL honours the OS display
+    // scale (e.g. 150% on Windows) and SDL_GetDisplayContentScale returns the
+    // real factor rather than always 1.0.
+    let flags = wb.window_flags()
+        | sdl3::sys::video::SDL_WINDOW_HIGH_PIXEL_DENSITY as u32;
+    wb.set_window_flags(flags);
+    let mut window = wb.build().map_err(|e| SiError::Sdl(e.to_string()))?;
 
     let event_pump = sdl.event_pump().map_err(SiError::Sdl)?;
 
