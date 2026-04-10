@@ -144,18 +144,98 @@ impl Provider for WebbrowserProvider {
 }
 
 // ---------------------------------------------------------------------------
-// Chromium singleton — shared Chrome process + dedicated runtime
+// Chromium — per-fetch browser launch + shared async runtime
 // ---------------------------------------------------------------------------
 
 // Multi-thread runtime (2 workers) for chromiumoxide. Kept alive for the
-// process lifetime so the CDP handler task keeps running between fetches.
+// process lifetime so repeated fetches reuse the same thread pool.
 static CHROMIUM_RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> =
     std::sync::OnceLock::new();
 
-// The Browser value is Send + Sync, so a &'static Browser is safe to pass
-// into async blocks on the multi-thread runtime.
-static CHROMIUM_BROWSER: std::sync::OnceLock<Result<Browser, String>> =
-    std::sync::OnceLock::new();
+// ---------------------------------------------------------------------------
+// Windows: hide Chrome windows that appear during headed launch
+//
+// Chrome must run headed to pass bot-detection on sites like gva.be — headless
+// mode is fingerprinted and blocked.  On Linux, xvfb-run provides an invisible
+// X11 display.  On Windows we use Browser::launch (which chromiumoxide manages)
+// with `with_head()`, and a background thread that calls ShowWindow(SW_HIDE)
+// on any Chrome windows that appear while the browser is starting up.
+// The window is hidden within one paint frame (~50 ms) — invisible in practice.
+// user32.dll is always linked on Windows — no extra crates.
+// ---------------------------------------------------------------------------
+#[cfg(target_os = "windows")]
+mod win_hide {
+    extern "system" {
+        fn EnumWindows(lp_enum_func: unsafe extern "system" fn(isize, isize) -> i32, l_param: isize) -> i32;
+        fn GetWindowThreadProcessId(hwnd: isize, lp_dw_process_id: *mut u32) -> u32;
+        fn ShowWindow(hwnd: isize, n_cmd_show: i32) -> i32;
+        fn IsWindowVisible(hwnd: isize) -> i32;
+        fn OpenProcess(dw_desired_access: u32, b_inherit_handle: i32, dw_process_id: u32) -> isize;
+        fn CloseHandle(h_object: isize) -> i32;
+        fn QueryFullProcessImageNameW(
+            h_process: isize,
+            dw_flags: u32,
+            lp_exe_name: *mut u16,
+            lp_size: *mut u32,
+        ) -> i32;
+    }
+
+    const SW_HIDE: i32 = 0;
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+
+    /// Collect all currently-visible top-level window handles.
+    pub fn snapshot_windows() -> Vec<isize> {
+        let mut hwnds: Vec<isize> = Vec::new();
+        unsafe extern "system" fn callback(hwnd: isize, lparam: isize) -> i32 {
+            let vec = &mut *(lparam as *mut Vec<isize>);
+            vec.push(hwnd);
+            1 // continue
+        }
+        unsafe { EnumWindows(callback, &mut hwnds as *mut Vec<isize> as isize) };
+        hwnds
+    }
+
+    /// Hide every visible top-level window whose exe path contains "chrome" or
+    /// "msedge" and that was NOT present in `before`.
+    pub fn hide_new_browser_windows(before: &[isize]) {
+        let mut current: Vec<isize> = Vec::new();
+        unsafe extern "system" fn callback(hwnd: isize, lparam: isize) -> i32 {
+            let vec = &mut *(lparam as *mut Vec<isize>);
+            vec.push(hwnd);
+            1
+        }
+        unsafe { EnumWindows(callback, &mut current as *mut Vec<isize> as isize) };
+
+        for hwnd in current {
+            if before.contains(&hwnd) { continue; }
+            if unsafe { IsWindowVisible(hwnd) } == 0 { continue; }
+
+            // Get the process ID for this window.
+            let mut pid: u32 = 0;
+            unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
+            if pid == 0 { continue; }
+
+            // Open the process to query its image name.
+            let h_proc = unsafe {
+                OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid)
+            };
+            if h_proc == 0 { continue; }
+
+            let mut buf = [0u16; 512];
+            let mut len = buf.len() as u32;
+            let ok = unsafe {
+                QueryFullProcessImageNameW(h_proc, 0, buf.as_mut_ptr(), &mut len)
+            };
+            unsafe { CloseHandle(h_proc) };
+
+            if ok == 0 { continue; }
+            let path = String::from_utf16_lossy(&buf[..len as usize]).to_lowercase();
+            if path.contains("chrome") || path.contains("msedge") {
+                unsafe { ShowWindow(hwnd, SW_HIDE) };
+            }
+        }
+    }
+}
 
 /// On Linux, write a one-shot wrapper script that invokes Chrome through
 /// `xvfb-run -a` so it runs on an auto-allocated virtual display (invisible).
@@ -170,7 +250,7 @@ fn chrome_via_xvfb() -> Result<std::path::PathBuf, String> {
         return Ok(chrome);
     }
 
-    let wrapper = std::path::PathBuf::from("/tmp/sicompass-xvfb-chrome.sh");
+    let wrapper = std::env::temp_dir().join("sicompass-xvfb-chrome.sh");
     let script = format!(
         "#!/bin/sh\nunset WAYLAND_DISPLAY\nexec xvfb-run -a {} --ozone-platform=x11 \"$@\"\n",
         chrome.to_string_lossy()
@@ -195,11 +275,23 @@ fn chromium_runtime() -> &'static tokio::runtime::Runtime {
     })
 }
 
-/// Try common Chrome/Chromium binary names and return the first one found in PATH.
-/// chromiumoxide's built-in detection only looks for `chrome` and `chromium`;
-/// on many Linux distros the binary is `google-chrome` or `google-chrome-stable`.
+/// Locate a usable Chrome/Chromium/Edge executable.
+///
+/// Priority:
+/// 1. `SICOMPASS_CHROME_PATH` environment variable
+/// 2. Common binary names on `PATH` (works on Linux; unlikely on Windows/macOS)
+/// 3. Well-known installation paths for the current OS
 fn find_chrome_executable() -> Option<std::path::PathBuf> {
-    const CANDIDATES: &[&str] = &[
+    // 1. Explicit override
+    if let Ok(p) = std::env::var("SICOMPASS_CHROME_PATH") {
+        let pb = std::path::PathBuf::from(p);
+        if pb.exists() {
+            return Some(pb);
+        }
+    }
+
+    // 2. PATH lookup (reliable on Linux; included here for all platforms)
+    const PATH_CANDIDATES: &[&str] = &[
         "google-chrome",
         "google-chrome-stable",
         "google-chrome-beta",
@@ -207,77 +299,171 @@ fn find_chrome_executable() -> Option<std::path::PathBuf> {
         "chromium-browser",
         "chrome",
     ];
-    CANDIDATES
-        .iter()
-        .find_map(|name| which::which(name).ok())
+    if let Some(p) = PATH_CANDIDATES.iter().find_map(|n| which::which(n).ok()) {
+        return Some(p);
+    }
+
+    // 3. Well-known installation locations
+    #[cfg(target_os = "windows")]
+    {
+        let env_candidates: &[(&str, &str)] = &[
+            ("ProgramFiles",      r"Google\Chrome\Application\chrome.exe"),
+            ("ProgramFiles",      r"Chromium\Application\chrome.exe"),
+            ("ProgramFiles",      r"Microsoft\Edge\Application\msedge.exe"),
+            ("ProgramFiles(x86)", r"Google\Chrome\Application\chrome.exe"),
+            ("ProgramFiles(x86)", r"Chromium\Application\chrome.exe"),
+            ("ProgramFiles(x86)", r"Microsoft\Edge\Application\msedge.exe"),
+            ("LocalAppData",      r"Google\Chrome\Application\chrome.exe"),
+        ];
+        for (env, rel) in env_candidates {
+            if let Ok(base) = std::env::var(env) {
+                let full = std::path::PathBuf::from(base).join(rel);
+                if full.exists() {
+                    return Some(full);
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        const FIXED: &[&str] = &[
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+        ];
+        for p in FIXED {
+            let pb = std::path::PathBuf::from(p);
+            if pb.exists() {
+                return Some(pb);
+            }
+        }
+        // ~/Applications
+        if let Ok(home) = std::env::var("HOME") {
+            let p = std::path::PathBuf::from(&home)
+                .join("Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
+            if p.exists() {
+                return Some(p);
+            }
+        }
+    }
+
+    None
 }
 
-fn acquire_browser() -> Result<&'static Browser, String> {
-    CHROMIUM_BROWSER
-        .get_or_init(|| {
-            chromium_runtime().block_on(async {
-                // Remove any leftover SingletonLock from a previous crashed run.
-                let profile_dir = "/tmp/sicompass-chrome";
-                let _ = std::fs::remove_file(
-                    std::path::Path::new(profile_dir).join("SingletonLock"),
-                );
+// ── BrowserSession ───────────────────────────────────────────────────────────
+// Owns the Browser handle; chromiumoxide manages the Chrome process lifetime.
+// On Windows, also owns the hider-thread stop signal: dropping it shuts the
+// thread down (channel disconnects → thread exits its recv_timeout loop).
 
-                // On Linux: wrap Chrome with xvfb-run so it renders on an
-                // auto-allocated virtual display — invisible, no DISPLAY juggling.
-                // On macOS/Windows: new headless mode suffices.
-                #[cfg(target_os = "linux")]
-                let mut builder = {
-                    let exe = if let Ok(p) = std::env::var("SICOMPASS_CHROME_PATH") {
-                        std::path::PathBuf::from(p)
-                    } else {
-                        chrome_via_xvfb()?
-                    };
-                    BrowserConfig::builder()
-                        .with_head()
-                        .arg("--disable-blink-features=AutomationControlled")
-                        .user_data_dir(profile_dir)
-                        .window_size(1920, 1080)
-                        .chrome_executable(exe)
-                };
+struct BrowserSession {
+    browser: Browser,
+    /// Windows only: dropping this signals the window-hider thread to stop.
+    #[cfg(target_os = "windows")]
+    _hider_stop: std::sync::mpsc::SyncSender<()>,
+}
 
-                #[cfg(not(target_os = "linux"))]
-                let mut builder = {
-                    let mut b = BrowserConfig::builder()
-                        .new_headless_mode()
-                        .arg("--disable-blink-features=AutomationControlled")
-                        .user_data_dir(profile_dir)
-                        .window_size(1920, 1080);
-                    if let Ok(p) = std::env::var("SICOMPASS_CHROME_PATH") {
-                        b = b.chrome_executable(p);
-                    } else if let Some(p) = find_chrome_executable() {
-                        b = b.chrome_executable(p);
-                    }
-                    b
-                };
+// ── Platform-specific browser launch ─────────────────────────────────────────
 
-                let config = builder
-                    .build()
-                    .map_err(|e| format!("chromium config error: {e}"))?;
+/// Linux: use xvfb-run so Chrome runs headed on an invisible X11 display.
+#[cfg(target_os = "linux")]
+async fn launch_browser() -> Result<BrowserSession, String> {
+    let exe = chrome_via_xvfb()?;
+    let config = BrowserConfig::builder()
+        .with_head()
+        .arg("--disable-blink-features=AutomationControlled")
+        .window_size(1920, 1080)
+        .chrome_executable(exe)
+        .build()
+        .map_err(|e| format!("chromium config error: {e}"))?;
+    let (browser, mut handler) = Browser::launch(config).await
+        .map_err(|e| format!("failed to launch Chrome (xvfb): {e}"))?;
+    tokio::spawn(async move { while handler.next().await.is_some() {} });
+    Ok(BrowserSession { browser })
+}
 
-                let (browser, mut handler) =
-                    Browser::launch(config).await.map_err(|e| {
-                        format!(
-                            "failed to launch Chrome — is Chrome/Chromium installed? \
-                             (set SICOMPASS_CHROME_PATH to override): {e}"
-                        )
-                    })?;
+/// Windows: launch headed Chrome via chromiumoxide, and keep a background
+/// thread running for the entire session that calls ShowWindow(SW_HIDE) on any
+/// new Chrome/Edge windows every 50 ms.  The hider runs from before launch
+/// through the whole fetch (new_page, goto, content) so windows that appear at
+/// any point during the session are hidden within one paint frame (~50 ms).
+/// The thread stops automatically when `BrowserSession` is dropped.
+#[cfg(target_os = "windows")]
+async fn launch_browser() -> Result<BrowserSession, String> {
+    let exe = find_chrome_executable().ok_or_else(|| {
+        "Chrome/Chromium/Edge not found. \
+         Install Chrome or set SICOMPASS_CHROME_PATH to the browser executable."
+            .to_owned()
+    })?;
 
-                // Drive the CDP event loop in a background task; it must keep
-                // running or all browser operations will stall.
-                tokio::spawn(async move {
-                    while handler.next().await.is_some() {}
-                });
+    let config = BrowserConfig::builder()
+        .with_head()
+        .arg("--disable-blink-features=AutomationControlled")
+        .arg("--no-first-run")
+        .arg("--no-default-browser-check")
+        .window_size(1920, 1080)
+        .chrome_executable(&exe)
+        .build()
+        .map_err(|e| format!("chromium config error: {e}"))?;
 
-                Ok(browser)
-            })
-        })
-        .as_ref()
-        .map_err(|e| e.clone())
+    // Snapshot existing windows before launch so we only target new ones.
+    let before = win_hide::snapshot_windows();
+
+    // Channel: when stop_tx is dropped (BrowserSession dropped), recv_timeout
+    // returns Disconnected and the thread exits cleanly.
+    let (stop_tx, stop_rx) = std::sync::mpsc::sync_channel::<()>(0);
+
+    // Background hider: runs for the entire session lifetime.
+    std::thread::spawn(move || {
+        use std::sync::mpsc::RecvTimeoutError;
+        loop {
+            match stop_rx.recv_timeout(std::time::Duration::from_millis(50)) {
+                Err(RecvTimeoutError::Timeout) => {
+                    win_hide::hide_new_browser_windows(&before);
+                }
+                _ => break, // Disconnected → BrowserSession dropped
+            }
+        }
+    });
+
+    let (browser, mut handler) = Browser::launch(config).await.map_err(|e| format!(
+        "failed to launch Chrome at {} — \
+         is Chrome installed? (set SICOMPASS_CHROME_PATH to override): {e}",
+        exe.display()
+    ))?;
+    tokio::spawn(async move { while handler.next().await.is_some() {} });
+
+    Ok(BrowserSession { browser, _hider_stop: stop_tx })
+}
+
+/// macOS / other: headed Chrome via chromiumoxide's built-in launcher.
+/// Chrome may briefly appear in the Dock; headless would be invisible but
+/// risks bot-detection blocks on some sites.
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+async fn launch_browser() -> Result<BrowserSession, String> {
+    let exe = find_chrome_executable().ok_or_else(|| {
+        "Chrome/Chromium not found. \
+         Install Chrome or set SICOMPASS_CHROME_PATH to the browser executable."
+            .to_owned()
+    })?;
+    let config = BrowserConfig::builder()
+        .with_head()
+        .arg("--disable-blink-features=AutomationControlled")
+        .arg("--no-first-run")
+        .arg("--no-default-browser-check")
+        .window_size(1920, 1080)
+        .chrome_executable(&exe)
+        .build()
+        .map_err(|e| format!("chromium config error: {e}"))?;
+    let (browser, mut handler) = Browser::launch(config).await
+        .map_err(|e| format!(
+            "failed to launch Chrome at {} — \
+             is Chrome installed? (set SICOMPASS_CHROME_PATH to override): {e}",
+            exe.display()
+        ))?;
+    tokio::spawn(async move { while handler.next().await.is_some() {} });
+    Ok(BrowserSession { browser })
 }
 
 
@@ -418,63 +604,100 @@ pub fn fetch_url_to_ffon(url: &str) -> Vec<FfonElement> {
 }
 
 fn fetch_html_chromium(url: &str) -> Result<String, String> {
-    let browser: &'static Browser = acquire_browser()?;
-
     chromium_runtime().block_on(async move {
-        let page = browser
-            .new_page("about:blank")
-            .await
-            .map_err(|e| format!("failed to open tab: {e}"))?;
-
-        page.execute(AddScriptToEvaluateOnNewDocumentParams::new(STEALTH_SCRIPT))
-            .await
-            .map_err(|e| format!("stealth script injection failed: {e}"))?;
-
-        page.goto(url)
-            .await
-            .map_err(|e| format!("navigation to {url} failed: {e}"))?;
-
-        // Wait briefly for JS-initiated redirects (e.g. consent-wall redirects).
-        // A short timeout avoids blocking 30 s on pages with no redirect.
-        let _ = tokio::time::timeout(
-            tokio::time::Duration::from_secs(3),
-            page.wait_for_navigation(),
-        ).await;
-
-        // If we landed on a consent wall, try to auto-accept and follow back.
-        let current_url = page.url().await.ok().flatten().unwrap_or_default();
-        if is_consent_wall_str(&current_url) {
-            let accepted = try_accept_consent(&page).await;
-            if accepted {
-                let _ = tokio::time::timeout(
-                    tokio::time::Duration::from_secs(5),
-                    page.wait_for_navigation(),
-                ).await;
-            }
-            // Whether or not we auto-accepted, re-check where we are.
-            let post_url = page.url().await.ok().flatten().unwrap_or_default();
-            if is_consent_wall_str(&post_url) {
-                let _ = page.close().await;
-                return Err(format!(
-                    "Site redirected to a cookie-consent page that could not be \
-                     auto-accepted. Try visiting the site in a real browser first \
-                     to accept cookies, then reload here."
-                ));
-            }
-        }
-
-        let html = page.content().await
-            .map_err(|e| format!("failed to get page content: {e}"))?;
-        let _ = page.close().await;
-
-        if is_cf_blocked_html(&html) {
-            return Err(format!(
-                "{url} blocked the request. The site may require a CAPTCHA or has \
-                 restricted automated access entirely."
-            ));
-        }
-        Ok(html)
+        tokio::time::timeout(
+            tokio::time::Duration::from_secs(60),
+            fetch_html_inner(url),
+        )
+        .await
+        .unwrap_or_else(|_| Err(format!("timed out loading {url} (60 s)")))
     })
+}
+
+async fn fetch_html_inner(url: &str) -> Result<String, String> {
+    // Launch a fresh Chrome process for this fetch.
+    let session = launch_browser().await?;
+
+    // Do the actual page fetch.  Keeping result separate lets us close Chrome
+    // gracefully on both success and error paths before dropping the session.
+    let result = fetch_page(&session, url).await;
+
+    // Send Browser.close so Chrome exits cleanly (WebSocket close handshake
+    // completes) instead of being killed abruptly (which logs a spurious
+    // "ConnectionReset" error from the chromiumoxide handler task).
+    use chromiumoxide::cdp::browser_protocol::browser::CloseParams;
+    let _ = tokio::time::timeout(
+        tokio::time::Duration::from_millis(500),
+        session.browser.execute(CloseParams::default()),
+    )
+    .await;
+
+    // session dropped here; hider thread (Windows) and browser process stop.
+    result
+}
+
+/// Open a tab, navigate to `url`, and return the rendered HTML.
+/// Called by `fetch_html_inner` which handles Chrome lifecycle around it.
+async fn fetch_page(session: &BrowserSession, url: &str) -> Result<String, String> {
+    let t = tokio::time::Duration::from_secs;
+
+    let page = tokio::time::timeout(t(15), session.browser.new_page("about:blank"))
+        .await
+        .map_err(|_| "Chrome took >15 s to open a tab".to_owned())?
+        .map_err(|e| format!("failed to open tab: {e}"))?;
+
+    tokio::time::timeout(
+        t(10),
+        page.execute(AddScriptToEvaluateOnNewDocumentParams::new(STEALTH_SCRIPT)),
+    )
+    .await
+    .map_err(|_| "stealth script injection timed out".to_owned())?
+    .map_err(|e| format!("stealth script injection failed: {e}"))?;
+
+    tokio::time::timeout(t(30), page.goto(url))
+        .await
+        .map_err(|_| format!("navigation to {url} timed out after 30 s"))?
+        .map_err(|e| format!("navigation to {url} failed: {e}"))?;
+
+    // Wait briefly for JS-initiated redirects (e.g. consent-wall redirects).
+    let _ = tokio::time::timeout(
+        tokio::time::Duration::from_secs(3),
+        page.wait_for_navigation(),
+    ).await;
+
+    // If we landed on a consent wall, try to auto-accept and follow back.
+    let current_url = page.url().await.ok().flatten().unwrap_or_default();
+    if is_consent_wall_str(&current_url) {
+        let accepted = try_accept_consent(&page).await;
+        if accepted {
+            let _ = tokio::time::timeout(
+                tokio::time::Duration::from_secs(5),
+                page.wait_for_navigation(),
+            ).await;
+        }
+        let post_url = page.url().await.ok().flatten().unwrap_or_default();
+        if is_consent_wall_str(&post_url) {
+            let _ = page.close().await;
+            return Err(
+                "Site redirected to a cookie-consent page that could not be \
+                 auto-accepted. Try visiting the site in a real browser first \
+                 to accept cookies, then reload here."
+                    .to_owned(),
+            );
+        }
+    }
+
+    let html = page.content().await
+        .map_err(|e| format!("failed to get page content: {e}"))?;
+    let _ = page.close().await;
+
+    if is_cf_blocked_html(&html) {
+        return Err(format!(
+            "{url} blocked the request. The site may require a CAPTCHA or has \
+             restricted automated access entirely."
+        ));
+    }
+    Ok(html)
 }
 
 /// Attempt to accept a GDPR consent wall on the current page by clicking a
