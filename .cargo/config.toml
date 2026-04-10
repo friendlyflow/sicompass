@@ -1,5 +1,1 @@
 [build]
-# Build artifacts go into the user profile directory, which Windows Application
-# Control trusts. C:\sicompass\target\ is blocked by the AppControl policy on
-# this machine.
-target-dir = "C:\\Users\\nicov\\AppData\\Local\\cargo-targets\\sicompass"
