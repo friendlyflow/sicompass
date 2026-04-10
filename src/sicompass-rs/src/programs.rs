@@ -139,7 +139,7 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
         &["dark", "light"], "dark",
     );
     settings.add_checkbox("sicompass", "maximized", "maximized", false);
-    settings.add_text("sicompass", "font scale (restart)", "fontScale", "1.0");
+    settings.add_text("sicompass", "font scale", "fontScale", "1.0");
 
     // File-browser settings
     settings.add_radio(
@@ -739,6 +739,9 @@ fn apply_setting(
         }
         "saveFolder" => {
             renderer.save_folder_path = value.to_owned();
+        }
+        "fontScale" => {
+            renderer.rebuild_font_renderer = true;
         }
         _ => {}
     }

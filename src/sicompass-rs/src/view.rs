@@ -139,6 +139,32 @@ pub fn main_loop(app: &mut AppState) {
             crate::programs::apply_pending_settings(&mut app.renderer, &q, false);
         }
 
+        // ---- Rebuild font renderer when fontScale changes -------------------
+        if app.renderer.rebuild_font_renderer {
+            app.renderer.rebuild_font_renderer = false;
+            unsafe {
+                app.device.device_wait_idle().unwrap();
+                if let Some(old_fr) = app.font_renderer.take() {
+                    old_fr.destroy(&app.device);
+                }
+                let display_id = app.window.display_index().unwrap_or(1) as u32;
+                let content_scale = app.window.display_content_scale(display_id);
+                let font_scale = crate::programs::read_font_scale();
+                let effective_dpi = (96.0_f32 * content_scale * font_scale)
+                    .round()
+                    .max(48.0) as u32;
+                match crate::text::FontRenderer::new(
+                    &app.device, &app.instance, app.physical_device,
+                    app.command_pool, app.graphics_queue, app.render_pass,
+                    effective_dpi,
+                ) {
+                    Ok(fr) => { app.font_renderer = Some(fr); }
+                    Err(e) => { app.renderer.error_message = format!("font reload failed: {e}"); }
+                }
+            }
+            app.renderer.needs_redraw = true;
+        }
+
         // ---- Let providers drive background state (e.g. async OAuth login) --
         let any_tick_update = app.renderer.providers.iter_mut().any(|p| p.tick());
         if any_tick_update {
