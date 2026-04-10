@@ -315,7 +315,8 @@ pub fn navigate_left_raw(r: &mut AppRenderer) -> bool {
             let changed = before != crate::provider::current_path(r);
             let name = std::path::Path::new(&before)
                 .file_name()
-                .map(|n| n.to_string_lossy().into_owned());
+                .map(|n| n.to_string_lossy().into_owned())
+                .or_else(|| Some(before.clone())); // drive roots (e.g. "D:\") have no file_name component
             (changed, name)
         }
         None => (false, None),
