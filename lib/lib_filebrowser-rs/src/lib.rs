@@ -55,6 +55,12 @@ impl FilebrowserProvider {
     }
 
     fn list_directory(&self) -> Vec<FfonElement> {
+        #[cfg(windows)]
+        {
+            if self.current_path == Path::new("/") {
+                return list_drives();
+            }
+        }
         let path = &self.current_path;
         let mut raw = collect_raw_entries(path);
 
@@ -481,6 +487,27 @@ fn copy_recursive(src: &Path, dst: &Path) -> bool {
 fn is_drive_root(path: &Path) -> bool {
     let s = path.to_string_lossy();
     s.len() == 3 && s.as_bytes()[1] == b':' && (s.as_bytes()[2] == b'\\' || s.as_bytes()[2] == b'/')
+}
+
+#[cfg(windows)]
+fn list_drives() -> Vec<FfonElement> {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetLogicalDrives() -> u32;
+    }
+    // SAFETY: GetLogicalDrives takes no arguments and has no failure mode
+    // other than returning 0 (no drives), which we handle gracefully.
+    let mask = unsafe { GetLogicalDrives() };
+    let mut out = Vec::new();
+    for i in 0..26u32 {
+        if mask & (1 << i) != 0 {
+            let letter = (b'A' + i as u8) as char;
+            let drive = format!("{}:\\", letter);
+            let label = format!("<input>{}</input>", drive);
+            out.push(FfonElement::new_obj(&label));
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
