@@ -1,1 +1,4 @@
 [build]
+
+[target.x86_64-pc-windows-msvc]
+runner = ["cmd", "/C", "C:\\sicompass\\.cargo\\run.bat"]
