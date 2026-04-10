@@ -30,7 +30,7 @@ mod linux {
         },
         utils::{Rectangle, Transform},
     };
-    use state::{ClientState, State};
+    use crate::state::{ClientState, State};
     use std::sync::Arc;
     use tracing::info;
 
@@ -102,7 +102,7 @@ mod linux {
                             |app_state, modifiers, keysym| {
                                 if modifiers.alt {
                                     let sym = keysym.modified_sym().raw();
-                                    return state::apply_keybinding(app_state, sym);
+                                    return crate::state::apply_keybinding(app_state, sym);
                                 }
                                 FilterResult::Forward
                             },

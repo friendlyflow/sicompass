@@ -370,9 +370,18 @@ struct BrowserSession {
 #[cfg(target_os = "linux")]
 async fn launch_browser() -> Result<BrowserSession, String> {
     let exe = chrome_via_xvfb()?;
+
+    // Use a fixed profile dir so Chrome doesn't open first-run dialogs and so
+    // we can clean up any stale SingletonLock left by a previous crashed launch.
+    let profile_dir = std::env::temp_dir().join("sicompass-chrome");
+    let _ = std::fs::remove_file(profile_dir.join("SingletonLock"));
+
     let config = BrowserConfig::builder()
         .with_head()
         .arg("--disable-blink-features=AutomationControlled")
+        .arg("--no-first-run")
+        .arg("--no-default-browser-check")
+        .user_data_dir(&profile_dir)
         .window_size(1920, 1080)
         .chrome_executable(exe)
         .build()
@@ -666,18 +675,21 @@ async fn fetch_page(session: &BrowserSession, url: &str) -> Result<String, Strin
     ).await;
 
     // If we landed on a consent wall, try to auto-accept and follow back.
-    let current_url = page.url().await.ok().flatten().unwrap_or_default();
+    let current_url = tokio::time::timeout(t(5), page.url())
+        .await.ok().and_then(|r| r.ok()).flatten().unwrap_or_default();
     if is_consent_wall_str(&current_url) {
-        let accepted = try_accept_consent(&page).await;
+        let accepted = tokio::time::timeout(t(5), try_accept_consent(&page))
+            .await.unwrap_or(false);
         if accepted {
             let _ = tokio::time::timeout(
                 tokio::time::Duration::from_secs(5),
                 page.wait_for_navigation(),
             ).await;
         }
-        let post_url = page.url().await.ok().flatten().unwrap_or_default();
+        let post_url = tokio::time::timeout(t(5), page.url())
+            .await.ok().and_then(|r| r.ok()).flatten().unwrap_or_default();
         if is_consent_wall_str(&post_url) {
-            let _ = page.close().await;
+            let _ = tokio::time::timeout(t(3), page.close()).await;
             return Err(
                 "Site redirected to a cookie-consent page that could not be \
                  auto-accepted. Try visiting the site in a real browser first \
@@ -687,9 +699,11 @@ async fn fetch_page(session: &BrowserSession, url: &str) -> Result<String, Strin
         }
     }
 
-    let html = page.content().await
+    let html = tokio::time::timeout(t(15), page.content())
+        .await
+        .map_err(|_| "timed out waiting for page content (15 s)".to_owned())?
         .map_err(|e| format!("failed to get page content: {e}"))?;
-    let _ = page.close().await;
+    let _ = tokio::time::timeout(t(3), page.close()).await;
 
     if is_cf_blocked_html(&html) {
         return Err(format!(
