@@ -106,6 +106,11 @@ pub trait Provider: Send + 'static {
     fn on_button_press(&mut self, _function_name: &str) {}
     fn on_checkbox_change(&mut self, _label: &str, _checked: bool) {}
 
+    /// Called once per frame from the main loop. Providers use this to drive
+    /// background state (e.g. polling async I/O). Return `true` if the view
+    /// needs a redraw as a result.
+    fn tick(&mut self) -> bool { false }
+
     // ---- Optional: settings section management -----------------------------
 
     /// Register a named section in this provider. Used by programs to give
