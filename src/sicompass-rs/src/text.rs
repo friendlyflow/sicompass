@@ -12,7 +12,7 @@ use freetype::freetype as ft;
 // Constants
 // ---------------------------------------------------------------------------
 
-const FONT_ATLAS_SIZE: u32 = 1024;
+// FONT_ATLAS_SIZE is no longer a fixed constant — it scales with effective DPI in FontRenderer::new.
 pub const MAX_TEXT_VERTICES: usize = 1_048_576;
 pub const FONT_SIZE_PT: f32 = 12.0;
 pub const TEXT_PADDING: f32 = 4.0;
@@ -118,15 +118,21 @@ impl FontRenderer {
             return Err(SiError::Other("FT_Set_Char_Size failed".into()));
         }
 
+        // Scale the atlas with DPI so glyphs always fit.  At 96 Dpi the atlas
+        // is 1024² (baseline, unchanged).  Each doubling of DPI doubles both
+        // glyph dimensions, so we need 4× the area — i.e. 2× the linear size.
+        let atlas_ratio = ((dpi as f32) / 96.0).ceil().max(1.0) as u32;
+        let font_atlas_size: u32 = (1024 * atlas_ratio).min(8192);
+
         let size_metrics = (*(*ft_face).size).metrics;
         let ascender = size_metrics.ascender as f32 / 64.0;
         let descender = size_metrics.descender as f32 / 64.0;
         let line_height = ascender - descender;
 
         // ----------------------------------------------------------------
-        // 2. Build glyph atlas (1024×1024 R8)
+        // 2. Build glyph atlas (font_atlas_size × font_atlas_size, R8)
         // ----------------------------------------------------------------
-        let atlas_sz = FONT_ATLAS_SIZE as usize;
+        let atlas_sz = font_atlas_size as usize;
         let mut atlas_data = vec![0u8; atlas_sz * atlas_sz];
         let mut glyphs: Vec<GlyphInfo> = (0..256).map(|_| GlyphInfo::default()).collect();
 
@@ -143,10 +149,20 @@ impl FontRenderer {
             let bw = bmp.width as i32;
             let bh = bmp.rows as i32;
 
-            if pen_x + bw >= FONT_ATLAS_SIZE as i32 {
+            if pen_x + bw >= font_atlas_size as i32 {
                 pen_x = 0;
                 pen_y += row_height;
                 row_height = 0;
+            }
+            if pen_y + bh > font_atlas_size as i32 {
+                // Should be unreachable given the DPI-scaled atlas size above,
+                // but guard against atlas exhaustion from a future font/size change
+                // rather than silently writing UVs > 1.0.
+                eprintln!(
+                    "text.rs: glyph atlas overflow for char {} at pen_y={}, atlas_size={}",
+                    c, pen_y, font_atlas_size
+                );
+                break;
             }
 
             if !bmp.buffer.is_null() && bw > 0 && bh > 0 {
@@ -167,12 +183,12 @@ impl FontRenderer {
             glyphs[ci].bearing = [(*slot).bitmap_left as f32, (*slot).bitmap_top as f32];
             glyphs[ci].advance = ((*slot).advance.x >> 6) as f32;
             glyphs[ci].uv_min = [
-                pen_x as f32 / FONT_ATLAS_SIZE as f32,
-                pen_y as f32 / FONT_ATLAS_SIZE as f32,
+                pen_x as f32 / font_atlas_size as f32,
+                pen_y as f32 / font_atlas_size as f32,
             ];
             glyphs[ci].uv_max = [
-                (pen_x + bw) as f32 / FONT_ATLAS_SIZE as f32,
-                (pen_y + bh) as f32 / FONT_ATLAS_SIZE as f32,
+                (pen_x + bw) as f32 / font_atlas_size as f32,
+                (pen_y + bh) as f32 / font_atlas_size as f32,
             ];
 
             pen_x += bw + 1;
@@ -197,7 +213,7 @@ impl FontRenderer {
 
         let (font_atlas_image, font_atlas_memory) = render::create_image_helper(
             device, instance, physical_device,
-            FONT_ATLAS_SIZE, FONT_ATLAS_SIZE,
+            font_atlas_size, font_atlas_size,
             vk::Format::R8_UNORM,
             vk::ImageTiling::OPTIMAL,
             vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
@@ -211,7 +227,7 @@ impl FontRenderer {
         );
         render::copy_buffer_to_image(
             device, command_pool, graphics_queue,
-            staging_buf, font_atlas_image, FONT_ATLAS_SIZE, FONT_ATLAS_SIZE,
+            staging_buf, font_atlas_image, font_atlas_size, font_atlas_size,
         );
         render::transition_image_layout(
             device, command_pool, graphics_queue,
