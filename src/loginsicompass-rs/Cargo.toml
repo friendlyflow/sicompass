@@ -9,7 +9,7 @@ description = "loginsicompass — greetd login screen (Rust port of src/loginsic
 name = "loginsicompass"
 path = "src/main.rs"
 
-[dependencies]
+[target.'cfg(target_os = "linux")'.dependencies]
 # Wayland client — smithay-client-toolkit 0.19 for XDG shell, shm, seat
 smithay-client-toolkit = { version = "0.19", default-features = false, features = [
     "calloop",

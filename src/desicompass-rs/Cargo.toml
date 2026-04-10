@@ -9,7 +9,7 @@ description = "desicompass — Wayland compositor (Rust/smithay port of src/desi
 name = "desicompass"
 path = "src/main.rs"
 
-[dependencies]
+[target.'cfg(target_os = "linux")'.dependencies]
 # Smithay: Wayland compositor framework.
 # backend_winit  — run inside an existing X11/Wayland session (development).
 # backend_egl    — EGL context used by the winit + gles backend.

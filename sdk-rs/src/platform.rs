@@ -168,9 +168,13 @@ pub fn open_with_default(path: &str) -> bool {
     }
     #[cfg(target_os = "windows")]
     {
-        // On Windows use the `open` crate or a raw ShellExecute call.
-        // For now, spawn `cmd /c start ""` which works for URLs and files.
-        Command::new("cmd").args(["/c", "start", "", path]).spawn().is_ok()
+        // `cmd /c start` interprets `&` in URLs as a command separator.
+        // `rundll32 url.dll,FileProtocolHandler` passes the argument as a
+        // single string to the shell's URL handler, preserving `&` intact.
+        Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", path])
+            .spawn()
+            .is_ok()
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     {
