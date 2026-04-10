@@ -20,7 +20,7 @@ mod state;
 #[cfg(target_os = "linux")]
 mod linux {
     use clap::Parser;
-    use state::AppState;
+    use crate::state::AppState;
     use wayland_client::{globals::registry_queue_init, Connection};
 
     use crate::{color::parse_hex, renderer::RenderConfig};
@@ -145,7 +145,7 @@ mod linux {
         let mut app = AppState::new(&conn, &globals, &qh, cfg, args.user.clone(), args.command.clone());
 
         // ---- Connect to greetd ----
-        match greetd::GreetdClient::connect() {
+        match crate::greetd::GreetdClient::connect() {
             Ok(mut client) => {
                 match client.create_session(&args.user) {
                     Ok(resp) => {
