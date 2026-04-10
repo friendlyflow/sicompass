@@ -139,6 +139,24 @@ pub fn main_loop(app: &mut AppState) {
             crate::programs::apply_pending_settings(&mut app.renderer, &q, false);
         }
 
+        // ---- Let providers drive background state (e.g. async OAuth login) --
+        let any_tick_update = app.renderer.providers.iter_mut().any(|p| p.tick());
+        if any_tick_update {
+            // Clear any stale status, then let providers re-assert their error.
+            app.renderer.error_message.clear();
+            for p in app.renderer.providers.iter_mut() {
+                if let Some(err) = p.take_error() {
+                    app.renderer.error_message = err;
+                }
+            }
+            crate::provider::refresh_current_directory(&mut app.renderer);
+            // Rebuild the rendered list from the updated ffon tree — same as
+            // what handlers.rs does after notify_button_pressed.
+            crate::list::create_list_current_layer(&mut app.renderer);
+            app.renderer.list_index = app.renderer.current_id.last().unwrap_or(0);
+            app.renderer.needs_redraw = true;
+        }
+
         // ---- Advance caret blink state --------------------------------------
         let now_ms = handlers::sdl_ticks();
         app.renderer.caret.update(now_ms);

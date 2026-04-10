@@ -275,6 +275,9 @@ pub struct EmailClientProvider {
     // Pending error message to surface via take_error.
     error_message: Option<String>,
 
+    // In-flight OAuth2 login handle (None when no login is in progress).
+    active_login: Option<oauth2::PendingAuthorize>,
+
     // Override for the settings.json path (used in tests to avoid touching
     // the real user config file).
     config_path_override: Option<std::path::PathBuf>,
@@ -301,6 +304,7 @@ impl EmailClientProvider {
             imap: None,
             smtp: None,
             error_message: None,
+            active_login: None,
             config_path_override: None,
         }
     }
@@ -493,13 +497,32 @@ impl EmailClientProvider {
 
     // ---- Login logic ---------------------------------------------------------
 
+    /// Start a non-blocking OAuth2 login. Returns immediately; the result is
+    /// applied asynchronously from `tick()` once the browser flow completes.
     fn do_login(&mut self) -> Result<(), String> {
         if self.config.client_id.is_empty() || self.config.client_secret.is_empty() {
             return Err("set client ID and client secret in settings first".to_owned());
         }
-        let result = oauth2::authorize(&self.config.client_id, &self.config.client_secret, 120);
+        if self.active_login.is_some() {
+            return Err("login already in progress".to_owned());
+        }
+        match oauth2::start(&self.config.client_id, &self.config.client_secret, 120) {
+            Err(e) => Err(format!("OAuth2 failed: {}", e.error)),
+            Ok(handle) => {
+                self.active_login = Some(handle);
+                // Use error_message as a status channel so the UI shows
+                // in-progress feedback without new plumbing.
+                self.error_message = Some("Waiting for Google authentication…".to_owned());
+                Ok(())
+            }
+        }
+    }
+
+    /// Apply a completed OAuth2 result. Called from `tick()` on success or failure.
+    fn finish_login(&mut self, result: oauth2::OAuth2TokenResult) {
         if !result.success {
-            return Err(format!("OAuth2 failed: {}", result.error));
+            self.error_message = Some(format!("OAuth2 failed: {}", result.error));
+            return;
         }
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -528,7 +551,7 @@ impl EmailClientProvider {
         self.folder_cache = None;
         self.envelope_cache = None;
         self.envelope_cache_folder.clear();
-        Ok(())
+        self.error_message = None;
     }
 
     // ---- FFON tree builders -----------------------------------------------
@@ -1356,6 +1379,24 @@ impl Provider for EmailClientProvider {
                 body_add_element(&mut self.compose.draft.body);
             }
             _ => {}
+        }
+    }
+
+    fn tick(&mut self) -> bool {
+        let handle = match self.active_login.take() {
+            Some(h) => h,
+            None => return false,
+        };
+        match handle.poll() {
+            None => {
+                // Still waiting — put the handle back.
+                self.active_login = Some(handle);
+                false
+            }
+            Some(result) => {
+                self.finish_login(result);
+                true
+            }
         }
     }
 

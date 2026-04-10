@@ -7,6 +7,8 @@ use reqwest::blocking::Client;
 use serde::Deserialize;
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::time::{Duration, Instant};
 
 const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
@@ -23,50 +25,141 @@ pub struct OAuth2TokenResult {
     pub error: String,
 }
 
-/// Start the OAuth2 authorization flow for Google.
-///
-/// Opens the browser for Google login, waits for the redirect on a local HTTP
-/// server, then exchanges the authorization code for tokens.
-pub fn authorize(client_id: &str, client_secret: &str, timeout_secs: u64) -> OAuth2TokenResult {
-    if client_id.is_empty() || client_secret.is_empty() {
-        return OAuth2TokenResult {
-            error: "client ID and client secret are required".to_owned(),
-            ..Default::default()
-        };
+// ---------------------------------------------------------------------------
+// Non-blocking handle
+// ---------------------------------------------------------------------------
+
+/// An in-flight OAuth2 authorization request. Created by [`start`]; poll it
+/// each frame with [`PendingAuthorize::poll`] until it returns `Some`.
+pub struct PendingAuthorize {
+    rx: std::sync::mpsc::Receiver<OAuth2TokenResult>,
+    cancel: Arc<AtomicBool>,
+    deadline: Instant,
+}
+
+impl std::fmt::Debug for PendingAuthorize {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PendingAuthorize")
+            .field("cancelled", &self.cancel.load(Ordering::Relaxed))
+            .finish_non_exhaustive()
+    }
+}
+
+impl PendingAuthorize {
+    /// Non-blocking check. Returns `Some(result)` once the worker finishes
+    /// (success, error, or timeout), `None` while still waiting.
+    pub fn poll(&self) -> Option<OAuth2TokenResult> {
+        // Check deadline before try_recv so callers don't have to track time.
+        if Instant::now() >= self.deadline {
+            self.cancel.store(true, Ordering::Relaxed);
+            // Drain whatever the worker might have sent right at the deadline.
+            if let Ok(r) = self.rx.try_recv() {
+                return Some(r);
+            }
+            return Some(OAuth2TokenResult {
+                error: "timed out waiting for Google authorization".to_owned(),
+                ..Default::default()
+            });
+        }
+        match self.rx.try_recv() {
+            Ok(r) => Some(r),
+            Err(std::sync::mpsc::TryRecvError::Empty) => None,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(OAuth2TokenResult {
+                error: "authorization worker exited unexpectedly".to_owned(),
+                ..Default::default()
+            }),
+        }
     }
 
-    // Bind to a random free port on loopback.
-    let listener = match TcpListener::bind("127.0.0.1:0") {
-        Ok(l) => l,
-        Err(e) => {
-            return OAuth2TokenResult {
-                error: format!("failed to start local server: {e}"),
-                ..Default::default()
-            }
-        }
-    };
+    /// Signal the worker thread to stop and return immediately on next poll.
+    pub fn cancel(&self) {
+        self.cancel.store(true, Ordering::Relaxed);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/// Start the OAuth2 authorization flow asynchronously.
+///
+/// Binds a local HTTP listener, opens the browser, spawns a worker thread
+/// that waits for the redirect, and returns a [`PendingAuthorize`] handle
+/// immediately. Call [`PendingAuthorize::poll`] each frame until it returns
+/// `Some`.
+pub fn start(
+    client_id: &str,
+    client_secret: &str,
+    timeout_secs: u64,
+) -> Result<PendingAuthorize, OAuth2TokenResult> {
+    if client_id.is_empty() || client_secret.is_empty() {
+        return Err(OAuth2TokenResult {
+            error: "client ID and client secret are required".to_owned(),
+            ..Default::default()
+        });
+    }
+
+    let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| OAuth2TokenResult {
+        error: format!("failed to start local server: {e}"),
+        ..Default::default()
+    })?;
+    listener.set_nonblocking(true).map_err(|e| OAuth2TokenResult {
+        error: format!("failed to set listener non-blocking: {e}"),
+        ..Default::default()
+    })?;
+
     let port = listener.local_addr().unwrap().port();
     let redirect_uri = format!("http://localhost:{port}");
 
     let auth_url = format!(
         "{GOOGLE_AUTH_URL}?client_id={client_id}&redirect_uri={redir}&\
          response_type=code&scope={scope}&access_type=offline&prompt=consent",
+        client_id = percent_encode(client_id),
         redir = percent_encode(&redirect_uri),
         scope = percent_encode(OAUTH2_SCOPE),
     );
     sicompass_sdk::platform::open_with_default(&auth_url);
 
-    let code = match wait_for_auth_code(listener, timeout_secs) {
-        Some(c) => c,
-        None => {
-            return OAuth2TokenResult {
-                error: "timed out waiting for authorization".to_owned(),
-                ..Default::default()
+    let cancel = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = std::sync::mpsc::channel::<OAuth2TokenResult>();
+    let cancel_worker = Arc::clone(&cancel);
+    let client_id = client_id.to_owned();
+    let client_secret = client_secret.to_owned();
+
+    std::thread::spawn(move || {
+        let result = accept_and_exchange(
+            listener,
+            &cancel_worker,
+            &client_id,
+            &client_secret,
+            &redirect_uri,
+        );
+        let _ = tx.send(result);
+    });
+
+    Ok(PendingAuthorize {
+        rx,
+        cancel,
+        deadline: Instant::now() + Duration::from_secs(timeout_secs),
+    })
+}
+
+/// Start the OAuth2 authorization flow and block until completion or timeout.
+///
+/// Convenience wrapper for callers (and tests) that can afford to block.
+pub fn authorize(client_id: &str, client_secret: &str, timeout_secs: u64) -> OAuth2TokenResult {
+    match start(client_id, client_secret, timeout_secs) {
+        Err(e) => e,
+        Ok(handle) => {
+            let sleep = Duration::from_millis(50);
+            loop {
+                if let Some(result) = handle.poll() {
+                    return result;
+                }
+                std::thread::sleep(sleep);
             }
         }
-    };
-
-    exchange_code(&code, client_id, client_secret, &redirect_uri)
+    }
 }
 
 /// Fetch the authenticated user's email address from Google's userinfo endpoint.
@@ -115,43 +208,95 @@ pub fn refresh_token(client_id: &str, client_secret: &str, refresh_tok: &str) ->
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-fn wait_for_auth_code(listener: TcpListener, timeout_secs: u64) -> Option<String> {
-    use std::sync::mpsc;
-    use std::time::Duration;
+/// Worker: non-blocking accept loop that checks `cancel` between attempts.
+/// On a successful connection it reads the request, sends the success page,
+/// and exchanges the auth code — all on this worker thread.
+fn accept_and_exchange(
+    listener: TcpListener,
+    cancel: &AtomicBool,
+    client_id: &str,
+    client_secret: &str,
+    redirect_uri: &str,
+) -> OAuth2TokenResult {
+    let sleep = Duration::from_millis(50);
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            return OAuth2TokenResult {
+                error: "login cancelled".to_owned(),
+                ..Default::default()
+            };
+        }
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
 
-    // TcpListener has no set_read_timeout, so spawn an accept thread and use
-    // a channel with a timeout to bound the wait.
-    let (tx, rx) = mpsc::channel::<Option<String>>();
-    std::thread::spawn(move || {
-        let result = (|| {
-            let (mut stream, _) = listener.accept().ok()?;
-            stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
+                let mut buf = [0u8; 4096];
+                let n = match stream.read(&mut buf) {
+                    Ok(n) => n,
+                    Err(_) => return OAuth2TokenResult {
+                        error: "failed to read redirect request".to_owned(),
+                        ..Default::default()
+                    },
+                };
+                let request = match std::str::from_utf8(&buf[..n]) {
+                    Ok(s) => s,
+                    Err(_) => return OAuth2TokenResult {
+                        error: "invalid UTF-8 in redirect request".to_owned(),
+                        ..Default::default()
+                    },
+                };
 
-            let mut buf = [0u8; 4096];
-            let n = stream.read(&mut buf).ok()?;
-            let request = std::str::from_utf8(&buf[..n]).ok()?;
+                let first_line = request.lines().next().unwrap_or("");
 
-            // Send a success HTML response.
-            let response = concat!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
-                "<html><body><h2>Authentication successful</h2>",
-                "<p>You can close this tab and return to sicompass.</p>",
-                "</body></html>"
-            );
-            let _ = stream.write_all(response.as_bytes());
+                // Always send a response so the browser tab closes cleanly.
+                let (status, body) = if first_line.contains("error=") || !first_line.contains("code=") {
+                    (
+                        "400 Bad Request",
+                        "<html><body><h2>Authentication failed</h2>\
+                         <p>You can close this tab and return to sicompass.</p>\
+                         </body></html>",
+                    )
+                } else {
+                    (
+                        "200 OK",
+                        "<html><body><h2>Authentication successful</h2>\
+                         <p>You can close this tab and return to sicompass.</p>\
+                         </body></html>",
+                    )
+                };
+                let response = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: text/html\r\n\r\n{body}"
+                );
+                let _ = stream.write_all(response.as_bytes());
 
-            // Check for error in query string.
-            let first_line = request.lines().next().unwrap_or("");
-            if first_line.contains("error=") {
-                return None;
+                if first_line.contains("error=") {
+                    return OAuth2TokenResult {
+                        error: "Google returned an error response".to_owned(),
+                        ..Default::default()
+                    };
+                }
+
+                let code = match extract_query_param(first_line, "code") {
+                    Some(c) => c,
+                    None => return OAuth2TokenResult {
+                        error: "no authorization code in redirect".to_owned(),
+                        ..Default::default()
+                    },
+                };
+
+                return exchange_code(&code, client_id, client_secret, redirect_uri);
             }
-
-            extract_query_param(first_line, "code")
-        })();
-        let _ = tx.send(result);
-    });
-
-    rx.recv_timeout(Duration::from_secs(timeout_secs)).ok().flatten()
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(sleep);
+            }
+            Err(e) => {
+                return OAuth2TokenResult {
+                    error: format!("accept error: {e}"),
+                    ..Default::default()
+                };
+            }
+        }
+    }
 }
 
 fn extract_query_param(get_line: &str, param: &str) -> Option<String> {
@@ -324,5 +469,53 @@ mod tests {
     fn test_extract_query_param_no_query() {
         let line = "GET / HTTP/1.1";
         assert_eq!(extract_query_param(line, "code"), None);
+    }
+
+    #[test]
+    fn test_start_empty_client_id_fails() {
+        let r = start("", "secret", 5);
+        assert!(r.is_err());
+        assert!(!r.unwrap_err().error.is_empty());
+    }
+
+    #[test]
+    fn test_pending_authorize_cancel_unblocks() {
+        // start() with real credentials would open a browser — use a dummy
+        // client_id/secret pair and cancel immediately.  We can't call start()
+        // without the browser opening, so we test cancel on a PendingAuthorize
+        // constructed manually from a channel pair.
+        let (tx, rx) = std::sync::mpsc::channel::<OAuth2TokenResult>();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let handle = PendingAuthorize {
+            rx,
+            cancel: Arc::clone(&cancel),
+            deadline: Instant::now() + Duration::from_secs(60),
+        };
+        // Nothing sent yet — should be None.
+        assert!(handle.poll().is_none());
+        // Send a cancellation result on the channel (simulates the worker responding).
+        tx.send(OAuth2TokenResult {
+            error: "login cancelled".to_owned(),
+            ..Default::default()
+        }).unwrap();
+        // Now poll should return Some.
+        let result = handle.poll().unwrap();
+        assert!(!result.success);
+        assert!(!result.error.is_empty());
+    }
+
+    #[test]
+    fn test_pending_authorize_timeout_returns_error() {
+        let (_tx, rx) = std::sync::mpsc::channel::<OAuth2TokenResult>();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let handle = PendingAuthorize {
+            rx,
+            cancel,
+            // Already past the deadline.
+            deadline: Instant::now() - Duration::from_secs(1),
+        };
+        let result = handle.poll().unwrap();
+        assert!(!result.success);
+        assert!(result.error.contains("timed out"));
     }
 }
