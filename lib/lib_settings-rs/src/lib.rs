@@ -387,6 +387,21 @@ impl Provider for SettingsProvider {
                 sc_obj.as_obj_mut().unwrap().push(FfonElement::Str(format!("{}{}", tag, e.label)));
             }
         }
+        for e in &self.radio_entries {
+            if e.section == "sicompass" && e.config_key != "colorScheme" {
+                let mut radio = FfonElement::new_obj(format!("<radio>{}", e.radio_key));
+                let ro = radio.as_obj_mut().unwrap();
+                for opt in &e.options {
+                    let s = if *opt == e.current_value {
+                        format!("<checked>{opt}")
+                    } else {
+                        opt.clone()
+                    };
+                    ro.push(FfonElement::Str(s));
+                }
+                sc_obj.as_obj_mut().unwrap().push(radio);
+            }
+        }
         for e in &self.text_entries {
             if e.section == "sicompass" {
                 sc_obj.as_obj_mut().unwrap().push(FfonElement::Str(format!(
@@ -581,6 +596,23 @@ mod tests {
             c.as_str().map_or(false, |s| s.contains("<checked>") && s.contains("dark"))
         });
         assert!(dark_checked);
+    }
+
+    #[test]
+    fn test_fetch_sicompass_includes_extra_radio() {
+        let mut p = headless();
+        p.add_radio("sicompass", "font scale", "fontScale",
+            &["0.500", "1.000", "2.000"], "1.000");
+        let elems = p.fetch();
+        let sc = elems.iter().find(|e| e.as_obj().map_or(false, |o| o.key == "sicompass")).unwrap();
+        let font_scale_radio = sc.as_obj().unwrap().children.iter().find(|c| {
+            c.as_obj().map_or(false, |o| o.key == "<radio>font scale")
+        });
+        assert!(font_scale_radio.is_some(), "font scale radio missing from sicompass section");
+        let selected = font_scale_radio.unwrap().as_obj().unwrap().children.iter().any(|c| {
+            c.as_str().map_or(false, |s| s == "<checked>1.000")
+        });
+        assert!(selected, "default value 1.000 not marked as checked");
     }
 
     // --- add_section / remove_section ---

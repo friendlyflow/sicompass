@@ -118,10 +118,12 @@ impl FontRenderer {
             return Err(SiError::Other("FT_Set_Char_Size failed".into()));
         }
 
-        // Scale the atlas with DPI so glyphs always fit.  At 96 Dpi the atlas
+        // Scale the atlas with DPI so glyphs always fit.  At 96 DPI the atlas
         // is 1024² (baseline, unchanged).  Each doubling of DPI doubles both
         // glyph dimensions, so we need 4× the area — i.e. 2× the linear size.
-        let atlas_ratio = ((dpi as f32) / 96.0).ceil().max(1.0) as u32;
+        // Use round() not ceil() so small DPI bumps (e.g. 97 at 100% scale)
+        // don't prematurely jump to 2048², quadrupling startup cost.
+        let atlas_ratio = ((dpi as f32) / 96.0).round().max(1.0) as u32;
         let font_atlas_size: u32 = (1024 * atlas_ratio).min(8192);
 
         let size_metrics = (*(*ft_face).size).metrics;
