@@ -568,7 +568,60 @@ impl ScriptProvider {
     }
 
     /// Run the script with the given arguments and return trimmed stdout.
-    fn run(&self, args: &[&str]) -> Option<String> {
+    fn run(&mut self, args: &[&str]) -> Option<String> {
+        sicompass_sdk::platform::ensure_bun_on_path();
+
+        if !self.script_path.exists() {
+            let msg = format!(
+                "script provider '{}': script not found at {}",
+                self.name,
+                self.script_path.display()
+            );
+            eprintln!("{msg}");
+            self.error_message = msg;
+            return None;
+        }
+
+        let output = match std::process::Command::new("bun")
+            .arg("run")
+            .arg(&self.script_path)
+            .args(args)
+            .output()
+        {
+            Ok(o) => o,
+            Err(e) => {
+                let msg = format!(
+                    "script provider '{}': failed to run bun ({e}). \
+                     Is bun installed? On Windows check %USERPROFILE%\\.bun\\bin\\bun.exe",
+                    self.name
+                );
+                eprintln!("{msg}");
+                self.error_message = msg;
+                return None;
+            }
+        };
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let msg = format!(
+                "script provider '{}': bun exited with {} — {}",
+                self.name,
+                output.status,
+                stderr.trim()
+            );
+            eprintln!("{msg}");
+            self.error_message = msg;
+            return None;
+        }
+
+        Some(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    }
+
+    /// Run the script with the given arguments and return trimmed stdout.
+    /// Read-only variant for trait methods that take `&self` — calls
+    /// `ensure_bun_on_path` and runs bun, but does not mutate `error_message`.
+    fn run_silent(&self, args: &[&str]) -> Option<String> {
+        sicompass_sdk::platform::ensure_bun_on_path();
         let output = std::process::Command::new("bun")
             .arg("run")
             .arg(&self.script_path)
@@ -656,27 +709,38 @@ impl Provider for ScriptProvider {
     fn fetch(&mut self) -> Vec<FfonElement> {
         // C ScriptProvider passes just the current path (no subcommand) for fetch.
         let path = self.current_path.clone();
-        match self.run(&[&path]) {
-            Some(json) => {
-                let (elems, dashboard, meta) = Self::parse_json_output(&json);
-                self.dashboard_image = dashboard;
-                // Register meta hints into the central SDK registry (Rust consumers
-                // query it via Provider::meta(); C consumers still use the FFON
-                // prepend convention, which is handled by the C build separately).
-                if let Some(meta_elem) = meta {
-                    if let sicompass_sdk::FfonElement::Obj(obj) = &meta_elem {
-                        let entries: Vec<sicompass_sdk::MetaEntry> = obj.children
-                            .iter()
-                            .filter_map(|e| e.as_str())
-                            .map(|s| sicompass_sdk::MetaEntry::new(s))
-                            .collect();
-                        sicompass_sdk::meta::register(self.name.clone(), entries);
-                    }
-                }
-                elems
-            }
-            None => Vec::new(),
+        let Some(json) = self.run(&[&path]) else {
+            // error_message already set by run()
+            return Vec::new();
+        };
+
+        if serde_json::from_str::<serde_json::Value>(&json).is_err() {
+            let msg = format!(
+                "script provider '{}': failed to parse JSON output ({} bytes)",
+                self.name,
+                json.len()
+            );
+            eprintln!("{msg}\n--- output ---\n{json}\n--- end ---");
+            self.error_message = msg;
+            return Vec::new();
         }
+
+        let (elems, dashboard, meta) = Self::parse_json_output(&json);
+        self.dashboard_image = dashboard;
+        // Register meta hints into the central SDK registry (Rust consumers
+        // query it via Provider::meta(); C consumers still use the FFON
+        // prepend convention, which is handled by the C build separately).
+        if let Some(meta_elem) = meta {
+            if let sicompass_sdk::FfonElement::Obj(obj) = &meta_elem {
+                let entries: Vec<sicompass_sdk::MetaEntry> = obj.children
+                    .iter()
+                    .filter_map(|e| e.as_str())
+                    .map(|s| sicompass_sdk::MetaEntry::new(s))
+                    .collect();
+                sicompass_sdk::meta::register(self.name.clone(), entries);
+            }
+        }
+        elems
     }
 
     fn dashboard_image_path(&self) -> Option<&str> {
@@ -752,7 +816,7 @@ impl Provider for ScriptProvider {
     }
 
     fn commands(&self) -> Vec<String> {
-        let Some(json) = self.run(&["commands"]) else {
+        let Some(json) = self.run_silent(&["commands"]) else {
             return Vec::new();
         };
         serde_json::from_str::<Vec<String>>(&json).unwrap_or_default()
@@ -782,7 +846,7 @@ impl Provider for ScriptProvider {
 
     fn command_list_items(&self, cmd: &str) -> Vec<ListItem> {
         let path = self.current_path.clone();
-        let Some(json) = self.run(&["commandListItems", &path, cmd]) else {
+        let Some(json) = self.run_silent(&["commandListItems", &path, cmd]) else {
             return vec![];
         };
         let Ok(serde_json::Value::Array(arr)) = serde_json::from_str::<serde_json::Value>(&json) else {
@@ -807,7 +871,7 @@ impl Provider for ScriptProvider {
 
     fn collect_deep_search_items(&self) -> Option<Vec<SearchResultItem>> {
         let path = self.current_path.clone();
-        let json = self.run(&["deepSearch", &path])?;
+        let json = self.run_silent(&["deepSearch", &path])?;
         let Ok(serde_json::Value::Array(arr)) = serde_json::from_str::<serde_json::Value>(&json) else {
             return None;
         };
