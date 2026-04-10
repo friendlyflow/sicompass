@@ -2306,7 +2306,7 @@ pub fn handle_file_browser_open(r: &mut AppRenderer) {
 
 /// Resolve the configured save folder to an absolute path.
 ///
-/// Empty or relative paths are resolved relative to `$HOME`.
+/// Empty or relative paths are resolved relative to the user's home directory.
 /// Falls back to the platform downloads directory or `/tmp`.
 fn resolve_save_folder(r: &AppRenderer) -> String {
     let folder = r.save_folder_path.trim();
@@ -2320,12 +2320,11 @@ fn resolve_save_folder(r: &AppRenderer) -> String {
     if path.is_absolute() {
         return folder.to_owned();
     }
-    // Relative → $HOME/<folder>
-    let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_default();
-    if home.is_empty() {
+    // Relative → <home>/<folder>, using the platform-native path separator
+    let Some(home) = sicompass_sdk::platform::home_dir() else {
         return folder.to_owned();
-    }
-    format!("{home}/{folder}")
+    };
+    home.join(folder).to_string_lossy().into_owned()
 }
 
 /// Load a JSON config file into the current provider (Ctrl+O).
@@ -4828,8 +4827,9 @@ mod tests {
         let mut r = AppRenderer::new();
         r.save_folder_path = "Documents".to_owned();
         let result = resolve_save_folder(&r);
-        // Should contain "Documents" somewhere (after HOME/)
-        assert!(result.ends_with("/Documents"), "got: {result}");
+        // Should contain "Documents" as the final path component
+        let ends_with = result.ends_with("/Documents") || result.ends_with("\\Documents");
+        assert!(ends_with, "got: {result}");
     }
 
     #[test]

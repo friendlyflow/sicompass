@@ -167,6 +167,8 @@ fn populate_builtins(map: &mut HashMap<String, Vec<MetaEntry>>) {
 
     // Sales demo (script provider)
     map.insert("sales demo".to_owned(), vec![
+        MetaEntry::new("Ctrl+I  Insert before"),
+        MetaEntry::new("Ctrl+A  Append after"),
         MetaEntry::new("/   Search"),
         MetaEntry::new("F5  Refresh"),
         MetaEntry::new(":   Commands"),

@@ -73,6 +73,10 @@ pub(crate) fn _reset_user_plugin_cache(plugins: Vec<DiscoveredPlugin>) {
 pub fn register_provider(renderer: &mut AppRenderer, mut provider: Box<dyn Provider>) {
     provider.init();
     let children = provider.fetch();
+    if let Some(err) = provider.take_error() {
+        eprintln!("provider '{}' fetch error on register: {err}", provider.display_name());
+        renderer.error_message = err;
+    }
     let display_name = provider.display_name().to_owned();
 
     let mut root = FfonElement::new_obj(&display_name);
@@ -382,22 +386,40 @@ fn migrate_programs_to_load(path: &Path) {
     }
 }
 
-/// Resolve the tutorial assets directory relative to the running executable.
-/// Falls back to a cwd-relative path if the executable path is unavailable.
-fn tutorial_assets_dir() -> PathBuf {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join("../../lib/lib_tutorial-rs/assets")))
-        .unwrap_or_else(|| PathBuf::from("lib/lib_tutorial-rs/assets"))
+/// Resolve a repo-relative asset path to an absolute one. Tries candidates in order:
+///   1. `<CARGO_MANIFEST_DIR>/../../<rel>`  — dev build (works with redirected target-dir,
+///      e.g. AppControl-blocked C:\sicompass\target redirect)
+///   2. `<exe_dir>/<rel>`                   — release: resources alongside the exe
+///   3. `<exe_dir>/../<rel>`                — release: resources one level up
+///   4. `<cwd>/<rel>`                       — running from the repo root
+///
+/// Returns the first existing candidate, or the manifest-anchored path as a last
+/// resort so that error messages point somewhere meaningful.
+fn resolve_repo_asset(rel: &str) -> PathBuf {
+    let from_manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..").join(rel);
+    if from_manifest.exists() {
+        return from_manifest;
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let a = dir.join(rel);
+            if a.exists() { return a; }
+            let b = dir.join("..").join(rel);
+            if b.exists() { return b; }
+        }
+    }
+    let cwd = PathBuf::from(rel);
+    if cwd.exists() { return cwd; }
+    from_manifest
 }
 
-/// Resolve the sales demo script path relative to the running executable.
-/// Falls back to a cwd-relative path if the executable path is unavailable.
+fn tutorial_assets_dir() -> PathBuf {
+    resolve_repo_asset("lib/lib_tutorial-rs/assets")
+}
+
 fn sales_demo_script_path() -> PathBuf {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join("../../lib/lib_sales_demo/sales_demo.ts")))
-        .unwrap_or_else(|| PathBuf::from("lib/lib_sales_demo/sales_demo.ts"))
+    resolve_repo_asset("lib/lib_sales_demo/sales_demo.ts")
 }
 
 /// Read `sicompass.fontScale` from settings.json.

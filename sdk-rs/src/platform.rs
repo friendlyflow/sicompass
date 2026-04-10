@@ -431,6 +431,40 @@ fn get_applications_windows() -> Vec<Application> {
 }
 
 // ---------------------------------------------------------------------------
+// bun executable discovery (Windows PATH injection)
+// ---------------------------------------------------------------------------
+
+/// On Windows, `bun` is installed to `%USERPROFILE%\.bun\bin\bun.exe`, but a
+/// process started before that install (or from a shell whose PATH was cached)
+/// won't see it. This prepends the bun bin directory to the current process'
+/// PATH so `Command::new("bun")` works in child processes.
+///
+/// Idempotent (runs once per process). No-op on non-Windows.
+/// Mirrors `getBunExecutable` in lib/lib_provider/src/provider.c:303-333.
+pub fn ensure_bun_on_path() {
+    #[cfg(target_os = "windows")]
+    {
+        use std::sync::OnceLock;
+        static DONE: OnceLock<()> = OnceLock::new();
+        DONE.get_or_init(|| {
+            let Some(home) = home_dir() else { return; };
+            let bun_dir = home.join(".bun").join("bin");
+            if !bun_dir.join("bun.exe").exists() {
+                return;
+            }
+            let existing = std::env::var_os("PATH").unwrap_or_default();
+            let mut parts: Vec<std::ffi::OsString> = vec![bun_dir.into_os_string()];
+            if !existing.is_empty() {
+                parts.push(existing);
+            }
+            if let Ok(joined) = std::env::join_paths(parts) {
+                std::env::set_var("PATH", joined);
+            }
+        });
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests — port of tests/lib_provider/test_provider_platform.c (10 tests)
 // ---------------------------------------------------------------------------
 

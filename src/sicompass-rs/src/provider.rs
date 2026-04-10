@@ -79,6 +79,9 @@ pub fn refresh_current_directory(renderer: &mut AppRenderer) {
     if idx >= renderer.providers.len() { return; }
 
     let children = renderer.providers[idx].fetch();
+    if let Some(err) = renderer.providers[idx].take_error() {
+        renderer.error_message = err;
+    }
     let cur_path = renderer.providers[idx].current_path().to_owned();
     let root_key = if cur_path == "/" {
         renderer.providers[idx].display_name().to_owned()
@@ -611,6 +614,47 @@ pub fn navigate_to_path(
 
     if root_idx >= renderer.providers.len() { return false; }
 
+    // On Windows, absolute paths start with a drive letter ("C:\...") or UNC
+    // ("\\...").  Walking component-by-component from the "/" sentinel root
+    // doesn't work for these because the root shows drive entries ("C:\"), not
+    // individual directory segments.  Jump directly to the target directory
+    // instead, mirroring C's providerNavigateToPath (provider.c:735-769).
+    #[cfg(windows)]
+    {
+        let b = absolute_dir.as_bytes();
+        let is_windows_absolute = (b.len() >= 2 && b[1] == b':')
+            || (b.len() >= 2 && b[0] == b'\\' && b[1] == b'\\');
+        if is_windows_absolute {
+            renderer.providers[root_idx].set_current_path(absolute_dir);
+            let children = renderer.providers[root_idx].fetch();
+            if let Some(FfonElement::Obj(root_obj)) = renderer.ffon.get_mut(root_idx) {
+                root_obj.children = children;
+            } else {
+                return false;
+            }
+            let mut nav_id = IdArray::new();
+            nav_id.push(root_idx);
+            nav_id.push(0);
+            renderer.current_id = nav_id;
+            if !target_filename.is_empty() {
+                let found = get_ffon_at_id(&renderer.ffon, &renderer.current_id)
+                    .and_then(|slice| {
+                        slice.iter().enumerate().find_map(|(i, e)| {
+                            let raw = match e {
+                                FfonElement::Str(s) => s.as_str(),
+                                FfonElement::Obj(o) => o.key.as_str(),
+                            };
+                            if tags::strip_display(raw) == target_filename { Some(i) } else { None }
+                        })
+                    });
+                if let Some(i) = found {
+                    renderer.current_id.set_last(i);
+                }
+            }
+            return true;
+        }
+    }
+
     // Reset provider to root and re-fetch
     renderer.providers[root_idx].set_current_path("/");
     let root_children = renderer.providers[root_idx].fetch();
@@ -626,9 +670,10 @@ pub fn navigate_to_path(
     nav_id.push(0);
     renderer.current_id = nav_id;
 
-    // Walk each component of the absolute path (skip leading '/')
+    // Walk each component of the absolute path (skip leading '/').
+    // Split on both '/' and '\' to match C's strtok_r(start, "/\\").
     let path_stripped = absolute_dir.trim_start_matches('/');
-    for component in path_stripped.split('/') {
+    for component in path_stripped.split(|c| c == '/' || c == '\\') {
         if component.is_empty() { continue; }
 
         // Find component in current level
