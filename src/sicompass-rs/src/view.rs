@@ -35,16 +35,23 @@ pub fn main_loop(app: &mut AppState) {
     update_window_title(app);
 
     while app.running {
-        // ---- Apply pending window commands BEFORE polling events ------------
-        // This must happen first to avoid a startup race where SDL fires a
-        // Restored event (window created non-maximized) before pending_maximized
-        // is consumed, which would write `maximized: false` to settings.json.
-        if let Some(maximize) = app.renderer.pending_maximized.take() {
-            if maximize {
-                app.window.maximize();
-            } else {
-                app.window.restore();
+        // ---- First-iteration startup: apply maximize state, then show window --
+        // The window is still hidden at this point (render.rs removed the early
+        // show so that we can maximize on the hidden window first).  On Windows,
+        // SDL3 honours a maximize call on a hidden window at show-time, producing
+        // ShowWindow(SW_SHOWMAXIMIZED) and avoiding an 800x600 flash.
+        // The outer `!maximized_ready` gate also repairs the case where
+        // pending_maximized is None (missing key): we still show and flip the
+        // flag so that subsequent Maximized/Restored events can write to settings.
+        if !app.maximized_ready {
+            if let Some(maximize) = app.renderer.pending_maximized.take() {
+                if maximize {
+                    app.window.maximize();
+                } else {
+                    app.window.restore();
+                }
             }
+            app.window.show();
             app.maximized_ready = true;
         }
 
