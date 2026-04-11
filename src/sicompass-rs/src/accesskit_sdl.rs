@@ -161,6 +161,40 @@ impl AccessKitAdapter {
 }
 
 // ---------------------------------------------------------------------------
+// Label-to-speech helpers (mirrors listPrefixToWord / labelToSpeech in render.c)
+// ---------------------------------------------------------------------------
+
+fn list_prefix_to_word(prefix: &str) -> Option<&'static str> {
+    match prefix {
+        "-"   => Some("minus"),
+        "-p"  => Some("minus p"),
+        "-cc" => Some("minus cc"),
+        "-c"  => Some("minus c"),
+        "-rc" => Some("minus rc"),
+        "-b"  => Some("minus b"),
+        "-i"  => Some("minus i"),
+        "-r"  => Some("minus r"),
+        "+"   => Some("plus"),
+        "+cc" => Some("plus cc"),
+        "+c"  => Some("plus c"),
+        "+l"  => Some("plus l"),
+        "+R"  => Some("plus R"),
+        "+i"  => Some("plus i"),
+        _     => None,
+    }
+}
+
+fn label_to_speech(label: &str) -> String {
+    let Some((prefix, content)) = label.split_once(' ') else {
+        return label.to_string();
+    };
+    match list_prefix_to_word(prefix) {
+        Some(word) => format!("{word} {content}"),
+        None       => content.to_string(),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Build the accessibility tree
 // ---------------------------------------------------------------------------
 
@@ -180,7 +214,7 @@ fn build_tree(renderer: &AppRenderer) -> TreeUpdate {
     for (i, item) in renderer.total_list.iter().enumerate() {
         let id = NodeId(i as u64 + 1);
         let mut builder = NodeBuilder::new(Role::ListItem);
-        builder.set_name(Box::<str>::from(item.label.as_str()));
+        builder.set_name(Box::<str>::from(label_to_speech(&item.label).as_str()));
         nodes.push((id, builder.build()));
         child_ids.push(id);
     }
@@ -329,6 +363,42 @@ mod tests {
         let tree = build_tree(&r);
         let (_, root_node) = &tree.nodes[0];
         assert_eq!(root_node.role(), Role::Window);
+    }
+
+    // --- label_to_speech ---
+
+    #[test]
+    fn label_to_speech_no_space_returns_raw() {
+        assert_eq!(label_to_speech("Files"), "Files");
+    }
+
+    #[test]
+    fn label_to_speech_minus_i() {
+        assert_eq!(label_to_speech("-i newfile.txt"), "minus i newfile.txt");
+    }
+
+    #[test]
+    fn label_to_speech_bare_minus() {
+        assert_eq!(label_to_speech("- something"), "minus something");
+    }
+
+    #[test]
+    fn label_to_speech_plus_l() {
+        assert_eq!(label_to_speech("+l foo"), "plus l foo");
+    }
+
+    #[test]
+    fn label_to_speech_unknown_prefix_drops_prefix() {
+        // Matches C render.c:220-221: unknown prefix → speak only the content.
+        assert_eq!(label_to_speech("-z thing"), "thing");
+    }
+
+    #[test]
+    fn build_tree_translates_list_item_names() {
+        let r = make_renderer_with_list(&["-i newfile.txt", "+l dir"]);
+        let tree = build_tree(&r);
+        assert_eq!(tree.nodes[1].1.name().as_deref(), Some("minus i newfile.txt"));
+        assert_eq!(tree.nodes[2].1.name().as_deref(), Some("plus l dir"));
     }
 
     #[test]

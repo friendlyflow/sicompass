@@ -1122,9 +1122,12 @@ mod tests {
         // This is a test-only path.
         NativePlugin {
             _lib: unsafe {
-                // `Library::this_process()` calls dlopen(NULL,...) which always
-                // succeeds and gives us a valid handle for the test.
-                libloading::os::unix::Library::this().into()
+                // On Unix, dlopen(NULL,...) always succeeds.
+                // On Windows, GetModuleHandle(NULL) always succeeds.
+                #[cfg(unix)]
+                { libloading::os::unix::Library::this().into() }
+                #[cfg(windows)]
+                { libloading::os::windows::Library::this().expect("this always succeeds").into() }
             },
             ops: ops as *const ProviderOpsC,
             current_path: "/".to_owned(),
