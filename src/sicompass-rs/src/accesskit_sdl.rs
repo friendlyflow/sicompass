@@ -15,7 +15,7 @@
 //!   technology is actually listening (zero overhead otherwise).
 
 use crate::app_state::AppRenderer;
-use accesskit::{NodeBuilder, NodeId, Role, Tree, TreeUpdate};
+use accesskit::{Live, NodeBuilder, NodeId, Role, Tree, TreeUpdate};
 
 // ---------------------------------------------------------------------------
 // Node-ID convention
@@ -25,6 +25,9 @@ use accesskit::{NodeBuilder, NodeId, Role, Tree, TreeUpdate};
 // ---------------------------------------------------------------------------
 
 const ROOT_ID: NodeId = NodeId(0);
+/// Reserved ID for the polite live-region node used for mode-change announcements.
+/// Must not collide with list-item IDs (1..=N); u64::MAX is safe in practice.
+const ANNOUNCEMENT_ID: NodeId = NodeId(u64::MAX);
 
 // ---------------------------------------------------------------------------
 // AccessKitAdapter
@@ -203,13 +206,22 @@ fn label_to_speech(label: &str) -> String {
 /// Layout:
 /// - Node 0 (ROOT_ID): `Role::Window` — the sicompass application window.
 /// - Nodes 1..=N: `Role::ListItem` — one per item in `renderer.total_list`.
+/// - ANNOUNCEMENT_ID: always-present polite live-region node.
+///
+/// The announcement node is **always** included with `Live::Polite`.  Its name
+/// is set to `pending_announcement` when there is something to read, and to
+/// `""` otherwise.  Keeping the node permanently in the tree (rather than
+/// adding/removing it) ensures that AccessKit fires `LiveRegionChanged` on
+/// every content change — which is what NVDA monitors — rather than the less
+/// reliable `NodeAdded` event.
 ///
 /// The focused node tracks `renderer.list_index`.
 fn build_tree(renderer: &AppRenderer) -> TreeUpdate {
-    let mut nodes: Vec<(NodeId, accesskit::Node)> = Vec::with_capacity(renderer.total_list.len() + 1);
+    let capacity = renderer.total_list.len() + 2; // list items + root + announcement
+    let mut nodes: Vec<(NodeId, accesskit::Node)> = Vec::with_capacity(capacity);
 
     // ---- List items --------------------------------------------------------
-    let mut child_ids: Vec<NodeId> = Vec::with_capacity(renderer.total_list.len());
+    let mut child_ids: Vec<NodeId> = Vec::with_capacity(renderer.total_list.len() + 1);
 
     for (i, item) in renderer.total_list.iter().enumerate() {
         let id = NodeId(i as u64 + 1);
@@ -218,6 +230,17 @@ fn build_tree(renderer: &AppRenderer) -> TreeUpdate {
         nodes.push((id, builder.build()));
         child_ids.push(id);
     }
+
+    // ---- Announcement live-region node (always present) --------------------
+    // Using an empty name when idle and the announcement text when active
+    // guarantees AccessKit fires LiveRegionChanged (content change) rather
+    // than NodeAdded, which screen readers like NVDA reliably pick up.
+    let ann_text = renderer.pending_announcement.as_deref().unwrap_or("");
+    let mut ann = NodeBuilder::new(Role::ListItem);
+    ann.set_name(Box::<str>::from(ann_text));
+    ann.set_live(Live::Polite);
+    nodes.push((ANNOUNCEMENT_ID, ann.build()));
+    child_ids.push(ANNOUNCEMENT_ID);
 
     // ---- Root window node --------------------------------------------------
     let mut root_builder = NodeBuilder::new(Role::Window);
@@ -273,21 +296,6 @@ impl accesskit::DeactivationHandler for NoopDeactivationHandler {
     fn deactivate_accessibility(&mut self) {}
 }
 
-// ---------------------------------------------------------------------------
-// Mode-change announcement helpers
-// ---------------------------------------------------------------------------
-
-/// Format the accessibility announcement for a coordinate mode change.
-///
-/// Mirrors `accesskitSpeakModeChange` from the C source. When `context` is
-/// non-empty the result is `"{mode} - {context}"`, otherwise just `"{mode}"`.
-pub fn speak_mode_change_text(renderer: &AppRenderer, context: Option<&str>) -> String {
-    let mode = renderer.coordinate.as_str();
-    match context {
-        Some(ctx) if !ctx.is_empty() => format!("{mode} - {ctx}"),
-        _ => mode.to_string(),
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -298,6 +306,16 @@ mod tests {
     use super::*;
     use crate::app_state::{AppRenderer, RenderListItem};
     use sicompass_sdk::ffon::IdArray;
+
+    /// Strip the parity sentinel (U+200B) appended by `speak_mode_change` and
+    /// `announce_char` to force AccessKit tree diffs on consecutive identical
+    /// announcements. Tests use this to assert the logical text without caring
+    /// about parity cycle state.
+    fn announced_text(r: &AppRenderer) -> Option<String> {
+        r.pending_announcement
+            .as_deref()
+            .map(|s| s.trim_end_matches('\u{200B}').to_string())
+    }
 
     fn make_renderer_with_list(labels: &[&str]) -> AppRenderer {
         let mut r = AppRenderer::new();
@@ -316,7 +334,8 @@ mod tests {
     fn build_tree_empty_list() {
         let r = AppRenderer::new();
         let tree = build_tree(&r);
-        assert_eq!(tree.nodes.len(), 1, "only the root node");
+        // root + announcement node (always present)
+        assert_eq!(tree.nodes.len(), 2, "root + announcement node");
         assert_eq!(tree.nodes[0].0, ROOT_ID);
         assert_eq!(tree.focus, ROOT_ID);
         assert!(tree.tree.is_some());
@@ -326,8 +345,8 @@ mod tests {
     fn build_tree_with_items() {
         let r = make_renderer_with_list(&["Files", "Tutorial", "Settings"]);
         let tree = build_tree(&r);
-        // root + 3 items
-        assert_eq!(tree.nodes.len(), 4);
+        // root + 3 items + announcement node
+        assert_eq!(tree.nodes.len(), 5);
         assert_eq!(tree.nodes[0].0, ROOT_ID);
         assert_eq!(tree.nodes[1].0, NodeId(1));
         assert_eq!(tree.nodes[3].0, NodeId(3));
@@ -424,74 +443,111 @@ mod tests {
         assert_eq!(tree.tree.unwrap().root, ROOT_ID);
     }
 
-    // --- speak_mode_change_text ---
+    // --- announcement live-region ---
+
+    #[test]
+    fn build_tree_includes_announcement_node_always() {
+        // The announcement node is always present; when pending it carries the text.
+        let mut r = AppRenderer::new();
+        r.pending_announcement = Some("search".to_string());
+        let tree = build_tree(&r);
+        let ann = tree.nodes.iter().find(|(id, _)| *id == ANNOUNCEMENT_ID);
+        assert!(ann.is_some(), "announcement node should always be present");
+        let (_, node) = ann.unwrap();
+        assert_eq!(node.name().unwrap(), "search");
+        assert_eq!(node.live(), Some(accesskit::Live::Polite));
+    }
+
+    #[test]
+    fn build_tree_announcement_node_empty_when_no_pending() {
+        // The announcement node is still in the tree but with empty name when idle.
+        let r = AppRenderer::new();
+        let tree = build_tree(&r);
+        let ann = tree.nodes.iter().find(|(id, _)| *id == ANNOUNCEMENT_ID);
+        assert!(ann.is_some(), "announcement node should always be present");
+        let (_, node) = ann.unwrap();
+        assert_eq!(node.name().unwrap_or(""), "");
+        assert_eq!(node.live(), Some(accesskit::Live::Polite));
+    }
+
+    // --- AppRenderer::speak_mode_change ---
 
     #[test]
     fn speak_mode_change_simple_search_no_context() {
         let mut r = AppRenderer::new();
         r.coordinate = crate::app_state::Coordinate::SimpleSearch;
-        assert_eq!(speak_mode_change_text(&r, None), "search");
+        r.speak_mode_change(None);
+        assert_eq!(announced_text(&r).as_deref(), Some("search"));
     }
 
     #[test]
     fn speak_mode_change_with_context() {
         let mut r = AppRenderer::new();
         r.coordinate = crate::app_state::Coordinate::EditorInsert;
-        assert_eq!(speak_mode_change_text(&r, Some("filename.txt")), "editor insert - filename.txt");
+        r.speak_mode_change(Some("filename.txt".to_string()));
+        assert_eq!(announced_text(&r).as_deref(), Some("editor insert - filename.txt"));
     }
 
     #[test]
     fn speak_mode_change_empty_context_gives_mode_only() {
         let mut r = AppRenderer::new();
         r.coordinate = crate::app_state::Coordinate::Command;
-        assert_eq!(speak_mode_change_text(&r, Some("")), "command");
+        r.speak_mode_change(Some(String::new()));
+        assert_eq!(announced_text(&r).as_deref(), Some("command"));
     }
 
     #[test]
     fn speak_mode_change_operator_general() {
-        let r = AppRenderer::new(); // default is OperatorGeneral
-        assert_eq!(speak_mode_change_text(&r, None), "operator");
+        let mut r = AppRenderer::new(); // default is OperatorGeneral
+        r.speak_mode_change(None);
+        assert_eq!(announced_text(&r).as_deref(), Some("operator"));
     }
 
     #[test]
     fn speak_mode_change_operator_insert_with_context() {
         let mut r = AppRenderer::new();
         r.coordinate = crate::app_state::Coordinate::OperatorInsert;
-        assert_eq!(speak_mode_change_text(&r, Some("Documents")), "operator insert - Documents");
+        r.speak_mode_change(Some("Documents".to_string()));
+        assert_eq!(announced_text(&r).as_deref(), Some("operator insert - Documents"));
     }
 
     #[test]
     fn speak_mode_change_editor_general() {
         let mut r = AppRenderer::new();
         r.coordinate = crate::app_state::Coordinate::EditorGeneral;
-        assert_eq!(speak_mode_change_text(&r, None), "editor");
+        r.speak_mode_change(None);
+        assert_eq!(announced_text(&r).as_deref(), Some("editor"));
     }
 
     #[test]
     fn speak_mode_change_extended_search() {
         let mut r = AppRenderer::new();
         r.coordinate = crate::app_state::Coordinate::ExtendedSearch;
-        assert_eq!(speak_mode_change_text(&r, None), "extended search");
+        r.speak_mode_change(None);
+        assert_eq!(announced_text(&r).as_deref(), Some("extended search"));
     }
 
     #[test]
     fn speak_mode_change_scroll() {
         let mut r = AppRenderer::new();
         r.coordinate = crate::app_state::Coordinate::Scroll;
-        assert_eq!(speak_mode_change_text(&r, None), "scroll");
+        r.speak_mode_change(None);
+        assert_eq!(announced_text(&r).as_deref(), Some("scroll"));
     }
 
     #[test]
     fn speak_mode_change_dashboard() {
         let mut r = AppRenderer::new();
         r.coordinate = crate::app_state::Coordinate::Dashboard;
-        assert_eq!(speak_mode_change_text(&r, None), "dashboard");
+        r.speak_mode_change(None);
+        assert_eq!(announced_text(&r).as_deref(), Some("dashboard"));
     }
 
     #[test]
     fn speak_mode_change_input_search() {
         let mut r = AppRenderer::new();
         r.coordinate = crate::app_state::Coordinate::InputSearch;
-        assert_eq!(speak_mode_change_text(&r, None), "input search");
+        r.speak_mode_change(None);
+        assert_eq!(announced_text(&r).as_deref(), Some("input search"));
     }
 }

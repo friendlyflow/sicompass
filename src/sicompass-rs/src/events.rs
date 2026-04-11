@@ -609,7 +609,12 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
                         &r.search_string
                     };
                     let before = &buf[..r.cursor_position.min(buf_len)];
-                    r.cursor_position = before.char_indices().rev().next().map(|(i,_)| i).unwrap_or(0);
+                    if let Some((i, ch)) = before.char_indices().rev().next() {
+                        r.cursor_position = i;
+                        handlers::announce_char(r, ch);
+                    } else {
+                        r.cursor_position = 0;
+                    }
                     r.caret.reset(handlers::sdl_ticks());
                     r.needs_redraw = true;
                 } else if handlers::navigate_left_raw(r) {
@@ -647,6 +652,7 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
                 if r.cursor_position < buf.len() {
                     let ch = buf[r.cursor_position..].chars().next().unwrap();
                     r.cursor_position += ch.len_utf8();
+                    handlers::announce_char(r, ch);
                     r.caret.reset(handlers::sdl_ticks());
                     r.needs_redraw = true;
                 } else if r.coordinate == Coordinate::ExtendedSearch {
@@ -726,8 +732,12 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
                     r.needs_redraw = true;
                 } else if r.cursor_position > 0 {
                     let before = &r.input_buffer[..r.cursor_position];
-                    r.cursor_position = before.char_indices().rev()
-                        .next().map(|(i, _)| i).unwrap_or(0);
+                    if let Some((i, ch)) = before.char_indices().rev().next() {
+                        r.cursor_position = i;
+                        handlers::announce_char(r, ch);
+                    } else {
+                        r.cursor_position = 0;
+                    }
                     r.caret.reset(handlers::sdl_ticks());
                     r.needs_redraw = true;
                 }
@@ -745,6 +755,7 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
                     if pos < r.input_buffer.len() {
                         let ch = r.input_buffer[pos..].chars().next().unwrap();
                         r.cursor_position = pos + ch.len_utf8();
+                        handlers::announce_char(r, ch);
                         r.caret.reset(handlers::sdl_ticks());
                         r.needs_redraw = true;
                     }
@@ -813,8 +824,12 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
                     r.needs_redraw = true;
                 } else if r.cursor_position > 0 {
                     let before = &r.input_buffer[..r.cursor_position];
-                    r.cursor_position = before.char_indices().rev()
-                        .next().map(|(i, _)| i).unwrap_or(0);
+                    if let Some((i, ch)) = before.char_indices().rev().next() {
+                        r.cursor_position = i;
+                        handlers::announce_char(r, ch);
+                    } else {
+                        r.cursor_position = 0;
+                    }
                     r.caret.reset(handlers::sdl_ticks());
                     r.needs_redraw = true;
                 }
@@ -833,6 +848,7 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
                     if pos < r.input_buffer.len() {
                         let ch = r.input_buffer[pos..].chars().next().unwrap();
                         r.cursor_position = pos + ch.len_utf8();
+                        handlers::announce_char(r, ch);
                         r.caret.reset(handlers::sdl_ticks());
                         r.needs_redraw = true;
                     } else {

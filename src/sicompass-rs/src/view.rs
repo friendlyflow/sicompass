@@ -205,6 +205,10 @@ pub fn main_loop(app: &mut AppState) {
         if let Some(adapter) = app.accesskit_adapter.as_mut() {
             adapter.update_if_active(&app.renderer);
         }
+        // Note: pending_announcement is NOT cleared here. It persists until a
+        // handler overwrites it with the next announcement, so the AT has
+        // unlimited time to query the live-region node. This matches the C
+        // behaviour where the announcement text stays in the tree between speaks.
 
         // ---- Recreate swapchain if needed -----------------------------------
         if app.framebuffer_resized {

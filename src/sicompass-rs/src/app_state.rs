@@ -374,6 +374,17 @@ pub struct AppRenderer {
 
     // ---- Current URI -------------------------------------------------------
     pub current_uri: String,
+
+    // ---- Accessibility announcements --------------------------------------
+    /// Text to announce via the live-region node on the next `update_if_active`
+    /// call. Persists until overwritten by the next announcement — the main
+    /// loop no longer clears it per-frame, so the AT has unlimited time to
+    /// query the node. Set by `speak_mode_change` and `announce_char`.
+    pub pending_announcement: Option<String>,
+    /// Toggled on every announcement to force an AccessKit tree diff even when
+    /// the announced text is the same as the previous one. A zero-width space
+    /// (\u{200B}) is appended when the toggle is true; screen readers ignore it.
+    pub announcement_parity: bool,
 }
 
 impl AppRenderer {
@@ -436,7 +447,31 @@ impl AppRenderer {
             save_as_return_id: IdArray::new(),
             save_folder_path: String::new(),
             current_uri: String::new(),
+            pending_announcement: None,
+            announcement_parity: false,
         }
+    }
+
+    /// Set the screen-reader announcement to the current coordinate's spoken
+    /// name, optionally suffixed with a context string.
+    ///
+    /// Mirrors `accesskitSpeakModeChange` from the C source. The announcement
+    /// persists in `pending_announcement` until the next call overwrites it —
+    /// the main loop no longer clears it per-frame.
+    ///
+    /// `announcement_parity` is toggled on every call so that identical
+    /// consecutive announcements still produce an AccessKit tree diff (a
+    /// zero-width space is appended when parity is true — screen readers
+    /// universally ignore it in speech output).
+    pub fn speak_mode_change(&mut self, context: Option<String>) {
+        let mode = self.coordinate.as_str();
+        let text = match context {
+            Some(ctx) if !ctx.is_empty() => format!("{mode} - {ctx}"),
+            _ => mode.to_string(),
+        };
+        self.announcement_parity = !self.announcement_parity;
+        let sentinel = if self.announcement_parity { "\u{200B}" } else { "" };
+        self.pending_announcement = Some(format!("{text}{sentinel}"));
     }
 
     /// Return the active color palette.

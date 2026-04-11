@@ -489,6 +489,8 @@ pub fn handle_i(r: &mut AppRenderer) {
         Coordinate::EditorInsert
     };
     populate_input_buffer(r);
+    let ctx = (!r.input_buffer.is_empty()).then(|| r.input_buffer.clone());
+    r.speak_mode_change(ctx);
     r.cursor_position = 0;
     r.selection_anchor = None;
     r.caret.reset(sdl_ticks());
@@ -507,6 +509,8 @@ pub fn handle_a(r: &mut AppRenderer) {
         Coordinate::EditorInsert
     };
     populate_input_buffer(r);
+    let ctx = (!r.input_buffer.is_empty()).then(|| r.input_buffer.clone());
+    r.speak_mode_change(ctx);
     r.cursor_position = r.input_buffer.len();
     r.selection_anchor = None;
     r.caret.reset(sdl_ticks());
@@ -526,6 +530,7 @@ pub fn handle_space(r: &mut AppRenderer) {
         }
         _ => return,
     }
+    r.speak_mode_change(None);
     r.needs_redraw = true;
 }
 
@@ -536,6 +541,7 @@ pub fn handle_s(r: &mut AppRenderer) {
     }
     r.previous_coordinate = r.coordinate;
     r.coordinate = Coordinate::Scroll;
+    r.speak_mode_change(None);
     r.text_scroll_offset = -1; // sentinel: renderer computes initial offset (selected item at top)
     r.text_scroll_total_height = 0;
     r.needs_redraw = true;
@@ -549,6 +555,7 @@ pub fn handle_meta(r: &mut AppRenderer) {
 
     r.previous_coordinate = r.coordinate;
     r.coordinate = Coordinate::Meta;
+    r.speak_mode_change(None);
     r.list_index = 0;
     list::create_list_current_layer(r);
     r.needs_redraw = true;
@@ -563,6 +570,7 @@ pub fn handle_tab(r: &mut AppRenderer) {
         Coordinate::OperatorGeneral | Coordinate::OperatorInsert | Coordinate::EditorGeneral => {
             r.previous_coordinate = r.coordinate;
             r.coordinate = Coordinate::SimpleSearch;
+            r.speak_mode_change(None);
             r.search_string.clear();
             r.cursor_position = 0;
             list::create_list_current_layer(r);
@@ -579,6 +587,7 @@ pub fn handle_colon(r: &mut AppRenderer) {
     }
     r.previous_coordinate = r.coordinate;
     r.coordinate = Coordinate::Command;
+    r.speak_mode_change(None);
     r.current_command = CommandPhase::None;
     r.provider_command_name.clear();
     r.input_buffer.clear();
@@ -651,6 +660,7 @@ pub fn handle_enter_command(r: &mut AppRenderer) {
                 // Provider set an error
                 r.current_command = CommandPhase::None;
                 r.coordinate = Coordinate::OperatorGeneral;
+                r.speak_mode_change(None);
                 list::create_list_current_layer(r);
                 r.needs_redraw = true;
             } else {
@@ -664,6 +674,7 @@ pub fn handle_enter_command(r: &mut AppRenderer) {
                     // Command was a state toggle — return to previous mode and refresh
                     r.current_command = CommandPhase::None;
                     r.coordinate = r.previous_coordinate;
+                    r.speak_mode_change(None);
                     r.previous_coordinate = Coordinate::OperatorGeneral;
 
                     // Navigate back to provider root if deeper (matches C: while depth > 2)
@@ -692,6 +703,7 @@ pub fn handle_enter_command(r: &mut AppRenderer) {
 
             r.current_command = CommandPhase::None;
             r.coordinate = r.previous_coordinate;
+            r.speak_mode_change(None);
             list::create_list_current_layer(r);
             r.list_index = r.current_id.last().unwrap_or(0);
             r.scroll_offset = 0;
@@ -894,6 +906,7 @@ pub fn handle_enter_search(r: &mut AppRenderer) {
         Some(id) => id,
         None => {
             r.coordinate = r.previous_coordinate;
+            r.speak_mode_change(None);
             r.search_string.clear();
             list::create_list_current_layer(r);
             r.needs_redraw = true;
@@ -939,6 +952,7 @@ pub fn handle_enter_search(r: &mut AppRenderer) {
         if toggle_radio(r) {
             crate::provider::notify_radio_changed(r);
             r.coordinate = r.previous_coordinate;
+            r.speak_mode_change(None);
             r.search_string.clear();
             list::create_list_current_layer(r);
             r.list_index = r.current_id.last().unwrap_or(0);
@@ -950,6 +964,7 @@ pub fn handle_enter_search(r: &mut AppRenderer) {
 
     r.current_id = selected_id;
     r.coordinate = r.previous_coordinate;
+    r.speak_mode_change(None);
     r.search_string.clear();
     list::create_list_current_layer(r);
     r.list_index = r.current_id.last().unwrap_or(0).min(r.active_list_len().saturating_sub(1));
@@ -967,6 +982,7 @@ fn handle_enter_extended_search(r: &mut AppRenderer) {
         Some(i) => i,
         None => {
             r.coordinate = r.previous_coordinate;
+            r.speak_mode_change(None);
             r.input_buffer.clear();
             r.cursor_position = 0;
             list::create_list_current_layer(r);
@@ -1029,6 +1045,7 @@ fn handle_enter_extended_search(r: &mut AppRenderer) {
         if let Some(err) = blocked_error {
             r.current_id = blocked_ancestor_id;
             r.coordinate = r.previous_coordinate;
+            r.speak_mode_change(None);
             r.input_buffer.clear();
             r.cursor_position = 0;
             list::create_list_current_layer(r);
@@ -1078,6 +1095,7 @@ fn handle_enter_extended_search(r: &mut AppRenderer) {
         if toggle_radio(r) {
             crate::provider::notify_radio_changed(r);
             r.coordinate = r.previous_coordinate;
+            r.speak_mode_change(None);
             r.input_buffer.clear();
             r.cursor_position = 0;
             list::create_list_current_layer(r);
@@ -1095,6 +1113,7 @@ fn handle_enter_extended_search(r: &mut AppRenderer) {
         let (parent_dir, filename) = split_nav_path(nav_path);
         crate::provider::navigate_to_path(r, root_idx, parent_dir, filename);
         r.coordinate = r.previous_coordinate;
+        r.speak_mode_change(None);
         r.input_buffer.clear();
         r.cursor_position = 0;
         list::create_list_current_layer(r);
@@ -1107,6 +1126,7 @@ fn handle_enter_extended_search(r: &mut AppRenderer) {
     // Regular FFON-tree item: navigate by id
     r.current_id = item.id;
     r.coordinate = r.previous_coordinate;
+    r.speak_mode_change(None);
     r.input_buffer.clear();
     r.cursor_position = 0;
     list::create_list_current_layer(r);
@@ -1329,6 +1349,7 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
         r.current_id = return_id;
         r.pending_file_browser_save_as = false;
         r.coordinate = Coordinate::OperatorGeneral;
+        r.speak_mode_change(None);
         r.previous_coordinate = Coordinate::OperatorGeneral;
         r.input_buffer.clear();
         r.cursor_position = 0;
@@ -1510,6 +1531,7 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
             }
 
             r.coordinate = Coordinate::OperatorGeneral;
+            r.speak_mode_change(None);
             r.previous_coordinate = Coordinate::OperatorGeneral;
             r.input_buffer.clear();
             r.cursor_position = 0;
@@ -1543,6 +1565,7 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
                 }
             }
             r.coordinate = Coordinate::OperatorGeneral;
+            r.speak_mode_change(None);
             r.previous_coordinate = Coordinate::OperatorGeneral;
             r.input_buffer.clear();
             r.cursor_position = 0;
@@ -1577,6 +1600,7 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
                 }
             }
             r.coordinate = Coordinate::OperatorGeneral;
+            r.speak_mode_change(None);
             r.previous_coordinate = Coordinate::OperatorGeneral;
             r.input_buffer.clear();
             r.cursor_position = 0;
@@ -1759,6 +1783,7 @@ pub fn handle_escape(r: &mut AppRenderer) {
                 r.current_id = return_id;
                 r.pending_file_browser_save_as = false;
                 r.coordinate = Coordinate::OperatorGeneral;
+                r.speak_mode_change(None);
                 r.previous_coordinate = Coordinate::OperatorGeneral;
                 r.input_buffer.clear();
                 r.cursor_position = 0;
@@ -1774,6 +1799,7 @@ pub fn handle_escape(r: &mut AppRenderer) {
         }
         Coordinate::Command => {
             r.coordinate = r.previous_coordinate;
+            r.speak_mode_change(None);
             r.input_buffer.clear();
             r.cursor_position = 0;
             list::create_list_current_layer(r);
@@ -1785,6 +1811,7 @@ pub fn handle_escape(r: &mut AppRenderer) {
         }
         Coordinate::SimpleSearch => {
             r.coordinate = r.previous_coordinate;
+            r.speak_mode_change(None);
             r.search_string.clear();
             list::create_list_current_layer(r);
             r.list_index = r.current_id.last().unwrap_or(0);
@@ -1795,6 +1822,7 @@ pub fn handle_escape(r: &mut AppRenderer) {
         }
         Coordinate::ExtendedSearch => {
             r.coordinate = r.previous_coordinate;
+            r.speak_mode_change(None);
             r.input_buffer.clear();
             r.cursor_position = 0;
             list::create_list_current_layer(r);
@@ -1805,6 +1833,7 @@ pub fn handle_escape(r: &mut AppRenderer) {
         }
         Coordinate::Meta => {
             r.coordinate = r.previous_coordinate;
+            r.speak_mode_change(None);
             list::create_list_current_layer(r);
             r.list_index = r.current_id.last().unwrap_or(0);
             r.scroll_offset = 0;
@@ -1814,6 +1843,7 @@ pub fn handle_escape(r: &mut AppRenderer) {
         }
         Coordinate::Dashboard => {
             r.coordinate = r.previous_coordinate;
+            r.speak_mode_change(None);
             r.caret.reset(sdl_ticks());
             r.needs_redraw = true;
             return;
@@ -1842,6 +1872,7 @@ pub fn handle_escape(r: &mut AppRenderer) {
                 let return_id = r.save_as_return_id.clone();
                 r.current_id = return_id;
                 r.pending_file_browser_open = false;
+                r.speak_mode_change(None);
                 list::create_list_current_layer(r);
                 r.list_index = r.current_id.last().unwrap_or(0);
                 r.scroll_offset = 0;
@@ -1860,6 +1891,7 @@ pub fn handle_escape(r: &mut AppRenderer) {
             }
         }
     }
+    r.speak_mode_change(None);
     r.caret.reset(sdl_ticks());
     r.needs_redraw = true;
 }
@@ -2525,6 +2557,21 @@ pub fn handle_select_all(r: &mut AppRenderer) {
     r.needs_redraw = true;
 }
 
+/// Set the pending screen-reader announcement to a single character.
+/// Called by the cursor-movement handlers when the cursor steps over a char
+/// in a text-input mode. Centralised so future verbalisation tweaks
+/// (e.g. "space" → "space") have one home.
+///
+/// Toggles `announcement_parity` on every call so that reversing direction
+/// (and thus re-announcing the same character) still produces an AccessKit
+/// tree diff. The zero-width space sentinel appended when parity is true is
+/// universally ignored by screen readers in speech output.
+pub(crate) fn announce_char(r: &mut AppRenderer, ch: char) {
+    r.announcement_parity = !r.announcement_parity;
+    let sentinel = if r.announcement_parity { "\u{200B}" } else { "" };
+    r.pending_announcement = Some(format!("{ch}{sentinel}"));
+}
+
 /// Shift+Left — extend selection one character to the left.
 pub fn handle_shift_left(r: &mut AppRenderer) {
     if r.cursor_position == 0 { return; }
@@ -2533,7 +2580,12 @@ pub fn handle_shift_left(r: &mut AppRenderer) {
     }
     let pos = r.cursor_position.min(active_text_buf(r).len());
     let before = &active_text_buf(r)[..pos];
-    r.cursor_position = before.char_indices().rev().next().map(|(i, _)| i).unwrap_or(0);
+    if let Some((i, ch)) = before.char_indices().rev().next() {
+        r.cursor_position = i;
+        announce_char(r, ch);
+    } else {
+        r.cursor_position = 0;
+    }
     r.caret.reset(sdl_ticks());
     r.needs_redraw = true;
 }
@@ -2546,6 +2598,7 @@ pub fn handle_shift_right(r: &mut AppRenderer) {
     }
     let ch = active_text_buf(r)[r.cursor_position..].chars().next().unwrap();
     r.cursor_position += ch.len_utf8();
+    announce_char(r, ch);
     r.caret.reset(sdl_ticks());
     r.needs_redraw = true;
 }
@@ -2905,6 +2958,7 @@ pub fn handle_ctrl_f(r: &mut AppRenderer) {
     match r.coordinate {
         Coordinate::Scroll => {
             r.coordinate = Coordinate::ScrollSearch;
+            r.speak_mode_change(None);
             r.input_buffer.clear();
             r.cursor_position = 0;
             r.selection_anchor = None;
@@ -2919,6 +2973,7 @@ pub fn handle_ctrl_f(r: &mut AppRenderer) {
         Coordinate::EditorInsert | Coordinate::OperatorInsert => {
             r.previous_coordinate = r.coordinate;
             r.coordinate = Coordinate::InputSearch;
+            r.speak_mode_change(None);
             r.input_buffer.clear();
             r.cursor_position = 0;
             r.selection_anchor = None;
@@ -2950,6 +3005,7 @@ pub fn handle_ctrl_f(r: &mut AppRenderer) {
                 r.previous_coordinate = r.coordinate;
             }
             r.coordinate = Coordinate::ExtendedSearch;
+            r.speak_mode_change(None);
             r.input_buffer.clear();
             r.cursor_position = 0;
             r.selection_anchor = None;
@@ -2973,6 +3029,7 @@ pub fn handle_dashboard(r: &mut AppRenderer) {
         r.dashboard_image_path = path;
         r.previous_coordinate = r.coordinate;
         r.coordinate = Coordinate::Dashboard;
+        r.speak_mode_change(None);
         r.needs_redraw = true;
     }
 }
@@ -3882,6 +3939,7 @@ mod tests {
         assert_eq!(r.coordinate, Coordinate::SimpleSearch);
         assert_eq!(r.previous_coordinate, Coordinate::OperatorGeneral);
         assert!(r.search_string.is_empty());
+        assert_eq!(announced_text(&r).as_deref(), Some("search"));
     }
 
     #[test]
@@ -4417,6 +4475,7 @@ mod tests {
         handle_tab(&mut r);
         assert_eq!(r.coordinate, Coordinate::SimpleSearch);
         assert_eq!(r.previous_coordinate, Coordinate::EditorGeneral);
+        assert_eq!(announced_text(&r).as_deref(), Some("search"));
     }
 
     // -----------------------------------------------------------------------
@@ -4866,6 +4925,65 @@ mod tests {
         r.cursor_position = 5;
         handle_shift_right(&mut r);
         assert_eq!(r.cursor_position, 5);
+    }
+
+    // -----------------------------------------------------------------------
+    // announce_char / per-character announcements
+
+    /// Strip the parity sentinel (U+200B) that `announce_char` and
+    /// `speak_mode_change` append to force a tree diff on consecutive identical
+    /// announcements. Tests use this so they can assert the logical text without
+    /// caring about which parity cycle they're on.
+    fn announced_text(r: &AppRenderer) -> Option<String> {
+        r.pending_announcement
+            .as_deref()
+            .map(|s| s.trim_end_matches('\u{200B}').to_string())
+    }
+
+    #[test]
+    fn shift_right_announces_stepped_char() {
+        let mut r = make_input_renderer("abc");
+        r.cursor_position = 0;
+        handle_shift_right(&mut r);
+        assert_eq!(announced_text(&r).as_deref(), Some("a"));
+        assert_eq!(r.cursor_position, 1);
+    }
+
+    #[test]
+    fn shift_left_announces_stepped_char() {
+        let mut r = make_input_renderer("abc");
+        r.cursor_position = 3;
+        handle_shift_left(&mut r);
+        assert_eq!(announced_text(&r).as_deref(), Some("c"));
+        assert_eq!(r.cursor_position, 2);
+    }
+
+    #[test]
+    fn shift_right_announces_multibyte_char() {
+        // "ñ" is U+00F1, two bytes in UTF-8
+        let mut r = make_input_renderer("ñabc");
+        r.cursor_position = 0;
+        handle_shift_right(&mut r);
+        assert_eq!(announced_text(&r).as_deref(), Some("ñ"));
+        assert_eq!(r.cursor_position, 2);
+    }
+
+    #[test]
+    fn shift_left_at_zero_no_announcement() {
+        let mut r = make_input_renderer("abc");
+        r.cursor_position = 0;
+        handle_shift_left(&mut r);
+        assert_eq!(r.pending_announcement, None);
+        assert_eq!(r.cursor_position, 0);
+    }
+
+    #[test]
+    fn shift_right_at_end_no_announcement() {
+        let mut r = make_input_renderer("abc");
+        r.cursor_position = 3;
+        handle_shift_right(&mut r);
+        assert_eq!(r.pending_announcement, None);
+        assert_eq!(r.cursor_position, 3);
     }
 
     // -----------------------------------------------------------------------
