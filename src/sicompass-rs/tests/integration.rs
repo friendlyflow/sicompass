@@ -133,6 +133,8 @@ fn press_ctrl(r: &mut AppRenderer, key: Keycode) {
 fn press_ctrl_shift(r: &mut AppRenderer, key: Keycode) {
     dispatch_key(r, Some(key), Mod::LCTRLMOD | Mod::LSHIFTMOD);
 }
+fn press_shift_left(r: &mut AppRenderer)  { dispatch_key(r, Some(Keycode::Left),  Mod::LSHIFTMOD); }
+fn press_shift_right(r: &mut AppRenderer) { dispatch_key(r, Some(Keycode::Right), Mod::LSHIFTMOD); }
 
 fn press_down(r: &mut AppRenderer)   { press(r, Keycode::Down); }
 fn press_up(r: &mut AppRenderer)     { press(r, Keycode::Up); }
@@ -2543,4 +2545,150 @@ fn escape_in_save_as_insert_cancels_and_returns_to_source() {
     assert!(!r.pending_file_browser_save_as, "save-as flag should be cleared after Escape");
     assert_eq!(r.current_id.get(0), Some(0), "should be back at config provider after Escape");
     assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+}
+
+// ---------------------------------------------------------------------------
+// Per-character screen-reader announcements on Left / Right in text-input modes
+// ---------------------------------------------------------------------------
+
+/// Helper: clear the pending announcement between individual key presses so
+/// each assertion is clean (mirrors what view.rs does between frames).
+fn clear_announcement(r: &mut AppRenderer) {
+    r.pending_announcement = None;
+}
+
+/// Strip the parity sentinel (U+200B) that `announce_char` and
+/// `speak_mode_change` append on alternate calls to force AccessKit tree diffs.
+/// Use this in assertions so tests do not depend on which parity cycle they run in.
+fn announced_text(r: &AppRenderer) -> Option<String> {
+    r.pending_announcement
+        .as_deref()
+        .map(|s| s.trim_end_matches('\u{200B}').to_string())
+}
+
+#[test]
+fn editor_insert_left_announces_char() {
+    let mut r = AppRenderer::new();
+    r.coordinate = Coordinate::EditorInsert;
+    r.input_buffer = "hello".to_string();
+    r.cursor_position = 5;
+
+    // Moving left over each character should announce the char stepped over.
+    press_left(&mut r);
+    assert_eq!(announced_text(&r).as_deref(), Some("o"), "left over 'o'");
+    clear_announcement(&mut r);
+
+    press_left(&mut r);
+    assert_eq!(announced_text(&r).as_deref(), Some("l"), "left over 'l'");
+    clear_announcement(&mut r);
+
+    press_left(&mut r);
+    assert_eq!(announced_text(&r).as_deref(), Some("l"), "left over second 'l'");
+}
+
+#[test]
+fn editor_insert_right_announces_char() {
+    let mut r = AppRenderer::new();
+    r.coordinate = Coordinate::EditorInsert;
+    r.input_buffer = "hello".to_string();
+    r.cursor_position = 0;
+
+    press_right(&mut r);
+    assert_eq!(announced_text(&r).as_deref(), Some("h"), "right over 'h'");
+    clear_announcement(&mut r);
+
+    press_right(&mut r);
+    assert_eq!(announced_text(&r).as_deref(), Some("e"), "right over 'e'");
+}
+
+#[test]
+fn editor_insert_shift_left_announces_and_extends_selection() {
+    let mut r = AppRenderer::new();
+    r.coordinate = Coordinate::EditorInsert;
+    r.input_buffer = "abc".to_string();
+    r.cursor_position = 3;
+
+    press_shift_left(&mut r);
+    assert_eq!(announced_text(&r).as_deref(), Some("c"), "shift-left over 'c'");
+    assert!(r.selection_anchor.is_some(), "selection should be anchored");
+    clear_announcement(&mut r);
+
+    press_shift_left(&mut r);
+    assert_eq!(announced_text(&r).as_deref(), Some("b"), "shift-left over 'b'");
+}
+
+#[test]
+fn editor_insert_shift_right_announces_and_extends_selection() {
+    let mut r = AppRenderer::new();
+    r.coordinate = Coordinate::EditorInsert;
+    r.input_buffer = "abc".to_string();
+    r.cursor_position = 0;
+
+    press_shift_right(&mut r);
+    assert_eq!(announced_text(&r).as_deref(), Some("a"), "shift-right over 'a'");
+    assert!(r.selection_anchor.is_some(), "selection should be anchored");
+}
+
+#[test]
+fn editor_insert_left_no_announcement_on_selection_collapse() {
+    let mut r = AppRenderer::new();
+    r.coordinate = Coordinate::EditorInsert;
+    r.input_buffer = "abc".to_string();
+    r.cursor_position = 3;
+    // Select all then collapse with Left — should NOT announce a char.
+    sicompass::handlers::handle_select_all(&mut r);
+    clear_announcement(&mut r);
+    press_left(&mut r);
+    assert_eq!(r.pending_announcement, None, "no char announcement on selection collapse");
+    assert_eq!(r.cursor_position, 0, "cursor collapsed to selection start");
+}
+
+#[test]
+fn simple_search_left_announces_char() {
+    let mut h = Harness::new();
+    press_tab(h.r());
+    assert_eq!(h.renderer.coordinate, Coordinate::SimpleSearch);
+    type_text(h.r(), "foo");
+    clear_announcement(h.r());
+
+    press_left(h.r());
+    assert_eq!(announced_text(&h.renderer).as_deref(), Some("o"), "left over 'o' in search");
+}
+
+#[test]
+fn simple_search_right_announces_char() {
+    let mut h = Harness::new();
+    press_tab(h.r());
+    type_text(h.r(), "foo");
+    h.renderer.cursor_position = 0;
+    clear_announcement(h.r());
+
+    press_right(h.r());
+    assert_eq!(announced_text(&h.renderer).as_deref(), Some("f"), "right over 'f' in search");
+}
+
+#[test]
+fn command_mode_left_announces_char() {
+    // Set up Command mode directly — entering via ':' requires depth > 1 in the
+    // tree, so we skip the entry ceremony and test the key-dispatch logic alone.
+    let mut r = AppRenderer::new();
+    r.coordinate = Coordinate::Command;
+    r.input_buffer = "abc".to_string();
+    r.cursor_position = 3;
+    clear_announcement(&mut r);
+
+    press_left(&mut r);
+    assert_eq!(announced_text(&r).as_deref(), Some("c"), "left over 'c' in command");
+}
+
+#[test]
+fn command_mode_right_announces_char() {
+    let mut r = AppRenderer::new();
+    r.coordinate = Coordinate::Command;
+    r.input_buffer = "abc".to_string();
+    r.cursor_position = 0;
+    clear_announcement(&mut r);
+
+    press_right(&mut r);
+    assert_eq!(announced_text(&r).as_deref(), Some("a"), "right over 'a' in command");
 }
