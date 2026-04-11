@@ -474,6 +474,22 @@ impl AppRenderer {
         self.pending_announcement = Some(format!("{text}{sentinel}"));
     }
 
+    /// Set the pending screen-reader announcement to the currently selected
+    /// list item's spoken label. Used by filter modes (search/command/extended
+    /// search) after any action that changes which item is selected — mode
+    /// entry, typing, backspace, up/down/page/ctrl-home/ctrl-end navigation.
+    ///
+    /// Mirrors `accesskitSpeakCurrentElement` in C. No-op if the list is empty.
+    /// Toggles `announcement_parity` so back-to-back identical items still
+    /// produce an AccessKit tree diff.
+    pub fn speak_current_element(&mut self) {
+        let Some(item) = self.current_list_item() else { return; };
+        let text = crate::accesskit_sdl::label_to_speech(&item.label);
+        self.announcement_parity = !self.announcement_parity;
+        let sentinel = if self.announcement_parity { "\u{200B}" } else { "" };
+        self.pending_announcement = Some(format!("{text}{sentinel}"));
+    }
+
     /// Return the active color palette.
     pub fn palette(&self) -> &'static ColorPalette {
         match self.palette_theme {

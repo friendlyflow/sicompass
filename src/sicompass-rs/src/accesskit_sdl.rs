@@ -187,7 +187,7 @@ fn list_prefix_to_word(prefix: &str) -> Option<&'static str> {
     }
 }
 
-fn label_to_speech(label: &str) -> String {
+pub(crate) fn label_to_speech(label: &str) -> String {
     let Some((prefix, content)) = label.split_once(' ') else {
         return label.to_string();
     };
@@ -250,11 +250,21 @@ fn build_tree(renderer: &AppRenderer) -> TreeUpdate {
     nodes.insert(0, (ROOT_ID, root_builder.build()));
 
     // Focus: the currently selected list item (1-based), or root if empty.
+    // When a filter is active, list_index indexes into filtered_list_indices,
+    // not total_list directly — resolve through the filter to get the raw offset.
     let focus = if renderer.total_list.is_empty() {
         ROOT_ID
     } else {
-        let idx = renderer.list_index.min(renderer.total_list.len() - 1);
-        NodeId(idx as u64 + 1)
+        let raw_idx = if renderer.filtered_list_indices.is_empty() {
+            renderer.list_index.min(renderer.total_list.len() - 1)
+        } else {
+            renderer.filtered_list_indices
+                .get(renderer.list_index)
+                .copied()
+                .unwrap_or(0)
+                .min(renderer.total_list.len() - 1)
+        };
+        NodeId(raw_idx as u64 + 1)
     };
 
     TreeUpdate {
