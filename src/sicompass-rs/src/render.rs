@@ -738,9 +738,6 @@ pub fn build_app() -> Result<AppState, SiError> {
         unsafe { device.create_fence(&fence_info, None)? },
     ];
 
-    // ---- Show window --------------------------------------------------------
-    window.show();
-
     Ok(AppState {
         _sdl: sdl,
         _video: video,
