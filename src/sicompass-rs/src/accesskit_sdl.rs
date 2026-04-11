@@ -25,8 +25,11 @@ use accesskit::{Live, NodeBuilder, NodeId, Role, Tree, TreeUpdate};
 // ---------------------------------------------------------------------------
 
 const ROOT_ID: NodeId = NodeId(0);
+/// Single placeholder list-item node.  Its label is updated in place on every
+/// navigation step; Orca therefore only ever speaks the current item (mirrors
+/// `ELEMENT_ID` in the C `render.c`).
+const ELEMENT_ID: NodeId = NodeId(1);
 /// Reserved ID for the polite live-region node used for mode-change announcements.
-/// Must not collide with list-item IDs (1..=N); u64::MAX is safe in practice.
 const ANNOUNCEMENT_ID: NodeId = NodeId(u64::MAX);
 
 // ---------------------------------------------------------------------------
@@ -203,57 +206,27 @@ pub(crate) fn label_to_speech(label: &str) -> String {
 
 /// Convert the current AppRenderer visible list into a flat AccessKit tree.
 ///
-/// Layout:
-/// - Node 0 (ROOT_ID): `Role::Window` — the sicompass application window.
-/// - Nodes 1..=N: `Role::ListItem` — one per item in `renderer.total_list`.
-/// - ANNOUNCEMENT_ID: always-present polite live-region node.
+/// Build the accessibility tree from current renderer state.
 ///
-/// The announcement node is **always** included with `Live::Polite`.  Its name
-/// is set to `pending_announcement` when there is something to read, and to
-/// `""` otherwise.  Keeping the node permanently in the tree (rather than
-/// adding/removing it) ensures that AccessKit fires `LiveRegionChanged` on
-/// every content change — which is what NVDA monitors — rather than the less
-/// reliable `NodeAdded` event.
+/// Layout (mirrors the C `render.c` single-element pattern):
+/// - `ROOT_ID` (`Role::Window`): the sicompass application window.
+/// - `ELEMENT_ID` (`Role::ListItem`): **one** placeholder whose label is the
+///   currently selected item.  Updated in place on every navigation step so
+///   Orca only ever reads the current item, not an enumeration of all items.
+/// - `ANNOUNCEMENT_ID` (`Role::ListItem`, `Live::Polite`): always-present
+///   live-region.  Its name is `pending_announcement` when an announcement is
+///   queued, `""` otherwise.  Keeping the node permanently in the tree (rather
+///   than adding/removing it) ensures AccessKit fires `LiveRegionChanged` on
+///   every content change — which NVDA and Orca monitor — rather than the less
+///   reliable `NodeAdded` event.
 ///
-/// The focused node tracks `renderer.list_index`.
+/// Focus is `ELEMENT_ID` when `total_list` is non-empty, `ROOT_ID` otherwise.
 fn build_tree(renderer: &AppRenderer) -> TreeUpdate {
-    let capacity = renderer.total_list.len() + 2; // list items + root + announcement
-    let mut nodes: Vec<(NodeId, accesskit::Node)> = Vec::with_capacity(capacity);
+    let mut nodes: Vec<(NodeId, accesskit::Node)> = Vec::with_capacity(3);
 
-    // ---- List items --------------------------------------------------------
-    let mut child_ids: Vec<NodeId> = Vec::with_capacity(renderer.total_list.len() + 1);
-
-    for (i, item) in renderer.total_list.iter().enumerate() {
-        let id = NodeId(i as u64 + 1);
-        let mut builder = NodeBuilder::new(Role::ListItem);
-        builder.set_name(Box::<str>::from(label_to_speech(&item.label).as_str()));
-        nodes.push((id, builder.build()));
-        child_ids.push(id);
-    }
-
-    // ---- Announcement live-region node (always present) --------------------
-    // Using an empty name when idle and the announcement text when active
-    // guarantees AccessKit fires LiveRegionChanged (content change) rather
-    // than NodeAdded, which screen readers like NVDA reliably pick up.
-    let ann_text = renderer.pending_announcement.as_deref().unwrap_or("");
-    let mut ann = NodeBuilder::new(Role::ListItem);
-    ann.set_name(Box::<str>::from(ann_text));
-    ann.set_live(Live::Polite);
-    nodes.push((ANNOUNCEMENT_ID, ann.build()));
-    child_ids.push(ANNOUNCEMENT_ID);
-
-    // ---- Root window node --------------------------------------------------
-    let mut root_builder = NodeBuilder::new(Role::Window);
-    root_builder.set_name(Box::<str>::from("sicompass"));
-    root_builder.set_children(child_ids);
-    // Insert root at position 0
-    nodes.insert(0, (ROOT_ID, root_builder.build()));
-
-    // Focus: the currently selected list item (1-based), or root if empty.
-    // When a filter is active, list_index indexes into filtered_list_indices,
-    // not total_list directly — resolve through the filter to get the raw offset.
-    let focus = if renderer.total_list.is_empty() {
-        ROOT_ID
+    // ---- Single focused element node (mirrors C's ELEMENT_ID) --------------
+    let element_label = if renderer.total_list.is_empty() {
+        String::new()
     } else {
         let raw_idx = if renderer.filtered_list_indices.is_empty() {
             renderer.list_index.min(renderer.total_list.len() - 1)
@@ -264,7 +237,29 @@ fn build_tree(renderer: &AppRenderer) -> TreeUpdate {
                 .unwrap_or(0)
                 .min(renderer.total_list.len() - 1)
         };
-        NodeId(raw_idx as u64 + 1)
+        label_to_speech(&renderer.total_list[raw_idx].label)
+    };
+    let mut elem = NodeBuilder::new(Role::ListItem);
+    elem.set_name(Box::<str>::from(element_label.as_str()));
+    nodes.push((ELEMENT_ID, elem.build()));
+
+    // ---- Announcement live-region node (always present) --------------------
+    let ann_text = renderer.pending_announcement.as_deref().unwrap_or("");
+    let mut ann = NodeBuilder::new(Role::ListItem);
+    ann.set_name(Box::<str>::from(ann_text));
+    ann.set_live(Live::Polite);
+    nodes.push((ANNOUNCEMENT_ID, ann.build()));
+
+    // ---- Root window node --------------------------------------------------
+    let mut root_builder = NodeBuilder::new(Role::Window);
+    root_builder.set_name(Box::<str>::from("sicompass"));
+    root_builder.set_children(vec![ELEMENT_ID, ANNOUNCEMENT_ID]);
+    nodes.insert(0, (ROOT_ID, root_builder.build()));
+
+    let focus = if renderer.total_list.is_empty() {
+        ROOT_ID
+    } else {
+        ELEMENT_ID
     };
 
     TreeUpdate {
@@ -344,8 +339,8 @@ mod tests {
     fn build_tree_empty_list() {
         let r = AppRenderer::new();
         let tree = build_tree(&r);
-        // root + announcement node (always present)
-        assert_eq!(tree.nodes.len(), 2, "root + announcement node");
+        // root + single element placeholder + announcement node
+        assert_eq!(tree.nodes.len(), 3, "root + element + announcement node");
         assert_eq!(tree.nodes[0].0, ROOT_ID);
         assert_eq!(tree.focus, ROOT_ID);
         assert!(tree.tree.is_some());
@@ -355,11 +350,11 @@ mod tests {
     fn build_tree_with_items() {
         let r = make_renderer_with_list(&["Files", "Tutorial", "Settings"]);
         let tree = build_tree(&r);
-        // root + 3 items + announcement node
-        assert_eq!(tree.nodes.len(), 5);
+        // always: root + single element + announcement (regardless of list size)
+        assert_eq!(tree.nodes.len(), 3);
         assert_eq!(tree.nodes[0].0, ROOT_ID);
-        assert_eq!(tree.nodes[1].0, NodeId(1));
-        assert_eq!(tree.nodes[3].0, NodeId(3));
+        assert_eq!(tree.nodes[1].0, ELEMENT_ID);
+        assert_eq!(tree.nodes[2].0, ANNOUNCEMENT_ID);
     }
 
     #[test]
@@ -367,7 +362,9 @@ mod tests {
         let mut r = make_renderer_with_list(&["a", "b", "c"]);
         r.list_index = 2;
         let tree = build_tree(&r);
-        assert_eq!(tree.focus, NodeId(3)); // 1-based
+        // Focus always lands on ELEMENT_ID; the label reflects the selected item.
+        assert_eq!(tree.focus, ELEMENT_ID);
+        assert_eq!(tree.nodes[1].1.name().as_deref(), Some("c"));
     }
 
     #[test]
@@ -375,7 +372,8 @@ mod tests {
         let mut r = make_renderer_with_list(&["only"]);
         r.list_index = 99; // out of bounds
         let tree = build_tree(&r);
-        assert_eq!(tree.focus, NodeId(1));
+        assert_eq!(tree.focus, ELEMENT_ID);
+        assert_eq!(tree.nodes[1].1.name().as_deref(), Some("only"));
     }
 
     #[test]
@@ -424,18 +422,28 @@ mod tests {
 
     #[test]
     fn build_tree_translates_list_item_names() {
+        // First item (index 0)
         let r = make_renderer_with_list(&["-i newfile.txt", "+l dir"]);
         let tree = build_tree(&r);
         assert_eq!(tree.nodes[1].1.name().as_deref(), Some("minus i newfile.txt"));
-        assert_eq!(tree.nodes[2].1.name().as_deref(), Some("plus l dir"));
+        // Second item (index 1)
+        let mut r2 = make_renderer_with_list(&["-i newfile.txt", "+l dir"]);
+        r2.list_index = 1;
+        let tree2 = build_tree(&r2);
+        assert_eq!(tree2.nodes[1].1.name().as_deref(), Some("plus l dir"));
     }
 
     #[test]
     fn build_tree_item_labels_match() {
+        // First item (index 0)
         let r = make_renderer_with_list(&["Files", "Tutorial"]);
         let tree = build_tree(&r);
         assert_eq!(tree.nodes[1].1.name().as_deref(), Some("Files"));
-        assert_eq!(tree.nodes[2].1.name().as_deref(), Some("Tutorial"));
+        // Second item (index 1)
+        let mut r2 = make_renderer_with_list(&["Files", "Tutorial"]);
+        r2.list_index = 1;
+        let tree2 = build_tree(&r2);
+        assert_eq!(tree2.nodes[1].1.name().as_deref(), Some("Tutorial"));
     }
 
     #[test]
