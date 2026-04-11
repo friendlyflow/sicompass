@@ -39,6 +39,7 @@ pub fn handle_up(r: &mut AppRenderer) {
                 if r.coordinate != Coordinate::Command && r.coordinate != Coordinate::Meta {
                     r.sync_current_id_from_list();
                 }
+                r.speak_current_element();
             }
             r.needs_redraw = true;
         }
@@ -86,6 +87,7 @@ pub fn handle_down(r: &mut AppRenderer) {
                 if r.coordinate != Coordinate::Command && r.coordinate != Coordinate::Meta {
                     r.sync_current_id_from_list();
                 }
+                r.speak_current_element();
             }
             r.needs_redraw = true;
         }
@@ -392,6 +394,7 @@ pub fn handle_page_up(r: &mut AppRenderer) {
             r.error_message.clear();
             r.list_index = r.list_index.saturating_sub(page_size);
             r.scroll_offset = r.list_index as i32;
+            r.speak_current_element();
         }
         Coordinate::OperatorGeneral | Coordinate::EditorGeneral => {
             if let Some(slice) = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id) {
@@ -434,6 +437,7 @@ pub fn handle_page_down(r: &mut AppRenderer) {
             if count > 0 {
                 r.list_index = (r.list_index + page_size).min(count - 1);
                 r.scroll_offset = -1;
+                r.speak_current_element();
             }
         }
         Coordinate::OperatorGeneral | Coordinate::EditorGeneral => {
@@ -458,6 +462,7 @@ pub fn handle_ctrl_home(r: &mut AppRenderer) {
         r.list_index = 0;
         r.scroll_offset = 0;
         r.sync_current_id_from_list();
+        r.speak_current_element();
     }
     r.needs_redraw = true;
 }
@@ -469,6 +474,7 @@ pub fn handle_ctrl_end(r: &mut AppRenderer) {
         r.list_index = len - 1;
         r.scroll_offset = -1;
         r.sync_current_id_from_list();
+        r.speak_current_element();
     }
     r.needs_redraw = true;
 }
@@ -570,10 +576,12 @@ pub fn handle_tab(r: &mut AppRenderer) {
         Coordinate::OperatorGeneral | Coordinate::OperatorInsert | Coordinate::EditorGeneral => {
             r.previous_coordinate = r.coordinate;
             r.coordinate = Coordinate::SimpleSearch;
-            r.speak_mode_change(None);
             r.search_string.clear();
             r.cursor_position = 0;
             list::create_list_current_layer(r);
+            let ctx = r.current_list_item()
+                .map(|it| crate::accesskit_sdl::label_to_speech(&it.label));
+            r.speak_mode_change(ctx);
             r.needs_redraw = true;
         }
         _ => {}
@@ -587,12 +595,14 @@ pub fn handle_colon(r: &mut AppRenderer) {
     }
     r.previous_coordinate = r.coordinate;
     r.coordinate = Coordinate::Command;
-    r.speak_mode_change(None);
     r.current_command = CommandPhase::None;
     r.provider_command_name.clear();
     r.input_buffer.clear();
     r.cursor_position = 0;
     list::create_list_current_layer(r);
+    let ctx = r.current_list_item()
+        .map(|it| crate::accesskit_sdl::label_to_speech(&it.label));
+    r.speak_mode_change(ctx);
     r.needs_redraw = true;
 }
 
@@ -1919,6 +1929,7 @@ pub fn handle_input(r: &mut AppRenderer, text: &str) {
             let search = r.search_string.clone();
             list::create_list_current_layer(r);
             list::populate_list_current_layer(r, &search);
+            r.speak_current_element();
             r.needs_redraw = true;
         }
         Coordinate::Command => {
@@ -1930,6 +1941,7 @@ pub fn handle_input(r: &mut AppRenderer, text: &str) {
             let filter = r.input_buffer.clone();
             list::create_list_current_layer(r);
             list::populate_list_current_layer(r, &filter);
+            r.speak_current_element();
             r.needs_redraw = true;
         }
         Coordinate::EditorInsert | Coordinate::OperatorInsert => {
@@ -1955,6 +1967,7 @@ pub fn handle_input(r: &mut AppRenderer, text: &str) {
             let filter = r.input_buffer.clone();
             list::create_list_extended_search(r);
             list::populate_list_current_layer(r, &filter);
+            r.speak_current_element();
             r.needs_redraw = true;
         }
         _ => {}
@@ -1975,6 +1988,7 @@ pub fn handle_backspace(r: &mut AppRenderer) {
                 let search = r.search_string.clone();
                 list::create_list_current_layer(r);
                 list::populate_list_current_layer(r, &search);
+                r.speak_current_element();
                 r.needs_redraw = true;
             }
         }
@@ -1983,6 +1997,9 @@ pub fn handle_backspace(r: &mut AppRenderer) {
                 delete_selection(r);
                 r.caret.reset(sdl_ticks());
                 maybe_update_search(r);
+                if matches!(r.coordinate, Coordinate::Command | Coordinate::ExtendedSearch) {
+                    r.speak_current_element();
+                }
                 r.needs_redraw = true;
             } else if r.cursor_position > 0 {
                 // Find the char boundary before cursor
@@ -1994,6 +2011,9 @@ pub fn handle_backspace(r: &mut AppRenderer) {
                 r.cursor_position = new_end;
                 r.caret.reset(sdl_ticks());
                 maybe_update_search(r);
+                if matches!(r.coordinate, Coordinate::Command | Coordinate::ExtendedSearch) {
+                    r.speak_current_element();
+                }
                 r.needs_redraw = true;
             }
         }
@@ -2995,6 +3015,9 @@ pub fn handle_ctrl_f(r: &mut AppRenderer) {
                 r.scroll_offset = 0;
                 list::create_list_extended_search(r);
                 r.list_index = 0;
+                let ctx = r.current_list_item()
+                    .map(|it| crate::accesskit_sdl::label_to_speech(&it.label));
+                r.speak_mode_change(ctx);
             }
             r.last_keypress_time = now;
             r.needs_redraw = true;
@@ -3005,13 +3028,15 @@ pub fn handle_ctrl_f(r: &mut AppRenderer) {
                 r.previous_coordinate = r.coordinate;
             }
             r.coordinate = Coordinate::ExtendedSearch;
-            r.speak_mode_change(None);
             r.input_buffer.clear();
             r.cursor_position = 0;
             r.selection_anchor = None;
             r.scroll_offset = 0;
             list::create_list_extended_search(r);
             r.list_index = r.current_id.last().unwrap_or(0);
+            let ctx = r.current_list_item()
+                .map(|it| crate::accesskit_sdl::label_to_speech(&it.label));
+            r.speak_mode_change(ctx);
             r.last_keypress_time = sdl_ticks();
             r.needs_redraw = true;
         }
