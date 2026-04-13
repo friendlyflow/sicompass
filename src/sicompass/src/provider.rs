@@ -224,15 +224,12 @@ pub fn get_commands(renderer: &AppRenderer) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Get meta/shortcut hints from the active provider.
+/// Get meta/shortcut hints for the currently rendered list.
+///
+/// Delegates to [`crate::shortcuts::hints_for`] which derives hints from the
+/// central SHORTCUTS table based on current state (mode, provider, FFON context).
 pub fn get_meta(renderer: &AppRenderer) -> Vec<String> {
-    if renderer.current_id.depth() <= 1 {
-        return sicompass_sdk::meta::lookup_formatted(sicompass_sdk::meta::ROOT)
-            .unwrap_or_default();
-    }
-    get_active_provider_ref(renderer)
-        .map(|p| p.meta())
-        .unwrap_or_default()
+    crate::shortcuts::hints_for(renderer)
 }
 
 /// Handle a command invocation (`:command`). Returns optional result element.

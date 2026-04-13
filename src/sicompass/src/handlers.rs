@@ -2046,7 +2046,6 @@ pub fn handle_backspace(r: &mut AppRenderer) {
 
 /// Delete the currently selected item.
 pub fn handle_delete(r: &mut AppRenderer, history: crate::app_state::History) {
-    if !provider_allows_shortcut(r, "Delete") { return; }
     crate::state::update_state(r, crate::app_state::Task::Delete, history);
     r.needs_redraw = true;
 }
@@ -2210,7 +2209,6 @@ pub fn handle_file_paste(r: &mut AppRenderer) {
 /// A double tap (within DELTA_MS) undoes the previous append and performs append-append.
 /// Mirrors C `handleCtrlA`.
 pub fn handle_ctrl_a(r: &mut AppRenderer, history: crate::app_state::History) {
-    if !provider_allows_shortcut(r, "Ctrl+A") { return; }
     let now = sdl_ticks();
     if now.saturating_sub(r.last_keypress_time) <= DELTA_MS {
         r.last_keypress_time = 0;
@@ -2229,7 +2227,6 @@ pub fn handle_ctrl_a(r: &mut AppRenderer, history: crate::app_state::History) {
 /// A double tap (within DELTA_MS) undoes the previous insert and re-enters insert.
 /// Mirrors C `handleCtrlI`.
 pub fn handle_ctrl_i(r: &mut AppRenderer, history: crate::app_state::History) {
-    if !provider_allows_shortcut(r, "Ctrl+I") { return; }
     let now = sdl_ticks();
     if now.saturating_sub(r.last_keypress_time) <= DELTA_MS {
         r.last_keypress_time = 0;
@@ -2864,7 +2861,7 @@ fn sdl_get_clipboard() -> Option<String> {
     }
 }
 
-fn is_text_edit_mode(r: &AppRenderer) -> bool {
+pub(crate) fn is_text_edit_mode(r: &AppRenderer) -> bool {
     matches!(
         r.coordinate,
         Coordinate::EditorInsert
@@ -2878,23 +2875,11 @@ fn is_text_edit_mode(r: &AppRenderer) -> bool {
 /// Returns true when the active provider is the file browser.
 ///
 /// Used to route Ctrl+C/X/V to filesystem clipboard ops in OperatorGeneral.
-fn active_provider_is_filebrowser(r: &AppRenderer) -> bool {
+pub(crate) fn active_provider_is_filebrowser(r: &AppRenderer) -> bool {
     r.current_id.get(0)
         .and_then(|i| r.providers.get(i))
         .map(|p| p.name() == "filebrowser")
         .unwrap_or(false)
-}
-
-/// Returns `false` when the active provider has a non-empty `meta()` list that does NOT
-/// include a hint containing `shortcut`.
-///
-/// When `meta()` is empty the provider places no restriction — returns `true`.
-/// This lets providers opt in to scoped structural editing via their `meta()` output.
-fn provider_allows_shortcut(r: &AppRenderer, shortcut: &str) -> bool {
-    let meta = crate::provider::get_active_provider_ref(r)
-        .map(|p| p.meta())
-        .unwrap_or_default();
-    meta.is_empty() || meta.iter().any(|m| m.contains(shortcut))
 }
 
 /// Ctrl+X — cut selected text (insert modes) or cut FFON element (editor general).
@@ -3089,8 +3074,6 @@ pub fn handle_dashboard(r: &mut AppRenderer) {
 /// Ctrl+I in OperatorGeneral — insert a `<input></input>` placeholder before the
 /// current item and immediately enter insert mode.
 pub fn handle_ctrl_i_operator(r: &mut AppRenderer) {
-    if !matches!(r.coordinate, Coordinate::OperatorGeneral) { return; }
-    if !provider_allows_shortcut(r, "Ctrl+I") { return; }
     let slice = match sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id) {
         Some(s) => s,
         None => return,
@@ -3108,8 +3091,6 @@ pub fn handle_ctrl_i_operator(r: &mut AppRenderer) {
 /// Ctrl+A in OperatorGeneral — append a `<input></input>` placeholder after the
 /// current item and immediately enter insert mode.
 pub fn handle_ctrl_a_operator(r: &mut AppRenderer) {
-    if !matches!(r.coordinate, Coordinate::OperatorGeneral) { return; }
-    if !provider_allows_shortcut(r, "Ctrl+A") { return; }
     let slice = match sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id) {
         Some(s) => s,
         None => return,
@@ -3225,6 +3206,221 @@ pub fn sdl_ticks() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+// ---------------------------------------------------------------------------
+// Text-cursor movement handlers (extracted from inline events.rs logic)
+// ---------------------------------------------------------------------------
+
+/// Left-arrow in insert text modes — collapse selection or move cursor left one char.
+pub fn handle_text_cursor_left(r: &mut AppRenderer) {
+    if has_selection(r) {
+        if let Some((start, _)) = selection_range(r) {
+            r.cursor_position = start;
+        }
+        clear_selection(r);
+        r.caret.reset(sdl_ticks());
+        r.needs_redraw = true;
+    } else if r.cursor_position > 0 {
+        let before = &r.input_buffer[..r.cursor_position];
+        if let Some((i, ch)) = before.char_indices().rev().next() {
+            r.cursor_position = i;
+            announce_char(r, ch);
+        } else {
+            r.cursor_position = 0;
+        }
+        r.caret.reset(sdl_ticks());
+        r.needs_redraw = true;
+    }
+}
+
+/// Right-arrow in insert text modes — collapse selection or move cursor right one char.
+pub fn handle_text_cursor_right(r: &mut AppRenderer) {
+    if has_selection(r) {
+        if let Some((_, end)) = selection_range(r) {
+            r.cursor_position = end;
+        }
+        clear_selection(r);
+        r.caret.reset(sdl_ticks());
+        r.needs_redraw = true;
+    } else {
+        let pos = r.cursor_position;
+        if pos < r.input_buffer.len() {
+            let ch = r.input_buffer[pos..].chars().next().unwrap();
+            r.cursor_position = pos + ch.len_utf8();
+            announce_char(r, ch);
+            r.caret.reset(sdl_ticks());
+            r.needs_redraw = true;
+        }
+    }
+}
+
+/// Right-arrow in Command mode — like `handle_text_cursor_right` but also tries tree
+/// navigation right when the cursor is already at the end of the command buffer.
+pub fn handle_command_right(r: &mut AppRenderer) {
+    if has_selection(r) {
+        if let Some((_, end)) = selection_range(r) {
+            r.cursor_position = end;
+        }
+        clear_selection(r);
+        r.caret.reset(sdl_ticks());
+        r.needs_redraw = true;
+    } else {
+        let pos = r.cursor_position;
+        if pos < r.input_buffer.len() {
+            let ch = r.input_buffer[pos..].chars().next().unwrap();
+            r.cursor_position = pos + ch.len_utf8();
+            announce_char(r, ch);
+            r.caret.reset(sdl_ticks());
+            r.needs_redraw = true;
+        } else {
+            handle_right(r);
+        }
+    }
+}
+
+/// Left-arrow in SimpleSearch / ExtendedSearch — cursor left in the search string or
+/// tree-navigate up when the cursor is already at position 0.
+pub fn handle_search_left(r: &mut AppRenderer) {
+    if has_selection(r) {
+        if let Some((start, _)) = selection_range(r) {
+            r.cursor_position = start;
+        }
+        clear_selection(r);
+        r.caret.reset(sdl_ticks());
+        r.needs_redraw = true;
+        return;
+    }
+    let buf_len = if r.coordinate == Coordinate::ExtendedSearch {
+        r.input_buffer.len()
+    } else {
+        r.search_string.len()
+    };
+    if r.cursor_position > 0 {
+        let buf = if r.coordinate == Coordinate::ExtendedSearch {
+            &r.input_buffer
+        } else {
+            &r.search_string
+        };
+        let before = &buf[..r.cursor_position.min(buf_len)];
+        if let Some((i, ch)) = before.char_indices().rev().next() {
+            r.cursor_position = i;
+            announce_char(r, ch);
+        } else {
+            r.cursor_position = 0;
+        }
+        r.caret.reset(sdl_ticks());
+        r.needs_redraw = true;
+    } else if navigate_left_raw(r) {
+        if r.coordinate == Coordinate::ExtendedSearch {
+            r.input_buffer.clear();
+            r.cursor_position = 0;
+            list::create_list_extended_search(r);
+        } else {
+            r.search_string.clear();
+            r.cursor_position = 0;
+            list::create_list_current_layer(r);
+        }
+        r.list_index = r.current_id.last().unwrap_or(0)
+            .min(r.active_list_len().saturating_sub(1));
+        r.needs_redraw = true;
+    }
+}
+
+/// Right-arrow in SimpleSearch / ExtendedSearch — cursor right in the search string or
+/// navigate into the selected item when the cursor is at the end.
+pub fn handle_search_right(r: &mut AppRenderer) {
+    if has_selection(r) {
+        if let Some((_, end)) = selection_range(r) {
+            r.cursor_position = end;
+        }
+        clear_selection(r);
+        r.caret.reset(sdl_ticks());
+        r.needs_redraw = true;
+        return;
+    }
+    let buf = if r.coordinate == Coordinate::ExtendedSearch {
+        r.input_buffer.clone()
+    } else {
+        r.search_string.clone()
+    };
+    if r.cursor_position < buf.len() {
+        let ch = buf[r.cursor_position..].chars().next().unwrap();
+        r.cursor_position += ch.len_utf8();
+        announce_char(r, ch);
+        r.caret.reset(sdl_ticks());
+        r.needs_redraw = true;
+    } else if r.coordinate == Coordinate::ExtendedSearch {
+        if let Some(item) = r.current_list_item().cloned() {
+            if let Some(ref nav_path) = item.nav_path {
+                let root_idx = item.id.get(0).unwrap_or(0);
+                let (parent_dir, filename) = split_nav_path(nav_path);
+                crate::provider::navigate_to_path(r, root_idx, parent_dir, filename);
+            } else {
+                r.current_id = item.id;
+            }
+            if navigate_right_raw(r) {
+                r.input_buffer.clear();
+                r.cursor_position = 0;
+                list::create_list_extended_search(r);
+                r.list_index = r.current_id.last().unwrap_or(0)
+                    .min(r.active_list_len().saturating_sub(1));
+                r.scroll_offset = r.list_index as i32;
+                r.needs_redraw = true;
+            }
+        }
+    } else {
+        // SimpleSearch at cursor end — navigate into selected item.
+        r.search_string.clear();
+        r.cursor_position = 0;
+        if let Some(item_id) = r.current_list_item_id() {
+            r.current_id = item_id;
+        }
+        if navigate_right_raw(r) {
+            list::create_list_current_layer(r);
+            r.list_index = r.current_id.last().unwrap_or(0)
+                .min(r.active_list_len().saturating_sub(1));
+            r.scroll_offset = r.list_index as i32;
+            r.needs_redraw = true;
+        }
+    }
+}
+
+/// Up in InputSearch mode — scrolls the text view up by one line.
+pub fn handle_input_search_up(r: &mut AppRenderer) {
+    r.text_scroll_offset = (r.text_scroll_offset - 1).max(0);
+    r.needs_redraw = true;
+}
+
+/// Down in InputSearch mode — scrolls the text view down by one line.
+pub fn handle_input_search_down(r: &mut AppRenderer) {
+    r.text_scroll_offset += 1;
+    r.needs_redraw = true;
+}
+
+/// Return in EditorInsert / EditorNormal — commit the input buffer and exit insert mode.
+pub fn handle_return_editor_insert(r: &mut AppRenderer) {
+    crate::state::update_state(r, Task::Input, History::None);
+    handle_escape(r);
+}
+
+/// Ctrl+Return in EditorInsert / OperatorInsert — insert a literal newline character.
+pub fn handle_ctrl_enter_insert(r: &mut AppRenderer) {
+    handle_input(r, "\n");
+}
+
+/// Ctrl+Shift+A in EditorInsert — escape insert mode, append after, then re-enter insert.
+pub fn handle_ctrl_shift_a_insert(r: &mut AppRenderer) {
+    handle_escape(r);
+    handle_ctrl_a(r, History::None);
+    handle_a(r);
+}
+
+/// Ctrl+Shift+I in EditorInsert — escape insert mode, insert before, then re-enter insert.
+pub fn handle_ctrl_shift_i_insert(r: &mut AppRenderer) {
+    handle_escape(r);
+    handle_ctrl_i(r, History::None);
+    handle_i(r);
 }
 
 // ---------------------------------------------------------------------------

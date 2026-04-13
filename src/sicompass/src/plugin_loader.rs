@@ -725,21 +725,8 @@ impl Provider for ScriptProvider {
             return Vec::new();
         }
 
-        let (elems, dashboard, meta) = Self::parse_json_output(&json);
+        let (elems, dashboard, _meta) = Self::parse_json_output(&json);
         self.dashboard_image = dashboard;
-        // Register meta hints into the central SDK registry (Rust consumers
-        // query it via Provider::meta(); C consumers still use the FFON
-        // prepend convention, which is handled by the C build separately).
-        if let Some(meta_elem) = meta {
-            if let sicompass_sdk::FfonElement::Obj(obj) = &meta_elem {
-                let entries: Vec<sicompass_sdk::MetaEntry> = obj.children
-                    .iter()
-                    .filter_map(|e| e.as_str())
-                    .map(|s| sicompass_sdk::MetaEntry::new(s))
-                    .collect();
-                sicompass_sdk::meta::register(self.name.clone(), entries);
-            }
-        }
         elems
     }
 
@@ -921,9 +908,7 @@ impl Provider for ScriptProvider {
         Some(obj)
     }
 
-    fn cleanup(&mut self) {
-        sicompass_sdk::meta::unregister(&self.name);
-    }
+    fn cleanup(&mut self) {}
 }
 
 // ---------------------------------------------------------------------------

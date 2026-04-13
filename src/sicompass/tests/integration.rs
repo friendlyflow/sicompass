@@ -1007,9 +1007,9 @@ fn test_meta_at_root_shows_root_hints() {
     assert_eq!(h.renderer.coordinate, Coordinate::Meta);
     assert!(!h.renderer.total_list.is_empty(), "root meta list should not be empty");
 
-    // Root hints should mention Tab and Ctrl+F which work at root
+    // Root hints should mention Search and Ctrl+F which work at root
     let labels: Vec<&str> = h.renderer.total_list.iter().map(|i| i.label.as_str()).collect();
-    assert!(labels.iter().any(|l| l.contains("Tab")), "root meta should mention Tab");
+    assert!(labels.iter().any(|l| l.contains("Search")), "root meta should mention Search, got: {labels:?}");
     assert!(labels.iter().any(|l| l.contains("Ctrl+F")), "root meta should mention Ctrl+F");
 }
 
@@ -2939,4 +2939,98 @@ fn nested_added_nodes_survive_deep_navigation() {
             .any(|o| sicompass_sdk::tags::strip_display(&o.key) == "branch"))
         .unwrap_or(false);
     assert!(branch_d1, "branch must still exist after Left×3");
+}
+
+// ---------------------------------------------------------------------------
+// get_meta / list-derived keyboard hint derivation
+// ---------------------------------------------------------------------------
+
+/// Navigate the harness to depth 2 (inside the filebrowser root list).
+fn nav_into_filebrowser(h: &mut Harness) {
+    // Depth 1: select the filebrowser provider (index 0).
+    while h.renderer.current_id.get(0) != Some(0) {
+        dispatch_key(&mut h.renderer, Some(Keycode::Down), Mod::empty());
+    }
+    // Right: enter the provider → depth 2.
+    dispatch_key(&mut h.renderer, Some(Keycode::Right), Mod::empty());
+}
+
+#[test]
+fn get_meta_at_root_returns_universal_hints() {
+    let mut h = Harness::new();
+    // Depth 1 = root navigation level.
+    assert_eq!(h.renderer.current_id.depth(), 1);
+    let meta = sicompass::provider::get_meta(&h.renderer);
+    assert!(!meta.is_empty(), "root should have hints");
+    assert!(meta.iter().any(|s| s.contains("Search")),
+        "root should have Search hint, got: {meta:?}");
+    assert!(meta.iter().any(|s| s.contains("Ctrl+F")),
+        "root should have Ctrl+F");
+    assert!(meta.iter().any(|s| s.contains("Space")),
+        "root should have Space (mode toggle)");
+    // Provider-specific hints (e.g. filebrowser's Ctrl+I) must NOT appear at root.
+    assert!(!meta.iter().any(|s| s.contains("Ctrl+I")),
+        "root should not show provider-only shortcut Ctrl+I");
+}
+
+#[test]
+fn get_meta_inside_filebrowser_shows_provider_hints() {
+    let mut h = Harness::new();
+    nav_into_filebrowser(&mut h);
+    assert_eq!(h.renderer.current_id.depth(), 2, "should be depth 2 after entering filebrowser");
+
+    let meta = sicompass::provider::get_meta(&h.renderer);
+    assert!(!meta.is_empty(), "filebrowser list should have hints");
+    // No universal root hints at this depth.
+    assert!(!meta.iter().any(|s| s.starts_with("D ") || s.trim_start().starts_with("D\t")),
+        "filebrowser should not show root-only D=Dashboard");
+    // Provider-declared filebrowser hints.
+    assert!(meta.iter().any(|s| s.contains("Ctrl+I")), "filebrowser must declare Ctrl+I");
+    assert!(meta.iter().any(|s| s.contains("F5")),     "filebrowser must declare F5");
+    assert!(meta.iter().any(|s| s.contains("Search")),
+        "filebrowser must declare Search hint, got: {meta:?}");
+}
+
+#[test]
+fn get_meta_tag_derived_hints_appear_for_input_children() {
+    use sicompass_sdk::ffon::FfonElement;
+    use sicompass_sdk::provider::Provider;
+
+    // Build a provider whose fetch returns a list with <input> children.
+    struct InputListProvider { path: String }
+    impl Provider for InputListProvider {
+        fn name(&self) -> &str { "inputlist" }
+        fn fetch(&mut self) -> Vec<FfonElement> {
+            vec![
+                FfonElement::new_str("Name: <input>Alice</input>"),
+                FfonElement::new_str("Email: <input>alice@example.com</input>"),
+            ]
+        }
+        fn push_path(&mut self, seg: &str) { self.path = format!("/{seg}"); }
+        fn pop_path(&mut self) { self.path = "/".to_owned(); }
+        fn current_path(&self) -> &str { &self.path }
+        fn set_current_path(&mut self, p: &str) { self.path = p.to_owned(); }
+    }
+
+    let mut renderer = AppRenderer::default();
+    let provider = Box::new(InputListProvider { path: "/".to_owned() });
+    let children = {
+        let mut p = InputListProvider { path: "/".to_owned() };
+        p.fetch()
+    };
+    // Build the FFON tree manually: one root Obj whose children are the input rows.
+    let mut root = FfonElement::new_obj("inputlist");
+    for c in children { root.as_obj_mut().unwrap().push(c); }
+    renderer.ffon = vec![root];
+    renderer.providers = vec![Box::new(InputListProvider { path: "/".to_owned() })];
+    renderer.current_id = sicompass_sdk::ffon::IdArray::new();
+    renderer.current_id.push(0); // provider
+    renderer.current_id.push(0); // first row → depth 2, container = ffon[0]
+
+    let meta = sicompass::provider::get_meta(&renderer);
+    // Tag-derived: children have <input> → Tab search/cycle hint.
+    assert!(
+        meta.iter().any(|s| s.contains("Tab") && s.contains("Search")),
+        "input children should auto-derive Tab Search hint, got: {meta:?}"
+    );
 }

@@ -22,6 +22,7 @@ pub mod plugin_manifest;
 pub mod programs;
 pub mod provider;
 pub mod rectangle;
+pub mod shortcuts;
 pub mod state;
 pub mod text;
 pub mod unicode_search;

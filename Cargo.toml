@@ -9,8 +9,6 @@ members = [
     "lib/lib_emailclient",
     "lib/lib_remote",
     "src/sicompass",
-    "src/desicompass-rs",
-    "src/loginsicompass-rs",
 ]
 resolver = "2"
 
