@@ -564,16 +564,13 @@ pub static SHORTCUTS: &[Shortcut] = &[
         modes: &[Coordinate::EditorGeneral],
         label: ":      Command", is_available: always, handle: handlers::handle_colon },
 
-    // ---- I / A (enter insert/append mode) --------------------------------
+    // ---- I (enter append mode) -------------------------------------------
     Shortcut { key: Keycode::I, key2: None, ctrl: false, shift: false,
         modes: GENERAL,
-        label: "I      Edit input", is_available: avail_i_edit_hint, handle: handlers::handle_i },
+        label: "I      Edit input", is_available: avail_i_edit_hint, handle: handlers::handle_a },
     Shortcut { key: Keycode::I, key2: None, ctrl: false, shift: false,
         modes: GENERAL,
-        label: "I      Edit input", is_available: not_at_root, handle: handlers::handle_i },
-    Shortcut { key: Keycode::A, key2: None, ctrl: false, shift: false,
-        modes: GENERAL,
-        label: "A      Append", is_available: not_at_root, handle: handlers::handle_a },
+        label: "I      Edit input", is_available: not_at_root, handle: handlers::handle_a },
 
     // ---- Ctrl+I / Ctrl+A (structural insert/append) ----------------------
     // OperatorGeneral: insert/append placeholder
