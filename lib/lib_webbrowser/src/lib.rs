@@ -163,12 +163,21 @@ static CHROMIUM_RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> =
 // The window is hidden within one paint frame (~50 ms) — invisible in practice.
 // user32.dll is always linked on Windows — no extra crates.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Windows: keep Chrome windows off-screen (not hidden)
+//
+// We must never call ShowWindow(SW_HIDE) on Chrome windows.  Hiding a window
+// sends WM_SHOWWINDOW(FALSE) to Chrome's message loop, which drives
+// RenderWidget::SetHidden() inside Blink — this forces
+// document.visibilityState = "hidden" and kills JavaScript timer resolution
+// (React / consent-page apps never hydrate).  Moving the window to a position
+// far off all monitors keeps Chrome thinking the window is fully visible while
+// making it invisible to the user.  Chrome's JS runs at full speed.
 #[cfg(target_os = "windows")]
 mod win_hide {
     extern "system" {
         fn EnumWindows(lp_enum_func: unsafe extern "system" fn(isize, isize) -> i32, l_param: isize) -> i32;
         fn GetWindowThreadProcessId(hwnd: isize, lp_dw_process_id: *mut u32) -> u32;
-        fn ShowWindow(hwnd: isize, n_cmd_show: i32) -> i32;
         fn IsWindowVisible(hwnd: isize) -> i32;
         fn OpenProcess(dw_desired_access: u32, b_inherit_handle: i32, dw_process_id: u32) -> isize;
         fn CloseHandle(h_object: isize) -> i32;
@@ -178,10 +187,26 @@ mod win_hide {
             lp_exe_name: *mut u16,
             lp_size: *mut u32,
         ) -> i32;
+        fn SetWindowPos(
+            hwnd: isize,
+            hwnd_insert_after: isize,
+            x: i32, y: i32,
+            cx: i32, cy: i32,
+            u_flags: u32,
+        ) -> i32;
     }
 
-    const SW_HIDE: i32 = 0;
     const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    /// Do not resize the window.
+    const SWP_NOSIZE:     u32 = 0x0001;
+    /// Do not change z-order.
+    const SWP_NOZORDER:   u32 = 0x0004;
+    /// Do not activate/focus the window.
+    const SWP_NOACTIVATE: u32 = 0x0010;
+
+    /// Off-screen position: far beyond any realistic monitor layout.
+    const OFFSCREEN_X: i32 = -10_000;
+    const OFFSCREEN_Y: i32 = -10_000;
 
     /// Collect all currently-visible top-level window handles.
     pub fn snapshot_windows() -> Vec<isize> {
@@ -195,8 +220,9 @@ mod win_hide {
         hwnds
     }
 
-    /// Hide every visible top-level window whose exe path contains "chrome" or
-    /// "msedge" and that was NOT present in `before`.
+    /// Move every visible top-level Chrome/Edge window that was NOT present in
+    /// `before` to an off-screen position.  The window remains "visible" to
+    /// Chrome (no SW_HIDE, no occlusion) so JavaScript timers are never throttled.
     pub fn hide_new_browser_windows(before: &[isize]) {
         let mut current: Vec<isize> = Vec::new();
         unsafe extern "system" fn callback(hwnd: isize, lparam: isize) -> i32 {
@@ -231,7 +257,16 @@ mod win_hide {
             if ok == 0 { continue; }
             let path = String::from_utf16_lossy(&buf[..len as usize]).to_lowercase();
             if path.contains("chrome") || path.contains("msedge") {
-                unsafe { ShowWindow(hwnd, SW_HIDE) };
+                // Move off-screen without resizing, changing z-order, or
+                // activating.  Never hide — see module comment.
+                unsafe {
+                    SetWindowPos(
+                        hwnd, 0,
+                        OFFSCREEN_X, OFFSCREEN_Y,
+                        0, 0,
+                        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                    );
+                }
             }
         }
     }
@@ -392,11 +427,14 @@ async fn launch_browser() -> Result<BrowserSession, String> {
     Ok(BrowserSession { browser })
 }
 
-/// Windows: launch headed Chrome via chromiumoxide, and keep a background
-/// thread running for the entire session that calls ShowWindow(SW_HIDE) on any
-/// new Chrome/Edge windows every 50 ms.  The hider runs from before launch
-/// through the whole fetch (new_page, goto, content) so windows that appear at
-/// any point during the session are hidden within one paint frame (~50 ms).
+/// Windows: launch headed Chrome positioned off-screen, with a background
+/// thread that moves any newly-visible Chrome windows off-screen every 50 ms.
+///
+/// We never call ShowWindow(SW_HIDE) — hiding a window sends WM_SHOWWINDOW
+/// to Chrome's message loop, driving RenderWidget::SetHidden(), which sets
+/// document.visibilityState = "hidden" and kills JS timer resolution.
+/// Instead we start Chrome with --window-position=-10000,-10000 and keep the
+/// mover thread running to catch any window that Chrome opens after launch.
 /// The thread stops automatically when `BrowserSession` is dropped.
 #[cfg(target_os = "windows")]
 async fn launch_browser() -> Result<BrowserSession, String> {
@@ -416,6 +454,15 @@ async fn launch_browser() -> Result<BrowserSession, String> {
         .arg("--disable-blink-features=AutomationControlled")
         .arg("--no-first-run")
         .arg("--no-default-browser-check")
+        // Start the window far off all monitors so it is never on-screen.
+        // Negative coordinates are valid on Windows; the window is "visible"
+        // to Chrome (no SW_HIDE) so JS timers and rendering run at full speed.
+        .arg("--window-position=-10000,-10000")
+        // Belt-and-suspenders: also disable renderer backgrounding in case
+        // Chrome ever detects that its window is off all monitors.
+        .arg("--disable-backgrounding-occluded-windows")
+        .arg("--disable-renderer-backgrounding")
+        .arg("--disable-background-timer-throttling")
         .user_data_dir(&profile_dir)
         .window_size(1920, 1080)
         .chrome_executable(&exe)
@@ -429,7 +476,8 @@ async fn launch_browser() -> Result<BrowserSession, String> {
     // returns Disconnected and the thread exits cleanly.
     let (stop_tx, stop_rx) = std::sync::mpsc::sync_channel::<()>(0);
 
-    // Background hider: runs for the entire session lifetime.
+    // Background mover: runs for the entire session lifetime.
+    // Moves any new Chrome windows off-screen (never hides them).
     std::thread::spawn(move || {
         use std::sync::mpsc::RecvTimeoutError;
         loop {
@@ -600,6 +648,17 @@ if (window.outerHeight === 0) {
     Object.defineProperty(window, 'outerHeight', { get: () => window.innerHeight + 74 });
     Object.defineProperty(window, 'outerWidth',  { get: () => window.innerWidth });
 }
+
+// ── 8. Page visibility ────────────────────────────────────────────────────────
+// On Windows the browser window is hidden via ShowWindow(SW_HIDE), which can
+// cause Chrome to report visibilityState = "hidden".  Consent-page React apps
+// (e.g. DPG Media / myprivacy.dpgmedia.be) check this before rendering; if the
+// page appears hidden they skip hydration entirely, leaving no accept button in
+// the DOM.  Always report the page as visible.
+try {
+    Object.defineProperty(document, 'visibilityState', { get: () => 'visible' });
+    Object.defineProperty(document, 'hidden',          { get: () => false });
+} catch(_) {}
 "#;
 
 /// Returns true if the page body is Cloudflare's "Sorry, you have been blocked" wall.
@@ -674,18 +733,27 @@ async fn fetch_page(session: &BrowserSession, url: &str) -> Result<String, Strin
         .map_err(|_| format!("navigation to {url} timed out after 30 s"))?
         .map_err(|e| format!("navigation to {url} failed: {e}"))?;
 
-    // Wait briefly for JS-initiated redirects (e.g. consent-wall redirects).
-    let _ = tokio::time::timeout(
-        tokio::time::Duration::from_secs(3),
-        page.wait_for_navigation(),
-    ).await;
+    // Poll until the URL stabilises or a consent-wall URL is detected (up to 5 s).
+    // On Windows the JS redirect from the original page to the consent wall can
+    // fire well after Chrome's load event, so a single wait_for_navigation call
+    // (which may return before the redirect) is not reliable cross-platform.
+    let current_url = await_stable_url(&page, tokio::time::Duration::from_secs(5)).await;
 
     // If we landed on a consent wall, try to auto-accept and follow back.
-    let current_url = tokio::time::timeout(t(5), page.url())
-        .await.ok().and_then(|r| r.ok()).flatten().unwrap_or_default();
     if is_consent_wall_str(&current_url) {
-        let accepted = tokio::time::timeout(t(5), try_accept_consent(&page))
-            .await.unwrap_or(false);
+        // Retry up to 4 times with 1-second pauses between attempts.  The
+        // consent page uses client-side JS (React/Next.js) and the accept button
+        // may not be in the DOM yet when the first attempt runs, especially on
+        // Windows where page hydration can lag behind the URL change.
+        let mut accepted = false;
+        for attempt in 0..4u32 {
+            if attempt > 0 {
+                tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+            }
+            accepted = tokio::time::timeout(t(5), try_accept_consent(&page))
+                .await.unwrap_or(false);
+            if accepted { break; }
+        }
         if accepted {
             // Poll until we leave the consent wall (up to 8 s) then let the
             // page settle for 500 ms before reading its content.
@@ -695,6 +763,16 @@ async fn fetch_page(session: &BrowserSession, url: &str) -> Result<String, Strin
         let post_url = tokio::time::timeout(t(5), page.url())
             .await.ok().and_then(|r| r.ok()).flatten().unwrap_or_default();
         if is_consent_wall_str(&post_url) {
+            // Capture a snippet of the page HTML to diagnose why acceptance failed.
+            let diag_html = tokio::time::timeout(t(5), page.content())
+                .await.ok().and_then(|r| r.ok()).unwrap_or_default();
+            let snippet: String = diag_html.chars().take(2000).collect();
+            eprintln!("=== consent-wall debug ===");
+            eprintln!("Consent URL : {current_url}");
+            eprintln!("Button found: {accepted}");
+            eprintln!("Post URL    : {post_url}");
+            eprintln!("Page snippet:\n{snippet}");
+            eprintln!("=== end consent-wall debug ===");
             let _ = tokio::time::timeout(t(3), page.close()).await;
             return Err(
                 "Site redirected to a cookie-consent page that could not be \
@@ -818,9 +896,38 @@ fn js_array(items: &[&str]) -> String {
     format!("[{}]", quoted.join(","))
 }
 
-/// Attempt to accept a GDPR consent wall on the current page by clicking a
-/// common "accept all" button. Returns `true` if a button was found and clicked.
+/// Attempt to accept a GDPR consent wall on the current page.
+///
+/// Strategy 1 — DPG Media shortcut (hln.be, vtm.be, ad.nl, …):
+///   The consent page sets `window.cmpProperties.siteUrl` inline, before the
+///   external `consent.js` loads.  That URL is the exact callback hln.be uses
+///   to record consent and set cookies.  We navigate to it directly, bypassing
+///   the consent UI entirely.  This is reliable cross-platform because it needs
+///   no external script to load.
+///
+/// Strategy 2 — Generic button click:
+///   For all other CMPs, scan the DOM (and same-origin iframes) for a
+///   recognisable "accept all" button and click it.
+///
+/// Returns `true` if a navigation was triggered.
 async fn try_accept_consent(page: &chromiumoxide::Page) -> bool {
+    // ── Strategy 1: DPG Media ────────────────────────────────────────────────
+    // cmpProperties is set by an inline <script> tag, so it is available the
+    // instant the HTML is parsed — no need to wait for consent.js.
+    let dpg_js = r#"(function() {
+        try {
+            const u = window.cmpProperties && window.cmpProperties.siteUrl;
+            if (u && u.length > 0) { window.location.href = u; return true; }
+        } catch(_) {}
+        return false;
+    })()"#;
+    let dpg_accepted = page.evaluate(dpg_js).await
+        .ok()
+        .and_then(|r| r.into_value::<bool>().ok())
+        .unwrap_or(false);
+    if dpg_accepted { return true; }
+
+    // ── Strategy 2: generic button click ────────────────────────────────────
     let cmp_sels    = js_array(CMP_SELECTORS);
     let reject_kws  = js_array(REJECT_KEYWORDS);
     let accept_kws  = js_array(ACCEPT_KEYWORDS);
@@ -909,6 +1016,44 @@ async fn wait_until_off_consent(
     }
 }
 
+
+/// Poll `page.url()` every 300 ms until the URL stabilises or a consent-wall
+/// URL is detected, up to `budget`.  Returns the final URL seen.
+///
+/// "Stable" means the URL was the same on two consecutive polls AND at least
+/// `MIN_WAIT` has elapsed since the call started — this prevents returning
+/// prematurely before a slow JS redirect has had a chance to fire (a common
+/// problem on Windows where the redirect can arrive after the load event).
+async fn await_stable_url(page: &chromiumoxide::Page, budget: tokio::time::Duration) -> String {
+    const MIN_WAIT: tokio::time::Duration = tokio::time::Duration::from_millis(1500);
+    let poll_interval = tokio::time::Duration::from_millis(300);
+    let deadline = tokio::time::Instant::now() + budget;
+    let start    = tokio::time::Instant::now();
+    let mut prev_url = String::new();
+    loop {
+        tokio::time::sleep(poll_interval).await;
+        let url = tokio::time::timeout(
+            tokio::time::Duration::from_secs(3),
+            page.url(),
+        )
+        .await
+        .ok()
+        .and_then(|r| r.ok())
+        .flatten()
+        .unwrap_or_default();
+
+        if is_consent_wall_str(&url) {
+            return url; // Consent wall detected — stop early
+        }
+        if url == prev_url && start.elapsed() >= MIN_WAIT {
+            return url; // URL has stabilised after minimum wait
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return url;
+        }
+        prev_url = url;
+    }
+}
 
 // html_to_ffon and resolve_href live in sicompass-html (re-exported above).
 
