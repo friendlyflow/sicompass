@@ -8,7 +8,7 @@ TOOL=$(echo "$INPUT" | jq -r '.tool_name')
 FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path')
 
 # Only check source files
-if [[ ! "$FILE_PATH" =~ \.(c|h|ts|rs)$ ]]; then
+if [[ ! "$FILE_PATH" =~ \.(ts|rs)$ ]]; then
   exit 0
 fi
 
@@ -35,14 +35,6 @@ fi
 
 # Edits to handler/provider code: remind about integration tests
 if [[ "$TOOL" == "Edit" ]]; then
-  if [[ "$FILE_PATH" =~ src/sicompass/handlers\.c ]] || \
-     [[ "$FILE_PATH" =~ src/sicompass/provider\.c ]] || \
-     [[ "$FILE_PATH" =~ src/sicompass/events\.c ]] || \
-     [[ "$FILE_PATH" =~ lib/lib_.*/src/provider\.c ]]; then
-    echo "REMINDER: You edited $FILE_PATH" >&2
-    echo "Consider adding/updating integration tests in tests/integration/test_integration.c for cross-provider or full-workflow behavior." >&2
-    exit 2
-  fi
   if [[ "$FILE_PATH" =~ src/sicompass-rs/src/handlers\.rs ]] || \
      [[ "$FILE_PATH" =~ src/sicompass-rs/src/provider\.rs ]] || \
      [[ "$FILE_PATH" =~ src/sicompass-rs/src/events\.rs ]] || \
