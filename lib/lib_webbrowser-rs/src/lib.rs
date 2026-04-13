@@ -687,10 +687,10 @@ async fn fetch_page(session: &BrowserSession, url: &str) -> Result<String, Strin
         let accepted = tokio::time::timeout(t(5), try_accept_consent(&page))
             .await.unwrap_or(false);
         if accepted {
-            let _ = tokio::time::timeout(
-                tokio::time::Duration::from_secs(5),
-                page.wait_for_navigation(),
-            ).await;
+            // Poll until we leave the consent wall (up to 8 s) then let the
+            // page settle for 500 ms before reading its content.
+            wait_until_off_consent(&page, tokio::time::Duration::from_secs(8)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         }
         let post_url = tokio::time::timeout(t(5), page.url())
             .await.ok().and_then(|r| r.ok()).flatten().unwrap_or_default();
@@ -720,30 +720,151 @@ async fn fetch_page(session: &BrowserSession, url: &str) -> Result<String, Strin
     Ok(html)
 }
 
+// ---------------------------------------------------------------------------
+// Consent-wall auto-accept helpers
+// ---------------------------------------------------------------------------
+
+/// CMP-specific CSS selectors for "accept all" buttons, tried in priority order.
+/// Covers DPG Media, OneTrust, Didomi, TrustArc, Sourcepoint, Quantcast,
+/// CookieBot, Cookie Information, Usercentrics, and generic patterns.
+const CMP_SELECTORS: &[&str] = &[
+    // DPG Media (hln.be, vtm.be, ad.nl, volkskrant.nl, …)
+    r#"button[data-testid="pur-accept-button"]"#,
+    r#"button[data-testid="pur-all-accept-button"]"#,
+    r#"button[class*="pur-accept"]"#,
+    // OneTrust
+    "#onetrust-accept-btn-handler",
+    "button.onetrust-close-btn-handler.accept-btn",
+    // Didomi
+    "#didomi-notice-agree-button",
+    // TrustArc
+    "#truste-consent-button",
+    ".trustarc-agree-btn",
+    // Sourcepoint
+    r#"button[title="Accept All"]"#,
+    ".message-button.accept-all",
+    "button.sp_choice_type_11",
+    // Quantcast
+    "button.qc-cmp2-summary-buttons button:last-child",
+    // CookieBot
+    "#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll",
+    "#CybotCookiebotDialogBodyButtonAccept",
+    // Cookie Information
+    "#coi-banner-accept",
+    // Usercentrics
+    r#"button[data-testid="uc-accept-all-button"]"#,
+    // Generic broad patterns
+    r#"[data-role="accept-all"]"#,
+    r#"[data-testid="accept-all"]"#,
+    r#"button[id*="accept-all"]"#,
+    r#"button[class*="accept-all"]"#,
+    r#"button[class*="acceptAll"]"#,
+    r#"button[id*="accept"][id*="all"]"#,
+    r#"button[class*="AcceptAll"]"#,
+    r#"[data-cy*="accept-all"]"#,
+    r#"[aria-label*="accept all" i]"#,
+    r#"[aria-label*="Alles accepteren" i]"#,
+    r#"[aria-label*="akzeptieren" i]"#,
+];
+
+/// Button text substrings indicating a *reject* or settings action.
+/// Checked before ACCEPT_KEYWORDS to prevent clicking "decline all" buttons
+/// whose text happens to contain an accept keyword fragment.
+const REJECT_KEYWORDS: &[&str] = &[
+    "reject", "decline", "weiger", "refuser", "ablehnen", "rifiuta", "rechazar",
+    "only necessary", "alleen noodzakelijke", "nur notwendige",
+    "manage", "settings", "instellingen", "personnaliser", "preferences",
+];
+
+/// Button text substrings indicating an "accept all" action, in 6 languages.
+const ACCEPT_KEYWORDS: &[&str] = &[
+    // English
+    "accept all", "allow all", "agree and continue", "i accept", "got it",
+    // Dutch
+    "alles accepteren", "accepteer alles", "akkoord", "ja, ik accepteer",
+    "ik ga akkoord", "alles toestaan",
+    // French
+    "tout accepter", "j'accepte", "accepter et fermer", "continuer et accepter",
+    // German
+    "alle akzeptieren", "alles annehmen", "zustimmen", "einverstanden",
+    "akzeptieren und weiter",
+    // Italian
+    "accetta tutto", "accetto", "acconsento",
+    // Spanish
+    "aceptar todo", "acepto", "aceptar y continuar",
+];
+
+/// Returns `true` if the button text looks like a reject/settings action.
+#[cfg_attr(not(test), allow(dead_code))]
+fn is_reject_text(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    REJECT_KEYWORDS.iter().any(|k| lower.contains(k))
+}
+
+/// Returns `true` if the button text looks like an "accept all" action.
+/// Always returns `false` when `is_reject_text` is true (guard takes priority).
+#[cfg_attr(not(test), allow(dead_code))]
+fn is_accept_keyword(text: &str) -> bool {
+    if is_reject_text(text) {
+        return false;
+    }
+    let lower = text.to_lowercase();
+    ACCEPT_KEYWORDS.iter().any(|k| lower.contains(k))
+}
+
+/// Serialise a Rust string slice as a JSON array for embedding in JS.
+fn js_array(items: &[&str]) -> String {
+    let quoted: Vec<String> = items.iter().map(|s| format!("{s:?}")).collect();
+    format!("[{}]", quoted.join(","))
+}
+
 /// Attempt to accept a GDPR consent wall on the current page by clicking a
 /// common "accept all" button. Returns `true` if a button was found and clicked.
 async fn try_accept_consent(page: &chromiumoxide::Page) -> bool {
-    let js = r#"(function() {
-        const attrSels = [
-            '[data-role="accept-all"]', '[data-testid="accept-all"]',
-            'button[id*="accept-all"]', 'button[class*="accept-all"]',
-            'button[class*="acceptAll"]', '[aria-label*="Accept all"]',
-            '[aria-label*="Alles accepteren"]',
-        ];
-        for (const sel of attrSels) {
-            const el = document.querySelector(sel);
-            if (el) { el.click(); return true; }
-        }
-        const keywords = [
-            'accept all', 'alles accepteren', 'accepteer alles',
-            'tout accepter', 'alle akzeptieren', 'alles annehmen',
-        ];
-        for (const btn of document.querySelectorAll('button, [role="button"]')) {
-            const t = btn.textContent.trim().toLowerCase();
-            if (keywords.some(k => t.includes(k))) { btn.click(); return true; }
-        }
+    let cmp_sels    = js_array(CMP_SELECTORS);
+    let reject_kws  = js_array(REJECT_KEYWORDS);
+    let accept_kws  = js_array(ACCEPT_KEYWORDS);
+    let js = format!(r#"(function() {{
+        const cmpSels   = {cmp_sels};
+        const rejectKws = {reject_kws};
+        const acceptKws = {accept_kws};
+
+        function trySelectors(doc) {{
+            for (const sel of cmpSels) {{
+                try {{
+                    const el = doc.querySelector(sel);
+                    if (el) {{ el.click(); return true; }}
+                }} catch(e) {{}}
+            }}
+            return false;
+        }}
+
+        function tryKeywords(doc) {{
+            for (const btn of doc.querySelectorAll('button, [role="button"]')) {{
+                const t = btn.textContent.trim().toLowerCase();
+                if (rejectKws.some(k => t.includes(k))) continue;
+                if (acceptKws.some(k => t.includes(k))) {{ btn.click(); return true; }}
+            }}
+            return false;
+        }}
+
+        function scanDoc(doc) {{
+            return trySelectors(doc) || tryKeywords(doc);
+        }}
+
+        // Main document
+        if (scanDoc(document)) return true;
+
+        // One level of same-origin iframes (e.g. Sourcepoint)
+        for (const iframe of document.querySelectorAll('iframe')) {{
+            try {{
+                const doc = iframe.contentDocument;
+                if (doc && scanDoc(doc)) return true;
+            }} catch(e) {{ /* cross-origin: skip */ }}
+        }}
+
         return false;
-    })()"#;
+    }})()"#);
     page.evaluate(js).await
         .ok()
         .and_then(|r| r.into_value::<bool>().ok())
@@ -752,8 +873,40 @@ async fn try_accept_consent(page: &chromiumoxide::Page) -> bool {
 
 fn is_consent_wall_str(url: &str) -> bool {
     url.contains("myprivacy.dpgmedia.be")
+        || url.contains("sp-prod.net")
+        || url.contains("privacy-mgmt.com")
         || url.contains("/consent")
         || url.contains("cookie-consent")
+        || url.contains("consent.")
+        || url.contains("cmp.")
+}
+
+/// Poll `page.url()` every 250 ms until we are no longer on a consent wall,
+/// or until `budget` elapses.  Returns `true` if we left the wall.
+async fn wait_until_off_consent(
+    page: &chromiumoxide::Page,
+    budget: tokio::time::Duration,
+) -> bool {
+    let interval = tokio::time::Duration::from_millis(250);
+    let deadline = tokio::time::Instant::now() + budget;
+    loop {
+        tokio::time::sleep(interval).await;
+        let url = tokio::time::timeout(
+            tokio::time::Duration::from_secs(3),
+            page.url(),
+        )
+        .await
+        .ok()
+        .and_then(|r| r.ok())
+        .flatten()
+        .unwrap_or_default();
+        if !is_consent_wall_str(&url) {
+            return true;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+    }
 }
 
 
@@ -1114,6 +1267,133 @@ mod tests {
     #[test]
     fn test_is_consent_wall_detects_cookie_consent_path() {
         assert!(is_consent_wall_str("https://example.com/page/cookie-consent/accept"));
+    }
+
+    #[test]
+    fn test_is_consent_wall_detects_sourcepoint() {
+        assert!(is_consent_wall_str("https://cdn.sp-prod.net/unified/v2/notice.html"));
+    }
+
+    #[test]
+    fn test_is_consent_wall_detects_consent_subdomain() {
+        assert!(is_consent_wall_str("https://consent.youtube.com/m?continue=https%3A%2F%2Fwww.youtube.com%2F"));
+    }
+
+    #[test]
+    fn test_is_consent_wall_detects_privacy_mgmt() {
+        assert!(is_consent_wall_str("https://privacy-mgmt.com/cmp?redirect=https://example.com"));
+    }
+
+    #[test]
+    fn test_is_consent_wall_detects_cmp_subdomain() {
+        assert!(is_consent_wall_str("https://cmp.example.com/notice"));
+    }
+
+    // ---- is_reject_text unit tests ----
+
+    #[test]
+    fn test_is_reject_text_english() {
+        assert!(is_reject_text("Reject all"));
+        assert!(is_reject_text("Decline cookies"));
+        assert!(is_reject_text("Only necessary cookies"));
+        assert!(is_reject_text("Manage preferences"));
+        assert!(is_reject_text("Settings"));
+    }
+
+    #[test]
+    fn test_is_reject_text_dutch() {
+        assert!(is_reject_text("Weigeren"));
+        assert!(is_reject_text("Instellingen"));
+        assert!(is_reject_text("Alleen noodzakelijke"));
+    }
+
+    #[test]
+    fn test_is_reject_text_german() {
+        assert!(is_reject_text("Ablehnen"));
+        assert!(is_reject_text("Nur notwendige"));
+    }
+
+    #[test]
+    fn test_is_reject_text_false_for_accept() {
+        assert!(!is_reject_text("Accept all"));
+        assert!(!is_reject_text("Alles accepteren"));
+        assert!(!is_reject_text("Tout accepter"));
+    }
+
+    // ---- is_accept_keyword unit tests ----
+
+    #[test]
+    fn test_is_accept_keyword_english() {
+        assert!(is_accept_keyword("Accept all cookies"));
+        assert!(is_accept_keyword("Allow all"));
+        assert!(is_accept_keyword("Agree and continue"));
+        assert!(is_accept_keyword("I accept"));
+        assert!(is_accept_keyword("Got it"));
+    }
+
+    #[test]
+    fn test_is_accept_keyword_dutch() {
+        assert!(is_accept_keyword("Alles accepteren"));
+        assert!(is_accept_keyword("Accepteer alles"));
+        assert!(is_accept_keyword("Akkoord"));
+        assert!(is_accept_keyword("Ja, ik accepteer"));
+        assert!(is_accept_keyword("Ik ga akkoord"));
+        assert!(is_accept_keyword("Alles toestaan"));
+    }
+
+    #[test]
+    fn test_is_accept_keyword_french() {
+        assert!(is_accept_keyword("Tout accepter"));
+        assert!(is_accept_keyword("J'accepte"));
+        assert!(is_accept_keyword("Accepter et fermer"));
+        assert!(is_accept_keyword("Continuer et accepter"));
+    }
+
+    #[test]
+    fn test_is_accept_keyword_german() {
+        assert!(is_accept_keyword("Alle akzeptieren"));
+        assert!(is_accept_keyword("Alles annehmen"));
+        assert!(is_accept_keyword("Zustimmen"));
+        assert!(is_accept_keyword("Einverstanden"));
+        assert!(is_accept_keyword("Akzeptieren und weiter"));
+    }
+
+    #[test]
+    fn test_is_accept_keyword_italian() {
+        assert!(is_accept_keyword("Accetta tutto"));
+        assert!(is_accept_keyword("Accetto"));
+        assert!(is_accept_keyword("Acconsento"));
+    }
+
+    #[test]
+    fn test_is_accept_keyword_spanish() {
+        assert!(is_accept_keyword("Aceptar todo"));
+        assert!(is_accept_keyword("Acepto"));
+        assert!(is_accept_keyword("Aceptar y continuar"));
+    }
+
+    #[test]
+    fn test_is_accept_keyword_reject_guard_takes_priority() {
+        // "alles ablehnen" contains "alles" (part of "alles toestaan" keyword)
+        // but the reject guard must fire first
+        assert!(!is_accept_keyword("Alles ablehnen"));
+        assert!(!is_accept_keyword("Reject all cookies"));
+        assert!(!is_accept_keyword("Decline and manage settings"));
+    }
+
+    // ---- js_array unit tests ----
+
+    #[test]
+    fn test_js_array_produces_valid_json_array() {
+        let result = js_array(&["foo", "bar"]);
+        assert_eq!(result, r#"["foo","bar"]"#);
+    }
+
+    #[test]
+    fn test_js_array_escapes_double_quotes() {
+        let result = js_array(&[r#"button[data-testid="pur-accept-button"]"#]);
+        // Must produce valid JSON (double-quotes escaped)
+        assert!(result.contains(r#"\""#), "embedded quotes must be escaped: {result}");
     }
 
     // ---- is_cf_blocked_html unit tests ----
