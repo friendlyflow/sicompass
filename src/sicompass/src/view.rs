@@ -202,6 +202,33 @@ pub fn main_loop(app: &mut AppState) {
             app.renderer.needs_redraw = true;
         }
 
+        // ---- Drain needs_refresh signals (e.g. async folder load, IMAP IDLE) -
+        // Only act on the *active* provider's flag so we don't clear another
+        // provider's pending signal before the user has navigated there.
+        let active_refresh = app.renderer.current_id.get(0)
+            .and_then(|i| app.renderer.providers.get(i))
+            .map(|p| p.needs_refresh())
+            .unwrap_or(false);
+        if active_refresh {
+            // Clear flag before rebuild so a signal that arrives *during*
+            // rebuild (e.g. IDLE push arriving mid-frame) is preserved.
+            if let Some(i) = app.renderer.current_id.get(0) {
+                if let Some(p) = app.renderer.providers.get_mut(i) {
+                    p.clear_needs_refresh();
+                }
+            }
+            app.renderer.error_message.clear();
+            for p in app.renderer.providers.iter_mut() {
+                if let Some(err) = p.take_error() {
+                    app.renderer.error_message = err;
+                }
+            }
+            crate::provider::refresh_current_directory(&mut app.renderer);
+            crate::list::create_list_current_layer(&mut app.renderer);
+            app.renderer.list_index = app.renderer.current_id.last().unwrap_or(0);
+            app.renderer.needs_redraw = true;
+        }
+
         // ---- Advance caret blink state --------------------------------------
         let now_ms = handlers::sdl_ticks();
         app.renderer.caret.update(now_ms);
