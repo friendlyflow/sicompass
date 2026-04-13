@@ -424,7 +424,7 @@ fn resolve_repo_asset(rel: &str) -> PathBuf {
 }
 
 fn tutorial_assets_dir() -> PathBuf {
-    resolve_repo_asset("lib/lib_tutorial-rs/assets")
+    resolve_repo_asset("lib/lib_tutorial/assets")
 }
 
 fn sales_demo_script_path() -> PathBuf {
