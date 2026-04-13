@@ -1134,6 +1134,10 @@ fn body_to_compose_children(body: &MailBody) -> Vec<FfonElement> {
         MailBody::Html(s) => vec![FfonElement::new_str(format!("<input>{s}</input>"))],
         MailBody::Ffon(elems) => elems.clone(),
     };
+    // Permanent `*` placeholder: lets the user insert a new string or object child
+    // by entering insert mode and typing with the usual prefix convention
+    // (`- name` / plain text → Str, `+ name` / `name:` → Obj).
+    children.push(FfonElement::new_str("* <input></input>".to_owned()));
     children.push(FfonElement::new_str(
         "<button>body_new_line</button>New text line".to_owned(),
     ));
@@ -1151,9 +1155,28 @@ fn body_to_compose_children(body: &MailBody) -> Vec<FfonElement> {
 fn update_body_leaf(body: &mut MailBody, old_content: &str, new_content: &str) {
     use sicompass_sdk::tags;
 
+    // Detect Obj creation: a trailing `:` on the content signals "make this an object key".
+    // This is produced by the `*` placeholder commit path when the user types `+ name` or `name:`.
+    let is_obj_create = new_content.ends_with(':');
+    let obj_key = if is_obj_create {
+        new_content.trim_end_matches(':').trim()
+    } else {
+        ""
+    };
+
     match body {
         MailBody::Text(s) | MailBody::Html(s) => {
-            if old_content.is_empty() && !s.is_empty() {
+            if is_obj_create && !obj_key.is_empty() {
+                // Obj creation — preserve any existing text as a Str leaf and append the new Obj.
+                let existing = s.clone();
+                let mut elems: Vec<FfonElement> = if existing.is_empty() {
+                    vec![]
+                } else {
+                    vec![FfonElement::new_str(format!("<input>{existing}</input>"))]
+                };
+                elems.push(FfonElement::new_obj(obj_key));
+                *body = MailBody::Ffon(elems);
+            } else if old_content.is_empty() && !s.is_empty() {
                 // A new element is being inserted alongside existing content — upgrade to Ffon.
                 let existing = s.clone();
                 let is_html = matches!(*body, MailBody::Html(_));
@@ -1177,7 +1200,14 @@ fn update_body_leaf(body: &mut MailBody, old_content: &str, new_content: &str) {
                     false
                 }
             });
-            if let Some(idx) = pos {
+            if is_obj_create && !obj_key.is_empty() {
+                // Replace the matched placeholder (or append) with a new Obj.
+                if let Some(idx) = pos {
+                    elems[idx] = FfonElement::new_obj(obj_key);
+                } else {
+                    elems.push(FfonElement::new_obj(obj_key));
+                }
+            } else if let Some(idx) = pos {
                 elems[idx] = FfonElement::new_str(format!("<input>{new_content}</input>"));
             } else {
                 // No match — append as a new element.
@@ -1311,6 +1341,10 @@ impl Provider for EmailClientProvider {
 
     fn needs_refresh(&self) -> bool {
         self.needs_refresh_flag.load(Ordering::Relaxed)
+    }
+
+    fn refresh_on_navigate(&self) -> bool {
+        true
     }
 
     fn clear_needs_refresh(&mut self) {
@@ -2603,5 +2637,86 @@ mod tests {
         assert_eq!(imap_url, "imaps://imap.example.com");
         let expiry = section.get("emailTokenExpiry").and_then(|v| v.as_i64()).unwrap();
         assert_eq!(expiry, 12345);
+    }
+
+    // ---- body_to_compose_children: * placeholder ----
+
+    #[test]
+    fn test_body_to_compose_children_includes_star_placeholder() {
+        let body = MailBody::Text("hello".to_owned());
+        let children = body_to_compose_children(&body);
+        let has_placeholder = children.iter().any(|e| match e {
+            FfonElement::Str(s) => s == "* <input></input>",
+            _ => false,
+        });
+        assert!(has_placeholder, "body_to_compose_children should include '* <input></input>'; got: {:?}", children);
+    }
+
+    #[test]
+    fn test_body_to_compose_children_placeholder_before_button() {
+        let body = MailBody::Text(String::new());
+        let children = body_to_compose_children(&body);
+        let ph_idx = children.iter().position(|e| matches!(e, FfonElement::Str(s) if s == "* <input></input>"));
+        let btn_idx = children.iter().position(|e| matches!(e, FfonElement::Str(s) if s.contains("<button>body_new_line</button>")));
+        assert!(ph_idx.is_some() && btn_idx.is_some(), "both placeholder and button must be present");
+        assert!(ph_idx.unwrap() < btn_idx.unwrap(), "placeholder must appear before the button");
+    }
+
+    // ---- update_body_leaf: Obj creation via trailing colon ----
+
+    #[test]
+    fn test_update_body_leaf_trailing_colon_creates_obj_in_empty_text_body() {
+        let mut body = MailBody::Text(String::new());
+        update_body_leaf(&mut body, "", "section:");
+        match &body {
+            MailBody::Ffon(elems) => {
+                let has_obj = elems.iter().any(|e| matches!(e, FfonElement::Obj(o) if o.key == "section"));
+                assert!(has_obj, "expected Obj(section) in Ffon; got: {:?}", elems);
+            }
+            other => panic!("expected Ffon body, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_update_body_leaf_trailing_colon_preserves_existing_text() {
+        let mut body = MailBody::Text("existing".to_owned());
+        update_body_leaf(&mut body, "", "header:");
+        match &body {
+            MailBody::Ffon(elems) => {
+                let has_existing = elems.iter().any(|e| matches!(e, FfonElement::Str(s) if s.contains("existing")));
+                let has_obj = elems.iter().any(|e| matches!(e, FfonElement::Obj(o) if o.key == "header"));
+                assert!(has_existing && has_obj, "existing text and new Obj must both be present; got: {:?}", elems);
+            }
+            other => panic!("expected Ffon body, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_update_body_leaf_trailing_colon_appends_obj_to_ffon_body() {
+        let mut body = MailBody::Ffon(vec![FfonElement::new_str("<input>first</input>".to_owned())]);
+        update_body_leaf(&mut body, "", "meta:");
+        match &body {
+            MailBody::Ffon(elems) => {
+                assert_eq!(elems.len(), 2, "should have 2 elements; got: {:?}", elems);
+                let has_obj = elems.iter().any(|e| matches!(e, FfonElement::Obj(o) if o.key == "meta"));
+                assert!(has_obj, "expected Obj(meta) appended; got: {:?}", elems);
+            }
+            other => panic!("expected Ffon body, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_commit_edit_body_trailing_colon_creates_obj() {
+        let mut p = EmailClientProvider::new();
+        p.push_path("compose");
+        p.push_path("Body:");
+        assert!(p.commit_edit("", "myobj:"));
+        match &p.compose.draft.body {
+            MailBody::Ffon(elems) => {
+                let has_obj = elems.iter().any(|e| matches!(e, FfonElement::Obj(o) if o.key == "myobj"));
+                assert!(has_obj, "expected Obj(myobj) in body; got: {:?}", elems);
+            }
+            other => panic!("expected Ffon body after Obj commit, got: {:?}", other),
+        }
     }
 }
