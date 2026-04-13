@@ -1,14 +1,14 @@
 [workspace]
 members = [
-    "sdk-rs",
-    "lib/lib_tutorial-rs",
-    "lib/lib_settings-rs",
-    "lib/lib_filebrowser-rs",
-    "lib/lib_webbrowser-rs",
-    "lib/lib_chatclient-rs",
-    "lib/lib_emailclient-rs",
-    "lib/lib_remote-rs",
-    "src/sicompass-rs",
+    "sdk",
+    "lib/lib_tutorial",
+    "lib/lib_settings",
+    "lib/lib_filebrowser",
+    "lib/lib_webbrowser",
+    "lib/lib_chatclient",
+    "lib/lib_emailclient",
+    "lib/lib_remote",
+    "src/sicompass",
     "src/desicompass-rs",
     "src/loginsicompass-rs",
 ]
@@ -21,14 +21,14 @@ license = "MIT"
 
 [workspace.dependencies]
 # SDK
-sicompass-sdk = { path = "sdk-rs" }
-sicompass-tutorial = { path = "lib/lib_tutorial-rs" }
-sicompass-settings = { path = "lib/lib_settings-rs" }
-sicompass-filebrowser = { path = "lib/lib_filebrowser-rs" }
-sicompass-webbrowser = { path = "lib/lib_webbrowser-rs" }
-sicompass-chatclient = { path = "lib/lib_chatclient-rs" }
-sicompass-emailclient = { path = "lib/lib_emailclient-rs" }
-sicompass-remote = { path = "lib/lib_remote-rs" }
+sicompass-sdk = { path = "sdk" }
+sicompass-tutorial = { path = "lib/lib_tutorial" }
+sicompass-settings = { path = "lib/lib_settings" }
+sicompass-filebrowser = { path = "lib/lib_filebrowser" }
+sicompass-webbrowser = { path = "lib/lib_webbrowser" }
+sicompass-chatclient = { path = "lib/lib_chatclient" }
+sicompass-emailclient = { path = "lib/lib_emailclient" }
+sicompass-remote = { path = "lib/lib_remote" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
