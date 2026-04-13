@@ -39,8 +39,7 @@
 //! | Return        | —        | EditorInsert / EditorNormal        | update_state(Input)        |
 //! | Return        | —        | OperatorInsert                     | handle_enter_operator_ins  |
 //! | Return        | —        | Command                            | handle_enter_command       |
-//! | I             | —        | OperatorGeneral, EditorGeneral      | handle_i                   |
-//! | A             | —        | same                               | handle_a                   |
+//! | I             | —        | OperatorGeneral, EditorGeneral      | handle_a                   |
 //! | A             | Ctrl     | OperatorGeneral                    | handle_ctrl_a_operator     |
 //! | I             | Ctrl     | OperatorGeneral                    | handle_ctrl_i_operator     |
 //! | A             | Ctrl     | EditorGeneral                      | handle_append              |
@@ -510,8 +509,7 @@ fn dispatch_key_old(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
             Some(Keycode::Return) | Some(Keycode::KpEnter) if !ctrl && !at_root => {
                 handlers::handle_enter_operator(r);
             }
-            Some(Keycode::I) if !ctrl && !shift && !at_root => handlers::handle_i(r),
-            Some(Keycode::A) if !ctrl && !shift && !at_root => handlers::handle_a(r),
+            Some(Keycode::I) if !ctrl && !shift && !at_root => handlers::handle_a(r),
             Some(Keycode::A) if ctrl && !shift && !at_root => handlers::handle_ctrl_a_operator(r),
             Some(Keycode::I) if ctrl && !shift && !at_root => handlers::handle_ctrl_i_operator(r),
             Some(Keycode::D) if ctrl && !shift && !at_root => handlers::handle_file_delete(r),
@@ -559,8 +557,7 @@ fn dispatch_key_old(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
             Some(Keycode::Colon) if !ctrl && !shift => handlers::handle_colon(r),
             Some(Keycode::Semicolon) if shift => handlers::handle_colon(r),
             Some(Keycode::Return) | Some(Keycode::KpEnter) if !ctrl => handlers::handle_append(r),
-            Some(Keycode::I) if !ctrl && !shift => handlers::handle_i(r),
-            Some(Keycode::A) if !ctrl && !shift => handlers::handle_a(r),
+            Some(Keycode::I) if !ctrl && !shift => handlers::handle_a(r),
             Some(Keycode::A) if ctrl && !shift => handlers::handle_ctrl_a(r, History::None),
             Some(Keycode::I) if ctrl && !shift => handlers::handle_ctrl_i(r, History::None),
             Some(Keycode::D) if ctrl && !shift => handlers::handle_delete(r, History::None),
