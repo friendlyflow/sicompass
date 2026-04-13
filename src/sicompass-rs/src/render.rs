@@ -543,6 +543,9 @@ pub fn build_app() -> Result<AppState, SiError> {
 
     let mut wb = video.window(WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT);
     wb.vulkan().resizable().hidden();
+    if crate::programs::read_maximized() {
+        wb.maximized();
+    }
     // Enable high-pixel-density backbuffer so SDL honours the OS display
     // scale (e.g. 150% on Windows) and SDL_GetDisplayContentScale returns the
     // real factor rather than always 1.0.

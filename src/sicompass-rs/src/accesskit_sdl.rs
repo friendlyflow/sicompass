@@ -39,6 +39,10 @@ const ANNOUNCEMENT_ID: NodeId = NodeId(u64::MAX);
 pub struct AccessKitAdapter {
     #[cfg(target_os = "linux")]
     adapter: accesskit_unix::Adapter,
+    /// Shared with `ActivationHandlerImpl`; set to `true` once the AT-SPI
+    /// background thread calls `request_initial_tree` (tree is registered).
+    #[cfg(target_os = "linux")]
+    registered: std::sync::Arc<std::sync::atomic::AtomicBool>,
     #[cfg(target_os = "windows")]
     adapter: accesskit_windows::SubclassingAdapter,
     #[cfg(target_os = "macos")]
@@ -56,13 +60,17 @@ impl AccessKitAdapter {
         // ---- Linux (AT-SPI2) ------------------------------------------------
         #[cfg(target_os = "linux")]
         {
+            let registered = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
             let initial_tree = build_tree(renderer);
             let adapter = accesskit_unix::Adapter::new(
-                ActivationHandlerImpl { initial_tree: Some(initial_tree) },
+                ActivationHandlerImpl {
+                    initial_tree: Some(initial_tree),
+                    registered: std::sync::Arc::clone(&registered),
+                },
                 NoopActionHandler,
                 NoopDeactivationHandler,
             );
-            return Some(AccessKitAdapter { adapter });
+            return Some(AccessKitAdapter { adapter, registered });
         }
 
         // ---- Windows (UI Automation) ----------------------------------------
@@ -162,6 +170,28 @@ impl AccessKitAdapter {
         #[cfg(target_os = "macos")]
         if let Some(events) = self.adapter.update_view_focus_state(focused) {
             events.raise();
+        }
+    }
+
+    /// Block (with a timeout) until the AT-SPI background thread has called
+    /// `request_initial_tree`, meaning AT-SPI is registered and the
+    /// accessibility tree is live.  Call this before `window.show()` so that
+    /// the window becomes visible only after Orca already knows about it —
+    /// eliminating the gap where Orca would otherwise keep reading the terminal.
+    ///
+    /// On non-Linux platforms this is a no-op (Windows/macOS adapters register
+    /// synchronously via window subclassing).
+    #[allow(unused_variables)]
+    pub fn wait_for_registration(&self, timeout: std::time::Duration) {
+        #[cfg(target_os = "linux")]
+        {
+            let deadline = std::time::Instant::now() + timeout;
+            while !self.registered.load(std::sync::atomic::Ordering::Acquire) {
+                if std::time::Instant::now() >= deadline {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
         }
     }
 }
@@ -276,10 +306,16 @@ fn build_tree(renderer: &AppRenderer) -> TreeUpdate {
 /// Provides the initial tree to the platform adapter when an AT connects.
 struct ActivationHandlerImpl {
     initial_tree: Option<TreeUpdate>,
+    /// Shared flag set to `true` when AT-SPI calls `request_initial_tree`,
+    /// signalling the main thread that D-Bus registration is complete.
+    #[cfg(target_os = "linux")]
+    registered: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl accesskit::ActivationHandler for ActivationHandlerImpl {
     fn request_initial_tree(&mut self) -> Option<TreeUpdate> {
+        #[cfg(target_os = "linux")]
+        self.registered.store(true, std::sync::atomic::Ordering::Release);
         self.initial_tree.take()
     }
 }

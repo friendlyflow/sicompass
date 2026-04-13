@@ -35,21 +35,33 @@ pub fn main_loop(app: &mut AppState) {
     update_window_title(app);
 
     while app.running {
-        // ---- First-iteration startup: apply maximize state, then show window --
-        // The window is still hidden at this point (render.rs removed the early
-        // show so that we can maximize on the hidden window first).  On Windows,
-        // SDL3 honours a maximize call on a hidden window at show-time, producing
-        // ShowWindow(SW_SHOWMAXIMIZED) and avoiding an 800x600 flash.
-        // The outer `!maximized_ready` gate also repairs the case where
-        // pending_maximized is None (missing key): we still show and flip the
-        // flag so that subsequent Maximized/Restored events can write to settings.
+        // ---- Runtime maximize/restore (checkbox toggle) ---------------------
+        // pending_maximized is set by a live settings change and must fire
+        // every iteration.  At startup this is always None (the startup drain
+        // skips "maximized"; the window builder flag covers initial state).
+        if let Some(maximize) = app.renderer.pending_maximized.take() {
+            if maximize {
+                app.window.maximize();
+            } else {
+                app.window.restore();
+            }
+        }
+
+        // ---- First-iteration startup: wait for AT-SPI, then show window -----
+        // The window is created hidden (render.rs) with the correct maximized
+        // state already baked into the window builder flags.  We defer show()
+        // so AccessKit can register with AT-SPI on Linux before the window is
+        // mapped, ensuring Orca announces sicompass immediately on focus.
+        // The !maximized_ready gate also ensures we don't write a stale value
+        // to settings.json from the Restored event SDL fires during window
+        // creation before the window is fully mapped.
         if !app.maximized_ready {
-            if let Some(maximize) = app.renderer.pending_maximized.take() {
-                if maximize {
-                    app.window.maximize();
-                } else {
-                    app.window.restore();
-                }
+            // Wait until AT-SPI has called request_initial_tree (meaning the
+            // accessibility tree is already registered on D-Bus) before making
+            // the window visible.  The 400 ms timeout covers the case where no
+            // screen reader is running.
+            if let Some(adapter) = app.accesskit_adapter.as_ref() {
+                adapter.wait_for_registration(std::time::Duration::from_millis(400));
             }
             app.window.show();
             app.maximized_ready = true;
