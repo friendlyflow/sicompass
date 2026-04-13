@@ -438,14 +438,19 @@ mod tests {
 /// Returns `true` if the application should quit (Escape/Q in OperatorGeneral),
 /// `false` otherwise.  The caller is responsible for acting on the quit signal.
 ///
-/// This function is the central key dispatcher — used by the main event loop
-/// (via `view::handle_keydown`) and directly by the integration test harness.
+/// Delegates to [`crate::shortcuts::dispatch_key`] which iterates the central
+/// SHORTCUTS table — one source of truth for both dispatch and hint display.
 pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) -> bool {
     tracing::debug!(
         ?keycode, ?keymod,
         mode = r.coordinate.as_str(),
         "dispatch_key"
     );
+    crate::shortcuts::dispatch_key(r, keycode, keymod)
+}
+
+#[allow(dead_code)]
+fn dispatch_key_old(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) -> bool {
     let ctrl  = keymod.intersects(Mod::LCTRLMOD  | Mod::RCTRLMOD);
     let shift = keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD);
     let at_root = r.current_id.depth() <= 1;

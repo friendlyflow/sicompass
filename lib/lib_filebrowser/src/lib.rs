@@ -542,14 +542,6 @@ mod tests {
     // ---- fetch structure ---------------------------------------------------
 
     #[test]
-    fn test_fetch_meta_has_shortcuts() {
-        let (p, _dir) = make_provider();
-        let hints = p.meta();
-        assert!(!hints.is_empty());
-        assert!(hints.iter().any(|s| s.contains("Rename")));
-    }
-
-    #[test]
     fn test_fetch_empty_dir_only_meta() {
         let (mut p, _dir) = make_provider();
         let items = p.fetch();
