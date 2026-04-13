@@ -635,8 +635,13 @@ impl FontRenderer {
         let mut last_fit = 0usize;
         let mut i = 0usize;
 
+        let char_len = |b: u8| -> usize {
+            if b < 0x80 { 1 } else if b < 0xE0 { 2 } else if b < 0xF0 { 3 } else { 4 }
+        };
+
         while i < n {
             let b = bytes[i];
+            let clen = char_len(b);
 
             if b == b'\n' {
                 lines.push((text[line_start..i].to_owned(), line_start));
@@ -654,7 +659,7 @@ impl FontRenderer {
                 let break_end = if let Some(sp) = last_space {
                     sp
                 } else {
-                    last_fit.max(line_start + 1)
+                    last_fit.max(line_start + char_len(bytes[line_start]))
                 };
                 lines.push((text[line_start..break_end].to_owned(), line_start));
                 line_start = break_end;
@@ -671,9 +676,9 @@ impl FontRenderer {
             if b == b' ' {
                 last_space = Some(i);
             }
-            last_fit = i + 1;
+            last_fit = i + clen;
             line_width = next_width;
-            i += 1;
+            i += clen;
         }
 
         lines.push((text[line_start..].to_owned(), line_start));
@@ -700,8 +705,14 @@ impl FontRenderer {
         let mut last_fit = 0usize;
         let mut i = 0usize;
 
+        // Returns the byte length of the UTF-8 char starting at `pos`.
+        let char_len = |b: u8| -> usize {
+            if b < 0x80 { 1 } else if b < 0xE0 { 2 } else if b < 0xF0 { 3 } else { 4 }
+        };
+
         while i < n {
             let b = bytes[i];
+            let clen = char_len(b);
 
             if b == b'\n' {
                 lines.push(text[line_start..i].to_owned());
@@ -719,7 +730,10 @@ impl FontRenderer {
                 let break_end = if let Some(sp) = last_space {
                     sp
                 } else {
-                    last_fit.max(line_start + 1)
+                    // last_fit is always on a char boundary; fall back to
+                    // the end of the first char at line_start so we always
+                    // make progress without splitting a multi-byte sequence.
+                    last_fit.max(line_start + char_len(bytes[line_start]))
                 };
                 lines.push(text[line_start..break_end].to_owned());
                 line_start = break_end;
@@ -736,9 +750,9 @@ impl FontRenderer {
             if b == b' ' {
                 last_space = Some(i);
             }
-            last_fit = i + 1;
+            last_fit = i + clen;
             line_width = next_width;
-            i += 1;
+            i += clen;
         }
 
         lines.push(text[line_start..].to_owned());
