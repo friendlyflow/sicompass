@@ -647,7 +647,7 @@ impl EmailClientProvider {
 
             // 2. A fetch is in flight — show a placeholder until it completes.
             if self.folder_fetch_inflight.load(Ordering::Acquire) {
-                return vec![FfonElement::new_str("Loading folders…".to_owned())];
+                return vec![FfonElement::new_str("Loading…".to_owned())];
             }
 
             // 3. Nothing in flight yet — spawn the background fetch.
@@ -667,7 +667,7 @@ impl EmailClientProvider {
                     inflight.store(false, Ordering::Release);
                     needs_refresh.store(true, Ordering::Release);
                 });
-                return vec![FfonElement::new_str("Loading folders…".to_owned())];
+                return vec![FfonElement::new_str("Loading…".to_owned())];
             }
         }
 
