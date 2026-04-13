@@ -19,11 +19,11 @@
     "lexbor-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1774982744,
-        "narHash": "sha256-P5ng/9lkjaWlZmyFzd3MpN39qBqhe8Rlkb/vv3cZ1MI=",
+        "lastModified": 1775421285,
+        "narHash": "sha256-Xl52F+++B0w/eV226NTUV7Cq1i/ExDVnsFz8xKwoYyM=",
         "owner": "lexbor",
         "repo": "lexbor",
-        "rev": "2ae88a1c6b5261830eff73ee12bb3cdf805f3cfe",
+        "rev": "4c9b27306c1165a9329a5c059a76728ffbd57b7f",
         "type": "github"
       },
       "original": {
@@ -34,11 +34,11 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1774709303,
-        "narHash": "sha256-D3Q07BbIA2KnTcSXIqqu9P586uWxN74zNoCH3h2ESHg=",
+        "lastModified": 1775710090,
+        "narHash": "sha256-ar3rofg+awPB8QXDaFJhJ2jJhu+KqN/PRCXeyuXR76E=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "8110df5ad7abf5d4c0f6fb0f8f978390e77f9685",
+        "rev": "4c1018dae018162ec878d42fec712642d214fdfa",
         "type": "github"
       },
       "original": {

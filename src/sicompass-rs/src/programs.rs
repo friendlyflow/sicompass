@@ -431,6 +431,22 @@ fn sales_demo_script_path() -> PathBuf {
     resolve_repo_asset("lib/lib_sales_demo/sales_demo.ts")
 }
 
+/// Read `sicompass.maximized` from settings.json.
+/// Returns `false` if absent, unparseable, or file missing.
+pub fn read_maximized() -> bool {
+    let Some(path) = sicompass_sdk::platform::main_config_path() else { return false };
+    let Ok(data) = std::fs::read_to_string(&path) else { return false };
+    let Ok(root) = serde_json::from_str::<serde_json::Value>(&data) else { return false };
+    let val = root.get("sicompass")
+        .and_then(|v| v.as_object())
+        .and_then(|s| s.get("maximized"));
+    match val {
+        Some(serde_json::Value::Bool(b)) => *b,
+        Some(serde_json::Value::String(s)) => s == "true",
+        _ => false,
+    }
+}
+
 /// Read `sicompass.fontScale` from settings.json.
 /// Returns 1.0 if absent or unparseable. Clamped to [0.5, 2.0].
 pub fn read_font_scale() -> f32 {
@@ -744,7 +760,13 @@ fn apply_setting(
             };
         }
         "maximized" => {
-            renderer.pending_maximized = Some(value == "true");
+            // During the startup settings drain (skip_enable=true) the window
+            // builder flag already handles the initial maximize state, so skip
+            // queuing a redundant runtime request.  Only set pending_maximized
+            // for live checkbox toggles (skip_enable=false).
+            if !skip_enable {
+                renderer.pending_maximized = Some(value == "true");
+            }
         }
         "saveFolder" => {
             renderer.save_folder_path = value.to_owned();
@@ -1052,6 +1074,14 @@ mod tests {
         let mut r = AppRenderer::new();
         apply_setting(&mut r, "maximized", "false", false);
         assert_eq!(r.pending_maximized, Some(false));
+    }
+
+    #[test]
+    fn apply_setting_maximized_skipped_during_startup_drain() {
+        let mut r = AppRenderer::new();
+        // skip_enable=true simulates the startup drain; pending_maximized must stay None.
+        apply_setting(&mut r, "maximized", "true", true);
+        assert_eq!(r.pending_maximized, None);
     }
 
     #[test]
