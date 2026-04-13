@@ -151,6 +151,8 @@ impl Provider for FilebrowserProvider {
 
     fn needs_refresh(&self) -> bool { false }
 
+    fn refresh_on_navigate(&self) -> bool { true }
+
     fn on_setting_change(&mut self, key: &str, value: &str) {
         if key == "sortOrder" {
             self.sort_mode = match value {

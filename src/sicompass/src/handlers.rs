@@ -204,23 +204,39 @@ pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
         new_id.push(0);
         r.current_id = new_id;
     } else {
-        // Lazy-fetch provider (filebrowser): push path, re-fetch, stay at depth 2.
         let provider_idx = item_id.get(0).unwrap_or(0);
-        crate::provider::push_path(r, &segment);
-        crate::provider::refresh_current_directory(r);
-        // If the directory is empty, insert a placeholder so the user can create files
-        // (mirrors C providerNavigateRight: childCount == 0 → add <input></input>)
-        if let Some(root) = r.ffon.get_mut(provider_idx) {
-            if let Some(obj) = root.as_obj_mut() {
-                if obj.children.is_empty() {
-                    obj.children.push(FfonElement::Str("<input></input>".to_owned()));
+        let does_refresh_on_nav = r.providers.get(provider_idx)
+            .map(|p| p.refresh_on_navigate())
+            .unwrap_or(false);
+
+        if does_refresh_on_nav {
+            // Lazy-fetch provider (filebrowser): push path, re-fetch, stay at depth 2.
+            crate::provider::push_path(r, &segment);
+            crate::provider::refresh_current_directory(r);
+            // If the directory is empty, insert a placeholder so the user can create files
+            // (mirrors C providerNavigateRight: childCount == 0 → add <input></input>)
+            if let Some(root) = r.ffon.get_mut(provider_idx) {
+                if let Some(obj) = root.as_obj_mut() {
+                    if obj.children.is_empty() {
+                        obj.children.push(FfonElement::Str("<input></input>".to_owned()));
+                    }
                 }
             }
+            let mut new_id = IdArray::new();
+            new_id.push(provider_idx);
+            new_id.push(0);
+            r.current_id = new_id;
+        } else {
+            // In-memory provider (script/form-builder): treat empty-children Obj the same as
+            // has_children — push path and descend without refreshing. This preserves
+            // in-memory user-added nodes at arbitrary nesting depth.
+            if item_id.depth() >= 2 {
+                crate::provider::push_path(r, &segment);
+            }
+            let mut new_id = item_id;
+            new_id.push(0);
+            r.current_id = new_id;
         }
-        let mut new_id = IdArray::new();
-        new_id.push(provider_idx);
-        new_id.push(0);
-        r.current_id = new_id;
     }
 
     true
@@ -301,8 +317,15 @@ pub fn navigate_left_raw(r: &mut AppRenderer) -> bool {
 
     // For lazy-fetch providers (filebrowser) at depth 2: if pop_path moves us
     // to a parent directory, stay at depth 2 and re-fetch instead of going back
-    // to the root provider list.
-    let path_before = if r.current_id.depth() == 2 && !parent_is_link && !parent_is_meta {
+    // to the root provider list.  Only applies when the provider declares that
+    // its backing store is authoritative on every nav step (refresh_on_navigate).
+    // For in-memory providers (script/form-builder), skip the capture so we
+    // always fall through to the simple pop, preserving user-added in-memory nodes.
+    let does_refresh_on_nav = r.providers
+        .get(r.current_id.get(0).unwrap_or(usize::MAX))
+        .map(|p| p.refresh_on_navigate())
+        .unwrap_or(false);
+    let path_before = if r.current_id.depth() == 2 && !parent_is_link && !parent_is_meta && does_refresh_on_nav {
         Some(crate::provider::current_path(r).to_owned())
     } else {
         None

@@ -21,17 +21,24 @@ function isCardinality(v: unknown): v is string {
 }
 
 // Navigate the raw equipment JSON to the object at pathParts.
-// Returns null if the path is not found or the target is not a nested object.
+// Returns an object node for further traversal, a string[] for leaf-array
+// content (e.g. radio options like ["black","grey"]), or null if not found.
 function getRawAtPath(
   raw: Record<string, unknown[]>,
   pathParts: string[]
-): Record<string, unknown[]> | null {
+): Record<string, unknown[]> | string[] | null {
   if (pathParts.length === 0) return raw;
   const [head, ...rest] = pathParts;
   const entry = raw[head];
   if (!entry || !isCardinality(entry[0])) return null;
   const content = entry[1];
-  if (content === null || content === undefined || typeof content !== "object" || Array.isArray(content)) return null;
+  if (content === null || content === undefined) return null;
+  // Leaf with array content (e.g. radio options: ["black","grey"])
+  if (Array.isArray(content)) {
+    // If we're at the terminal segment, return the array; otherwise path is invalid.
+    return rest.length === 0 ? (content as string[]) : null;
+  }
+  if (typeof content !== "object") return null;
   return getRawAtPath(content as Record<string, unknown[]>, rest);
 }
 
@@ -112,7 +119,11 @@ const pathParts = rawPath === "/" ? [] : rawPath.split("/").filter(Boolean);
 const dashboardImage = scriptDir + "assets/115-Draw-through-Air-Handling-Unit-Diagram-1.webp";
 
 const rawObj = getRawAtPath(equipmentRaw, pathParts);
-const children = rawObj ? buildDisplayChildren(rawObj) : null;
+// rawObj may be an object node (build display children) or a leaf string array
+// (e.g. paint → ["black","grey"]: emit directly as radio options).
+const children: (string | Section)[] | null = Array.isArray(rawObj)
+  ? rawObj.map(String)
+  : rawObj ? buildDisplayChildren(rawObj) : null;
 if (children) {
   const jsonChildren = toJson(children);
   if (pathParts.length === 0) {
