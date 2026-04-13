@@ -48,7 +48,7 @@ pub mod net;
 pub mod oauth2;
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use sicompass_sdk::ffon::{FfonElement, FfonObject};
 use sicompass_sdk::platform;
@@ -272,6 +272,12 @@ pub struct EmailClientProvider {
     imap: Option<Box<dyn ImapBackend>>,
     smtp: Option<Box<dyn SmtpBackend>>,
 
+    // Async folder fetch — moves list_folders() off the main thread at startup.
+    folder_fetch_inflight: Arc<AtomicBool>,
+    folder_fetch_result: Arc<Mutex<Option<Result<Vec<String>, String>>>>,
+    // Disabled in tests that inject a mock via with_imap() so they keep using the sync path.
+    async_folder_fetch_enabled: bool,
+
     // Pending error message to surface via take_error.
     error_message: Option<String>,
 
@@ -303,6 +309,9 @@ impl EmailClientProvider {
             idle: IdleController::new(needs_refresh_flag),
             imap: None,
             smtp: None,
+            folder_fetch_inflight: Arc::new(AtomicBool::new(false)),
+            folder_fetch_result: Arc::new(Mutex::new(None)),
+            async_folder_fetch_enabled: true,
             error_message: None,
             active_login: None,
             config_path_override: None,
@@ -322,6 +331,7 @@ impl EmailClientProvider {
     /// Inject an IMAP backend (used in tests and production setup).
     pub fn with_imap(mut self, backend: Box<dyn ImapBackend>) -> Self {
         self.imap = Some(backend);
+        self.async_folder_fetch_enabled = false;
         self
     }
 
@@ -556,36 +566,13 @@ impl EmailClientProvider {
 
     // ---- FFON tree builders -----------------------------------------------
 
-    fn build_root(&mut self) -> Vec<FfonElement> {
-        // Stop IDLE when leaving a folder (returning to root).
-        self.idle.stop();
-
-        // When not logged in, show a single login button.
-        if !self.is_logged_in() {
-            self.folder_cache = None;
-            return vec![FfonElement::new_str(
-                "<button>login</button>Log in with Google".to_owned(),
-            )];
-        }
-
-        // Serve folder cache on back-navigation.
-        if let Some(cached) = &self.folder_cache {
-            return cached.clone();
-        }
-
+    /// Convert a `list_folders` result into FFON items, populate caches and mappings.
+    fn build_root_from_folder_list(
+        &mut self,
+        folder_result: Result<Vec<String>, String>,
+    ) -> Vec<FfonElement> {
         let mut items = vec![];
-
-        let imap = match self.imap_mut() {
-            Some(b) => b,
-            None => {
-                items.push(FfonElement::new_str(
-                    "not configured — set IMAP/SMTP settings".to_owned(),
-                ));
-                return items;
-            }
-        };
-
-        match imap.list_folders() {
+        match folder_result {
             Err(e) => {
                 items.push(FfonElement::new_str(format!("IMAP error: {e}")));
             }
@@ -621,9 +608,78 @@ impl EmailClientProvider {
                 }
             }
         }
-
         self.folder_cache = Some(items.clone());
         items
+    }
+
+    fn build_root(&mut self) -> Vec<FfonElement> {
+        // Stop IDLE when leaving a folder (returning to root).
+        self.idle.stop();
+
+        // When not logged in, show a single login button.
+        if !self.is_logged_in() {
+            self.folder_cache = None;
+            return vec![FfonElement::new_str(
+                "<button>login</button>Log in with Google".to_owned(),
+            )];
+        }
+
+        // Serve folder cache on back-navigation.
+        if let Some(cached) = &self.folder_cache {
+            return cached.clone();
+        }
+
+        // Async path: move list_folders() off the main thread at startup.
+        if self.async_folder_fetch_enabled {
+            // 1. If a background result has arrived, drain it and build the cache.
+            let result = self.folder_fetch_result.lock().unwrap().take();
+            if let Some(folder_result) = result {
+                self.folder_fetch_inflight.store(false, Ordering::Release);
+                return self.build_root_from_folder_list(folder_result);
+            }
+
+            // 2. A fetch is in flight — show a placeholder until it completes.
+            if self.folder_fetch_inflight.load(Ordering::Acquire) {
+                return vec![FfonElement::new_str("Loading folders…".to_owned())];
+            }
+
+            // 3. Nothing in flight yet — spawn the background fetch.
+            if self.imap.is_none() {
+                // Not configured; fall through to the sync path so the
+                // "not configured" message is shown immediately.
+            } else {
+                self.folder_fetch_inflight.store(true, Ordering::Release);
+                let inflight = Arc::clone(&self.folder_fetch_inflight);
+                let result_slot = Arc::clone(&self.folder_fetch_result);
+                let needs_refresh = Arc::clone(&self.needs_refresh_flag);
+                let config = self.config.clone();
+                std::thread::spawn(move || {
+                    let mut imap = crate::net::RealImap::from_config(&config);
+                    let result = imap.list_folders();
+                    *result_slot.lock().unwrap() = Some(result);
+                    inflight.store(false, Ordering::Release);
+                    needs_refresh.store(true, Ordering::Release);
+                });
+                return vec![FfonElement::new_str("Loading folders…".to_owned())];
+            }
+        }
+
+        // Sync path (tests, or when imap backend is None / async disabled).
+        let mut items = vec![];
+
+        let imap = match self.imap_mut() {
+            Some(b) => b,
+            None => {
+                items.push(FfonElement::new_str(
+                    "not configured — set IMAP/SMTP settings".to_owned(),
+                ));
+                return items;
+            }
+        };
+
+        let folder_result = imap.list_folders();
+        drop(imap);
+        self.build_root_from_folder_list(folder_result)
     }
 
     fn build_folder(&mut self, display: &str) -> Vec<FfonElement> {
