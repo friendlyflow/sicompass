@@ -249,7 +249,11 @@ fn build_str_label(s: &str, parent_has_radio: bool) -> String {
     } else if tags::has_input_all(s) {
         ("-i", tags::strip_display(s))
     } else if tags::has_input(s) {
-        ("-i", tags::strip_display(s))
+        let content = tags::strip_display(s);
+        if content.trim() == "i" {
+            return "i".to_owned();
+        }
+        ("-i", content)
     } else if parent_has_radio {
         ("-r", tags::strip_display(s))
     } else {
@@ -482,6 +486,13 @@ mod tests {
     #[test]
     fn input_str_label() {
         assert!(build_str_label("edit: <input>value</input>", false).starts_with("-i"));
+    }
+
+    #[test]
+    fn i_placeholder_str_label_is_i() {
+        // The compose-body placeholder `"i <input></input>"` must render as plain `"i"`,
+        // not `"-i "` — the "i " prefix before the empty <input> tag is the sentinel.
+        assert_eq!(build_str_label("i <input></input>", false), "i");
     }
 
     fn make_renderer_with_items(items: &[&str]) -> AppRenderer {

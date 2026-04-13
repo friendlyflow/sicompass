@@ -184,6 +184,25 @@ pub trait Provider: Send + 'static {
 
     /// Take (consume) any pending error message.
     fn take_error(&mut self) -> Option<String> { None }
+
+    // ---- Optional: sub-tree refresh ----------------------------------------
+
+    /// Return the children for the **current sub-path** so a caller can refresh
+    /// just the parent Obj's children without rebuilding the entire provider root.
+    ///
+    /// Used by the `*` placeholder commit path when we are inside a nested Obj
+    /// (e.g. email compose Body:). `refresh_current_directory` calls `fetch()`
+    /// at the provider's current deep path, which may be misrouted; this method
+    /// returns the correct child list directly.
+    ///
+    /// Returns `None` (default) to signal "fall back to `refresh_current_directory`".
+    fn fetch_subtree_children(&mut self) -> Option<Vec<FfonElement>> { None }
+
+    /// Delete an element identified by `old_content` from the provider's internal state.
+    ///
+    /// For providers like the email client this removes a body leaf; for others the default
+    /// no-op is used.  Returns `true` on success.
+    fn delete_element(&mut self, _old_content: &str) -> bool { false }
 }
 
 // ---------------------------------------------------------------------------

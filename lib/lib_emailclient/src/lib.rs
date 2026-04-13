@@ -1129,19 +1129,12 @@ fn build_message_view(msg: &EmailMessage) -> Vec<FfonElement> {
 /// Always appends a `<button>body_new_line</button>New text line` button at the end
 /// so the user can add elements via Enter as well as via Ctrl+A/I.
 fn body_to_compose_children(body: &MailBody) -> Vec<FfonElement> {
-    let mut children: Vec<FfonElement> = match body {
-        MailBody::Text(s) => vec![FfonElement::new_str(format!("<input>{s}</input>"))],
-        MailBody::Html(s) => vec![FfonElement::new_str(format!("<input>{s}</input>"))],
+    match body {
+        MailBody::Text(s) | MailBody::Html(s) if !s.is_empty() =>
+            vec![FfonElement::new_str(format!("<input>{s}</input>"))],
+        MailBody::Text(_) | MailBody::Html(_) => vec![],
         MailBody::Ffon(elems) => elems.clone(),
-    };
-    // Permanent `*` placeholder: lets the user insert a new string or object child
-    // by entering insert mode and typing with the usual prefix convention
-    // (`- name` / plain text → Str, `+ name` / `name:` → Obj).
-    children.push(FfonElement::new_str("* <input></input>".to_owned()));
-    children.push(FfonElement::new_str(
-        "<button>body_new_line</button>New text line".to_owned(),
-    ));
-    children
+    }
 }
 
 /// Update a body leaf after a text edit in the compose form.
@@ -1214,6 +1207,36 @@ fn update_body_leaf(body: &mut MailBody, old_content: &str, new_content: &str) {
                 elems.push(FfonElement::new_str(format!("<input>{new_content}</input>")));
             }
         }
+    }
+}
+
+/// Remove a body element whose input content matches `old_content`.
+///
+/// For `Ffon` bodies: removes the first matching `Str` or `Obj` element.
+/// For `Text`/`Html`: clears the body if its content matches.
+fn delete_body_element(body: &mut MailBody, old_content: &str) -> bool {
+    use sicompass_sdk::tags;
+    match body {
+        MailBody::Ffon(elems) => {
+            let pos = elems.iter().position(|e| match e {
+                FfonElement::Str(s) => {
+                    let stripped = tags::extract_input(s).unwrap_or_else(|| s.clone());
+                    stripped == old_content
+                }
+                FfonElement::Obj(o) => o.key == old_content,
+            });
+            if let Some(idx) = pos {
+                elems.remove(idx);
+                true
+            } else {
+                false
+            }
+        }
+        MailBody::Text(s) | MailBody::Html(s) if s == old_content => {
+            *s = String::new();
+            true
+        }
+        _ => false,
     }
 }
 
@@ -1400,6 +1423,13 @@ impl Provider for EmailClientProvider {
         }
         let segs = self.path_segments().iter().map(|s| s.to_string()).collect::<Vec<_>>();
 
+        // If the last path segment is "Body:" (possibly with content) and we're in a compose
+        // context, return the body children directly — any other routing would misroute.
+        let in_compose = segs.iter().any(|s| matches!(s.as_str(), "compose" | "reply" | "reply all" | "forward"));
+        if in_compose && segs.last().map_or(false, |s| s.starts_with("Body:")) {
+            return body_to_compose_children(&self.compose.draft.body);
+        }
+
         match segs.len() {
             0 => self.build_root(),
             1 => {
@@ -1573,6 +1603,26 @@ impl Provider for EmailClientProvider {
 
     fn take_error(&mut self) -> Option<String> {
         self.error_message.take()
+    }
+
+    fn fetch_subtree_children(&mut self) -> Option<Vec<FfonElement>> {
+        // When the current path is inside a compose context at sub-level
+        // (e.g. /compose/Body: [text]), return the body children directly.
+        // This lets the placeholder commit path refresh only the Body: Obj's
+        // children without triggering a full `refresh_current_directory` which
+        // would misroute the fetch to `build_message()` and corrupt the FFON.
+        let segs = self.path_segments().iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        if segs.len() >= 2
+            && matches!(segs[0].as_str(), "compose" | "reply" | "reply all" | "forward")
+        {
+            Some(body_to_compose_children(&self.compose.draft.body))
+        } else {
+            None
+        }
+    }
+
+    fn delete_element(&mut self, old_content: &str) -> bool {
+        delete_body_element(&mut self.compose.draft.body, old_content)
     }
 
     fn commands(&self) -> Vec<String> {
@@ -2124,18 +2174,34 @@ mod tests {
     }
 
     #[test]
+    fn test_fetch_at_compose_body_path_returns_body_children() {
+        // Regression: fetch() at /compose/Body: must return body_to_compose_children,
+        // not misroute to build_message() which returns "(message not found)".
+        let mut p = EmailClientProvider::new();
+        p.push_path("compose");
+        p.push_path("Body:");
+        let children = p.fetch();
+        // Empty draft body → no children (no "(message not found)" string).
+        assert!(children.is_empty(), "empty draft body should yield no children; got: {:?}", children);
+
+        // After adding a body element, fetch at Body: returns it.
+        update_body_leaf(&mut p.compose.draft.body, "", "hello");
+        let children2 = p.fetch();
+        assert_eq!(children2.len(), 1);
+        assert!(matches!(&children2[0], FfonElement::Str(s) if s.contains("hello")),
+            "expected body child with 'hello'; got: {:?}", children2);
+    }
+
+    #[test]
     fn test_compose_view_has_input_fields() {
         let mut p = EmailClientProvider::new();
         p.push_path("compose");
         let items = p.fetch();
         assert!(items.iter().any(|e| e.as_str().map_or(false, |s| s.contains("To:") && s.contains("<input>"))));
         assert!(items.iter().any(|e| e.as_str().map_or(false, |s| s.contains("Subject:") && s.contains("<input>"))));
-        // Body: is now an Obj node whose children contain the <input> leaf.
+        // Body: is an Obj node; an empty draft body has no children yet (user inserts via Ctrl+I).
         assert!(items.iter().any(|e| {
-            if let FfonElement::Obj(obj) = e {
-                obj.key.starts_with("Body:") && obj.children.iter().any(|c|
-                    c.as_str().map_or(false, |s| s.contains("<input>")))
-            } else { false }
+            if let FfonElement::Obj(obj) = e { obj.key.starts_with("Body:") } else { false }
         }));
     }
 
@@ -2639,27 +2705,34 @@ mod tests {
         assert_eq!(expiry, 12345);
     }
 
-    // ---- body_to_compose_children: * placeholder ----
+    // ---- body_to_compose_children ----
 
     #[test]
-    fn test_body_to_compose_children_includes_star_placeholder() {
-        let body = MailBody::Text("hello".to_owned());
+    fn test_body_to_compose_children_empty_body_returns_empty() {
+        // Empty body produces no children; the i placeholder is inserted on-demand via ctrl+i/a.
+        let body = MailBody::Text(String::new());
         let children = body_to_compose_children(&body);
-        let has_placeholder = children.iter().any(|e| match e {
-            FfonElement::Str(s) => s == "* <input></input>",
-            _ => false,
-        });
-        assert!(has_placeholder, "body_to_compose_children should include '* <input></input>'; got: {:?}", children);
+        assert!(children.is_empty(), "empty body should produce no children; got: {:?}", children);
     }
 
     #[test]
-    fn test_body_to_compose_children_placeholder_before_button() {
-        let body = MailBody::Text(String::new());
+    fn test_body_to_compose_children_text_body_wraps_in_input() {
+        let body = MailBody::Text("hello".to_owned());
         let children = body_to_compose_children(&body);
-        let ph_idx = children.iter().position(|e| matches!(e, FfonElement::Str(s) if s == "* <input></input>"));
-        let btn_idx = children.iter().position(|e| matches!(e, FfonElement::Str(s) if s.contains("<button>body_new_line</button>")));
-        assert!(ph_idx.is_some() && btn_idx.is_some(), "both placeholder and button must be present");
-        assert!(ph_idx.unwrap() < btn_idx.unwrap(), "placeholder must appear before the button");
+        assert_eq!(children.len(), 1);
+        assert!(matches!(&children[0], FfonElement::Str(s) if s == "<input>hello</input>"),
+            "non-empty text body should wrap content in <input>; got: {:?}", children[0]);
+    }
+
+    #[test]
+    fn test_body_to_compose_children_ffon_body_cloned() {
+        let elems = vec![
+            FfonElement::new_str("<input>line 1</input>".to_owned()),
+            FfonElement::new_str("<input>line 2</input>".to_owned()),
+        ];
+        let body = MailBody::Ffon(elems.clone());
+        let children = body_to_compose_children(&body);
+        assert_eq!(children, elems);
     }
 
     // ---- update_body_leaf: Obj creation via trailing colon ----
