@@ -101,6 +101,42 @@ pub fn refresh_current_directory(renderer: &mut AppRenderer) {
     }
 }
 
+/// Ask the active provider for children at the **current sub-path** and update
+/// only the parent Obj's children in the FFON tree (without rebuilding the root).
+///
+/// Returns `true` if the provider supplied sub-tree children and the FFON was
+/// updated in-place.  Returns `false` when the provider returns `None` (caller
+/// should fall back to `refresh_current_directory`).
+///
+/// This is used by the `*` placeholder commit path when the cursor is deep
+/// inside a nested Obj (e.g. email compose Body:).  `refresh_current_directory`
+/// rebuilds the entire provider root, which is wrong at that depth.
+pub fn refresh_subtree_parent(renderer: &mut AppRenderer) -> bool {
+    let idx = match renderer.current_id.get(0) {
+        Some(i) => i,
+        None => return false,
+    };
+    let children = match renderer.providers.get_mut(idx) {
+        Some(p) => match p.fetch_subtree_children() {
+            Some(c) => c,
+            None => return false,
+        },
+        None => return false,
+    };
+
+    // Navigate to the slice that CONTAINS the parent Obj (one level up from current).
+    let mut parent_id = renderer.current_id.clone();
+    parent_id.pop(); // drop the child index; parent_id now points at the parent Obj
+    let parent_obj_idx = parent_id.last().unwrap_or(0);
+
+    if let Some(arr) = crate::state::navigate_to_slice_pub(&mut renderer.ffon, &parent_id) {
+        if let Some(sicompass_sdk::ffon::FfonElement::Obj(obj)) = arr.get_mut(parent_obj_idx) {
+            obj.children = children;
+        }
+    }
+    true
+}
+
 /// Re-fetch only if the active provider requests it (`needs_refresh()`).
 pub fn refresh_if_needed(renderer: &mut AppRenderer) {
     let needs = renderer.providers
@@ -314,6 +350,54 @@ pub fn delete_item(renderer: &mut AppRenderer) -> bool {
         refresh_current_directory(renderer);
     }
     ok
+}
+
+/// Delete an element by its input content via the active provider.
+///
+/// Used for compose body elements: removes the matching leaf from `MailBody`
+/// so the next `refresh_subtree_parent` reflects the deletion.
+pub fn delete_element(renderer: &mut AppRenderer, old_content: &str) -> bool {
+    let idx = match renderer.current_id.get(0) {
+        Some(i) => i,
+        None => return false,
+    };
+    if let Some(p) = renderer.providers.get_mut(idx) {
+        p.delete_element(old_content)
+    } else {
+        false
+    }
+}
+
+/// Return true when the active provider's current path is inside an email compose body.
+pub fn is_in_email_compose_body(renderer: &AppRenderer) -> bool {
+    let path = current_path(renderer);
+    let mut segments = path.trim_matches('/').split('/');
+    let compose_roots = ["compose", "reply", "reply all", "forward"];
+    let first = segments.next().unwrap_or("");
+    if !compose_roots.contains(&first) {
+        return false;
+    }
+    path.split('/').any(|s| s.starts_with("Body:"))
+}
+
+/// Get the input content of the currently focused FFON element (for provider operations).
+///
+/// For `Str` elements with an `<input>` tag: returns the content inside the tag.
+/// For `Obj` elements: returns the object key.
+pub fn current_element_old_content(renderer: &AppRenderer) -> String {
+    use sicompass_sdk::ffon::get_ffon_at_id;
+    use sicompass_sdk::tags;
+    let arr = match get_ffon_at_id(&renderer.ffon, &renderer.current_id) {
+        Some(a) => a,
+        None => return String::new(),
+    };
+    let idx = renderer.current_id.last().unwrap_or(0);
+    match arr.get(idx) {
+        Some(sicompass_sdk::ffon::FfonElement::Str(s)) =>
+            tags::extract_input(s).unwrap_or_default(),
+        Some(sicompass_sdk::ffon::FfonElement::Obj(o)) => o.key.clone(),
+        None => String::new(),
+    }
 }
 
 /// Notify the active provider that a checkbox changed state.

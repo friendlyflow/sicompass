@@ -214,11 +214,20 @@ pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
             crate::provider::push_path(r, &segment);
             crate::provider::refresh_current_directory(r);
             // If the directory is empty, insert a placeholder so the user can create files
-            // (mirrors C providerNavigateRight: childCount == 0 → add <input></input>)
+            // (mirrors C providerNavigateRight: childCount == 0 → add <input></input>).
+            // For email compose body use the `i <input></input>` typed-placeholder instead
+            // of the bare `<input></input>` so it renders as "i" (not "-i").
+            // Check before the mutable borrow to satisfy the borrow checker.
+            let in_compose_body = crate::provider::is_in_email_compose_body(r);
             if let Some(root) = r.ffon.get_mut(provider_idx) {
                 if let Some(obj) = root.as_obj_mut() {
                     if obj.children.is_empty() {
-                        obj.children.push(FfonElement::Str("<input></input>".to_owned()));
+                        let placeholder = if in_compose_body {
+                            FfonElement::Str("i <input></input>".to_owned())
+                        } else {
+                            FfonElement::Str("<input></input>".to_owned())
+                        };
+                        obj.children.push(placeholder);
                     }
                 }
             }
@@ -518,6 +527,11 @@ pub fn handle_i(r: &mut AppRenderer) {
         Coordinate::EditorInsert
     };
     populate_input_buffer(r);
+    // Detect permanent `*` placeholder elements (e.g. from email compose body).
+    // `populate_input_buffer` sets input_prefix to the text before the `<input>` tag.
+    if r.input_prefix.trim() == "i" {
+        r.placeholder_insert_mode = true;
+    }
     let ctx = (!r.input_buffer.is_empty()).then(|| r.input_buffer.clone());
     r.speak_mode_change(ctx);
     r.cursor_position = 0;
@@ -538,6 +552,10 @@ pub fn handle_a(r: &mut AppRenderer) {
         Coordinate::EditorInsert
     };
     populate_input_buffer(r);
+    // Detect permanent `*` placeholder elements (e.g. from email compose body).
+    if r.input_prefix.trim() == "i" {
+        r.placeholder_insert_mode = true;
+    }
     let ctx = (!r.input_buffer.is_empty()).then(|| r.input_buffer.clone());
     r.speak_mode_change(ctx);
     r.cursor_position = r.input_buffer.len();
@@ -1308,6 +1326,94 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
     let old_content = old_content.unwrap_or_default();
     let new_content = r.input_buffer.clone();
 
+    // `*` placeholder mode: resolve to Str or Obj at commit time.
+    // All three arms return early; the normal commit path below only runs for non-placeholder edits.
+    if old_content.is_empty() && r.placeholder_insert_mode {
+        match parse_placeholder_prefix(&new_content) {
+            PlaceholderKind::Empty => {
+                r.error_message =
+                    "Enter text: '- name' or plain text → string; '+ name' or 'name:' → object".to_owned();
+                r.needs_redraw = true;
+                return; // stay in OperatorInsert
+            }
+            PlaceholderKind::Str(name) => {
+                r.placeholder_insert_mode = false;
+                let committed = crate::provider::commit_edit(r, &old_content, &name);
+                if committed {
+                    // Prefer a sub-tree refresh (updates only the parent Obj's children)
+                    // because `refresh_current_directory` rebuilds the entire provider root
+                    // and misroutes deep paths like email compose /compose/Body: [text].
+                    if !crate::provider::refresh_subtree_parent(r) {
+                        crate::provider::refresh_current_directory(r);
+                    }
+                    // After refresh the `*` placeholder may have shifted position — repoint.
+                    let new_star_idx = {
+                        let arr = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id);
+                        arr.and_then(|a| a.iter().position(|e| matches!(e, FfonElement::Str(s) if s == "i <input></input>")))
+                    };
+                    if let Some(star_idx) = new_star_idx {
+                        r.current_id.set_last(star_idx);
+                    }
+                } else {
+                    // No provider — update the FFON element in-place with <input> wrapping.
+                    let idx = r.current_id.last().unwrap_or(0);
+                    if let Some(arr) = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id) {
+                        if let Some(e) = arr.get_mut(idx) {
+                            *e = FfonElement::new_str(format!("<input>{name}</input>"));
+                        }
+                    }
+                }
+                list::create_list_current_layer(r);
+                r.coordinate = Coordinate::OperatorGeneral;
+                r.speak_mode_change(None);
+                r.previous_coordinate = Coordinate::OperatorGeneral;
+                r.input_buffer.clear();
+                r.cursor_position = 0;
+                r.list_index = r.current_id.last().unwrap_or(0);
+                r.scroll_offset = 0;
+                r.needs_redraw = true;
+                return;
+            }
+            PlaceholderKind::Obj(key) => {
+                r.placeholder_insert_mode = false;
+                // Passes `key:` — the trailing colon signals Obj creation to `update_body_leaf`.
+                let committed = crate::provider::commit_edit(r, &old_content, &format!("{key}:"));
+                if committed {
+                    if !crate::provider::refresh_subtree_parent(r) {
+                        crate::provider::refresh_current_directory(r);
+                    }
+                    let new_star_idx = {
+                        let arr = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id);
+                        arr.and_then(|a| a.iter().position(|e| matches!(e, FfonElement::Str(s) if s == "i <input></input>")))
+                    };
+                    if let Some(star_idx) = new_star_idx {
+                        r.current_id.set_last(star_idx);
+                    }
+                } else {
+                    // No provider — mutate the FFON element directly.
+                    let idx = r.current_id.last().unwrap_or(0);
+                    if let Some(arr) = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id) {
+                        if let Some(e) = arr.get_mut(idx) {
+                            let mut obj = FfonElement::new_obj(&key);
+                            obj.as_obj_mut().unwrap().push(FfonElement::new_str(String::new()));
+                            *e = obj;
+                        }
+                    }
+                }
+                list::create_list_current_layer(r);
+                r.coordinate = Coordinate::OperatorGeneral;
+                r.speak_mode_change(None);
+                r.previous_coordinate = Coordinate::OperatorGeneral;
+                r.input_buffer.clear();
+                r.cursor_position = 0;
+                r.list_index = r.current_id.last().unwrap_or(0);
+                r.scroll_offset = 0;
+                r.needs_redraw = true;
+                return;
+            }
+        }
+    }
+
     if old_content == new_content {
         // Match C: wasInput → refresh even when content unchanged, then exit cleanly.
         crate::provider::refresh_current_directory(r);
@@ -1745,25 +1851,53 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
     r.scroll_offset = 0;
 }
 
+/// Outcome of interpreting text typed into a `*` placeholder.
+enum PlaceholderKind {
+    /// Resolve to a plain string with this content.
+    Str(String),
+    /// Resolve to an object (dict entry) with this key.
+    Obj(String),
+    /// Nothing or only whitespace was typed — stay in insert mode.
+    Empty,
+}
+
+/// Parse text typed into a `*` placeholder:
+/// - `"- foo"` or `"foo"` (plain text, no special prefix/suffix) → `Str("foo")`
+/// - `"+ foo"` or `"foo:"` (trailing colon)                     → `Obj("foo")`
+/// - `""` / whitespace-only / prefix with empty name            → `Empty`
+fn parse_placeholder_prefix(input: &str) -> PlaceholderKind {
+    let t = input.trim();
+    if t.is_empty() {
+        return PlaceholderKind::Empty;
+    }
+    if let Some(rest) = t.strip_prefix('+') {
+        let name = rest.trim_start().to_owned();
+        return if name.is_empty() { PlaceholderKind::Empty } else { PlaceholderKind::Obj(name) };
+    }
+    if let Some(rest) = t.strip_prefix('-') {
+        let name = rest.trim_start().to_owned();
+        return if name.is_empty() { PlaceholderKind::Empty } else { PlaceholderKind::Str(name) };
+    }
+    if let Some(name) = t.strip_suffix(':') {
+        let name = name.trim().to_owned();
+        return if name.is_empty() { PlaceholderKind::Empty } else { PlaceholderKind::Obj(name) };
+    }
+    PlaceholderKind::Str(t.to_owned())
+}
+
 /// Parse "- name" (file) or "+ name" (directory) creation prefixes.
 /// Returns (is_file, is_dir, name_without_prefix).
 fn parse_creation_prefix(input: &str) -> (bool, bool, String) {
-    if let Some(rest) = input.strip_prefix('-') {
-        let name = rest.trim_start().to_owned();
-        (true, false, name)
-    } else if let Some(rest) = input.strip_prefix('+') {
-        let name = rest.trim_start().to_owned();
-        (false, true, name)
-    } else {
-        // No prefix: bare name → file (or dir if ends with ':')
-        let trimmed = input.trim();
-        if trimmed.ends_with(':') {
-            let name = trimmed.trim_end_matches(':').trim().to_owned();
-            (false, !name.is_empty(), name)
-        } else if !trimmed.is_empty() {
-            (true, false, trimmed.to_owned())
-        } else {
-            (false, false, String::new())
+    match parse_placeholder_prefix(input) {
+        PlaceholderKind::Str(name) => (true, false, name),
+        PlaceholderKind::Obj(name) => (false, true, name),
+        // No prefix / only whitespace / lone '+' or '-': empty name → caller checks item_name.is_empty()
+        PlaceholderKind::Empty => {
+            // Preserve original behaviour for the lone-prefix cases (e.g. "+" alone → is_dir true but empty name)
+            let t = input.trim();
+            if t.starts_with('+') { (false, true, String::new()) }
+            else if t.starts_with('-') { (true, false, String::new()) }
+            else { (false, false, String::new()) }
         }
     }
 }
@@ -1828,6 +1962,7 @@ pub fn handle_escape(r: &mut AppRenderer) {
                 return;
             }
             // Discard changes, return to OperatorGeneral
+            r.placeholder_insert_mode = false;
             r.coordinate = Coordinate::OperatorGeneral;
         }
         Coordinate::Command => {
@@ -2077,6 +2212,30 @@ pub fn handle_file_delete(r: &mut AppRenderer) {
             r.current_id.set_last(new_len - 1);
         }
         list::create_list_current_layer(r);
+        r.needs_redraw = true;
+    }
+}
+
+/// Delete the focused body element via the provider, then refresh the subtree.
+///
+/// Used by Ctrl+D / Delete in OperatorGeneral when inside email compose body.
+pub fn handle_delete_body_element(r: &mut AppRenderer) {
+    let old_content = crate::provider::current_element_old_content(r);
+    let ok = crate::provider::delete_element(r, &old_content);
+    if ok {
+        if !crate::provider::refresh_subtree_parent(r) {
+            crate::provider::refresh_current_directory(r);
+        }
+        // Clamp cursor to new length
+        let new_len = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)
+            .map(|a| a.len())
+            .unwrap_or(0);
+        let cur = r.current_id.last().unwrap_or(0);
+        if new_len > 0 && cur >= new_len {
+            r.current_id.set_last(new_len - 1);
+        }
+        list::create_list_current_layer(r);
+        r.list_index = r.current_id.last().unwrap_or(0);
         r.needs_redraw = true;
     }
 }
@@ -2900,10 +3059,18 @@ pub fn handle_ctrl_x(r: &mut AppRenderer) {
         handle_file_cut(r);
         return;
     }
+    // Compose body: copy element to internal clipboard then delete via provider
+    if r.coordinate == Coordinate::OperatorGeneral && crate::provider::is_in_email_compose_body(r) {
+        let idx = r.current_id.last().unwrap_or(0);
+        if let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) {
+            r.clipboard = slice.get(idx).cloned();
+        }
+        handle_delete_body_element(r);
+        return;
+    }
     if matches!(r.coordinate, Coordinate::EditorGeneral) {
         // Cut FFON element into internal clipboard
         if let Some(item) = r.current_list_item().cloned() {
-            use sicompass_sdk::ffon::get_ffon_at_id;
             if let Some(slice) = get_ffon_at_id(&r.ffon, &item.id) {
                 if let Some(idx) = item.id.last() {
                     r.clipboard = slice.get(idx).cloned();
@@ -2930,9 +3097,17 @@ pub fn handle_ctrl_c(r: &mut AppRenderer) {
         handle_file_copy(r);
         return;
     }
+    // Compose body: copy focused element to internal clipboard
+    if r.coordinate == Coordinate::OperatorGeneral && crate::provider::is_in_email_compose_body(r) {
+        let idx = r.current_id.last().unwrap_or(0);
+        if let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) {
+            r.clipboard = slice.get(idx).cloned();
+        }
+        r.needs_redraw = true;
+        return;
+    }
     if matches!(r.coordinate, Coordinate::EditorGeneral) {
         if let Some(item) = r.current_list_item().cloned() {
-            use sicompass_sdk::ffon::get_ffon_at_id;
             if let Some(slice) = get_ffon_at_id(&r.ffon, &item.id) {
                 if let Some(idx) = item.id.last() {
                     r.clipboard = slice.get(idx).cloned();
@@ -2965,6 +3140,27 @@ pub fn handle_ctrl_v(r: &mut AppRenderer) {
     // File browser: paste file from clipboard
     if r.coordinate == Coordinate::OperatorGeneral && active_provider_is_filebrowser(r) {
         handle_file_paste(r);
+        return;
+    }
+    // Compose body: paste internal clipboard element via commit_edit
+    if r.coordinate == Coordinate::OperatorGeneral && crate::provider::is_in_email_compose_body(r) {
+        use sicompass_sdk::ffon::FfonElement;
+        use sicompass_sdk::tags;
+        let elem = r.clipboard.clone();
+        let new_content = match &elem {
+            Some(FfonElement::Str(s)) => tags::extract_input(s).unwrap_or_default(),
+            Some(FfonElement::Obj(o)) => format!("{}:", o.key),
+            None => return,
+        };
+        if new_content.is_empty() { return; }
+        let committed = crate::provider::commit_edit(r, "", &new_content);
+        if committed {
+            if !crate::provider::refresh_subtree_parent(r) {
+                crate::provider::refresh_current_directory(r);
+            }
+            list::create_list_current_layer(r);
+            r.needs_redraw = true;
+        }
         return;
     }
     if matches!(r.coordinate, Coordinate::EditorGeneral) {
@@ -3071,8 +3267,10 @@ pub fn handle_dashboard(r: &mut AppRenderer) {
 // Operator-mode insert/append placeholders (Ctrl+I / Ctrl+A in OperatorGeneral)
 // ---------------------------------------------------------------------------
 
-/// Ctrl+I in OperatorGeneral — insert a `<input></input>` placeholder before the
-/// current item and immediately enter insert mode.
+/// Ctrl+I in OperatorGeneral — insert a placeholder before the current item.
+///
+/// In email compose body: inserts a `i` typed placeholder (commit resolves to Str or Obj).
+/// Elsewhere: inserts a plain `<input></input>` and enters insert mode immediately.
 pub fn handle_ctrl_i_operator(r: &mut AppRenderer) {
     let slice = match sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id) {
         Some(s) => s,
@@ -3082,14 +3280,19 @@ pub fn handle_ctrl_i_operator(r: &mut AppRenderer) {
         if r.current_id.depth() <= 1 { return; }
         0
     } else {
-        // Clamp in case current_id drifted out of bounds after a refresh
         r.current_id.last().unwrap_or(0).min(slice.len().saturating_sub(1))
     };
-    insert_operator_placeholder(r, insert_idx);
+    if crate::provider::is_in_email_compose_body(r) {
+        insert_placeholder_typed(r, insert_idx);
+    } else {
+        insert_operator_placeholder(r, insert_idx);
+    }
 }
 
-/// Ctrl+A in OperatorGeneral — append a `<input></input>` placeholder after the
-/// current item and immediately enter insert mode.
+/// Ctrl+A in OperatorGeneral — append a placeholder after the current item.
+///
+/// In email compose body: appends a `i` typed placeholder (commit resolves to Str or Obj).
+/// Elsewhere: appends a plain `<input></input>` and enters insert mode immediately.
 pub fn handle_ctrl_a_operator(r: &mut AppRenderer) {
     let slice = match sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id) {
         Some(s) => s,
@@ -3099,10 +3302,81 @@ pub fn handle_ctrl_a_operator(r: &mut AppRenderer) {
         if r.current_id.depth() <= 1 { return; }
         0
     } else {
-        // Clamp in case current_id drifted out of bounds after a refresh
         r.current_id.last().unwrap_or(0).min(slice.len().saturating_sub(1)) + 1
     };
-    insert_operator_placeholder(r, insert_idx);
+    if crate::provider::is_in_email_compose_body(r) {
+        insert_placeholder_typed(r, insert_idx);
+    } else {
+        insert_operator_placeholder(r, insert_idx);
+    }
+}
+
+/// Ctrl+Shift+I in OperatorGeneral / EditorGeneral — insert a `*` placeholder before
+/// the current item and enter insert mode. At commit time the typed text determines the
+/// final type: `Str` or `Obj` (see `parse_placeholder_prefix`).
+pub fn handle_ctrl_shift_i_placeholder(r: &mut AppRenderer) {
+    let slice = match sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id) {
+        Some(s) => s,
+        None => return,
+    };
+    let insert_idx = if slice.is_empty() {
+        if r.current_id.depth() <= 1 { return; }
+        0
+    } else {
+        r.current_id.last().unwrap_or(0).min(slice.len().saturating_sub(1))
+    };
+    insert_placeholder_typed(r, insert_idx);
+}
+
+/// Ctrl+Shift+A in OperatorGeneral / EditorGeneral — append a `*` placeholder after
+/// the current item and enter insert mode.
+pub fn handle_ctrl_shift_a_placeholder(r: &mut AppRenderer) {
+    let slice = match sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id) {
+        Some(s) => s,
+        None => return,
+    };
+    let insert_idx = if slice.is_empty() {
+        if r.current_id.depth() <= 1 { return; }
+        0
+    } else {
+        r.current_id.last().unwrap_or(0).min(slice.len().saturating_sub(1)) + 1
+    };
+    insert_placeholder_typed(r, insert_idx);
+}
+
+/// Insert an `<input></input>` placeholder at `insert_idx`, set `placeholder_insert_mode`,
+/// and enter OperatorInsert. This is the `*`-placeholder variant of `insert_operator_placeholder`.
+fn insert_placeholder_typed(r: &mut AppRenderer, insert_idx: usize) {
+    use sicompass_sdk::ffon::FfonElement;
+
+    let depth = r.current_id.depth();
+    // Use "i" prefix so build_str_label renders it as the "i" placeholder label.
+    let placeholder = FfonElement::Str("i <input></input>".to_owned());
+
+    if depth == 1 {
+        r.ffon.insert(insert_idx, placeholder);
+    } else {
+        let mut parent_id = r.current_id.clone();
+        parent_id.pop();
+        if let Some(parent_slice) = crate::state::navigate_to_slice_pub(&mut r.ffon, &parent_id) {
+            let parent_idx = parent_id.last().unwrap_or(0);
+            if let Some(FfonElement::Obj(obj)) = parent_slice.get_mut(parent_idx) {
+                obj.children.insert(insert_idx, placeholder);
+            } else {
+                return;
+            }
+        } else {
+            return;
+        }
+    }
+
+    r.current_id.set_last(insert_idx);
+    r.placeholder_insert_mode = true;
+    r.prefixed_insert_mode = false;
+    list::create_list_current_layer(r);
+    r.list_index = insert_idx;
+    r.scroll_offset = 0;
+    handle_i(r);
 }
 
 /// Insert a placeholder at `insert_idx` in the current parent.
@@ -5722,5 +5996,160 @@ mod tests {
         let navigated = navigate_right_raw(&mut r);
         assert!(!navigated, "unresolved fragment should return false");
         assert_eq!(r.current_id, id, "cursor should be unchanged");
+    }
+
+    // ---------------------------------------------------------------------------
+    // parse_placeholder_prefix
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn placeholder_plain_text_is_str() {
+        assert!(matches!(parse_placeholder_prefix("foo"), PlaceholderKind::Str(s) if s == "foo"));
+    }
+
+    #[test]
+    fn placeholder_dash_prefix_is_str() {
+        assert!(matches!(parse_placeholder_prefix("- foo"), PlaceholderKind::Str(s) if s == "foo"));
+    }
+
+    #[test]
+    fn placeholder_dash_prefix_no_space_is_str() {
+        assert!(matches!(parse_placeholder_prefix("-bar"), PlaceholderKind::Str(s) if s == "bar"));
+    }
+
+    #[test]
+    fn placeholder_plus_prefix_is_obj() {
+        assert!(matches!(parse_placeholder_prefix("+ foo"), PlaceholderKind::Obj(s) if s == "foo"));
+    }
+
+    #[test]
+    fn placeholder_plus_prefix_no_space_is_obj() {
+        assert!(matches!(parse_placeholder_prefix("+bar"), PlaceholderKind::Obj(s) if s == "bar"));
+    }
+
+    #[test]
+    fn placeholder_trailing_colon_is_obj() {
+        assert!(matches!(parse_placeholder_prefix("foo:"), PlaceholderKind::Obj(s) if s == "foo"));
+    }
+
+    #[test]
+    fn placeholder_trailing_colon_with_spaces_is_obj() {
+        assert!(matches!(parse_placeholder_prefix("  foo :"), PlaceholderKind::Obj(s) if s == "foo"));
+    }
+
+    #[test]
+    fn placeholder_empty_is_empty() {
+        assert!(matches!(parse_placeholder_prefix(""), PlaceholderKind::Empty));
+    }
+
+    #[test]
+    fn placeholder_whitespace_only_is_empty() {
+        assert!(matches!(parse_placeholder_prefix("   "), PlaceholderKind::Empty));
+    }
+
+    #[test]
+    fn placeholder_lone_plus_is_empty() {
+        assert!(matches!(parse_placeholder_prefix("+"), PlaceholderKind::Empty));
+    }
+
+    #[test]
+    fn placeholder_lone_minus_is_empty() {
+        assert!(matches!(parse_placeholder_prefix("-"), PlaceholderKind::Empty));
+    }
+
+    #[test]
+    fn placeholder_plus_whitespace_only_is_empty() {
+        assert!(matches!(parse_placeholder_prefix("+   "), PlaceholderKind::Empty));
+    }
+
+    #[test]
+    fn placeholder_lone_colon_is_empty() {
+        assert!(matches!(parse_placeholder_prefix(":"), PlaceholderKind::Empty));
+    }
+
+    // ---------------------------------------------------------------------------
+    // parse_placeholder_prefix — commit-path integration (handle_enter_operator_insert)
+    // ---------------------------------------------------------------------------
+
+    /// Build a minimal renderer with a single-element FFON list inside a provider,
+    /// positioned on an `<input></input>` placeholder, and `placeholder_insert_mode = true`.
+    fn make_placeholder_renderer() -> AppRenderer {
+        let mut root = FfonElement::new_obj("provider");
+        root.as_obj_mut().unwrap().push(FfonElement::new_str("<input></input>"));
+        let mut r = AppRenderer::new();
+        r.ffon = vec![root];
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        r.coordinate = Coordinate::OperatorInsert;
+        r.previous_coordinate = Coordinate::OperatorGeneral;
+        r.placeholder_insert_mode = true;
+        list::create_list_current_layer(&mut r);
+        r
+    }
+
+    #[test]
+    fn placeholder_commit_plain_text_becomes_str() {
+        let mut r = make_placeholder_renderer();
+        r.input_buffer = "hello".to_owned();
+        handle_enter_operator_insert(&mut r);
+        let arr = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id).unwrap();
+        let idx = r.current_id.last().unwrap_or(0);
+        // Should be a Str wrapping the text in <input> tags
+        assert!(matches!(&arr[idx], FfonElement::Str(s) if s.contains("hello")));
+        assert!(!r.placeholder_insert_mode);
+    }
+
+    #[test]
+    fn placeholder_commit_dash_prefix_becomes_str() {
+        let mut r = make_placeholder_renderer();
+        r.input_buffer = "- myfile".to_owned();
+        handle_enter_operator_insert(&mut r);
+        // After commit mode exits, current_id may shift; just verify no placeholder flag left
+        assert!(!r.placeholder_insert_mode);
+    }
+
+    #[test]
+    fn placeholder_commit_plus_prefix_becomes_obj() {
+        let mut r = make_placeholder_renderer();
+        r.input_buffer = "+ mydir".to_owned();
+        handle_enter_operator_insert(&mut r);
+        // Element should now be an Obj
+        // After commit, cursor stays at same position; check FFON directly via depth-1 path.
+        let arr = &r.ffon;
+        if let Some(FfonElement::Obj(provider)) = arr.get(0) {
+            // The first child should be an Obj with key "mydir"
+            let child = provider.children.get(0);
+            assert!(matches!(child, Some(FfonElement::Obj(o)) if o.key == "mydir"),
+                "expected Obj(mydir), got {:?}", child);
+        } else {
+            panic!("root element should be an Obj provider");
+        }
+        assert!(!r.placeholder_insert_mode);
+    }
+
+    #[test]
+    fn placeholder_commit_trailing_colon_becomes_obj() {
+        let mut r = make_placeholder_renderer();
+        r.input_buffer = "section:".to_owned();
+        handle_enter_operator_insert(&mut r);
+        let arr = &r.ffon;
+        if let Some(FfonElement::Obj(provider)) = arr.get(0) {
+            let child = provider.children.get(0);
+            assert!(matches!(child, Some(FfonElement::Obj(o)) if o.key == "section"),
+                "expected Obj(section), got {:?}", child);
+        } else {
+            panic!("root element should be an Obj provider");
+        }
+        assert!(!r.placeholder_insert_mode);
+    }
+
+    #[test]
+    fn placeholder_commit_empty_stays_in_insert_with_error() {
+        let mut r = make_placeholder_renderer();
+        r.input_buffer = String::new();
+        handle_enter_operator_insert(&mut r);
+        // Should remain in OperatorInsert with an error message
+        assert_eq!(r.coordinate, Coordinate::OperatorInsert);
+        assert!(!r.error_message.is_empty());
+        assert!(r.placeholder_insert_mode);
     }
 }

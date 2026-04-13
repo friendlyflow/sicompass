@@ -256,6 +256,11 @@ fn avail_structural_edit(r: &AppRenderer) -> bool {
     not_at_root(r) && (is_filebrowser(r) || in_email_compose_body(r) || has_add_element_sibling(r))
 }
 
+/// Structural edit available in email compose body (OperatorGeneral).
+fn avail_compose_body_edit(r: &AppRenderer) -> bool {
+    not_at_root(r) && in_email_compose_body(r)
+}
+
 /// File-level delete (OperatorGeneral Delete / Ctrl+D) — only for filebrowser.
 fn avail_file_delete(r: &AppRenderer) -> bool {
     not_at_root(r) && is_filebrowser(r)
@@ -647,18 +652,41 @@ pub static SHORTCUTS: &[Shortcut] = &[
         modes: &[Coordinate::EditorGeneral],
         label: "Ctrl+D Delete", is_available: avail_structural_edit,
         handle: delete_editor },
+    // OperatorGeneral Ctrl+D → compose body element delete (before filebrowser entry)
+    Shortcut { key: Keycode::D, key2: None, ctrl: true, shift: false,
+        modes: &[Coordinate::OperatorGeneral],
+        label: "Ctrl+D Delete", is_available: avail_compose_body_edit,
+        handle: handlers::handle_delete_body_element },
     // OperatorGeneral Ctrl+D → file delete
     Shortcut { key: Keycode::D, key2: None, ctrl: true, shift: false,
         modes: &[Coordinate::OperatorGeneral],
         label: "Ctrl+D Delete", is_available: avail_file_delete, handle: handlers::handle_file_delete },
 
     // ---- Delete key (file delete in OperatorGeneral) --------------------
+    // Compose body delete (before filebrowser entry)
+    Shortcut { key: Keycode::Delete, key2: None, ctrl: false, shift: false,
+        modes: &[Coordinate::OperatorGeneral],
+        label: "Del    Delete", is_available: avail_compose_body_edit,
+        handle: handlers::handle_delete_body_element },
     Shortcut { key: Keycode::Delete, key2: None, ctrl: false, shift: false,
         modes: &[Coordinate::OperatorGeneral],
         label: "Del    Delete", is_available: avail_file_delete,
         handle: handlers::handle_file_delete },
 
     // ---- Ctrl+X / C / V -------------------------------------------------
+    // OperatorGeneral: compose body clipboard (before filebrowser entries)
+    Shortcut { key: Keycode::X, key2: None, ctrl: true, shift: false,
+        modes: &[Coordinate::OperatorGeneral],
+        label: "Ctrl+X Cut", is_available: avail_compose_body_edit,
+        handle: handlers::handle_ctrl_x },
+    Shortcut { key: Keycode::C, key2: None, ctrl: true, shift: false,
+        modes: &[Coordinate::OperatorGeneral],
+        label: "Ctrl+C Copy", is_available: avail_compose_body_edit,
+        handle: handlers::handle_ctrl_c },
+    Shortcut { key: Keycode::V, key2: None, ctrl: true, shift: false,
+        modes: &[Coordinate::OperatorGeneral],
+        label: "Ctrl+V Paste", is_available: avail_compose_body_edit,
+        handle: handlers::handle_ctrl_v },
     // OperatorGeneral: filebrowser file clipboard (show hint)
     Shortcut { key: Keycode::X, key2: None, ctrl: true, shift: false,
         modes: &[Coordinate::OperatorGeneral],

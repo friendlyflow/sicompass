@@ -3144,19 +3144,19 @@ fn placeholder_escape_clears_flag() {
     assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
 }
 
-/// Build a renderer whose top-level FFON list contains a `"* <input></input>"` element.
+/// Build a renderer whose top-level FFON list contains a `"i <input></input>"` element.
 /// This simulates what the email compose body view looks like after `body_to_compose_children`
 /// adds the permanent placeholder.
 fn make_star_prefix_harness() -> AppRenderer {
     let mut root = FfonElement::new_obj("provider");
-    root.as_obj_mut().unwrap().push(FfonElement::new_str("* <input></input>".to_owned()));
+    root.as_obj_mut().unwrap().push(FfonElement::new_str("i <input></input>".to_owned()));
     root.as_obj_mut().unwrap().push(FfonElement::new_str("other item".to_owned()));
 
     let mut r = AppRenderer::new();
     r.ffon = vec![root];
     r.current_id = sicompass_sdk::ffon::IdArray::new();
     r.current_id.push(0);
-    r.current_id.push(0); // on "* <input></input>"
+    r.current_id.push(0); // on "i <input></input>"
     r.coordinate = Coordinate::OperatorGeneral;
     r.previous_coordinate = Coordinate::OperatorGeneral;
     sicompass::list::create_list_current_layer(&mut r);
@@ -3236,4 +3236,56 @@ fn email_provider_refresh_on_navigate_is_true() {
     assert!(p.refresh_on_navigate(),
         "EmailClientProvider must return refresh_on_navigate() = true so \
          navigate_right_raw calls fetch() when opening a folder");
+}
+
+/// Navigating right into an empty email compose body inserts the typed `i` placeholder
+/// (shows as label `"i"`, not the spurious `-i` from the bare `<input></input>` fallback).
+///
+/// Regression test for the bug where `navigate_right_raw`'s empty-directory
+/// fallback used `<input></input>` regardless of provider type.
+#[test]
+fn navigate_into_empty_compose_body_shows_i_placeholder() {
+    use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
+
+    let mut renderer = AppRenderer::new();
+    register(&mut renderer, Box::new(EmailClientProvider::new()));
+
+    // Set provider path to compose root so is_in_email_compose_body returns true
+    // after we push "Body: [text]".
+    renderer.providers[0].set_current_path("compose");
+
+    // Build a minimal compose FFON: one Obj ("email") containing a Body: [text] Obj with no children.
+    // This mirrors what build_compose_view produces for an empty draft.
+    let body_obj = FfonElement::Obj(FfonObject {
+        key: "Body: [text]".to_owned(),
+        children: vec![],
+    });
+    let mut compose_root = FfonElement::new_obj("email");
+    compose_root.as_obj_mut().unwrap().push(body_obj);
+    renderer.ffon[0] = compose_root;
+
+    // Position the cursor on the Body: [text] element (depth 2 = provider 0, child 0).
+    renderer.current_id = {
+        let mut id = IdArray::new();
+        id.push(0);
+        id.push(0);
+        id
+    };
+    renderer.coordinate = Coordinate::OperatorGeneral;
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    // Navigate right into the empty Body: [text] Obj.
+    press_right(&mut renderer);
+
+    // Exactly one child: the `i` typed-placeholder (renders as "i", not "-i").
+    assert_eq!(
+        renderer.total_list.len(), 1,
+        "empty compose body must show exactly one i placeholder; got: {:?}",
+        renderer.total_list.iter().map(|i| &i.label).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        renderer.total_list[0].label, "i",
+        "placeholder must render as 'i', not '-i'; got: {:?}",
+        renderer.total_list[0].label
+    );
 }

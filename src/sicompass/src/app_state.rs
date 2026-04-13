@@ -328,6 +328,10 @@ pub struct AppRenderer {
     pub needs_redraw: bool,
     pub input_down: bool,
     pub prefixed_insert_mode: bool,
+    /// True when the current OperatorInsert session is for a `*` placeholder —
+    /// the typed text is interpreted by `parse_placeholder_prefix` at commit time
+    /// to resolve to either a `Str` or an `Obj`.
+    pub placeholder_insert_mode: bool,
 
     // ---- Cached layout (filled by render loop) ----------------------------
     pub window_height: i32,
@@ -429,6 +433,7 @@ impl AppRenderer {
             needs_redraw: true,
             input_down: false,
             prefixed_insert_mode: false,
+            placeholder_insert_mode: false,
             window_height: WINDOW_HEIGHT as i32,
             cached_line_height: 20,
             current_element_x: 0.0,
