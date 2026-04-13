@@ -494,14 +494,14 @@ pub static SHORTCUTS: &[Shortcut] = &[
     // ---- Backspace -------------------------------------------------------
     Shortcut { key: Keycode::Backspace, key2: None, ctrl: false, shift: false,
         modes: &[Coordinate::OperatorGeneral],
-        label: "Bspc   Back", is_available: not_at_root, handle: handlers::handle_backspace },
+        label: "Bspc   Backspace", is_available: not_at_root, handle: handlers::handle_backspace },
     Shortcut { key: Keycode::Backspace, key2: None, ctrl: false, shift: false,
         modes: &[Coordinate::EditorGeneral,
                  Coordinate::EditorInsert, Coordinate::EditorNormal,
                  Coordinate::EditorVisual, Coordinate::OperatorInsert,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
                  Coordinate::Command, Coordinate::ScrollSearch, Coordinate::InputSearch],
-        label: "Bspc   Delete back", is_available: always, handle: handlers::handle_backspace },
+        label: "Bspc   Backspace", is_available: always, handle: handlers::handle_backspace },
 
     // ---- Delete (forward) ------------------------------------------------
     Shortcut { key: Keycode::Delete, key2: None, ctrl: false, shift: false,
