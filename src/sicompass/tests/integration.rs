@@ -2692,3 +2692,251 @@ fn command_mode_right_announces_char() {
     press_right(&mut r);
     assert_eq!(announced_text(&r).as_deref(), Some("a"), "right over 'a' in command");
 }
+
+// ---------------------------------------------------------------------------
+// refresh_on_navigate tests
+// ---------------------------------------------------------------------------
+
+/// Provider that creates elements with empty children for "leaf" and
+/// non-empty children for "branch" — used to test in-memory survival.
+struct InMemoryFormProvider {
+    path: String,
+}
+
+impl InMemoryFormProvider {
+    fn new() -> Self { InMemoryFormProvider { path: "/".to_owned() } }
+}
+
+impl Provider for InMemoryFormProvider {
+    fn name(&self) -> &str { "inmemform" }
+    fn display_name(&self) -> &str { "In-Mem Form" }
+
+    fn fetch(&mut self) -> Vec<FfonElement> {
+        // This provider's script has no memory of user additions — same pattern
+        // as sales_demo.ts.  fetch() always returns the base schema only.
+        match self.path.as_str() {
+            "/" => {
+                let mut add = FfonElement::new_obj("Add element:");
+                add.as_obj_mut().unwrap().push(FfonElement::Str(
+                    "<button>branch</button>branch".to_owned(),
+                ));
+                add.as_obj_mut().unwrap().push(FfonElement::Str(
+                    "<button>one-opt:leaf</button>leaf".to_owned(),
+                ));
+                vec![add]
+            }
+            "/branch" => {
+                let mut add = FfonElement::new_obj("Add element:");
+                add.as_obj_mut().unwrap().push(FfonElement::Str(
+                    "<button>one-opt:leaf</button>leaf".to_owned(),
+                ));
+                vec![add]
+            }
+            // All other paths return empty (leaf / unknown)
+            _ => vec![],
+        }
+    }
+
+    fn push_path(&mut self, segment: &str) {
+        if self.path == "/" { self.path = format!("/{segment}"); }
+        else { self.path.push('/'); self.path.push_str(segment); }
+    }
+
+    fn pop_path(&mut self) {
+        if self.path == "/" { return; }
+        if let Some(idx) = self.path.rfind('/') {
+            self.path = if idx == 0 { "/".to_owned() } else { self.path[..idx].to_owned() };
+        }
+    }
+
+    fn current_path(&self) -> &str { &self.path }
+
+    fn create_element(&mut self, element_key: &str) -> Option<FfonElement> {
+        let key = element_key.strip_prefix("one-opt:").unwrap_or(element_key);
+        let tagged = if element_key.starts_with("one-opt:") {
+            sicompass_sdk::tags::format_one_opt(key)
+        } else {
+            sicompass_sdk::tags::format_many_opt(key)
+        };
+        let mut obj = FfonElement::new_obj(&tagged);
+        let saved = self.path.clone();
+        self.push_path(key);
+        let children = self.fetch();
+        self.path = saved;
+        for c in children { obj.as_obj_mut().unwrap().push(c); }
+        Some(obj)
+    }
+
+    // No override for refresh_on_navigate → defaults to false (in-memory provider).
+}
+
+/// Helper: count children of the provider root element.
+fn root_child_count(renderer: &AppRenderer) -> usize {
+    renderer.ffon.get(0).and_then(|e| e.as_obj()).map(|o| o.children.len()).unwrap_or(0)
+}
+
+/// Helper: return child keys of the provider root element.
+fn root_child_keys(renderer: &AppRenderer) -> Vec<String> {
+    renderer.ffon.get(0)
+        .and_then(|e| e.as_obj())
+        .map(|o| o.children.iter().filter_map(|c| c.as_obj()).map(|o| o.key.clone()).collect())
+        .unwrap_or_default()
+}
+
+/// Adding a node whose create_element returns empty children, navigating right
+/// into it (previously triggered refresh_current_directory and destroyed the
+/// tree), then pressing Left must leave the node intact.
+#[test]
+fn added_empty_leaf_survives_right_then_left() {
+    let mut renderer = AppRenderer::new();
+    register(&mut renderer, Box::new(InMemoryFormProvider::new()));
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    let pid = 0_usize;
+
+    // Enter provider root (depth 1 → 2).
+    renderer.current_id.set(0, pid);
+    press_right(&mut renderer);
+    assert_eq!(renderer.current_id.depth(), 2);
+
+    // Navigate into "Add element:" (depth 2 → 3).
+    let add_idx = renderer.total_list.iter().position(|i| i.label.contains("Add element:"))
+        .expect("Add element: must be in list");
+    renderer.list_index = add_idx;
+    renderer.current_id = renderer.total_list[add_idx].id.clone();
+    press_right(&mut renderer);
+    assert_eq!(renderer.current_id.depth(), 3);
+
+    // Select the "leaf" button and press Enter → creates empty-children Obj.
+    let leaf_btn = renderer.total_list.iter().position(|i| i.label.contains("leaf"))
+        .expect("leaf button must appear inside Add element:");
+    renderer.list_index = leaf_btn;
+    renderer.current_id = renderer.total_list[leaf_btn].id.clone();
+    press_enter(&mut renderer);
+
+    // Cursor should be at depth 2 on the new leaf Obj.
+    assert_eq!(renderer.current_id.depth(), 2, "cursor at depth 2 after adding leaf");
+
+    // The new leaf must appear in the root's children.
+    let keys_after_add = root_child_keys(&renderer);
+    let leaf_present = keys_after_add.iter().any(|k| sicompass_sdk::tags::strip_display(k) == "leaf");
+    assert!(leaf_present, "leaf must be in root children after creation; got: {keys_after_add:?}");
+
+    // Navigate right into the leaf Obj.  Its children are empty — before the fix
+    // this fired refresh_current_directory and wiped the tree.
+    press_right(&mut renderer);
+    // Verify the leaf is still in the tree (not wiped).
+    let keys_after_right = root_child_keys(&renderer);
+    let still_present = keys_after_right.iter().any(|k| sicompass_sdk::tags::strip_display(k) == "leaf");
+    assert!(still_present, "leaf must survive right-nav into it; got: {keys_after_right:?}");
+
+    // Navigate left — must return to leaf without wiping the tree.
+    press_left(&mut renderer);
+    let keys_after_left = root_child_keys(&renderer);
+    let after_left = keys_after_left.iter().any(|k| sicompass_sdk::tags::strip_display(k) == "leaf");
+    assert!(after_left, "leaf must survive Left back out; got: {keys_after_left:?}");
+    assert_eq!(renderer.current_id.depth(), 2, "back at depth 2 after Left");
+}
+
+/// Full AHU-style scenario: add a "branch" node, navigate into it, add a "leaf"
+/// (empty children) inside it, navigate right into leaf, then Left×3 back to
+/// provider selection — every level must remain intact throughout.
+#[test]
+fn nested_added_nodes_survive_deep_navigation() {
+    let mut renderer = AppRenderer::new();
+    register(&mut renderer, Box::new(InMemoryFormProvider::new()));
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    let pid = 0_usize;
+
+    // Enter provider root (depth 1 → 2).
+    renderer.current_id.set(0, pid);
+    press_right(&mut renderer);
+
+    // Navigate into "Add element:", add "branch".
+    let add_idx = renderer.total_list.iter().position(|i| i.label.contains("Add element:"))
+        .expect("root Add element: must exist");
+    renderer.list_index = add_idx;
+    renderer.current_id = renderer.total_list[add_idx].id.clone();
+    press_right(&mut renderer);
+    let branch_btn = renderer.total_list.iter().position(|i| i.label.contains("branch"))
+        .expect("branch button must exist");
+    renderer.list_index = branch_btn;
+    renderer.current_id = renderer.total_list[branch_btn].id.clone();
+    press_enter(&mut renderer);
+    assert_eq!(renderer.current_id.depth(), 2, "cursor at depth 2 after adding branch");
+
+    // Navigate right into the new "branch" Obj.
+    press_right(&mut renderer);
+    assert_eq!(renderer.current_id.depth(), 3, "inside branch at depth 3");
+    assert_eq!(renderer.providers[pid].current_path(), "/branch",
+        "path must be /branch after entering it");
+
+    // Verify branch is still in the root.
+    let branch_in_root = renderer.ffon.get(0).and_then(|e| e.as_obj())
+        .map(|o| o.children.iter().filter_map(|c| c.as_obj())
+            .any(|o| sicompass_sdk::tags::strip_display(&o.key) == "branch"))
+        .unwrap_or(false);
+    assert!(branch_in_root, "branch must still be in root after entering it");
+
+    // Inside branch: navigate into its "Add element:", add "leaf".
+    let add2_idx = renderer.total_list.iter().position(|i| i.label.contains("Add element:"))
+        .expect("branch Add element: must exist");
+    renderer.list_index = add2_idx;
+    renderer.current_id = renderer.total_list[add2_idx].id.clone();
+    press_right(&mut renderer);
+    let leaf_btn = renderer.total_list.iter().position(|i| i.label.contains("leaf"))
+        .expect("leaf button inside branch must exist");
+    renderer.list_index = leaf_btn;
+    renderer.current_id = renderer.total_list[leaf_btn].id.clone();
+    press_enter(&mut renderer);
+    assert_eq!(renderer.current_id.depth(), 3, "cursor at depth 3 after adding leaf inside branch");
+
+    // The branch Obj must now contain a "leaf" child.
+    let branch_obj = renderer.ffon.get(0).and_then(|e| e.as_obj())
+        .and_then(|o| o.children.iter().filter_map(|c| c.as_obj())
+            .find(|o| sicompass_sdk::tags::strip_display(&o.key) == "branch").cloned());
+    let leaf_in_branch = branch_obj.as_ref()
+        .map(|b| b.children.iter().filter_map(|c| c.as_obj())
+            .any(|o| sicompass_sdk::tags::strip_display(&o.key) == "leaf"))
+        .unwrap_or(false);
+    assert!(leaf_in_branch, "leaf must be inside branch after creation");
+
+    // Navigate right into the empty leaf Obj — should not wipe anything.
+    press_right(&mut renderer);
+    assert_eq!(renderer.current_id.depth(), 4, "inside leaf at depth 4");
+
+    let still_branch = renderer.ffon.get(0).and_then(|e| e.as_obj())
+        .map(|o| o.children.iter().filter_map(|c| c.as_obj())
+            .any(|o| sicompass_sdk::tags::strip_display(&o.key) == "branch"))
+        .unwrap_or(false);
+    assert!(still_branch, "branch must survive right-nav into leaf");
+
+    // Left: back into branch (depth 3).
+    press_left(&mut renderer);
+    assert_eq!(renderer.current_id.depth(), 3, "back at depth 3 (inside branch)");
+    let branch_still = renderer.ffon.get(0).and_then(|e| e.as_obj())
+        .map(|o| o.children.iter().filter_map(|c| c.as_obj())
+            .any(|o| sicompass_sdk::tags::strip_display(&o.key) == "branch"))
+        .unwrap_or(false);
+    assert!(branch_still, "branch must still exist after Left from leaf");
+
+    // Left: back to provider root list (depth 2).
+    press_left(&mut renderer);
+    assert_eq!(renderer.current_id.depth(), 2, "back at depth 2 (provider root)");
+    let branch_d2 = renderer.ffon.get(0).and_then(|e| e.as_obj())
+        .map(|o| o.children.iter().filter_map(|c| c.as_obj())
+            .any(|o| sicompass_sdk::tags::strip_display(&o.key) == "branch"))
+        .unwrap_or(false);
+    assert!(branch_d2, "branch must still exist in root list after Left×2");
+
+    // Left: back to top-level provider selection (depth 1).
+    press_left(&mut renderer);
+    assert_eq!(renderer.current_id.depth(), 1, "back at depth 1 (provider selection)");
+    // ffon root still intact — branch is still there even from depth 1.
+    let branch_d1 = renderer.ffon.get(0).and_then(|e| e.as_obj())
+        .map(|o| o.children.iter().filter_map(|c| c.as_obj())
+            .any(|o| sicompass_sdk::tags::strip_display(&o.key) == "branch"))
+        .unwrap_or(false);
+    assert!(branch_d1, "branch must still exist after Left×3");
+}

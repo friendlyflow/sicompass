@@ -104,4 +104,44 @@ describe("sales demo provider", () => {
       expect(children).toBeArray();
     }
   });
+
+  test("leaf-array path emits its options as children (e.g. paint → black, grey)", async () => {
+    // The schema has: "air handling unit(s) (--> only working example in here <--)"
+    //   → casing → "<radio>paint" = ["one opt", ["black","grey"]]
+    // When create_element fetches the paint sub-path it must get ["black","grey"],
+    // not an empty array.  This was broken before: getRawAtPath rejected array-content leaves.
+    const AHU = "air handling unit(s) (--> only working example in here <--)";
+
+    const ahuChildren = getChildren(await runSalesDemo(`/${AHU}`));
+    // casing must exist as a mandatory child
+    const casingEntry = ahuChildren.find((item) => {
+      if (typeof item === "string") return false;
+      const key = Object.keys(item as Record<string, unknown>)[0];
+      return key === "casing";
+    });
+    expect(casingEntry).toBeDefined();
+
+    const casingChildren = getChildren(await runSalesDemo(`/${AHU}/casing`));
+    // "paint" appears as a one-opt inside "Add element:" under the <radio> tag key
+    const addSection = casingChildren.find((item) => {
+      if (typeof item === "string") return false;
+      const key = Object.keys(item as Record<string, unknown>)[0];
+      return key === "Add element:";
+    });
+    expect(addSection).toBeDefined();
+
+    // Fetching the paint sub-path directly must return its radio options.
+    // The key in the JSON is "<radio>paint" so the path uses that segment.
+    const paintResult = await runSalesDemo(`/${AHU}/casing/<radio>paint`);
+    const paintChildren = getChildren(paintResult);
+    expect(paintChildren).toBeArray();
+    expect(paintChildren.length).toBeGreaterThan(0);
+    // The options should be plain strings (radio values like "black", "grey").
+    for (const child of paintChildren) {
+      expect(typeof child).toBe("string");
+    }
+    // Specifically, black and grey must be present.
+    expect(paintChildren).toContain("black");
+    expect(paintChildren).toContain("grey");
+  });
 });

@@ -278,6 +278,11 @@ pub struct EmailClientProvider {
     // Disabled in tests that inject a mock via with_imap() so they keep using the sync path.
     async_folder_fetch_enabled: bool,
 
+    // Async OAuth token refresh — moves oauth2::refresh_token() off the main thread at startup.
+    // Result carries (new_access_token, new_token_expiry) on success.
+    token_refresh_inflight: Arc<AtomicBool>,
+    token_refresh_result: Arc<Mutex<Option<Result<(String, i64), String>>>>,
+
     // Pending error message to surface via take_error.
     error_message: Option<String>,
 
@@ -312,6 +317,8 @@ impl EmailClientProvider {
             folder_fetch_inflight: Arc::new(AtomicBool::new(false)),
             folder_fetch_result: Arc::new(Mutex::new(None)),
             async_folder_fetch_enabled: true,
+            token_refresh_inflight: Arc::new(AtomicBool::new(false)),
+            token_refresh_result: Arc::new(Mutex::new(None)),
             error_message: None,
             active_login: None,
             config_path_override: None,
@@ -896,6 +903,78 @@ impl EmailClientProvider {
         }
     }
 
+    /// Non-blocking variant of `ensure_fresh_token` used on the startup hot path.
+    ///
+    /// Returns `true` when the token is ready to use (valid, or refresh just completed),
+    /// and `false` when a background refresh is in flight (caller should show a loading
+    /// placeholder and retry on the next fetch cycle).
+    fn ensure_fresh_token_async(&mut self) -> bool {
+        // Password mode or no OAuth configured — nothing to refresh.
+        if self.config.oauth_access_token.is_empty() {
+            return true;
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        // Fast path: token still valid.
+        if now < self.config.token_expiry - 60 {
+            return true;
+        }
+        // No refresh token — can't refresh; let the caller proceed (will fail later).
+        if self.config.oauth_refresh_token.is_empty() {
+            return true;
+        }
+
+        // Drain a completed background refresh if one has arrived.
+        let result = self.token_refresh_result.lock().unwrap().take();
+        if let Some(outcome) = result {
+            self.token_refresh_inflight.store(false, Ordering::Release);
+            if let Ok((access_token, expiry)) = outcome {
+                self.config.oauth_access_token = access_token;
+                self.config.token_expiry = expiry;
+                self.save_oauth_tokens();
+                // Drop backends so rebuild_backends recreates them with the new token.
+                self.imap = None;
+                self.smtp = None;
+                self.rebuild_backends();
+            }
+            // Whether refresh succeeded or failed, unblock the caller.
+            return true;
+        }
+
+        // Still waiting for an in-flight refresh.
+        if self.token_refresh_inflight.load(Ordering::Acquire) {
+            return false;
+        }
+
+        // Spawn a background refresh.
+        self.token_refresh_inflight.store(true, Ordering::Release);
+        let inflight = Arc::clone(&self.token_refresh_inflight);
+        let result_slot = Arc::clone(&self.token_refresh_result);
+        let needs_refresh = Arc::clone(&self.needs_refresh_flag);
+        let client_id = self.config.client_id.clone();
+        let client_secret = self.config.client_secret.clone();
+        let refresh_token_str = self.config.oauth_refresh_token.clone();
+        std::thread::spawn(move || {
+            let r = oauth2::refresh_token(&client_id, &client_secret, &refresh_token_str);
+            let outcome = if r.success {
+                let expiry = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0)
+                    + r.expires_in;
+                Ok((r.access_token, expiry))
+            } else {
+                Err("OAuth token refresh failed".to_owned())
+            };
+            *result_slot.lock().unwrap() = Some(outcome);
+            inflight.store(false, Ordering::Release);
+            needs_refresh.store(true, Ordering::Release);
+        });
+        false
+    }
+
     /// Rebuild the IMAP/SMTP backends from current config.
     /// Called after config changes (init, on_setting_change).
     fn rebuild_backends(&mut self) {
@@ -1282,7 +1361,9 @@ impl Provider for EmailClientProvider {
     }
 
     fn fetch(&mut self) -> Vec<FfonElement> {
-        self.ensure_fresh_token();
+        if !self.ensure_fresh_token_async() {
+            return vec![FfonElement::new_str("Loading…".to_owned())];
+        }
         let segs = self.path_segments().iter().map(|s| s.to_string()).collect::<Vec<_>>();
 
         match segs.len() {
