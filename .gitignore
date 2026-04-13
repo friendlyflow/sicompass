@@ -1,5 +1,4 @@
 # Build artifacts
-build
 target/
 .cache
 .vscode
