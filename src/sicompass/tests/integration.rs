@@ -11,6 +11,7 @@ use sicompass::app_state::{AppRenderer, Coordinate};
 use sdl3::keyboard::{Keycode, Mod};
 use sicompass_filebrowser::FilebrowserProvider;
 use sicompass_settings::SettingsProvider;
+use sicompass_emailclient::EmailClientProvider;
 use sicompass_sdk::provider::Provider;
 use sicompass_sdk::ffon::FfonElement;
 use std::path::Path;
@@ -3033,4 +3034,206 @@ fn get_meta_tag_derived_hints_appear_for_input_children() {
         meta.iter().any(|s| s.contains("Tab") && s.contains("Search")),
         "input children should auto-derive Tab Search hint, got: {meta:?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// `*` placeholder (Ctrl+Shift+I / Ctrl+Shift+A) integration tests
+// ---------------------------------------------------------------------------
+
+/// Build a minimal renderer with one provider root and two string children.
+/// Cursor starts at depth 2 (inside the provider, on first child).
+fn make_placeholder_harness() -> AppRenderer {
+    let mut root = FfonElement::new_obj("testprovider");
+    root.as_obj_mut().unwrap().push(FfonElement::new_str("first"));
+    root.as_obj_mut().unwrap().push(FfonElement::new_str("second"));
+
+    let mut r = AppRenderer::new();
+    r.ffon = vec![root];
+    r.current_id = sicompass_sdk::ffon::IdArray::new();
+    r.current_id.push(0);
+    r.current_id.push(0); // depth 2, on "first"
+    r.coordinate = Coordinate::OperatorGeneral;
+    r.previous_coordinate = Coordinate::OperatorGeneral;
+    sicompass::list::create_list_current_layer(&mut r);
+    r.list_index = 0;
+    r
+}
+
+#[test]
+fn placeholder_ctrl_shift_i_enters_operator_insert() {
+    let mut r = make_placeholder_harness();
+    // Ctrl+Shift+I is invoked from code, not from key dispatch (shortcut removed by design).
+    sicompass::handlers::handle_ctrl_shift_i_placeholder(&mut r);
+    assert_eq!(r.coordinate, Coordinate::OperatorInsert,
+        "handle_ctrl_shift_i_placeholder should enter OperatorInsert");
+    assert!(r.placeholder_insert_mode, "placeholder_insert_mode should be set");
+}
+
+#[test]
+fn placeholder_commit_plain_text_becomes_string_element() {
+    let mut r = make_placeholder_harness();
+    sicompass::handlers::handle_ctrl_shift_i_placeholder(&mut r); // insert placeholder before "first"
+    assert_eq!(r.coordinate, Coordinate::OperatorInsert);
+    type_text(&mut r, "myvalue");
+    press_enter(&mut r);
+    // Should exit insert mode and produce a Str element
+    assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+    assert!(!r.placeholder_insert_mode);
+    // Check the FFON: provider now has 3 children, one of which contains "myvalue"
+    if let Some(FfonElement::Obj(prov)) = r.ffon.get(0) {
+        let has_value = prov.children.iter().any(|e| match e {
+            FfonElement::Str(s) => s.contains("myvalue"),
+            _ => false,
+        });
+        assert!(has_value, "expected a child containing 'myvalue', got: {:?}", prov.children);
+    } else {
+        panic!("root should be Obj");
+    }
+}
+
+#[test]
+fn placeholder_commit_plus_prefix_becomes_obj_element() {
+    let mut r = make_placeholder_harness();
+    sicompass::handlers::handle_ctrl_shift_i_placeholder(&mut r);
+    type_text(&mut r, "+ myobj");
+    press_enter(&mut r);
+    assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+    assert!(!r.placeholder_insert_mode);
+    if let Some(FfonElement::Obj(prov)) = r.ffon.get(0) {
+        let has_obj = prov.children.iter().any(|e| matches!(e, FfonElement::Obj(o) if o.key == "myobj"));
+        assert!(has_obj, "expected an Obj child with key 'myobj', got: {:?}", prov.children);
+    } else {
+        panic!("root should be Obj");
+    }
+}
+
+#[test]
+fn placeholder_commit_trailing_colon_becomes_obj_element() {
+    let mut r = make_placeholder_harness();
+    sicompass::handlers::handle_ctrl_shift_a_placeholder(&mut r); // append after "first"
+    type_text(&mut r, "section:");
+    press_enter(&mut r);
+    assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+    if let Some(FfonElement::Obj(prov)) = r.ffon.get(0) {
+        let has_obj = prov.children.iter().any(|e| matches!(e, FfonElement::Obj(o) if o.key == "section"));
+        assert!(has_obj, "expected Obj(section), got: {:?}", prov.children);
+    } else {
+        panic!("root should be Obj");
+    }
+}
+
+#[test]
+fn placeholder_commit_empty_stays_in_operator_insert() {
+    let mut r = make_placeholder_harness();
+    sicompass::handlers::handle_ctrl_shift_i_placeholder(&mut r);
+    // Don't type anything — commit empty
+    press_enter(&mut r);
+    assert_eq!(r.coordinate, Coordinate::OperatorInsert,
+        "empty commit should stay in OperatorInsert");
+    assert!(!r.error_message.is_empty(), "should show an error message");
+    assert!(r.placeholder_insert_mode, "placeholder_insert_mode should still be set");
+}
+
+#[test]
+fn placeholder_escape_clears_flag() {
+    let mut r = make_placeholder_harness();
+    sicompass::handlers::handle_ctrl_shift_i_placeholder(&mut r);
+    assert!(r.placeholder_insert_mode);
+    press_escape(&mut r);
+    assert!(!r.placeholder_insert_mode, "escape should clear placeholder_insert_mode");
+    assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+}
+
+/// Build a renderer whose top-level FFON list contains a `"* <input></input>"` element.
+/// This simulates what the email compose body view looks like after `body_to_compose_children`
+/// adds the permanent placeholder.
+fn make_star_prefix_harness() -> AppRenderer {
+    let mut root = FfonElement::new_obj("provider");
+    root.as_obj_mut().unwrap().push(FfonElement::new_str("* <input></input>".to_owned()));
+    root.as_obj_mut().unwrap().push(FfonElement::new_str("other item".to_owned()));
+
+    let mut r = AppRenderer::new();
+    r.ffon = vec![root];
+    r.current_id = sicompass_sdk::ffon::IdArray::new();
+    r.current_id.push(0);
+    r.current_id.push(0); // on "* <input></input>"
+    r.coordinate = Coordinate::OperatorGeneral;
+    r.previous_coordinate = Coordinate::OperatorGeneral;
+    sicompass::list::create_list_current_layer(&mut r);
+    r.list_index = 0;
+    r
+}
+
+#[test]
+fn handle_i_on_star_prefix_element_sets_placeholder_insert_mode() {
+    let mut r = make_star_prefix_harness();
+    // Press 'i' — handle_i should detect the "* " input_prefix and set the flag.
+    press(&mut r, Keycode::I);
+    assert_eq!(r.coordinate, Coordinate::OperatorInsert,
+        "pressing 'i' should enter OperatorInsert");
+    assert!(r.placeholder_insert_mode,
+        "handle_i should set placeholder_insert_mode when input_prefix is '* '");
+}
+
+#[test]
+fn handle_i_on_star_element_commit_plain_text_produces_str() {
+    let mut r = make_star_prefix_harness();
+    press(&mut r, Keycode::I);
+    assert!(r.placeholder_insert_mode);
+    type_text(&mut r, "hello");
+    press_enter(&mut r);
+    assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+    assert!(!r.placeholder_insert_mode);
+    // The element should now contain "hello".
+    if let Some(FfonElement::Obj(prov)) = r.ffon.get(0) {
+        let has_hello = prov.children.iter().any(|e| match e {
+            FfonElement::Str(s) => s.contains("hello"),
+            _ => false,
+        });
+        assert!(has_hello, "expected a Str child containing 'hello'; got: {:?}", prov.children);
+    } else {
+        panic!("root should be Obj");
+    }
+}
+
+#[test]
+fn handle_i_on_star_element_commit_plus_prefix_produces_obj() {
+    let mut r = make_star_prefix_harness();
+    press(&mut r, Keycode::I);
+    type_text(&mut r, "+ section");
+    press_enter(&mut r);
+    assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+    if let Some(FfonElement::Obj(prov)) = r.ffon.get(0) {
+        let has_obj = prov.children.iter().any(|e| matches!(e, FfonElement::Obj(o) if o.key == "section"));
+        assert!(has_obj, "expected Obj(section); got: {:?}", prov.children);
+    } else {
+        panic!("root should be Obj");
+    }
+}
+
+#[test]
+fn handle_a_on_star_prefix_element_sets_placeholder_insert_mode() {
+    let mut r = make_star_prefix_harness();
+    // Navigate to the "* " element and press 'a' (append mode).
+    sicompass::handlers::handle_a(&mut r);
+    assert_eq!(r.coordinate, Coordinate::OperatorInsert);
+    assert!(r.placeholder_insert_mode,
+        "handle_a should set placeholder_insert_mode when input_prefix is '* '");
+}
+
+// ---------------------------------------------------------------------------
+// Email client — refresh_on_navigate
+// ---------------------------------------------------------------------------
+
+/// The email client must declare refresh_on_navigate() = true so that
+/// navigate_right_raw calls push_path + refresh_current_directory (and thus
+/// fetch() / build_folder) when the user navigates into a folder.
+/// Regression guard for commit 7d21ee7 which introduced the flag and broke
+/// email folder navigation by leaving EmailClientProvider on the default false.
+#[test]
+fn email_provider_refresh_on_navigate_is_true() {
+    let p = EmailClientProvider::new();
+    assert!(p.refresh_on_navigate(),
+        "EmailClientProvider must return refresh_on_navigate() = true so \
+         navigate_right_raw calls fetch() when opening a folder");
 }
