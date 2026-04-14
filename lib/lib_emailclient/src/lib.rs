@@ -1210,36 +1210,48 @@ fn update_body_leaf(body: &mut MailBody, old_content: &str, new_content: &str) {
     }
 }
 
-/// Remove a body element whose input content matches `old_content`.
+/// Recursively remove the element at `path` within a `Vec<FfonElement>`.
 ///
-/// For `Ffon` bodies: removes the first matching `Str` or `Obj` element.
-/// For `Text`/`Html`: clears the body if its content matches.
-fn delete_body_element(body: &mut MailBody, old_content: &str) -> bool {
-    use sicompass_sdk::tags;
-    match body {
-        MailBody::Ffon(elems) => {
-            let pos = elems.iter().position(|e| match e {
-                FfonElement::Str(s) => {
-                    let stripped = tags::extract_input(s).unwrap_or_else(|| s.clone());
-                    stripped == old_content
-                }
-                FfonElement::Obj(o) => {
-                    let stripped = tags::extract_input(&o.key).unwrap_or_else(|| o.key.clone());
-                    stripped == old_content
-                }
-            });
-            if let Some(idx) = pos {
-                elems.remove(idx);
-                if elems.is_empty() {
-                    elems.push(FfonElement::new_str("i <input></input>".to_owned()));
-                }
+/// - `path = [i]`: remove `elems[i]` directly.
+/// - `path = [i, rest..]`: descend into `elems[i]` (must be an `Obj`) and recurse.
+/// - `path = []`: no-op, returns `false`.
+fn remove_at(elems: &mut Vec<FfonElement>, path: &[usize]) -> bool {
+    match path {
+        [] => false,
+        [last] => {
+            if *last < elems.len() {
+                elems.remove(*last);
                 true
             } else {
                 false
             }
         }
-        MailBody::Text(s) | MailBody::Html(s) if s == old_content => {
-            *body = MailBody::Ffon(vec![FfonElement::new_str("i <input></input>".to_owned())]);
+        [head, rest @ ..] => match elems.get_mut(*head) {
+            Some(FfonElement::Obj(o)) => remove_at(&mut o.children, rest),
+            _ => false,
+        },
+    }
+}
+
+/// Remove a body element at the given path (indices into the body's Ffon tree).
+///
+/// For `Ffon` bodies: walks the tree by `path` and removes the element there.
+/// For `Text`/`Html`: any non-empty single-segment path clears the body.
+/// After removal, ensures the top-level element list is never left empty.
+fn delete_body_element_at(body: &mut MailBody, path: &[usize]) -> bool {
+    const PLACEHOLDER: &str = "i <input></input>";
+    match body {
+        MailBody::Ffon(elems) => {
+            if !remove_at(elems, path) {
+                return false;
+            }
+            if elems.is_empty() {
+                elems.push(FfonElement::new_str(PLACEHOLDER.to_owned()));
+            }
+            true
+        }
+        MailBody::Text(_) | MailBody::Html(_) if !path.is_empty() => {
+            *body = MailBody::Ffon(vec![FfonElement::new_str(PLACEHOLDER.to_owned())]);
             true
         }
         _ => false,
@@ -1627,8 +1639,8 @@ impl Provider for EmailClientProvider {
         }
     }
 
-    fn delete_element(&mut self, old_content: &str) -> bool {
-        delete_body_element(&mut self.compose.draft.body, old_content)
+    fn delete_element(&mut self, path: &[usize]) -> bool {
+        delete_body_element_at(&mut self.compose.draft.body, path)
     }
 
     fn commands(&self) -> Vec<String> {
@@ -2811,7 +2823,7 @@ mod tests {
         }
     }
 
-    // ---- delete_body_element: i-placeholder invariant ----
+    // ---- delete_body_element_at ----
 
     /// Deleting the sole Ffon element leaves a single `i <input></input>` placeholder.
     #[test]
@@ -2819,7 +2831,7 @@ mod tests {
         let mut body = MailBody::Ffon(vec![
             FfonElement::new_str("<input>hello</input>".to_owned()),
         ]);
-        let ok = delete_body_element(&mut body, "hello");
+        let ok = delete_body_element_at(&mut body, &[0]);
         assert!(ok, "delete should succeed");
         match &body {
             MailBody::Ffon(elems) => {
@@ -2834,11 +2846,11 @@ mod tests {
         }
     }
 
-    /// Deleting the content of a Text body converts it to Ffon with the `i` placeholder.
+    /// Deleting a Text body via any path converts it to Ffon with the `i` placeholder.
     #[test]
     fn delete_body_element_text_keeps_i_placeholder() {
         let mut body = MailBody::Text("hello".to_owned());
-        let ok = delete_body_element(&mut body, "hello");
+        let ok = delete_body_element_at(&mut body, &[0]);
         assert!(ok, "delete should succeed");
         match &body {
             MailBody::Ffon(elems) => {
@@ -2851,5 +2863,74 @@ mod tests {
             }
             other => panic!("expected Ffon body with placeholder, got: {:?}", other),
         }
+    }
+
+    /// Deleting a Str sibling when an Obj sibling also exists (regression: was broken by
+    /// content-based matching when the path pointed into the Obj sub-tree).
+    #[test]
+    fn delete_body_element_str_with_obj_sibling() {
+        let mut body = MailBody::Ffon(vec![
+            FfonElement::new_str("<input>abc</input>".to_owned()),
+            FfonElement::new_obj("myobj:"),
+            FfonElement::new_str("<input>def</input>".to_owned()),
+        ]);
+        // Delete the first Str (index 0).
+        assert!(delete_body_element_at(&mut body, &[0]), "delete index 0 should succeed");
+        let MailBody::Ffon(elems) = &body else { panic!("expected Ffon"); };
+        assert_eq!(elems.len(), 2, "should have 2 remaining elements");
+        assert!(matches!(&elems[0], FfonElement::Obj(_)), "index 0 should now be the Obj");
+
+        // Delete the last Str (now at index 1).
+        assert!(delete_body_element_at(&mut body, &[1]), "delete index 1 should succeed");
+        let MailBody::Ffon(elems) = &body else { panic!("expected Ffon"); };
+        assert_eq!(elems.len(), 1, "only the Obj should remain");
+        assert!(matches!(&elems[0], FfonElement::Obj(_)));
+    }
+
+    /// Deleting a top-level Obj removes it.
+    #[test]
+    fn delete_body_element_top_level_obj() {
+        let mut body = MailBody::Ffon(vec![
+            FfonElement::new_str("<input>line</input>".to_owned()),
+            FfonElement::new_obj("myobj:"),
+        ]);
+        assert!(delete_body_element_at(&mut body, &[1]), "delete Obj should succeed");
+        let MailBody::Ffon(elems) = &body else { panic!("expected Ffon"); };
+        assert_eq!(elems.len(), 1);
+        assert!(matches!(&elems[0], FfonElement::Str(_)));
+    }
+
+    /// Deleting a leaf inside an Obj's children (nested path).
+    #[test]
+    fn delete_body_element_nested_child() {
+        let mut inner = FfonElement::new_obj("myobj:");
+        inner.as_obj_mut().unwrap().push(FfonElement::new_str("<input>x</input>".to_owned()));
+        inner.as_obj_mut().unwrap().push(FfonElement::new_str("<input>y</input>".to_owned()));
+        let mut body = MailBody::Ffon(vec![inner]);
+        // Delete the first child of the Obj (path [0, 0]).
+        assert!(delete_body_element_at(&mut body, &[0, 0]), "nested delete should succeed");
+        let MailBody::Ffon(elems) = &body else { panic!("expected Ffon"); };
+        let FfonElement::Obj(o) = &elems[0] else { panic!("expected Obj"); };
+        assert_eq!(o.children.len(), 1, "one child should remain");
+    }
+
+    /// Out-of-range path returns false and leaves body unchanged.
+    #[test]
+    fn delete_body_element_out_of_range() {
+        let mut body = MailBody::Ffon(vec![
+            FfonElement::new_str("<input>only</input>".to_owned()),
+        ]);
+        assert!(!delete_body_element_at(&mut body, &[5]), "out-of-range should return false");
+        let MailBody::Ffon(elems) = &body else { panic!("expected Ffon"); };
+        assert_eq!(elems.len(), 1, "body should be unchanged");
+    }
+
+    /// Empty path returns false.
+    #[test]
+    fn delete_body_element_empty_path() {
+        let mut body = MailBody::Ffon(vec![
+            FfonElement::new_str("<input>x</input>".to_owned()),
+        ]);
+        assert!(!delete_body_element_at(&mut body, &[]), "empty path should return false");
     }
 }

@@ -3345,3 +3345,61 @@ fn delete_last_compose_body_element_keeps_i_placeholder() {
         renderer.total_list[0].label
     );
 }
+
+/// Regression test: Delete works on Str elements even when an Obj sibling exists in the body.
+///
+/// Before the path-based fix, `delete_body_element` searched by string content at the
+/// top level only, so any element whose cursor path pointed into the Obj's sub-tree
+/// (or whose content didn't match the top-level key) silently returned `false`.
+#[test]
+fn delete_body_element_str_with_obj_sibling_integration() {
+    use sicompass_sdk::ffon::IdArray;
+
+    let mut renderer = AppRenderer::new();
+    register(&mut renderer, Box::new(EmailClientProvider::new()));
+
+    // Build a body with [Str("abc"), Obj{key:"myobj:"}, Str("def")].
+    renderer.providers[0].set_current_path("compose/Body: [ffon]");
+
+    {
+        use sicompass_emailclient::EmailClientProvider;
+        // Directly set the body state by committing two strings and an obj via the
+        // provider trait.  commit_edit on an empty body creates the first Str; subsequent
+        // calls update or append.  For the Obj we create it via "myobj:" commit.
+        renderer.providers[0].commit_edit("", "abc");
+        renderer.providers[0].commit_edit("abc", "myobj:");
+        renderer.providers[0].commit_edit("", "def");
+    }
+
+    // Build the ffon tree displayed when the user is inside the Body.
+    // It mirrors the Ffon children: [Str(<input>abc</input>), Obj(myobj:), Str(<input>def</input>)].
+    let mut root = FfonElement::new_obj("Body: [ffon]");
+    {
+        let root_obj = root.as_obj_mut().unwrap();
+        root_obj.push(FfonElement::new_str("<input>abc</input>".to_owned()));
+        let obj = FfonElement::new_obj("myobj:");
+        root_obj.push(obj);
+        root_obj.push(FfonElement::new_str("<input>def</input>".to_owned()));
+    }
+    renderer.ffon[0] = root;
+
+    // Cursor on first Str (provider 0, child 0).
+    renderer.current_id = {
+        let mut id = IdArray::new();
+        id.push(0);
+        id.push(0);
+        id
+    };
+    renderer.coordinate = Coordinate::OperatorGeneral;
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    // Delete the first Str — must succeed even with an Obj sibling.
+    sicompass::handlers::handle_delete_body_element(&mut renderer);
+
+    // After deletion the list should show the Obj + second Str (2 items).
+    assert_eq!(
+        renderer.total_list.len(), 2,
+        "after deleting first Str, 2 elements should remain; got: {:?}",
+        renderer.total_list.iter().map(|i| &i.label).collect::<Vec<_>>()
+    );
+}

@@ -2220,8 +2220,7 @@ pub fn handle_file_delete(r: &mut AppRenderer) {
 ///
 /// Used by Ctrl+D / Delete in OperatorGeneral when inside email compose body.
 pub fn handle_delete_body_element(r: &mut AppRenderer) {
-    let old_content = crate::provider::current_element_old_content(r);
-    let ok = crate::provider::delete_element(r, &old_content);
+    let ok = crate::provider::delete_element(r);
     if ok {
         if !crate::provider::refresh_subtree_parent(r) {
             crate::provider::refresh_current_directory(r);
