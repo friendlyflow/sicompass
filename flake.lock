@@ -1,37 +1,5 @@
 {
   "nodes": {
-    "accesskit-c-src": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1773694903,
-        "narHash": "sha256-FBNTTUPLLC7WKSy2ojIpr22XRAkJNRNCPIvtKWOUiU4=",
-        "owner": "AccessKit",
-        "repo": "accesskit-c",
-        "rev": "28a7a96b76118e7a4628954a0bcafadc4ca46330",
-        "type": "github"
-      },
-      "original": {
-        "owner": "AccessKit",
-        "repo": "accesskit-c",
-        "type": "github"
-      }
-    },
-    "lexbor-src": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1775421285,
-        "narHash": "sha256-Xl52F+++B0w/eV226NTUV7Cq1i/ExDVnsFz8xKwoYyM=",
-        "owner": "lexbor",
-        "repo": "lexbor",
-        "rev": "4c9b27306c1165a9329a5c059a76728ffbd57b7f",
-        "type": "github"
-      },
-      "original": {
-        "owner": "lexbor",
-        "repo": "lexbor",
-        "type": "github"
-      }
-    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1775710090,
@@ -50,8 +18,6 @@
     },
     "root": {
       "inputs": {
-        "accesskit-c-src": "accesskit-c-src",
-        "lexbor-src": "lexbor-src",
         "nixpkgs": "nixpkgs"
       }
     }
