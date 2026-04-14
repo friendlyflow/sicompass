@@ -216,6 +216,29 @@ fn focused_is_link(r: &AppRenderer) -> bool {
     })
 }
 
+/// True when the focused element itself carries an `<input>` or `<input-all>` tag.
+fn focused_is_input(r: &AppRenderer) -> bool {
+    let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) else { return false };
+    let idx = r.current_id.last().unwrap_or(0);
+    slice.get(idx).is_some_and(|e| {
+        let k = match e {
+            sicompass_sdk::ffon::FfonElement::Str(s) => s.as_str(),
+            sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.as_str(),
+        };
+        tags::has_input(k) || tags::has_input_all(k)
+    })
+}
+
+/// I/A (generic): not at root and the focused element is an `<input>` / `<input-all>`.
+fn avail_insert_on_input(r: &AppRenderer) -> bool {
+    not_at_root(r) && focused_is_input(r)
+}
+
+/// A (filebrowser): mirror of `avail_i_edit_hint` so filebrowser can still rename via A.
+fn avail_a_edit_hint(r: &AppRenderer) -> bool {
+    not_at_root(r) && is_filebrowser(r)
+}
+
 /// True when we're navigated inside an email compose / reply / forward body section.
 fn in_email_compose_body(r: &AppRenderer) -> bool {
     let path = crate::provider::current_path(r);
@@ -575,10 +598,13 @@ pub static SHORTCUTS: &[Shortcut] = &[
         label: "I      Edit input", is_available: avail_i_edit_hint, handle: handlers::handle_i },
     Shortcut { key: Keycode::I, key2: None, ctrl: false, shift: false,
         modes: GENERAL,
-        label: "I      Edit input", is_available: not_at_root, handle: handlers::handle_i },
+        label: "I      Edit input", is_available: avail_insert_on_input, handle: handlers::handle_i },
     Shortcut { key: Keycode::A, key2: None, ctrl: false, shift: false,
         modes: GENERAL,
-        label: "A      Append", is_available: not_at_root, handle: handlers::handle_a },
+        label: "A      Append", is_available: avail_a_edit_hint, handle: handlers::handle_a },
+    Shortcut { key: Keycode::A, key2: None, ctrl: false, shift: false,
+        modes: GENERAL,
+        label: "A      Append", is_available: avail_insert_on_input, handle: handlers::handle_a },
 
     // ---- Ctrl+I / Ctrl+A (structural insert/append) ----------------------
     // OperatorGeneral: insert/append placeholder
