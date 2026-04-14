@@ -645,7 +645,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
     // ---- M (enter meta/hint screen) --------------------------------------
     Shortcut { key: Keycode::M, key2: None, ctrl: false, shift: false,
         modes: &[Coordinate::OperatorGeneral],
-        label: "M      Shortcuts", is_available: always, handle: handlers::handle_meta },
+        label: "M      Meta", is_available: always, handle: handlers::handle_meta },
 
     // ---- Ctrl+D (delete FFON element in EditorGeneral) ------------------
     Shortcut { key: Keycode::D, key2: None, ctrl: true, shift: false,
