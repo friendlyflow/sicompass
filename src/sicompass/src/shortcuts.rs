@@ -241,14 +241,7 @@ fn avail_a_edit_hint(r: &AppRenderer) -> bool {
 
 /// True when we're navigated inside an email compose / reply / forward body section.
 fn in_email_compose_body(r: &AppRenderer) -> bool {
-    let path = crate::provider::current_path(r);
-    let mut segments = path.trim_matches('/').split('/');
-    let compose_roots = ["compose", "reply", "reply all", "forward"];
-    let first = segments.next().unwrap_or("");
-    if !compose_roots.contains(&first) {
-        return false;
-    }
-    path.split('/').any(|s| s.starts_with("Body:"))
+    crate::provider::is_in_email_compose_body(r)
 }
 
 /// True when we're navigated inside any email compose / reply / forward context
@@ -256,8 +249,8 @@ fn in_email_compose_body(r: &AppRenderer) -> bool {
 fn in_email_compose(r: &AppRenderer) -> bool {
     let path = crate::provider::current_path(r);
     let compose_roots = ["compose", "reply", "reply all", "forward"];
-    let first = path.trim_matches('/').split('/').next().unwrap_or("");
-    compose_roots.contains(&first) && not_at_root(r)
+    let has_compose = path.trim_matches('/').split('/').any(|s| compose_roots.contains(&s));
+    has_compose && not_at_root(r)
 }
 
 /// True when the current parent container has an "Add element:" sibling
