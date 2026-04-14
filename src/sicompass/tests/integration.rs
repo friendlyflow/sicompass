@@ -3289,3 +3289,59 @@ fn navigate_into_empty_compose_body_shows_i_placeholder() {
         renderer.total_list[0].label
     );
 }
+
+/// Deleting the last element of an email compose body must leave a single `i` placeholder
+/// rather than an empty body with no input.
+///
+/// Regression test for the bug where `delete_body_element` removed the sole Ffon entry
+/// and left the body empty, stranding the user with no way to type.
+///
+/// Setup mirrors the actual runtime state produced by navigating into the Body: subtree
+/// via `navigate_right_raw` + `refresh_current_directory`:
+///   - `ffon[0]` is the flat Obj produced by refresh (root key = path's last segment)
+///   - `current_id = [provider, child_idx]` (depth 2 selects a child of the flat root)
+///   - Provider's `current_path` and `compose.draft.body` are primed via the trait API.
+#[test]
+fn delete_last_compose_body_element_keeps_i_placeholder() {
+    use sicompass_sdk::ffon::{FfonElement, IdArray};
+
+    let mut renderer = AppRenderer::new();
+    register(&mut renderer, Box::new(EmailClientProvider::new()));
+
+    // Prime provider internal body state via the trait API:
+    //   set_current_path so is_in_email_compose_body() returns true,
+    //   then commit_edit to populate draft.body = Text("hello").
+    renderer.providers[0].set_current_path("compose/Body: [text]");
+    renderer.providers[0].commit_edit("", "hello");
+
+    // Build the flat ffon shape that refresh_current_directory produces when the
+    // provider path's last segment is "Body: [text]".  One child: <input>hello</input>.
+    let mut root = FfonElement::new_obj("Body: [text]");
+    root.as_obj_mut().unwrap().push(FfonElement::new_str("<input>hello</input>".to_owned()));
+    renderer.ffon[0] = root;
+
+    // Position cursor on the single body element (provider 0, child 0 of root).
+    renderer.current_id = {
+        let mut id = IdArray::new();
+        id.push(0); // provider
+        id.push(0); // child index within root
+        id
+    };
+    renderer.coordinate = Coordinate::OperatorGeneral;
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    // Delete the only body element.
+    sicompass::handlers::handle_delete_body_element(&mut renderer);
+
+    // Body must still show exactly one element: the `i` typed placeholder.
+    assert_eq!(
+        renderer.total_list.len(), 1,
+        "deleting last body element must leave one i placeholder; got: {:?}",
+        renderer.total_list.iter().map(|i| &i.label).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        renderer.total_list[0].label, "i",
+        "placeholder must render as 'i'; got: {:?}",
+        renderer.total_list[0].label
+    );
+}
