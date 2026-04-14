@@ -3631,3 +3631,76 @@ fn commit_trailing_colon_in_nested_body_creates_obj_with_i_placeholder() {
         baz.children
     );
 }
+
+/// Editing a string leaf inside a nested body Obj (e.g. pressing `i` then typing then Enter)
+/// must leave the nested list non-empty after commit.
+///
+/// Regression: the non-placeholder commit branch of `handle_enter_operator_insert` used to
+/// call `refresh_current_directory` unconditionally, which rebuilds the provider root and
+/// misroutes deep paths like `/compose/Body: [ffon]/foo`, emptying `total_list`.
+/// The fix: try `refresh_subtree_parent` first (same as the placeholder branch), which
+/// updates only the parent Obj's children without touching the root.
+#[test]
+fn editing_leaf_in_nested_compose_body_does_not_empty_list() {
+    use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
+
+    let mut renderer = AppRenderer::new();
+    register_no_init(&mut renderer, Box::new(EmailClientProvider::new()));
+
+    // Step 1: build draft.body via the provider API so that fetch_subtree_children
+    // can return the correct children for the nested path.
+    renderer.providers[0].set_current_path("compose/Body: [text]");
+    assert!(
+        sicompass::provider::commit_edit(&mut renderer, "", "foo:"),
+        "top-level foo: creation must succeed"
+    );
+    // After commit, sync_body_path_label updates path from Body: [text] → Body: [ffon].
+    renderer.providers[0].push_path("foo");
+    assert!(
+        sicompass::provider::commit_edit(&mut renderer, "", "original"),
+        "nested commit must succeed"
+    );
+    // provider's current_path is now "compose/Body: [ffon]/foo" with "original" in draft.body.
+
+    // Step 2: build a FFON tree that matches: email root → Body:[ffon] Obj → foo: Obj → "original" str.
+    let original_str = FfonElement::Str("<input>original</input>".to_owned());
+    let foo_obj = FfonElement::Obj(FfonObject {
+        key: "<input>foo</input>".to_owned(),
+        children: vec![original_str],
+    });
+    let body_obj = FfonElement::Obj(FfonObject {
+        key: "Body: [ffon]".to_owned(),
+        children: vec![foo_obj],
+    });
+    let mut compose_root = FfonElement::new_obj("email");
+    compose_root.as_obj_mut().unwrap().push(body_obj);
+    renderer.ffon[0] = compose_root;
+
+    // Step 3: position cursor on the "original" string inside foo (depth 4).
+    renderer.current_id = {
+        let mut id = IdArray::new();
+        id.push(0); // provider
+        id.push(0); // Body: [ffon] Obj
+        id.push(0); // foo: Obj
+        id.push(0); // "original" string
+        id
+    };
+    renderer.coordinate = Coordinate::OperatorInsert;
+    renderer.previous_coordinate = Coordinate::OperatorGeneral;
+    renderer.placeholder_insert_mode = false;
+    // Simulate user having typed "updated" into the existing "original" element.
+    renderer.input_buffer = "updated".to_owned();
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    // Step 4: press Enter — must commit "updated" and keep the nested list non-empty.
+    press_enter(&mut renderer);
+
+    assert_eq!(
+        renderer.coordinate, Coordinate::OperatorGeneral,
+        "Enter in OperatorInsert must exit to OperatorGeneral"
+    );
+    assert!(
+        !renderer.total_list.is_empty(),
+        "nested foo: list must be non-empty after editing a leaf; got empty list (refresh_current_directory misroute regression)"
+    );
+}
