@@ -376,15 +376,15 @@ pub fn delete_element(renderer: &mut AppRenderer) -> bool {
 }
 
 /// Return true when the active provider's current path is inside an email compose body.
+///
+/// Works for both top-level compose (`/compose/Body: …`) and compose entered from a
+/// message (`/INBOX/msg/reply/Body: …`) by checking all path segments rather than
+/// only the first one.
 pub fn is_in_email_compose_body(renderer: &AppRenderer) -> bool {
     let path = current_path(renderer);
-    let mut segments = path.trim_matches('/').split('/');
     let compose_roots = ["compose", "reply", "reply all", "forward"];
-    let first = segments.next().unwrap_or("");
-    if !compose_roots.contains(&first) {
-        return false;
-    }
-    path.split('/').any(|s| s.starts_with("Body:"))
+    let has_compose = path.trim_matches('/').split('/').any(|s| compose_roots.contains(&s));
+    has_compose && path.split('/').any(|s| s.starts_with("Body:"))
 }
 
 /// Get the input content of the currently focused FFON element (for provider operations).

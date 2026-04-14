@@ -121,6 +121,19 @@ fn register(renderer: &mut AppRenderer, mut provider: Box<dyn Provider>) {
     renderer.providers.push(provider);
 }
 
+/// Like `register` but skips `init()` — prevents loading real settings from disk.
+///
+/// Use this for email-client compose/body tests where the test manually sets the
+/// FFON and provider path.  Calling `init()` on a real machine with OAuth configured
+/// would set an expired access token, causing every `fetch()` call to return
+/// "Loading…" instead of the expected compose-body children.
+fn register_no_init(renderer: &mut AppRenderer, provider: Box<dyn Provider>) {
+    let display_name = provider.display_name().to_owned();
+    let root = FfonElement::new_obj(&display_name);
+    renderer.ffon.push(root);
+    renderer.providers.push(provider);
+}
+
 // ---------------------------------------------------------------------------
 // Key simulation helpers
 // ---------------------------------------------------------------------------
@@ -3248,7 +3261,9 @@ fn navigate_into_empty_compose_body_shows_i_placeholder() {
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
     let mut renderer = AppRenderer::new();
-    register(&mut renderer, Box::new(EmailClientProvider::new()));
+    // Use register_no_init to avoid loading real OAuth config from disk,
+    // which would cause fetch() to return "Loading…" on machines with an expired token.
+    register_no_init(&mut renderer, Box::new(EmailClientProvider::new()));
 
     // Set provider path to compose root so is_in_email_compose_body returns true
     // after we push "Body: [text]".
@@ -3306,7 +3321,7 @@ fn delete_last_compose_body_element_keeps_i_placeholder() {
     use sicompass_sdk::ffon::{FfonElement, IdArray};
 
     let mut renderer = AppRenderer::new();
-    register(&mut renderer, Box::new(EmailClientProvider::new()));
+    register_no_init(&mut renderer, Box::new(EmailClientProvider::new()));
 
     // Prime provider internal body state via the trait API:
     //   set_current_path so is_in_email_compose_body() returns true,
@@ -3356,7 +3371,7 @@ fn delete_body_element_str_with_obj_sibling_integration() {
     use sicompass_sdk::ffon::IdArray;
 
     let mut renderer = AppRenderer::new();
-    register(&mut renderer, Box::new(EmailClientProvider::new()));
+    register_no_init(&mut renderer, Box::new(EmailClientProvider::new()));
 
     // Build a body with [Str("abc"), Obj{key:"myobj:"}, Str("def")].
     renderer.providers[0].set_current_path("compose/Body: [ffon]");
@@ -3401,5 +3416,77 @@ fn delete_body_element_str_with_obj_sibling_integration() {
         renderer.total_list.len(), 2,
         "after deleting first Str, 2 elements should remain; got: {:?}",
         renderer.total_list.iter().map(|i| &i.label).collect::<Vec<_>>()
+    );
+}
+
+/// `is_in_email_compose_body` must return true for reply/forward paths entered from
+/// a message context, where the compose-root token is NOT at segs[0].
+///
+/// Regression test for the bug where `segs[0]`-only gating caused every helper
+/// to return false for paths like `/INBOX/msg/reply/Body: [text]`, breaking
+/// shortcuts, placeholder seeding, and subtree refresh.
+#[test]
+fn is_in_email_compose_body_true_for_reply_from_message() {
+    let mut renderer = AppRenderer::new();
+    register_no_init(&mut renderer, Box::new(EmailClientProvider::new()));
+
+    // Simulate a reply entered from /INBOX/msg — compose root is at segs[2].
+    renderer.providers[0].set_current_path("INBOX/Hello — alice@example.com/reply/Body: [text]");
+
+    assert!(
+        sicompass::provider::is_in_email_compose_body(&renderer),
+        "is_in_email_compose_body must be true for /INBOX/msg/reply/Body: paths"
+    );
+}
+
+/// Navigating into a reply compose body (entered from a message) must show the
+/// `i` placeholder, just like entering a fresh compose body.
+///
+/// Regression test for the bug where the reply path `/{folder}/{msg}/reply/Body: [text]`
+/// was not recognised as a compose body, causing the navigate-right fallback to insert
+/// a plain `<input></input>` (renders as `-i`) instead of the typed `i` placeholder.
+#[test]
+fn navigate_into_reply_from_message_body_shows_i_placeholder() {
+    use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
+
+    let mut renderer = AppRenderer::new();
+    register_no_init(&mut renderer, Box::new(EmailClientProvider::new()));
+
+    // Simulate the path produced when reply is entered from /INBOX/msg.
+    renderer.providers[0].set_current_path("INBOX/Hello — alice@example.com/reply");
+
+    // Build the FFON shape for a reply compose view: root Obj containing Body: [ffon]
+    // (Ffon because prefill_compose now always produces Ffon for reply).
+    let body_obj = FfonElement::Obj(FfonObject {
+        key: "Body: [ffon]".to_owned(),
+        children: vec![],
+    });
+    let mut compose_root = FfonElement::new_obj("email");
+    compose_root.as_obj_mut().unwrap().push(body_obj);
+    renderer.ffon[0] = compose_root;
+
+    // Position cursor on Body: [ffon] (provider 0, child 0).
+    renderer.current_id = {
+        let mut id = IdArray::new();
+        id.push(0);
+        id.push(0);
+        id
+    };
+    renderer.coordinate = Coordinate::OperatorGeneral;
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    // Navigate right into the empty Body: Obj.
+    press_right(&mut renderer);
+
+    // Must show exactly the typed `i` placeholder (label "i", not "-i").
+    assert_eq!(
+        renderer.total_list.len(), 1,
+        "reply body must show exactly one i placeholder; got: {:?}",
+        renderer.total_list.iter().map(|i| &i.label).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        renderer.total_list[0].label, "i",
+        "placeholder must render as 'i'; got: {:?}",
+        renderer.total_list[0].label
     );
 }
