@@ -885,7 +885,7 @@ impl Provider for ScriptProvider {
             sicompass_sdk::tags::format_many_opt(key)
         };
 
-        if sicompass_sdk::tags::has_input(key) || sicompass_sdk::tags::has_input_all(key) {
+        if sicompass_sdk::tags::has_input(key) {
             return Some(FfonElement::Str(tagged));
         }
 

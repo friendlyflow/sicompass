@@ -840,12 +840,8 @@ pub fn handle_enter_operator(r: &mut AppRenderer) {
         .map(|p| p.name() == "filebrowser")
         .unwrap_or(false);
 
-    if !_is_obj_elem && (tags::has_input(&elem_text) || tags::has_input_all(&elem_text)) && !is_filebrowser {
-        let content = if tags::has_input_all(&elem_text) {
-            tags::extract_input_all(&elem_text).unwrap_or_default()
-        } else {
-            tags::extract_input(&elem_text).unwrap_or_default()
-        };
+    if !_is_obj_elem && tags::has_input(&elem_text) && !is_filebrowser {
+        let content = tags::extract_input(&elem_text).unwrap_or_default();
         crate::provider::commit_edit(r, &content, &content);
         crate::provider::refresh_current_directory(r);
         list::create_list_current_layer(r);
@@ -857,8 +853,6 @@ pub fn handle_enter_operator(r: &mut AppRenderer) {
     if r.pending_file_browser_open && is_filebrowser && matches!(elem_clone, FfonElement::Str(_)) {
         let fname_opt = if tags::has_input(&elem_text) {
             tags::extract_input(&elem_text)
-        } else if tags::has_input_all(&elem_text) {
-            tags::extract_input_all(&elem_text)
         } else {
             Some(elem_text.clone())
         };
@@ -931,8 +925,6 @@ pub fn handle_enter_operator(r: &mut AppRenderer) {
     if matches!(elem_clone, FfonElement::Str(_)) {
         let filename = if tags::has_input(&elem_text) {
             tags::extract_input(&elem_text)
-        } else if tags::has_input_all(&elem_text) {
-            tags::extract_input_all(&elem_text)
         } else {
             None
         };
@@ -1314,9 +1306,7 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
     };
 
     // Extract the old content from the tag
-    let old_content = if tags::has_input_all(&elem_text) {
-        tags::extract_input_all(&elem_text)
-    } else if tags::has_input(&elem_text) {
+    let old_content = if tags::has_input(&elem_text) {
         tags::extract_input(&elem_text)
     } else {
         // No input tag — just escape
@@ -1579,108 +1569,6 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
         return;
     }
 
-    // <input-all> with empty old content and no prefix: create file or directory.
-    // A trailing ':' on the new name means "create as directory".
-    if tags::has_input_all(&elem_text) && old_content.is_empty() && r.input_prefix.is_empty() && !new_content.is_empty() {
-        let (create_as_dir, effective_name) = if new_content.ends_with(':') {
-            (true, new_content.trim_end_matches(':').trim().to_owned())
-        } else {
-            (false, new_content.clone())
-        };
-
-        let undo_id = r.current_id.clone();
-        let success;
-        let fs_created;
-
-        if create_as_dir {
-            let created = crate::provider::create_directory(r, &effective_name);
-            if created {
-                success = true;
-                fs_created = true;
-            } else if r.error_message.is_empty() {
-                // Provider has no createDirectory — convert FFON element to Obj in-place
-                let idx = r.current_id.last().unwrap_or(0);
-                if let Some(arr) = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id) {
-                    if idx < arr.len() {
-                        let mut new_obj = FfonElement::new_obj(effective_name.clone());
-                        new_obj.as_obj_mut().unwrap().push(FfonElement::new_str(String::new()));
-                        arr[idx] = new_obj;
-                    }
-                }
-                success = true;
-                fs_created = false;
-            } else {
-                r.needs_redraw = true;
-                return;
-            }
-        } else {
-            let created = crate::provider::create_file(r, &effective_name);
-            if created {
-                success = true;
-                fs_created = true;
-            } else if r.error_message.is_empty() {
-                // Provider has no createFile — keep as string, fall through to key update
-                success = true;
-                fs_created = false;
-            } else {
-                r.needs_redraw = true;
-                return;
-            }
-        }
-
-        if success {
-            if fs_created {
-                if r.undo_history.last().map(|e| matches!(e.task, Task::Insert | Task::InsertInsert | Task::Append | Task::AppendAppend)).unwrap_or(false) {
-                    r.undo_history.pop();
-                }
-                let undo_elem = if create_as_dir {
-                    FfonElement::new_obj(&effective_name)
-                } else {
-                    FfonElement::new_str(effective_name.clone())
-                };
-                crate::state::update_history(r, Task::FsCreate, &undo_id, None, Some(undo_elem), History::None);
-                crate::provider::refresh_current_directory(r);
-                list::create_list_current_layer(r);
-
-                // Find the created item and move cursor to it.
-                // Labels have the form "{prefix} {content}", compare content after the first space.
-                let found_idx = r.total_list.iter().position(|item| {
-                    let content = item.label.split_once(' ').map(|(_, c)| c).unwrap_or(&item.label);
-                    content == effective_name
-                });
-                if let Some(i) = found_idx {
-                    if let Some(id) = r.total_list.get(i).map(|it| it.id.clone()) {
-                        r.current_id = id;
-                    }
-                }
-            } else {
-                // Pure FFON: update element key with new content
-                let new_key = if !fs_created && !create_as_dir {
-                    tags::format_input(&effective_name)
-                } else {
-                    effective_name.clone()
-                };
-                let idx = r.current_id.last().unwrap_or(0);
-                if let Some(arr) = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id) {
-                    if let Some(e) = arr.get_mut(idx) {
-                        *e = FfonElement::new_str(new_key);
-                    }
-                }
-                list::create_list_current_layer(r);
-            }
-
-            r.coordinate = Coordinate::OperatorGeneral;
-            r.speak_mode_change(None);
-            r.previous_coordinate = Coordinate::OperatorGeneral;
-            r.input_buffer.clear();
-            r.cursor_position = 0;
-            r.list_index = r.current_id.last().unwrap_or(0);
-            r.scroll_offset = 0;
-            r.needs_redraw = true;
-        }
-        return;
-    }
-
     // Empty old content, no prefix, Obj element: create directory via provider.
     if old_content.is_empty() && r.input_prefix.is_empty() && is_obj && !new_content.is_empty() {
         let undo_id = r.current_id.clone();
@@ -1795,11 +1683,7 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
     }
 
     // Build replacement element text (re-wrap in tag format)
-    let new_elem_text = if tags::has_input_all(&elem_text) {
-        let prefix = &r.input_prefix;
-        let suffix = &r.input_suffix;
-        format!("{prefix}<input-all>{new_content}</input-all>{suffix}")
-    } else {
+    let new_elem_text = {
         let prefix = &r.input_prefix;
         let suffix = &r.input_suffix;
         format!("{prefix}<input>{new_content}</input>{suffix}")
@@ -2627,24 +2511,13 @@ fn populate_input_buffer(r: &mut AppRenderer) {
         sicompass_sdk::ffon::FfonElement::Obj(o) => &o.key,
     };
 
-    // Try <input-all> first, then <input>
-    let extracted = if tags::has_input_all(element_key) {
-        tags::extract_input_all(element_key)
-    } else if tags::has_input(element_key) {
-        tags::extract_input(element_key)
-    } else {
-        None
-    };
+    let extracted = tags::extract_input(element_key);
 
     if let Some(content) = extracted {
         r.input_buffer = content;
 
         // Extract prefix (text before the opening tag) and suffix (text after closing tag)
-        let (open_tag, close_tag) = if tags::has_input_all(element_key) {
-            ("<input-all>", "</input-all>")
-        } else {
-            ("<input>", "</input>")
-        };
+        let (open_tag, close_tag) = ("<input>", "</input>");
         if let Some(open_pos) = element_key.find(open_tag) {
             r.input_prefix = element_key[..open_pos].to_owned();
             let after_open = open_pos + open_tag.len();
@@ -3709,9 +3582,6 @@ pub fn handle_ctrl_shift_i_insert(r: &mut AppRenderer) {
 fn is_empty_placeholder(key: &str) -> bool {
     use sicompass_sdk::tags;
     if let Some(content) = tags::extract_input(key) {
-        return content.is_empty();
-    }
-    if let Some(content) = tags::extract_input_all(key) {
         return content.is_empty();
     }
     false

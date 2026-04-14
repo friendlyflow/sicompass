@@ -78,8 +78,6 @@ fn extract_after<'a>(text: &'a str, open: &str, open_len: usize, close: &str) ->
 
 const INPUT_OPEN: &str = "<input>";
 const INPUT_CLOSE: &str = "</input>";
-const INPUT_ALL_OPEN: &str = "<input-all>";
-const INPUT_ALL_CLOSE: &str = "</input-all>";
 const RADIO_OPEN: &str = "<radio>";
 const RADIO_CLOSE: &str = "</radio>";
 const CHECKED_OPEN: &str = "<checked>";
@@ -102,11 +100,10 @@ const ONE_OPT_TAG: &str = "<one-opt></one-opt>";
 // <input>...</input>
 // ---------------------------------------------------------------------------
 
-/// Returns true if `text` contains `<input>...</input>` (but not `<input-all>`).
+/// Returns true if `text` contains `<input>...</input>`.
 pub fn has_input(text: &str) -> bool {
     find_unescaped(text, INPUT_OPEN).is_some()
         && find_unescaped(text, INPUT_CLOSE).is_some()
-        && find_unescaped(text, INPUT_ALL_OPEN).is_none()
 }
 
 /// Extracts content between `<input>` and `</input>`.
@@ -117,24 +114,6 @@ pub fn extract_input(text: &str) -> Option<String> {
 /// Wraps `content` in `<input>...</input>`.
 pub fn format_input(content: &str) -> String {
     format!("{INPUT_OPEN}{content}{INPUT_CLOSE}")
-}
-
-// ---------------------------------------------------------------------------
-// <input-all>...</input-all>
-// ---------------------------------------------------------------------------
-
-pub fn has_input_all(text: &str) -> bool {
-    find_unescaped(text, INPUT_ALL_OPEN).is_some()
-        && find_unescaped(text, INPUT_ALL_CLOSE).is_some()
-}
-
-pub fn extract_input_all(text: &str) -> Option<String> {
-    extract_between(text, INPUT_ALL_OPEN, INPUT_ALL_OPEN.len(), INPUT_ALL_CLOSE)
-        .map(|s| s.to_owned())
-}
-
-pub fn format_input_all(content: &str) -> String {
-    format!("{INPUT_ALL_OPEN}{content}{INPUT_ALL_CLOSE}")
 }
 
 // ---------------------------------------------------------------------------
@@ -332,7 +311,6 @@ pub fn strip_display(text: &str) -> String {
 
     // 4. Find the first recognized tag pair and strip it
     let candidates: &[(&str, usize, &str)] = &[
-        (INPUT_ALL_OPEN,         INPUT_ALL_OPEN.len(),         INPUT_ALL_CLOSE),
         (INPUT_OPEN,             INPUT_OPEN.len(),             INPUT_CLOSE),
         (RADIO_OPEN,             RADIO_OPEN.len(),             RADIO_CLOSE),
         (CHECKED_OPEN,           CHECKED_OPEN.len(),           CHECKED_CLOSE),
@@ -385,11 +363,6 @@ mod tests {
     }
 
     #[test]
-    fn test_has_input_false_input_all() {
-        assert!(!has_input("<input-all>hello</input-all>"));
-    }
-
-    #[test]
     fn test_has_input_missing_close() {
         assert!(!has_input("<input>hello"));
     }
@@ -439,40 +412,6 @@ mod tests {
     #[test]
     fn test_format_input_empty() {
         assert_eq!(format_input(""), "<input></input>");
-    }
-
-    // --- has_input_all ---
-
-    #[test]
-    fn test_has_input_all_true() {
-        assert!(has_input_all("<input-all>x</input-all>"));
-    }
-
-    #[test]
-    fn test_has_input_all_false() {
-        assert!(!has_input_all("<input>x</input>"));
-    }
-
-    // --- extract_input_all ---
-
-    #[test]
-    fn test_extract_input_all_basic() {
-        assert_eq!(
-            extract_input_all("<input-all>hello</input-all>"),
-            Some("hello".to_owned())
-        );
-    }
-
-    #[test]
-    fn test_extract_input_all_empty() {
-        assert_eq!(extract_input_all("<input-all></input-all>"), Some("".to_owned()));
-    }
-
-    // --- format_input_all ---
-
-    #[test]
-    fn test_format_input_all() {
-        assert_eq!(format_input_all("x"), "<input-all>x</input-all>");
     }
 
     // --- radio ---
@@ -713,11 +652,6 @@ mod tests {
     #[test]
     fn test_strip_display_input_with_prefix_suffix() {
         assert_eq!(strip_display("Label: <input>val</input> (hint)"), "Label: val (hint)");
-    }
-
-    #[test]
-    fn test_strip_display_input_all() {
-        assert_eq!(strip_display("<input-all>val</input-all>"), "val");
     }
 
     #[test]

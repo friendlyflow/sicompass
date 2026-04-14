@@ -127,7 +127,6 @@ pub fn create_list_current_layer(renderer: &mut AppRenderer) {
         if filter_json {
             if let FfonElement::Str(s) = elem {
                 let name = tags::extract_input(s)
-                    .or_else(|| tags::extract_input_all(s))
                     .unwrap_or_else(|| s.clone());
                 if !name.ends_with(".json") {
                     continue;
@@ -246,8 +245,6 @@ fn build_str_label(s: &str, parent_has_radio: bool) -> String {
             .unwrap_or_else(|| tags::strip_display(s)))
     } else if tags::has_button(s) {
         ("-b", tags::strip_display(s))
-    } else if tags::has_input_all(s) {
-        ("-i", tags::strip_display(s))
     } else if tags::has_input(s) {
         let content = tags::strip_display(s);
         if content.trim() == "i" {
@@ -289,8 +286,6 @@ fn build_obj_label(key: &str) -> String {
     } else if tags::has_radio(key) {
         ("+R", tags::extract_radio(key)
             .unwrap_or_else(|| tags::strip_display(key)))
-    } else if tags::has_input_all(key) {
-        ("+i", tags::strip_display(key))
     } else if tags::has_input(key) {
         ("+i", tags::strip_display(key))
     } else {
