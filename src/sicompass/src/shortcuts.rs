@@ -152,7 +152,7 @@ fn supports_config_files_hint(r: &AppRenderer) -> bool {
     not_at_root(r) && supports_config_files(r)
 }
 
-/// True when the focused container's children contain an `<input>` or `<input-all>` element.
+/// True when the focused container's children contain an `<input>` element.
 fn children_have_input(r: &AppRenderer) -> bool {
     let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) else { return false };
     slice.iter().any(|elem| {
@@ -160,7 +160,7 @@ fn children_have_input(r: &AppRenderer) -> bool {
             sicompass_sdk::ffon::FfonElement::Str(s) => s.as_str(),
             sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.as_str(),
         };
-        tags::has_input(key) || tags::has_input_all(key)
+        tags::has_input(key)
     })
 }
 
@@ -225,11 +225,11 @@ fn focused_is_input(r: &AppRenderer) -> bool {
             sicompass_sdk::ffon::FfonElement::Str(s) => s.as_str(),
             sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.as_str(),
         };
-        tags::has_input(k) || tags::has_input_all(k)
+        tags::has_input(k)
     })
 }
 
-/// I/A (generic): not at root and the focused element is an `<input>` / `<input-all>`.
+/// I/A (generic): not at root and the focused element is an `<input>`.
 fn avail_insert_on_input(r: &AppRenderer) -> bool {
     not_at_root(r) && focused_is_input(r)
 }

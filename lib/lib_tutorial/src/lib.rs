@@ -145,8 +145,7 @@ static SECTIONS: &[Node] = &[
             Leaf("While editing, type normally to change the text. Use Backspace to delete characters."),
             Leaf("Press Enter to confirm your edit and save the change."),
             Leaf("Press Escape to cancel the edit and discard your changes."),
-            Leaf("Not all items are editable, only those marked with <input> or <input-all> tags by the provider. The file browser makes file and directory names editable; the settings provider makes configuration values editable."),
-            Leaf("Some editable items use <input-all> tags, meaning they can become either a string or an object (a section with children). When such an item is empty, entering a name without a trailing : creates a string or file; entering a name ending with : creates an object or directory (the colon is stripped from the name). This is the same convention used in editor mode."),
+            Leaf("Not all items are editable, only those marked with <input> tags by the provider. The file browser makes file and directory names editable; the settings provider makes configuration values editable."),
         ],
     },
     Branch {
@@ -250,8 +249,6 @@ static SECTIONS: &[Node] = &[
             ]},
             Leaf("Text inputs let you edit a value inline. Press i or a on the item below to start editing:"),
             Leaf("Edit this text --> <input>hello world</input> <-- press i or a"),
-            Leaf("Dual-type inputs (<input-all> elements) can become either a string or a section. When empty, type a name without : to create a string, or end the name with : to create a nested section (colon is stripped):"),
-            Leaf("<input-all></input-all>"),
             Branch { key: "<radio>Pick a color", children: &[
                 Leaf("<checked>blue"),
                 Leaf("green"),
@@ -376,8 +373,7 @@ static SECTIONS: &[Node] = &[
             Branch { key: "Element Tags", children: &[
                 Leaf("Element tags are special markers in string content that tell Sicompass to render interactive elements instead of plain text."),
                 Leaf("Use \\< and \\> to escape angle brackets when you want to display them as literal text."),
-                Leaf("\\<input>content\\</input> - make the content editable inline. The user can press i or a to edit it. Elements with this tag can only become strings."),
-                Leaf("\\<input-all>content\\</input-all> - like input, but can also become an object. When the value is empty, entering a name without a trailing : creates a string; entering a name ending with : creates an object (the colon is stripped). This is used for placeholders that can become either type."),
+                Leaf("\\<input>content\\</input> - make the content editable inline. The user can press i or a to edit it."),
                 Leaf("\\<radio>group name - mark a parent object as a radio group. Its children become mutually exclusive options."),
                 Leaf("\\<checked>option - mark a radio option as the currently selected one."),
                 Leaf("\\<checkbox>label - render an unchecked boolean toggle. Press Enter to check it."),
