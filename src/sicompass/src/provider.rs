@@ -352,17 +352,18 @@ pub fn delete_item(renderer: &mut AppRenderer) -> bool {
     ok
 }
 
-/// Delete an element by its input content via the active provider.
+/// Delete the element at the renderer's current path via the active provider.
 ///
-/// Used for compose body elements: removes the matching leaf from `MailBody`
+/// Used for compose body elements: removes the focused leaf from `MailBody`
 /// so the next `refresh_subtree_parent` reflects the deletion.
-pub fn delete_element(renderer: &mut AppRenderer, old_content: &str) -> bool {
+pub fn delete_element(renderer: &mut AppRenderer) -> bool {
     let idx = match renderer.current_id.get(0) {
         Some(i) => i,
         None => return false,
     };
+    let path: Vec<usize> = renderer.current_id.as_slice().iter().skip(1).copied().collect();
     if let Some(p) = renderer.providers.get_mut(idx) {
-        p.delete_element(old_content)
+        p.delete_element(&path)
     } else {
         false
     }

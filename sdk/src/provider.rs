@@ -198,11 +198,12 @@ pub trait Provider: Send + 'static {
     /// Returns `None` (default) to signal "fall back to `refresh_current_directory`".
     fn fetch_subtree_children(&mut self) -> Option<Vec<FfonElement>> { None }
 
-    /// Delete an element identified by `old_content` from the provider's internal state.
+    /// Delete an element at `path` (indices into the provider's FFON tree, excluding the
+    /// leading provider index) from the provider's internal state.
     ///
     /// For providers like the email client this removes a body leaf; for others the default
     /// no-op is used.  Returns `true` on success.
-    fn delete_element(&mut self, _old_content: &str) -> bool { false }
+    fn delete_element(&mut self, _path: &[usize]) -> bool { false }
 }
 
 // ---------------------------------------------------------------------------
