@@ -3490,3 +3490,144 @@ fn navigate_into_reply_from_message_body_shows_i_placeholder() {
         renderer.total_list[0].label
     );
 }
+
+/// Navigating right into a nested body Obj (one with `I_PLACEHOLDER` seeded by
+/// `seed_i_placeholders`) shows the `i` placeholder — i.e. the `has_children` branch
+/// of `navigate_right_raw` is taken and the nested list is rendered correctly.
+///
+/// Covers: compose, reply, reply-all, forward — the FFON setup is identical regardless
+/// of mode because the test focuses on the generic nested-Obj navigation path.
+#[test]
+fn navigate_into_nested_body_obj_shows_i_placeholder() {
+    use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
+
+    let mut renderer = AppRenderer::new();
+    register_no_init(&mut renderer, Box::new(EmailClientProvider::new()));
+
+    // Path is inside the body so that push_path (called by navigate_right_raw) appends
+    // to the correct base path when navigating into `foo:`.
+    renderer.providers[0].set_current_path("compose/Body: [ffon]");
+
+    // Build the FFON: email root → Body: [ffon] Obj with a nested `foo:` Obj
+    // that already has an `i <input></input>` child (as seeded by seed_i_placeholders).
+    // The `has_children` branch of navigate_right_raw is taken for Objs with children,
+    // so the FFON children are used directly — no draft.body access needed here.
+    let foo_obj = FfonElement::Obj(FfonObject {
+        key: "<input>foo</input>".to_owned(),
+        children: vec![FfonElement::Str("i <input></input>".to_owned())],
+    });
+    let body_obj = FfonElement::Obj(FfonObject {
+        key: "Body: [ffon]".to_owned(),
+        children: vec![foo_obj],
+    });
+    let mut compose_root = FfonElement::new_obj("email");
+    compose_root.as_obj_mut().unwrap().push(body_obj);
+    renderer.ffon[0] = compose_root;
+
+    // Position cursor on `foo:` (depth 3: [provider=0, body_obj=0, foo_obj=0]).
+    renderer.current_id = {
+        let mut id = IdArray::new();
+        id.push(0);  // provider
+        id.push(0);  // Body: Obj (child 0 of compose_root)
+        id.push(0);  // foo: Obj (child 0 of body)
+        id
+    };
+    renderer.coordinate = Coordinate::OperatorGeneral;
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    // Navigate right into `foo:` — must show the seeded `i` placeholder.
+    press_right(&mut renderer);
+
+    assert_eq!(
+        renderer.total_list.len(), 1,
+        "nested foo: Obj must show exactly one i placeholder; got: {:?}",
+        renderer.total_list.iter().map(|i| &i.label).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        renderer.total_list[0].label, "i",
+        "nested body Obj placeholder must render as 'i'; got: {:?}",
+        renderer.total_list[0].label
+    );
+}
+
+/// `commit_edit` at a nested body path places the committed content inside the nested
+/// Obj, not at the top level of the body.
+///
+/// Verifies that the path-aware commit pipeline (B) works: after creating `foo:` at the
+/// top of the body and then committing "bar" while the path is inside `foo:`, the
+/// `fetch_subtree_children` for the nested path returns "bar" as a child of `foo:`.
+#[test]
+fn commit_in_nested_compose_body_creates_child_there() {
+    let mut renderer = AppRenderer::new();
+    register_no_init(&mut renderer, Box::new(EmailClientProvider::new()));
+
+    // Step 1: create `foo:` at the top level of the body.
+    renderer.providers[0].push_path("compose");
+    renderer.providers[0].push_path("Body: [text]");
+    assert!(
+        sicompass::provider::commit_edit(&mut renderer, "", "foo:"),
+        "top-level foo: creation must succeed"
+    );
+    // sync_body_path_label updates path from Body: [text] → Body: [ffon] after Ffon promotion.
+
+    // Step 2: simulate navigating into `foo:` and committing "bar" there.
+    renderer.providers[0].push_path("foo");
+    assert!(
+        sicompass::provider::commit_edit(&mut renderer, "", "bar"),
+        "nested commit must succeed"
+    );
+
+    // Step 3: verify via fetch_subtree_children (path is inside foo:) that "bar" is a
+    // child of `foo:`, not at the top level of the body.
+    // Note: committing "bar" onto I_PLACEHOLDER replaces the placeholder — after commit
+    // foo:'s children are [bar] (the placeholder is consumed by the commit).
+    let children = renderer.providers[0]
+        .fetch_subtree_children()
+        .expect("fetch_subtree_children must return Some when inside nested body Obj");
+
+    assert!(
+        children.iter().any(|c| matches!(c, FfonElement::Str(s) if s.contains("bar"))),
+        "bar must appear in foo:'s children (not at body top level); got: {:?}",
+        children
+    );
+}
+
+/// Creating `baz:` inside `foo:` via `commit_edit` produces a `baz:` Obj whose children
+/// start with `I_PLACEHOLDER`, so that pressing right on `baz:` would reveal it.
+///
+/// Verifies that `update_body_elems` calls `new_obj_with_i_placeholder` for nested Obj
+/// creation just as it does at the top level.
+#[test]
+fn commit_trailing_colon_in_nested_body_creates_obj_with_i_placeholder() {
+    let mut renderer = AppRenderer::new();
+    register_no_init(&mut renderer, Box::new(EmailClientProvider::new()));
+
+    // Create `foo:` at top level, then `baz:` inside `foo:`.
+    renderer.providers[0].push_path("compose");
+    renderer.providers[0].push_path("Body: [text]");
+    assert!(sicompass::provider::commit_edit(&mut renderer, "", "foo:"));
+
+    renderer.providers[0].push_path("foo");
+    assert!(sicompass::provider::commit_edit(&mut renderer, "", "baz:"));
+
+    // fetch_subtree_children for path inside foo: should contain the baz: Obj.
+    let children = renderer.providers[0]
+        .fetch_subtree_children()
+        .expect("fetch_subtree_children must return Some");
+
+    let baz = children.iter().find_map(|c| {
+        if let FfonElement::Obj(o) = c {
+            if sicompass_sdk::tags::strip_display(&o.key) == "baz" {
+                return Some(o);
+            }
+        }
+        None
+    }).expect("baz: Obj not found in foo:'s children; got: {:?}");
+
+    assert_eq!(
+        baz.children.first(),
+        Some(&FfonElement::Str("i <input></input>".to_owned())),
+        "newly created baz: Obj must have I_PLACEHOLDER as first child; got: {:?}",
+        baz.children
+    );
+}
