@@ -1121,6 +1121,24 @@ fn build_message_view(msg: &EmailMessage) -> Vec<FfonElement> {
 // Body helper functions
 // ---------------------------------------------------------------------------
 
+/// The "insert here" placeholder used in both the top-level body list and in
+/// every inner Obj's children list.  Always kept in sync so keyboard affordances
+/// behave identically at every nesting level of the compose body.
+const I_PLACEHOLDER: &str = "i <input></input>";
+
+/// Create a new body `Obj` element pre-seeded with the `I_PLACEHOLDER` child.
+///
+/// Every Obj that appears inside the compose body must start with this
+/// placeholder so the insert affordance (Ctrl+I / Enter) is always available
+/// inside the Obj, just as it is at the top-level body list.
+fn new_obj_with_i_placeholder(key: String) -> FfonElement {
+    let mut obj = FfonElement::new_obj(key);
+    obj.as_obj_mut()
+        .unwrap()
+        .push(FfonElement::new_str(I_PLACEHOLDER.to_owned()));
+    obj
+}
+
 /// Build the children list for the `Body:` Obj in the compose view.
 ///
 /// - Text / Html: one `<input>` leaf with the current content.
@@ -1167,7 +1185,7 @@ fn update_body_leaf(body: &mut MailBody, old_content: &str, new_content: &str) {
                 } else {
                     vec![FfonElement::new_str(format!("<input>{existing}</input>"))]
                 };
-                elems.push(FfonElement::new_obj(format!("<input>{obj_key}</input>")));
+                elems.push(new_obj_with_i_placeholder(format!("<input>{obj_key}</input>")));
                 *body = MailBody::Ffon(elems);
             } else if old_content.is_empty() && !s.is_empty() {
                 // A new element is being inserted alongside existing content — upgrade to Ffon.
@@ -1196,9 +1214,9 @@ fn update_body_leaf(body: &mut MailBody, old_content: &str, new_content: &str) {
             if is_obj_create && !obj_key.is_empty() {
                 // Replace the matched placeholder (or append) with a new Obj.
                 if let Some(idx) = pos {
-                    elems[idx] = FfonElement::new_obj(format!("<input>{obj_key}</input>"));
+                    elems[idx] = new_obj_with_i_placeholder(format!("<input>{obj_key}</input>"));
                 } else {
-                    elems.push(FfonElement::new_obj(format!("<input>{obj_key}</input>")));
+                    elems.push(new_obj_with_i_placeholder(format!("<input>{obj_key}</input>")));
                 }
             } else if let Some(idx) = pos {
                 elems[idx] = FfonElement::new_str(format!("<input>{new_content}</input>"));
@@ -1227,7 +1245,13 @@ fn remove_at(elems: &mut Vec<FfonElement>, path: &[usize]) -> bool {
             }
         }
         [head, rest @ ..] => match elems.get_mut(*head) {
-            Some(FfonElement::Obj(o)) => remove_at(&mut o.children, rest),
+            Some(FfonElement::Obj(o)) => {
+                let removed = remove_at(&mut o.children, rest);
+                if removed && o.children.is_empty() {
+                    o.children.push(FfonElement::new_str(I_PLACEHOLDER.to_owned()));
+                }
+                removed
+            }
             _ => false,
         },
     }
@@ -1239,19 +1263,18 @@ fn remove_at(elems: &mut Vec<FfonElement>, path: &[usize]) -> bool {
 /// For `Text`/`Html`: any non-empty single-segment path clears the body.
 /// After removal, ensures the top-level element list is never left empty.
 fn delete_body_element_at(body: &mut MailBody, path: &[usize]) -> bool {
-    const PLACEHOLDER: &str = "i <input></input>";
     match body {
         MailBody::Ffon(elems) => {
             if !remove_at(elems, path) {
                 return false;
             }
             if elems.is_empty() {
-                elems.push(FfonElement::new_str(PLACEHOLDER.to_owned()));
+                elems.push(FfonElement::new_str(I_PLACEHOLDER.to_owned()));
             }
             true
         }
         MailBody::Text(_) | MailBody::Html(_) if !path.is_empty() => {
-            *body = MailBody::Ffon(vec![FfonElement::new_str(PLACEHOLDER.to_owned())]);
+            *body = MailBody::Ffon(vec![FfonElement::new_str(I_PLACEHOLDER.to_owned())]);
             true
         }
         _ => false,
@@ -2912,6 +2935,63 @@ mod tests {
         let MailBody::Ffon(elems) = &body else { panic!("expected Ffon"); };
         let FfonElement::Obj(o) = &elems[0] else { panic!("expected Obj"); };
         assert_eq!(o.children.len(), 1, "one child should remain");
+    }
+
+    /// Deleting the sole child of an inner Obj reseeds the `i` placeholder
+    /// instead of leaving the Obj with an empty children list.
+    #[test]
+    fn delete_body_element_empties_obj_reseeds_placeholder() {
+        let mut inner = FfonElement::new_obj("myobj:");
+        inner.as_obj_mut().unwrap().push(FfonElement::new_str("<input>x</input>".to_owned()));
+        let mut body = MailBody::Ffon(vec![inner]);
+        assert!(delete_body_element_at(&mut body, &[0, 0]), "nested delete should succeed");
+        let MailBody::Ffon(elems) = &body else { panic!("expected Ffon"); };
+        let FfonElement::Obj(o) = &elems[0] else { panic!("expected Obj"); };
+        assert_eq!(o.children.len(), 1, "Obj children should have exactly the i placeholder");
+        assert_eq!(
+            o.children[0],
+            FfonElement::new_str(I_PLACEHOLDER.to_owned()),
+            "remaining child should be the i placeholder"
+        );
+    }
+
+    /// Creating a new Obj via update_body_leaf seeds the `i` placeholder into
+    /// the Obj's children — for all three creation paths.
+    #[test]
+    fn update_body_leaf_new_obj_seeds_i_placeholder() {
+        // Path 1: Text body → upgraded to Ffon with a new Obj.
+        let mut body = MailBody::Text(String::new());
+        update_body_leaf(&mut body, "", "foo:");
+        match &body {
+            MailBody::Ffon(elems) => {
+                let FfonElement::Obj(o) = elems.iter().find(|e| e.is_obj()).expect("expected Obj") else {
+                    panic!("element should be Obj");
+                };
+                assert_eq!(o.children.len(), 1, "new Obj (from Text body) should have one child");
+                assert_eq!(o.children[0], FfonElement::new_str(I_PLACEHOLDER.to_owned()));
+            }
+            other => panic!("expected Ffon body, got: {:?}", other),
+        }
+
+        // Path 2: Ffon body — replace existing placeholder Str with Obj.
+        let mut body = MailBody::Ffon(vec![FfonElement::new_str(I_PLACEHOLDER.to_owned())]);
+        update_body_leaf(&mut body, "", "bar:");
+        let MailBody::Ffon(elems) = &body else { panic!("expected Ffon"); };
+        let FfonElement::Obj(o) = elems.iter().find(|e| e.is_obj()).expect("expected Obj") else {
+            panic!("element should be Obj");
+        };
+        assert_eq!(o.children.len(), 1, "replaced Obj should have one child");
+        assert_eq!(o.children[0], FfonElement::new_str(I_PLACEHOLDER.to_owned()));
+
+        // Path 3: Ffon body — no placeholder match, append new Obj.
+        let mut body = MailBody::Ffon(vec![FfonElement::new_str("<input>hello</input>".to_owned())]);
+        update_body_leaf(&mut body, "nonexistent", "baz:");
+        let MailBody::Ffon(elems) = &body else { panic!("expected Ffon"); };
+        let FfonElement::Obj(o) = elems.iter().find(|e| e.is_obj()).expect("expected Obj") else {
+            panic!("element should be Obj");
+        };
+        assert_eq!(o.children.len(), 1, "appended Obj should have one child");
+        assert_eq!(o.children[0], FfonElement::new_str(I_PLACEHOLDER.to_owned()));
     }
 
     /// Out-of-range path returns false and leaves body unchanged.
