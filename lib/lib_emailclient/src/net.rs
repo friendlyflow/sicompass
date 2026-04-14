@@ -10,7 +10,6 @@ use crate::idle::parse_imap_url;
 
 use imap_proto::types::Address;
 use lettre::message::header::ContentType;
-use lettre::message::{MultiPart, SinglePart};
 use lettre::transport::smtp::authentication::{Credentials, Mechanism};
 use lettre::{Message, SmtpTransport, Transport};
 use native_tls::TlsConnector;
@@ -247,18 +246,10 @@ impl SmtpBackend for RealSmtp {
             MailBody::Ffon(elems) => {
                 let json = sicompass_sdk::ffon::to_json_string(elems)
                     .map_err(|e| e.to_string())?;
-                let plain_text = crate::flatten_ffon_to_text(elems);
                 builder
-                    .multipart(
-                        MultiPart::alternative()
-                            .singlepart(SinglePart::plain(plain_text))
-                            .singlepart(
-                                SinglePart::builder()
-                                    .header(ContentType::parse("application/json; charset=utf-8")
-                                        .map_err(|e| e.to_string())?)
-                                    .body(json)
-                            )
-                    )
+                    .header(ContentType::parse("application/json; charset=utf-8")
+                        .map_err(|e| e.to_string())?)
+                    .body(json)
                     .map_err(|e| e.to_string())?
             }
         };
