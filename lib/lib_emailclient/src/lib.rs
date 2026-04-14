@@ -1230,13 +1230,16 @@ fn delete_body_element(body: &mut MailBody, old_content: &str) -> bool {
             });
             if let Some(idx) = pos {
                 elems.remove(idx);
+                if elems.is_empty() {
+                    elems.push(FfonElement::new_str("i <input></input>".to_owned()));
+                }
                 true
             } else {
                 false
             }
         }
         MailBody::Text(s) | MailBody::Html(s) if s == old_content => {
-            *s = String::new();
+            *body = MailBody::Ffon(vec![FfonElement::new_str("i <input></input>".to_owned())]);
             true
         }
         _ => false,
@@ -2805,6 +2808,48 @@ mod tests {
                 assert!(has_obj, "expected Obj(myobj) in body; got: {:?}", elems);
             }
             other => panic!("expected Ffon body after Obj commit, got: {:?}", other),
+        }
+    }
+
+    // ---- delete_body_element: i-placeholder invariant ----
+
+    /// Deleting the sole Ffon element leaves a single `i <input></input>` placeholder.
+    #[test]
+    fn delete_body_element_ffon_last_keeps_i_placeholder() {
+        let mut body = MailBody::Ffon(vec![
+            FfonElement::new_str("<input>hello</input>".to_owned()),
+        ]);
+        let ok = delete_body_element(&mut body, "hello");
+        assert!(ok, "delete should succeed");
+        match &body {
+            MailBody::Ffon(elems) => {
+                assert_eq!(elems.len(), 1, "should have exactly one placeholder; got: {:?}", elems);
+                assert_eq!(
+                    elems[0],
+                    FfonElement::new_str("i <input></input>".to_owned()),
+                    "remaining element should be the i placeholder"
+                );
+            }
+            other => panic!("expected Ffon body, got: {:?}", other),
+        }
+    }
+
+    /// Deleting the content of a Text body converts it to Ffon with the `i` placeholder.
+    #[test]
+    fn delete_body_element_text_keeps_i_placeholder() {
+        let mut body = MailBody::Text("hello".to_owned());
+        let ok = delete_body_element(&mut body, "hello");
+        assert!(ok, "delete should succeed");
+        match &body {
+            MailBody::Ffon(elems) => {
+                assert_eq!(elems.len(), 1, "should have exactly one placeholder; got: {:?}", elems);
+                assert_eq!(
+                    elems[0],
+                    FfonElement::new_str("i <input></input>".to_owned()),
+                    "remaining element should be the i placeholder"
+                );
+            }
+            other => panic!("expected Ffon body with placeholder, got: {:?}", other),
         }
     }
 }
