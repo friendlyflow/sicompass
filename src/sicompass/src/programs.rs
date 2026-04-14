@@ -141,13 +141,8 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
     settings.add_checkbox("sicompass", "maximized", "maximized", false);
     settings.add_radio(
         "sicompass", "font scale", "fontScale",
-        &[
-            "0.500", "0.625", "0.750", "0.875",
-            "1.000", "1.125", "1.250", "1.375",
-            "1.500", "1.625", "1.750", "1.875",
-            "2.000",
-        ],
-        "1.000",
+        &["1.00", "1.25", "1.50", "1.75", "2.00", "2.25", "2.50"],
+        "1.00",
     );
 
     // File-browser settings
@@ -448,7 +443,7 @@ pub fn read_maximized() -> bool {
 }
 
 /// Read `sicompass.fontScale` from settings.json.
-/// Returns 1.0 if absent or unparseable. Clamped to [0.5, 2.0].
+/// Returns 1.0 if absent or unparseable. Clamped to [1.0, 2.5].
 pub fn read_font_scale() -> f32 {
     let Some(path) = sicompass_sdk::platform::main_config_path() else { return 1.0 };
     let Ok(data) = std::fs::read_to_string(&path) else { return 1.0 };
@@ -461,7 +456,7 @@ pub fn read_font_scale() -> f32 {
                 .or_else(|| v.as_f64().map(|f| f.to_string()))
         });
     raw.and_then(|s| s.parse::<f32>().ok())
-        .map(|f| f.clamp(0.5, 2.0))
+        .map(|f| f.clamp(1.0, 2.5))
         .unwrap_or(1.0)
 }
 
