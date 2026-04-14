@@ -247,8 +247,7 @@ impl SmtpBackend for RealSmtp {
                 let json = sicompass_sdk::ffon::to_json_string(elems)
                     .map_err(|e| e.to_string())?;
                 builder
-                    .header(ContentType::parse("application/json; charset=utf-8")
-                        .map_err(|e| e.to_string())?)
+                    .header(ContentType::TEXT_PLAIN)
                     .body(json)
                     .map_err(|e| e.to_string())?
             }
@@ -384,8 +383,18 @@ fn parse_body_part(raw: &str, content_type: &str, cte: &str) -> MailBody {
             }
             MailBody::Text(decoded)
         }
-        // text/plain or unknown/empty — treat as plain text.
-        _ => MailBody::Text(decoded),
+        // text/plain or unknown/empty — treat as plain text, but promote to
+        // Ffon if the content is valid FFON JSON (sicompass-sent bodies).
+        _ => {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&decoded) {
+                if sicompass_sdk::ffon::is_ffon(&v) {
+                    if let Ok(elems) = serde_json::from_value(v) {
+                        return MailBody::Ffon(elems);
+                    }
+                }
+            }
+            MailBody::Text(decoded)
+        }
     }
 }
 
@@ -591,6 +600,17 @@ mod tests {
         let ffon_json = r#"[{"Heading:":["line1","line2"]}]"#;
         let raw = format!(
             "From: a@b.com\r\nSubject: Ffon\r\nContent-Type: application/json; charset=utf-8\r\n\r\n{ffon_json}\r\n"
+        );
+        let msg = parse_rfc2822(1, raw.as_bytes());
+        assert!(matches!(&msg.body, MailBody::Ffon(elems) if !elems.is_empty()));
+    }
+
+    #[test]
+    fn test_parse_rfc2822_text_plain_ffon_promoted() {
+        // sicompass sends FFON as text/plain JSON; receiver must promote it back to Ffon.
+        let ffon_json = r#"[{"Heading:":["line1","line2"]}]"#;
+        let raw = format!(
+            "From: a@b.com\r\nSubject: Ffon\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{ffon_json}\r\n"
         );
         let msg = parse_rfc2822(1, raw.as_bytes());
         assert!(matches!(&msg.body, MailBody::Ffon(elems) if !elems.is_empty()));
