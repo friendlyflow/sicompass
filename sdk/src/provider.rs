@@ -198,6 +198,13 @@ pub trait Provider: Send + 'static {
     /// Returns `None` (default) to signal "fall back to `refresh_current_directory`".
     fn fetch_subtree_children(&mut self) -> Option<Vec<FfonElement>> { None }
 
+    /// Return the current display key for the parent Obj when inside a subtree,
+    /// so `refresh_subtree_parent` can update both the children and the parent key
+    /// in one pass.  Called immediately after `fetch_subtree_children` returns `Some`.
+    ///
+    /// Returns `None` (default) to leave the parent key unchanged.
+    fn fetch_subtree_parent_key(&mut self) -> Option<String> { None }
+
     /// Delete an element at `path` (indices into the provider's FFON tree, excluding the
     /// leading provider index) from the provider's internal state.
     ///
