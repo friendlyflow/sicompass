@@ -1046,7 +1046,9 @@ fn prefill_compose(compose: &mut ComposeState, msg: &EmailMessage, mode: Compose
                         FfonElement::new_str(I_PLACEHOLDER.to_owned()),
                         FfonElement::new_str(attribution),
                     ];
-                    elems.extend(orig.clone());
+                    let mut orig_cloned = orig.clone();
+                    seed_i_placeholders(&mut orig_cloned);
+                    elems.extend(orig_cloned);
                     MailBody::Ffon(elems)
                 }
             };
@@ -1079,7 +1081,9 @@ fn prefill_compose(compose: &mut ComposeState, msg: &EmailMessage, mode: Compose
                 MailBody::Ffon(orig) => {
                     let mut elems = vec![FfonElement::new_str(I_PLACEHOLDER.to_owned())];
                     elems.extend(fwd_header);
-                    elems.extend(orig.clone());
+                    let mut orig_cloned = orig.clone();
+                    seed_i_placeholders(&mut orig_cloned);
+                    elems.extend(orig_cloned);
                     MailBody::Ffon(elems)
                 }
             };
@@ -1141,6 +1145,23 @@ fn new_obj_with_i_placeholder(key: String) -> FfonElement {
     obj
 }
 
+/// Recursively ensure every `Obj` inside `elems` has `I_PLACEHOLDER` as its
+/// first child so that the insert affordance is available at every nesting level.
+/// Skips Objs that already start with the placeholder.
+fn seed_i_placeholders(elems: &mut Vec<FfonElement>) {
+    for elem in elems.iter_mut() {
+        if let FfonElement::Obj(o) = elem {
+            let already_seeded = o.children.first()
+                .map(|c| matches!(c, FfonElement::Str(s) if s == I_PLACEHOLDER))
+                .unwrap_or(false);
+            if !already_seeded {
+                o.children.insert(0, FfonElement::new_str(I_PLACEHOLDER.to_owned()));
+            }
+            seed_i_placeholders(&mut o.children);
+        }
+    }
+}
+
 /// Build the children list for the `Body:` Obj in the compose view.
 ///
 /// - Text: one `<input>` leaf with the current content (empty → no children).
@@ -1154,19 +1175,106 @@ fn body_to_compose_children(body: &MailBody) -> Vec<FfonElement> {
     }
 }
 
+/// Apply an edit to a flat `Vec<FfonElement>` (the Ffon-body mutation logic).
+///
+/// Finds the element whose stripped `<input>` content equals `old_content` and
+/// replaces it.  When `new_content` ends with `:`, a new `Obj` is created instead.
+/// When no match is found the new content is appended (handles the case where the
+/// placeholder was inserted locally in the FFON tree but not yet committed).
+fn update_body_elems(elems: &mut Vec<FfonElement>, old_content: &str, new_content: &str) {
+    use sicompass_sdk::tags;
+
+    let is_obj_create = new_content.ends_with(':');
+    let obj_key = if is_obj_create {
+        new_content.trim_end_matches(':').trim()
+    } else {
+        ""
+    };
+
+    let pos = elems.iter().position(|e| {
+        if let FfonElement::Str(s) = e {
+            let stripped = tags::extract_input(s).unwrap_or_else(|| s.clone());
+            stripped == old_content
+        } else {
+            false
+        }
+    });
+
+    if is_obj_create && !obj_key.is_empty() {
+        if let Some(idx) = pos {
+            elems[idx] = new_obj_with_i_placeholder(format!("<input>{obj_key}</input>"));
+        } else {
+            elems.push(new_obj_with_i_placeholder(format!("<input>{obj_key}</input>")));
+        }
+    } else if let Some(idx) = pos {
+        elems[idx] = FfonElement::new_str(format!("<input>{new_content}</input>"));
+    } else {
+        elems.push(FfonElement::new_str(format!("<input>{new_content}</input>")));
+    }
+}
+
+/// Walk the body Ffon tree (immutable) following `sub_segs` (display-stripped Obj
+/// key segments after `Body:`) and return the children slice of the target Obj.
+fn body_elems_at_sub_path<'a>(
+    elems: &'a [FfonElement],
+    sub_segs: &[&str],
+) -> Option<&'a [FfonElement]> {
+    if sub_segs.is_empty() {
+        return Some(elems);
+    }
+    let seg = sub_segs[0];
+    let rest = &sub_segs[1..];
+    let idx = elems.iter().position(|e| {
+        if let FfonElement::Obj(o) = e {
+            sicompass_sdk::tags::strip_display(&o.key) == seg
+        } else {
+            false
+        }
+    })?;
+    if let FfonElement::Obj(o) = &elems[idx] {
+        body_elems_at_sub_path(&o.children, rest)
+    } else {
+        None
+    }
+}
+
+/// Walk the body Ffon tree (mutable) following `sub_segs` and return a mutable
+/// reference to the children vec of the target Obj.
+fn body_elems_at_sub_path_mut<'a>(
+    elems: &'a mut Vec<FfonElement>,
+    sub_segs: &[&str],
+) -> Option<&'a mut Vec<FfonElement>> {
+    if sub_segs.is_empty() {
+        return Some(elems);
+    }
+    let seg = sub_segs[0];
+    let rest = &sub_segs[1..];
+    let idx = elems.iter().position(|e| {
+        if let FfonElement::Obj(o) = e {
+            sicompass_sdk::tags::strip_display(&o.key) == seg
+        } else {
+            false
+        }
+    })?;
+    if let FfonElement::Obj(o) = &mut elems[idx] {
+        body_elems_at_sub_path_mut(&mut o.children, rest)
+    } else {
+        None
+    }
+}
+
 /// Update a body leaf after a text edit in the compose form.
 ///
-/// Called from `commit_edit` when the path ends in `"Body:"`.
+/// Called from `commit_edit` when the path ends directly at `"Body:"` (top-level
+/// body edit).  For nested edits (path contains `Body:` but has more segments after
+/// it), `commit_edit` resolves the sub-path and calls `update_body_elems` directly.
+///
 /// Matches the element whose stripped input content equals `old_content`
 /// and replaces it with `new_content`.  When `old_content` is empty
 /// (a freshly-inserted placeholder), the first empty leaf is filled.
 /// If the body was `Text` and a new element is being added (no match),
 /// it is upgraded to `Ffon` to hold multiple elements.
 fn update_body_leaf(body: &mut MailBody, old_content: &str, new_content: &str) {
-    use sicompass_sdk::tags;
-
-    // Detect Obj creation: a trailing `:` on the content signals "make this an object key".
-    // This is produced by the `*` placeholder commit path when the user types `+ name` or `name:`.
     let is_obj_create = new_content.ends_with(':');
     let obj_key = if is_obj_create {
         new_content.trim_end_matches(':').trim()
@@ -1199,28 +1307,7 @@ fn update_body_leaf(body: &mut MailBody, old_content: &str, new_content: &str) {
             }
         }
         MailBody::Ffon(elems) => {
-            // Find the element whose input-stripped content matches old_content.
-            let pos = elems.iter().position(|e| {
-                if let FfonElement::Str(s) = e {
-                    let stripped = tags::extract_input(s).unwrap_or_else(|| s.clone());
-                    stripped == old_content
-                } else {
-                    false
-                }
-            });
-            if is_obj_create && !obj_key.is_empty() {
-                // Replace the matched placeholder (or append) with a new Obj.
-                if let Some(idx) = pos {
-                    elems[idx] = new_obj_with_i_placeholder(format!("<input>{obj_key}</input>"));
-                } else {
-                    elems.push(new_obj_with_i_placeholder(format!("<input>{obj_key}</input>")));
-                }
-            } else if let Some(idx) = pos {
-                elems[idx] = FfonElement::new_str(format!("<input>{new_content}</input>"));
-            } else {
-                // No match — append as a new element.
-                elems.push(FfonElement::new_str(format!("<input>{new_content}</input>")));
-            }
+            update_body_elems(elems, old_content, new_content);
         }
     }
 }
@@ -1560,12 +1647,16 @@ impl Provider for EmailClientProvider {
     }
 
     fn commit_edit(&mut self, old_content: &str, new_content: &str) -> bool {
-        // Path: /compose/To, /compose/Subject, /compose/Body:  (or deeper body paths)
-        let field = self.current_path
-            .rfind('/')
-            .map(|i| &self.current_path[i + 1..])
-            .unwrap_or("");
-        match field {
+        // Collect path segments as owned strings so we can freely mutate `self` later.
+        let segs: Vec<String> = self.current_path
+            .trim_start_matches('/')
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_owned())
+            .collect();
+        let last = segs.last().map(|s| s.as_str()).unwrap_or("");
+
+        match last {
             "To" => {
                 self.compose.draft.to = new_content.to_owned();
                 true
@@ -1574,22 +1665,43 @@ impl Provider for EmailClientProvider {
                 self.compose.draft.subject = new_content.to_owned();
                 true
             }
-            // Body: is now a subtree; commit_edit fires for any leaf edit inside it.
-            // The framework pushes no extra path segment for naked <input> elements,
-            // so the last segment is always "Body:" regardless of which child was edited.
-            // We match by old_content to find the right leaf, or add a new element when
-            // old_content="" (a newly-inserted placeholder being committed for the first time).
-            f if f.starts_with("Body:") => {
-                update_body_leaf(&mut self.compose.draft.body, old_content, new_content);
-                // Live format detection — one-way promotion only (never collapses Ffon).
-                let promoted = detect_body_format_live(std::mem::take(&mut self.compose.draft.body));
-                self.compose.draft.body = promoted;
-                // Re-sync variant with structural shape (e.g. collapse Ffon→Text after delete).
-                renormalize_body_variant(&mut self.compose.draft.body);
-                self.sync_body_path_label();
+            _ => {
+                // Find a `Body:` segment anywhere in the path — covers both top-level
+                // (`/compose/Body: [ffon]`) and nested (`/compose/Body: [ffon]/foo/bar`).
+                let Some(body_pos) = segs.iter().position(|s| s.starts_with("Body:")) else {
+                    return false;
+                };
+                // Sub-path: segments after `Body:` (empty → top-level body edit).
+                let sub_segs: Vec<String> = segs[body_pos + 1..].iter().cloned().collect();
+
+                if sub_segs.is_empty() {
+                    // Top-level body edit — same as before.
+                    update_body_leaf(&mut self.compose.draft.body, old_content, new_content);
+                    // Live format detection — one-way promotion only (never collapses Ffon).
+                    let promoted = detect_body_format_live(
+                        std::mem::take(&mut self.compose.draft.body),
+                    );
+                    self.compose.draft.body = promoted;
+                    // Re-sync variant with structural shape.
+                    renormalize_body_variant(&mut self.compose.draft.body);
+                    self.sync_body_path_label();
+                } else {
+                    // Nested body edit — walk the Ffon tree to the target Obj's children
+                    // and apply the mutation there.  No format promotion / label sync:
+                    // the body is already Ffon (you can only navigate into nested Objs when
+                    // the body is Ffon), and the path label doesn't change.
+                    let sub_segs_ref: Vec<&str> =
+                        sub_segs.iter().map(|s| s.as_str()).collect();
+                    if let MailBody::Ffon(ref mut elems) = self.compose.draft.body {
+                        if let Some(target) =
+                            body_elems_at_sub_path_mut(elems, &sub_segs_ref)
+                        {
+                            update_body_elems(target, old_content, new_content);
+                        }
+                    }
+                }
                 true
             }
-            _ => false,
         }
     }
 
@@ -1638,32 +1750,63 @@ impl Provider for EmailClientProvider {
     }
 
     fn fetch_subtree_parent_key(&mut self) -> Option<String> {
-        let segs = self.path_segments().iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        if segs.len() >= 2
-            && matches!(segs[0].as_str(), "compose" | "reply" | "reply all" | "forward")
-        {
+        // Collect as owned strings to avoid borrow conflicts with self.compose.
+        let segs: Vec<String> = self.current_path
+            .trim_start_matches('/')
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_owned())
+            .collect();
+        let in_compose = segs.iter().any(|s| {
+            matches!(s.as_str(), "compose" | "reply" | "reply all" | "forward")
+        });
+        if !in_compose {
+            return None;
+        }
+        let body_pos = segs.iter().position(|s| s.starts_with("Body:"))?;
+        let depth_past_body = segs.len() - (body_pos + 1);
+        if depth_past_body == 0 {
+            // Directly inside `Body:` — update the label to reflect current variant.
             Some(body_format_label(&self.compose.draft.body).to_owned())
         } else {
+            // Nested inside a body Obj — the Obj key should not be replaced; return
+            // None so `refresh_subtree_parent` leaves the existing key intact.
             None
         }
     }
 
     fn fetch_subtree_children(&mut self) -> Option<Vec<FfonElement>> {
-        // When the current path is inside a compose context at sub-level
-        // (e.g. /compose/Body: [text]), return the body children directly.
-        // This lets the placeholder commit path refresh only the Body: Obj's
-        // children without triggering a full `refresh_current_directory` which
-        // would misroute the fetch to `build_message()` and corrupt the FFON.
-        // Check for a compose-root token anywhere in the path — not just segs[0] —
-        // so that reply/forward entered from a message (/INBOX/msg/reply/Body:…)
-        // also gets a targeted subtree refresh instead of a full root rebuild.
-        let segs = self.path_segments().iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        let in_compose = segs.len() >= 2
-            && segs.iter().any(|s| matches!(s.as_str(), "compose" | "reply" | "reply all" | "forward"));
-        if in_compose {
+        // When the current path is inside a compose context, return the body children
+        // at the correct nesting depth instead of doing a full provider re-fetch.
+        // Check for a compose-root token anywhere in the path so that reply/forward
+        // entered from a message (/INBOX/msg/reply/Body:…) also gets a targeted refresh.
+        let segs: Vec<String> = self.current_path
+            .trim_start_matches('/')
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_owned())
+            .collect();
+        let in_compose = segs.iter().any(|s| {
+            matches!(s.as_str(), "compose" | "reply" | "reply all" | "forward")
+        });
+        if !in_compose {
+            return None;
+        }
+        let body_pos = segs.iter().position(|s| s.starts_with("Body:"))?;
+        let sub_segs: Vec<&str> = segs[body_pos + 1..].iter().map(|s| s.as_str()).collect();
+
+        if sub_segs.is_empty() {
+            // Top-level body: return all body children (same as before).
             Some(body_to_compose_children(&self.compose.draft.body))
         } else {
-            None
+            // Nested body: walk the Ffon tree to the target Obj's children.
+            match &self.compose.draft.body {
+                MailBody::Ffon(elems) => {
+                    body_elems_at_sub_path(elems, &sub_segs)
+                        .map(|children| children.to_vec())
+                }
+                MailBody::Text(_) => Some(vec![]),
+            }
         }
     }
 
@@ -3207,5 +3350,237 @@ mod tests {
             }
             other => panic!("expected Ffon([I_PLACEHOLDER]), got: {:?}", other),
         }
+    }
+
+    // ---- seed_i_placeholders ----
+
+    /// Reply from a Ffon-body message that contains a nested Obj: the inherited Obj
+    /// must have I_PLACEHOLDER inserted as its first child.
+    #[test]
+    fn test_reply_nested_ffon_obj_gets_i_placeholder() {
+        let msgs = vec![make_header(1, "alice@example.com", "Hello")];
+        let mut msg = make_message(1);
+        // Source body contains an Obj with a child string (no I_PLACEHOLDER).
+        let nested_obj = {
+            let mut o = FfonElement::new_obj("<input>section</input>".to_owned());
+            o.as_obj_mut().unwrap().push(FfonElement::new_str("<input>content</input>".to_owned()));
+            o
+        };
+        msg.body = MailBody::Ffon(vec![nested_obj]);
+        let imap = MockImap::new().with_messages(msgs).with_detail(msg);
+        let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
+        p.push_path("INBOX");
+        p.fetch();
+        p.push_path("Hello — alice@example.com");
+        p.fetch();
+        p.push_path("reply");
+        p.fetch();
+
+        let MailBody::Ffon(elems) = &p.compose.draft.body else {
+            panic!("expected Ffon body; got: {:?}", p.compose.draft.body);
+        };
+        // Find the inherited nested Obj (third element onward — after I_PLACEHOLDER and attribution).
+        let nested = elems.iter().find_map(|e| {
+            if let FfonElement::Obj(o) = e {
+                if sicompass_sdk::tags::extract_input(&o.key).as_deref() == Some("section") {
+                    return Some(o);
+                }
+            }
+            None
+        }).expect("nested Obj from source body not found in reply draft");
+        assert_eq!(
+            nested.children[0],
+            FfonElement::new_str(I_PLACEHOLDER.to_owned()),
+            "inherited nested Obj must have I_PLACEHOLDER as first child; got: {:?}",
+            nested.children
+        );
+    }
+
+    /// Forward from a Ffon-body message that contains a nested Obj: the inherited Obj
+    /// must have I_PLACEHOLDER seeded.
+    #[test]
+    fn forward_body_nested_ffon_obj_has_i_placeholder() {
+        let msgs = vec![make_header(1, "alice@example.com", "Hello")];
+        let mut msg = make_message(1);
+        let nested_obj = {
+            let mut o = FfonElement::new_obj("<input>attachment</input>".to_owned());
+            o.as_obj_mut().unwrap().push(FfonElement::new_str("<input>data</input>".to_owned()));
+            o
+        };
+        msg.body = MailBody::Ffon(vec![nested_obj]);
+        let imap = MockImap::new().with_messages(msgs).with_detail(msg);
+        let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
+        p.push_path("INBOX");
+        p.fetch();
+        p.push_path("Hello — alice@example.com");
+        p.fetch();
+        p.push_path("forward");
+        p.fetch();
+
+        let MailBody::Ffon(elems) = &p.compose.draft.body else {
+            panic!("expected Ffon body; got: {:?}", p.compose.draft.body);
+        };
+        let nested = elems.iter().find_map(|e| {
+            if let FfonElement::Obj(o) = e {
+                if sicompass_sdk::tags::extract_input(&o.key).as_deref() == Some("attachment") {
+                    return Some(o);
+                }
+            }
+            None
+        }).expect("nested Obj from source body not found in forward draft");
+        assert_eq!(
+            nested.children[0],
+            FfonElement::new_str(I_PLACEHOLDER.to_owned()),
+            "inherited nested Obj must have I_PLACEHOLDER as first child in forward; got: {:?}",
+            nested.children
+        );
+    }
+
+    // ---- update_body_elems / path-aware nested commit ----
+
+    /// `update_body_elems` replaces the placeholder with a plain string in a nested vec.
+    #[test]
+    fn update_body_elems_replaces_placeholder_with_string() {
+        let mut children = vec![FfonElement::new_str(I_PLACEHOLDER.to_owned())];
+        update_body_elems(&mut children, "", "hello");
+        assert_eq!(children.len(), 1);
+        assert!(
+            matches!(&children[0], FfonElement::Str(s) if s == "<input>hello</input>"),
+            "placeholder should be replaced with '<input>hello</input>'; got: {:?}", children[0]
+        );
+    }
+
+    /// `update_body_elems` creates an Obj when content ends with `:`.
+    #[test]
+    fn update_body_elems_trailing_colon_creates_obj() {
+        let mut children = vec![FfonElement::new_str(I_PLACEHOLDER.to_owned())];
+        update_body_elems(&mut children, "", "sub:");
+        assert_eq!(children.len(), 1);
+        match &children[0] {
+            FfonElement::Obj(o) => {
+                assert_eq!(
+                    sicompass_sdk::tags::extract_input(&o.key).as_deref(),
+                    Some("sub"),
+                    "Obj key should be 'sub'; got: {:?}", o.key
+                );
+                assert_eq!(
+                    o.children[0],
+                    FfonElement::new_str(I_PLACEHOLDER.to_owned()),
+                    "newly created nested Obj must have I_PLACEHOLDER child; got: {:?}", o.children
+                );
+            }
+            other => panic!("expected Obj, got: {:?}", other),
+        }
+    }
+
+    /// `commit_edit` at a nested body path (`/compose/Body: [ffon]/foo`) mutates the
+    /// `foo:` Obj's children, not the top-level body vec.
+    #[test]
+    fn commit_edit_nested_body_creates_child_in_nested_obj() {
+        let mut p = EmailClientProvider::new();
+        p.push_path("compose");
+
+        // Pre-build a body with a top-level `foo:` Obj containing only I_PLACEHOLDER.
+        p.compose.draft.body = MailBody::Ffon(vec![
+            new_obj_with_i_placeholder("<input>foo</input>".to_owned()),
+        ]);
+
+        // Simulate being navigated inside `foo:` (path has Body: and then `foo` segment).
+        p.push_path("Body: [ffon]");
+        p.push_path("foo");
+
+        // Commit "bar" onto the placeholder inside `foo:`.
+        assert!(p.commit_edit("", "bar"), "commit should return true");
+
+        let MailBody::Ffon(elems) = &p.compose.draft.body else {
+            panic!("expected Ffon body; got: {:?}", p.compose.draft.body);
+        };
+        assert_eq!(elems.len(), 1, "top-level body should still have exactly one element");
+        let FfonElement::Obj(foo) = &elems[0] else {
+            panic!("expected top-level Obj; got: {:?}", elems[0]);
+        };
+        assert!(
+            foo.children.iter().any(|c| matches!(c, FfonElement::Str(s) if s == "<input>bar</input>")),
+            "bar must be a child of foo, not at top level; foo.children: {:?}", foo.children
+        );
+    }
+
+    /// `commit_edit` with trailing colon at a nested path creates an Obj inside the parent.
+    #[test]
+    fn commit_edit_nested_body_trailing_colon_creates_obj_inside_parent() {
+        let mut p = EmailClientProvider::new();
+        p.push_path("compose");
+        p.compose.draft.body = MailBody::Ffon(vec![
+            new_obj_with_i_placeholder("<input>foo</input>".to_owned()),
+        ]);
+        p.push_path("Body: [ffon]");
+        p.push_path("foo");
+
+        assert!(p.commit_edit("", "baz:"), "commit should return true");
+
+        let MailBody::Ffon(elems) = &p.compose.draft.body else {
+            panic!("expected Ffon body");
+        };
+        let FfonElement::Obj(foo) = &elems[0] else {
+            panic!("expected top-level foo Obj");
+        };
+        // `baz:` Obj should exist inside `foo:`, alongside I_PLACEHOLDER.
+        let baz = foo.children.iter().find_map(|c| {
+            if let FfonElement::Obj(o) = c {
+                if sicompass_sdk::tags::extract_input(&o.key).as_deref() == Some("baz") {
+                    return Some(o);
+                }
+            }
+            None
+        }).expect("baz Obj not found inside foo; foo.children: {:?}");
+        assert_eq!(
+            baz.children[0],
+            FfonElement::new_str(I_PLACEHOLDER.to_owned()),
+            "newly created baz Obj must have I_PLACEHOLDER child"
+        );
+    }
+
+    /// `fetch_subtree_children` returns the nested Obj's children when the path is
+    /// inside a body Obj (`/compose/Body: [ffon]/foo`).
+    #[test]
+    fn fetch_subtree_children_returns_nested_body_children() {
+        let mut p = EmailClientProvider::new();
+        p.push_path("compose");
+
+        let foo_obj = new_obj_with_i_placeholder("<input>foo</input>".to_owned());
+        p.compose.draft.body = MailBody::Ffon(vec![foo_obj.clone()]);
+
+        // Simulate being inside the `foo:` Obj.
+        p.push_path("Body: [ffon]");
+        p.push_path("foo");
+
+        let children = p.fetch_subtree_children()
+            .expect("fetch_subtree_children must return Some when inside a nested body Obj");
+
+        // Should return foo's children (the I_PLACEHOLDER), not the top-level body vec.
+        assert_eq!(children.len(), 1, "expected 1 child (I_PLACEHOLDER); got: {:?}", children);
+        assert_eq!(
+            children[0],
+            FfonElement::new_str(I_PLACEHOLDER.to_owned()),
+            "child should be I_PLACEHOLDER; got: {:?}", children[0]
+        );
+    }
+
+    /// `fetch_subtree_parent_key` returns None when inside a nested body Obj so that
+    /// `refresh_subtree_parent` does not overwrite the Obj's existing key.
+    #[test]
+    fn fetch_subtree_parent_key_returns_none_for_nested_body_obj() {
+        let mut p = EmailClientProvider::new();
+        p.push_path("compose");
+        p.compose.draft.body = MailBody::Ffon(vec![
+            new_obj_with_i_placeholder("<input>foo</input>".to_owned()),
+        ]);
+        p.push_path("Body: [ffon]");
+        p.push_path("foo");
+
+        assert!(
+            p.fetch_subtree_parent_key().is_none(),
+            "parent key must be None for nested body Obj so the key is not overwritten"
+        );
     }
 }
