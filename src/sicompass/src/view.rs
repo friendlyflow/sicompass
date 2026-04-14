@@ -283,6 +283,7 @@ pub fn main_loop(app: &mut AppState) {
 
 struct ParentInfo {
     display_text: String,
+    is_radio: bool,
     radio_summary: Option<String>,
 }
 
@@ -522,26 +523,27 @@ fn update_view(app: &mut AppState) {
                 sicompass_sdk::ffon::FfonElement::Str(s) => s.as_str(),
             };
             let display_text = sicompass_sdk::tags::strip_display(raw_text);
-            let radio_summary = if let sicompass_sdk::ffon::FfonElement::Obj(obj) = elem {
+            let (is_radio, radio_summary) = if let sicompass_sdk::ffon::FfonElement::Obj(obj) = elem {
                 if sicompass_sdk::tags::has_radio(&obj.key) {
-                    obj.children.iter().find_map(|child| {
+                    let checked = obj.children.iter().find_map(|child| {
                         if let sicompass_sdk::ffon::FfonElement::Str(s) = child {
                             if sicompass_sdk::tags::has_checked(s) {
                                 return sicompass_sdk::tags::extract_checked(s);
                             }
                         }
                         None
-                    })
+                    });
+                    (true, checked)
                 } else {
-                    None
+                    (false, None)
                 }
             } else {
-                None
+                (false, None)
             };
-            Some(ParentInfo { display_text, radio_summary })
-        }).unwrap_or(ParentInfo { display_text: String::new(), radio_summary: None })
+            Some(ParentInfo { display_text, is_radio, radio_summary })
+        }).unwrap_or(ParentInfo { display_text: String::new(), is_radio: false, radio_summary: None })
     } else {
-        ParentInfo { display_text: String::new(), radio_summary: None }
+        ParentInfo { display_text: String::new(), is_radio: false, radio_summary: None }
     };
 
     // ---- Scroll-into-view: compute start_index from scroll_offset/list_index --
@@ -743,7 +745,13 @@ fn update_view(app: &mut AppState) {
     // ---- Parent element (when navigated into a child level) ---------------
     if !parent_info.display_text.is_empty() && search_str.is_none() {
         let parent_y = line_height as f32 + ascender * scale + crate::text::TEXT_PADDING;
-        fr.prepare_text_for_rendering(&parent_info.display_text, text_x, parent_y, scale, p.text);
+        let parent_display = if parent_info.is_radio {
+            let state = parent_info.radio_summary.as_deref().unwrap_or("");
+            format!("{} [{}]", parent_info.display_text, state)
+        } else {
+            parent_info.display_text.clone()
+        };
+        fr.prepare_text_for_rendering(&parent_display, text_x, parent_y, scale, p.text);
         if let Some(ref summary) = parent_info.radio_summary {
             let indent = fr.measure_text_width("    ", scale);
             let summary_x = text_x + indent;
