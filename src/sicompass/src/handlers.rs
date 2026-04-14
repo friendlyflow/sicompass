@@ -1829,7 +1829,12 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
     }
 
     if committed {
-        crate::provider::refresh_current_directory(r);
+        // Prefer sub-tree refresh for providers that support it (e.g. email client at
+        // deep paths like /compose/Body: [ffon]/foo). refresh_current_directory rebuilds
+        // the entire provider root and misroutes those paths, leaving the nested list empty.
+        if !crate::provider::refresh_subtree_parent(r) {
+            crate::provider::refresh_current_directory(r);
+        }
         // Auto-navigate into the element if it now has children after refresh
         // (e.g. web browser URL bar gains page content after load).
         // Skip for filebrowser — renaming a directory must not navigate into it.
