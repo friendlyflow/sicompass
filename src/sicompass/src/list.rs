@@ -6,7 +6,7 @@
 use crate::app_state::{AppRenderer, CommandPhase, Coordinate, RenderListItem};
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
-use sicompass_sdk::ffon::{get_ffon_at_id, FfonElement, IdArray};
+use sicompass_sdk::ffon::{get_ffon_at_id, FfonElement, FfonObject, IdArray};
 use sicompass_sdk::tags;
 
 // ---------------------------------------------------------------------------
@@ -213,7 +213,7 @@ pub fn populate_list_current_layer(renderer: &mut AppRenderer, search: &str) {
 fn build_label_for_element(elem: &FfonElement, parent_has_radio: bool) -> String {
     match elem {
         FfonElement::Str(s) => build_str_label(s, parent_has_radio),
-        FfonElement::Obj(obj) => build_obj_label(&obj.key),
+        FfonElement::Obj(obj) => build_obj_label(obj),
     }
 }
 
@@ -260,39 +260,48 @@ fn build_str_label(s: &str, parent_has_radio: bool) -> String {
     format!("{prefix} {content}")
 }
 
-fn build_obj_label(key: &str) -> String {
+fn build_obj_label(obj: &FfonObject) -> String {
+    let raw_key = &obj.key;
     // Strip <one-opt> / <many-opt> first
     let stripped_opt;
-    let key: &str = if tags::has_one_opt(key) {
-        stripped_opt = tags::strip_one_opt(key).to_owned();
+    let key: &str = if tags::has_one_opt(raw_key) {
+        stripped_opt = tags::strip_one_opt(raw_key).to_owned();
         &stripped_opt
-    } else if tags::has_many_opt(key) {
-        stripped_opt = tags::strip_many_opt(key).to_owned();
+    } else if tags::has_many_opt(raw_key) {
+        stripped_opt = tags::strip_many_opt(raw_key).to_owned();
         &stripped_opt
     } else {
         stripped_opt = String::new();
-        key
+        raw_key
     };
     let _ = stripped_opt;
 
-    let (prefix, content): (&str, String) = if tags::has_checkbox_checked(key) {
-        ("+cc", tags::extract_checkbox_checked(key)
-            .unwrap_or_else(|| tags::strip_display(key)))
+    if tags::has_checkbox_checked(key) {
+        let content = tags::extract_checkbox_checked(key)
+            .unwrap_or_else(|| tags::strip_display(key));
+        return format!("+cc {content}");
     } else if tags::has_checkbox(key) {
-        ("+c", tags::extract_checkbox(key)
-            .unwrap_or_else(|| tags::strip_display(key)))
+        let content = tags::extract_checkbox(key)
+            .unwrap_or_else(|| tags::strip_display(key));
+        return format!("+c {content}");
     } else if tags::has_link(key) {
-        ("+l", tags::strip_display(key))
+        return format!("+l {}", tags::strip_display(key));
     } else if tags::has_radio(key) {
-        ("+R", tags::extract_radio(key)
-            .unwrap_or_else(|| tags::strip_display(key)))
+        let group = tags::extract_radio(key)
+            .unwrap_or_else(|| tags::strip_display(key));
+        let state = obj.children.iter().find_map(|c| match c {
+            FfonElement::Str(s) if tags::has_checked(s) => Some(
+                tags::extract_checked(s)
+                    .unwrap_or_else(|| tags::strip_display(s)),
+            ),
+            _ => None,
+        }).unwrap_or_default();
+        return format!("+R {group} [{state}]");
     } else if tags::has_input(key) {
-        ("+i", tags::strip_display(key))
-    } else {
-        ("+", tags::strip_display(key))
-    };
+        return format!("+i {}", tags::strip_display(key));
+    }
 
-    format!("{prefix} {content}")
+    format!("+ {}", tags::strip_display(key))
 }
 
 // ---------------------------------------------------------------------------
