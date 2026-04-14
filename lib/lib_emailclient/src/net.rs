@@ -244,13 +244,6 @@ impl SmtpBackend for RealSmtp {
                 .header(ContentType::TEXT_PLAIN)
                 .body(s.clone())
                 .map_err(|e| e.to_string())?,
-            MailBody::Html(s) => {
-                let plain_fallback = sicompass_sdk::ffon::html_to_ffon(s, "");
-                let plain = crate::flatten_ffon_to_text(&plain_fallback);
-                builder
-                    .multipart(MultiPart::alternative_plain_html(plain, s.clone()))
-                    .map_err(|e| e.to_string())?
-            }
             MailBody::Ffon(elems) => {
                 let json = sicompass_sdk::ffon::to_json_string(elems)
                     .map_err(|e| e.to_string())?;
@@ -386,7 +379,10 @@ fn parse_body_part(raw: &str, content_type: &str, cte: &str) -> MailBody {
     let decoded = decode_transfer_encoding(raw, cte);
 
     match mime {
-        "text/html" => MailBody::Html(decoded),
+        "text/html" => {
+            let elems = sicompass_sdk::ffon::html_to_ffon(&decoded, "");
+            MailBody::Text(crate::flatten_ffon_to_text(&elems))
+        }
         "application/json" => {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&decoded) {
                 if sicompass_sdk::ffon::is_ffon(&v) {
@@ -466,11 +462,9 @@ fn parse_multipart(raw: &str, boundary: &str) -> MailBody {
         parts.push(parse_body_part(part_body, &part_ct, &part_cte));
     }
 
-    // Pick in preference order: Ffon > Html > Text.
+    // Pick in preference order: Ffon > Text.
     let ffon = parts.iter().find(|p| matches!(p, MailBody::Ffon(_)));
     if let Some(f) = ffon { return f.clone(); }
-    let html = parts.iter().find(|p| matches!(p, MailBody::Html(_)));
-    if let Some(h) = html { return h.clone(); }
     parts.into_iter().find(|p| matches!(p, MailBody::Text(_)))
         .unwrap_or_else(|| MailBody::Text(String::new()))
 }
@@ -581,11 +575,12 @@ mod tests {
     fn test_parse_rfc2822_html_content_type() {
         let raw = b"From: a@b.com\r\nSubject: Html\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<p>Hello</p>\r\n";
         let msg = parse_rfc2822(1, raw);
-        assert!(matches!(&msg.body, MailBody::Html(s) if s.contains("<p>Hello</p>")));
+        // HTML is flattened to plain text at parse time.
+        assert!(matches!(&msg.body, MailBody::Text(s) if s.contains("Hello")));
     }
 
     #[test]
-    fn test_parse_rfc2822_multipart_alternative_prefers_html() {
+    fn test_parse_rfc2822_multipart_alternative_html_flattened_to_text() {
         let boundary = "bound1";
         let body = format!(
             "--{boundary}\r\nContent-Type: text/plain\r\n\r\nPlain text\r\n\
@@ -596,7 +591,8 @@ mod tests {
             "From: a@b.com\r\nSubject: Multi\r\nContent-Type: multipart/alternative; boundary=\"{boundary}\"\r\n\r\n{body}"
         );
         let msg = parse_rfc2822(1, raw.as_bytes());
-        assert!(matches!(&msg.body, MailBody::Html(s) if s.contains("<p>Rich</p>")));
+        // Both parts are Text after parsing; first Text match wins (plain text part).
+        assert!(matches!(&msg.body, MailBody::Text(_)));
     }
 
     #[test]

@@ -116,9 +116,12 @@ pub fn refresh_subtree_parent(renderer: &mut AppRenderer) -> bool {
         Some(i) => i,
         None => return false,
     };
-    let children = match renderer.providers.get_mut(idx) {
+    let (children, new_key) = match renderer.providers.get_mut(idx) {
         Some(p) => match p.fetch_subtree_children() {
-            Some(c) => c,
+            Some(c) => {
+                let k = p.fetch_subtree_parent_key();
+                (c, k)
+            }
             None => return false,
         },
         None => return false,
@@ -132,6 +135,9 @@ pub fn refresh_subtree_parent(renderer: &mut AppRenderer) -> bool {
     if let Some(arr) = crate::state::navigate_to_slice_pub(&mut renderer.ffon, &parent_id) {
         if let Some(sicompass_sdk::ffon::FfonElement::Obj(obj)) = arr.get_mut(parent_obj_idx) {
             obj.children = children;
+            if let Some(key) = new_key {
+                obj.key = key;
+            }
         }
     }
     true

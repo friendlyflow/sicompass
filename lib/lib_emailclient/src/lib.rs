@@ -62,13 +62,11 @@ use idle::IdleController;
 
 /// The body of an email message, tagged with its content kind.
 ///
-/// - `Text`  — plain text (`text/plain`)
-/// - `Html`  — raw HTML source (`text/html`)
+/// - `Text`  — plain text (`text/plain`); incoming HTML is flattened to this at parse time.
 /// - `Ffon`  — a structured FFON tree (`application/json` that passes `is_ffon`)
 #[derive(Debug, Clone)]
 pub enum MailBody {
     Text(String),
-    Html(String),
     Ffon(Vec<FfonElement>),
 }
 
@@ -83,11 +81,6 @@ impl MailBody {
     pub fn as_plain(&self) -> String {
         match self {
             MailBody::Text(s) => s.clone(),
-            MailBody::Html(s) => {
-                // Convert HTML to FFON then flatten leaves to text.
-                let elems = sicompass_sdk::ffon::html_to_ffon(s, "");
-                flatten_ffon_to_text(&elems)
-            }
             MailBody::Ffon(elems) => {
                 sicompass_sdk::ffon::to_json_string(elems).unwrap_or_default()
             }
@@ -96,7 +89,7 @@ impl MailBody {
 }
 
 /// Recursively flatten an FFON tree to a plain-text string.
-fn flatten_ffon_to_text(elems: &[FfonElement]) -> String {
+pub(crate) fn flatten_ffon_to_text(elems: &[FfonElement]) -> String {
     let mut out = String::new();
     for elem in elems {
         match elem {
@@ -875,6 +868,18 @@ impl EmailClientProvider {
         items
     }
 
+    /// Sync the last path segment to the current body format label.
+    ///
+    /// Called after any mutation that may change the `MailBody` variant so that
+    /// the parent label shown between the header and the list (e.g. `Body: [ffon]`)
+    /// is always up-to-date.
+    fn sync_body_path_label(&mut self) {
+        let new_label = body_format_label(&self.compose.draft.body);
+        if let Some(slash) = self.current_path.rfind('/') {
+            self.current_path = format!("{}/{new_label}", &self.current_path[..slash]);
+        }
+    }
+
     fn send_draft(&mut self) -> bool {
         self.ensure_fresh_token();
         if let Some(ref mut smtp) = self.smtp {
@@ -1029,10 +1034,6 @@ fn prefill_compose(compose: &mut ComposeState, msg: &EmailMessage, mode: Compose
                         "\n\nOn {} <{}> wrote:\n{}", msg.date, msg.from, quoted
                     ))
                 }
-                MailBody::Html(s) => MailBody::Html(format!(
-                    "<p></p><p>On {} &lt;{}&gt; wrote:</p><blockquote>{}</blockquote>",
-                    msg.date, msg.from, s
-                )),
                 MailBody::Ffon(elems) => MailBody::Ffon(vec![
                     FfonElement::new_str("".to_owned()),
                     FfonElement::Obj(FfonObject {
@@ -1052,11 +1053,6 @@ fn prefill_compose(compose: &mut ComposeState, msg: &EmailMessage, mode: Compose
             compose.draft.body = match &msg.body {
                 MailBody::Text(s) => MailBody::Text(format!(
                     "\n\n---------- Forwarded message ----------\nFrom: {}\nTo: {}\nDate: {}\nSubject: {}\n\n{}",
-                    msg.from, msg.to, msg.date, msg.subject, s
-                )),
-                MailBody::Html(s) => MailBody::Html(format!(
-                    "<p></p><hr><p><b>---------- Forwarded message ----------</b><br>\
-                     From: {}<br>To: {}<br>Date: {}<br>Subject: {}</p>{}",
                     msg.from, msg.to, msg.date, msg.subject, s
                 )),
                 MailBody::Ffon(elems) => MailBody::Ffon(vec![
@@ -1098,11 +1094,6 @@ fn build_message_view(msg: &EmailMessage) -> Vec<FfonElement> {
         MailBody::Text(s) => {
             items.push(FfonElement::new_str(s.clone()));
         }
-        MailBody::Html(s) => {
-            // Convert HTML to FFON via the shared html crate, same as webbrowser.
-            let html_elems = sicompass_sdk::ffon::html_to_ffon(s, "");
-            items.extend(html_elems);
-        }
         MailBody::Ffon(elems) => {
             items.extend(elems.clone());
         }
@@ -1141,16 +1132,13 @@ fn new_obj_with_i_placeholder(key: String) -> FfonElement {
 
 /// Build the children list for the `Body:` Obj in the compose view.
 ///
-/// - Text / Html: one `<input>` leaf with the current content.
+/// - Text: one `<input>` leaf with the current content (empty → no children).
 /// - Ffon: the stored elements directly (each leaf should already carry `<input>` tags).
-///
-/// Always appends a `<button>body_new_line</button>New text line` button at the end
-/// so the user can add elements via Enter as well as via Ctrl+A/I.
 fn body_to_compose_children(body: &MailBody) -> Vec<FfonElement> {
     match body {
-        MailBody::Text(s) | MailBody::Html(s) if !s.is_empty() =>
+        MailBody::Text(s) if !s.is_empty() =>
             vec![FfonElement::new_str(format!("<input>{s}</input>"))],
-        MailBody::Text(_) | MailBody::Html(_) => vec![],
+        MailBody::Text(_) => vec![],
         MailBody::Ffon(elems) => elems.clone(),
     }
 }
@@ -1176,7 +1164,7 @@ fn update_body_leaf(body: &mut MailBody, old_content: &str, new_content: &str) {
     };
 
     match body {
-        MailBody::Text(s) | MailBody::Html(s) => {
+        MailBody::Text(s) => {
             if is_obj_create && !obj_key.is_empty() {
                 // Obj creation — preserve any existing text as a Str leaf and append the new Obj.
                 let existing = s.clone();
@@ -1190,12 +1178,10 @@ fn update_body_leaf(body: &mut MailBody, old_content: &str, new_content: &str) {
             } else if old_content.is_empty() && !s.is_empty() {
                 // A new element is being inserted alongside existing content — upgrade to Ffon.
                 let existing = s.clone();
-                let is_html = matches!(*body, MailBody::Html(_));
                 *body = MailBody::Ffon(vec![
                     FfonElement::new_str(format!("<input>{existing}</input>")),
                     FfonElement::new_str(format!("<input>{new_content}</input>")),
                 ]);
-                let _ = is_html; // future: preserve HTML kind if needed
             } else {
                 // Simple replacement.
                 *s = new_content.to_owned();
@@ -1260,7 +1246,7 @@ fn remove_at(elems: &mut Vec<FfonElement>, path: &[usize]) -> bool {
 /// Remove a body element at the given path (indices into the body's Ffon tree).
 ///
 /// For `Ffon` bodies: walks the tree by `path` and removes the element there.
-/// For `Text`/`Html`: any non-empty single-segment path clears the body.
+/// For `Text`: any non-empty single-segment path clears the body.
 /// After removal, ensures the top-level element list is never left empty.
 fn delete_body_element_at(body: &mut MailBody, path: &[usize]) -> bool {
     match body {
@@ -1273,7 +1259,7 @@ fn delete_body_element_at(body: &mut MailBody, path: &[usize]) -> bool {
             }
             true
         }
-        MailBody::Text(_) | MailBody::Html(_) if !path.is_empty() => {
+        MailBody::Text(_) if !path.is_empty() => {
             *body = MailBody::Ffon(vec![FfonElement::new_str(I_PLACEHOLDER.to_owned())]);
             true
         }
@@ -1294,13 +1280,6 @@ fn body_add_element(body: &mut MailBody) {
                 FfonElement::new_str("<input></input>".to_owned()),
             ]);
         }
-        MailBody::Html(s) => {
-            let existing = s.clone();
-            *body = MailBody::Ffon(vec![
-                FfonElement::new_str(format!("<input>{existing}</input>")),
-                FfonElement::new_str("<input></input>".to_owned()),
-            ]);
-        }
         MailBody::Ffon(elems) => {
             elems.push(FfonElement::new_str("<input></input>".to_owned()));
         }
@@ -1311,17 +1290,15 @@ fn body_add_element(body: &mut MailBody) {
 ///
 /// - Single-element `Ffon([Str("<input>text</input>")])` → `Text(text)`.
 /// - `Text` that parses as valid FFON JSON → `Ffon(parsed)`.
-/// - `Text` that looks like HTML → `Html(text)`.
 /// - Everything else: unchanged.
 fn normalize_body_for_send(body: &MailBody) -> MailBody {
-    use sicompass_sdk::ffon::to_json_string;
     use sicompass_sdk::tags;
 
     match body {
         MailBody::Ffon(elems) if elems.len() == 1 => {
             if let FfonElement::Str(s) = &elems[0] {
                 let plain = tags::extract_input(s).unwrap_or_else(|| s.clone());
-                // Collapse single-element Ffon back to Text (or re-detect as HTML/Ffon).
+                // Collapse single-element Ffon back to Text (or re-detect as Ffon).
                 return normalize_body_for_send(&MailBody::Text(plain.to_owned()));
             }
             body.clone()
@@ -1335,14 +1312,6 @@ fn normalize_body_for_send(body: &MailBody) -> MailBody {
                     }
                 }
             }
-            // Try HTML detection (conservative: must start with a block-level HTML tag).
-            let trimmed = s.trim();
-            let looks_html = trimmed.starts_with("<!DOCTYPE")
-                || trimmed.starts_with("<html")
-                || trimmed.starts_with("<HTML");
-            if looks_html {
-                return MailBody::Html(s.clone());
-            }
             body.clone()
         }
         _ => body.clone(),
@@ -1353,8 +1322,27 @@ fn normalize_body_for_send(body: &MailBody) -> MailBody {
 fn body_format_label(body: &MailBody) -> &'static str {
     match body {
         MailBody::Text(_) => "Body: [text]",
-        MailBody::Html(_) => "Body: [html]",
         MailBody::Ffon(_) => "Body: [ffon]",
+    }
+}
+
+/// Keep the `MailBody` variant in sync with the structural shape after a mutation.
+///
+/// Collapses a single plain-Str `Ffon` leaf back to `Text`; otherwise leaves
+/// the variant alone.  The `I_PLACEHOLDER` sentinel is never collapsed so that
+/// the insertion affordance stays visible in the compose view after the body
+/// is emptied by deleting all children.
+fn renormalize_body_variant(body: &mut MailBody) {
+    use sicompass_sdk::tags;
+    if let MailBody::Ffon(elems) = body {
+        if elems.len() == 1 {
+            if let FfonElement::Str(raw) = &elems[0] {
+                if raw != I_PLACEHOLDER {
+                    let plain = tags::extract_input(raw).unwrap_or_else(|| raw.clone());
+                    *body = MailBody::Text(plain);
+                }
+            }
+        }
     }
 }
 
@@ -1372,14 +1360,6 @@ fn detect_body_format_live(body: MailBody) -> MailBody {
                         return MailBody::Ffon(elems);
                     }
                 }
-            }
-            // Try HTML: must start with a recognised block-level tag.
-            let trimmed = s.trim();
-            if trimmed.starts_with("<!DOCTYPE")
-                || trimmed.starts_with("<html")
-                || trimmed.starts_with("<HTML")
-            {
-                return MailBody::Html(s.clone());
             }
             body
         }
@@ -1593,11 +1573,9 @@ impl Provider for EmailClientProvider {
                 // Live format detection — one-way promotion only (never collapses Ffon).
                 let promoted = detect_body_format_live(std::mem::take(&mut self.compose.draft.body));
                 self.compose.draft.body = promoted;
-                // Sync the path segment to the new label so meta() stays correct.
-                let new_label = body_format_label(&self.compose.draft.body);
-                if let Some(slash) = self.current_path.rfind('/') {
-                    self.current_path = format!("{}/{new_label}", &self.current_path[..slash]);
-                }
+                // Re-sync variant with structural shape (e.g. collapse Ffon→Text after delete).
+                renormalize_body_variant(&mut self.compose.draft.body);
+                self.sync_body_path_label();
                 true
             }
             _ => false,
@@ -1619,6 +1597,8 @@ impl Provider for EmailClientProvider {
             // "Add new line" button inside the Body: subtree.
             "body_new_line" => {
                 body_add_element(&mut self.compose.draft.body);
+                renormalize_body_variant(&mut self.compose.draft.body);
+                self.sync_body_path_label();
             }
             _ => {}
         }
@@ -1646,6 +1626,17 @@ impl Provider for EmailClientProvider {
         self.error_message.take()
     }
 
+    fn fetch_subtree_parent_key(&mut self) -> Option<String> {
+        let segs = self.path_segments().iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        if segs.len() >= 2
+            && matches!(segs[0].as_str(), "compose" | "reply" | "reply all" | "forward")
+        {
+            Some(body_format_label(&self.compose.draft.body).to_owned())
+        } else {
+            None
+        }
+    }
+
     fn fetch_subtree_children(&mut self) -> Option<Vec<FfonElement>> {
         // When the current path is inside a compose context at sub-level
         // (e.g. /compose/Body: [text]), return the body children directly.
@@ -1663,7 +1654,12 @@ impl Provider for EmailClientProvider {
     }
 
     fn delete_element(&mut self, path: &[usize]) -> bool {
-        delete_body_element_at(&mut self.compose.draft.body, path)
+        let removed = delete_body_element_at(&mut self.compose.draft.body, path);
+        if removed {
+            renormalize_body_variant(&mut self.compose.draft.body);
+            self.sync_body_path_label();
+        }
+        removed
     }
 
     fn commands(&self) -> Vec<String> {
@@ -3012,5 +3008,103 @@ mod tests {
             FfonElement::new_str("<input>x</input>".to_owned()),
         ]);
         assert!(!delete_body_element_at(&mut body, &[]), "empty path should return false");
+    }
+
+    // ---- renormalize_body_variant ----
+
+    #[test]
+    fn renormalize_collapses_single_str_to_text() {
+        let mut body = MailBody::Ffon(vec![FfonElement::new_str("<input>hello</input>".to_owned())]);
+        renormalize_body_variant(&mut body);
+        assert!(matches!(&body, MailBody::Text(s) if s == "hello"), "expected Text(hello), got: {:?}", body);
+    }
+
+    #[test]
+    fn renormalize_preserves_i_placeholder() {
+        let mut body = MailBody::Ffon(vec![FfonElement::new_str(I_PLACEHOLDER.to_owned())]);
+        renormalize_body_variant(&mut body);
+        assert!(matches!(&body, MailBody::Ffon(elems) if elems.len() == 1), "i placeholder should stay Ffon");
+    }
+
+    #[test]
+    fn renormalize_preserves_multi_child() {
+        let mut body = MailBody::Ffon(vec![
+            FfonElement::new_str("<input>a</input>".to_owned()),
+            FfonElement::new_str("<input>b</input>".to_owned()),
+        ]);
+        renormalize_body_variant(&mut body);
+        assert!(matches!(&body, MailBody::Ffon(elems) if elems.len() == 2), "multi-child Ffon should stay Ffon");
+    }
+
+    #[test]
+    fn renormalize_preserves_obj_child() {
+        let mut body = MailBody::Ffon(vec![new_obj_with_i_placeholder("<input>key</input>".to_owned())]);
+        renormalize_body_variant(&mut body);
+        assert!(matches!(&body, MailBody::Ffon(_)), "single Obj child should stay Ffon");
+    }
+
+    #[test]
+    fn renormalize_noop_on_text() {
+        let mut body = MailBody::Text("hello".to_owned());
+        renormalize_body_variant(&mut body);
+        assert!(matches!(&body, MailBody::Text(s) if s == "hello"), "Text should be unchanged");
+    }
+
+    /// End-to-end: deleting the second of two string children collapses body to Text.
+    #[test]
+    fn delete_second_child_collapses_to_text() {
+        let mut p = EmailClientProvider::new();
+        p.push_path("compose");
+        p.push_path("Body: [text]");
+        // Promote to Ffon with two leaves.
+        p.compose.draft.body = MailBody::Ffon(vec![
+            FfonElement::new_str("<input>hello</input>".to_owned()),
+            FfonElement::new_str("<input>world</input>".to_owned()),
+        ]);
+        // Delete the second child.
+        assert!(p.delete_element(&[1]));
+        assert!(
+            matches!(&p.compose.draft.body, MailBody::Text(s) if s == "hello"),
+            "body should collapse to Text(hello) after deleting second child; got: {:?}",
+            p.compose.draft.body
+        );
+    }
+
+    /// End-to-end: deleting the Obj of a Ffon([Str, Obj]) body collapses to Text.
+    #[test]
+    fn delete_obj_child_collapses_to_text() {
+        let mut p = EmailClientProvider::new();
+        p.push_path("compose");
+        p.push_path("Body: [text]");
+        p.compose.draft.body = MailBody::Ffon(vec![
+            FfonElement::new_str("<input>hello</input>".to_owned()),
+            new_obj_with_i_placeholder("<input>myobj</input>".to_owned()),
+        ]);
+        // Delete the Obj (index 1).
+        assert!(p.delete_element(&[1]));
+        assert!(
+            matches!(&p.compose.draft.body, MailBody::Text(s) if s == "hello"),
+            "body should collapse to Text(hello) after deleting Obj; got: {:?}",
+            p.compose.draft.body
+        );
+    }
+
+    /// End-to-end: deleting the last content child leaves Ffon([I_PLACEHOLDER]).
+    #[test]
+    fn delete_last_content_child_stays_ffon_with_placeholder() {
+        let mut p = EmailClientProvider::new();
+        p.push_path("compose");
+        p.push_path("Body: [text]");
+        p.compose.draft.body = MailBody::Ffon(vec![
+            FfonElement::new_str("<input>hello</input>".to_owned()),
+        ]);
+        assert!(p.delete_element(&[0]));
+        match &p.compose.draft.body {
+            MailBody::Ffon(elems) => {
+                assert_eq!(elems.len(), 1);
+                assert_eq!(elems[0], FfonElement::new_str(I_PLACEHOLDER.to_owned()));
+            }
+            other => panic!("expected Ffon([I_PLACEHOLDER]), got: {:?}", other),
+        }
     }
 }
