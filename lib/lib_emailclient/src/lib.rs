@@ -1167,7 +1167,7 @@ fn update_body_leaf(body: &mut MailBody, old_content: &str, new_content: &str) {
                 } else {
                     vec![FfonElement::new_str(format!("<input>{existing}</input>"))]
                 };
-                elems.push(FfonElement::new_obj(obj_key));
+                elems.push(FfonElement::new_obj(format!("<input>{obj_key}</input>")));
                 *body = MailBody::Ffon(elems);
             } else if old_content.is_empty() && !s.is_empty() {
                 // A new element is being inserted alongside existing content — upgrade to Ffon.
@@ -1196,9 +1196,9 @@ fn update_body_leaf(body: &mut MailBody, old_content: &str, new_content: &str) {
             if is_obj_create && !obj_key.is_empty() {
                 // Replace the matched placeholder (or append) with a new Obj.
                 if let Some(idx) = pos {
-                    elems[idx] = FfonElement::new_obj(obj_key);
+                    elems[idx] = FfonElement::new_obj(format!("<input>{obj_key}</input>"));
                 } else {
-                    elems.push(FfonElement::new_obj(obj_key));
+                    elems.push(FfonElement::new_obj(format!("<input>{obj_key}</input>")));
                 }
             } else if let Some(idx) = pos {
                 elems[idx] = FfonElement::new_str(format!("<input>{new_content}</input>"));
@@ -1223,7 +1223,10 @@ fn delete_body_element(body: &mut MailBody, old_content: &str) -> bool {
                     let stripped = tags::extract_input(s).unwrap_or_else(|| s.clone());
                     stripped == old_content
                 }
-                FfonElement::Obj(o) => o.key == old_content,
+                FfonElement::Obj(o) => {
+                    let stripped = tags::extract_input(&o.key).unwrap_or_else(|| o.key.clone());
+                    stripped == old_content
+                }
             });
             if let Some(idx) = pos {
                 elems.remove(idx);
@@ -2743,7 +2746,10 @@ mod tests {
         update_body_leaf(&mut body, "", "section:");
         match &body {
             MailBody::Ffon(elems) => {
-                let has_obj = elems.iter().any(|e| matches!(e, FfonElement::Obj(o) if o.key == "section"));
+                let has_obj = elems.iter().any(|e| match e {
+                    FfonElement::Obj(o) => sicompass_sdk::tags::extract_input(&o.key).as_deref() == Some("section"),
+                    _ => false,
+                });
                 assert!(has_obj, "expected Obj(section) in Ffon; got: {:?}", elems);
             }
             other => panic!("expected Ffon body, got: {:?}", other),
@@ -2757,7 +2763,10 @@ mod tests {
         match &body {
             MailBody::Ffon(elems) => {
                 let has_existing = elems.iter().any(|e| matches!(e, FfonElement::Str(s) if s.contains("existing")));
-                let has_obj = elems.iter().any(|e| matches!(e, FfonElement::Obj(o) if o.key == "header"));
+                let has_obj = elems.iter().any(|e| match e {
+                    FfonElement::Obj(o) => sicompass_sdk::tags::extract_input(&o.key).as_deref() == Some("header"),
+                    _ => false,
+                });
                 assert!(has_existing && has_obj, "existing text and new Obj must both be present; got: {:?}", elems);
             }
             other => panic!("expected Ffon body, got: {:?}", other),
@@ -2771,7 +2780,10 @@ mod tests {
         match &body {
             MailBody::Ffon(elems) => {
                 assert_eq!(elems.len(), 2, "should have 2 elements; got: {:?}", elems);
-                let has_obj = elems.iter().any(|e| matches!(e, FfonElement::Obj(o) if o.key == "meta"));
+                let has_obj = elems.iter().any(|e| match e {
+                    FfonElement::Obj(o) => sicompass_sdk::tags::extract_input(&o.key).as_deref() == Some("meta"),
+                    _ => false,
+                });
                 assert!(has_obj, "expected Obj(meta) appended; got: {:?}", elems);
             }
             other => panic!("expected Ffon body, got: {:?}", other),
@@ -2786,7 +2798,10 @@ mod tests {
         assert!(p.commit_edit("", "myobj:"));
         match &p.compose.draft.body {
             MailBody::Ffon(elems) => {
-                let has_obj = elems.iter().any(|e| matches!(e, FfonElement::Obj(o) if o.key == "myobj"));
+                let has_obj = elems.iter().any(|e| match e {
+                    FfonElement::Obj(o) => sicompass_sdk::tags::extract_input(&o.key).as_deref() == Some("myobj"),
+                    _ => false,
+                });
                 assert!(has_obj, "expected Obj(myobj) in body; got: {:?}", elems);
             }
             other => panic!("expected Ffon body after Obj commit, got: {:?}", other),
