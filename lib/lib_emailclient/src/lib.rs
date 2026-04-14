@@ -1024,24 +1024,25 @@ fn prefill_compose(compose: &mut ComposeState, msg: &EmailMessage, mode: Compose
             } else {
                 format!("Re: {}", msg.subject)
             };
-            // Flat structure: I_PLACEHOLDER, attribution header, then original body
-            // elements directly — no nested "On … wrote:" Obj, so all content is
-            // visible at the body list level without extra navigation.
-            let attribution = format!(
-                "<input>On {} <{}> wrote:</input>", msg.date, msg.from
-            );
             compose.draft.body = match &msg.body {
+                // Text-origin: keep as text. Attribution + "> "-quoted lines
+                // are prepended as plain text; body_to_compose_children will
+                // render the whole blob as one editable <input> leaf.
                 MailBody::Text(s) => {
-                    let mut elems = vec![
-                        FfonElement::new_str(I_PLACEHOLDER.to_owned()),
-                        FfonElement::new_str(attribution),
-                    ];
-                    elems.extend(
-                        s.lines().map(|l| FfonElement::new_str(format!("<input>> {l}</input>")))
-                    );
-                    MailBody::Ffon(elems)
+                    let mut draft = format!("On {} <{}> wrote:\n", msg.date, msg.from);
+                    for l in s.lines() {
+                        draft.push_str("> ");
+                        draft.push_str(l);
+                        draft.push('\n');
+                    }
+                    MailBody::Text(draft)
                 }
+                // FFON-origin: preserve structure. Flat I_PLACEHOLDER +
+                // attribution leaf + seeded original elements.
                 MailBody::Ffon(orig) => {
+                    let attribution = format!(
+                        "<input>On {} <{}> wrote:</input>", msg.date, msg.from
+                    );
                     let mut elems = vec![
                         FfonElement::new_str(I_PLACEHOLDER.to_owned()),
                         FfonElement::new_str(attribution),
@@ -1060,25 +1061,27 @@ fn prefill_compose(compose: &mut ComposeState, msg: &EmailMessage, mode: Compose
             } else {
                 format!("Fwd: {}", msg.subject)
             };
-            // Flat structure: I_PLACEHOLDER, forwarded header lines, then original
-            // body elements directly — all content visible at body list level.
-            let fwd_header: Vec<FfonElement> = vec![
-                FfonElement::new_str("<input>---------- Forwarded message ----------</input>".to_owned()),
-                FfonElement::new_str(format!("<input>From: {}</input>", msg.from)),
-                FfonElement::new_str(format!("<input>To: {}</input>", msg.to)),
-                FfonElement::new_str(format!("<input>Date: {}</input>", msg.date)),
-                FfonElement::new_str(format!("<input>Subject: {}</input>", msg.subject)),
-            ];
             compose.draft.body = match &msg.body {
+                // Text-origin: keep as text. Forwarded-header block + original
+                // body as plain text; rendered as one editable <input> leaf.
                 MailBody::Text(s) => {
-                    let mut elems = vec![FfonElement::new_str(I_PLACEHOLDER.to_owned())];
-                    elems.extend(fwd_header);
-                    elems.extend(
-                        s.lines().map(|l| FfonElement::new_str(format!("<input>{l}</input>")))
+                    let mut draft = format!(
+                        "---------- Forwarded message ----------\nFrom: {}\nTo: {}\nDate: {}\nSubject: {}\n\n{}",
+                        msg.from, msg.to, msg.date, msg.subject, s
                     );
-                    MailBody::Ffon(elems)
+                    if !draft.ends_with('\n') { draft.push('\n'); }
+                    MailBody::Text(draft)
                 }
+                // FFON-origin: preserve structure. Flat I_PLACEHOLDER +
+                // forwarded-header leaves + seeded original elements.
                 MailBody::Ffon(orig) => {
+                    let fwd_header: Vec<FfonElement> = vec![
+                        FfonElement::new_str("<input>---------- Forwarded message ----------</input>".to_owned()),
+                        FfonElement::new_str(format!("<input>From: {}</input>", msg.from)),
+                        FfonElement::new_str(format!("<input>To: {}</input>", msg.to)),
+                        FfonElement::new_str(format!("<input>Date: {}</input>", msg.date)),
+                        FfonElement::new_str(format!("<input>Subject: {}</input>", msg.subject)),
+                    ];
                     let mut elems = vec![FfonElement::new_str(I_PLACEHOLDER.to_owned())];
                     elems.extend(fwd_header);
                     let mut orig_cloned = orig.clone();
@@ -2532,21 +2535,17 @@ mod tests {
         p.fetch();
         p.push_path("forward");
         p.fetch();
-        // Forward bodies are now always Ffon: [I_PLACEHOLDER, <input>fwd_block</input>].
-        let MailBody::Ffon(elems) = &p.compose.draft.body else {
-            panic!("expected Ffon body after forward; got: {:?}", p.compose.draft.body);
+        // Text-origin forward: MailBody::Text with the forwarded-header block prepended.
+        let MailBody::Text(body) = &p.compose.draft.body else {
+            panic!("expected Text body after forwarding text-origin mail; got: {:?}", p.compose.draft.body);
         };
-        assert_eq!(elems[0], FfonElement::new_str(I_PLACEHOLDER.to_owned()), "first elem must be i placeholder");
-        let fwd_header = elems[1].as_str().unwrap_or("");
-        assert!(fwd_header.contains("Forwarded message"), "fwd block must contain 'Forwarded message'");
-        // sender address is in the From: header line (flat structure)
-        let has_sender = elems.iter().any(|e| e.as_str().map(|s| s.contains("alice@example.com")).unwrap_or(false));
-        assert!(has_sender, "fwd block must contain sender address");
+        assert!(body.contains("Forwarded message"), "forward body must contain 'Forwarded message'");
+        assert!(body.contains("alice@example.com"), "forward body must contain sender address");
     }
 
     #[test]
-    fn test_reply_body_starts_with_i_placeholder() {
-        // Text-body message: reply body must be Ffon([I_PLACEHOLDER, <input>quoted</input>]).
+    fn test_reply_body_text_origin_stays_text() {
+        // Text-origin reply: body stays MailBody::Text with attribution + "> "-quoted lines.
         let msgs = vec![make_header(1, "alice@example.com", "Hello")];
         let msg = make_message(1); // Text("Hi Bob!")
         let imap = MockImap::new().with_messages(msgs).with_detail(msg);
@@ -2557,24 +2556,16 @@ mod tests {
         p.fetch();
         p.push_path("reply");
         p.fetch();
-        let MailBody::Ffon(elems) = &p.compose.draft.body else {
-            panic!("expected Ffon body after reply; got: {:?}", p.compose.draft.body);
+        let MailBody::Text(body) = &p.compose.draft.body else {
+            panic!("expected Text body after replying to text-origin mail; got: {:?}", p.compose.draft.body);
         };
-        assert_eq!(
-            elems[0],
-            FfonElement::new_str(I_PLACEHOLDER.to_owned()),
-            "reply body must start with i placeholder"
-        );
-        // flat structure: elems[1] = attribution line, elems[2+] = quoted body lines
-        let attribution = elems[1].as_str().unwrap_or("");
-        assert!(attribution.contains("wrote:"), "reply body must include attribution line");
-        let has_quoted = elems.iter().skip(2).any(|e| e.as_str().map(|s| s.contains("Hi Bob!")).unwrap_or(false));
-        assert!(has_quoted, "reply body must include quoted text");
+        assert!(body.contains("wrote:"), "reply body must include attribution line");
+        assert!(body.contains("> Hi Bob!"), "reply body must include \"> \"-quoted original text");
     }
 
     #[test]
-    fn test_forward_body_starts_with_i_placeholder() {
-        // Text-body message: forward body must be Ffon([I_PLACEHOLDER, <input>fwd_block</input>]).
+    fn test_forward_body_text_origin_stays_text() {
+        // Text-origin forward: body stays MailBody::Text with forwarded-header block prepended.
         let msgs = vec![make_header(1, "alice@example.com", "Hello")];
         let msg = make_message(1);
         let imap = MockImap::new().with_messages(msgs).with_detail(msg);
@@ -2585,14 +2576,11 @@ mod tests {
         p.fetch();
         p.push_path("forward");
         p.fetch();
-        let MailBody::Ffon(elems) = &p.compose.draft.body else {
-            panic!("expected Ffon body after forward; got: {:?}", p.compose.draft.body);
+        let MailBody::Text(body) = &p.compose.draft.body else {
+            panic!("expected Text body after forwarding text-origin mail; got: {:?}", p.compose.draft.body);
         };
-        assert_eq!(
-            elems[0],
-            FfonElement::new_str(I_PLACEHOLDER.to_owned()),
-            "forward body must start with i placeholder"
-        );
+        assert!(body.contains("Forwarded message"), "forward body must include forwarded-header block");
+        assert!(body.contains("Hi Bob!"), "forward body must include original text");
     }
 
     #[test]
