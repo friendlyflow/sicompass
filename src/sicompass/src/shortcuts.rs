@@ -171,32 +171,6 @@ fn children_have_input(r: &AppRenderer) -> bool {
     })
 }
 
-/// True when the focused element is a checkbox.
-fn focused_is_checkbox(r: &AppRenderer) -> bool {
-    let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) else { return false };
-    let idx = r.current_id.last().unwrap_or(0);
-    slice.get(idx).is_some_and(|e| {
-        let k = match e {
-            sicompass_sdk::ffon::FfonElement::Str(s) => s.as_str(),
-            sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.as_str(),
-        };
-        tags::has_checkbox(k) || tags::has_checkbox_checked(k)
-    })
-}
-
-/// True when the focused element is a radio button.
-fn focused_is_radio(r: &AppRenderer) -> bool {
-    let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) else { return false };
-    let idx = r.current_id.last().unwrap_or(0);
-    slice.get(idx).is_some_and(|e| {
-        let k = match e {
-            sicompass_sdk::ffon::FfonElement::Str(s) => s.as_str(),
-            sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.as_str(),
-        };
-        tags::has_radio(k)
-    })
-}
-
 /// True when the focused element is a button.
 fn focused_is_button(r: &AppRenderer) -> bool {
     let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) else { return false };
@@ -302,16 +276,6 @@ fn avail_enter_activate(r: &AppRenderer) -> bool {
 /// Enter "Follow link" — focused item is a link.
 fn avail_enter_follow_link(r: &AppRenderer) -> bool {
     not_at_root(r) && focused_is_link(r)
-}
-
-/// Space "Toggle" — focused item is a checkbox.
-fn avail_space_toggle(r: &AppRenderer) -> bool {
-    focused_is_checkbox(r)
-}
-
-/// Space "Select" — focused item is a radio button.
-fn avail_space_select(r: &AppRenderer) -> bool {
-    focused_is_radio(r)
 }
 
 /// Enter in OperatorGeneral: not at root, not a link/button hint
@@ -638,16 +602,6 @@ pub static SHORTCUTS: &[Shortcut] = &[
         label: "Ctrl+A Select all", is_available: always, handle: handlers::handle_select_all },
 
     // ---- Space -----------------------------------------------------------
-    // Toggle checkbox (hint shown when checkbox focused)
-    Shortcut { key: Keycode::Space, key2: None, ctrl: false, shift: false,
-        modes: GENERAL,
-        label: "Space  Toggle", is_available: avail_space_toggle,
-        handle: handlers::handle_space },
-    // Select radio (hint shown when radio focused)
-    Shortcut { key: Keycode::Space, key2: None, ctrl: false, shift: false,
-        modes: GENERAL,
-        label: "Space  Select", is_available: avail_space_select,
-        handle: handlers::handle_space },
     // Toggle operator/editor mode (always available, shown as hint; fires when not already a label match)
     Shortcut { key: Keycode::Space, key2: None, ctrl: false, shift: false,
         modes: GENERAL,
