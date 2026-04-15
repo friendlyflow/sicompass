@@ -3704,3 +3704,220 @@ fn editing_leaf_in_nested_compose_body_does_not_empty_list() {
         "nested foo: list must be non-empty after editing a leaf; got empty list (refresh_current_directory misroute regression)"
     );
 }
+
+/// Helper: create a stub IMAP backend + renderer positioned inside an opened
+/// email message (flat FFON at depth 2, provider path = "/INBOX/msg_label").
+/// Returns the renderer ready for key dispatch.
+///
+/// The email provider's navigate_right_raw uses refresh_on_navigate=true, which
+/// always resets current_id to [provider_idx, 0] (depth 2) and rebuilds ffon[0]
+/// as a flat Obj{msg_key, body_children}.  This helper replicates that runtime
+/// state without going through the full SDL/network stack.
+fn email_renderer_inside_message() -> AppRenderer {
+    use sicompass_emailclient::{EmailClientProvider, ImapBackend, FolderInfo, MessageHeader, EmailMessage};
+    use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
+
+    struct StubImap { messages: Vec<MessageHeader>, removed_uids: Vec<u32> }
+    impl ImapBackend for StubImap {
+        fn list_folders(&mut self) -> Result<Vec<FolderInfo>, String> {
+            Ok(vec![
+                FolderInfo { name: "INBOX".to_owned(), attributes: vec![] },
+                FolderInfo { name: "[Gmail]/Trash".to_owned(),
+                             attributes: vec!["\\Trash".to_owned()] },
+            ])
+        }
+        fn list_messages(&mut self, _f: &str, _l: usize) -> Result<Vec<MessageHeader>, String> {
+            // Exclude removed UIDs so the list reflects post-delete state.
+            Ok(self.messages.iter().filter(|m| !self.removed_uids.contains(&m.uid)).cloned().collect())
+        }
+        fn fetch_message(&mut self, _: &str, _: u32) -> Result<Option<EmailMessage>, String> { Ok(None) }
+        fn fetch_message_by_message_id(&mut self, _: &str, _: &str) -> Result<Option<EmailMessage>, String> { Ok(None) }
+        fn set_flags(&mut self, _: &str, _: u32, _: &[&str], _: &[&str]) -> Result<(), String> { Ok(()) }
+        fn copy_message(&mut self, _: &str, _: u32, _: &str) -> Result<(), String> { Ok(()) }
+        fn move_message(&mut self, _: &str, uid: u32, _: &str) -> Result<(), String> {
+            self.removed_uids.push(uid); Ok(())
+        }
+        fn expunge_uid(&mut self, _: &str, uid: u32) -> Result<(), String> {
+            self.removed_uids.push(uid); Ok(())
+        }
+    }
+
+    let msgs = vec![
+        MessageHeader { uid: 1, from: "alice@x.com".to_owned(),
+                        subject: "Alpha".to_owned(), date: String::new(), seen: true, flagged: false },
+        MessageHeader { uid: 2, from: "bob@x.com".to_owned(),
+                        subject: "Beta".to_owned(), date: String::new(), seen: true, flagged: false },
+    ];
+
+    let provider = EmailClientProvider::new()
+        .with_oauth_token("fake")
+        .with_imap(Box::new(StubImap { messages: msgs, removed_uids: vec![] }));
+
+    let mut renderer = AppRenderer::new();
+    register_no_init(&mut renderer, Box::new(provider));
+
+    // Populate message_cache (needed by lookup_uid during delete).
+    renderer.providers[0].set_current_path("INBOX");
+    let _ = renderer.providers[0].fetch();
+
+    // Simulate navigate_right into "Alpha": push the message label to provider path.
+    // Provider path is now "/INBOX/[read] Alpha — alice@x.com" (2 segments).
+    renderer.providers[0].push_path("[read] Alpha — alice@x.com");
+
+    // Flat FFON that navigate_right_raw / refresh_current_directory produces at
+    // this path: root Obj = the opened message, children = body elements.
+    let mut root = FfonElement::new_obj("[read] Alpha — alice@x.com");
+    root.as_obj_mut().unwrap().children = vec![
+        FfonElement::Str("body text".to_owned()),
+    ];
+    renderer.ffon[0] = root;
+
+    // current_id = [0, 0]: depth 2, cursor on first body element (same shape as
+    // all lazy-fetch navigation inside the email provider).
+    renderer.current_id = {
+        let mut id = IdArray::new();
+        id.push(0); // provider
+        id.push(0); // first body element
+        id
+    };
+    renderer.coordinate = Coordinate::OperatorGeneral;
+    sicompass::list::create_list_current_layer(&mut renderer);
+    renderer
+}
+
+/// Pressing Ctrl+D while inside an opened message (flat FFON depth 2, provider
+/// path "/INBOX/msg_label") must delete the message, return to the message list,
+/// and place the cursor on the next/prev message — the same behaviour as deleting
+/// directly from the message list.
+///
+/// Setup: Alpha is at index 0, Beta at index 1.  We open Alpha (provider path
+/// "/INBOX/[read] Alpha — alice@x.com"), then press Ctrl+D.
+/// Expected: view is the message list, cursor at 0 (Beta shifted into slot 0).
+#[test]
+fn ctrl_d_from_inside_message_shows_message_list_with_cursor_on_next() {
+    let mut renderer = email_renderer_inside_message();
+
+    // Pre-condition: depth 2, flat FFON shows the message body.
+    assert_eq!(renderer.current_id.depth(), 2, "pre-condition: depth must be 2");
+
+    press_ctrl(&mut renderer, Keycode::D);
+
+    assert!(
+        renderer.error_message.is_empty(),
+        "delete must succeed; got: {:?}", renderer.error_message
+    );
+
+    // View must be the message list (ffon[0] key = folder name, not message label).
+    let root_key = renderer.ffon[0].as_obj().map(|o| o.key.as_str()).unwrap_or("");
+    assert_eq!(root_key, "INBOX",
+        "after delete, ffon[0] must be the INBOX folder Obj; got: {root_key:?}");
+
+    // Alpha must be gone; Beta must be present.
+    let children = renderer.ffon[0].as_obj().map(|o| o.children.as_slice()).unwrap_or(&[]);
+    assert!(
+        !children.iter().any(|e| e.as_obj().map_or(false, |o| o.key.contains("Alpha"))),
+        "Alpha must be absent from the message list after deletion"
+    );
+    assert!(
+        children.iter().any(|e| e.as_obj().map_or(false, |o| o.key.contains("Beta"))),
+        "Beta must still be in the message list"
+    );
+
+    // Cursor must be valid and point to Beta (the next/prev message).
+    let cursor = renderer.current_id.last().unwrap_or(0);
+    assert!(
+        children.is_empty() || cursor < children.len(),
+        "cursor {cursor} must be within message list of length {}", children.len()
+    );
+    if !children.is_empty() {
+        let selected_key = children[cursor].as_obj().map(|o| o.key.as_str()).unwrap_or("");
+        assert!(
+            selected_key.contains("Beta"),
+            "cursor must point to Beta after Alpha deleted; got: {selected_key:?}"
+        );
+    }
+}
+
+/// Pressing Ctrl+D while on a message in the message list (provider path "/INBOX",
+/// flat FFON at depth 2, cursor on a message Obj) must remove it and keep the
+/// cursor valid in the refreshed list.
+#[test]
+fn ctrl_d_from_message_list_removes_message() {
+    use sicompass_emailclient::{EmailClientProvider, ImapBackend, FolderInfo, MessageHeader, EmailMessage};
+    use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
+
+    struct StubImap2 { messages: Vec<MessageHeader>, removed_uids: Vec<u32> }
+    impl ImapBackend for StubImap2 {
+        fn list_folders(&mut self) -> Result<Vec<FolderInfo>, String> {
+            Ok(vec![
+                FolderInfo { name: "INBOX".to_owned(), attributes: vec![] },
+                FolderInfo { name: "[Gmail]/Trash".to_owned(),
+                             attributes: vec!["\\Trash".to_owned()] },
+            ])
+        }
+        fn list_messages(&mut self, _f: &str, _l: usize) -> Result<Vec<MessageHeader>, String> {
+            Ok(self.messages.iter().filter(|m| !self.removed_uids.contains(&m.uid)).cloned().collect())
+        }
+        fn fetch_message(&mut self, _: &str, _: u32) -> Result<Option<EmailMessage>, String> { Ok(None) }
+        fn fetch_message_by_message_id(&mut self, _: &str, _: &str) -> Result<Option<EmailMessage>, String> { Ok(None) }
+        fn set_flags(&mut self, _: &str, _: u32, _: &[&str], _: &[&str]) -> Result<(), String> { Ok(()) }
+        fn copy_message(&mut self, _: &str, _: u32, _: &str) -> Result<(), String> { Ok(()) }
+        fn move_message(&mut self, _: &str, uid: u32, _: &str) -> Result<(), String> {
+            self.removed_uids.push(uid); Ok(())
+        }
+        fn expunge_uid(&mut self, _: &str, uid: u32) -> Result<(), String> {
+            self.removed_uids.push(uid); Ok(())
+        }
+    }
+
+    let msgs = vec![
+        MessageHeader { uid: 1, from: "alice@x.com".to_owned(),
+                        subject: "Alpha".to_owned(), date: String::new(), seen: true, flagged: false },
+        MessageHeader { uid: 2, from: "bob@x.com".to_owned(),
+                        subject: "Beta".to_owned(), date: String::new(), seen: true, flagged: false },
+    ];
+
+    let provider = EmailClientProvider::new()
+        .with_oauth_token("fake")
+        .with_imap(Box::new(StubImap2 { messages: msgs, removed_uids: vec![] }));
+
+    let mut renderer = AppRenderer::new();
+    register_no_init(&mut renderer, Box::new(provider));
+
+    // Simulate being at the message list: path = "/INBOX", flat FFON with 2 messages.
+    renderer.providers[0].set_current_path("INBOX");
+    let msgs_elements = renderer.providers[0].fetch(); // also populates message_cache
+
+    let mut root = FfonElement::new_obj("INBOX");
+    root.as_obj_mut().unwrap().children = msgs_elements;
+    renderer.ffon[0] = root;
+
+    // Cursor on Alpha (index 0).
+    renderer.current_id = {
+        let mut id = IdArray::new();
+        id.push(0);
+        id.push(0); // Alpha
+        id
+    };
+    renderer.coordinate = Coordinate::OperatorGeneral;
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    let before_len = renderer.ffon[0].as_obj().map(|o| o.children.len()).unwrap_or(0);
+    assert_eq!(before_len, 2, "pre-condition: must start with 2 messages");
+
+    press_ctrl(&mut renderer, Keycode::D);
+
+    assert!(renderer.error_message.is_empty(),
+        "delete must succeed; got: {:?}", renderer.error_message);
+
+    // Root must still be the INBOX message list.
+    let root_key = renderer.ffon[0].as_obj().map(|o| o.key.as_str()).unwrap_or("");
+    assert_eq!(root_key, "INBOX", "root key must remain INBOX after delete from message list");
+
+    let after_len = renderer.ffon[0].as_obj().map(|o| o.children.len()).unwrap_or(0);
+    let cursor = renderer.current_id.last().unwrap_or(0);
+    assert!(
+        after_len == 0 || cursor < after_len,
+        "cursor {cursor} must be within refreshed list of length {after_len}"
+    );
+}

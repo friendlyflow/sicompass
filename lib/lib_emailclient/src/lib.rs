@@ -1918,6 +1918,13 @@ impl Provider for EmailClientProvider {
             matches!(s.as_str(), "compose" | "reply" | "reply all" | "forward")
         });
         if !in_compose {
+            // Folder message-list case: the parent Obj key must match the folder
+            // display name (e.g. "INBOX").  The flat FFON root may currently hold
+            // an old message key, so we return Some here so refresh_subtree_parent
+            // updates both children and key together.
+            if segs.len() == 1 {
+                return Some(segs[0].clone());
+            }
             return None;
         }
         let body_pos = segs.iter().position(|s| s.starts_with("Body:"))?;
@@ -1947,6 +1954,13 @@ impl Provider for EmailClientProvider {
             matches!(s.as_str(), "compose" | "reply" | "reply all" | "forward")
         });
         if !in_compose {
+            // Folder message-list case: exactly one path segment means we're inside a
+            // folder (e.g. `/INBOX`).  Return the envelope list so that
+            // `refresh_subtree_parent` can update only the folder Obj's children without
+            // rebuilding the entire provider root.
+            if segs.len() == 1 {
+                return Some(self.fetch());
+            }
             return None;
         }
         let body_pos = segs.iter().position(|s| s.starts_with("Body:"))?;
@@ -3937,6 +3951,64 @@ mod tests {
         assert!(
             p.fetch_subtree_parent_key().is_none(),
             "parent key must be None for nested body Obj so the key is not overwritten"
+        );
+    }
+
+    /// When the provider path is at a folder (exactly one segment, e.g. `/INBOX`),
+    /// `fetch_subtree_children` returns `Some` with the message list so that
+    /// `refresh_subtree_parent` can update the folder Obj's children in-place after
+    /// a delete without rebuilding the whole provider root.
+    #[test]
+    fn fetch_subtree_children_returns_messages_for_folder_path() {
+        let msgs = vec![
+            make_header(1, "alice@x.com", "Alpha"),
+            make_header(2, "bob@x.com", "Beta"),
+        ];
+        let imap = MockImap::new().with_messages(msgs);
+        let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
+        p.push_path("INBOX");
+
+        let children = p.fetch_subtree_children()
+            .expect("fetch_subtree_children must return Some for a folder path");
+
+        assert_eq!(children.len(), 2, "expected 2 message children; got: {:?}", children);
+        assert!(
+            children.iter().any(|e| e.as_obj().map_or(false, |o| o.key.contains("Alpha"))),
+            "children must include message with subject Alpha"
+        );
+        assert!(
+            children.iter().any(|e| e.as_obj().map_or(false, |o| o.key.contains("Beta"))),
+            "children must include message with subject Beta"
+        );
+    }
+
+    /// `fetch_subtree_parent_key` returns `Some(folder_name)` for a folder path so
+    /// that `refresh_subtree_parent` also updates the root Obj's key.  This is needed
+    /// when the flat FFON root currently holds a stale message key (e.g. after the
+    /// user navigated into a message and then deleted it).
+    #[test]
+    fn fetch_subtree_parent_key_is_folder_name_for_folder_path() {
+        let imap = MockImap::new().with_messages(vec![make_header(1, "a@x.com", "Hi")]);
+        let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
+        p.push_path("INBOX");
+
+        assert_eq!(
+            p.fetch_subtree_parent_key(),
+            Some("INBOX".to_owned()),
+            "parent key must be Some(\"INBOX\") so refresh_subtree_parent updates the root Obj key"
+        );
+    }
+
+    /// At the root path (`/`) `fetch_subtree_children` returns `None` — a full
+    /// `refresh_current_directory` is needed there.
+    #[test]
+    fn fetch_subtree_children_stays_none_at_root() {
+        let imap = MockImap::new().with_folders(&["INBOX"]);
+        let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
+        // No push_path — provider path stays at "/"
+        assert!(
+            p.fetch_subtree_children().is_none(),
+            "fetch_subtree_children must return None at the folder-list root"
         );
     }
 
