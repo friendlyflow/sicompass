@@ -2134,6 +2134,31 @@ pub fn handle_delete_body_element(r: &mut AppRenderer) {
 /// provider the current depth is unwound to the folder list and the directory is refreshed
 /// so the deleted message disappears from the list.
 pub fn invoke_provider_delete(r: &mut AppRenderer) {
+    // Before deleting: navigate back to the message list so that cursor position
+    // is restored to the message's index in the list.  This must happen BEFORE
+    // the delete so the message still exists when navigate_left_raw re-fetches
+    // and restores the cursor (path-match logic in navigate_left_raw).
+    //
+    // For hierarchical FFON (compose/non-lazy providers at depth > 2) unwind to
+    // depth 3.  For the flat email FFON (always depth 2) check the provider path:
+    // 2+ segments means we are inside a message body.
+    while r.current_id.depth() > 3 {
+        navigate_left_raw(r);
+    }
+    {
+        let seg_count = crate::provider::current_path(r)
+            .trim_start_matches('/')
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .count();
+        if seg_count >= 2 {
+            // navigate_left_raw re-fetches at "/INBOX" and places the cursor on
+            // the message we were viewing because the message still exists.
+            navigate_left_raw(r);
+        }
+    }
+
+    // Now at the message list: extract the message Obj the cursor is on.
     let (element_key, element_type) = {
         let arr = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id);
         let idx = r.current_id.last().unwrap_or(0);
@@ -2156,11 +2181,11 @@ pub fn invoke_provider_delete(r: &mut AppRenderer) {
         return;
     }
 
-    // Navigate back to the folder list if we were inside a message.
-    while r.current_id.depth() > 2 {
-        navigate_left_raw(r);
+    // Refresh the message list in-place (cursor index is already correct — the
+    // deleted message is gone and the next one shifts into the same slot).
+    if !crate::provider::refresh_subtree_parent(r) {
+        crate::provider::refresh_current_directory(r);
     }
-    crate::provider::refresh_current_directory(r);
     list::create_list_current_layer(r);
 
     // Clamp cursor to the new list length.
