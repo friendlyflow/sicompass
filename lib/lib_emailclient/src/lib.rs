@@ -262,20 +262,41 @@ fn folder_display_name(imap_name: &str) -> &str {
 
 /// Compute the FFON label for a message header.
 ///
-/// Unread messages are prefixed with `●` so they stand out in the list.
+/// Produces a prefix of bracketed state tags followed by the subject/from body:
+///   `[read] [star] Subject — From`
+///   `[unread] Subject — From`
+///
 /// The label is the single source of truth used in both `build_folder` (display)
 /// and `lookup_uid` (reverse lookup), ensuring they always agree.
 fn message_label(h: &MessageHeader) -> String {
-    let base = if h.subject.is_empty() {
+    let read_tag = if h.seen { "[read]" } else { "[unread]" };
+    let star_tag = if h.flagged { " [star]" } else { "" };
+    let body = if h.subject.is_empty() {
         format!("(no subject) — {}", h.from)
     } else {
         format!("{} — {}", h.subject, h.from)
     };
-    if !h.seen {
-        format!("● {base}")
-    } else {
-        base
+    format!("{read_tag}{star_tag} {body}")
+}
+
+/// Strip all leading `[tag]` prefixes from a message label, returning the bare
+/// `Subject — From` body.  Used by `lookup_uid` when the cached flags have changed
+/// since the path label was recorded.
+fn strip_message_tags(label: &str) -> &str {
+    let mut s = label;
+    loop {
+        let trimmed = s.trim_start();
+        if let Some(rest) = trimmed.strip_prefix('[') {
+            if let Some(end) = rest.find(']') {
+                s = rest[end + 1..].trim_start_matches(' ');
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
     }
+    s
 }
 
 // ---------------------------------------------------------------------------
@@ -461,18 +482,15 @@ impl EmailClientProvider {
 
     /// Look up a UID by message display label (as produced by `message_label`).
     ///
-    /// Falls back to stripping the `● ` unread prefix when no exact match is found,
-    /// because the current path may still carry the old label after auto-mark-read
-    /// updates `h.seen` in the cache.
+    /// Falls back to stripping all leading `[tag]` prefixes when no exact match is found,
+    /// because the current path may still carry old tags after a flag change updates the cache.
     fn lookup_uid(&self, label: &str) -> Option<u32> {
         // Fast path: exact label match.
         if let Some(h) = self.message_cache.iter().find(|h| message_label(h) == label) {
             return Some(h.uid);
         }
-        // Fallback: try matching against the base "Subject — From" regardless of seen flag.
-        // This handles the case where the path still has the ● prefix but the cache
-        // already reflects the message as seen (e.g. after auto-mark-read).
-        let stripped = label.strip_prefix("● ").unwrap_or(label);
+        // Fallback: compare against the bare "Subject — From" body, ignoring tag prefixes.
+        let body = strip_message_tags(label);
         self.message_cache
             .iter()
             .find(|h| {
@@ -481,7 +499,7 @@ impl EmailClientProvider {
                 } else {
                     format!("{} — {}", h.subject, h.from)
                 };
-                base == stripped
+                base == body
             })
             .map(|h| h.uid)
     }
@@ -2559,7 +2577,7 @@ mod tests {
         p.push_path("INBOX");
         let items = p.fetch();
         assert!(items.iter().any(|e| {
-            e.as_obj().map_or(false, |o| o.key == "Subject — alice@x.com")
+            e.as_obj().map_or(false, |o| o.key == "[read] Subject — alice@x.com")
         }));
     }
 
@@ -2571,7 +2589,7 @@ mod tests {
         p.push_path("INBOX");
         let items = p.fetch();
         assert!(items.iter().any(|e| {
-            e.as_obj().map_or(false, |o| o.key.starts_with("(no subject)"))
+            e.as_obj().map_or(false, |o| o.key.contains("(no subject)"))
         }));
     }
 
@@ -2618,7 +2636,7 @@ mod tests {
         let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
         p.push_path("INBOX");
         p.fetch();
-        p.push_path("Hello — alice@example.com");
+        p.push_path("[read] Hello — alice@example.com");
         let items = p.fetch();
         assert!(items.iter().any(|e| e.as_str().map_or(false, |s| s.starts_with("From:"))));
         assert!(items.iter().any(|e| e.as_str().map_or(false, |s| s.starts_with("To:"))));
@@ -2634,7 +2652,7 @@ mod tests {
         let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
         p.push_path("INBOX");
         p.fetch();
-        p.push_path("Hello — alice@example.com");
+        p.push_path("[read] Hello — alice@example.com");
         let items = p.fetch();
         assert!(items.iter().any(|e| e.as_str().map_or(false, |s| s == "Hi Bob!")));
     }
@@ -2647,7 +2665,7 @@ mod tests {
         let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
         p.push_path("INBOX");
         p.fetch();
-        p.push_path("Hello — alice@example.com");
+        p.push_path("[read] Hello — alice@example.com");
         let items = p.fetch();
         assert!(items.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "reply")));
         assert!(items.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "reply all")));
@@ -2665,7 +2683,7 @@ mod tests {
         let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
         p.push_path("INBOX");
         p.fetch();
-        p.push_path("Hello — alice@example.com");
+        p.push_path("[read] Hello — alice@example.com");
         p.fetch();
         // fetch_message_by_message_id should NOT have been called yet.
         let mock = p.imap.as_ref().unwrap().as_ref() as *const dyn ImapBackend as *const MockImap;
@@ -2697,7 +2715,7 @@ mod tests {
         // Navigate: root → INBOX → message
         p.push_path("INBOX");
         p.fetch();
-        p.push_path("Hello — alice@example.com");
+        p.push_path("[read] Hello — alice@example.com");
         p.fetch();
         // Now navigate into History.
         p.push_path("History");
@@ -2781,7 +2799,7 @@ mod tests {
         let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
         p.push_path("INBOX");
         p.fetch();
-        p.push_path("Hello — alice@example.com");
+        p.push_path("[read] Hello — alice@example.com");
         p.fetch(); // caches message_detail
         p.push_path("reply");
         p.fetch(); // triggers prefill
@@ -2796,7 +2814,7 @@ mod tests {
         let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
         p.push_path("INBOX");
         p.fetch();
-        p.push_path("Hello — alice@example.com");
+        p.push_path("[read] Hello — alice@example.com");
         p.fetch();
         p.push_path("reply");
         p.fetch();
@@ -2812,7 +2830,7 @@ mod tests {
         let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
         p.push_path("INBOX");
         p.fetch();
-        p.push_path("Re: Hello — alice@example.com");
+        p.push_path("[read] Re: Hello — alice@example.com");
         p.fetch();
         p.push_path("reply");
         p.fetch();
@@ -2831,7 +2849,7 @@ mod tests {
         p.config.username = "bob@example.com".to_owned();
         p.push_path("INBOX");
         p.fetch();
-        p.push_path("Hello — alice@example.com");
+        p.push_path("[read] Hello — alice@example.com");
         p.fetch();
         p.push_path("reply all");
         p.fetch();
@@ -2851,7 +2869,7 @@ mod tests {
         let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
         p.push_path("INBOX");
         p.fetch();
-        p.push_path("Hello — alice@example.com");
+        p.push_path("[read] Hello — alice@example.com");
         p.fetch();
         p.push_path("forward");
         p.fetch();
@@ -2866,7 +2884,7 @@ mod tests {
         let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
         p.push_path("INBOX");
         p.fetch();
-        p.push_path("Hello — alice@example.com");
+        p.push_path("[read] Hello — alice@example.com");
         p.fetch();
         p.push_path("forward");
         p.fetch();
@@ -2881,7 +2899,7 @@ mod tests {
         let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
         p.push_path("INBOX");
         p.fetch();
-        p.push_path("Hello — alice@example.com");
+        p.push_path("[read] Hello — alice@example.com");
         p.fetch();
         p.push_path("forward");
         p.fetch();
@@ -2902,7 +2920,7 @@ mod tests {
         let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
         p.push_path("INBOX");
         p.fetch();
-        p.push_path("Hello — alice@example.com");
+        p.push_path("[read] Hello — alice@example.com");
         p.fetch();
         p.push_path("reply");
         p.fetch();
@@ -2922,7 +2940,7 @@ mod tests {
         let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
         p.push_path("INBOX");
         p.fetch();
-        p.push_path("Hello — alice@example.com");
+        p.push_path("[read] Hello — alice@example.com");
         p.fetch();
         p.push_path("forward");
         p.fetch();
@@ -2943,7 +2961,7 @@ mod tests {
         let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
         p.push_path("INBOX");
         p.fetch();
-        p.push_path("Hello — alice@example.com");
+        p.push_path("[read] Hello — alice@example.com");
         p.fetch();
         p.push_path("reply");
         p.fetch();
@@ -3003,8 +3021,8 @@ mod tests {
         let mut p = EmailClientProvider::new();
         p.push_path("INBOX");
         assert_eq!(p.current_path(), "/INBOX");
-        p.push_path("Hello — alice@x.com");
-        assert_eq!(p.current_path(), "/INBOX/Hello — alice@x.com");
+        p.push_path("[read] Hello — alice@x.com");
+        assert_eq!(p.current_path(), "/INBOX/[read] Hello — alice@x.com");
     }
 
     #[test]
@@ -3709,7 +3727,7 @@ mod tests {
         let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
         p.push_path("INBOX");
         p.fetch();
-        p.push_path("Hello — alice@example.com");
+        p.push_path("[read] Hello — alice@example.com");
         p.fetch();
         p.push_path("reply");
         p.fetch();
@@ -3750,7 +3768,7 @@ mod tests {
         let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
         p.push_path("INBOX");
         p.fetch();
-        p.push_path("Hello — alice@example.com");
+        p.push_path("[read] Hello — alice@example.com");
         p.fetch();
         p.push_path("forward");
         p.fetch();
@@ -3925,17 +3943,56 @@ mod tests {
     // ---- Unread marker ----
 
     #[test]
-    fn test_unread_message_label_has_bullet_prefix() {
+    fn test_unread_message_label_has_unread_tag() {
         let h = make_header_unread(1, "alice@x.com", "Hello");
-        assert!(message_label(&h).starts_with("● "), "unread label must start with ●");
+        let label = message_label(&h);
+        assert!(label.starts_with("[unread] "), "unread label must start with [unread]; got: {label}");
+        assert!(label.contains("Hello — alice@x.com"), "label must contain subject and from");
     }
 
     #[test]
-    fn test_read_message_label_has_no_prefix() {
+    fn test_read_message_label_has_read_tag() {
         let h = make_header(1, "alice@x.com", "Hello");
         let label = message_label(&h);
-        assert!(!label.starts_with("● "), "read label must not have ● prefix");
-        assert_eq!(label, "Hello — alice@x.com");
+        assert!(label.starts_with("[read] "), "read label must start with [read]; got: {label}");
+        assert_eq!(label, "[read] Hello — alice@x.com");
+    }
+
+    #[test]
+    fn test_starred_message_label_has_star_tag() {
+        let mut h = make_header(1, "alice@x.com", "Hello");
+        h.flagged = true;
+        let label = message_label(&h);
+        assert!(label.contains("[star]"), "starred label must contain [star]; got: {label}");
+        assert!(label.starts_with("[read] [star] "), "starred read label must start with [read] [star]; got: {label}");
+    }
+
+    #[test]
+    fn test_unread_starred_message_label() {
+        let mut h = make_header_unread(1, "alice@x.com", "Hello");
+        h.flagged = true;
+        let label = message_label(&h);
+        assert!(label.starts_with("[unread] [star] "), "unread starred label must start with [unread] [star]; got: {label}");
+    }
+
+    #[test]
+    fn test_lookup_uid_after_tag_prefix_strip() {
+        // Simulate: path has "[unread] Hello — alice@x.com" but cache now has seen=true.
+        let msgs = vec![make_header(1, "alice@x.com", "Hello")]; // seen=true → [read] prefix
+        let imap = MockImap::new().with_messages(msgs);
+        let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
+        p.push_path("INBOX");
+        p.fetch();
+        // Path carries the old [unread] label.
+        let uid = p.lookup_uid("[unread] Hello — alice@x.com");
+        assert_eq!(uid, Some(1), "lookup_uid must resolve despite stale [unread] prefix");
+    }
+
+    #[test]
+    fn test_strip_message_tags_removes_prefix() {
+        assert_eq!(strip_message_tags("[read] Hello — alice@x.com"), "Hello — alice@x.com");
+        assert_eq!(strip_message_tags("[unread] [star] Hello — alice@x.com"), "Hello — alice@x.com");
+        assert_eq!(strip_message_tags("Hello — alice@x.com"), "Hello — alice@x.com");
     }
 
     #[test]
@@ -3946,8 +4003,8 @@ mod tests {
         p.push_path("INBOX");
         let items = p.fetch();
         assert!(
-            items.iter().any(|e| e.as_obj().map_or(false, |o| o.key.starts_with("● "))),
-            "unread message should have ● prefix in list; got: {:?}", items
+            items.iter().any(|e| e.as_obj().map_or(false, |o| o.key.starts_with("[unread] "))),
+            "unread message should have [unread] prefix in list; got: {:?}", items
         );
     }
 
@@ -3959,8 +4016,8 @@ mod tests {
         p.push_path("INBOX");
         let items = p.fetch();
         assert!(
-            !items.iter().any(|e| e.as_obj().map_or(false, |o| o.key.starts_with("● "))),
-            "seen message should not have ● prefix; got: {:?}", items
+            !items.iter().any(|e| e.as_obj().map_or(false, |o| o.key.starts_with("[unread] "))),
+            "seen message should not have [unread] prefix; got: {:?}", items
         );
     }
 
@@ -3974,8 +4031,8 @@ mod tests {
         let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
         p.push_path("INBOX");
         p.fetch();
-        // Unread: label has ● prefix
-        p.push_path("● Hello — alice@example.com");
+        // Unread: label has [unread] prefix
+        p.push_path("[unread] Hello — alice@example.com");
         p.fetch();
         // IMAP set_flags should have been called with +FLAGS (\Seen)
         let mock = p.imap.as_ref().unwrap().as_ref() as *const dyn ImapBackend as *const MockImap;
@@ -3994,7 +4051,7 @@ mod tests {
         let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
         p.push_path("INBOX");
         p.fetch();
-        p.push_path("Hello — alice@example.com");
+        p.push_path("[read] Hello — alice@example.com");
         p.fetch();
         let mock = p.imap.as_ref().unwrap().as_ref() as *const dyn ImapBackend as *const MockImap;
         let stored = unsafe { &(*mock).stored_flags };
@@ -4014,7 +4071,7 @@ mod tests {
         let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
         p.push_path("INBOX");
         p.fetch();
-        p.push_path("Hello — alice@example.com");
+        p.push_path("[read] Hello — alice@example.com");
         p.fetch();
         let mut err = String::new();
         p.handle_command("mark-unread", "", 0, &mut err);
@@ -4035,7 +4092,7 @@ mod tests {
         let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
         p.push_path("INBOX");
         p.fetch();
-        p.push_path("● Hello — alice@example.com");
+        p.push_path("[unread] Hello — alice@example.com");
         p.fetch();  // triggers auto-mark-read
         // Reset stored_flags to isolate the explicit mark-read command
         let mock = p.imap.as_mut().unwrap().as_mut() as *mut dyn ImapBackend as *mut MockImap;
@@ -4060,7 +4117,7 @@ mod tests {
         let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
         p.push_path("INBOX");
         p.fetch();
-        p.push_path("Hello — alice@example.com");
+        p.push_path("[read] Hello — alice@example.com");
         p.fetch();
         let mut err = String::new();
         p.handle_command("star", "", 0, &mut err);
@@ -4081,7 +4138,7 @@ mod tests {
         let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
         p.push_path("INBOX");
         p.fetch();
-        p.push_path("Hello — alice@example.com");
+        p.push_path("[read] Hello — alice@example.com");
         p.fetch();
         let mut err = String::new();
         p.handle_command("unstar", "", 0, &mut err);
@@ -4116,7 +4173,7 @@ mod tests {
         p.fetch();
         p.push_path("INBOX");
         p.fetch();
-        p.push_path("Hello — alice@example.com");
+        p.push_path("[read] Hello — alice@example.com");
         p.fetch();
         let mut err = String::new();
         p.handle_command("delete", "", 0, &mut err);
@@ -4151,7 +4208,7 @@ mod tests {
         p.folder_mappings.push(("Trash".to_owned(), "[Gmail]/Trash".to_owned()));
         p.message_cache = vec![make_header(1, "alice@example.com", "Hello")];
         p.push_path("Trash");
-        p.push_path("Hello — alice@example.com");
+        p.push_path("[read] Hello — alice@example.com");
         let mut err = String::new();
         p.handle_command("delete", "", 0, &mut err);
         assert!(err.is_empty(), "delete from trash should not set error; got: {err}");
@@ -4175,7 +4232,7 @@ mod tests {
         p.fetch(); // no trash in folder list
         p.push_path("INBOX");
         p.fetch();
-        p.push_path("Hello — alice@example.com");
+        p.push_path("[read] Hello — alice@example.com");
         p.fetch();
         let mut err = String::new();
         p.handle_command("delete", "", 0, &mut err);
@@ -4209,7 +4266,7 @@ mod tests {
         p.fetch(); // populate special_folders
         p.push_path("INBOX");
         p.fetch();
-        p.push_path("Hello — alice@example.com");
+        p.push_path("[read] Hello — alice@example.com");
         p.fetch();
         let mut err = String::new();
         p.handle_command("archive", "", 0, &mut err);
@@ -4234,7 +4291,7 @@ mod tests {
         p.fetch();
         p.push_path("INBOX");
         p.fetch();
-        p.push_path("Hello — alice@example.com");
+        p.push_path("[read] Hello — alice@example.com");
         p.fetch();
         let mut err = String::new();
         p.handle_command("archive", "", 0, &mut err);
@@ -4256,7 +4313,7 @@ mod tests {
         p.fetch();
         p.push_path("INBOX");
         p.fetch();
-        p.push_path("Hello — alice@example.com");
+        p.push_path("[read] Hello — alice@example.com");
         p.fetch();
         let mut err = String::new();
         p.handle_command("move", "", 0, &mut err);
@@ -4277,7 +4334,7 @@ mod tests {
         p.fetch();
         p.push_path("INBOX");
         p.fetch();
-        p.push_path("Hello — alice@example.com");
+        p.push_path("[read] Hello — alice@example.com");
         p.fetch();
         let mut err = String::new();
         p.handle_command("move", "", 0, &mut err);
@@ -4300,7 +4357,7 @@ mod tests {
         p.fetch();
         p.push_path("INBOX");
         p.fetch();
-        p.push_path("Hello — alice@example.com");
+        p.push_path("[read] Hello — alice@example.com");
         p.fetch();
         let mut err = String::new();
         p.handle_command("move", "", 0, &mut err);
