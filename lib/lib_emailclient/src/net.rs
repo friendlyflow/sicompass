@@ -5,7 +5,7 @@
 //!
 //! Both are instantiated lazily from `EmailClientConfig` inside `init()`.
 
-use crate::{EmailClientConfig, EmailMessage, ImapBackend, MailBody, MessageHeader, SmtpBackend};
+use crate::{EmailClientConfig, EmailMessage, FolderInfo, ImapBackend, MailBody, MessageHeader, SmtpBackend};
 use crate::idle::parse_imap_url;
 
 use imap_proto::types::Address;
@@ -73,7 +73,7 @@ fn connect(config: &EmailClientConfig) -> Result<ImapSession, String> {
 }
 
 impl ImapBackend for RealImap {
-    fn list_folders(&mut self) -> Result<Vec<String>, String> {
+    fn list_folders(&mut self) -> Result<Vec<FolderInfo>, String> {
         // Avoid borrow conflict: get error first, reset session, then unwrap.
         if let Err(e) = self.session() {
             self.reset_session();
@@ -82,17 +82,32 @@ impl ImapBackend for RealImap {
         let session = self.session.as_mut().unwrap();
         let names = session
             .list(None, Some("*"))
-            .map_err(|e| { e.to_string() })?;
-        let mut folders: Vec<String> = names
+            .map_err(|e| e.to_string())?;
+        let folders: Vec<FolderInfo> = names
             .iter()
             .filter_map(|n| {
-                // Skip \\Noselect folders (containers).
+                // Skip \Noselect folders (containers).
                 if n.attributes().iter().any(|a| {
                     matches!(a, imap::types::NameAttribute::NoSelect)
                 }) {
                     return None;
                 }
-                Some(n.name().to_owned())
+                // Collect SPECIAL-USE and system attributes as raw strings.
+                let attributes: Vec<String> = n
+                    .attributes()
+                    .iter()
+                    .map(|a| match a {
+                        imap::types::NameAttribute::NoInferiors => "\\Noinferiors".to_owned(),
+                        imap::types::NameAttribute::NoSelect    => "\\Noselect".to_owned(),
+                        imap::types::NameAttribute::Marked      => "\\Marked".to_owned(),
+                        imap::types::NameAttribute::Unmarked    => "\\Unmarked".to_owned(),
+                        imap::types::NameAttribute::Custom(s)   => s.to_string(),
+                    })
+                    .collect();
+                Some(FolderInfo {
+                    name: n.name().to_owned(),
+                    attributes,
+                })
             })
             .collect();
         Ok(folders)
@@ -113,8 +128,9 @@ impl ImapBackend for RealImap {
         let start = if total > limit { total - limit + 1 } else { 1 };
         let fetch_range = format!("{start}:{total}");
 
+        // Include FLAGS so we can show the unread (●) marker in the list.
         let messages = session
-            .fetch(&fetch_range, "(UID ENVELOPE)")
+            .fetch(&fetch_range, "(UID ENVELOPE FLAGS)")
             .map_err(|e| e.to_string())?;
 
         let mut headers: Vec<MessageHeader> = messages
@@ -140,7 +156,9 @@ impl ImapBackend for RealImap {
                     .and_then(|b| std::str::from_utf8(b).ok())
                     .unwrap_or("")
                     .to_owned();
-                Some(MessageHeader { uid, from, subject, date })
+                let seen = m.flags().iter().any(|f| matches!(f, imap::types::Flag::Seen));
+                let flagged = m.flags().iter().any(|f| matches!(f, imap::types::Flag::Flagged));
+                Some(MessageHeader { uid, from, subject, date, seen, flagged })
             })
             .collect();
 
@@ -196,6 +214,72 @@ impl ImapBackend for RealImap {
 
         // Reuse the normal fetch path.
         self.fetch_message(folder, uid)
+    }
+
+    fn set_flags(
+        &mut self,
+        folder: &str,
+        uid: u32,
+        add: &[&str],
+        remove: &[&str],
+    ) -> Result<(), String> {
+        let session = match self.session() {
+            Ok(s) => s,
+            Err(e) => { self.reset_session(); return Err(e); }
+        };
+        session.select(folder).map_err(|e| e.to_string())?;
+        let uid_str = uid.to_string();
+        if !add.is_empty() {
+            let query = format!("+FLAGS ({})", add.join(" "));
+            session.uid_store(&uid_str, &query).map_err(|e| e.to_string())?;
+        }
+        if !remove.is_empty() {
+            let query = format!("-FLAGS ({})", remove.join(" "));
+            session.uid_store(&uid_str, &query).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    fn copy_message(&mut self, folder: &str, uid: u32, dest: &str) -> Result<(), String> {
+        let session = match self.session() {
+            Ok(s) => s,
+            Err(e) => { self.reset_session(); return Err(e); }
+        };
+        session.select(folder).map_err(|e| e.to_string())?;
+        let uid_str = uid.to_string();
+        session.uid_copy(&uid_str, dest).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    fn move_message(&mut self, folder: &str, uid: u32, dest: &str) -> Result<(), String> {
+        let session = match self.session() {
+            Ok(s) => s,
+            Err(e) => { self.reset_session(); return Err(e); }
+        };
+        session.select(folder).map_err(|e| e.to_string())?;
+        let uid_str = uid.to_string();
+        // Try MOVE extension (RFC 6851) first; fall back to COPY + \Deleted + EXPUNGE.
+        match session.uid_mv(&uid_str, dest) {
+            Ok(_) => Ok(()),
+            Err(_) => {
+                // Fallback: COPY then mark \Deleted and expunge.
+                session.uid_copy(&uid_str, dest).map_err(|e| e.to_string())?;
+                let _ = session.uid_store(&uid_str, "+FLAGS (\\Deleted)");
+                let _ = session.uid_expunge(&uid_str);
+                Ok(())
+            }
+        }
+    }
+
+    fn expunge_uid(&mut self, folder: &str, uid: u32) -> Result<(), String> {
+        let session = match self.session() {
+            Ok(s) => s,
+            Err(e) => { self.reset_session(); return Err(e); }
+        };
+        session.select(folder).map_err(|e| e.to_string())?;
+        let uid_str = uid.to_string();
+        session.uid_expunge(&uid_str).map_err(|e| e.to_string())?;
+        Ok(())
     }
 }
 
@@ -661,11 +745,11 @@ mod tests {
         let mut backend = RealImap::from_config(&config);
         let folders = backend.list_folders().expect("list_folders failed");
         assert!(!folders.is_empty(), "expected at least one folder");
-        println!("folders: {folders:?}");
+        println!("folders: {:?}", folders.iter().map(|f| &f.name).collect::<Vec<_>>());
 
-        let inbox = folders.iter().find(|f| f.to_uppercase() == "INBOX")
+        let inbox = folders.iter().find(|f| f.name.to_uppercase() == "INBOX")
             .expect("INBOX not found");
-        let headers = backend.list_messages(inbox, 5).expect("list_messages failed");
+        let headers = backend.list_messages(&inbox.name, 5).expect("list_messages failed");
         println!("inbox headers: {headers:?}");
     }
 }

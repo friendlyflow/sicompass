@@ -129,7 +129,26 @@ pub struct EmailClientConfig {
     pub token_expiry: i64, // Unix timestamp
 }
 
-/// A summarised message header (from IMAP ENVELOPE).
+/// A single mailbox entry returned by `ImapBackend::list_folders`.
+#[derive(Debug, Clone)]
+pub struct FolderInfo {
+    /// Full IMAP folder name, e.g. `[Gmail]/Trash`.
+    pub name: String,
+    /// Raw SPECIAL-USE / system attribute strings from the LIST response,
+    /// e.g. `"\\Trash"`, `"\\Archive"`, `"\\Sent"`.
+    pub attributes: Vec<String>,
+}
+
+/// SPECIAL-USE folder paths discovered from LIST attributes (RFC 6154).
+#[derive(Debug, Clone, Default)]
+struct SpecialFolders {
+    /// Full IMAP name of the Trash folder (e.g. `[Gmail]/Trash`).
+    trash: Option<String>,
+    /// Full IMAP name of the Archive folder (e.g. `[Gmail]/All Mail`).
+    archive: Option<String>,
+}
+
+/// A summarised message header (from IMAP ENVELOPE + FLAGS).
 #[derive(Debug, Clone)]
 pub struct MessageHeader {
     /// IMAP UID
@@ -137,6 +156,10 @@ pub struct MessageHeader {
     pub from: String,
     pub subject: String,
     pub date: String,
+    /// Whether the `\Seen` flag is set.
+    pub seen: bool,
+    /// Whether the `\Flagged` (starred) flag is set.
+    pub flagged: bool,
 }
 
 /// A fully fetched email message.
@@ -190,9 +213,9 @@ struct ComposeState {
 
 /// IMAP backend — all operations used by the provider.
 pub trait ImapBackend: Send {
-    /// List all selectable folder names (full IMAP names, e.g. `[Gmail]/Sent`).
-    fn list_folders(&mut self) -> Result<Vec<String>, String>;
-    /// Fetch headers for the most recent `limit` messages in `folder`.
+    /// List all selectable folders with their SPECIAL-USE attributes.
+    fn list_folders(&mut self) -> Result<Vec<FolderInfo>, String>;
+    /// Fetch headers (including flags) for the most recent `limit` messages in `folder`.
     fn list_messages(&mut self, folder: &str, limit: usize) -> Result<Vec<MessageHeader>, String>;
     /// Fetch the full content of a message by UID.
     fn fetch_message(&mut self, folder: &str, uid: u32) -> Result<Option<EmailMessage>, String>;
@@ -202,6 +225,20 @@ pub trait ImapBackend: Send {
         folder: &str,
         message_id: &str,
     ) -> Result<Option<EmailMessage>, String>;
+    /// Add/remove IMAP flags on a message (e.g. `\\Seen`, `\\Flagged`, `\\Deleted`).
+    fn set_flags(
+        &mut self,
+        folder: &str,
+        uid: u32,
+        add: &[&str],
+        remove: &[&str],
+    ) -> Result<(), String>;
+    /// Copy a message to another folder (server-side COPY).
+    fn copy_message(&mut self, folder: &str, uid: u32, dest: &str) -> Result<(), String>;
+    /// Move a message to another folder (MOVE extension; falls back to COPY+DELETE+EXPUNGE).
+    fn move_message(&mut self, folder: &str, uid: u32, dest: &str) -> Result<(), String>;
+    /// Expunge a specific UID from a folder (UIDPLUS UID EXPUNGE).
+    fn expunge_uid(&mut self, folder: &str, uid: u32) -> Result<(), String>;
 }
 
 /// SMTP backend — send an email message.
@@ -220,6 +257,24 @@ fn folder_display_name(imap_name: &str) -> &str {
     match imap_name.rfind('/') {
         Some(idx) => &imap_name[idx + 1..],
         None => imap_name,
+    }
+}
+
+/// Compute the FFON label for a message header.
+///
+/// Unread messages are prefixed with `●` so they stand out in the list.
+/// The label is the single source of truth used in both `build_folder` (display)
+/// and `lookup_uid` (reverse lookup), ensuring they always agree.
+fn message_label(h: &MessageHeader) -> String {
+    let base = if h.subject.is_empty() {
+        format!("(no subject) — {}", h.from)
+    } else {
+        format!("{} — {}", h.subject, h.from)
+    };
+    if !h.seen {
+        format!("● {base}")
+    } else {
+        base
     }
 }
 
@@ -246,6 +301,14 @@ pub struct EmailClientProvider {
     // Cached full message for the current message path.
     message_detail: Option<EmailMessage>,
 
+    // SPECIAL-USE folders discovered from LIST attributes (populated on folder fetch).
+    special_folders: SpecialFolders,
+
+    // Pending "move" target: UID + source real-folder name stored between
+    // handle_command("move") and execute_command("move", dest_display).
+    pending_move_uid: Option<u32>,
+    pending_move_folder: String,
+
     // Compose state
     compose: ComposeState,
     compose_sent: bool,
@@ -267,7 +330,7 @@ pub struct EmailClientProvider {
 
     // Async folder fetch — moves list_folders() off the main thread at startup.
     folder_fetch_inflight: Arc<AtomicBool>,
-    folder_fetch_result: Arc<Mutex<Option<Result<Vec<String>, String>>>>,
+    folder_fetch_result: Arc<Mutex<Option<Result<Vec<FolderInfo>, String>>>>,
     // Disabled in tests that inject a mock via with_imap() so they keep using the sync path.
     async_folder_fetch_enabled: bool,
 
@@ -299,6 +362,9 @@ impl EmailClientProvider {
             envelope_cache_folder: String::new(),
             message_cache: Vec::new(),
             message_detail: None,
+            special_folders: SpecialFolders::default(),
+            pending_move_uid: None,
+            pending_move_folder: String::new(),
             compose: ComposeState::default(),
             compose_sent: false,
             history_folder: String::new(),
@@ -393,19 +459,58 @@ impl EmailClientProvider {
             .unwrap_or(display)
     }
 
-    /// Look up a UID by message display label (Subject — From).
+    /// Look up a UID by message display label (as produced by `message_label`).
+    ///
+    /// Falls back to stripping the `● ` unread prefix when no exact match is found,
+    /// because the current path may still carry the old label after auto-mark-read
+    /// updates `h.seen` in the cache.
     fn lookup_uid(&self, label: &str) -> Option<u32> {
+        // Fast path: exact label match.
+        if let Some(h) = self.message_cache.iter().find(|h| message_label(h) == label) {
+            return Some(h.uid);
+        }
+        // Fallback: try matching against the base "Subject — From" regardless of seen flag.
+        // This handles the case where the path still has the ● prefix but the cache
+        // already reflects the message as seen (e.g. after auto-mark-read).
+        let stripped = label.strip_prefix("● ").unwrap_or(label);
         self.message_cache
             .iter()
             .find(|h| {
-                let l = if h.subject.is_empty() {
+                let base = if h.subject.is_empty() {
                     format!("(no subject) — {}", h.from)
                 } else {
                     format!("{} — {}", h.subject, h.from)
                 };
-                l == label
+                base == stripped
             })
             .map(|h| h.uid)
+    }
+
+    /// Return the (real_folder, uid) for the message identified by `elem_key`.
+    ///
+    /// Works at two depths:
+    /// - depth 2 (inside a message): folder from path[0], message from path[1].
+    /// - depth 1 (folder list):      folder from path[0], message from `elem_key`.
+    ///
+    /// Returns `None` when there is no folder context (depth 0) or the label
+    /// does not resolve to a known UID.
+    fn current_message_uid(&self, elem_key: &str) -> Option<(String, u32)> {
+        let segs = self.path_segments();
+        match segs.len() {
+            0 => None,
+            1 => {
+                // At folder list — elem_key is the selected message label.
+                let real_folder = self.lookup_folder(segs[0]).to_owned();
+                let uid = self.lookup_uid(elem_key)?;
+                Some((real_folder, uid))
+            }
+            _ => {
+                // Inside a message — use path[1].
+                let real_folder = self.lookup_folder(segs[0]).to_owned();
+                let uid = self.lookup_uid(segs[1])?;
+                Some((real_folder, uid))
+            }
+        }
     }
 
     // ---- Login state ---------------------------------------------------------
@@ -566,39 +671,63 @@ impl EmailClientProvider {
 
     // ---- FFON tree builders -----------------------------------------------
 
-    /// Convert a `list_folders` result into FFON items, populate caches and mappings.
+    /// Convert a `list_folders` result into FFON items, populate caches, mappings,
+    /// and discover SPECIAL-USE folders (Trash, Archive) from LIST attributes.
     fn build_root_from_folder_list(
         &mut self,
-        folder_result: Result<Vec<String>, String>,
+        folder_result: Result<Vec<FolderInfo>, String>,
     ) -> Vec<FfonElement> {
         let mut items = vec![];
         match folder_result {
             Err(e) => {
                 items.push(FfonElement::new_str(format!("IMAP error: {e}")));
             }
-            Ok(folders) => {
+            Ok(folder_infos) => {
                 // Rebuild folder display-name mappings.
                 self.folder_mappings.clear();
+                self.special_folders = SpecialFolders::default();
+
+                let names: Vec<&str> = folder_infos.iter().map(|f| f.name.as_str()).collect();
 
                 // Filter out hierarchy-only container folders (e.g. "[Gmail]")
                 // — a folder is a container if any other folder starts with it + "/".
-                let mut real_folders: Vec<String> = Vec::new();
-                for name in &folders {
-                    let is_container = folders.iter().any(|other| {
-                        other != name && other.starts_with(&format!("{name}/"))
+                let mut real_infos: Vec<&FolderInfo> = Vec::new();
+                for info in &folder_infos {
+                    let is_container = names.iter().any(|other| {
+                        *other != info.name.as_str()
+                            && other.starts_with(&format!("{}/", info.name))
                     });
                     if !is_container {
-                        real_folders.push(name.clone());
+                        real_infos.push(info);
+                    }
+                }
+
+                // Detect SPECIAL-USE folders from attributes (RFC 6154).
+                for info in &folder_infos {
+                    for attr in &info.attributes {
+                        match attr.as_str() {
+                            "\\Trash" => {
+                                if self.special_folders.trash.is_none() {
+                                    self.special_folders.trash = Some(info.name.clone());
+                                }
+                            }
+                            "\\Archive" | "\\All" => {
+                                if self.special_folders.archive.is_none() {
+                                    self.special_folders.archive = Some(info.name.clone());
+                                }
+                            }
+                            _ => {}
+                        }
                     }
                 }
 
                 let mut compose_inserted = false;
-                for name in real_folders {
-                    let display = folder_display_name(&name).to_owned();
-                    self.folder_mappings.push((display.clone(), name.clone()));
+                for info in real_infos {
+                    let display = folder_display_name(&info.name).to_owned();
+                    self.folder_mappings.push((display.clone(), info.name.clone()));
                     items.push(FfonElement::new_obj(display.clone()));
                     // Insert compose right after INBOX.
-                    if !compose_inserted && name.to_uppercase() == "INBOX" {
+                    if !compose_inserted && info.name.to_uppercase() == "INBOX" {
                         items.push(FfonElement::new_obj("compose"));
                         compose_inserted = true;
                     }
@@ -655,7 +784,7 @@ impl EmailClientProvider {
                 let config = self.config.clone();
                 std::thread::spawn(move || {
                     let mut imap = crate::net::RealImap::from_config(&config);
-                    let result = imap.list_folders();
+                    let result: Result<Vec<FolderInfo>, String> = imap.list_folders();
                     *result_slot.lock().unwrap() = Some(result);
                     inflight.store(false, Ordering::Release);
                     needs_refresh.store(true, Ordering::Release);
@@ -710,12 +839,7 @@ impl EmailClientProvider {
             Ok(headers) => {
                 self.message_cache = headers.clone();
                 for h in &headers {
-                    let label = if h.subject.is_empty() {
-                        format!("(no subject) — {}", h.from)
-                    } else {
-                        format!("{} — {}", h.subject, h.from)
-                    };
-                    items.push(FfonElement::new_obj(label));
+                    items.push(FfonElement::new_obj(message_label(h)));
                 }
                 if items.is_empty() {
                     items.push(FfonElement::new_str("(no messages)".to_owned()));
@@ -764,6 +888,19 @@ impl EmailClientProvider {
             return vec![FfonElement::new_str("(message not found)".to_owned())];
         };
 
+        // Auto-mark as read: set \Seen flag and update cache so the list
+        // re-renders without the ● prefix on the next envelope fetch.
+        if let Some(h) = self.message_cache.iter_mut().find(|h| h.uid == uid) {
+            if !h.seen {
+                if let Some(ref mut imap) = self.imap {
+                    let _ = imap.set_flags(&real_folder, uid, &["\\Seen"], &[]);
+                }
+                h.seen = true;
+                // Invalidate envelope cache so the list re-renders without ●.
+                self.envelope_cache = None;
+            }
+        }
+
         // Store References for lazy History navigation.
         if !msg.references.is_empty() {
             self.history_folder = real_folder;
@@ -772,8 +909,7 @@ impl EmailClientProvider {
             self.history_refs.clear();
         }
 
-        let mut items = build_message_view(&msg);
-        items
+        build_message_view(&msg)
     }
 
     fn build_history(&mut self) -> Vec<FfonElement> {
@@ -1826,11 +1962,68 @@ impl Provider for EmailClientProvider {
         if !self.is_logged_in() {
             return vec![];
         }
-        vec![
+        let mut cmds = vec![
             "compose".to_owned(),
             "logout".to_owned(),
             "refresh".to_owned(),
-        ]
+        ];
+        // Message-operation commands are only relevant when current_id points to a
+        // message (inside a folder at depth ≥ 1).
+        if self.path_segments().len() >= 1 {
+            cmds.extend([
+                "mark-read".to_owned(),
+                "mark-unread".to_owned(),
+                "star".to_owned(),
+                "unstar".to_owned(),
+                "delete".to_owned(),
+                "archive".to_owned(),
+                "move".to_owned(),
+            ]);
+        }
+        cmds
+    }
+
+    fn command_list_items(&self, command: &str) -> Vec<sicompass_sdk::provider::ListItem> {
+        if command == "move" {
+            let current_real = &self.pending_move_folder;
+            self.folder_mappings
+                .iter()
+                .filter(|(_, real)| real != current_real)
+                .map(|(display, real)| sicompass_sdk::provider::ListItem {
+                    label: display.clone(),
+                    data: real.clone(),
+                })
+                .collect()
+        } else {
+            vec![]
+        }
+    }
+
+    fn execute_command(&mut self, command: &str, selection: &str) -> bool {
+        if command != "move" {
+            return false;
+        }
+        let uid = match self.pending_move_uid.take() {
+            Some(u) => u,
+            None => return false,
+        };
+        let from = std::mem::take(&mut self.pending_move_folder);
+        // `selection` is the display name; resolve to the real IMAP folder.
+        let dest = self
+            .folder_mappings
+            .iter()
+            .find(|(d, _)| d == selection)
+            .map(|(_, r)| r.clone())
+            .unwrap_or_else(|| selection.to_owned());
+        if let Some(ref mut imap) = self.imap {
+            if let Err(e) = imap.move_message(&from, uid, &dest) {
+                self.error_message = Some(format!("move failed: {e}"));
+                return false;
+            }
+        }
+        self.envelope_cache = None;
+        self.message_cache.retain(|h| h.uid != uid);
+        true
     }
 
     fn handle_command(
@@ -1868,11 +2061,108 @@ impl Provider for EmailClientProvider {
                 self.envelope_cache_folder.clear();
                 self.message_cache.clear();
                 self.message_detail = None;
+                self.special_folders = SpecialFolders::default();
+                self.pending_move_uid = None;
+                self.pending_move_folder.clear();
                 self.compose = ComposeState::default();
                 self.compose_sent = false;
                 self.history_folder.clear();
                 self.history_refs.clear();
                 None  // triggers state-toggle refresh in handlers.rs
+            }
+            "mark-read" | "mark-unread" | "star" | "unstar" => {
+                if let Some((real_folder, uid)) = self.current_message_uid(elem_key) {
+                    let (add, remove): (&[&str], &[&str]) = match cmd {
+                        "mark-read"   => (&["\\Seen"],    &[]),
+                        "mark-unread" => (&[],            &["\\Seen"]),
+                        "star"        => (&["\\Flagged"], &[]),
+                        _             => (&[],            &["\\Flagged"]), // unstar
+                    };
+                    if let Some(ref mut imap) = self.imap {
+                        if let Err(e) = imap.set_flags(&real_folder, uid, add, remove) {
+                            *error = format!("{cmd} failed: {e}");
+                            return None;
+                        }
+                    }
+                    // Update cached header so the list re-renders correctly.
+                    if let Some(h) = self.message_cache.iter_mut().find(|h| h.uid == uid) {
+                        match cmd {
+                            "mark-read"   => h.seen = true,
+                            "mark-unread" => h.seen = false,
+                            "star"        => h.flagged = true,
+                            _             => h.flagged = false,
+                        }
+                    }
+                    self.envelope_cache = None;
+                } else {
+                    *error = format!("{cmd}: not viewing a message");
+                }
+                None
+            }
+            "delete" => {
+                if let Some((real_folder, uid)) = self.current_message_uid(elem_key) {
+                    let trash = self.special_folders.trash.clone();
+                    let moved_to_trash = if let Some(ref t) = trash {
+                        if real_folder != *t {
+                            // Move to Trash.
+                            if let Some(ref mut imap) = self.imap {
+                                if let Err(e) = imap.move_message(&real_folder, uid, t) {
+                                    *error = format!("delete failed: {e}");
+                                    return None;
+                                }
+                            }
+                            true
+                        } else {
+                            false // already in Trash — fall through to hard delete
+                        }
+                    } else {
+                        false // no Trash configured — hard delete
+                    };
+                    if !moved_to_trash {
+                        if let Some(ref mut imap) = self.imap {
+                            let _ = imap.set_flags(&real_folder, uid, &["\\Deleted"], &[]);
+                            let _ = imap.expunge_uid(&real_folder, uid);
+                        }
+                    }
+                    self.envelope_cache = None;
+                    self.message_cache.retain(|h| h.uid != uid);
+                } else {
+                    *error = "delete: not viewing a message".to_owned();
+                }
+                None
+            }
+            "archive" => {
+                if let Some((real_folder, uid)) = self.current_message_uid(elem_key) {
+                    let archive = self.special_folders.archive.clone();
+                    match archive {
+                        None => {
+                            *error = "archive: server does not advertise an \\Archive folder".to_owned();
+                        }
+                        Some(ref dest) => {
+                            if let Some(ref mut imap) = self.imap {
+                                if let Err(e) = imap.move_message(&real_folder, uid, dest) {
+                                    *error = format!("archive failed: {e}");
+                                    return None;
+                                }
+                            }
+                            self.envelope_cache = None;
+                            self.message_cache.retain(|h| h.uid != uid);
+                        }
+                    }
+                } else {
+                    *error = "archive: not viewing a message".to_owned();
+                }
+                None
+            }
+            "move" => {
+                // Two-phase: store context now; folder selection handled in execute_command.
+                if let Some((real_folder, uid)) = self.current_message_uid(elem_key) {
+                    self.pending_move_uid = Some(uid);
+                    self.pending_move_folder = real_folder;
+                } else {
+                    *error = "move: not viewing a message".to_owned();
+                }
+                None
             }
             _ => {
                 *error = format!("unknown command: {cmd}");
@@ -1919,7 +2209,7 @@ mod tests {
     // ---- Mock backends ----
 
     struct MockImap {
-        folders: Vec<String>,
+        folders: Vec<FolderInfo>,
         messages: Vec<MessageHeader>,
         detail: Option<EmailMessage>,
         by_msg_id: Option<EmailMessage>,
@@ -1927,6 +2217,10 @@ mod tests {
         list_folders_calls: usize,
         list_messages_calls: usize,
         fetch_by_msg_id_calls: usize,
+        // Write-operation tracking
+        stored_flags: Vec<(String, u32, String)>,   // (folder, uid, "+/-FLAGS (flags)")
+        moved: Vec<(String, u32, String)>,           // (from_folder, uid, dest_folder)
+        expunged: Vec<(String, u32)>,                // (folder, uid)
     }
 
     impl MockImap {
@@ -1940,10 +2234,20 @@ mod tests {
                 list_folders_calls: 0,
                 list_messages_calls: 0,
                 fetch_by_msg_id_calls: 0,
+                stored_flags: vec![],
+                moved: vec![],
+                expunged: vec![],
             }
         }
         fn with_folders(mut self, folders: &[&str]) -> Self {
-            self.folders = folders.iter().map(|s| s.to_string()).collect();
+            self.folders = folders
+                .iter()
+                .map(|s| FolderInfo { name: s.to_string(), attributes: vec![] })
+                .collect();
+            self
+        }
+        fn with_folder_infos(mut self, infos: Vec<FolderInfo>) -> Self {
+            self.folders = infos;
             self
         }
         fn with_messages(mut self, msgs: Vec<MessageHeader>) -> Self {
@@ -1965,7 +2269,7 @@ mod tests {
     }
 
     impl ImapBackend for MockImap {
-        fn list_folders(&mut self) -> Result<Vec<String>, String> {
+        fn list_folders(&mut self) -> Result<Vec<FolderInfo>, String> {
             self.list_folders_calls += 1;
             if let Some(ref e) = self.error { return Err(e.clone()); }
             Ok(self.folders.clone())
@@ -1983,6 +2287,39 @@ mod tests {
             self.fetch_by_msg_id_calls += 1;
             if let Some(ref e) = self.error { return Err(e.clone()); }
             Ok(self.by_msg_id.clone())
+        }
+        fn set_flags(&mut self, folder: &str, uid: u32, add: &[&str], remove: &[&str]) -> Result<(), String> {
+            if let Some(ref e) = self.error { return Err(e.clone()); }
+            if !add.is_empty() {
+                self.stored_flags.push((
+                    folder.to_owned(),
+                    uid,
+                    format!("+FLAGS ({})", add.join(" ")),
+                ));
+            }
+            if !remove.is_empty() {
+                self.stored_flags.push((
+                    folder.to_owned(),
+                    uid,
+                    format!("-FLAGS ({})", remove.join(" ")),
+                ));
+            }
+            Ok(())
+        }
+        fn copy_message(&mut self, folder: &str, uid: u32, dest: &str) -> Result<(), String> {
+            if let Some(ref e) = self.error { return Err(e.clone()); }
+            self.moved.push((folder.to_owned(), uid, dest.to_owned()));
+            Ok(())
+        }
+        fn move_message(&mut self, folder: &str, uid: u32, dest: &str) -> Result<(), String> {
+            if let Some(ref e) = self.error { return Err(e.clone()); }
+            self.moved.push((folder.to_owned(), uid, dest.to_owned()));
+            Ok(())
+        }
+        fn expunge_uid(&mut self, folder: &str, uid: u32) -> Result<(), String> {
+            if let Some(ref e) = self.error { return Err(e.clone()); }
+            self.expunged.push((folder.to_owned(), uid));
+            Ok(())
         }
     }
 
@@ -2016,6 +2353,19 @@ mod tests {
             from: from.to_owned(),
             subject: subject.to_owned(),
             date: "2025-01-01".to_owned(),
+            seen: true,
+            flagged: false,
+        }
+    }
+
+    fn make_header_unread(uid: u32, from: &str, subject: &str) -> MessageHeader {
+        MessageHeader {
+            uid,
+            from: from.to_owned(),
+            subject: subject.to_owned(),
+            date: "2025-01-01".to_owned(),
+            seen: false,
+            flagged: false,
         }
     }
 
@@ -3570,5 +3920,451 @@ mod tests {
             p.fetch_subtree_parent_key().is_none(),
             "parent key must be None for nested body Obj so the key is not overwritten"
         );
+    }
+
+    // ---- Unread marker ----
+
+    #[test]
+    fn test_unread_message_label_has_bullet_prefix() {
+        let h = make_header_unread(1, "alice@x.com", "Hello");
+        assert!(message_label(&h).starts_with("● "), "unread label must start with ●");
+    }
+
+    #[test]
+    fn test_read_message_label_has_no_prefix() {
+        let h = make_header(1, "alice@x.com", "Hello");
+        let label = message_label(&h);
+        assert!(!label.starts_with("● "), "read label must not have ● prefix");
+        assert_eq!(label, "Hello — alice@x.com");
+    }
+
+    #[test]
+    fn test_build_folder_shows_unread_marker_for_unseen_message() {
+        let msgs = vec![make_header_unread(1, "alice@x.com", "New Mail")];
+        let imap = MockImap::new().with_messages(msgs);
+        let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
+        p.push_path("INBOX");
+        let items = p.fetch();
+        assert!(
+            items.iter().any(|e| e.as_obj().map_or(false, |o| o.key.starts_with("● "))),
+            "unread message should have ● prefix in list; got: {:?}", items
+        );
+    }
+
+    #[test]
+    fn test_build_folder_no_marker_for_seen_message() {
+        let msgs = vec![make_header(1, "alice@x.com", "Old Mail")];
+        let imap = MockImap::new().with_messages(msgs);
+        let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
+        p.push_path("INBOX");
+        let items = p.fetch();
+        assert!(
+            !items.iter().any(|e| e.as_obj().map_or(false, |o| o.key.starts_with("● "))),
+            "seen message should not have ● prefix; got: {:?}", items
+        );
+    }
+
+    // ---- Auto-mark-read ----
+
+    #[test]
+    fn test_opening_unread_message_marks_seen() {
+        let msgs = vec![make_header_unread(1, "alice@example.com", "Hello")];
+        let msg = make_message(1);
+        let imap = MockImap::new().with_messages(msgs).with_detail(msg);
+        let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
+        p.push_path("INBOX");
+        p.fetch();
+        // Unread: label has ● prefix
+        p.push_path("● Hello — alice@example.com");
+        p.fetch();
+        // IMAP set_flags should have been called with +FLAGS (\Seen)
+        let mock = p.imap.as_ref().unwrap().as_ref() as *const dyn ImapBackend as *const MockImap;
+        let stored = unsafe { &(*mock).stored_flags };
+        assert!(
+            stored.iter().any(|(_, uid, flag)| *uid == 1 && flag.contains("\\Seen") && flag.starts_with("+FLAGS")),
+            "opening an unread message must call set_flags +FLAGS (\\Seen); got: {:?}", stored
+        );
+    }
+
+    #[test]
+    fn test_opening_already_read_message_does_not_call_set_flags() {
+        let msgs = vec![make_header(1, "alice@example.com", "Hello")];
+        let msg = make_message(1);
+        let imap = MockImap::new().with_messages(msgs).with_detail(msg);
+        let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
+        p.push_path("INBOX");
+        p.fetch();
+        p.push_path("Hello — alice@example.com");
+        p.fetch();
+        let mock = p.imap.as_ref().unwrap().as_ref() as *const dyn ImapBackend as *const MockImap;
+        let stored = unsafe { &(*mock).stored_flags };
+        assert!(
+            stored.is_empty(),
+            "opening an already-read message must not call set_flags; got: {:?}", stored
+        );
+    }
+
+    // ---- mark-read / mark-unread commands ----
+
+    #[test]
+    fn test_mark_unread_issues_remove_seen_flag() {
+        let msgs = vec![make_header(1, "alice@example.com", "Hello")];
+        let msg = make_message(1);
+        let imap = MockImap::new().with_messages(msgs).with_detail(msg);
+        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        p.push_path("INBOX");
+        p.fetch();
+        p.push_path("Hello — alice@example.com");
+        p.fetch();
+        let mut err = String::new();
+        p.handle_command("mark-unread", "", 0, &mut err);
+        assert!(err.is_empty(), "mark-unread should not set error; got: {err}");
+        let mock = p.imap.as_ref().unwrap().as_ref() as *const dyn ImapBackend as *const MockImap;
+        let stored = unsafe { &(*mock).stored_flags };
+        assert!(
+            stored.iter().any(|(_, uid, flag)| *uid == 1 && flag.contains("\\Seen") && flag.starts_with("-FLAGS")),
+            "mark-unread must call -FLAGS (\\Seen); got: {:?}", stored
+        );
+    }
+
+    #[test]
+    fn test_mark_read_issues_add_seen_flag() {
+        let msgs = vec![make_header_unread(1, "alice@example.com", "Hello")];
+        let msg = make_message(1);
+        let imap = MockImap::new().with_messages(msgs).with_detail(msg);
+        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        p.push_path("INBOX");
+        p.fetch();
+        p.push_path("● Hello — alice@example.com");
+        p.fetch();  // triggers auto-mark-read
+        // Reset stored_flags to isolate the explicit mark-read command
+        let mock = p.imap.as_mut().unwrap().as_mut() as *mut dyn ImapBackend as *mut MockImap;
+        unsafe { (*mock).stored_flags.clear(); }
+        let mut err = String::new();
+        p.handle_command("mark-read", "", 0, &mut err);
+        assert!(err.is_empty(), "mark-read should not set error; got: {err}");
+        let stored = unsafe { &(*mock).stored_flags };
+        assert!(
+            stored.iter().any(|(_, uid, flag)| *uid == 1 && flag.contains("\\Seen") && flag.starts_with("+FLAGS")),
+            "mark-read must call +FLAGS (\\Seen); got: {:?}", stored
+        );
+    }
+
+    // ---- star / unstar commands ----
+
+    #[test]
+    fn test_star_issues_add_flagged() {
+        let msgs = vec![make_header(1, "alice@example.com", "Hello")];
+        let msg = make_message(1);
+        let imap = MockImap::new().with_messages(msgs).with_detail(msg);
+        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        p.push_path("INBOX");
+        p.fetch();
+        p.push_path("Hello — alice@example.com");
+        p.fetch();
+        let mut err = String::new();
+        p.handle_command("star", "", 0, &mut err);
+        assert!(err.is_empty(), "star should not set error; got: {err}");
+        let mock = p.imap.as_ref().unwrap().as_ref() as *const dyn ImapBackend as *const MockImap;
+        let stored = unsafe { &(*mock).stored_flags };
+        assert!(
+            stored.iter().any(|(_, uid, flag)| *uid == 1 && flag.contains("\\Flagged") && flag.starts_with("+FLAGS")),
+            "star must call +FLAGS (\\Flagged); got: {:?}", stored
+        );
+    }
+
+    #[test]
+    fn test_unstar_issues_remove_flagged() {
+        let msgs = vec![make_header(1, "alice@example.com", "Hello")];
+        let msg = make_message(1);
+        let imap = MockImap::new().with_messages(msgs).with_detail(msg);
+        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        p.push_path("INBOX");
+        p.fetch();
+        p.push_path("Hello — alice@example.com");
+        p.fetch();
+        let mut err = String::new();
+        p.handle_command("unstar", "", 0, &mut err);
+        assert!(err.is_empty(), "unstar should not set error; got: {err}");
+        let mock = p.imap.as_ref().unwrap().as_ref() as *const dyn ImapBackend as *const MockImap;
+        let stored = unsafe { &(*mock).stored_flags };
+        assert!(
+            stored.iter().any(|(_, uid, flag)| *uid == 1 && flag.contains("\\Flagged") && flag.starts_with("-FLAGS")),
+            "unstar must call -FLAGS (\\Flagged); got: {:?}", stored
+        );
+    }
+
+    // ---- delete command ----
+
+    #[test]
+    fn test_delete_from_inbox_moves_to_trash() {
+        let msgs = vec![make_header(1, "alice@example.com", "Hello")];
+        let msg = make_message(1);
+        let trash_info = FolderInfo {
+            name: "[Gmail]/Trash".to_owned(),
+            attributes: vec!["\\Trash".to_owned()],
+        };
+        let imap = MockImap::new()
+            .with_folder_infos(vec![
+                FolderInfo { name: "INBOX".to_owned(), attributes: vec![] },
+                trash_info,
+            ])
+            .with_messages(msgs)
+            .with_detail(msg);
+        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        // Build root to populate special_folders from LIST response.
+        p.fetch();
+        p.push_path("INBOX");
+        p.fetch();
+        p.push_path("Hello — alice@example.com");
+        p.fetch();
+        let mut err = String::new();
+        p.handle_command("delete", "", 0, &mut err);
+        assert!(err.is_empty(), "delete should not set error; got: {err}");
+        let mock = p.imap.as_ref().unwrap().as_ref() as *const dyn ImapBackend as *const MockImap;
+        let moved = unsafe { &(*mock).moved };
+        assert!(
+            moved.iter().any(|(from, uid, dest)| *uid == 1 && from == "INBOX" && dest == "[Gmail]/Trash"),
+            "delete from INBOX must move to trash; got: {:?}", moved
+        );
+        // Navigation back to the folder is handled by the app layer, not the provider.
+    }
+
+    #[test]
+    fn test_delete_from_trash_permanently_deletes() {
+        let msgs = vec![make_header(1, "alice@example.com", "Hello")];
+        let msg = make_message(1);
+        let trash_info = FolderInfo {
+            name: "[Gmail]/Trash".to_owned(),
+            attributes: vec!["\\Trash".to_owned()],
+        };
+        let imap = MockImap::new()
+            .with_folder_infos(vec![
+                FolderInfo { name: "INBOX".to_owned(), attributes: vec![] },
+                trash_info,
+            ])
+            .with_messages(msgs)
+            .with_detail(msg);
+        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        p.fetch(); // populate special_folders
+        // Manually set path into Trash (simulating navigation)
+        p.folder_mappings.push(("Trash".to_owned(), "[Gmail]/Trash".to_owned()));
+        p.message_cache = vec![make_header(1, "alice@example.com", "Hello")];
+        p.push_path("Trash");
+        p.push_path("Hello — alice@example.com");
+        let mut err = String::new();
+        p.handle_command("delete", "", 0, &mut err);
+        assert!(err.is_empty(), "delete from trash should not set error; got: {err}");
+        let mock = p.imap.as_ref().unwrap().as_ref() as *const dyn ImapBackend as *const MockImap;
+        let expunged = unsafe { &(*mock).expunged };
+        assert!(
+            expunged.iter().any(|(_, uid)| *uid == 1),
+            "delete from trash must expunge; got: {:?}", expunged
+        );
+    }
+
+    #[test]
+    fn test_delete_no_trash_folder_hard_deletes() {
+        let msgs = vec![make_header(1, "alice@example.com", "Hello")];
+        let msg = make_message(1);
+        let imap = MockImap::new()
+            .with_folders(&["INBOX"])
+            .with_messages(msgs)
+            .with_detail(msg);
+        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        p.fetch(); // no trash in folder list
+        p.push_path("INBOX");
+        p.fetch();
+        p.push_path("Hello — alice@example.com");
+        p.fetch();
+        let mut err = String::new();
+        p.handle_command("delete", "", 0, &mut err);
+        assert!(err.is_empty(), "delete with no trash should not set error; got: {err}");
+        let mock = p.imap.as_ref().unwrap().as_ref() as *const dyn ImapBackend as *const MockImap;
+        let expunged = unsafe { &(*mock).expunged };
+        assert!(
+            expunged.iter().any(|(_, uid)| *uid == 1),
+            "delete with no trash folder must expunge; got: {:?}", expunged
+        );
+    }
+
+    // ---- archive command ----
+
+    #[test]
+    fn test_archive_moves_to_archive_folder() {
+        let msgs = vec![make_header(1, "alice@example.com", "Hello")];
+        let msg = make_message(1);
+        let archive_info = FolderInfo {
+            name: "[Gmail]/All Mail".to_owned(),
+            attributes: vec!["\\All".to_owned()],
+        };
+        let imap = MockImap::new()
+            .with_folder_infos(vec![
+                FolderInfo { name: "INBOX".to_owned(), attributes: vec![] },
+                archive_info,
+            ])
+            .with_messages(msgs)
+            .with_detail(msg);
+        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        p.fetch(); // populate special_folders
+        p.push_path("INBOX");
+        p.fetch();
+        p.push_path("Hello — alice@example.com");
+        p.fetch();
+        let mut err = String::new();
+        p.handle_command("archive", "", 0, &mut err);
+        assert!(err.is_empty(), "archive should not set error; got: {err}");
+        let mock = p.imap.as_ref().unwrap().as_ref() as *const dyn ImapBackend as *const MockImap;
+        let moved = unsafe { &(*mock).moved };
+        assert!(
+            moved.iter().any(|(from, uid, dest)| *uid == 1 && from == "INBOX" && dest == "[Gmail]/All Mail"),
+            "archive must move to archive folder; got: {:?}", moved
+        );
+    }
+
+    #[test]
+    fn test_archive_error_when_no_archive_folder() {
+        let msgs = vec![make_header(1, "alice@example.com", "Hello")];
+        let msg = make_message(1);
+        let imap = MockImap::new()
+            .with_folders(&["INBOX"])
+            .with_messages(msgs)
+            .with_detail(msg);
+        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        p.fetch();
+        p.push_path("INBOX");
+        p.fetch();
+        p.push_path("Hello — alice@example.com");
+        p.fetch();
+        let mut err = String::new();
+        p.handle_command("archive", "", 0, &mut err);
+        assert!(!err.is_empty(), "archive without archive folder must set error");
+        assert!(err.contains("\\Archive"), "error must mention \\Archive; got: {err}");
+    }
+
+    // ---- move command (two-phase) ----
+
+    #[test]
+    fn test_move_command_stores_pending_context() {
+        let msgs = vec![make_header(1, "alice@example.com", "Hello")];
+        let msg = make_message(1);
+        let imap = MockImap::new()
+            .with_folders(&["INBOX", "Sent"])
+            .with_messages(msgs)
+            .with_detail(msg);
+        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        p.fetch();
+        p.push_path("INBOX");
+        p.fetch();
+        p.push_path("Hello — alice@example.com");
+        p.fetch();
+        let mut err = String::new();
+        p.handle_command("move", "", 0, &mut err);
+        assert!(err.is_empty(), "move should not set error; got: {err}");
+        assert_eq!(p.pending_move_uid, Some(1), "pending_move_uid should be set");
+        assert_eq!(p.pending_move_folder, "INBOX", "pending_move_folder should be INBOX");
+    }
+
+    #[test]
+    fn test_move_command_list_items_excludes_current_folder() {
+        let msgs = vec![make_header(1, "alice@example.com", "Hello")];
+        let msg = make_message(1);
+        let imap = MockImap::new()
+            .with_folders(&["INBOX", "Sent", "Drafts"])
+            .with_messages(msgs)
+            .with_detail(msg);
+        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        p.fetch();
+        p.push_path("INBOX");
+        p.fetch();
+        p.push_path("Hello — alice@example.com");
+        p.fetch();
+        let mut err = String::new();
+        p.handle_command("move", "", 0, &mut err);
+        let items = p.command_list_items("move");
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        assert!(!labels.contains(&"INBOX"), "INBOX should not appear in move targets");
+        assert!(labels.contains(&"Sent"), "Sent should appear as move target");
+        assert!(labels.contains(&"Drafts"), "Drafts should appear as move target");
+    }
+
+    #[test]
+    fn test_execute_move_calls_move_message_and_pops_path() {
+        let msgs = vec![make_header(1, "alice@example.com", "Hello")];
+        let msg = make_message(1);
+        let imap = MockImap::new()
+            .with_folders(&["INBOX", "Sent"])
+            .with_messages(msgs)
+            .with_detail(msg);
+        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        p.fetch();
+        p.push_path("INBOX");
+        p.fetch();
+        p.push_path("Hello — alice@example.com");
+        p.fetch();
+        let mut err = String::new();
+        p.handle_command("move", "", 0, &mut err);
+        let ok = p.execute_command("move", "Sent");
+        assert!(ok, "execute_command(move) should return true on success");
+        let mock = p.imap.as_ref().unwrap().as_ref() as *const dyn ImapBackend as *const MockImap;
+        let moved = unsafe { &(*mock).moved };
+        assert!(
+            moved.iter().any(|(from, uid, dest)| *uid == 1 && from == "INBOX" && dest == "Sent"),
+            "execute_command(move) must call move_message; got: {:?}", moved
+        );
+        // Navigation back to the folder is handled by the app layer, not the provider.
+    }
+
+    // ---- SPECIAL-USE folder detection ----
+
+    #[test]
+    fn test_special_use_trash_folder_detected() {
+        let imap = MockImap::new().with_folder_infos(vec![
+            FolderInfo { name: "INBOX".to_owned(), attributes: vec![] },
+            FolderInfo { name: "[Gmail]/Trash".to_owned(), attributes: vec!["\\Trash".to_owned()] },
+        ]);
+        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        p.fetch();
+        assert_eq!(
+            p.special_folders.trash.as_deref(),
+            Some("[Gmail]/Trash"),
+            "\\Trash attribute must populate special_folders.trash"
+        );
+    }
+
+    #[test]
+    fn test_special_use_archive_folder_detected_via_all() {
+        let imap = MockImap::new().with_folder_infos(vec![
+            FolderInfo { name: "INBOX".to_owned(), attributes: vec![] },
+            FolderInfo { name: "[Gmail]/All Mail".to_owned(), attributes: vec!["\\All".to_owned()] },
+        ]);
+        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        p.fetch();
+        assert_eq!(
+            p.special_folders.archive.as_deref(),
+            Some("[Gmail]/All Mail"),
+            "\\All attribute must populate special_folders.archive"
+        );
+    }
+
+    #[test]
+    fn test_new_commands_included_when_logged_in() {
+        // Message commands only appear when current_id points into a folder (depth >= 1).
+        let imap = MockImap::new().with_folders(&["INBOX"]);
+        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        p.push_path("INBOX");
+        let cmds = p.commands();
+        for cmd in &["mark-read", "mark-unread", "star", "unstar", "delete", "archive", "move"] {
+            assert!(cmds.contains(&cmd.to_string()), "commands() must include '{cmd}'");
+        }
+    }
+
+    #[test]
+    fn test_message_commands_hidden_at_root() {
+        let p = EmailClientProvider::new().with_oauth_token("fake");
+        let cmds = p.commands();
+        for cmd in &["mark-read", "mark-unread", "star", "unstar", "delete", "archive", "move"] {
+            assert!(!cmds.contains(&cmd.to_string()), "commands() must not include '{cmd}' at root");
+        }
     }
 }
