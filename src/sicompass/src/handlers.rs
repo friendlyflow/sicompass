@@ -2128,6 +2128,53 @@ pub fn handle_delete_body_element(r: &mut AppRenderer) {
     }
 }
 
+/// Invoke the provider's `delete` command on the focused element (Ctrl+D / Delete shortcut).
+///
+/// Mirrors the state-toggle command path in `handle_enter_command`: after calling the
+/// provider the current depth is unwound to the folder list and the directory is refreshed
+/// so the deleted message disappears from the list.
+pub fn invoke_provider_delete(r: &mut AppRenderer) {
+    let (element_key, element_type) = {
+        let arr = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id);
+        let idx = r.current_id.last().unwrap_or(0);
+        match arr.and_then(|a| a.get(idx)) {
+            Some(sicompass_sdk::ffon::FfonElement::Str(s)) => (s.clone(), 0),
+            Some(sicompass_sdk::ffon::FfonElement::Obj(o)) => (o.key.clone(), 1),
+            None => return,
+        }
+    };
+
+    let mut error = String::new();
+    if let Some(idx) = r.current_id.get(0) {
+        if let Some(provider) = r.providers.get_mut(idx) {
+            provider.handle_command("delete", &element_key, element_type, &mut error);
+        }
+    }
+    if !error.is_empty() {
+        r.error_message = error;
+        r.needs_redraw = true;
+        return;
+    }
+
+    // Navigate back to the folder list if we were inside a message.
+    while r.current_id.depth() > 2 {
+        navigate_left_raw(r);
+    }
+    crate::provider::refresh_current_directory(r);
+    list::create_list_current_layer(r);
+
+    // Clamp cursor to the new list length.
+    let new_len = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)
+        .map(|a| a.len())
+        .unwrap_or(0);
+    let cur = r.current_id.last().unwrap_or(0);
+    if new_len > 0 && cur >= new_len {
+        r.current_id.set_last(new_len - 1);
+    }
+    r.list_index = r.current_id.last().unwrap_or(0);
+    r.needs_redraw = true;
+}
+
 /// Copy the selected file's path into `file_clipboard_path` (no move).
 ///
 /// Only works when the active provider is "filebrowser".

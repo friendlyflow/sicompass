@@ -152,6 +152,13 @@ fn supports_config_files_hint(r: &AppRenderer) -> bool {
     not_at_root(r) && supports_config_files(r)
 }
 
+/// True when the active provider's command list includes `"delete"`.
+/// Used to gate Ctrl+D / Delete key so they only act as message-delete in the
+/// email client and remain inert (or fall through to other handlers) elsewhere.
+fn avail_provider_has_delete(r: &AppRenderer) -> bool {
+    crate::provider::get_commands(r).iter().any(|c| c == "delete")
+}
+
 /// True when the focused container's children contain an `<input>` element.
 fn children_have_input(r: &AppRenderer) -> bool {
     let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) else { return false };
@@ -665,6 +672,18 @@ pub static SHORTCUTS: &[Shortcut] = &[
     Shortcut { key: Keycode::M, key2: None, ctrl: false, shift: false,
         modes: &[Coordinate::OperatorGeneral],
         label: "M      Meta", is_available: always, handle: handlers::handle_meta },
+
+    // ---- Ctrl+D / Delete key → provider delete command (email message delete) ----
+    // These must come before the editor/filebrowser Ctrl+D rows so they win when
+    // the active provider advertises "delete" (e.g. email client in folder/message view).
+    Shortcut { key: Keycode::D, key2: None, ctrl: true, shift: false,
+        modes: &[Coordinate::OperatorGeneral],
+        label: "Ctrl+D Delete", is_available: avail_provider_has_delete,
+        handle: handlers::invoke_provider_delete },
+    Shortcut { key: Keycode::Delete, key2: None, ctrl: false, shift: false,
+        modes: &[Coordinate::OperatorGeneral],
+        label: "Del    Delete", is_available: avail_provider_has_delete,
+        handle: handlers::invoke_provider_delete },
 
     // ---- Ctrl+D (delete FFON element in EditorGeneral) ------------------
     Shortcut { key: Keycode::D, key2: None, ctrl: true, shift: false,
