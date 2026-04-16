@@ -918,17 +918,19 @@ pub fn draw_frame(app: &mut AppState) {
         };
         app.device.cmd_set_scissor(cb, 0, &[scissor]);
 
-        // Draw rectangles (background, selection highlight, separator)
-        if let Some(rr) = &app.rect_renderer {
-            rr.draw_rectangles(&app.device, cb, app.swapchain_extent);
-        }
-        // Draw text (list items, header)
-        if let Some(fr) = &app.font_renderer {
-            fr.draw_text(&app.device, cb, frame, app.swapchain_extent);
-        }
-        // Draw images (<image> tags)
-        if let Some(ir) = &app.image_renderer {
-            ir.draw_images(&app.device, cb, app.swapchain_extent);
+        if !app.renderer.privacy_blank {
+            // Draw rectangles (background, selection highlight, separator)
+            if let Some(rr) = &app.rect_renderer {
+                rr.draw_rectangles(&app.device, cb, app.swapchain_extent);
+            }
+            // Draw text (list items, header)
+            if let Some(fr) = &app.font_renderer {
+                fr.draw_text(&app.device, cb, frame, app.swapchain_extent);
+            }
+            // Draw images (<image> tags)
+            if let Some(ir) = &app.image_renderer {
+                ir.draw_images(&app.device, cb, app.swapchain_extent);
+            }
         }
 
         app.device.cmd_end_render_pass(cb);

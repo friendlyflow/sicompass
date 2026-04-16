@@ -416,6 +416,11 @@ pub struct AppRenderer {
     /// the announced text is the same as the previous one. A zero-width space
     /// (\u{200B}) is appended when the toggle is true; screen readers ignore it.
     pub announcement_parity: bool,
+
+    // ---- Privacy -----------------------------------------------------------
+    /// When true the visual output is suppressed (blank screen). Navigation,
+    /// FFON state, and AccessKit/screen-reader output continue to work normally.
+    pub privacy_blank: bool,
 }
 
 impl AppRenderer {
@@ -482,6 +487,7 @@ impl AppRenderer {
             current_uri: String::new(),
             pending_announcement: None,
             announcement_parity: false,
+            privacy_blank: false,
         }
     }
 

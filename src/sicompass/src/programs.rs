@@ -137,6 +137,7 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
         &["dark", "light"], "dark",
     );
     settings.add_checkbox_setting("sicompass", "maximized", "maximized", false);
+    settings.add_checkbox_setting("sicompass", "shoulder-surfing protection (blank screen)", "shoulderSurfingProtection", false);
     settings.add_radio_setting(
         "sicompass", "font scale", "fontScale",
         &["1.00", "1.25", "1.50", "1.75", "2.00", "2.25", "2.50"],
@@ -734,6 +735,9 @@ fn apply_setting(
             if !skip_enable {
                 renderer.pending_maximized = Some(value == "true");
             }
+        }
+        "shoulderSurfingProtection" => {
+            renderer.privacy_blank = value == "true";
         }
         "saveFolder" => {
             renderer.save_folder_path = value.to_owned();
