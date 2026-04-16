@@ -238,6 +238,26 @@ pub struct UndoEntry {
 }
 
 // ---------------------------------------------------------------------------
+// PlaceholderCancel
+// ---------------------------------------------------------------------------
+
+/// Stashed state for cancelling an in-progress placeholder insertion via Escape.
+///
+/// Set by `insert_placeholder_typed`, `insert_operator_placeholder`, and the
+/// insert path in `handle_enter_command`. Consumed (and cleared) by
+/// `handle_escape` when the user presses Escape during `OperatorInsert`.
+#[derive(Clone)]
+pub struct PlaceholderCancel {
+    /// Full navigation id of the inserted (or replaced) placeholder element.
+    pub insertion_id: IdArray,
+    /// The original element that was replaced in place, if any.
+    /// `None` means a fresh slot was inserted and should be removed on cancel.
+    pub replaced_element: Option<FfonElement>,
+    /// The `current_id` to restore after undoing the insertion.
+    pub return_id: IdArray,
+}
+
+// ---------------------------------------------------------------------------
 // AppRenderer
 // ---------------------------------------------------------------------------
 
@@ -364,6 +384,13 @@ pub struct AppRenderer {
     /// The filesystem path last used for Ctrl+S / save-as. Empty = no path set yet.
     pub current_save_path: String,
 
+    // ---- Placeholder cancel state -------------------------------------------
+    /// Set when a placeholder element is freshly inserted for a create session
+    /// (Ctrl+I/A or `:create` command). Consumed by `handle_escape` to undo the
+    /// insertion and restore the prior selection. `None` when no cancel is pending
+    /// (e.g. pressing `i` on a persistent `I_PLACEHOLDER` — nothing was inserted).
+    pub placeholder_cancel: Option<PlaceholderCancel>,
+
     // ---- Save-as / open dialog state ----------------------------------------
     /// True while navigating the filebrowser to pick a save-as destination.
     pub pending_file_browser_save_as: bool,
@@ -446,6 +473,7 @@ impl AppRenderer {
             pending_maximized: None,
             rebuild_font_renderer: false,
             current_save_path: String::new(),
+            placeholder_cancel: None,
             pending_file_browser_save_as: false,
             pending_file_browser_open: false,
             save_as_source_root_idx: 0,
