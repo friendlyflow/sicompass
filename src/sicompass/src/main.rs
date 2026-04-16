@@ -6,6 +6,10 @@ use std::process;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 fn main() {
+    // Register all built-in providers with the SDK factory and manifest registries.
+    // Must happen before load_programs() so create_provider_by_name() resolves them.
+    sicompass_builtins::register_all();
+
     // Set up dual logging: always write debug to a log file, optionally stderr via RUST_LOG.
     let log_dir = sicompass_sdk::platform::log_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."));

@@ -1,0 +1,17 @@
+[package]
+name = "sicompass-builtins"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Registers all built-in sicompass providers with the SDK factory registry"
+
+[dependencies]
+sicompass-sdk = { workspace = true }
+sicompass-filebrowser = { workspace = true }
+sicompass-tutorial = { workspace = true }
+sicompass-webbrowser = { workspace = true }
+sicompass-chatclient = { workspace = true }
+sicompass-emailclient = { workspace = true }
+sicompass-remote = { workspace = true }
+sicompass-sales-demo = { workspace = true }
+sicompass-settings = { workspace = true }

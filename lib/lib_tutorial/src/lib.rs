@@ -714,3 +714,18 @@ mod tests {
         assert!(elems[0].is_str());
     }
 }
+
+// ---------------------------------------------------------------------------
+// SDK registration
+// ---------------------------------------------------------------------------
+
+/// Register the tutorial with the SDK factory and manifest registries.
+pub fn register() {
+    sicompass_sdk::register_provider_factory("tutorial", || {
+        let assets = sicompass_sdk::platform::resolve_repo_asset("lib/lib_tutorial/assets");
+        Box::new(TutorialProvider::new(&assets))
+    });
+    sicompass_sdk::register_builtin_manifest(
+        sicompass_sdk::BuiltinManifest::new("tutorial", "tutorial").enable_by_default(),
+    );
+}

@@ -1127,3 +1127,20 @@ mod tests {
         assert!(names.contains(&"link.txt".to_string()));
     }
 }
+
+// ---------------------------------------------------------------------------
+// SDK registration
+// ---------------------------------------------------------------------------
+
+/// Register the file browser with the SDK factory and manifest registries.
+///
+/// The manifest marks the provider as `always_enabled` — the app registers it
+/// unconditionally without listing it in "Available programs:".
+pub fn register() {
+    sicompass_sdk::register_provider_factory("filebrowser", || {
+        Box::new(FilebrowserProvider::new())
+    });
+    sicompass_sdk::register_builtin_manifest(
+        sicompass_sdk::BuiltinManifest::new("filebrowser", "file browser").always_enabled(),
+    );
+}

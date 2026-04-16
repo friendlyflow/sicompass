@@ -11,6 +11,7 @@ serde_json = { workspace = true }
 unicode-normalization = { workspace = true }
 scraper = { workspace = true }
 url = { workspace = true }
+libloading = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 xdg = "2"

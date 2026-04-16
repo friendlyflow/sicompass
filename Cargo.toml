@@ -8,6 +8,8 @@ members = [
     "lib/lib_chatclient",
     "lib/lib_emailclient",
     "lib/lib_remote",
+    "lib/lib_sales_demo",
+    "lib/lib_builtins",
     "src/sicompass",
 ]
 resolver = "2"
@@ -27,6 +29,8 @@ sicompass-webbrowser = { path = "lib/lib_webbrowser" }
 sicompass-chatclient = { path = "lib/lib_chatclient" }
 sicompass-emailclient = { path = "lib/lib_emailclient" }
 sicompass-remote = { path = "lib/lib_remote" }
+sicompass-sales-demo = { path = "lib/lib_sales_demo" }
+sicompass-builtins = { path = "lib/lib_builtins" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

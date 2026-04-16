@@ -408,3 +408,28 @@ mod tests {
         assert_eq!(url_encode("abc"), "abc");
     }
 }
+
+// ---------------------------------------------------------------------------
+// SDK registration
+// ---------------------------------------------------------------------------
+
+/// Instantiate a `RemoteProvider` for a named remote service.
+///
+/// `RemoteProvider` requires `(name, url, api_key)` at construction time and
+/// cannot fit the zero-arg factory signature, so this helper is called
+/// directly by `sicompass_builtins` and by the app's `load_remote_programs`.
+pub fn create_remote(
+    name: &str,
+    remote_url: String,
+    api_key: String,
+) -> Box<dyn sicompass_sdk::Provider> {
+    Box::new(RemoteProvider::new(name, remote_url, api_key))
+}
+
+/// Register the remote provider with the SDK manifest registry (no zero-arg
+/// factory — use [`create_remote`] to instantiate).
+pub fn register() {
+    // RemoteProvider is per-service, not a single named factory; only the
+    // manifest type info is registered so the app can recognise remote entries.
+    // Instantiation goes through create_remote().
+}

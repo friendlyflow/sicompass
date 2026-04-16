@@ -1573,3 +1573,18 @@ mod tests {
         assert!(!html.is_empty(), "expected non-empty HTML from gva.be");
     }
 }
+
+// ---------------------------------------------------------------------------
+// SDK registration
+// ---------------------------------------------------------------------------
+
+/// Register the web browser with the SDK factory and manifest registries.
+pub fn register() {
+    sicompass_sdk::register_provider_factory("webbrowser", || {
+        Box::new(WebbrowserProvider::new())
+    });
+    sicompass_sdk::register_builtin_manifest(
+        sicompass_sdk::BuiltinManifest::new("webbrowser", "web browser"),
+    );
+    sicompass_sdk::register_url_fetcher(fetch_url_to_ffon);
+}

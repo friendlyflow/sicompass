@@ -22,6 +22,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'hits=$(grep -rnE \"^use sicompass_(filebrowser|settings|chatclient|emailclient|webbrowser|tutorial|remote|sales_demo)::\" \"$CLAUDE_PROJECT_DIR\"/src/sicompass/src 2>/dev/null); if [ -n \"$hits\" ]; then echo \"SDK boundary violation: app code must not import lib crates directly. All communication goes through sicompass-sdk and sicompass-builtins. Offending imports:\" >&2; echo \"$hits\" >&2; exit 2; fi'"
+          }
+        ]
+      }
     ]
   }
 }

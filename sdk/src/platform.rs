@@ -465,6 +465,39 @@ pub fn ensure_bun_on_path() {
 }
 
 // ---------------------------------------------------------------------------
+// Repository-relative asset resolution
+// ---------------------------------------------------------------------------
+
+/// Resolve a repo-relative asset path to an absolute one.
+///
+/// Tries candidates in order:
+///   1. `<CARGO_MANIFEST_DIR>/../../<rel>` — dev build
+///   2. `<exe_dir>/<rel>`                  — release: resources alongside the exe
+///   3. `<exe_dir>/../<rel>`               — release: resources one level up
+///   4. `<cwd>/<rel>`                      — running from the repo root
+///
+/// Returns the first existing candidate, or the manifest-anchored path as a
+/// last resort so that error messages point somewhere meaningful.
+pub fn resolve_repo_asset(rel: &str) -> std::path::PathBuf {
+    let from_manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..").join(rel);
+    if from_manifest.exists() {
+        return from_manifest;
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let a = dir.join(rel);
+            if a.exists() { return a; }
+            let b = dir.join("..").join(rel);
+            if b.exists() { return b; }
+        }
+    }
+    let cwd = std::path::PathBuf::from(rel);
+    if cwd.exists() { return cwd; }
+    from_manifest
+}
+
+// ---------------------------------------------------------------------------
 // Tests — port of tests/lib_provider/test_provider_platform.c (10 tests)
 // ---------------------------------------------------------------------------
 

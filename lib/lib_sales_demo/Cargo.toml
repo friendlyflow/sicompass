@@ -1,0 +1,9 @@
+[package]
+name = "sicompass-sales-demo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Sicompass sales demo provider (TypeScript script wrapper)"
+
+[dependencies]
+sicompass-sdk = { workspace = true }

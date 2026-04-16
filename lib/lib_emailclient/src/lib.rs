@@ -4465,3 +4465,24 @@ mod tests {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// SDK registration
+// ---------------------------------------------------------------------------
+
+/// Register the email client with the SDK factory and manifest registries.
+pub fn register() {
+    sicompass_sdk::register_provider_factory("emailclient", || {
+        Box::new(EmailClientProvider::new())
+    });
+    sicompass_sdk::register_builtin_manifest(
+        sicompass_sdk::BuiltinManifest::new("emailclient", "email client").with_settings(vec![
+            sicompass_sdk::SettingDecl::text("email client", "IMAP URL",              "emailImapUrl",       "imaps://imap.gmail.com"),
+            sicompass_sdk::SettingDecl::text("email client", "SMTP URL",              "emailSmtpUrl",       "smtps://smtp.gmail.com"),
+            sicompass_sdk::SettingDecl::text("email client", "username",              "emailUsername",      ""),
+            sicompass_sdk::SettingDecl::text("email client", "password",              "emailPassword",      ""),
+            sicompass_sdk::SettingDecl::text("email client", "client ID (OAuth)",     "emailClientId",      ""),
+            sicompass_sdk::SettingDecl::text("email client", "client secret (OAuth)", "emailClientSecret",  ""),
+        ]),
+    );
+}

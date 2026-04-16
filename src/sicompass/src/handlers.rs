@@ -246,7 +246,7 @@ pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
 /// Fetch URL content and parse into FFON elements.
 /// Mirrors C's `fetchUrlToElements`.
 fn fetch_url_to_elements(url: &str) -> Vec<FfonElement> {
-    sicompass_webbrowser::fetch_url_to_ffon(url)
+    sicompass_sdk::fetch_url_to_ffon(url)
 }
 
 /// Resolve a link URL (local file or HTTP) into FFON elements.
