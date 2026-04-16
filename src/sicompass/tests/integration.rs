@@ -9,14 +9,16 @@
 use sicompass::events::dispatch_key;
 use sicompass::app_state::{AppRenderer, Coordinate};
 use sdl3::keyboard::{Keycode, Mod};
-use sicompass_filebrowser::FilebrowserProvider;
-use sicompass_settings::SettingsProvider;
-use sicompass_emailclient::EmailClientProvider;
 use sicompass_sdk::placeholders::I_PLACEHOLDER;
 use sicompass_sdk::provider::Provider;
 use sicompass_sdk::ffon::FfonElement;
 use std::path::Path;
 use tempfile::TempDir;
+
+/// Call once per test binary to populate the SDK factory registry.
+fn ensure_builtins() {
+    sicompass_builtins::register_all();
+}
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -33,6 +35,7 @@ impl Harness {
     ///   alpha.txt, beta.txt, subdir/nested.txt
     /// and providers: FilebrowserProvider (rooted at tmp) + SettingsProvider.
     fn new() -> Self {
+        ensure_builtins();
         let tmp = TempDir::new().expect("failed to create temp dir");
         let root = tmp.path();
 
@@ -44,7 +47,7 @@ impl Harness {
         let mut renderer = AppRenderer::new();
 
         // File browser rooted at temp dir (set path AFTER init which resets to "/")
-        register(&mut renderer, Box::new(FilebrowserProvider::new()));
+        register(&mut renderer, sicompass_sdk::create_provider_by_name("filebrowser").unwrap());
         renderer.providers[0].set_current_path(root.to_str().unwrap());
         // Re-fetch now that the path is correct
         {
@@ -55,10 +58,10 @@ impl Harness {
             renderer.ffon[0] = root_elem;
         }
 
-        // Settings (no-op apply fn, isolated to temp dir — never touches real config)
-        let settings = SettingsProvider::new(|_, _| {})
-            .with_config_path(tmp.path().join("settings.json"));
-        register(&mut renderer, Box::new(settings));
+        // Settings (isolated to temp dir — never touches real config)
+        let mut settings = sicompass_sdk::create_provider_by_name("settings").unwrap();
+        settings.set_config_path(tmp.path().join("settings.json"));
+        register(&mut renderer, settings);
 
         sicompass::list::create_list_current_layer(&mut renderer);
 
@@ -66,6 +69,7 @@ impl Harness {
     }
 
     fn new_with_webbrowser() -> Self {
+        ensure_builtins();
         let tmp = TempDir::new().expect("failed to create temp dir");
         let root = tmp.path();
         std::fs::write(root.join("alpha.txt"), "test content").unwrap();
@@ -73,7 +77,7 @@ impl Harness {
         let mut renderer = AppRenderer::new();
 
         // Filebrowser: init resets path to "/", so set path after init
-        register(&mut renderer, Box::new(FilebrowserProvider::new()));
+        register(&mut renderer, sicompass_sdk::create_provider_by_name("filebrowser").unwrap());
         renderer.providers[0].set_current_path(root.to_str().unwrap());
         {
             let children = renderer.providers[0].fetch();
@@ -83,13 +87,12 @@ impl Harness {
             renderer.ffon[0] = root_elem;
         }
 
-        let wb = sicompass_webbrowser::WebbrowserProvider::new();
-        register(&mut renderer, Box::new(wb));
+        register(&mut renderer, sicompass_sdk::create_provider_by_name("webbrowser").unwrap());
 
-        // Settings (no-op apply fn, isolated to temp dir — never touches real config)
-        let settings = SettingsProvider::new(|_, _| {})
-            .with_config_path(tmp.path().join("settings.json"));
-        register(&mut renderer, Box::new(settings));
+        // Settings (isolated to temp dir — never touches real config)
+        let mut settings = sicompass_sdk::create_provider_by_name("settings").unwrap();
+        settings.set_config_path(tmp.path().join("settings.json"));
+        register(&mut renderer, settings);
 
         sicompass::list::create_list_current_layer(&mut renderer);
 
@@ -1172,13 +1175,14 @@ fn colon_blocked_at_root() {
 /// The filebrowser is a flat (lazy-fetch) provider: depth stays at 2 when entering subdirs.
 #[test]
 fn navigate_right_empty_dir_shows_placeholder() {
+    ensure_builtins();
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
     std::fs::write(root.join("file.txt"), "").unwrap();
     std::fs::create_dir(root.join("emptydir")).unwrap();
 
     let mut renderer = AppRenderer::new();
-    register(&mut renderer, Box::new(FilebrowserProvider::new()));
+    register(&mut renderer, sicompass_sdk::create_provider_by_name("filebrowser").unwrap());
     renderer.providers[0].set_current_path(root.to_str().unwrap());
     {
         let children = renderer.providers[0].fetch();
@@ -1221,6 +1225,7 @@ fn navigate_right_empty_dir_shows_placeholder() {
 /// Only at filesystem root "/" does the key fall back to "file browser".
 #[test]
 fn navigate_right_updates_parent_key() {
+    ensure_builtins();
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
     let root_name = root.file_name().unwrap().to_str().unwrap().to_owned();
@@ -1228,7 +1233,7 @@ fn navigate_right_updates_parent_key() {
     std::fs::write(root.join("subdir/file.txt"), "").unwrap();
 
     let mut renderer = AppRenderer::new();
-    register(&mut renderer, Box::new(FilebrowserProvider::new()));
+    register(&mut renderer, sicompass_sdk::create_provider_by_name("filebrowser").unwrap());
     renderer.providers[0].set_current_path(root.to_str().unwrap());
     {
         let children = renderer.providers[0].fetch();
@@ -1273,13 +1278,14 @@ fn navigate_right_updates_parent_key() {
 /// Deleting the last file in a directory causes the placeholder to reappear.
 #[test]
 fn delete_last_item_leaves_placeholder() {
+    ensure_builtins();
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
     std::fs::create_dir(root.join("mydir")).unwrap();
     std::fs::write(root.join("mydir/only.txt"), "").unwrap();
 
     let mut renderer = AppRenderer::new();
-    register(&mut renderer, Box::new(FilebrowserProvider::new()));
+    register(&mut renderer, sicompass_sdk::create_provider_by_name("filebrowser").unwrap());
     renderer.providers[0].set_current_path(root.to_str().unwrap());
     {
         let children = renderer.providers[0].fetch();
@@ -1319,12 +1325,13 @@ fn delete_last_item_leaves_placeholder() {
 /// Running "create file" command when on the empty placeholder replaces it in-place.
 #[test]
 fn create_file_on_placeholder_replaces_in_place() {
+    ensure_builtins();
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
     std::fs::create_dir(root.join("emptydir")).unwrap();
 
     let mut renderer = AppRenderer::new();
-    register(&mut renderer, Box::new(FilebrowserProvider::new()));
+    register(&mut renderer, sicompass_sdk::create_provider_by_name("filebrowser").unwrap());
     renderer.providers[0].set_current_path(root.to_str().unwrap());
     {
         let children = renderer.providers[0].fetch();
@@ -1370,12 +1377,13 @@ fn create_file_on_placeholder_replaces_in_place() {
 /// End-to-end: navigate into empty dir → press `i` → type → Enter → file exists on disk.
 #[test]
 fn filebrowser_i_placeholder_creates_file() {
+    ensure_builtins();
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
     std::fs::create_dir(root.join("emptydir")).unwrap();
 
     let mut renderer = AppRenderer::new();
-    register(&mut renderer, Box::new(FilebrowserProvider::new()));
+    register(&mut renderer, sicompass_sdk::create_provider_by_name("filebrowser").unwrap());
     renderer.providers[0].set_current_path(root.to_str().unwrap());
     {
         let children = renderer.providers[0].fetch();
@@ -1412,12 +1420,13 @@ fn filebrowser_i_placeholder_creates_file() {
 /// End-to-end: navigate into empty dir → press `i` → type `name:` → Enter → dir exists on disk.
 #[test]
 fn filebrowser_i_placeholder_creates_subdirectory() {
+    ensure_builtins();
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
     std::fs::create_dir(root.join("emptydir")).unwrap();
 
     let mut renderer = AppRenderer::new();
-    register(&mut renderer, Box::new(FilebrowserProvider::new()));
+    register(&mut renderer, sicompass_sdk::create_provider_by_name("filebrowser").unwrap());
     renderer.providers[0].set_current_path(root.to_str().unwrap());
     {
         let children = renderer.providers[0].fetch();
@@ -1450,12 +1459,13 @@ fn filebrowser_i_placeholder_creates_subdirectory() {
 /// Regression: after refresh, current_id could be out-of-bounds → insert at invalid index.
 #[test]
 fn ctrl_a_after_prefixed_creation_no_panic() {
+    ensure_builtins();
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().to_path_buf();
     std::fs::create_dir(root.join("testdir")).unwrap();
 
     let mut h = Harness { renderer: AppRenderer::new(), tmp };
-    register(h.r(), Box::new(FilebrowserProvider::new()));
+    register(h.r(), sicompass_sdk::create_provider_by_name("filebrowser").unwrap());
     h.renderer.providers[0].set_current_path(root.to_str().unwrap());
     {
         let children = h.renderer.providers[0].fetch();
@@ -2348,6 +2358,7 @@ impl Provider for ConfigProvider {
 /// Helper: create a harness with ConfigProvider (idx 0), FilebrowserProvider (idx 1).
 /// The filebrowser is rooted at `tmp` and the save folder is set to `tmp`.
 fn harness_with_config_provider() -> (AppRenderer, TempDir) {
+    ensure_builtins();
     let tmp = TempDir::new().expect("temp dir");
     let mut renderer = AppRenderer::new();
 
@@ -2356,7 +2367,7 @@ fn harness_with_config_provider() -> (AppRenderer, TempDir) {
 
     // Filebrowser at index 1
     let root = tmp.path().to_str().unwrap().to_owned();
-    register(&mut renderer, Box::new(FilebrowserProvider::new()));
+    register(&mut renderer, sicompass_sdk::create_provider_by_name("filebrowser").unwrap());
     renderer.providers[1].set_current_path(&root);
     {
         let children = renderer.providers[1].fetch();
@@ -3327,7 +3338,8 @@ fn handle_a_on_star_prefix_element_sets_placeholder_insert_mode() {
 /// email folder navigation by leaving EmailClientProvider on the default false.
 #[test]
 fn email_provider_refresh_on_navigate_is_true() {
-    let p = EmailClientProvider::new();
+    ensure_builtins();
+    let p = sicompass_sdk::create_provider_by_name("emailclient").unwrap();
     assert!(p.refresh_on_navigate(),
         "EmailClientProvider must return refresh_on_navigate() = true so \
          navigate_right_raw calls fetch() when opening a folder");
@@ -3340,12 +3352,13 @@ fn email_provider_refresh_on_navigate_is_true() {
 /// fallback used `<input></input>` regardless of provider type.
 #[test]
 fn navigate_into_empty_compose_body_shows_i_placeholder() {
+    ensure_builtins();
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
     let mut renderer = AppRenderer::new();
     // Use register_no_init to avoid loading real OAuth config from disk,
     // which would cause fetch() to return "Loading…" on machines with an expired token.
-    register_no_init(&mut renderer, Box::new(EmailClientProvider::new()));
+    register_no_init(&mut renderer, sicompass_sdk::create_provider_by_name("emailclient").unwrap());
 
     // Set provider path to compose root so is_in_email_compose_body returns true
     // after we push "Body: [text]".
@@ -3400,10 +3413,11 @@ fn navigate_into_empty_compose_body_shows_i_placeholder() {
 ///   - Provider's `current_path` and `compose.draft.body` are primed via the trait API.
 #[test]
 fn delete_last_compose_body_element_keeps_i_placeholder() {
+    ensure_builtins();
     use sicompass_sdk::ffon::{FfonElement, IdArray};
 
     let mut renderer = AppRenderer::new();
-    register_no_init(&mut renderer, Box::new(EmailClientProvider::new()));
+    register_no_init(&mut renderer, sicompass_sdk::create_provider_by_name("emailclient").unwrap());
 
     // Prime provider internal body state via the trait API:
     //   set_current_path so is_in_email_compose_body() returns true,
@@ -3450,23 +3464,21 @@ fn delete_last_compose_body_element_keeps_i_placeholder() {
 /// (or whose content didn't match the top-level key) silently returned `false`.
 #[test]
 fn delete_body_element_str_with_obj_sibling_integration() {
+    ensure_builtins();
     use sicompass_sdk::ffon::IdArray;
 
     let mut renderer = AppRenderer::new();
-    register_no_init(&mut renderer, Box::new(EmailClientProvider::new()));
+    register_no_init(&mut renderer, sicompass_sdk::create_provider_by_name("emailclient").unwrap());
 
     // Build a body with [Str("abc"), Obj{key:"myobj:"}, Str("def")].
     renderer.providers[0].set_current_path("compose/Body: [ffon]");
 
-    {
-        use sicompass_emailclient::EmailClientProvider;
-        // Directly set the body state by committing two strings and an obj via the
-        // provider trait.  commit_edit on an empty body creates the first Str; subsequent
-        // calls update or append.  For the Obj we create it via "myobj:" commit.
-        renderer.providers[0].commit_edit("", "abc");
-        renderer.providers[0].commit_edit("abc", "myobj:");
-        renderer.providers[0].commit_edit("", "def");
-    }
+    // Directly set the body state by committing two strings and an obj via the
+    // provider trait.  commit_edit on an empty body creates the first Str; subsequent
+    // calls update or append.  For the Obj we create it via "myobj:" commit.
+    renderer.providers[0].commit_edit("", "abc");
+    renderer.providers[0].commit_edit("abc", "myobj:");
+    renderer.providers[0].commit_edit("", "def");
 
     // Build the ffon tree displayed when the user is inside the Body.
     // It mirrors the Ffon children: [Str(<input>abc</input>), Obj(myobj:), Str(<input>def</input>)].
@@ -3509,8 +3521,9 @@ fn delete_body_element_str_with_obj_sibling_integration() {
 /// shortcuts, placeholder seeding, and subtree refresh.
 #[test]
 fn is_in_email_compose_body_true_for_reply_from_message() {
+    ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register_no_init(&mut renderer, Box::new(EmailClientProvider::new()));
+    register_no_init(&mut renderer, sicompass_sdk::create_provider_by_name("emailclient").unwrap());
 
     // Simulate a reply entered from /INBOX/msg — compose root is at segs[2].
     renderer.providers[0].set_current_path("INBOX/Hello — alice@example.com/reply/Body: [text]");
@@ -3529,10 +3542,11 @@ fn is_in_email_compose_body_true_for_reply_from_message() {
 /// a plain `<input></input>` (renders as `-i`) instead of the typed `i` placeholder.
 #[test]
 fn navigate_into_reply_from_message_body_shows_i_placeholder() {
+    ensure_builtins();
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
     let mut renderer = AppRenderer::new();
-    register_no_init(&mut renderer, Box::new(EmailClientProvider::new()));
+    register_no_init(&mut renderer, sicompass_sdk::create_provider_by_name("emailclient").unwrap());
 
     // Simulate the path produced when reply is entered from /INBOX/msg.
     renderer.providers[0].set_current_path("INBOX/Hello — alice@example.com/reply");
@@ -3581,10 +3595,11 @@ fn navigate_into_reply_from_message_body_shows_i_placeholder() {
 /// of mode because the test focuses on the generic nested-Obj navigation path.
 #[test]
 fn navigate_into_nested_body_obj_shows_i_placeholder() {
+    ensure_builtins();
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
     let mut renderer = AppRenderer::new();
-    register_no_init(&mut renderer, Box::new(EmailClientProvider::new()));
+    register_no_init(&mut renderer, sicompass_sdk::create_provider_by_name("emailclient").unwrap());
 
     // Path is inside the body so that push_path (called by navigate_right_raw) appends
     // to the correct base path when navigating into `foo:`.
@@ -3640,8 +3655,9 @@ fn navigate_into_nested_body_obj_shows_i_placeholder() {
 /// `fetch_subtree_children` for the nested path returns "bar" as a child of `foo:`.
 #[test]
 fn commit_in_nested_compose_body_creates_child_there() {
+    ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register_no_init(&mut renderer, Box::new(EmailClientProvider::new()));
+    register_no_init(&mut renderer, sicompass_sdk::create_provider_by_name("emailclient").unwrap());
 
     // Step 1: create `foo:` at the top level of the body.
     renderer.providers[0].push_path("compose");
@@ -3681,8 +3697,9 @@ fn commit_in_nested_compose_body_creates_child_there() {
 /// creation just as it does at the top level.
 #[test]
 fn commit_trailing_colon_in_nested_body_creates_obj_with_i_placeholder() {
+    ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register_no_init(&mut renderer, Box::new(EmailClientProvider::new()));
+    register_no_init(&mut renderer, sicompass_sdk::create_provider_by_name("emailclient").unwrap());
 
     // Create `foo:` at top level, then `baz:` inside `foo:`.
     renderer.providers[0].push_path("compose");
@@ -3724,10 +3741,11 @@ fn commit_trailing_colon_in_nested_body_creates_obj_with_i_placeholder() {
 /// updates only the parent Obj's children without touching the root.
 #[test]
 fn editing_leaf_in_nested_compose_body_does_not_empty_list() {
+    ensure_builtins();
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
     let mut renderer = AppRenderer::new();
-    register_no_init(&mut renderer, Box::new(EmailClientProvider::new()));
+    register_no_init(&mut renderer, sicompass_sdk::create_provider_by_name("emailclient").unwrap());
 
     // Step 1: build draft.body via the provider API so that fetch_subtree_children
     // can return the correct children for the nested path.

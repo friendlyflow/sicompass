@@ -117,6 +117,21 @@ pub trait Provider: Send + 'static {
     /// themselves a section in the settings provider (mirrors C's `settingsAddSection`).
     fn add_settings_section(&mut self, _name: &str) {}
 
+    /// Register a priority section (rendered first in the settings list).
+    /// Used to set up the "Available programs:" section without a direct
+    /// dependency on `SettingsProvider`. Default: no-op.
+    fn add_priority_section(&mut self, _name: &str) {}
+
+    /// Set the apply callback — called whenever a setting changes.
+    /// Replaces the constructor-time closure so `SettingsProvider` can be
+    /// created through the factory registry and configured afterwards.
+    /// Default: no-op.
+    fn set_apply_callback(&mut self, _cb: Box<dyn Fn(&str, &str) + Send + 'static>) {}
+
+    /// Override the config file path (primarily for tests).
+    /// Default: no-op.
+    fn set_config_path(&mut self, _path: std::path::PathBuf) {}
+
     /// Remove a named section from this provider.
     fn remove_settings_section(&mut self, _name: &str) {}
 

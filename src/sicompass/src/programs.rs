@@ -20,13 +20,6 @@ use sicompass_sdk::ffon::FfonElement;
 use sicompass_sdk::provider::Provider;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
-use sicompass_filebrowser::FilebrowserProvider;
-use sicompass_settings::SettingsProvider;
-use sicompass_tutorial::TutorialProvider;
-use sicompass_chatclient::ChatClientProvider;
-use sicompass_emailclient::EmailClientProvider;
-use sicompass_webbrowser::WebbrowserProvider;
-use sicompass_remote::RemoteProvider;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -128,25 +121,30 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
     let queue: SettingsQueue = Arc::new(Mutex::new(Vec::new()));
     let queue_clone = Arc::clone(&queue);
 
-    // ---- Build the settings provider ----------------------------------------
-    let mut settings = SettingsProvider::new(move |k, v| {
+    // ---- Build the settings provider via factory registry -------------------
+    let mut settings: Box<dyn Provider> = sicompass_sdk::create_provider_by_name("settings")
+        .expect("settings factory must be registered — call sicompass_builtins::register_all() first");
+    settings.set_apply_callback(Box::new(move |k, v| {
         queue_clone.lock().unwrap().push((k.to_owned(), v.to_owned()));
-    });
+    }));
+    if let Some(path) = sicompass_sdk::platform::main_config_path() {
+        settings.set_config_path(path);
+    }
 
     // Core sicompass settings
-    settings.add_radio(
+    settings.add_radio_setting(
         "sicompass", "color scheme", "colorScheme",
         &["dark", "light"], "dark",
     );
-    settings.add_checkbox("sicompass", "maximized", "maximized", false);
-    settings.add_radio(
+    settings.add_checkbox_setting("sicompass", "maximized", "maximized", false);
+    settings.add_radio_setting(
         "sicompass", "font scale", "fontScale",
         &["1.00", "1.25", "1.50", "1.75", "2.00", "2.25", "2.50"],
         "1.00",
     );
 
     // File-browser settings
-    settings.add_radio(
+    settings.add_radio_setting(
         "file browser", "sort order", "sortOrder",
         &["alphanumerically", "chronologically"], "alphanumerically",
     );
@@ -155,18 +153,32 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
     // Built-in program checkboxes are added first; user-plugin checkboxes are
     // added by load_user_plugins() below (after discovery).
     settings.add_priority_section("Available programs:");
-    for &(name, config_key, default) in PROGRAM_ENTRIES {
-        settings.add_checkbox("Available programs:", name, config_key, default);
+    for m in sicompass_sdk::builtin_manifests() {
+        if !m.always_enabled {
+            let config_key = format!("enable_{}", m.display_name);
+            settings.add_checkbox_setting("Available programs:", &m.display_name, &config_key, m.enable_default);
+        }
     }
 
-    // ---- Always register file browser first --------------------------------
-    register_provider(renderer, Box::new(FilebrowserProvider::new()));
+    // ---- Always register always_enabled providers first (e.g. file browser) -
+    for m in sicompass_sdk::builtin_manifests() {
+        if m.always_enabled {
+            if let Some(p) = instantiate_builtin(&m.name) {
+                register_provider(renderer, p);
+            }
+        }
+    }
 
     // ---- Load enabled content providers (before registering settings) -------
     let enabled = enabled_programs();
     for name in &enabled {
         if let Some(p) = instantiate_builtin(name.as_str()) {
-            inject_builtin_settings(&mut settings, name.as_str());
+            let manifest = sicompass_sdk::builtin_manifests()
+                .into_iter()
+                .find(|m| m.display_name == *name || m.name == *name);
+            if let Some(ref m) = manifest {
+                inject_builtin_manifest_settings(settings.as_mut(), m);
+            }
             register_provider(renderer, p);
         } else {
             eprintln!("sicompass: unknown program '{name}' — skipping");
@@ -175,77 +187,66 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
 
     // ---- Register a settings section for each loaded program ---------------
     for p in renderer.providers.iter() {
-        if let Some(&(entry_name, _, _)) = PROGRAM_ENTRIES.iter()
-            .find(|&&(n, _, _)| name_matches_provider(n, p.name()))
+        if let Some(m) = sicompass_sdk::builtin_manifests()
+            .into_iter()
+            .find(|m| name_matches_provider(&m.display_name, p.name()))
         {
-            settings.add_section(entry_name);
+            settings.add_settings_section(&m.display_name);
         }
     }
 
     // ---- Load user-installed plugins ----------------------------------------
-    load_user_plugins(renderer, &mut settings);
+    load_user_plugins(renderer, settings.as_mut());
 
     // ---- Load remote service providers from Available programs: config ------
     // Scans for enable_*=true entries that don't match any known program and
     // routes them through RemoteProvider (mirrors C's loadProgram remote branch).
-    load_remote_programs(renderer, &mut settings);
+    load_remote_programs(renderer, settings.as_mut());
 
     // ---- Sort all registered providers alphabetically ----------------------
     sort_providers_alphabetically(renderer);
 
     // ---- Register settings as the last provider ----------------------------
-    register_provider(renderer, Box::new(settings));
+    register_provider(renderer, settings);
 
     queue
 }
 
-/// Inject the text settings for a built-in program. Mirrors C's
-/// `applyManifestSettings` over `BUILTIN_MANIFESTS` (src/sicompass/programs.c:187).
+/// Inject setting entries from a `BuiltinManifest` into the settings provider.
 /// Called from both the startup load loop and `enable_provider` so hot-enable
 /// registers identical settings to startup-enable.
-fn inject_builtin_settings(settings: &mut dyn Provider, name: &str) {
-    match name {
-        "sales demo" => {
-            settings.add_text_setting("sales demo",
-                "save folder (product configuration)", "saveFolder", "Downloads");
+fn inject_builtin_manifest_settings(settings: &mut dyn Provider, manifest: &sicompass_sdk::BuiltinManifest) {
+    use sicompass_sdk::SettingKind;
+    for s in &manifest.settings {
+        match s.kind {
+            SettingKind::Text => {
+                settings.add_text_setting(&s.section, &s.label, &s.key, &s.default);
+            }
+            SettingKind::Checkbox => {
+                settings.add_checkbox_setting(&s.section, &s.label, &s.key, s.default_checked);
+            }
+            SettingKind::Radio => {
+                let opts: Vec<&str> = s.options.iter().map(String::as_str).collect();
+                settings.add_radio_setting(&s.section, &s.label, &s.key, &opts, &s.default);
+            }
         }
-        "chat client" => {
-            settings.add_text_setting("chat client", "homeserver URL",    "chatHomeserver", "https://matrix.org");
-            settings.add_text_setting("chat client", "access token",      "chatAccessToken", "");
-            settings.add_text_setting("chat client", "username",          "chatUsername",    "");
-            settings.add_text_setting("chat client", "password",          "chatPassword",    "");
-        }
-        "email client" => {
-            settings.add_text_setting("email client", "IMAP URL",
-                "emailImapUrl", "imaps://imap.gmail.com");
-            settings.add_text_setting("email client", "SMTP URL",
-                "emailSmtpUrl", "smtps://smtp.gmail.com");
-            settings.add_text_setting("email client", "username",              "emailUsername",     "");
-            settings.add_text_setting("email client", "password",              "emailPassword",     "");
-            settings.add_text_setting("email client", "client ID (OAuth)",     "emailClientId",     "");
-            settings.add_text_setting("email client", "client secret (OAuth)", "emailClientSecret", "");
-        }
-        _ => {}
     }
 }
 
-/// Instantiate a built-in provider by display name.
+/// Instantiate a built-in provider by name via the SDK factory registry.
 ///
-/// Factory match keys use display names (e.g. `"chat client"` with a space),
-/// not internal names like `"chatclient"`. This same function is used from
-/// both `load_programs` and the `Factory` branch of `instantiate_user_plugin`.
+/// Accepts both display names with spaces (e.g. `"chat client"`) and the
+/// compact factory keys (e.g. `"chatclient"`).  Tries the exact name first,
+/// then strips spaces as a fallback so callers from `instantiate_user_plugin`
+/// (which uses `manifest.name`) work without conversion.
 fn instantiate_builtin(name: &str) -> Option<Box<dyn Provider>> {
-    match name {
-        "filebrowser" => Some(Box::new(FilebrowserProvider::new())),
-        "tutorial"    => Some(Box::new(TutorialProvider::new(&tutorial_assets_dir()))),
-        "web browser" => Some(Box::new(WebbrowserProvider::new())),
-        "chat client" => Some(Box::new(ChatClientProvider::new())),
-        "email client"=> Some(Box::new(EmailClientProvider::new())),
-        "sales demo"  => Some(Box::new(ScriptProvider::new(
-            "sales demo", "sales demo", sales_demo_script_path(),
-        ).with_supports_config_files(true))),
-        _ => None,
+    // Try exact name first (e.g. "sales demo", "filebrowser").
+    if let Some(p) = sicompass_sdk::create_provider_by_name(name) {
+        return Some(p);
     }
+    // Fallback: try with spaces stripped (e.g. "chat client" → "chatclient").
+    let compact: String = name.chars().filter(|&c| c != ' ').collect();
+    sicompass_sdk::create_provider_by_name(&compact)
 }
 
 /// Instantiate a user plugin (Script, Native, or Factory) from its discovered manifest.
@@ -264,21 +265,21 @@ fn instantiate_user_plugin(plugin: &DiscoveredPlugin) -> Option<Box<dyn Provider
 }
 
 /// Inject a plugin manifest's settings entries into the settings provider.
-fn inject_plugin_settings(settings: &mut SettingsProvider, manifest: &PluginManifest) {
+fn inject_plugin_settings(settings: &mut dyn Provider, manifest: &PluginManifest) {
     use crate::plugin_manifest::SettingKind;
     for s in &manifest.settings {
         match s.kind {
             SettingKind::Text => {
-                settings.add_text(&manifest.display_name, &s.label, &s.key, &s.default);
+                settings.add_text_setting(&manifest.display_name, &s.label, &s.key, &s.default);
             }
             SettingKind::Checkbox => {
-                settings.add_checkbox(
+                settings.add_checkbox_setting(
                     &manifest.display_name, &s.label, &s.key, s.default_checked,
                 );
             }
             SettingKind::Radio => {
                 let opts: Vec<&str> = s.options.iter().map(String::as_str).collect();
-                settings.add_radio(
+                settings.add_radio_setting(
                     &manifest.display_name, &s.label, &s.key, &opts, &s.default,
                 );
             }
@@ -291,7 +292,7 @@ fn inject_plugin_settings(settings: &mut SettingsProvider, manifest: &PluginMani
 ///
 /// Mirrors `discoverUserPlugins` + `registerProgramsSection` (user half) +
 /// the user-plugin loading loop in `programsLoad` from `src/sicompass/programs.c`.
-fn load_user_plugins(renderer: &mut AppRenderer, settings: &mut SettingsProvider) {
+fn load_user_plugins(renderer: &mut AppRenderer, settings: &mut dyn Provider) {
     let discovered = discover_user_plugins();
 
     // Populate the global cache so hot-enable can find manifests later.
@@ -303,7 +304,7 @@ fn load_user_plugins(renderer: &mut AppRenderer, settings: &mut SettingsProvider
         // Add the enable checkbox to "Available programs:" (same as C's registerProgramsSection).
         let config_key = format!("enable_{}", m.name);
         let currently_enabled = is_plugin_enabled_in_config(&m.name);
-        settings.add_checkbox("Available programs:", &m.display_name, &config_key, currently_enabled);
+        settings.add_checkbox_setting("Available programs:", &m.display_name, &config_key, currently_enabled);
 
         // Skip disabled plugins (mirrors C's isEnabledInConfig check in programsLoad).
         if !currently_enabled {
@@ -314,7 +315,7 @@ fn load_user_plugins(renderer: &mut AppRenderer, settings: &mut SettingsProvider
         inject_plugin_settings(settings, m);
 
         // Register a section in settings for this plugin.
-        settings.add_section(&m.display_name);
+        settings.add_settings_section(&m.display_name);
 
         // Construct and register the provider.
         match instantiate_user_plugin(plugin) {
@@ -390,42 +391,6 @@ fn migrate_programs_to_load(path: &Path) {
     }
 }
 
-/// Resolve a repo-relative asset path to an absolute one. Tries candidates in order:
-///   1. `<CARGO_MANIFEST_DIR>/../../<rel>`  — dev build (works with redirected target-dir,
-///      e.g. AppControl-blocked C:\sicompass\target redirect)
-///   2. `<exe_dir>/<rel>`                   — release: resources alongside the exe
-///   3. `<exe_dir>/../<rel>`                — release: resources one level up
-///   4. `<cwd>/<rel>`                       — running from the repo root
-///
-/// Returns the first existing candidate, or the manifest-anchored path as a last
-/// resort so that error messages point somewhere meaningful.
-fn resolve_repo_asset(rel: &str) -> PathBuf {
-    let from_manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..").join(rel);
-    if from_manifest.exists() {
-        return from_manifest;
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let a = dir.join(rel);
-            if a.exists() { return a; }
-            let b = dir.join("..").join(rel);
-            if b.exists() { return b; }
-        }
-    }
-    let cwd = PathBuf::from(rel);
-    if cwd.exists() { return cwd; }
-    from_manifest
-}
-
-fn tutorial_assets_dir() -> PathBuf {
-    resolve_repo_asset("lib/lib_tutorial/assets")
-}
-
-fn sales_demo_script_path() -> PathBuf {
-    resolve_repo_asset("lib/lib_sales_demo/sales_demo.ts")
-}
-
 /// Read `sicompass.maximized` from settings.json.
 /// Returns `false` if absent, unparseable, or file missing.
 pub fn read_maximized() -> bool {
@@ -478,7 +443,7 @@ fn read_remote_config(section: &str) -> Option<(String, String)> {
 /// providers.  Mirrors the "unknown program → remote service" branch of C's
 /// `loadProgram` (src/sicompass/programs.c:247-273) but applied at startup so
 /// remote services are reachable without requiring a hot-enable action.
-fn load_remote_programs(renderer: &mut AppRenderer, settings: &mut SettingsProvider) {
+fn load_remote_programs(renderer: &mut AppRenderer, settings: &mut dyn Provider) {
     let path = match sicompass_sdk::platform::main_config_path() {
         Some(p) => p,
         None => return,
@@ -496,6 +461,7 @@ fn load_remote_programs(renderer: &mut AppRenderer, settings: &mut SettingsProvi
         None => return,
     };
 
+    let builtin_manifests = sicompass_sdk::builtin_manifests();
     for (key, val) in available {
         // Only process enable_*=true keys.
         let name = match key.strip_prefix("enable_") {
@@ -505,7 +471,7 @@ fn load_remote_programs(renderer: &mut AppRenderer, settings: &mut SettingsProvi
         if val.as_bool() != Some(true) { continue; }
 
         // Skip known builtins and already-registered providers.
-        if PROGRAM_ENTRIES.iter().any(|&(n, _, _)| n == name) { continue; }
+        if builtin_manifests.iter().any(|m| m.display_name == name || m.name == name) { continue; }
         if renderer.providers.iter().any(|p| name_matches_provider(name, p.name())) { continue; }
 
         // Read remoteUrl; skip if absent.
@@ -519,13 +485,13 @@ fn load_remote_programs(renderer: &mut AppRenderer, settings: &mut SettingsProvi
         }
 
         let provider: Box<dyn Provider> =
-            Box::new(RemoteProvider::new(name, remote_url, api_key));
+            sicompass_builtins::create_remote(name, remote_url, api_key);
         register_provider(renderer, provider);
 
         // Register the two settings text entries for this remote service.
-        settings.add_text(name, "remote URL", "remoteUrl", "");
-        settings.add_text(name, "API key",    "apiKey",    "");
-        settings.add_section(name);
+        settings.add_text_setting(name, "remote URL", "remoteUrl", "");
+        settings.add_text_setting(name, "API key",    "apiKey",    "");
+        settings.add_settings_section(name);
     }
 }
 
@@ -546,12 +512,16 @@ pub fn enable_provider(renderer: &mut AppRenderer, name: &str) {
 
     // Try built-ins first.
     if let Some(provider) = instantiate_builtin(name) {
-        let name_owned = name.to_owned();
+        let manifest = sicompass_sdk::builtin_manifests()
+            .into_iter()
+            .find(|m| m.display_name == name || m.name == name);
         insert_provider_alphabetically(
             renderer,
             provider,
             Some(Box::new(move |settings: &mut dyn Provider| {
-                inject_builtin_settings(settings, &name_owned);
+                if let Some(ref m) = manifest {
+                    inject_builtin_manifest_settings(settings, m);
+                }
             })),
         );
         return;
@@ -576,7 +546,7 @@ pub fn enable_provider(renderer: &mut AppRenderer, name: &str) {
             crate::provider::register_auth(&remote_url, &api_key);
         }
         let provider: Box<dyn Provider> =
-            Box::new(RemoteProvider::new(name, remote_url, api_key));
+            sicompass_builtins::create_remote(name, remote_url, api_key);
         let section_name = name.to_owned();
         insert_provider_alphabetically(renderer, provider, Some(Box::new(move |settings: &mut dyn Provider| {
             settings.add_text_setting(&section_name, "remote URL", "remoteUrl", "");
@@ -637,9 +607,10 @@ fn insert_provider_alphabetically(
     let settings_idx = renderer.providers.len().saturating_sub(1);
     let new_name_lower = provider.name().to_ascii_lowercase();
     // Determine the canonical settings section name before consuming `provider`.
-    let section_name = PROGRAM_ENTRIES.iter()
-        .find(|&&(n, _, _)| name_matches_provider(n, provider.name()))
-        .map(|&(n, _, _)| n.to_owned())
+    let section_name = sicompass_sdk::builtin_manifests()
+        .into_iter()
+        .find(|m| name_matches_provider(&m.display_name, provider.name()))
+        .map(|m| m.display_name)
         .unwrap_or_else(|| display_name.clone());
     let mut insert_idx = settings_idx; // default: just before settings
     for i in 0..settings_idx {
@@ -674,11 +645,12 @@ pub fn disable_provider(renderer: &mut AppRenderer, name: &str) {
     };
 
     let removed_provider_name = renderer.providers[idx].name().to_owned();
-    // Use the PROGRAM_ENTRIES canonical name for section removal when available.
+    // Use the builtin manifest display_name for section removal when available.
     // For user plugins, fall back to the provider name itself (which equals manifest.display_name).
-    let removed_section_name = PROGRAM_ENTRIES.iter()
-        .find(|&&(n, _, _)| name_matches_provider(n, &removed_provider_name))
-        .map(|&(n, _, _)| n.to_owned())
+    let removed_section_name = sicompass_sdk::builtin_manifests()
+        .into_iter()
+        .find(|m| name_matches_provider(&m.display_name, &removed_provider_name))
+        .map(|m| m.display_name)
         .unwrap_or_else(|| {
             // Check user plugin cache for display_name
             let guard = user_plugin_cache().lock().unwrap();
@@ -783,15 +755,6 @@ fn apply_setting(
 // Config helpers
 // ---------------------------------------------------------------------------
 
-/// (name, config_key, default_enabled) for the Available programs: section.
-const PROGRAM_ENTRIES: &[(&str, &str, bool)] = &[
-    ("tutorial",     "enable_tutorial",     true),
-    ("sales demo",   "enable_sales demo",   false),
-    ("chat client",  "enable_chat client",  false),
-    ("email client", "enable_email client", false),
-    ("web browser",  "enable_web browser",  false),
-];
-
 /// Return true if `display_name` matches `provider_name` when spaces are ignored.
 /// e.g., "chat client" matches "chatclient".
 pub fn name_matches_provider(display_name: &str, provider_name: &str) -> bool {
@@ -801,18 +764,22 @@ pub fn name_matches_provider(display_name: &str, provider_name: &str) -> bool {
 }
 
 fn enabled_programs() -> Vec<String> {
+    let manifests = sicompass_sdk::builtin_manifests();
+    let non_always: Vec<_> = manifests.iter().filter(|m| !m.always_enabled).collect();
+
     if let Some(path) = sicompass_sdk::platform::main_config_path() {
         if let Ok(data) = std::fs::read_to_string(&path) {
             if let Ok(root) = serde_json::from_str::<serde_json::Value>(&data) {
                 if let Some(section) = root.get("Available programs:") {
                     let mut result = Vec::new();
-                    for &(name, config_key, default) in PROGRAM_ENTRIES {
+                    for m in &non_always {
+                        let config_key = format!("enable_{}", m.display_name);
                         let enabled = section
-                            .get(config_key)
+                            .get(&config_key)
                             .and_then(|v| v.as_bool())
-                            .unwrap_or(default);
+                            .unwrap_or(m.enable_default);
                         if enabled {
-                            result.push(name.to_owned());
+                            result.push(m.display_name.clone());
                         }
                     }
                     if !result.is_empty() {
@@ -823,10 +790,10 @@ fn enabled_programs() -> Vec<String> {
         }
     }
 
-    PROGRAM_ENTRIES
+    non_always
         .iter()
-        .filter(|&&(_, _, default)| default)
-        .map(|&(name, _, _)| name.to_string())
+        .filter(|m| m.enable_default)
+        .map(|m| m.display_name.clone())
         .collect()
 }
 
@@ -1197,6 +1164,8 @@ mod tests {
     /// `name`, then return the FFON fetch output from the settings provider.
     fn settings_ffon_after_enable(name: &str) -> Vec<FfonElement> {
         use sicompass_settings::SettingsProvider;
+        // Ensure the factory registry is populated (normally done in main()).
+        sicompass_builtins::register_all();
         let mut r = AppRenderer::new();
         _reset_user_plugin_cache(vec![]);
         register_provider(&mut r, Box::new(SettingsProvider::new_headless()));

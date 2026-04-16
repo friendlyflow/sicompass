@@ -1277,3 +1277,22 @@ mod tests {
         assert_eq!(result.device_id, "ABCDEF");
     }
 }
+
+// ---------------------------------------------------------------------------
+// SDK registration
+// ---------------------------------------------------------------------------
+
+/// Register the chat client with the SDK factory and manifest registries.
+pub fn register() {
+    sicompass_sdk::register_provider_factory("chatclient", || {
+        Box::new(ChatClientProvider::new())
+    });
+    sicompass_sdk::register_builtin_manifest(
+        sicompass_sdk::BuiltinManifest::new("chatclient", "chat client").with_settings(vec![
+            sicompass_sdk::SettingDecl::text("chat client", "homeserver URL",    "chatHomeserver",   "https://matrix.org"),
+            sicompass_sdk::SettingDecl::text("chat client", "access token",      "chatAccessToken",  ""),
+            sicompass_sdk::SettingDecl::text("chat client", "username",          "chatUsername",     ""),
+            sicompass_sdk::SettingDecl::text("chat client", "password",          "chatPassword",     ""),
+        ]),
+    );
+}

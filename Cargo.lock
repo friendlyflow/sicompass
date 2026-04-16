@@ -3356,6 +3356,7 @@ dependencies = [
  "sdl3",
  "serde",
  "serde_json",
+ "sicompass-builtins",
  "sicompass-chatclient",
  "sicompass-emailclient",
  "sicompass-filebrowser",
@@ -3372,6 +3373,21 @@ dependencies = [
  "unicode-normalization",
  "windows 0.58.0",
  "winres",
+]
+
+[[package]]
+name = "sicompass-builtins"
+version = "0.1.0"
+dependencies = [
+ "sicompass-chatclient",
+ "sicompass-emailclient",
+ "sicompass-filebrowser",
+ "sicompass-remote",
+ "sicompass-sales-demo",
+ "sicompass-sdk",
+ "sicompass-settings",
+ "sicompass-tutorial",
+ "sicompass-webbrowser",
 ]
 
 [[package]]
@@ -3427,9 +3443,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sicompass-sales-demo"
+version = "0.1.0"
+dependencies = [
+ "sicompass-sdk",
+]
+
+[[package]]
 name = "sicompass-sdk"
 version = "0.1.0"
 dependencies = [
+ "libloading",
  "mockall",
  "scraper",
  "serde",

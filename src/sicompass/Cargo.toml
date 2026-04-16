@@ -15,13 +15,7 @@ path = "src/lib.rs"
 
 [dependencies]
 sicompass-sdk = { workspace = true }
-sicompass-tutorial = { workspace = true }
-sicompass-settings = { workspace = true }
-sicompass-filebrowser = { workspace = true }
-sicompass-webbrowser = { workspace = true }
-sicompass-chatclient = { workspace = true }
-sicompass-emailclient = { workspace = true }
-sicompass-remote = { workspace = true }
+sicompass-builtins = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -64,5 +58,13 @@ accesskit_macos = { workspace = true }
 winres = { workspace = true }
 
 [dev-dependencies]
+sicompass-builtins = { workspace = true }
+sicompass-settings = { workspace = true }
+sicompass-filebrowser = { workspace = true }
+sicompass-tutorial = { workspace = true }
+sicompass-webbrowser = { workspace = true }
+sicompass-chatclient = { workspace = true }
+sicompass-emailclient = { workspace = true }
+sicompass-remote = { workspace = true }
 mockall = { workspace = true }
 tempfile = { workspace = true }

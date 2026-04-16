@@ -533,6 +533,21 @@ impl Provider for SettingsProvider {
                          config_key: &str, options: &[&str], default: &str) {
         self.add_radio(section, label, config_key, options, default);
     }
+
+    fn add_priority_section(&mut self, name: &str) {
+        // Inline the inherent add_priority_section body to avoid recursive
+        // dispatch (both inherent and trait have the same name).
+        self.priority_section = Some(name.to_owned());
+        self.add_section(name);
+    }
+
+    fn set_apply_callback(&mut self, cb: Box<dyn Fn(&str, &str) + Send + 'static>) {
+        self.apply_fn = Some(cb);
+    }
+
+    fn set_config_path(&mut self, path: std::path::PathBuf) {
+        self.config_path_override = Some(path);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1175,4 +1190,72 @@ mod tests {
         // Seed must not have added Available programs: on top of the existing file.
         assert!(root.get("Available programs:").is_none());
     }
+
+    #[test]
+    fn set_apply_callback_fires_on_checkbox_change() {
+        use std::sync::{Arc, Mutex};
+        let fired: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let fired2 = Arc::clone(&fired);
+        let mut p = SettingsProvider::new_headless()
+            .with_config_path(test_config_path());
+        p.set_apply_callback(Box::new(move |k, _v| {
+            fired2.lock().unwrap().push(k.to_owned());
+        }));
+        p.add_checkbox("s", "my flag", "myFlag", false);
+        p.on_checkbox_change("my flag", true);
+        assert!(fired.lock().unwrap().contains(&"myFlag".to_owned()));
+    }
+
+    #[test]
+    fn set_config_path_writes_to_override() {
+        use sicompass_sdk::provider::Provider;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("override.json");
+        let mut p = SettingsProvider::new_headless();
+        p.set_config_path(path.clone());
+        p.add_checkbox("sicompass", "flag", "testFlag", false);
+        // on_checkbox_change should write to the override path, not the real config
+        p.on_checkbox_change("flag", true);
+        assert!(path.exists(), "on_checkbox_change should write to the override path");
+        let data = std::fs::read_to_string(&path).unwrap();
+        assert!(data.contains("testFlag"), "written config should contain the key");
+    }
+
+    #[test]
+    fn add_priority_section_trait_method_registers_section() {
+        use sicompass_sdk::provider::Provider;
+        let mut p = SettingsProvider::new_headless()
+            .with_config_path(test_config_path());
+        Provider::add_priority_section(&mut p, "My Priority");
+        p.add_checkbox("My Priority", "flag", "myFlag", false);
+        let items = p.fetch();
+        let has_section = items.iter().any(|e| {
+            e.as_obj().map(|o| o.key == "My Priority").unwrap_or(false)
+        });
+        assert!(has_section, "priority section should appear in fetch output");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Default + SDK registration
+// ---------------------------------------------------------------------------
+
+impl Default for SettingsProvider {
+    /// Create a headless `SettingsProvider` with no apply callback.
+    /// Use `set_apply_callback` and `set_config_path` (via the `Provider` trait)
+    /// to configure it after construction — enabling factory-registry creation
+    /// without a direct dependency on this crate from the app.
+    fn default() -> Self {
+        Self::new_headless()
+    }
+}
+
+/// Register the settings provider with the SDK factory registry.
+///
+/// The factory creates a headless `SettingsProvider`; the app configures it
+/// afterwards via `Provider::set_apply_callback` and `Provider::set_config_path`.
+pub fn register() {
+    sicompass_sdk::register_provider_factory("settings", || {
+        Box::new(SettingsProvider::default())
+    });
 }
