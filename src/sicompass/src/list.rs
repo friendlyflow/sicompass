@@ -494,9 +494,9 @@ mod tests {
 
     #[test]
     fn i_placeholder_str_label_is_i() {
-        // The compose-body placeholder `"i <input></input>"` must render as plain `"i"`,
-        // not `"-i "` — the "i " prefix before the empty <input> tag is the sentinel.
-        assert_eq!(build_str_label("i <input></input>", false), "i");
+        // I_PLACEHOLDER must render as plain `"i"`, not `"-i "` —
+        // the "i " prefix before the empty <input> tag is the sentinel.
+        assert_eq!(build_str_label(sicompass_sdk::placeholders::I_PLACEHOLDER, false), "i");
     }
 
     fn make_renderer_with_items(items: &[&str]) -> AppRenderer {

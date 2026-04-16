@@ -6,6 +6,7 @@
 use crate::app_state::{AppRenderer, CommandPhase, Coordinate, History, Task};
 use crate::list;
 use sicompass_sdk::ffon::{get_ffon_at_id, next_layer_exists, FfonElement, IdArray};
+use sicompass_sdk::placeholders::{is_i_placeholder, I_PLACEHOLDER};
 use sicompass_sdk::tags;
 
 // ---------------------------------------------------------------------------
@@ -213,21 +214,12 @@ pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
             // Lazy-fetch provider (filebrowser): push path, re-fetch, stay at depth 2.
             crate::provider::push_path(r, &segment);
             crate::provider::refresh_current_directory(r);
-            // If the directory is empty, insert a placeholder so the user can create files
-            // (mirrors C providerNavigateRight: childCount == 0 → add <input></input>).
-            // For email compose body use the `i <input></input>` typed-placeholder instead
-            // of the bare `<input></input>` so it renders as "i" (not "-i").
-            // Check before the mutable borrow to satisfy the borrow checker.
-            let in_compose_body = crate::provider::is_in_email_compose_body(r);
+            // If the directory/container is empty, insert the `i` placeholder so
+            // the user can create children by typing (renders as "i", not "-i").
             if let Some(root) = r.ffon.get_mut(provider_idx) {
                 if let Some(obj) = root.as_obj_mut() {
                     if obj.children.is_empty() {
-                        let placeholder = if in_compose_body {
-                            FfonElement::Str("i <input></input>".to_owned())
-                        } else {
-                            FfonElement::Str("<input></input>".to_owned())
-                        };
-                        obj.children.push(placeholder);
+                        obj.children.push(FfonElement::Str(I_PLACEHOLDER.to_owned()));
                     }
                 }
             }
@@ -1339,7 +1331,7 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
                     // After refresh the `*` placeholder may have shifted position — repoint.
                     let new_star_idx = {
                         let arr = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id);
-                        arr.and_then(|a| a.iter().position(|e| matches!(e, FfonElement::Str(s) if s == "i <input></input>")))
+                        arr.and_then(|a| a.iter().position(|e| matches!(e, FfonElement::Str(s) if is_i_placeholder(s))))
                     };
                     if let Some(star_idx) = new_star_idx {
                         r.current_id.set_last(star_idx);
@@ -1374,7 +1366,7 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
                     }
                     let new_star_idx = {
                         let arr = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id);
-                        arr.and_then(|a| a.iter().position(|e| matches!(e, FfonElement::Str(s) if s == "i <input></input>")))
+                        arr.and_then(|a| a.iter().position(|e| matches!(e, FfonElement::Str(s) if is_i_placeholder(s))))
                     };
                     if let Some(star_idx) = new_star_idx {
                         r.current_id.set_last(star_idx);
@@ -2081,13 +2073,13 @@ pub fn handle_delete(r: &mut AppRenderer, history: crate::app_state::History) {
 pub fn handle_file_delete(r: &mut AppRenderer) {
     let ok = crate::provider::delete_item(r);
     if ok {
-        // If the directory is now empty, insert a placeholder so the user can create files
-        // (mirrors C update.c: after deletion, if _ffon_count == 0 → add <input></input>)
+        // If the directory is now empty, insert the `i` placeholder so the user
+        // can create files by typing (renders as "i", not "-i").
         let provider_idx = r.current_id.get(0).unwrap_or(0);
         if let Some(root) = r.ffon.get_mut(provider_idx) {
             if let Some(obj) = root.as_obj_mut() {
                 if obj.children.is_empty() {
-                    obj.children.push(FfonElement::Str("<input></input>".to_owned()));
+                    obj.children.push(FfonElement::Str(I_PLACEHOLDER.to_owned()));
                     r.current_id.set_last(0);
                 }
             }
@@ -3299,8 +3291,8 @@ fn insert_placeholder_typed(r: &mut AppRenderer, insert_idx: usize) {
     use sicompass_sdk::ffon::FfonElement;
 
     let depth = r.current_id.depth();
-    // Use "i" prefix so build_str_label renders it as the "i" placeholder label.
-    let placeholder = FfonElement::Str("i <input></input>".to_owned());
+    // Use I_PLACEHOLDER so build_str_label renders it as the "i" placeholder label.
+    let placeholder = FfonElement::Str(I_PLACEHOLDER.to_owned());
 
     if depth == 1 {
         r.ffon.insert(insert_idx, placeholder);
