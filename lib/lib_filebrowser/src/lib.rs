@@ -16,6 +16,7 @@
 //! - `deep_search` is a BFS traversal (up to 50 000 results).
 
 use sicompass_sdk::ffon::FfonElement;
+use sicompass_sdk::placeholders::new_obj_with_i_placeholder;
 use sicompass_sdk::provider::{ListItem, Provider, SearchResultItem};
 use sicompass_sdk::tags;
 use std::path::{Path, PathBuf};
@@ -163,11 +164,21 @@ impl Provider for FilebrowserProvider {
     }
 
     fn commit_edit(&mut self, old: &str, new_content: &str) -> bool {
-        // Strip tags to get bare filename
         let old_name = tags::strip_display(old);
         let new_name = tags::strip_display(new_content);
-        if old_name == new_name { return false; }
 
+        if old_name.is_empty() {
+            // Committing an `i` placeholder — treat as a create.
+            // The generic handler appends `:` when the user typed `+name` or `name:`.
+            if let Some(dir_name) = new_name.strip_suffix(':') {
+                if dir_name.is_empty() { return false; }
+                return self.create_directory(dir_name);
+            }
+            if new_name.is_empty() { return false; }
+            return self.create_file(&new_name);
+        }
+
+        if old_name == new_name { return false; }
         let old_path = self.current_path.join(old_name.trim_end_matches('/').trim_end_matches('\\'));
         let new_path = self.current_path.join(new_name.trim_end_matches('/').trim_end_matches('\\'));
         std::fs::rename(&old_path, &new_path).is_ok()
@@ -218,9 +229,7 @@ impl Provider for FilebrowserProvider {
     ) -> Option<FfonElement> {
         match command {
             "create directory" => {
-                let mut obj = FfonElement::new_obj("<input></input>");
-                obj.as_obj_mut().unwrap().push(FfonElement::Str("<input></input>".into()));
-                Some(obj)
+                Some(new_obj_with_i_placeholder("<input></input>"))
             }
             "create file" => {
                 Some(FfonElement::Str("<input></input>".into()))
@@ -711,7 +720,47 @@ mod tests {
         let mut err = String::new();
         let result = p.handle_command("create directory", "", 0, &mut err);
         let elem = result.unwrap();
-        assert!(elem.as_obj().is_some());
+        let obj = elem.as_obj().expect("create directory must return an Obj");
+        assert_eq!(obj.children.len(), 1, "new directory Obj must have exactly one child");
+        assert!(
+            matches!(&obj.children[0], FfonElement::Str(s) if s == sicompass_sdk::placeholders::I_PLACEHOLDER),
+            "child must be I_PLACEHOLDER, got: {:?}", obj.children[0]
+        );
+    }
+
+    // ---- commit_edit (create on empty old) ------------------------------------
+
+    #[test]
+    fn test_commit_edit_empty_old_creates_file() {
+        let (mut p, dir) = make_provider();
+        let ok = p.commit_edit("", "notes.txt");
+        assert!(ok, "commit_edit with empty old should create the file");
+        assert!(dir.path().join("notes.txt").exists(), "notes.txt should exist on disk");
+    }
+
+    #[test]
+    fn test_commit_edit_empty_old_creates_directory() {
+        let (mut p, dir) = make_provider();
+        let ok = p.commit_edit("", "subdir:");
+        assert!(ok, "commit_edit with empty old and trailing colon should create a directory");
+        assert!(dir.path().join("subdir").is_dir(), "subdir should exist as a directory");
+    }
+
+    #[test]
+    fn test_commit_edit_empty_old_empty_new_returns_false() {
+        let (mut p, _dir) = make_provider();
+        assert!(!p.commit_edit("", ""), "empty old + empty new must return false");
+        assert!(!p.commit_edit("", ":"), "empty old + colon-only new must return false");
+    }
+
+    #[test]
+    fn test_commit_edit_rename_still_works() {
+        let (mut p, dir) = make_provider();
+        std::fs::File::create(dir.path().join("alpha.txt")).unwrap();
+        let ok = p.commit_edit("alpha.txt", "beta.txt");
+        assert!(ok, "rename should succeed");
+        assert!(!dir.path().join("alpha.txt").exists(), "alpha.txt should be gone");
+        assert!(dir.path().join("beta.txt").exists(), "beta.txt should exist");
     }
 
     #[test]

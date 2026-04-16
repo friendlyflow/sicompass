@@ -12,6 +12,7 @@ use sdl3::keyboard::{Keycode, Mod};
 use sicompass_filebrowser::FilebrowserProvider;
 use sicompass_settings::SettingsProvider;
 use sicompass_emailclient::EmailClientProvider;
+use sicompass_sdk::placeholders::I_PLACEHOLDER;
 use sicompass_sdk::provider::Provider;
 use sicompass_sdk::ffon::FfonElement;
 use std::path::Path;
@@ -1210,8 +1211,8 @@ fn navigate_right_empty_dir_shows_placeholder() {
     // Placeholder is the only list item
     assert_eq!(renderer.total_list.len(), 1, "empty dir should show exactly one placeholder");
     let label = &renderer.total_list[0].label;
-    // <input></input> renders as "-i " (str prefix + empty input tag content)
-    assert!(label.starts_with("-i"), "placeholder label should start with '-i', got: {label:?}");
+    // I_PLACEHOLDER renders as "i" (typed insert affordance)
+    assert_eq!(label, "i", "placeholder label should be 'i', got: {label:?}");
 }
 
 /// Navigating into a subdirectory updates the root FFON element's key to the
@@ -1310,7 +1311,7 @@ fn delete_last_item_leaves_placeholder() {
     // Placeholder must now be the only item
     assert_eq!(renderer.total_list.len(), 1, "placeholder should be the only item after delete");
     let label = &renderer.total_list[0].label;
-    assert!(label.starts_with("-i"),
+    assert_eq!(label, "i",
         "placeholder should appear after deleting last item, got: {label:?}");
     assert_eq!(renderer.current_id.last(), Some(0), "current_id should point at placeholder");
 }
@@ -1362,6 +1363,87 @@ fn create_file_on_placeholder_replaces_in_place() {
     // Should enter insert mode to type the filename
     assert_eq!(renderer.coordinate, sicompass::app_state::Coordinate::OperatorInsert,
         "should enter insert mode after create file");
+}
+
+/// Typing a plain name on the `i` placeholder in an empty directory creates a file.
+///
+/// End-to-end: navigate into empty dir → press `i` → type → Enter → file exists on disk.
+#[test]
+fn filebrowser_i_placeholder_creates_file() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    std::fs::create_dir(root.join("emptydir")).unwrap();
+
+    let mut renderer = AppRenderer::new();
+    register(&mut renderer, Box::new(FilebrowserProvider::new()));
+    renderer.providers[0].set_current_path(root.to_str().unwrap());
+    {
+        let children = renderer.providers[0].fetch();
+        let display_name = renderer.providers[0].display_name().to_owned();
+        let mut root_elem = FfonElement::new_obj(&display_name);
+        for child in children { root_elem.as_obj_mut().unwrap().push(child); }
+        renderer.ffon[0] = root_elem;
+    }
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    press_right(&mut renderer);
+    let idx = renderer.total_list.iter().position(|i| i.label.contains("emptydir")).unwrap();
+    let cur = renderer.list_index;
+    for _ in 0..(idx.abs_diff(cur)) {
+        if idx > cur { press_down(&mut renderer); } else { press_up(&mut renderer); }
+    }
+    press_right(&mut renderer); // enter emptydir → i placeholder shown
+
+    assert_eq!(renderer.total_list.len(), 1);
+    assert_eq!(&renderer.total_list[0].label, "i");
+
+    // Press i, type a filename, commit
+    press(&mut renderer, Keycode::I);
+    assert!(renderer.placeholder_insert_mode, "should be in placeholder insert mode");
+    type_text(&mut renderer, "notes.txt");
+    press_enter(&mut renderer);
+
+    assert!(root.join("emptydir/notes.txt").exists(), "notes.txt should have been created on disk");
+    assert_eq!(renderer.coordinate, sicompass::app_state::Coordinate::OperatorGeneral);
+}
+
+/// Typing `name:` on the `i` placeholder in an empty directory creates a subdirectory.
+///
+/// End-to-end: navigate into empty dir → press `i` → type `name:` → Enter → dir exists on disk.
+#[test]
+fn filebrowser_i_placeholder_creates_subdirectory() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    std::fs::create_dir(root.join("emptydir")).unwrap();
+
+    let mut renderer = AppRenderer::new();
+    register(&mut renderer, Box::new(FilebrowserProvider::new()));
+    renderer.providers[0].set_current_path(root.to_str().unwrap());
+    {
+        let children = renderer.providers[0].fetch();
+        let display_name = renderer.providers[0].display_name().to_owned();
+        let mut root_elem = FfonElement::new_obj(&display_name);
+        for child in children { root_elem.as_obj_mut().unwrap().push(child); }
+        renderer.ffon[0] = root_elem;
+    }
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    press_right(&mut renderer);
+    let idx = renderer.total_list.iter().position(|i| i.label.contains("emptydir")).unwrap();
+    let cur = renderer.list_index;
+    for _ in 0..(idx.abs_diff(cur)) {
+        if idx > cur { press_down(&mut renderer); } else { press_up(&mut renderer); }
+    }
+    press_right(&mut renderer); // enter emptydir → i placeholder shown
+
+    assert_eq!(&renderer.total_list[0].label, "i");
+
+    press(&mut renderer, Keycode::I);
+    type_text(&mut renderer, "subdir:");
+    press_enter(&mut renderer);
+
+    assert!(root.join("emptydir/subdir").is_dir(), "subdir should have been created on disk");
+    assert_eq!(renderer.coordinate, sicompass::app_state::Coordinate::OperatorGeneral);
 }
 
 /// Ctrl+A after creating a file (prefixed insert mode) must not panic.
@@ -3157,19 +3239,19 @@ fn placeholder_escape_clears_flag() {
     assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
 }
 
-/// Build a renderer whose top-level FFON list contains a `"i <input></input>"` element.
+/// Build a renderer whose top-level FFON list contains an `I_PLACEHOLDER` element.
 /// This simulates what the email compose body view looks like after `body_to_compose_children`
 /// adds the permanent placeholder.
 fn make_star_prefix_harness() -> AppRenderer {
     let mut root = FfonElement::new_obj("provider");
-    root.as_obj_mut().unwrap().push(FfonElement::new_str("i <input></input>".to_owned()));
+    root.as_obj_mut().unwrap().push(FfonElement::new_str(I_PLACEHOLDER.to_owned()));
     root.as_obj_mut().unwrap().push(FfonElement::new_str("other item".to_owned()));
 
     let mut r = AppRenderer::new();
     r.ffon = vec![root];
     r.current_id = sicompass_sdk::ffon::IdArray::new();
     r.current_id.push(0);
-    r.current_id.push(0); // on "i <input></input>"
+    r.current_id.push(0); // on I_PLACEHOLDER
     r.coordinate = Coordinate::OperatorGeneral;
     r.previous_coordinate = Coordinate::OperatorGeneral;
     sicompass::list::create_list_current_layer(&mut r);
@@ -3514,7 +3596,7 @@ fn navigate_into_nested_body_obj_shows_i_placeholder() {
     // so the FFON children are used directly — no draft.body access needed here.
     let foo_obj = FfonElement::Obj(FfonObject {
         key: "<input>foo</input>".to_owned(),
-        children: vec![FfonElement::Str("i <input></input>".to_owned())],
+        children: vec![FfonElement::Str(I_PLACEHOLDER.to_owned())],
     });
     let body_obj = FfonElement::Obj(FfonObject {
         key: "Body: [ffon]".to_owned(),
@@ -3626,7 +3708,7 @@ fn commit_trailing_colon_in_nested_body_creates_obj_with_i_placeholder() {
 
     assert_eq!(
         baz.children.first(),
-        Some(&FfonElement::Str("i <input></input>".to_owned())),
+        Some(&FfonElement::Str(I_PLACEHOLDER.to_owned())),
         "newly created baz: Obj must have I_PLACEHOLDER as first child; got: {:?}",
         baz.children
     );

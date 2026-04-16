@@ -51,6 +51,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use sicompass_sdk::ffon::{FfonElement, FfonObject};
+use sicompass_sdk::placeholders::{
+    new_obj_with_i_placeholder, seed_i_placeholders, I_PLACEHOLDER,
+};
 use sicompass_sdk::platform;
 use sicompass_sdk::provider::Provider;
 
@@ -1283,41 +1286,6 @@ fn build_message_view(msg: &EmailMessage) -> Vec<FfonElement> {
 // ---------------------------------------------------------------------------
 // Body helper functions
 // ---------------------------------------------------------------------------
-
-/// The "insert here" placeholder used in both the top-level body list and in
-/// every inner Obj's children list.  Always kept in sync so keyboard affordances
-/// behave identically at every nesting level of the compose body.
-const I_PLACEHOLDER: &str = "i <input></input>";
-
-/// Create a new body `Obj` element pre-seeded with the `I_PLACEHOLDER` child.
-///
-/// Every Obj that appears inside the compose body must start with this
-/// placeholder so the insert affordance (Ctrl+I / Enter) is always available
-/// inside the Obj, just as it is at the top-level body list.
-fn new_obj_with_i_placeholder(key: String) -> FfonElement {
-    let mut obj = FfonElement::new_obj(key);
-    obj.as_obj_mut()
-        .unwrap()
-        .push(FfonElement::new_str(I_PLACEHOLDER.to_owned()));
-    obj
-}
-
-/// Recursively ensure every `Obj` inside `elems` has `I_PLACEHOLDER` as its
-/// first child so that the insert affordance is available at every nesting level.
-/// Skips Objs that already start with the placeholder.
-fn seed_i_placeholders(elems: &mut Vec<FfonElement>) {
-    for elem in elems.iter_mut() {
-        if let FfonElement::Obj(o) = elem {
-            let already_seeded = o.children.first()
-                .map(|c| matches!(c, FfonElement::Str(s) if s == I_PLACEHOLDER))
-                .unwrap_or(false);
-            if !already_seeded {
-                o.children.insert(0, FfonElement::new_str(I_PLACEHOLDER.to_owned()));
-            }
-            seed_i_placeholders(&mut o.children);
-        }
-    }
-}
 
 /// Build the children list for the `Body:` Obj in the compose view.
 ///
@@ -3471,7 +3439,7 @@ mod tests {
                 assert_eq!(elems.len(), 1, "should have exactly one placeholder; got: {:?}", elems);
                 assert_eq!(
                     elems[0],
-                    FfonElement::new_str("i <input></input>".to_owned()),
+                    FfonElement::new_str(I_PLACEHOLDER.to_owned()),
                     "remaining element should be the i placeholder"
                 );
             }
@@ -3490,7 +3458,7 @@ mod tests {
                 assert_eq!(elems.len(), 1, "should have exactly one placeholder; got: {:?}", elems);
                 assert_eq!(
                     elems[0],
-                    FfonElement::new_str("i <input></input>".to_owned()),
+                    FfonElement::new_str(I_PLACEHOLDER.to_owned()),
                     "remaining element should be the i placeholder"
                 );
             }
