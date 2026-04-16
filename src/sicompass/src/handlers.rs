@@ -685,12 +685,28 @@ pub fn handle_enter_command(r: &mut AppRenderer) {
                     }
                 };
 
+                // Stash cancel state before mutating so Escape can undo the insertion.
+                let return_id = r.current_id.clone();
                 if current_is_placeholder {
+                    // Clone the original placeholder so Escape can put it back.
+                    let orig = get_ffon_at_id(&r.ffon, &r.current_id)
+                        .and_then(|a| a.get(current_idx))
+                        .cloned();
+                    r.placeholder_cancel = Some(crate::app_state::PlaceholderCancel {
+                        insertion_id: r.current_id.clone(),
+                        replaced_element: orig,
+                        return_id,
+                    });
                     replace_ffon_element(r, current_idx, new_elem);
                 } else {
                     let insert_idx = current_idx + 1;
                     insert_ffon_element(r, insert_idx, new_elem);
                     r.current_id.set_last(insert_idx);
+                    r.placeholder_cancel = Some(crate::app_state::PlaceholderCancel {
+                        insertion_id: r.current_id.clone(),
+                        replaced_element: None,
+                        return_id,
+                    });
                 }
                 r.current_command = CommandPhase::None;
                 r.coordinate = Coordinate::OperatorGeneral;
@@ -1320,6 +1336,7 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
             }
             PlaceholderKind::Str(name) => {
                 r.placeholder_insert_mode = false;
+                r.placeholder_cancel = None;
                 let committed = crate::provider::commit_edit(r, &old_content, &name);
                 if committed {
                     // Prefer a sub-tree refresh (updates only the parent Obj's children)
@@ -1358,6 +1375,7 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
             }
             PlaceholderKind::Obj(key) => {
                 r.placeholder_insert_mode = false;
+                r.placeholder_cancel = None;
                 // Passes `key:` — the trailing colon signals Obj creation to `update_body_leaf`.
                 let committed = crate::provider::commit_edit(r, &old_content, &format!("{key}:"));
                 if committed {
@@ -1534,6 +1552,7 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
         );
 
         r.prefixed_insert_mode = false;
+        r.placeholder_cancel = None;
         crate::provider::refresh_current_directory(r);
         list::create_list_current_layer(r);
         // Move cursor to the newly created item by name (list may have re-sorted).
@@ -1569,6 +1588,7 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
                 r.undo_history.pop();
             }
             crate::state::update_history(r, Task::FsCreate, &undo_id, None, Some(FfonElement::new_obj(&new_content)), History::None);
+            r.placeholder_cancel = None;
             crate::provider::refresh_current_directory(r);
             list::create_list_current_layer(r);
             {
@@ -1842,7 +1862,49 @@ pub fn handle_escape(r: &mut AppRenderer) {
                 r.needs_redraw = true;
                 return;
             }
-            // Discard changes, return to OperatorGeneral
+            // Cancel a freshly-inserted placeholder (Ctrl+I/A or :create command):
+            // remove the element from the FFON tree and restore the prior selection.
+            if let Some(cancel) = r.placeholder_cancel.take() {
+                use sicompass_sdk::ffon::FfonElement;
+                let idx = cancel.insertion_id.last().unwrap_or(0);
+                let mut parent_id = cancel.insertion_id.clone();
+                parent_id.pop();
+                if parent_id.depth() == 0 {
+                    // Root-level insertion
+                    match cancel.replaced_element {
+                        Some(orig) if idx < r.ffon.len() => r.ffon[idx] = orig,
+                        Some(_) => {}
+                        None if idx < r.ffon.len() => { r.ffon.remove(idx); }
+                        None => {}
+                    }
+                } else if let Some(slice) = crate::state::navigate_to_slice_pub(&mut r.ffon, &parent_id) {
+                    let parent_idx = parent_id.last().unwrap_or(0);
+                    if let Some(FfonElement::Obj(obj)) = slice.get_mut(parent_idx) {
+                        match cancel.replaced_element {
+                            Some(orig) if idx < obj.children.len() => obj.children[idx] = orig,
+                            Some(_) => {}
+                            None if idx < obj.children.len() => { obj.children.remove(idx); }
+                            None => {}
+                        }
+                    }
+                }
+                r.current_id = cancel.return_id;
+                r.placeholder_insert_mode = false;
+                r.prefixed_insert_mode = false;
+                r.coordinate = Coordinate::OperatorGeneral;
+                r.previous_coordinate = Coordinate::OperatorGeneral;
+                r.input_buffer.clear();
+                r.cursor_position = 0;
+                list::create_list_current_layer(r);
+                r.list_index = r.current_id.last().unwrap_or(0);
+                r.scroll_offset = 0;
+                r.speak_mode_change(None);
+                r.caret.reset(sdl_ticks());
+                r.needs_redraw = true;
+                return;
+            }
+            // Discard changes, return to OperatorGeneral (e.g. pressing `i` on a
+            // persistent I_PLACEHOLDER — nothing was inserted, just clear the flag).
             r.placeholder_insert_mode = false;
             r.coordinate = Coordinate::OperatorGeneral;
         }
@@ -3288,11 +3350,15 @@ pub fn handle_ctrl_shift_a_placeholder(r: &mut AppRenderer) {
 /// Insert an `<input></input>` placeholder at `insert_idx`, set `placeholder_insert_mode`,
 /// and enter OperatorInsert. This is the `*`-placeholder variant of `insert_operator_placeholder`.
 fn insert_placeholder_typed(r: &mut AppRenderer, insert_idx: usize) {
+    use crate::app_state::PlaceholderCancel;
     use sicompass_sdk::ffon::FfonElement;
 
     let depth = r.current_id.depth();
     // Use I_PLACEHOLDER so build_str_label renders it as the "i" placeholder label.
     let placeholder = FfonElement::Str(I_PLACEHOLDER.to_owned());
+
+    // Stash current_id before mutating — used to restore on Escape.
+    let return_id = r.current_id.clone();
 
     if depth == 1 {
         r.ffon.insert(insert_idx, placeholder);
@@ -3312,6 +3378,11 @@ fn insert_placeholder_typed(r: &mut AppRenderer, insert_idx: usize) {
     }
 
     r.current_id.set_last(insert_idx);
+    r.placeholder_cancel = Some(PlaceholderCancel {
+        insertion_id: r.current_id.clone(),
+        replaced_element: None,
+        return_id,
+    });
     r.placeholder_insert_mode = true;
     r.prefixed_insert_mode = false;
     list::create_list_current_layer(r);
@@ -3386,6 +3457,9 @@ fn insert_operator_placeholder(r: &mut AppRenderer, insert_idx: usize) {
         .map(|p| p.name() == "filebrowser")
         .unwrap_or(false);
 
+    // Stash current_id before mutating — used to restore on Escape.
+    let return_id = r.current_id.clone();
+
     if depth == 1 {
         r.ffon.insert(insert_idx, placeholder);
     } else {
@@ -3404,6 +3478,11 @@ fn insert_operator_placeholder(r: &mut AppRenderer, insert_idx: usize) {
     }
 
     r.current_id.set_last(insert_idx);
+    r.placeholder_cancel = Some(crate::app_state::PlaceholderCancel {
+        insertion_id: r.current_id.clone(),
+        replaced_element: None,
+        return_id,
+    });
     r.prefixed_insert_mode = is_filebrowser;
     list::create_list_current_layer(r);
     r.list_index = insert_idx;

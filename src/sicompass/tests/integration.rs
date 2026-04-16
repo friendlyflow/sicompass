@@ -4003,3 +4003,109 @@ fn ctrl_d_from_message_list_removes_message() {
         "cursor {cursor} must be within refreshed list of length {after_len}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Tests: Escape during create-placeholder removes stale element (bug fix)
+// ---------------------------------------------------------------------------
+
+/// Ctrl+Shift+I inserts a fresh placeholder then Escape removes it and restores
+/// the original `current_id`.
+#[test]
+fn placeholder_escape_removes_inserted_element() {
+    let mut r = make_placeholder_harness();
+    let pre_id = r.current_id.clone();
+    let pre_len = r.ffon[0].as_obj().unwrap().children.len(); // 2 ("first", "second")
+
+    sicompass::handlers::handle_ctrl_shift_i_placeholder(&mut r);
+    assert_eq!(r.coordinate, Coordinate::OperatorInsert);
+    assert!(r.placeholder_insert_mode);
+    // Placeholder was inserted: child count should have grown.
+    assert_eq!(r.ffon[0].as_obj().unwrap().children.len(), pre_len + 1);
+
+    press_escape(&mut r);
+
+    assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+    assert!(!r.placeholder_insert_mode);
+    // Placeholder must be gone.
+    assert_eq!(
+        r.ffon[0].as_obj().unwrap().children.len(), pre_len,
+        "escape should remove the freshly inserted placeholder"
+    );
+    // current_id must be restored.
+    assert_eq!(r.current_id, pre_id, "escape should restore the pre-insert current_id");
+}
+
+/// Ctrl+A appends a placeholder then Escape removes it.
+#[test]
+fn placeholder_ctrl_a_escape_removes_inserted_element() {
+    let mut r = make_placeholder_harness();
+    let pre_id = r.current_id.clone();
+    let pre_len = r.ffon[0].as_obj().unwrap().children.len();
+
+    sicompass::handlers::handle_ctrl_shift_a_placeholder(&mut r);
+    assert_eq!(r.coordinate, Coordinate::OperatorInsert);
+    assert_eq!(r.ffon[0].as_obj().unwrap().children.len(), pre_len + 1);
+
+    press_escape(&mut r);
+
+    assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(r.ffon[0].as_obj().unwrap().children.len(), pre_len);
+    assert_eq!(r.current_id, pre_id);
+}
+
+/// Pressing `i` on a persistent `I_PLACEHOLDER` (Path D) and then Escape must
+/// NOT remove the element — it was never freshly inserted.
+#[test]
+fn persistent_i_placeholder_escape_does_not_remove() {
+    let mut r = make_star_prefix_harness(); // seeds a permanent I_PLACEHOLDER
+    let pre_len = r.ffon[0].as_obj().unwrap().children.len();
+
+    press(&mut r, Keycode::I); // enters OperatorInsert on the persistent placeholder
+    assert_eq!(r.coordinate, Coordinate::OperatorInsert);
+    assert!(r.placeholder_insert_mode);
+    // placeholder_cancel must be None because nothing was freshly inserted.
+    assert!(r.placeholder_cancel.is_none());
+
+    press_escape(&mut r);
+
+    assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+    // The I_PLACEHOLDER element must still be present.
+    assert_eq!(
+        r.ffon[0].as_obj().unwrap().children.len(), pre_len,
+        "persistent I_PLACEHOLDER must survive Escape"
+    );
+    let still_has_placeholder = r.ffon[0].as_obj().unwrap().children.iter().any(|e| {
+        matches!(e, FfonElement::Str(s) if sicompass_sdk::placeholders::is_i_placeholder(s))
+    });
+    assert!(still_has_placeholder, "I_PLACEHOLDER element must still be in the FFON after Escape");
+}
+
+/// Ctrl+I in the file browser inserts a `<input></input>` placeholder; Escape
+/// removes it and restores the prior selection.
+#[test]
+fn filebrowser_ctrl_i_escape_removes_placeholder() {
+    let mut h = Harness::new();
+    std::fs::create_dir(h.tmp_path().join("Downloads")).unwrap();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r()); // enter filebrowser at depth 2
+    press(h.r(), Keycode::F5); // refresh to load Downloads
+
+    let pre_id = h.renderer.current_id.clone();
+    let pre_len = h.renderer.ffon[fb_idx].as_obj().unwrap().children.len();
+
+    press_ctrl(h.r(), Keycode::I); // inserts <input></input>, enters OperatorInsert
+    assert_eq!(h.renderer.coordinate, Coordinate::OperatorInsert);
+    assert_eq!(h.renderer.ffon[fb_idx].as_obj().unwrap().children.len(), pre_len + 1,
+        "Ctrl+I should insert a placeholder element");
+
+    press_escape(h.r());
+
+    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(
+        h.renderer.ffon[fb_idx].as_obj().unwrap().children.len(), pre_len,
+        "Escape should remove the filebrowser placeholder"
+    );
+    assert_eq!(h.renderer.current_id, pre_id, "Escape should restore the pre-insert current_id");
+}
