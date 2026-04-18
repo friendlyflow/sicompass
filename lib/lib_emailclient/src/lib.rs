@@ -674,10 +674,10 @@ impl EmailClientProvider {
         if self.config.smtp_url.is_empty() {
             self.config.smtp_url = "smtps://smtp.gmail.com:465".to_owned();
         }
-        if self.config.username.is_empty() {
-            if let Some(email) = oauth2::fetch_email(&self.config.oauth_access_token) {
-                self.config.username = email;
-            }
+        // Always sync username from the token so the XOAUTH2 `user=` field
+        // matches the authenticated account, even when a username was previously set.
+        if let Some(email) = oauth2::fetch_email(&self.config.oauth_access_token) {
+            self.config.username = email;
         }
         self.save_server_config();
         self.imap = None;
@@ -1092,16 +1092,29 @@ impl EmailClientProvider {
         let result = self.token_refresh_result.lock().unwrap().take();
         if let Some(outcome) = result {
             self.token_refresh_inflight.store(false, Ordering::Release);
-            if let Ok((access_token, expiry)) = outcome {
-                self.config.oauth_access_token = access_token;
-                self.config.token_expiry = expiry;
-                self.save_oauth_tokens();
-                // Drop backends so rebuild_backends recreates them with the new token.
-                self.imap = None;
-                self.smtp = None;
-                self.rebuild_backends();
+            match outcome {
+                Ok((access_token, expiry)) => {
+                    self.config.oauth_access_token = access_token;
+                    self.config.token_expiry = expiry;
+                    self.save_oauth_tokens();
+                    // Drop backends and cached folder list so the next fetch
+                    // issues a fresh IMAP connection with the new token.
+                    self.imap = None;
+                    self.smtp = None;
+                    self.folder_cache = None;
+                    self.rebuild_backends();
+                }
+                Err(_) => {
+                    // Refresh failed (e.g. revoked refresh token). Clear the stale
+                    // access token so is_logged_in() returns false and the login
+                    // button is shown instead of repeatedly failing with IMAP auth errors.
+                    self.config.oauth_access_token.clear();
+                    self.config.token_expiry = 0;
+                    self.save_oauth_tokens();
+                    self.imap = None;
+                    self.smtp = None;
+                }
             }
-            // Whether refresh succeeded or failed, unblock the caller.
             return true;
         }
 
@@ -2529,6 +2542,35 @@ mod tests {
     }
 
     #[test]
+    fn test_finish_login_clears_folder_cache_and_resets_path() {
+        // finish_login must always clear session state so the next fetch
+        // issues a fresh IMAP folder list with the new token.
+        let dir = tempfile::tempdir().unwrap();
+        let result = crate::oauth2::OAuth2TokenResult {
+            success: true,
+            access_token: "new_token".to_owned(),
+            refresh_token: "new_refresh".to_owned(),
+            expires_in: 3600,
+            ..Default::default()
+        };
+        let mut p = EmailClientProvider::new()
+            .with_config_path(dir.path().join("settings.json"));
+        // Pre-set a stale folder cache and a non-root path.
+        p.folder_cache = Some(vec![FfonElement::new_str("IMAP error: stale".to_owned())]);
+        p.current_path = "/INBOX/some-message".to_owned();
+        p.config.username = "old@example.com".to_owned();
+
+        p.finish_login(result);
+
+        assert!(p.folder_cache.is_none(), "folder_cache must be cleared after login");
+        assert_eq!(p.current_path, "/", "path must reset to root after login");
+        // oauth_access_token must be set from the result.
+        assert_eq!(p.config.oauth_access_token, "new_token");
+        // Username stays as-is when fetch_email returns None (no real network in tests).
+        // The production path always syncs username from the token — see finish_login.
+    }
+
+    #[test]
     fn test_folder_display_name_strips_prefix() {
         assert_eq!(folder_display_name("[Gmail]/Sent"), "Sent");
         assert_eq!(folder_display_name("INBOX"), "INBOX");
@@ -3241,6 +3283,52 @@ mod tests {
         p.handle_command("login", "", 0, &mut err);
         assert!(!err.is_empty(), "unknown command should set error");
         assert!(err.contains("unknown command"), "expected 'unknown command' message");
+    }
+
+    #[test]
+    fn test_ensure_fresh_token_async_refresh_failure_clears_token() {
+        // When the background refresh fails, the stale access token must be cleared
+        // so is_logged_in() returns false and the login button is shown.
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = EmailClientProvider::new()
+            .with_config_path(dir.path().join("settings.json"));
+        p.config.oauth_access_token = "stale_token".to_owned();
+        p.config.oauth_refresh_token = "refresh_tok".to_owned();
+        p.config.token_expiry = 1; // expired long ago
+
+        // Simulate a completed-but-failed background refresh.
+        *p.token_refresh_result.lock().unwrap() = Some(Err("revoked".to_owned()));
+
+        let unblocked = p.ensure_fresh_token_async();
+        assert!(unblocked, "caller must be unblocked even on failure");
+        assert!(p.config.oauth_access_token.is_empty(), "stale token must be cleared");
+        assert_eq!(p.config.token_expiry, 0);
+        assert!(!p.is_logged_in(), "is_logged_in must return false so login button appears");
+    }
+
+    #[test]
+    fn test_ensure_fresh_token_async_refresh_success_updates_token() {
+        // Successful refresh updates the token, rebuilds backends, and clears
+        // folder_cache so the next fetch issues a fresh IMAP connection.
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = EmailClientProvider::new()
+            .with_config_path(dir.path().join("settings.json"));
+        p.config.imap_url = "imaps://imap.example.com".to_owned();
+        p.config.username = "user@example.com".to_owned();
+        p.config.oauth_access_token = "old_token".to_owned();
+        p.config.oauth_refresh_token = "refresh_tok".to_owned();
+        p.config.token_expiry = 1;
+        // Seed a cached error as would happen after a failed IMAP attempt.
+        p.folder_cache = Some(vec![FfonElement::new_str("IMAP error: old".to_owned())]);
+
+        *p.token_refresh_result.lock().unwrap() = Some(Ok(("new_token".to_owned(), i64::MAX)));
+
+        let unblocked = p.ensure_fresh_token_async();
+        assert!(unblocked);
+        assert_eq!(p.config.oauth_access_token, "new_token");
+        assert_eq!(p.config.token_expiry, i64::MAX);
+        assert!(p.is_logged_in());
+        assert!(p.folder_cache.is_none(), "folder_cache must be cleared so next fetch retries IMAP with new token");
     }
 
     #[test]
