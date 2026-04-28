@@ -331,6 +331,9 @@ pub struct AppRenderer {
 
     // ---- Search string (Tab search) ----------------------------------------
     pub search_string: String,
+    /// `current_id` at the moment SimpleSearch/ExtendedSearch was entered.
+    /// Restored on Escape so search navigation doesn't permanently move the cursor.
+    pub search_origin_id: IdArray,
 
     // ---- Undo history ------------------------------------------------------
     pub undo_history: Vec<UndoEntry>,
@@ -459,6 +462,7 @@ impl AppRenderer {
             dashboard_image_path: String::new(),
             last_keypress_time: 0,
             search_string: String::new(),
+            search_origin_id: IdArray::new(),
             undo_history: Vec::new(),
             undo_position: 0,
             caret: crate::caret::CaretState::new(),
