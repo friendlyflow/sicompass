@@ -328,33 +328,73 @@ pub fn navigate_left_raw(r: &mut AppRenderer) -> bool {
         }
     };
 
-    // For lazy-fetch providers (filebrowser) at depth 2: if pop_path moves us
-    // to a parent directory, stay at depth 2 and re-fetch instead of going back
-    // to the root provider list.  Only applies when the provider declares that
-    // its backing store is authoritative on every nav step (refresh_on_navigate).
-    // For in-memory providers (script/form-builder), skip the capture so we
-    // always fall through to the simple pop, preserving user-added in-memory nodes.
-    let does_refresh_on_nav = r.providers
-        .get(r.current_id.get(0).unwrap_or(usize::MAX))
-        .map(|p| p.refresh_on_navigate())
-        .unwrap_or(false);
-    let path_before = if r.current_id.depth() == 2 && !parent_is_link && !parent_is_meta && does_refresh_on_nav {
+    // For providers that track a path (filebrowser, email client): if pop_path
+    // moves us to a parent directory/folder, stay at depth 2 and re-fetch instead
+    // of falling back to the root provider list.  We capture path_before whenever
+    // the provider implements pop_path — if the path is unchanged (no-op pop_path
+    // as in script/form-builder providers), path_changed stays false and we fall
+    // through to the simple current_id.pop(), preserving in-memory nodes.
+    let path_before = if r.current_id.depth() == 2 && !parent_is_link && !parent_is_meta {
         Some(crate::provider::current_path(r).to_owned())
     } else {
         None
+    };
+
+    // Also capture the pre-pop path for depths > 2.  Used below to restore the
+    // cursor position when a stale provider path (from undo/redo cursor mismatch)
+    // causes pop_path to skip past compose and land at "/" unexpectedly.
+    let path_before_any_depth = if !parent_is_link && !parent_is_meta {
+        crate::provider::current_path(r).to_owned()
+    } else {
+        String::new()
     };
 
     if !parent_is_link && !parent_is_meta {
         crate::provider::pop_path(r);
     }
 
+    // If the new path still has refresh_on_navigate=false (e.g. cursor/path mismatch
+    // from undo/redo left path at "/compose/Body:[...]" while cursor was at depth 2),
+    // keep popping until we reach a path that wants re-fetching or pop_path becomes
+    // a no-op.  We remember the first intermediate path's last segment so the cursor
+    // can land on the correct entry in the re-fetched parent list (e.g. "compose").
+    let folder_name_override: Option<String> = if path_before.is_some() {
+        let provider_idx = r.current_id.get(0).unwrap_or(usize::MAX);
+        let mut override_name: Option<String> = None;
+        for _ in 0..8 {
+            let does_refresh = r.providers
+                .get(provider_idx)
+                .map(|p| p.refresh_on_navigate())
+                .unwrap_or(true);
+            if does_refresh {
+                break;
+            }
+            let cur = crate::provider::current_path(r).to_owned();
+            if override_name.is_none() {
+                override_name = std::path::Path::new(&cur)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .or_else(|| Some(cur.clone()));
+            }
+            crate::provider::pop_path(r);
+            if crate::provider::current_path(r) == cur {
+                break; // pop_path was a no-op — don't loop forever
+            }
+        }
+        override_name
+    } else {
+        None
+    };
+
     let (path_changed, folder_name) = match path_before {
         Some(before) => {
             let changed = before != crate::provider::current_path(r);
-            let name = std::path::Path::new(&before)
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .or_else(|| Some(before.clone())); // drive roots (e.g. "D:\") have no file_name component
+            let name = folder_name_override.or_else(|| {
+                std::path::Path::new(&before)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .or_else(|| Some(before.clone())) // drive roots (e.g. "D:\") have no file_name component
+            });
             (changed, name)
         }
         None => (false, None),
@@ -377,6 +417,62 @@ pub fn navigate_left_raw(r: &mut AppRenderer) -> bool {
         r.current_id.set(1, target_index);
     } else {
         r.current_id.pop();
+
+        // Stale-key correction: undo/redo can leave the cursor at depth > 2
+        // while the provider path is one level shallower than expected (e.g.
+        // cursor at body depth 3 but path="/compose" instead of
+        // "/compose/Body:[...]"). pop_path then jumps from "/compose" → "/"
+        // without triggering a re-fetch, leaving ffon[provider].key="compose"
+        // while path="/". The next Left from depth 2 would reach depth 1 with
+        // a stale key in the root list. Detect and correct this here.
+        if r.current_id.depth() == 2 {
+            let provider_idx = r.current_id.get(0).unwrap_or(usize::MAX);
+            let needs_refetch = r.providers.get(provider_idx)
+                .map(|p| {
+                    if !p.refresh_on_navigate() {
+                        return false; // path is still in a no-refresh zone, fine
+                    }
+                    // refresh_on_navigate=true means we're at a "root-like" path.
+                    // If the FFON key doesn't match what this path should produce,
+                    // the entry is stale.
+                    let cur = p.current_path();
+                    let expected_key = if cur == "/" {
+                        p.display_name()
+                    } else {
+                        std::path::Path::new(cur)
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or(p.display_name())
+                    };
+                    r.ffon.get(provider_idx)
+                        .and_then(|f| f.as_obj())
+                        .map(|obj| sicompass_sdk::tags::strip_display(&obj.key) != expected_key)
+                        .unwrap_or(false)
+                })
+                .unwrap_or(false);
+
+            if needs_refetch {
+                crate::provider::refresh_current_directory(r);
+                // Place cursor on the folder we came from (last segment of the
+                // path that was popped away, captured before the initial pop).
+                let stale_folder = std::path::Path::new(&path_before_any_depth)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .or_else(|| Some(path_before_any_depth.clone()));
+                let target_index = stale_folder
+                    .and_then(|name| {
+                        let children = r.ffon.get(provider_idx)?.as_obj()?.children.as_slice();
+                        children.iter().position(|child| match child {
+                            sicompass_sdk::ffon::FfonElement::Obj(obj) => {
+                                sicompass_sdk::tags::strip_display(&obj.key) == name
+                            }
+                            _ => false,
+                        })
+                    })
+                    .unwrap_or(0);
+                r.current_id.set(1, target_index);
+            }
+        }
     }
 
     true
@@ -4078,6 +4174,244 @@ mod tests {
         r.scroll_offset = 99; // simulate stale scroll from deep navigation
         handle_left(&mut r); // go back → depth 2
         assert_eq!(r.scroll_offset, 0, "scroll_offset must be reset on Left");
+    }
+
+    #[test]
+    fn left_from_path_provider_at_depth2_stays_depth2_and_refetches() {
+        // Regression: providers that return refresh_on_navigate=false for certain
+        // sub-paths (e.g. email client in compose mode) must still re-fetch when
+        // Left is pressed at depth 2, because pop_path moves to a parent path.
+        // Previously the does_refresh_on_nav guard prevented path_before capture,
+        // causing current_id to pop to depth 1 (root list).
+        use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
+        use sicompass_sdk::provider::Provider;
+
+        use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+        let fetch_count = Arc::new(AtomicUsize::new(0));
+        struct PathProv { path: String, fetch_count: Arc<AtomicUsize> }
+        impl Provider for PathProv {
+            fn name(&self) -> &str { "pathprov" }
+            fn display_name(&self) -> &str { "pathprov" }
+            fn fetch(&mut self) -> Vec<FfonElement> {
+                self.fetch_count.fetch_add(1, Ordering::Relaxed);
+                vec![
+                    FfonElement::new_str("item-a"),
+                    FfonElement::new_str("item-b"),
+                ]
+            }
+            fn current_path(&self) -> &str { &self.path }
+            fn set_current_path(&mut self, p: &str) { self.path = p.to_owned(); }
+            fn push_path(&mut self, seg: &str) {
+                let base = self.path.trim_end_matches('/');
+                self.path = if base.is_empty() { format!("/{seg}") } else { format!("{base}/{seg}") };
+            }
+            fn pop_path(&mut self) {
+                if let Some(slash) = self.path.rfind('/') {
+                    self.path = if slash == 0 { "/".to_owned() } else { self.path[..slash].to_owned() };
+                }
+            }
+            // Simulate email-like: return false when inside a "compose" sub-path
+            fn refresh_on_navigate(&self) -> bool { !self.path.contains("compose") }
+        }
+
+        // Provider has folder list; "compose" is one of its children.
+        let compose_obj = FfonElement::Obj(FfonObject {
+            key: "compose".to_owned(),
+            children: vec![FfonElement::new_str("From: me")],
+        });
+        let root_obj = FfonElement::Obj(FfonObject {
+            key: "pathprov".to_owned(),
+            children: vec![FfonElement::new_str("INBOX"), compose_obj],
+        });
+        let mut r = AppRenderer::new();
+        r.ffon = vec![root_obj];
+        let prov = Box::new(PathProv { path: "/compose".to_owned(), fetch_count: Arc::clone(&fetch_count) });
+        r.providers.push(prov);
+        // Simulate being inside the compose form at depth 2
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        crate::list::create_list_current_layer(&mut r);
+
+        let fetches_before = fetch_count.load(Ordering::Relaxed);
+
+        handle_left(&mut r);
+
+        // Must stay at depth 2 (not pop to depth 1 / root provider list).
+        assert_eq!(r.current_id.depth(), 2,
+            "Left from compose depth-2 must stay at depth 2, not root");
+
+        // Path must have been popped back to parent.
+        let path_after = r.providers[0].current_path().to_owned();
+        assert!(!path_after.contains("compose"),
+            "path should no longer be in compose after Left: {path_after}");
+
+        // Provider must have been re-fetched to show the folder list.
+        let fetches_after = fetch_count.load(Ordering::Relaxed);
+        assert!(fetches_after > fetches_before, "provider should have been re-fetched");
+    }
+
+    #[test]
+    fn left_from_path_provider_depth2_with_stale_deep_path_skips_to_folder_list() {
+        // Regression: after undo/redo moves cursor from depth 3 to depth 2 without
+        // adjusting the provider path, the path may still be at a deeper sub-path
+        // (e.g. "/compose/Body: [ffon]").  Left must keep popping until reaching a
+        // path where refresh_on_navigate=true, rather than re-fetching compose.
+        use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
+        use sicompass_sdk::provider::Provider;
+        use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+
+        let fetch_count = Arc::new(AtomicUsize::new(0));
+        let fetched_at_path = Arc::new(std::sync::Mutex::new(String::new()));
+
+        struct PathProv2 {
+            path: String,
+            fetch_count: Arc<AtomicUsize>,
+            fetched_at: Arc<std::sync::Mutex<String>>,
+        }
+        impl Provider for PathProv2 {
+            fn name(&self) -> &str { "pathprov2" }
+            fn display_name(&self) -> &str { "pathprov2" }
+            fn fetch(&mut self) -> Vec<FfonElement> {
+                self.fetch_count.fetch_add(1, Ordering::Relaxed);
+                *self.fetched_at.lock().unwrap() = self.path.clone();
+                // Root folder list contains "compose" as a child
+                vec![
+                    FfonElement::new_str("INBOX"),
+                    FfonElement::Obj(FfonObject { key: "compose".to_owned(), children: vec![] }),
+                ]
+            }
+            fn current_path(&self) -> &str { &self.path }
+            fn set_current_path(&mut self, p: &str) { self.path = p.to_owned(); }
+            fn push_path(&mut self, seg: &str) {
+                let base = self.path.trim_end_matches('/');
+                self.path = if base.is_empty() { format!("/{seg}") } else { format!("{base}/{seg}") };
+            }
+            fn pop_path(&mut self) {
+                if let Some(slash) = self.path.rfind('/') {
+                    self.path = if slash == 0 { "/".to_owned() } else { self.path[..slash].to_owned() };
+                }
+            }
+            fn refresh_on_navigate(&self) -> bool { !self.path.contains("compose") }
+        }
+
+        let root_obj = FfonElement::Obj(FfonObject {
+            key: "pathprov2".to_owned(),
+            children: vec![
+                FfonElement::new_str("INBOX"),
+                FfonElement::Obj(FfonObject { key: "compose".to_owned(), children: vec![] }),
+            ],
+        });
+        let mut r = AppRenderer::new();
+        r.ffon = vec![root_obj];
+        let prov = Box::new(PathProv2 {
+            path: "/compose/Body: [ffon]".to_owned(), // stale deep path from undo/redo
+            fetch_count: Arc::clone(&fetch_count),
+            fetched_at: Arc::clone(&fetched_at_path),
+        });
+        r.providers.push(prov);
+        // Cursor is at depth 2 (mismatch: path has 3 segments)
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        crate::list::create_list_current_layer(&mut r);
+
+        let fetches_before = fetch_count.load(Ordering::Relaxed);
+        handle_left(&mut r);
+
+        // Must stay at depth 2 (not pop to depth 1).
+        assert_eq!(r.current_id.depth(), 2,
+            "Left with stale deep path must stay at depth 2, not root");
+
+        // The provider must have been re-fetched at the root path "/".
+        let fetches_after = fetch_count.load(Ordering::Relaxed);
+        assert!(fetches_after > fetches_before, "provider should have been re-fetched");
+        let fetched_path = fetched_at_path.lock().unwrap().clone();
+        assert_eq!(fetched_path, "/",
+            "must re-fetch at '/' (folder list), not at compose path; got {fetched_path:?}");
+
+        // Cursor must land on the "compose" entry in the folder list.
+        let cursor_idx = r.current_id.last().unwrap_or(0);
+        assert_eq!(cursor_idx, 1,
+            "cursor should point to 'compose' entry (index 1); got {cursor_idx}");
+    }
+
+    #[test]
+    fn left_from_depth3_with_stale_compose_path_corrects_root_key() {
+        // Regression: undo/redo can place cursor at depth 3 while the provider
+        // path is "/compose" (not "/compose/Body: [...]") because the body was
+        // not re-navigated in the current compose session.  Pressing Left pops
+        // pop_path("/compose")→"/" silently (path_before=None at depth 3).
+        // Without correction the root FFON key stays "compose" and the user
+        // sees "compose" instead of the provider name in the root list.
+        use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
+        use sicompass_sdk::provider::Provider;
+        use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+
+        let fetch_count = Arc::new(AtomicUsize::new(0));
+        struct PathProv3 {
+            path: String,
+            fetch_count: Arc<AtomicUsize>,
+        }
+        impl Provider for PathProv3 {
+            fn name(&self) -> &str { "pathprov3" }
+            fn display_name(&self) -> &str { "pathprov3" }
+            fn fetch(&mut self) -> Vec<FfonElement> {
+                self.fetch_count.fetch_add(1, Ordering::Relaxed);
+                vec![
+                    FfonElement::Obj(FfonObject { key: "INBOX".to_owned(), children: vec![] }),
+                    FfonElement::Obj(FfonObject { key: "compose".to_owned(), children: vec![] }),
+                ]
+            }
+            fn current_path(&self) -> &str { &self.path }
+            fn set_current_path(&mut self, p: &str) { self.path = p.to_owned(); }
+            fn push_path(&mut self, seg: &str) {
+                let base = self.path.trim_end_matches('/');
+                self.path = if base.is_empty() { format!("/{seg}") } else { format!("{base}/{seg}") };
+            }
+            fn pop_path(&mut self) {
+                if let Some(slash) = self.path.rfind('/') {
+                    self.path = if slash == 0 { "/".to_owned() } else { self.path[..slash].to_owned() };
+                }
+            }
+            fn refresh_on_navigate(&self) -> bool { !self.path.contains("compose") }
+        }
+
+        // Start with FFON in the "compose" state — stale key from a prior entry.
+        let stale_root = FfonElement::Obj(FfonObject {
+            key: "compose".to_owned(), // stale: should be "pathprov3"
+            children: vec![
+                FfonElement::new_str("From: me"),
+                FfonElement::new_str("Body: text"),
+            ],
+        });
+        let mut r = AppRenderer::new();
+        r.ffon = vec![stale_root];
+        let prov = Box::new(PathProv3 {
+            path: "/compose".to_owned(), // path mismatches depth: cursor is at depth 3
+            fetch_count: Arc::clone(&fetch_count),
+        });
+        r.providers.push(prov);
+        // Cursor at depth 3 (body element) but path only has 1 segment ("/compose")
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id.push(0); id };
+        crate::list::create_list_current_layer(&mut r);
+
+        let fetches_before = fetch_count.load(Ordering::Relaxed);
+        handle_left(&mut r); // depth 3 → depth 2, pop_path→"/"
+
+        // Must be at depth 2 (not depth 1).
+        assert_eq!(r.current_id.depth(), 2,
+            "Left from depth 3 stale-path must land at depth 2, not root");
+
+        // The stale FFON key must have been corrected — re-fetch should have fired.
+        let fetches_after = fetch_count.load(Ordering::Relaxed);
+        assert!(fetches_after > fetches_before, "provider should have been re-fetched to fix stale key");
+
+        // After re-fetch the root key must be "pathprov3" (the display_name).
+        let key = r.ffon[0].as_obj().map(|o| o.key.as_str()).unwrap_or("");
+        assert_eq!(key, "pathprov3",
+            "root FFON key must be display_name after stale-key correction; got {key:?}");
+
+        // Cursor must land on "compose" (last segment of pre-pop path "/compose").
+        let cursor = r.current_id.last().unwrap_or(usize::MAX);
+        assert_eq!(cursor, 1,
+            "cursor should point to 'compose' entry (index 1); got {cursor}");
     }
 
     #[test]
