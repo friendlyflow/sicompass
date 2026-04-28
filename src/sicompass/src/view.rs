@@ -1473,9 +1473,10 @@ fn collect_list_items(r: &AppRenderer) -> Vec<(String, Option<String>, bool, Vec
 /// Render `text` at `(x, y)` with background highlight rectangles behind
 /// characters at `match_positions`, matching scroll-search style. Text is
 /// rendered in `text_color`; highlights use `highlight_color` as background.
+/// Newlines in `text` start a new visual row, matching `prepare_text_wrapped`.
 fn render_with_highlights(
     fr: &mut crate::text::FontRenderer,
-    rr: Option<&mut crate::rectangle::RectangleRenderer>,
+    mut rr: Option<&mut crate::rectangle::RectangleRenderer>,
     text: &str,
     x: f32,
     y: f32,
@@ -1486,29 +1487,56 @@ fn render_with_highlights(
     highlight_color: u32,
     match_positions: &[u32],
 ) {
-    if let Some(rr) = rr {
-        // Draw background rectangles behind matched character runs
-        let chars: Vec<char> = text.chars().collect();
-        let mut i = 0usize;
-        let mut byte_off = 0usize;
-        while i < chars.len() {
-            if match_positions.binary_search(&(i as u32)).is_ok() {
-                let start_byte = byte_off;
-                while i < chars.len() && match_positions.binary_search(&(i as u32)).is_ok() {
-                    byte_off += chars[i].len_utf8();
-                    i += 1;
+    // Split `text` into `\n`-separated segments: (byte_start, byte_end, char_start).
+    let mut segs: Vec<(usize, usize, u32)> = Vec::new();
+    let mut seg_byte_start = 0usize;
+    let mut seg_char_start = 0u32;
+    let mut char_count = 0u32;
+    for (bi, c) in text.char_indices() {
+        if c == '\n' {
+            segs.push((seg_byte_start, bi, seg_char_start));
+            seg_byte_start = bi + 1;
+            seg_char_start = char_count + 1;
+        }
+        char_count += 1;
+    }
+    segs.push((seg_byte_start, text.len(), seg_char_start));
+
+    for (n, &(byte_start, byte_end, char_start)) in segs.iter().enumerate() {
+        let seg_text = &text[byte_start..byte_end];
+        let seg_y = y + n as f32 * line_height;
+
+        if let Some(rr) = rr.as_deref_mut() {
+            let seg_chars: Vec<char> = seg_text.chars().collect();
+            let seg_char_len = seg_chars.len() as u32;
+            let local_positions: Vec<u32> = match_positions.iter()
+                .filter(|&&p| p >= char_start && p < char_start + seg_char_len)
+                .map(|&p| p - char_start)
+                .collect();
+            if !local_positions.is_empty() {
+                let mut i = 0usize;
+                let mut byte_off = 0usize;
+                let rect_y = seg_y - ascender * scale - crate::text::TEXT_PADDING;
+                while i < seg_chars.len() {
+                    if local_positions.binary_search(&(i as u32)).is_ok() {
+                        let start_byte = byte_off;
+                        while i < seg_chars.len() && local_positions.binary_search(&(i as u32)).is_ok() {
+                            byte_off += seg_chars[i].len_utf8();
+                            i += 1;
+                        }
+                        let match_x = x + fr.measure_text_width(&seg_text[..start_byte], scale);
+                        let match_w = fr.measure_text_width(&seg_text[start_byte..byte_off], scale);
+                        rr.prepare_rectangle(match_x, rect_y, match_w, line_height, highlight_color, 3.0);
+                    } else {
+                        byte_off += seg_chars[i].len_utf8();
+                        i += 1;
+                    }
                 }
-                let match_x = x + fr.measure_text_width(&text[..start_byte], scale);
-                let match_w = fr.measure_text_width(&text[start_byte..byte_off], scale);
-                let rect_y = y - ascender * scale - crate::text::TEXT_PADDING;
-                rr.prepare_rectangle(match_x, rect_y, match_w, line_height, highlight_color, 3.0);
-            } else {
-                byte_off += chars[i].len_utf8();
-                i += 1;
             }
         }
+
+        fr.prepare_text_for_rendering(seg_text, x, seg_y, scale, text_color);
     }
-    fr.prepare_text_for_rendering(text, x, y, scale, text_color);
 }
 
 
