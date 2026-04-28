@@ -397,6 +397,38 @@ pub fn handle_left(r: &mut AppRenderer) {
     }
 }
 
+/// Walk back from `cur` consuming up to `budget` visual lines.
+/// Always retreats at least one index when `cur > 0`.
+fn step_back_by_lines(line_counts: &[usize], cur: usize, budget: usize) -> usize {
+    if cur == 0 { return 0; }
+    let mut i = cur;
+    let mut consumed = 0usize;
+    while i > 0 {
+        let lines = line_counts.get(i - 1).copied().unwrap_or(1).max(1);
+        if consumed > 0 && consumed + lines > budget { break; }
+        consumed += lines;
+        i -= 1;
+        if consumed >= budget { break; }
+    }
+    i
+}
+
+/// Walk forward from `cur` consuming up to `budget` visual lines.
+/// Always advances at least one index when `cur < max_id`.
+fn step_forward_by_lines(line_counts: &[usize], cur: usize, max_id: usize, budget: usize) -> usize {
+    if cur >= max_id { return max_id; }
+    let mut i = cur;
+    let mut consumed = 0usize;
+    while i < max_id {
+        let lines = line_counts.get(i).copied().unwrap_or(1).max(1);
+        if consumed > 0 && consumed + lines > budget { break; }
+        consumed += lines;
+        i += 1;
+        if consumed >= budget { break; }
+    }
+    i
+}
+
 /// Page up (scroll a full screen up).
 pub fn handle_page_up(r: &mut AppRenderer) {
     match r.coordinate {
@@ -417,15 +449,24 @@ pub fn handle_page_up(r: &mut AppRenderer) {
         }
         Coordinate::SimpleSearch | Coordinate::Command | Coordinate::ExtendedSearch => {
             r.error_message.clear();
-            r.list_index = r.list_index.saturating_sub(page_size);
+            let new_idx = if r.cached_line_counts.is_empty() {
+                r.list_index.saturating_sub(page_size)
+            } else {
+                step_back_by_lines(&r.cached_line_counts, r.list_index, page_size)
+            };
+            r.list_index = new_idx;
             r.scroll_offset = r.list_index as i32;
             r.speak_current_element();
         }
         Coordinate::OperatorGeneral | Coordinate::EditorGeneral => {
             if let Some(slice) = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id) {
                 let max_id = slice.len().saturating_sub(1);
-                let cur = r.current_id.last().unwrap_or(0);
-                let new_id = cur.saturating_sub(page_size).min(max_id);
+                let cur = r.current_id.last().unwrap_or(0).min(max_id);
+                let new_id = if r.cached_line_counts.is_empty() {
+                    cur.saturating_sub(page_size)
+                } else {
+                    step_back_by_lines(&r.cached_line_counts, cur, page_size)
+                };
                 r.current_id.set_last(new_id);
                 list::create_list_current_layer(r);
                 r.scroll_offset = r.list_index as i32;
@@ -460,7 +501,13 @@ pub fn handle_page_down(r: &mut AppRenderer) {
             r.error_message.clear();
             let count = r.active_list_len();
             if count > 0 {
-                r.list_index = (r.list_index + page_size).min(count - 1);
+                let max_id = count - 1;
+                let new_idx = if r.cached_line_counts.is_empty() {
+                    (r.list_index + page_size).min(max_id)
+                } else {
+                    step_forward_by_lines(&r.cached_line_counts, r.list_index, max_id, page_size)
+                };
+                r.list_index = new_idx;
                 r.scroll_offset = -1;
                 r.speak_current_element();
             }
@@ -469,7 +516,11 @@ pub fn handle_page_down(r: &mut AppRenderer) {
             if let Some(slice) = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id) {
                 let max_id = slice.len().saturating_sub(1);
                 let cur = r.current_id.last().unwrap_or(0);
-                let new_id = (cur + page_size).min(max_id);
+                let new_id = if r.cached_line_counts.is_empty() {
+                    (cur + page_size).min(max_id)
+                } else {
+                    step_forward_by_lines(&r.cached_line_counts, cur, max_id, page_size)
+                };
                 r.current_id.set_last(new_id);
                 list::create_list_current_layer(r);
                 r.scroll_offset = -1;
@@ -5766,6 +5817,28 @@ mod tests {
     }
 
     #[test]
+    fn page_down_simple_search_uses_visual_lines_for_image() {
+        // counts=[1,1,1,1,8,1,1,1,1,1,1,1], page_size=10, start at 0 → land at 4 (image), not 10
+        let counts = vec![1usize, 1, 1, 1, 8, 1, 1, 1, 1, 1, 1, 1];
+        let mut r = make_renderer_general_with_counts(counts);
+        r.coordinate = Coordinate::SimpleSearch;
+        r.list_index = 0;
+        handle_page_down(&mut r);
+        assert_eq!(r.list_index, 4, "should stop at image, not jump past it");
+    }
+
+    #[test]
+    fn page_up_simple_search_uses_visual_lines_for_image() {
+        // counts=[1,1,1,1,8,1,1,1,1,1,1,1], page_size=10, start at 11 → land at 5, not 1
+        let counts = vec![1usize, 1, 1, 1, 8, 1, 1, 1, 1, 1, 1, 1];
+        let mut r = make_renderer_general_with_counts(counts);
+        r.coordinate = Coordinate::SimpleSearch;
+        r.list_index = 11;
+        handle_page_up(&mut r);
+        assert_eq!(r.list_index, 5, "should stop near image, not skip past it");
+    }
+
+    #[test]
     fn page_up_scroll_decreases_offset() {
         let mut r = make_renderer_paged();
         r.coordinate = Coordinate::Scroll;
@@ -5823,6 +5896,136 @@ mod tests {
         handle_page_down(&mut r);
         assert_eq!(r.input_search_scroll_offset, 1); // page_size=1
         assert!(r.needs_redraw);
+    }
+
+    // -----------------------------------------------------------------------
+    // step_back_by_lines / step_forward_by_lines + OperatorGeneral page nav
+    // -----------------------------------------------------------------------
+
+    fn make_renderer_paged_large() -> AppRenderer {
+        // window_height=130, line_height=10 → page_size = (130/10) - 3 = 10
+        let mut r = make_renderer();
+        r.window_height = 130;
+        r.cached_line_height = 10;
+        r
+    }
+
+    fn make_renderer_general_with_counts(counts: Vec<usize>) -> AppRenderer {
+        // Build a flat list large enough to match counts.len().
+        let mut root = FfonElement::new_obj("provider");
+        for i in 0..counts.len() {
+            root.as_obj_mut().unwrap().push(FfonElement::new_str(&format!("item {i}")));
+        }
+        let mut r = AppRenderer::new();
+        r.ffon = vec![root];
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        r.window_height = 130;
+        r.cached_line_height = 10;
+        r.cached_line_counts = counts;
+        list::create_list_current_layer(&mut r);
+        r
+    }
+
+    #[test]
+    fn step_forward_basic() {
+        // counts=[1,1,1,1,8,1,1,1,1,1,1,1], budget=10
+        // from 0: consume item0(1)+item1(1)+item2(1)+item3(1)+item4(8)=12 → stop before item4
+        // so we consume 0→1→2→3 (4 lines) and then item4 would push to 12 > 10, stop at 4
+        let counts = vec![1usize, 1, 1, 1, 8, 1, 1, 1, 1, 1, 1, 1];
+        assert_eq!(step_forward_by_lines(&counts, 0, 11, 10), 4);
+    }
+
+    #[test]
+    fn step_forward_lands_on_image_when_budget_allows() {
+        // counts=[8,1,1], budget=10, cur=0: image(8)+item1(1)+item2(1)=10 → all consumed, land at 2
+        let counts = vec![8usize, 1, 1];
+        assert_eq!(step_forward_by_lines(&counts, 0, 2, 10), 2);
+    }
+
+    #[test]
+    fn step_forward_advances_at_least_one_on_oversized_image() {
+        // counts=[1,50,1], budget=10, cur=0 — item1 is huge; must still reach it
+        let counts = vec![1usize, 50, 1];
+        assert_eq!(step_forward_by_lines(&counts, 0, 2, 10), 1);
+    }
+
+    #[test]
+    fn step_forward_clamps_at_max() {
+        let counts = vec![1usize, 1, 1];
+        assert_eq!(step_forward_by_lines(&counts, 2, 2, 10), 2);
+    }
+
+    #[test]
+    fn step_back_basic() {
+        // from 11, budget=10: consume items 10,9,8,7,6,5 (6×1=6 lines),
+        // item 4 is 8 lines → 6+8=14 > 10 → stop; i is still 5 when we break
+        let counts = vec![1usize, 1, 1, 1, 8, 1, 1, 1, 1, 1, 1, 1];
+        assert_eq!(step_back_by_lines(&counts, 11, 10), 5);
+    }
+
+    #[test]
+    fn step_back_retreats_at_least_one_on_oversized_image() {
+        // counts=[1,50,1], budget=10, cur=2 — land on item1 (the big image)
+        let counts = vec![1usize, 50, 1];
+        assert_eq!(step_back_by_lines(&counts, 2, 10), 1);
+    }
+
+    #[test]
+    fn step_back_clamps_at_zero() {
+        let counts = vec![1usize, 1, 1];
+        assert_eq!(step_back_by_lines(&counts, 0, 10), 0);
+    }
+
+    #[test]
+    fn page_down_general_uses_visual_lines_for_image() {
+        // counts=[1,1,1,1,8,1,1,1,1,1,1,1], page_size=10, start at 0 → land at index 4
+        let counts = vec![1usize, 1, 1, 1, 8, 1, 1, 1, 1, 1, 1, 1];
+        let mut r = make_renderer_general_with_counts(counts);
+        r.coordinate = Coordinate::OperatorGeneral;
+        r.current_id.set_last(0);
+        list::create_list_current_layer(&mut r);
+        handle_page_down(&mut r);
+        assert_eq!(r.current_id.last(), Some(4), "should land on the image, not skip past it");
+    }
+
+    #[test]
+    fn page_up_general_uses_visual_lines_for_image() {
+        // From 11, budget=10: consume items 10..5 (6 lines), image at 4 would add 8→14>10 → stop at 5
+        // Without the fix (element-index step) this would land at 1, skipping the image entirely
+        let counts = vec![1usize, 1, 1, 1, 8, 1, 1, 1, 1, 1, 1, 1];
+        let mut r = make_renderer_general_with_counts(counts);
+        r.coordinate = Coordinate::OperatorGeneral;
+        r.current_id.set_last(11);
+        list::create_list_current_layer(&mut r);
+        handle_page_up(&mut r);
+        assert_eq!(r.current_id.last(), Some(5), "should stop near the image, not skip past it");
+    }
+
+    #[test]
+    fn page_down_general_advances_one_on_oversized_image() {
+        let counts = vec![1usize, 50, 1];
+        let mut r = make_renderer_general_with_counts(counts);
+        r.coordinate = Coordinate::OperatorGeneral;
+        r.current_id.set_last(0);
+        list::create_list_current_layer(&mut r);
+        handle_page_down(&mut r);
+        assert_eq!(r.current_id.last(), Some(1), "must advance at least one index onto the image");
+    }
+
+    #[test]
+    fn page_down_general_falls_back_when_cache_empty() {
+        // No cached_line_counts → old element-index arithmetic
+        let mut r = make_renderer_paged_large();
+        r.coordinate = Coordinate::OperatorGeneral;
+        r.current_id.set_last(0);
+        list::create_list_current_layer(&mut r);
+        let max_id = {
+            let slice = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id).unwrap();
+            slice.len().saturating_sub(1)
+        };
+        handle_page_down(&mut r);
+        // page_size=10, list only has 3 items (indices 0-2) → clamps at max_id
+        assert_eq!(r.current_id.last(), Some(max_id));
     }
 
     // -----------------------------------------------------------------------
