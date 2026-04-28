@@ -5,6 +5,34 @@ use std::path::Path;
 // Supporting types
 // ---------------------------------------------------------------------------
 
+/// Opaque descriptor that lets a provider record enough state to reverse a
+/// just-completed command. The app dispatcher drains this after every
+/// `handle_command` / `execute_command` call and pushes it onto the undo stack.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProviderUndoDescriptor {
+    /// Short token identifying the operation, e.g. `"delete-trash"`, `"mark-read"`.
+    pub command: String,
+    /// Command-specific payload. Providers typically store a JSON blob here as
+    /// `FfonElement::Str(json)`.
+    pub payload: FfonElement,
+    /// User-facing label shown in status / error messages, e.g. `"delete email"`.
+    pub label: String,
+}
+
+impl ProviderUndoDescriptor {
+    pub fn new(command: impl Into<String>, payload: FfonElement, label: impl Into<String>) -> Self {
+        Self { command: command.into(), payload, label: label.into() }
+    }
+
+    /// Convenience: return the payload string if it is an `FfonElement::Str`.
+    pub fn payload_str(&self) -> &str {
+        match &self.payload {
+            FfonElement::Str(s) => s.as_str(),
+            _ => "",
+        }
+    }
+}
+
 /// An item in a command's selection list (e.g. applications for "open with").
 #[derive(Debug, Clone, PartialEq)]
 pub struct ListItem {
@@ -99,6 +127,20 @@ pub trait Provider: Send + 'static {
 
     fn command_list_items(&self, _cmd: &str) -> Vec<ListItem> { vec![] }
     fn execute_command(&mut self, _cmd: &str, _selection: &str) -> bool { false }
+
+    // ---- Optional: provider-command undo/redo ---------------------------------
+
+    /// Pop the descriptor for the most recently completed undoable command, or
+    /// `None` if the last command was not undoable. The app dispatcher calls
+    /// this once after every `handle_command` / `execute_command` invocation
+    /// and pushes an undo entry when `Some` is returned.
+    fn take_last_undo_descriptor(&mut self) -> Option<ProviderUndoDescriptor> { None }
+
+    /// Reverse the operation described by `descriptor`. Sets `error` on failure.
+    fn undo_command(&mut self, _descriptor: &ProviderUndoDescriptor, _error: &mut String) {}
+
+    /// Re-apply the operation described by `descriptor`. Sets `error` on failure.
+    fn redo_command(&mut self, _descriptor: &ProviderUndoDescriptor, _error: &mut String) {}
 
     // ---- Optional: interactive element callbacks ---------------------------
 
@@ -220,12 +262,13 @@ pub trait Provider: Send + 'static {
     /// Returns `None` (default) to leave the parent key unchanged.
     fn fetch_subtree_parent_key(&mut self) -> Option<String> { None }
 
-    /// Delete an element at `path` (indices into the provider's FFON tree, excluding the
-    /// leading provider index) from the provider's internal state.
+    /// Sync the provider's internal compose-body state from the current FFON body children.
     ///
-    /// For providers like the email client this removes a body leaf; for others the default
-    /// no-op is used.  Returns `true` on success.
-    fn delete_element(&mut self, _path: &[usize]) -> bool { false }
+    /// Called after any app-level FFON mutation (Task::Delete undo/redo) that modifies the
+    /// body subtree so that `compose.draft.body` stays consistent with the FFON tree and
+    /// subsequent `commit_edit` / `fetch_subtree_children` calls read the correct state.
+    /// Default no-op — only the email provider overrides this.
+    fn sync_ffon_body_children(&mut self, _children: &[FfonElement]) {}
 }
 
 // ---------------------------------------------------------------------------

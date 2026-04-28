@@ -4127,3 +4127,470 @@ fn filebrowser_ctrl_i_escape_removes_placeholder() {
     );
     assert_eq!(h.renderer.current_id, pre_id, "Escape should restore the pre-insert current_id");
 }
+
+// ---------------------------------------------------------------------------
+// Compose body desync fix (Part B) — undo/redo keeps compose.draft.body in sync
+// ---------------------------------------------------------------------------
+
+/// Delete a body element then undo — `sync_ffon_body_children` must keep
+/// `compose.draft.body` in sync so `fetch_subtree_children` returns the correct
+/// content after the restoration without a full provider re-fetch.
+#[test]
+fn compose_body_delete_undo_syncs_draft_body() {
+    ensure_builtins();
+    use sicompass_emailclient::EmailClientProvider;
+    use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
+
+    let mut renderer = AppRenderer::new();
+    let mut p = EmailClientProvider::new();
+
+    // Set up compose path so refresh_on_navigate returns false.
+    p.set_current_path("compose/Body: [text]");
+    // Seed compose.draft.body with two lines (Ffon).
+    p.commit_edit("", "line1");
+    p.commit_edit("line1", "line2_start");
+    // Re-commit to create a real Ffon body with two elements.
+    p.commit_edit("line2_start", "line1"); // back to line1 in slot 0
+    // Directly seed a 2-element Ffon body for simplicity.
+    use sicompass_emailclient::MailBody;
+    // We can't access MailBody from the provider trait, so we set up the
+    // FFON manually and drive state through the trait.
+
+    // Build compose FFON: depth-3 body elements.
+    // ffon[0] = Obj("compose") { children: [Body:Obj { children: [line1, line2] }] }
+    let body_obj = FfonElement::Obj(FfonObject {
+        key: "Body: [text]".to_owned(),
+        children: vec![
+            FfonElement::new_str("<input>line1</input>".to_owned()),
+            FfonElement::new_str("<input>line2</input>".to_owned()),
+        ],
+    });
+    let compose_root = FfonElement::Obj(FfonObject {
+        key: "compose".to_owned(),
+        children: vec![body_obj],
+    });
+    renderer.ffon.push(compose_root);
+    renderer.providers.push(Box::new(p));
+
+    // Position cursor on "line1" (depth 3: [0=provider, 0=body_obj, 0=line1]).
+    renderer.current_id = {
+        let mut id = IdArray::new();
+        id.push(0); id.push(0); id.push(0);
+        id
+    };
+    renderer.coordinate = Coordinate::OperatorGeneral;
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    // Delete "line1".
+    sicompass::handlers::handle_delete_body_element(&mut renderer);
+
+    // Verify "line1" is gone from FFON.
+    let body_children_post_delete = renderer.ffon[0].as_obj().unwrap()
+        .children[0].as_obj().unwrap().children.clone();
+    assert_eq!(body_children_post_delete.len(), 1,
+        "after delete body must have 1 child; got: {:?}", body_children_post_delete);
+
+    // Undo the delete — should restore "line1".
+    press_ctrl(&mut renderer, Keycode::Z);
+
+    let body_children_post_undo = renderer.ffon[0].as_obj().unwrap()
+        .children[0].as_obj().unwrap().children.clone();
+    assert_eq!(body_children_post_undo.len(), 2,
+        "after undo body must have 2 children again; got: {:?}", body_children_post_undo);
+
+    // fetch_subtree_children must return the 2-element body (reads from compose.draft.body
+    // which sync_ffon_body_children kept in sync).
+    let fetched = renderer.providers[0].fetch_subtree_children();
+    assert!(
+        fetched.as_ref().map(|v| v.len() == 2).unwrap_or(false),
+        "fetch_subtree_children after undo must return 2 elements; got: {:?}", fetched
+    );
+}
+
+/// Redo after undo of a body-element delete must re-remove the element and keep
+/// `compose.draft.body` consistent.
+#[test]
+fn compose_body_delete_undo_redo_syncs_draft_body() {
+    ensure_builtins();
+    use sicompass_emailclient::EmailClientProvider;
+    use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
+
+    let mut renderer = AppRenderer::new();
+    let mut p = EmailClientProvider::new();
+    p.set_current_path("compose/Body: [text]");
+
+    let body_obj = FfonElement::Obj(FfonObject {
+        key: "Body: [text]".to_owned(),
+        children: vec![
+            FfonElement::new_str("<input>line1</input>".to_owned()),
+            FfonElement::new_str("<input>line2</input>".to_owned()),
+        ],
+    });
+    let compose_root = FfonElement::Obj(FfonObject {
+        key: "compose".to_owned(),
+        children: vec![body_obj],
+    });
+    renderer.ffon.push(compose_root);
+    renderer.providers.push(Box::new(p));
+
+    renderer.current_id = {
+        let mut id = IdArray::new();
+        id.push(0); id.push(0); id.push(0);
+        id
+    };
+    renderer.coordinate = Coordinate::OperatorGeneral;
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    // Delete → undo → redo.
+    sicompass::handlers::handle_delete_body_element(&mut renderer);
+    press_ctrl(&mut renderer, Keycode::Z);       // undo
+    press_ctrl_shift(&mut renderer, Keycode::Z); // redo
+
+    let body_children = renderer.ffon[0].as_obj().unwrap()
+        .children[0].as_obj().unwrap().children.clone();
+    assert_eq!(body_children.len(), 1,
+        "after redo body must have 1 child again; got: {:?}", body_children);
+
+    // compose.draft.body must also reflect the post-redo (deleted) state.
+    let fetched = renderer.providers[0].fetch_subtree_children();
+    assert!(
+        fetched.as_ref().map(|v| v.len() == 1).unwrap_or(false),
+        "fetch_subtree_children after redo must return 1 element; got: {:?}", fetched
+    );
+}
+
+/// Appending a new element to the compose body via Ctrl+A → type → Enter must be
+/// undoable (Ctrl+Z removes it) and redoable (Ctrl+Shift+Z restores it), keeping
+/// `compose.draft.body` in sync throughout.
+#[test]
+fn compose_body_insert_undo_redo_syncs_draft_body() {
+    ensure_builtins();
+    use sicompass_emailclient::EmailClientProvider;
+    use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
+
+    let mut renderer = AppRenderer::new();
+    let mut p = EmailClientProvider::new();
+    p.set_current_path("compose/Body: [text]");
+    // Seed one body line via commit so compose.draft.body is non-empty.
+    p.commit_edit("", "line1");
+
+    // Build FFON: depth-3 body element at [0, 0, 0].
+    let body_obj = FfonElement::Obj(FfonObject {
+        key: "Body: [text]".to_owned(),
+        children: vec![FfonElement::new_str("<input>line1</input>".to_owned())],
+    });
+    let compose_root = FfonElement::Obj(FfonObject {
+        key: "compose".to_owned(),
+        children: vec![body_obj],
+    });
+    renderer.ffon.push(compose_root);
+    renderer.providers.push(Box::new(p));
+
+    // Position on line1 at [0, 0, 0].
+    renderer.current_id = {
+        let mut id = IdArray::new();
+        id.push(0); id.push(0); id.push(0);
+        id
+    };
+    renderer.coordinate = Coordinate::OperatorGeneral;
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    // Ctrl+A → append placeholder after line1, enters OperatorInsert.
+    press_ctrl(&mut renderer, Keycode::A);
+    assert!(
+        renderer.placeholder_insert_mode,
+        "placeholder_insert_mode must be set after Ctrl+A in compose body"
+    );
+    assert_eq!(
+        renderer.coordinate, Coordinate::OperatorInsert,
+        "must enter OperatorInsert after Ctrl+A"
+    );
+
+    // Type "line2" and commit via Enter.
+    type_text(&mut renderer, "line2");
+    press_enter(&mut renderer);
+
+    assert_eq!(
+        renderer.coordinate, Coordinate::OperatorGeneral,
+        "must return to OperatorGeneral after commit"
+    );
+
+    // Verify "line2" appears in FFON body children.
+    let body_after_insert = renderer.ffon[0].as_obj().unwrap()
+        .children[0].as_obj().unwrap().children.clone();
+    assert_eq!(
+        body_after_insert.len(), 2,
+        "body must have 2 children after insert; got: {:?}", body_after_insert
+    );
+    let has_line2 = body_after_insert.iter().any(|e| {
+        matches!(e, FfonElement::Str(s) if s.contains("line2"))
+    });
+    assert!(has_line2, "body must contain line2 after insert; got: {:?}", body_after_insert);
+
+    // fetch_subtree_children must return both elements (compose.draft.body synced).
+    let fetched_after = renderer.providers[0].fetch_subtree_children();
+    assert!(
+        fetched_after.as_ref().map(|v| v.len() == 2).unwrap_or(false),
+        "fetch_subtree_children must return 2 after insert; got: {:?}", fetched_after
+    );
+
+    // Undo — should remove line2.
+    press_ctrl(&mut renderer, Keycode::Z);
+
+    let body_after_undo = renderer.ffon[0].as_obj().unwrap()
+        .children[0].as_obj().unwrap().children.clone();
+    assert_eq!(
+        body_after_undo.len(), 1,
+        "body must have 1 child after undo; got: {:?}", body_after_undo
+    );
+    let has_line2_after_undo = body_after_undo.iter().any(|e| {
+        matches!(e, FfonElement::Str(s) if s.contains("line2"))
+    });
+    assert!(!has_line2_after_undo, "line2 must be gone after undo; got: {:?}", body_after_undo);
+
+    // compose.draft.body must also be synced after undo.
+    let fetched_after_undo = renderer.providers[0].fetch_subtree_children();
+    assert!(
+        fetched_after_undo.as_ref().map(|v| v.len() == 1).unwrap_or(false),
+        "fetch_subtree_children must return 1 after undo; got: {:?}", fetched_after_undo
+    );
+
+    // Redo — should restore line2.
+    press_ctrl_shift(&mut renderer, Keycode::Z);
+
+    let body_after_redo = renderer.ffon[0].as_obj().unwrap()
+        .children[0].as_obj().unwrap().children.clone();
+    assert_eq!(
+        body_after_redo.len(), 2,
+        "body must have 2 children after redo; got: {:?}", body_after_redo
+    );
+    let has_line2_after_redo = body_after_redo.iter().any(|e| {
+        matches!(e, FfonElement::Str(s) if s.contains("line2"))
+    });
+    assert!(has_line2_after_redo, "line2 must be restored after redo; got: {:?}", body_after_redo);
+
+    // compose.draft.body must be synced after redo too.
+    let fetched_after_redo = renderer.providers[0].fetch_subtree_children();
+    assert!(
+        fetched_after_redo.as_ref().map(|v| v.len() == 2).unwrap_or(false),
+        "fetch_subtree_children must return 2 after redo; got: {:?}", fetched_after_redo
+    );
+}
+
+/// Inserting into an initially-empty compose body (I_PLACEHOLDER case) via Ctrl+A → type
+/// → Enter must be undoable, restoring the I_PLACEHOLDER and keeping draft.body in sync.
+#[test]
+fn compose_body_insert_into_empty_undo_syncs_draft_body() {
+    ensure_builtins();
+    use sicompass_emailclient::EmailClientProvider;
+    use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
+
+    let mut renderer = AppRenderer::new();
+    let mut p = EmailClientProvider::new();
+    p.set_current_path("compose/Body: [text]");
+    // Draft body starts empty.
+
+    // Build FFON with an I_PLACEHOLDER seeded (mimics navigate_right_raw).
+    let body_obj = FfonElement::Obj(FfonObject {
+        key: "Body: [text]".to_owned(),
+        children: vec![FfonElement::Str(I_PLACEHOLDER.to_owned())],
+    });
+    let compose_root = FfonElement::Obj(FfonObject {
+        key: "compose".to_owned(),
+        children: vec![body_obj],
+    });
+    renderer.ffon.push(compose_root);
+    renderer.providers.push(Box::new(p));
+
+    // Position on the I_PLACEHOLDER at [0, 0, 0].
+    renderer.current_id = {
+        let mut id = IdArray::new();
+        id.push(0); id.push(0); id.push(0);
+        id
+    };
+    renderer.coordinate = Coordinate::OperatorGeneral;
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    // Ctrl+A → insert placeholder, enter OperatorInsert.
+    press_ctrl(&mut renderer, Keycode::A);
+    assert!(renderer.placeholder_insert_mode, "placeholder_insert_mode must be set");
+
+    // Type "hello" and commit via Enter.
+    type_text(&mut renderer, "hello");
+    press_enter(&mut renderer);
+
+    // Verify "hello" appears in FFON.
+    let body_after = renderer.ffon[0].as_obj().unwrap()
+        .children[0].as_obj().unwrap().children.clone();
+    let has_hello = body_after.iter().any(|e| matches!(e, FfonElement::Str(s) if s.contains("hello")));
+    assert!(has_hello, "body must contain 'hello' after insert; got: {:?}", body_after);
+
+    // draft.body synced.
+    let fetched = renderer.providers[0].fetch_subtree_children();
+    assert!(
+        fetched.as_ref().map(|v| v.iter().any(|e| matches!(e, FfonElement::Str(s) if s.contains("hello")))).unwrap_or(false),
+        "fetch_subtree_children must contain 'hello'; got: {:?}", fetched
+    );
+
+    // Undo — should remove "hello".
+    press_ctrl(&mut renderer, Keycode::Z);
+
+    let body_after_undo = renderer.ffon[0].as_obj().unwrap()
+        .children[0].as_obj().unwrap().children.clone();
+    let has_hello_after_undo = body_after_undo.iter().any(|e| {
+        matches!(e, FfonElement::Str(s) if s.contains("hello"))
+    });
+    assert!(!has_hello_after_undo, "'hello' must be gone after undo; got: {:?}", body_after_undo);
+
+    // draft.body must NOT contain "hello" after undo.
+    let fetched_undo = renderer.providers[0].fetch_subtree_children();
+    let still_has_hello = fetched_undo.as_ref()
+        .map(|v| v.iter().any(|e| matches!(e, FfonElement::Str(s) if s.contains("hello"))))
+        .unwrap_or(false);
+    assert!(!still_has_hello, "draft.body must not contain 'hello' after undo; got: {:?}", fetched_undo);
+}
+
+/// Undoing the only inserted body element must leave an I_PLACEHOLDER ("i"), not a
+/// bare `"<input></input>"` ("-i "). Covers the undo arm for Task::Append/Insert and
+/// the redo arm for Task::Delete/Cut in compose/reply/reply-all/forward bodies.
+#[test]
+fn compose_body_undo_last_element_restores_i_placeholder() {
+    ensure_builtins();
+    use sicompass_emailclient::EmailClientProvider;
+    use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
+
+    let mut renderer = AppRenderer::new();
+    let mut p = EmailClientProvider::new();
+    p.set_current_path("compose/Body: [text]");
+    // Draft body starts empty.
+
+    // FFON body starts with I_PLACEHOLDER (mimics navigate_right_raw seeding it).
+    let body_obj = FfonElement::Obj(FfonObject {
+        key: "Body: [text]".to_owned(),
+        children: vec![FfonElement::Str(I_PLACEHOLDER.to_owned())],
+    });
+    let compose_root = FfonElement::Obj(FfonObject {
+        key: "compose".to_owned(),
+        children: vec![body_obj],
+    });
+    renderer.ffon.push(compose_root);
+    renderer.providers.push(Box::new(p));
+
+    renderer.current_id = {
+        let mut id = IdArray::new();
+        id.push(0); id.push(0); id.push(0);
+        id
+    };
+    renderer.coordinate = Coordinate::OperatorGeneral;
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    // Ctrl+A → append placeholder, enter OperatorInsert.
+    press_ctrl(&mut renderer, Keycode::A);
+    assert!(renderer.placeholder_insert_mode, "must enter placeholder insert mode");
+
+    // Type "only" and commit via Enter.
+    type_text(&mut renderer, "only");
+    press_enter(&mut renderer);
+
+    // Verify "only" is in body.
+    let body_after_insert = renderer.ffon[0].as_obj().unwrap()
+        .children[0].as_obj().unwrap().children.clone();
+    let has_only = body_after_insert.iter().any(|e| matches!(e, FfonElement::Str(s) if s.contains("only")));
+    assert!(has_only, "body must contain 'only' after insert; got: {:?}", body_after_insert);
+
+    // Undo — the body should be empty again, and the sole remaining element
+    // must be I_PLACEHOLDER ("i <input></input>"), not bare "<input></input>".
+    press_ctrl(&mut renderer, Keycode::Z);
+
+    let body_after_undo = renderer.ffon[0].as_obj().unwrap()
+        .children[0].as_obj().unwrap().children.clone();
+    assert_eq!(
+        body_after_undo.len(), 1,
+        "body must have 1 child after undo; got: {:?}", body_after_undo
+    );
+    assert!(
+        matches!(&body_after_undo[0], FfonElement::Str(s) if s == I_PLACEHOLDER),
+        "sole body child after undo must be I_PLACEHOLDER; got: {:?}", body_after_undo
+    );
+
+    // draft.body must also reflect the I_PLACEHOLDER (not bare "<input></input>").
+    let fetched = renderer.providers[0].fetch_subtree_children();
+    // An empty MailBody::Text("") produces no children from body_to_compose_children,
+    // so fetched may be empty or contain the placeholder — either way "only" must be gone.
+    let has_only_in_draft = fetched.as_ref()
+        .map(|v| v.iter().any(|e| matches!(e, FfonElement::Str(s) if s.contains("only"))))
+        .unwrap_or(false);
+    assert!(!has_only_in_draft, "draft must not contain 'only' after undo; got: {:?}", fetched);
+
+    // Redo — "only" should come back as the SOLE body child (no extra I_PLACEHOLDER).
+    press_ctrl_shift(&mut renderer, Keycode::Z);
+
+    let body_after_redo = renderer.ffon[0].as_obj().unwrap()
+        .children[0].as_obj().unwrap().children.clone();
+    assert_eq!(
+        body_after_redo.len(), 1,
+        "after redo body must have exactly 1 child (no extra I_PLACEHOLDER); got: {:?}", body_after_redo
+    );
+    assert!(
+        matches!(&body_after_redo[0], FfonElement::Str(s) if s.contains("only")),
+        "sole child after redo must be the restored element; got: {:?}", body_after_redo
+    );
+}
+
+/// Undoing a body-element delete when the body held only that element must restore
+/// the element as the sole child — no extra I_PLACEHOLDER alongside it.
+#[test]
+fn compose_body_delete_undo_single_element_no_extra_placeholder() {
+    ensure_builtins();
+    use sicompass_emailclient::EmailClientProvider;
+    use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
+
+    let mut renderer = AppRenderer::new();
+    let mut p = EmailClientProvider::new();
+    p.set_current_path("compose/Body: [text]");
+    p.commit_edit("", "only");
+
+    let body_obj = FfonElement::Obj(FfonObject {
+        key: "Body: [text]".to_owned(),
+        children: vec![FfonElement::new_str("<input>only</input>".to_owned())],
+    });
+    let compose_root = FfonElement::Obj(FfonObject {
+        key: "compose".to_owned(),
+        children: vec![body_obj],
+    });
+    renderer.ffon.push(compose_root);
+    renderer.providers.push(Box::new(p));
+
+    renderer.current_id = {
+        let mut id = IdArray::new();
+        id.push(0); id.push(0); id.push(0);
+        id
+    };
+    renderer.coordinate = Coordinate::OperatorGeneral;
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    // Delete the only body element.
+    sicompass::handlers::handle_delete_body_element(&mut renderer);
+
+    let body_after_delete = renderer.ffon[0].as_obj().unwrap()
+        .children[0].as_obj().unwrap().children.clone();
+    assert_eq!(body_after_delete.len(), 1, "after delete body must have I_PLACEHOLDER");
+    assert!(
+        matches!(&body_after_delete[0], FfonElement::Str(s) if s == I_PLACEHOLDER),
+        "after delete must be I_PLACEHOLDER; got: {:?}", body_after_delete
+    );
+
+    // Undo — must restore "only" as sole child, no extra I_PLACEHOLDER.
+    press_ctrl(&mut renderer, Keycode::Z);
+
+    let body_after_undo = renderer.ffon[0].as_obj().unwrap()
+        .children[0].as_obj().unwrap().children.clone();
+    assert_eq!(
+        body_after_undo.len(), 1,
+        "after undo body must have exactly 1 child; got: {:?}", body_after_undo
+    );
+    assert!(
+        matches!(&body_after_undo[0], FfonElement::Str(s) if s.contains("only")),
+        "sole child after undo must be the restored element; got: {:?}", body_after_undo
+    );
+}

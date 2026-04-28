@@ -164,6 +164,7 @@ pub enum Task {
     FsRename,
     FsPaste,
     FsNavigate,
+    ProviderCommand,
 }
 
 impl Task {
@@ -187,6 +188,7 @@ impl Task {
             Task::FsRename => "fs rename",
             Task::FsPaste => "fs paste",
             Task::FsNavigate => "fs navigate",
+            Task::ProviderCommand => "provider command",
         }
     }
 }

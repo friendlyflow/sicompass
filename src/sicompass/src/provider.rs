@@ -291,6 +291,8 @@ pub fn handle_command(
     );
     if !error.is_empty() {
         renderer.error_message = error;
+    } else {
+        push_provider_descriptor_if_present(renderer, idx);
     }
     result
 }
@@ -320,10 +322,51 @@ pub fn execute_command(
         Some(i) => i,
         None => return false,
     };
-    renderer.providers
+    let ok = renderer.providers
         .get_mut(idx)
         .map(|p| p.execute_command(command, selected_item))
-        .unwrap_or(false)
+        .unwrap_or(false);
+    if ok {
+        push_provider_descriptor_if_present(renderer, idx);
+    }
+    ok
+}
+
+/// After a provider command completes successfully, drain any pending undo
+/// descriptor from that provider and push it onto the undo stack.
+///
+/// `provider_idx` is the originator's index — always use the provider that ran
+/// the command, not `renderer.current_id.get(0)`, which may differ after a
+/// navigation or context switch.
+pub(crate) fn push_provider_descriptor_if_present(
+    renderer: &mut AppRenderer,
+    provider_idx: usize,
+) {
+    let desc = match renderer.providers.get_mut(provider_idx) {
+        Some(p) => p.take_last_undo_descriptor(),
+        None => return,
+    };
+    if let Some(desc) = desc {
+        let serialized = sicompass_sdk::ffon::FfonElement::Obj(
+            sicompass_sdk::ffon::FfonObject {
+                key: desc.command,
+                children: vec![
+                    desc.payload,
+                    sicompass_sdk::ffon::FfonElement::Str(desc.label),
+                ],
+            }
+        );
+        let mut originator_id = sicompass_sdk::ffon::IdArray::new();
+        originator_id.push(provider_idx);
+        crate::state::update_history(
+            renderer,
+            crate::app_state::Task::ProviderCommand,
+            &originator_id,
+            None,
+            Some(serialized),
+            crate::app_state::History::None,
+        );
+    }
 }
 
 /// Delete the currently selected item via the active provider.
@@ -356,23 +399,6 @@ pub fn delete_item(renderer: &mut AppRenderer) -> bool {
         refresh_current_directory(renderer);
     }
     ok
-}
-
-/// Delete the element at the renderer's current path via the active provider.
-///
-/// Used for compose body elements: removes the focused leaf from `MailBody`
-/// so the next `refresh_subtree_parent` reflects the deletion.
-pub fn delete_element(renderer: &mut AppRenderer) -> bool {
-    let idx = match renderer.current_id.get(0) {
-        Some(i) => i,
-        None => return false,
-    };
-    let path: Vec<usize> = renderer.current_id.as_slice().iter().skip(1).copied().collect();
-    if let Some(p) = renderer.providers.get_mut(idx) {
-        p.delete_element(&path)
-    } else {
-        false
-    }
 }
 
 /// Return true when the active provider's current path is inside an email compose body.

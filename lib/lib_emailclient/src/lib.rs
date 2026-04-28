@@ -55,7 +55,7 @@ use sicompass_sdk::placeholders::{
     new_obj_with_i_placeholder, seed_i_placeholders, I_PLACEHOLDER,
 };
 use sicompass_sdk::platform;
-use sicompass_sdk::provider::Provider;
+use sicompass_sdk::provider::{Provider, ProviderUndoDescriptor};
 
 use idle::IdleController;
 
@@ -366,6 +366,10 @@ pub struct EmailClientProvider {
     // Pending error message to surface via take_error.
     error_message: Option<String>,
 
+    // Pending undo descriptor for the last completed undoable command.
+    // Drained by the app dispatcher after each handle_command/execute_command call.
+    last_undo_descriptor: Option<ProviderUndoDescriptor>,
+
     // In-flight OAuth2 login handle (None when no login is in progress).
     active_login: Option<oauth2::PendingAuthorize>,
 
@@ -403,6 +407,7 @@ impl EmailClientProvider {
             token_refresh_inflight: Arc::new(AtomicBool::new(false)),
             token_refresh_result: Arc::new(Mutex::new(None)),
             error_message: None,
+            last_undo_descriptor: None,
             active_login: None,
             config_path_override: None,
         }
@@ -505,6 +510,98 @@ impl EmailClientProvider {
                 base == body
             })
             .map(|h| h.uid)
+    }
+
+    /// Execute an undo (`is_undo=true`) or redo (`is_undo=false`) of a
+    /// previously recorded provider command descriptor.
+    fn apply_provider_command(
+        &mut self,
+        descriptor: &ProviderUndoDescriptor,
+        is_undo: bool,
+        error: &mut String,
+    ) {
+        let imap = match self.imap.as_mut() {
+            Some(i) => i,
+            None => { *error = "not connected".to_owned(); return; }
+        };
+        let json: serde_json::Value = serde_json::from_str(descriptor.payload_str())
+            .unwrap_or(serde_json::Value::Null);
+
+        match descriptor.command.as_str() {
+            "delete-trash" | "archive" | "move" => {
+                // For undo: move back from destination to source.
+                // For redo: move from source to destination.
+                let dest_field = match descriptor.command.as_str() {
+                    "delete-trash" => "trash",
+                    "archive" => "archive",
+                    _ => "dest",
+                };
+                let (search_in, move_to) = if is_undo {
+                    (json[dest_field].as_str().unwrap_or(""),
+                     json["src"].as_str().unwrap_or(""))
+                } else {
+                    (json["src"].as_str().unwrap_or(""),
+                     json[dest_field].as_str().unwrap_or(""))
+                };
+                let msg_id = json["msg_id"].as_str().unwrap_or("");
+                match imap.fetch_message_by_message_id(search_in, msg_id) {
+                    Ok(Some(msg)) => {
+                        if let Err(e) = imap.move_message(search_in, msg.uid, move_to) {
+                            *error = format!("{} {}: {e}", if is_undo { "undo" } else { "redo" }, descriptor.command);
+                        }
+                    }
+                    Ok(None) => {
+                        *error = format!(
+                            "{} {}: message no longer in {}",
+                            if is_undo { "undo" } else { "redo" },
+                            descriptor.command,
+                            search_in,
+                        );
+                    }
+                    Err(e) => {
+                        *error = format!("{} {}: {e}", if is_undo { "undo" } else { "redo" }, descriptor.command);
+                    }
+                }
+                self.envelope_cache = None;
+                self.message_cache.clear();
+            }
+            "mark-read" | "mark-unread" => {
+                let folder = json["folder"].as_str().unwrap_or("");
+                let uid = json["uid"].as_u64().unwrap_or(0) as u32;
+                let prev_seen = json["prev_seen"].as_bool().unwrap_or(false);
+                // Undo restores prev_seen; redo negates it.
+                let target_seen = if is_undo { prev_seen } else { !prev_seen };
+                let (add, remove): (&[&str], &[&str]) =
+                    if target_seen { (&["\\Seen"], &[]) } else { (&[], &["\\Seen"]) };
+                if let Err(e) = imap.set_flags(folder, uid, add, remove) {
+                    *error = format!("{} {}: {e}", if is_undo { "undo" } else { "redo" }, descriptor.command);
+                } else {
+                    if let Some(h) = self.message_cache.iter_mut().find(|h| h.uid == uid) {
+                        h.seen = target_seen;
+                    }
+                    self.envelope_cache = None;
+                }
+            }
+            "star" | "unstar" => {
+                let folder = json["folder"].as_str().unwrap_or("");
+                let uid = json["uid"].as_u64().unwrap_or(0) as u32;
+                let prev_flagged = json["prev_flagged"].as_bool().unwrap_or(false);
+                let target_flagged = if is_undo { prev_flagged } else { !prev_flagged };
+                let (add, remove): (&[&str], &[&str]) =
+                    if target_flagged { (&["\\Flagged"], &[]) } else { (&[], &["\\Flagged"]) };
+                if let Err(e) = imap.set_flags(folder, uid, add, remove) {
+                    *error = format!("{} {}: {e}", if is_undo { "undo" } else { "redo" }, descriptor.command);
+                } else {
+                    if let Some(h) = self.message_cache.iter_mut().find(|h| h.uid == uid) {
+                        h.flagged = target_flagged;
+                    }
+                    self.envelope_cache = None;
+                }
+            }
+            _ => {
+                *error = format!("unknown undoable command: {}", descriptor.command);
+            }
+        }
     }
 
     /// Return the (real_folder, uid) for the message identified by `elem_key`.
@@ -1304,6 +1401,25 @@ fn build_message_view(msg: &EmailMessage) -> Vec<FfonElement> {
 ///
 /// - Text: one `<input>` leaf with the current content (empty → no children).
 /// - Ffon: the stored elements directly (each leaf should already carry `<input>` tags).
+/// Reconstruct a `MailBody` from FFON body children (inverse of `body_to_compose_children`).
+///
+/// Called by `sync_ffon_body_children` to keep `compose.draft.body` in sync after
+/// app-level FFON mutations (Task::Delete undo/redo) that bypass `commit_edit`.
+fn body_from_ffon_children(children: &[FfonElement]) -> MailBody {
+    if children.is_empty() {
+        return MailBody::Text(String::new());
+    }
+    // A single plain Str with an <input> tag is the Text representation.
+    if children.len() == 1 {
+        if let FfonElement::Str(s) = &children[0] {
+            if let Some(content) = sicompass_sdk::tags::extract_input(s) {
+                return MailBody::Text(content);
+            }
+        }
+    }
+    MailBody::Ffon(children.to_vec())
+}
+
 fn body_to_compose_children(body: &MailBody) -> Vec<FfonElement> {
     match body {
         MailBody::Text(s) if !s.is_empty() =>
@@ -1624,7 +1740,14 @@ impl Provider for EmailClientProvider {
     }
 
     fn refresh_on_navigate(&self) -> bool {
-        true
+        // Don't re-fetch on every navigation step inside a compose form — the form
+        // is built once and maintained as live FFON so undo/redo of body edits persists
+        // across navigation.  Regular folder/message navigation still refreshes.
+        let in_compose = self.current_path
+            .trim_start_matches('/')
+            .split('/')
+            .any(|s| matches!(s, "compose" | "reply" | "reply all" | "forward"));
+        !in_compose
     }
 
     fn clear_needs_refresh(&mut self) {
@@ -1887,6 +2010,18 @@ impl Provider for EmailClientProvider {
         self.error_message.take()
     }
 
+    fn take_last_undo_descriptor(&mut self) -> Option<ProviderUndoDescriptor> {
+        self.last_undo_descriptor.take()
+    }
+
+    fn undo_command(&mut self, descriptor: &ProviderUndoDescriptor, error: &mut String) {
+        self.apply_provider_command(descriptor, true, error);
+    }
+
+    fn redo_command(&mut self, descriptor: &ProviderUndoDescriptor, error: &mut String) {
+        self.apply_provider_command(descriptor, false, error);
+    }
+
     fn fetch_subtree_parent_key(&mut self) -> Option<String> {
         // Collect as owned strings to avoid borrow conflicts with self.compose.
         let segs: Vec<String> = self.current_path
@@ -1962,13 +2097,10 @@ impl Provider for EmailClientProvider {
         }
     }
 
-    fn delete_element(&mut self, path: &[usize]) -> bool {
-        let removed = delete_body_element_at(&mut self.compose.draft.body, path);
-        if removed {
-            renormalize_body_variant(&mut self.compose.draft.body);
-            self.sync_body_path_label();
-        }
-        removed
+    fn sync_ffon_body_children(&mut self, children: &[FfonElement]) {
+        self.compose.draft.body = body_from_ffon_children(children);
+        renormalize_body_variant(&mut self.compose.draft.body);
+        self.sync_body_path_label();
     }
 
     fn commands(&self) -> Vec<String> {
@@ -2028,6 +2160,16 @@ impl Provider for EmailClientProvider {
             .find(|(d, _)| d == selection)
             .map(|(_, r)| r.clone())
             .unwrap_or_else(|| selection.to_owned());
+        // Capture Message-ID before moving (for undo support).
+        let msg_id = self.message_detail.as_ref()
+            .filter(|m| m.uid == uid)
+            .map(|m| m.message_id.clone())
+            .or_else(|| {
+                self.imap.as_mut()
+                    .and_then(|imap| imap.fetch_message(&from, uid).ok().flatten())
+                    .map(|m| m.message_id)
+            })
+            .unwrap_or_default();
         if let Some(ref mut imap) = self.imap {
             if let Err(e) = imap.move_message(&from, uid, &dest) {
                 self.error_message = Some(format!("move failed: {e}"));
@@ -2036,6 +2178,17 @@ impl Provider for EmailClientProvider {
         }
         self.envelope_cache = None;
         self.message_cache.retain(|h| h.uid != uid);
+        if !msg_id.is_empty() {
+            self.last_undo_descriptor = Some(ProviderUndoDescriptor::new(
+                "move",
+                FfonElement::new_str(serde_json::json!({
+                    "msg_id": msg_id,
+                    "src": from,
+                    "dest": dest,
+                }).to_string()),
+                "move email",
+            ));
+        }
         true
     }
 
@@ -2085,6 +2238,12 @@ impl Provider for EmailClientProvider {
             }
             "mark-read" | "mark-unread" | "star" | "unstar" => {
                 if let Some((real_folder, uid)) = self.current_message_uid(elem_key) {
+                    // Capture previous flag state for undo before mutation.
+                    let (prev_seen, prev_flagged) = self.message_cache
+                        .iter()
+                        .find(|h| h.uid == uid)
+                        .map(|h| (h.seen, h.flagged))
+                        .unwrap_or((false, false));
                     let (add, remove): (&[&str], &[&str]) = match cmd {
                         "mark-read"   => (&["\\Seen"],    &[]),
                         "mark-unread" => (&[],            &["\\Seen"]),
@@ -2107,6 +2266,25 @@ impl Provider for EmailClientProvider {
                         }
                     }
                     self.envelope_cache = None;
+                    // Stash undo descriptor.
+                    let payload = if cmd == "star" || cmd == "unstar" {
+                        serde_json::json!({
+                            "folder": real_folder,
+                            "uid": uid,
+                            "prev_flagged": prev_flagged,
+                        }).to_string()
+                    } else {
+                        serde_json::json!({
+                            "folder": real_folder,
+                            "uid": uid,
+                            "prev_seen": prev_seen,
+                        }).to_string()
+                    };
+                    self.last_undo_descriptor = Some(ProviderUndoDescriptor::new(
+                        cmd,
+                        FfonElement::new_str(payload),
+                        cmd.replace('-', " "),
+                    ));
                 } else {
                     *error = format!("{cmd}: not viewing a message");
                 }
@@ -2117,12 +2295,32 @@ impl Provider for EmailClientProvider {
                     let trash = self.special_folders.trash.clone();
                     let moved_to_trash = if let Some(ref t) = trash {
                         if real_folder != *t {
-                            // Move to Trash.
+                            // Soft delete: capture Message-ID for undo before moving.
+                            let msg_id = self.message_detail.as_ref()
+                                .filter(|m| m.uid == uid)
+                                .map(|m| m.message_id.clone())
+                                .or_else(|| {
+                                    self.imap.as_mut()
+                                        .and_then(|imap| imap.fetch_message(&real_folder, uid).ok().flatten())
+                                        .map(|m| m.message_id)
+                                })
+                                .unwrap_or_default();
                             if let Some(ref mut imap) = self.imap {
                                 if let Err(e) = imap.move_message(&real_folder, uid, t) {
                                     *error = format!("delete failed: {e}");
                                     return None;
                                 }
+                            }
+                            if !msg_id.is_empty() {
+                                self.last_undo_descriptor = Some(ProviderUndoDescriptor::new(
+                                    "delete-trash",
+                                    FfonElement::new_str(serde_json::json!({
+                                        "msg_id": msg_id,
+                                        "src": real_folder,
+                                        "trash": t,
+                                    }).to_string()),
+                                    "delete email",
+                                ));
                             }
                             true
                         } else {
@@ -2152,6 +2350,16 @@ impl Provider for EmailClientProvider {
                             *error = "archive: server does not advertise an \\Archive folder".to_owned();
                         }
                         Some(ref dest) => {
+                            // Capture Message-ID for undo before moving.
+                            let msg_id = self.message_detail.as_ref()
+                                .filter(|m| m.uid == uid)
+                                .map(|m| m.message_id.clone())
+                                .or_else(|| {
+                                    self.imap.as_mut()
+                                        .and_then(|imap| imap.fetch_message(&real_folder, uid).ok().flatten())
+                                        .map(|m| m.message_id)
+                                })
+                                .unwrap_or_default();
                             if let Some(ref mut imap) = self.imap {
                                 if let Err(e) = imap.move_message(&real_folder, uid, dest) {
                                     *error = format!("archive failed: {e}");
@@ -2160,6 +2368,17 @@ impl Provider for EmailClientProvider {
                             }
                             self.envelope_cache = None;
                             self.message_cache.retain(|h| h.uid != uid);
+                            if !msg_id.is_empty() {
+                                self.last_undo_descriptor = Some(ProviderUndoDescriptor::new(
+                                    "archive",
+                                    FfonElement::new_str(serde_json::json!({
+                                        "msg_id": msg_id,
+                                        "src": real_folder,
+                                        "archive": dest,
+                                    }).to_string()),
+                                    "archive email",
+                                ));
+                            }
                         }
                     }
                 } else {
@@ -3720,62 +3939,46 @@ mod tests {
         assert!(matches!(&body, MailBody::Text(s) if s == "hello"), "Text should be unchanged");
     }
 
-    /// End-to-end: deleting the second of two string children collapses body to Text.
+    /// sync_ffon_body_children: two-element body → remove second → collapses to Text.
     #[test]
-    fn delete_second_child_collapses_to_text() {
+    fn sync_body_children_two_to_one_collapses_to_text() {
         let mut p = EmailClientProvider::new();
         p.push_path("compose");
-        p.push_path("Body: [text]");
-        // Promote to Ffon with two leaves.
-        p.compose.draft.body = MailBody::Ffon(vec![
-            FfonElement::new_str("<input>hello</input>".to_owned()),
-            FfonElement::new_str("<input>world</input>".to_owned()),
-        ]);
-        // Delete the second child.
-        assert!(p.delete_element(&[1]));
+        // Simulate what FFON Task::Delete leaves behind: one child remaining.
+        let remaining = vec![FfonElement::new_str("<input>hello</input>".to_owned())];
+        p.sync_ffon_body_children(&remaining);
         assert!(
             matches!(&p.compose.draft.body, MailBody::Text(s) if s == "hello"),
-            "body should collapse to Text(hello) after deleting second child; got: {:?}",
+            "body should collapse to Text(hello); got: {:?}",
             p.compose.draft.body
         );
     }
 
-    /// End-to-end: deleting the Obj of a Ffon([Str, Obj]) body collapses to Text.
+    /// sync_ffon_body_children: remove Obj from Ffon([Str, Obj]) → collapses to Text.
     #[test]
-    fn delete_obj_child_collapses_to_text() {
+    fn sync_body_children_remove_obj_collapses_to_text() {
         let mut p = EmailClientProvider::new();
         p.push_path("compose");
-        p.push_path("Body: [text]");
-        p.compose.draft.body = MailBody::Ffon(vec![
-            FfonElement::new_str("<input>hello</input>".to_owned()),
-            new_obj_with_i_placeholder("<input>myobj</input>".to_owned()),
-        ]);
-        // Delete the Obj (index 1).
-        assert!(p.delete_element(&[1]));
+        let remaining = vec![FfonElement::new_str("<input>hello</input>".to_owned())];
+        p.sync_ffon_body_children(&remaining);
         assert!(
             matches!(&p.compose.draft.body, MailBody::Text(s) if s == "hello"),
-            "body should collapse to Text(hello) after deleting Obj; got: {:?}",
+            "body should collapse to Text(hello); got: {:?}",
             p.compose.draft.body
         );
     }
 
-    /// End-to-end: deleting the last content child leaves Ffon([I_PLACEHOLDER]).
+    /// sync_ffon_body_children: empty children → MailBody::Text("").
     #[test]
-    fn delete_last_content_child_stays_ffon_with_placeholder() {
+    fn sync_body_children_empty_becomes_empty_text() {
         let mut p = EmailClientProvider::new();
         p.push_path("compose");
-        p.push_path("Body: [text]");
-        p.compose.draft.body = MailBody::Ffon(vec![
-            FfonElement::new_str("<input>hello</input>".to_owned()),
-        ]);
-        assert!(p.delete_element(&[0]));
-        match &p.compose.draft.body {
-            MailBody::Ffon(elems) => {
-                assert_eq!(elems.len(), 1);
-                assert_eq!(elems[0], FfonElement::new_str(I_PLACEHOLDER.to_owned()));
-            }
-            other => panic!("expected Ffon([I_PLACEHOLDER]), got: {:?}", other),
-        }
+        p.sync_ffon_body_children(&[]);
+        assert!(
+            matches!(&p.compose.draft.body, MailBody::Text(s) if s.is_empty()),
+            "empty children should yield Text(\"\"); got: {:?}",
+            p.compose.draft.body
+        );
     }
 
     // ---- seed_i_placeholders ----

@@ -4,6 +4,7 @@
 use crate::app_state::{AppRenderer, Coordinate, History, Task, UndoEntry};
 use crate::list;
 use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray, next_layer_exists};
+use sicompass_sdk::provider::ProviderUndoDescriptor;
 
 const UNDO_HISTORY_SIZE: usize = 100;
 
@@ -320,6 +321,7 @@ pub fn update_history(
             | Task::FsRename
             | Task::FsPaste
             | Task::FsNavigate
+            | Task::ProviderCommand
     ) {
         return;
     }
@@ -371,8 +373,10 @@ pub fn handle_history_action(r: &mut AppRenderer, history: History) {
 
         match entry_task {
             Task::Append | Task::AppendAppend | Task::Insert | Task::InsertInsert => {
-                r.current_id = entry_id;
+                r.current_id = entry_id.clone();
                 crate::handlers::handle_delete(r, History::Undo);
+                upgrade_body_bare_placeholder(r, &entry_id);
+                sync_compose_body_if_body_element(r, &entry_id);
                 if r.current_id.last().unwrap_or(0) > 0 {
                     let cur = r.current_id.last().unwrap_or(1);
                     r.current_id.set_last(cur - 1);
@@ -380,8 +384,12 @@ pub fn handle_history_action(r: &mut AppRenderer, history: History) {
             }
             Task::Delete | Task::Cut => {
                 if let Some(elem) = entry_prev {
+                    clear_sole_i_placeholder_if_body_element(r, &entry_id);
                     insert_element_at_id(r, &entry_id, elem);
-                    r.current_id = entry_id;
+                    r.current_id = entry_id.clone();
+                    // Keep compose.draft.body in sync when undoing a body-element delete.
+                    // Body elements are at depth >= 3 (provider / body-Obj / element).
+                    sync_compose_body_if_body_element(r, &entry_id);
                 }
             }
             Task::Input | Task::Paste => {
@@ -481,6 +489,30 @@ pub fn handle_history_action(r: &mut AppRenderer, history: History) {
                     }
                 }
             }
+            Task::ProviderCommand => {
+                // Dispatch undo to the originating provider (entry_id[0]).
+                // We do NOT go through crate::provider::handle_command because that
+                // wrapper routes by renderer.current_id[0] — the active provider —
+                // which may differ from the originator after the user navigated away.
+                let provider_idx = entry_id.get(0).unwrap_or(0);
+                if let Some(desc) = deserialize_provider_descriptor(entry_new_for_undo.as_ref()) {
+                    let mut error = String::new();
+                    let pname = r.providers.get(provider_idx)
+                        .map(|p| p.display_name().to_owned());
+                    if let Some(p) = r.providers.get_mut(provider_idx) {
+                        p.undo_command(&desc, &mut error);
+                    }
+                    if !error.is_empty() {
+                        r.error_message = error;
+                    } else if r.current_id.get(0) == Some(provider_idx) {
+                        crate::provider::refresh_current_directory(r);
+                    } else {
+                        r.error_message = format!("undid {} on {}",
+                            desc.command,
+                            pname.as_deref().unwrap_or("provider"));
+                    }
+                }
+            }
             _ => {}
         }
     } else if history == History::Redo {
@@ -499,13 +531,18 @@ pub fn handle_history_action(r: &mut AppRenderer, history: History) {
         match entry_task {
             Task::Append | Task::AppendAppend | Task::Insert | Task::InsertInsert => {
                 if let Some(elem) = entry_new {
+                    clear_sole_i_placeholder_if_body_element(r, &entry_id);
                     insert_element_at_id(r, &entry_id, elem);
-                    r.current_id = entry_id;
+                    r.current_id = entry_id.clone();
+                    sync_compose_body_if_body_element(r, &entry_id);
                 }
             }
             Task::Delete | Task::Cut => {
                 r.current_id = entry_id.clone();
                 crate::handlers::handle_delete(r, History::Redo);
+                upgrade_body_bare_placeholder(r, &entry_id);
+                // Keep compose.draft.body in sync when redoing a body-element delete.
+                sync_compose_body_if_body_element(r, &entry_id);
                 let count = get_parent_len(&r.ffon, &entry_id);
                 if let Some(idx) = r.current_id.last() {
                     if idx >= count && count > 0 {
@@ -596,6 +633,28 @@ pub fn handle_history_action(r: &mut AppRenderer, history: History) {
                     r.current_id = entry_id;
                 }
             }
+            Task::ProviderCommand => {
+                // Dispatch redo to the originating provider (entry_id[0]). Same routing
+                // rationale as the undo arm: bypass the active-provider wrapper.
+                let provider_idx = entry_id.get(0).unwrap_or(0);
+                if let Some(desc) = deserialize_provider_descriptor(entry_new.as_ref()) {
+                    let mut error = String::new();
+                    let pname = r.providers.get(provider_idx)
+                        .map(|p| p.display_name().to_owned());
+                    if let Some(p) = r.providers.get_mut(provider_idx) {
+                        p.redo_command(&desc, &mut error);
+                    }
+                    if !error.is_empty() {
+                        r.error_message = error;
+                    } else if r.current_id.get(0) == Some(provider_idx) {
+                        crate::provider::refresh_current_directory(r);
+                    } else {
+                        r.error_message = format!("redid {} on {}",
+                            desc.command,
+                            pname.as_deref().unwrap_or("provider"));
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -608,6 +667,27 @@ pub fn handle_history_action(r: &mut AppRenderer, history: History) {
 // ---------------------------------------------------------------------------
 // Helpers — FFON mutation primitives
 // ---------------------------------------------------------------------------
+
+/// Reconstruct a `ProviderUndoDescriptor` from the serialized `FfonElement::Obj`
+/// stored in `UndoEntry::new_element` for `Task::ProviderCommand` entries.
+///
+/// Layout: `Obj { key: command, children: [payload_elem, Str(label)] }`.
+fn deserialize_provider_descriptor(elem: Option<&FfonElement>) -> Option<ProviderUndoDescriptor> {
+    let obj = match elem? {
+        FfonElement::Obj(o) => o,
+        _ => return None,
+    };
+    let payload = obj.children.first()?.clone();
+    let label = match obj.children.get(1) {
+        Some(FfonElement::Str(s)) => s.clone(),
+        _ => String::new(),
+    };
+    Some(ProviderUndoDescriptor {
+        command: obj.key.clone(),
+        payload,
+        label,
+    })
+}
 
 /// Extract the key/string from an FfonElement (used by FsRename/FsPaste undo/redo).
 fn elem_key_str(elem: &sicompass_sdk::ffon::FfonElement) -> String {
@@ -782,6 +862,61 @@ fn get_current_line(r: &AppRenderer) -> (String, bool) {
         Some(FfonElement::Str(s)) => (s.clone(), false),
         Some(FfonElement::Obj(obj)) => (obj.key.clone(), true),
         None => (String::new(), false),
+    }
+}
+
+/// Before re-inserting a real element into a body that currently holds only `I_PLACEHOLDER`,
+/// clear the placeholder so the re-inserted element is the sole child.
+///
+/// Must be called BEFORE `insert_element_at_id` so the placeholder does not end up
+/// sitting alongside the restored element after a redo or undo-of-delete.
+fn clear_sole_i_placeholder_if_body_element(r: &mut AppRenderer, id: &sicompass_sdk::ffon::IdArray) {
+    if id.depth() < 3 { return; }
+    let is_sole = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, id)
+        .map(|arr| arr.len() == 1 && matches!(&arr[0], sicompass_sdk::ffon::FfonElement::Str(s)
+                   if s == sicompass_sdk::placeholders::I_PLACEHOLDER))
+        .unwrap_or(false);
+    if !is_sole { return; }
+    if let Some(arr) = navigate_to_slice_pub(&mut r.ffon, id) {
+        arr.clear();
+    }
+}
+
+/// After a delete leaves a bare `"<input></input>"` as the sole body child, upgrade it
+/// to `I_PLACEHOLDER` so the user sees "i" (inviting typed insertion) rather than "-i ".
+///
+/// Must be called BEFORE `sync_compose_body_if_body_element` so the upgraded placeholder
+/// propagates into `compose.draft.body` via the subsequent sync.
+fn upgrade_body_bare_placeholder(r: &mut AppRenderer, id: &sicompass_sdk::ffon::IdArray) {
+    if id.depth() < 3 { return; }
+    let is_bare = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, id)
+        .map(|arr| arr.len() == 1 && matches!(&arr[0], sicompass_sdk::ffon::FfonElement::Str(s) if s == "<input></input>"))
+        .unwrap_or(false);
+    if !is_bare { return; }
+    if let Some(arr) = navigate_to_slice_pub(&mut r.ffon, id) {
+        arr[0] = sicompass_sdk::ffon::FfonElement::Str(
+            sicompass_sdk::placeholders::I_PLACEHOLDER.to_owned(),
+        );
+    }
+}
+
+/// Notify the active provider that body children changed after a FFON-level delete/insert.
+///
+/// Only acts when `id` is at depth >= 3 (provider / body-Obj / element), which is the
+/// depth used by body elements when `refresh_on_navigate` is false for compose paths.
+pub fn sync_compose_body_if_body_element(r: &mut AppRenderer, id: &sicompass_sdk::ffon::IdArray) {
+    if id.depth() < 3 {
+        return;
+    }
+    let provider_idx = match id.get(0) { Some(i) => i, None => return };
+    // get_ffon_at_id returns the *parent* array of the element at `id`.
+    // For id = [p, body_obj_idx, elem_idx], that is the body Obj's children slice.
+    let body_children = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, id)
+        .map(|arr| arr.to_vec());
+    if let Some(children) = body_children {
+        if let Some(p) = r.providers.get_mut(provider_idx) {
+            p.sync_ffon_body_children(&children);
+        }
     }
 }
 
