@@ -234,6 +234,18 @@ pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
             if item_id.depth() >= 2 {
                 crate::provider::push_path(r, &segment);
             }
+            // For email compose body: seed I_PLACEHOLDER if navigating into an empty Obj
+            // so the user always has an insertion point (mirrors the lazy-fetch branch above).
+            if crate::provider::is_in_email_compose_body(r) {
+                let last_idx = item_id.last().unwrap_or(0);
+                if let Some(siblings) = crate::provider::get_ffon_at_id_mut(&mut r.ffon, &item_id) {
+                    if let Some(FfonElement::Obj(obj)) = siblings.get_mut(last_idx) {
+                        if obj.children.is_empty() {
+                            obj.children.push(FfonElement::Str(I_PLACEHOLDER.to_owned()));
+                        }
+                    }
+                }
+            }
             let mut new_id = item_id;
             new_id.push(0);
             r.current_id = new_id;
@@ -1406,6 +1418,24 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
                     if let Some(star_idx) = new_star_idx {
                         r.current_id.set_last(star_idx);
                     }
+                    // Record undo entry for compose-body Str insertions.
+                    if crate::provider::is_in_email_compose_body(r) {
+                        let target = format!("<input>{name}</input>");
+                        let entry = {
+                            let arr = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id);
+                            arr.and_then(|a| {
+                                a.iter().rposition(|e| matches!(e, FfonElement::Str(s) if *s == target))
+                                    .map(|pos| {
+                                        let mut cid = r.current_id.clone();
+                                        cid.set_last(pos);
+                                        (cid, a[pos].clone())
+                                    })
+                            })
+                        };
+                        if let Some((cid, elem)) = entry {
+                            crate::state::update_history(r, crate::app_state::Task::Insert, &cid, None, Some(elem), crate::app_state::History::None);
+                        }
+                    }
                 } else {
                     // No provider — update the FFON element in-place with <input> wrapping.
                     let idx = r.current_id.last().unwrap_or(0);
@@ -1441,6 +1471,32 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
                     };
                     if let Some(star_idx) = new_star_idx {
                         r.current_id.set_last(star_idx);
+                    }
+                    // Record undo entry for compose-body Obj insertions.
+                    if crate::provider::is_in_email_compose_body(r) {
+                        let key_trimmed = key.trim().to_owned();
+                        let entry = {
+                            let arr = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id);
+                            arr.and_then(|a| {
+                                a.iter().rposition(|e| {
+                                    if let FfonElement::Obj(o) = e {
+                                        let k = sicompass_sdk::tags::extract_input(&o.key)
+                                            .unwrap_or_else(|| o.key.clone());
+                                        k.trim() == key_trimmed
+                                    } else {
+                                        false
+                                    }
+                                })
+                                .map(|pos| {
+                                    let mut cid = r.current_id.clone();
+                                    cid.set_last(pos);
+                                    (cid, a[pos].clone())
+                                })
+                            })
+                        };
+                        if let Some((cid, elem)) = entry {
+                            crate::state::update_history(r, crate::app_state::Task::Insert, &cid, None, Some(elem), crate::app_state::History::None);
+                        }
                     }
                 } else {
                     // No provider — mutate the FFON element directly.
@@ -2220,27 +2276,48 @@ pub fn handle_file_delete(r: &mut AppRenderer) {
     }
 }
 
-/// Delete the focused body element via the provider, then refresh the subtree.
+/// Delete the focused body element and keep the provider's compose state in sync.
 ///
-/// Used by Ctrl+D / Delete in OperatorGeneral when inside email compose body.
+/// Uses the standard FFON Task::Delete path (so undo/redo work) then notifies the
+/// provider about the updated body children via `sync_ffon_body_children`.
 pub fn handle_delete_body_element(r: &mut AppRenderer) {
-    let ok = crate::provider::delete_element(r);
-    if ok {
-        if !crate::provider::refresh_subtree_parent(r) {
-            crate::provider::refresh_current_directory(r);
+    crate::state::update_state(r, crate::app_state::Task::Delete, crate::app_state::History::None);
+
+    // update_ffon's non-editor empty-list fallback inserts a bare "<input></input>".
+    // Compose body needs the typed I_PLACEHOLDER ("i <input></input>") so the user
+    // sees "i" (inviting insertion) rather than "-i " (a plain input field).
+    {
+        let is_bare = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.previous_id)
+            .map(|arr| arr.len() == 1 && matches!(&arr[0], FfonElement::Str(s) if s == "<input></input>"))
+            .unwrap_or(false);
+        if is_bare {
+            if let Some(arr) = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.previous_id) {
+                arr[0] = FfonElement::Str(I_PLACEHOLDER.to_owned());
+            }
         }
-        // Clamp cursor to new length
-        let new_len = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)
-            .map(|a| a.len())
-            .unwrap_or(0);
-        let cur = r.current_id.last().unwrap_or(0);
-        if new_len > 0 && cur >= new_len {
-            r.current_id.set_last(new_len - 1);
-        }
-        list::create_list_current_layer(r);
-        r.list_index = r.current_id.last().unwrap_or(0);
-        r.needs_redraw = true;
     }
+
+    // Sync provider's compose.draft.body with the updated FFON body children.
+    // r.previous_id is the id of the deleted element (set by update_ids inside update_state).
+    let body_children = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.previous_id)
+        .map(|arr| arr.to_vec());
+    if let (Some(children), Some(provider_idx)) = (body_children, r.previous_id.get(0)) {
+        if let Some(p) = r.providers.get_mut(provider_idx) {
+            p.sync_ffon_body_children(&children);
+        }
+    }
+
+    // Clamp cursor to new length.
+    let new_len = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)
+        .map(|a| a.len())
+        .unwrap_or(0);
+    let cur = r.current_id.last().unwrap_or(0);
+    if new_len > 0 && cur >= new_len {
+        r.current_id.set_last(new_len - 1);
+    }
+    list::create_list_current_layer(r);
+    r.list_index = r.current_id.last().unwrap_or(0);
+    r.needs_redraw = true;
 }
 
 /// Invoke the provider's `delete` command on the focused element (Ctrl+D / Delete shortcut).
@@ -2285,7 +2362,8 @@ pub fn invoke_provider_delete(r: &mut AppRenderer) {
     };
 
     let mut error = String::new();
-    if let Some(idx) = r.current_id.get(0) {
+    let provider_idx = r.current_id.get(0);
+    if let Some(idx) = provider_idx {
         if let Some(provider) = r.providers.get_mut(idx) {
             provider.handle_command("delete", &element_key, element_type, &mut error);
         }
@@ -2294,6 +2372,10 @@ pub fn invoke_provider_delete(r: &mut AppRenderer) {
         r.error_message = error;
         r.needs_redraw = true;
         return;
+    }
+    // Push undo descriptor if the provider queued one (e.g. soft email delete).
+    if let Some(idx) = provider_idx {
+        crate::provider::push_provider_descriptor_if_present(r, idx);
     }
 
     // Refresh the message list in-place (cursor index is already correct — the
