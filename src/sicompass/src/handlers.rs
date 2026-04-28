@@ -389,6 +389,7 @@ pub fn handle_left(r: &mut AppRenderer) {
                 }
             }
         }
+        r.scroll_offset = 0;
         list::create_list_current_layer(r);
         r.sync_current_id_from_list();
         r.caret.reset(sdl_ticks());
@@ -3918,6 +3919,19 @@ mod tests {
         r.current_id = { let mut id = IdArray::new(); id.push(0); id };
         handle_left(&mut r);
         assert_eq!(r.current_id.depth(), 1);
+    }
+
+    #[test]
+    fn left_resets_scroll_offset() {
+        // Stale scroll_offset from a deeper level must be cleared on Left so
+        // the parent list renders from the top rather than a truncated slice.
+        let mut r = make_renderer();
+        r.list_index = 3; // "section"
+        r.sync_current_id_from_list();
+        handle_right(&mut r); // enter "section" → depth 3
+        r.scroll_offset = 99; // simulate stale scroll from deep navigation
+        handle_left(&mut r); // go back → depth 2
+        assert_eq!(r.scroll_offset, 0, "scroll_offset must be reset on Left");
     }
 
     #[test]
