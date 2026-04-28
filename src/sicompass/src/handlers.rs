@@ -660,6 +660,7 @@ pub fn handle_tab(r: &mut AppRenderer) {
         }
         Coordinate::OperatorGeneral | Coordinate::OperatorInsert | Coordinate::EditorGeneral => {
             r.previous_coordinate = r.coordinate;
+            r.search_origin_id = r.current_id.clone();
             r.coordinate = Coordinate::SimpleSearch;
             r.search_string.clear();
             r.cursor_position = 0;
@@ -1976,6 +1977,7 @@ pub fn handle_escape(r: &mut AppRenderer) {
             r.coordinate = r.previous_coordinate;
             r.speak_mode_change(None);
             r.search_string.clear();
+            r.current_id = r.search_origin_id.clone();
             list::create_list_current_layer(r);
             r.list_index = r.current_id.last().unwrap_or(0);
             r.scroll_offset = 0;
@@ -1988,6 +1990,7 @@ pub fn handle_escape(r: &mut AppRenderer) {
             r.speak_mode_change(None);
             r.input_buffer.clear();
             r.cursor_position = 0;
+            r.current_id = r.search_origin_id.clone();
             list::create_list_current_layer(r);
             r.list_index = r.current_id.last().unwrap_or(0);
             r.scroll_offset = 0;
@@ -2082,6 +2085,8 @@ pub fn handle_input(r: &mut AppRenderer, text: &str) {
             let search = r.search_string.clone();
             list::create_list_current_layer(r);
             list::populate_list_current_layer(r, &search);
+            r.list_index = 0;
+            r.sync_current_id_from_list();
             r.speak_current_element();
             r.needs_redraw = true;
         }
@@ -2120,6 +2125,8 @@ pub fn handle_input(r: &mut AppRenderer, text: &str) {
             let filter = r.input_buffer.clone();
             list::create_list_extended_search(r);
             list::populate_list_current_layer(r, &filter);
+            r.list_index = 0;
+            r.sync_current_id_from_list();
             r.speak_current_element();
             r.needs_redraw = true;
         }
@@ -2141,6 +2148,8 @@ pub fn handle_backspace(r: &mut AppRenderer) {
                 let search = r.search_string.clone();
                 list::create_list_current_layer(r);
                 list::populate_list_current_layer(r, &search);
+                r.list_index = 0;
+                r.sync_current_id_from_list();
                 r.speak_current_element();
                 r.needs_redraw = true;
             }
@@ -3048,6 +3057,8 @@ fn maybe_update_search(r: &mut AppRenderer) {
             let s = r.input_buffer.clone();
             list::create_list_extended_search(r);
             list::populate_list_current_layer(r, &s);
+            r.list_index = 0;
+            r.sync_current_id_from_list();
         }
         _ => {}
     }
@@ -3282,9 +3293,10 @@ pub fn handle_ctrl_f(r: &mut AppRenderer) {
             r.needs_redraw = true;
         }
         _ => {
-            // From SimpleSearch: preserve previous_coordinate (don't overwrite)
+            // From SimpleSearch: preserve previous_coordinate and search_origin_id (don't overwrite)
             if r.coordinate != Coordinate::SimpleSearch {
                 r.previous_coordinate = r.coordinate;
+                r.search_origin_id = r.current_id.clone();
             }
             r.coordinate = Coordinate::ExtendedSearch;
             r.input_buffer.clear();
@@ -4713,6 +4725,107 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // search_origin_id — first-match jump and Escape restore
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn simple_search_typing_resets_to_top_match() {
+        let mut r = make_renderer();
+        // Start at item 2 (index 2)
+        r.list_index = 2;
+        r.sync_current_id_from_list();
+        handle_tab(&mut r); // enters SimpleSearch, saves search_origin_id
+        // Type "2" — only "item 2" matches, becomes the sole filtered item
+        handle_input(&mut r, "2");
+        assert_eq!(r.list_index, 0, "list_index should snap to 0 (top match)");
+    }
+
+    #[test]
+    fn simple_search_backspace_resets_to_top_match() {
+        let mut r = make_renderer();
+        handle_tab(&mut r);
+        handle_input(&mut r, "12"); // "item 1" and "item 2" match; top is 0
+        r.list_index = 1; // manually move down
+        handle_backspace(&mut r); // back to "1"; re-filters
+        assert_eq!(r.list_index, 0, "list_index should snap to 0 after backspace");
+    }
+
+    #[test]
+    fn escape_from_simple_search_restores_origin_id() {
+        let mut r = make_renderer();
+        // Start at list index 2 (item 2)
+        r.list_index = 2;
+        r.sync_current_id_from_list();
+        let origin_last = r.current_id.last().unwrap_or(0);
+        handle_tab(&mut r); // saves search_origin_id = current_id at item 2
+        // Navigate within search — moves list_index (and current_id.last) to 0
+        handle_input(&mut r, "0");
+        assert_eq!(r.list_index, 0);
+        // Escape should restore current_id to the pre-search position
+        r.previous_coordinate = Coordinate::OperatorGeneral;
+        handle_escape(&mut r);
+        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+        assert_eq!(r.current_id.last().unwrap_or(99), origin_last,
+            "current_id.last() should be restored to item index before search");
+    }
+
+    #[test]
+    fn escape_from_extended_search_restores_origin_id() {
+        let mut r = make_renderer();
+        r.list_index = 2;
+        r.sync_current_id_from_list();
+        let origin_last = r.current_id.last().unwrap_or(0);
+        // Enter ExtendedSearch from OperatorGeneral — saves search_origin_id
+        r.coordinate = Coordinate::OperatorGeneral;
+        handle_ctrl_f(&mut r);
+        assert_eq!(r.coordinate, Coordinate::ExtendedSearch);
+        // Type something so list_index moves to 0
+        handle_input(&mut r, "0");
+        // Escape restores origin
+        r.previous_coordinate = Coordinate::OperatorGeneral;
+        handle_escape(&mut r);
+        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+        assert_eq!(r.current_id.last().unwrap_or(99), origin_last,
+            "current_id.last() should be restored to item index before search");
+    }
+
+    #[test]
+    fn tab_saves_search_origin_id() {
+        let mut r = make_renderer();
+        r.list_index = 1;
+        r.sync_current_id_from_list();
+        let expected = r.current_id.clone();
+        handle_tab(&mut r);
+        assert_eq!(r.search_origin_id, expected);
+    }
+
+    #[test]
+    fn ctrl_f_from_operator_saves_search_origin_id() {
+        let mut r = make_renderer();
+        r.list_index = 1;
+        r.sync_current_id_from_list();
+        let expected = r.current_id.clone();
+        r.coordinate = Coordinate::OperatorGeneral;
+        handle_ctrl_f(&mut r);
+        assert_eq!(r.search_origin_id, expected);
+    }
+
+    #[test]
+    fn ctrl_f_from_simple_search_preserves_search_origin_id() {
+        let mut r = make_renderer();
+        r.list_index = 2;
+        r.sync_current_id_from_list();
+        handle_tab(&mut r); // saves origin at index 2
+        let saved = r.search_origin_id.clone();
+        // Navigate within search (moves current_id)
+        handle_down(&mut r);
+        // Now enter ExtendedSearch via Ctrl+F from SimpleSearch
+        handle_ctrl_f(&mut r);
+        assert_eq!(r.search_origin_id, saved,
+            "search_origin_id must not be overwritten when chaining Simple→Extended search");
+    }
+
+    // -----------------------------------------------------------------------
     // Clipboard — Ctrl+C / Ctrl+X / Ctrl+V
     // -----------------------------------------------------------------------
 
@@ -5098,10 +5211,13 @@ mod tests {
         let mut r = make_renderer();
         r.coordinate = Coordinate::SimpleSearch;
         r.previous_coordinate = Coordinate::EditorGeneral;
-        r.current_id.set_last(3); // simulate current position
+        // Simulate the origin id saved when search was entered (item at index 3)
+        r.search_origin_id = { let mut id = r.current_id.clone(); id.set_last(3); id };
+        // Simulate search having moved current_id to a different position
+        r.current_id.set_last(1);
         handle_escape(&mut r);
         assert_eq!(r.coordinate, Coordinate::EditorGeneral);
-        // list_index should be synced to currentId
+        // list_index should be restored to the origin id, not the mid-search position
         assert_eq!(r.list_index, 3);
     }
 
