@@ -143,6 +143,24 @@ pub fn refresh_subtree_parent(renderer: &mut AppRenderer) -> bool {
     true
 }
 
+/// If the active provider exposes a `"refresh"` command, dispatch it.
+///
+/// Used by F5 to trigger provider-side cache invalidation / hard reload before
+/// the FFON tree is rebuilt by `refresh_current_directory`. Providers without
+/// `"refresh"` in `commands()` are no-ops (F5 stays a pure re-render for them).
+pub fn dispatch_refresh_command(renderer: &mut AppRenderer) {
+    let idx = match renderer.current_id.get(0) {
+        Some(i) => i,
+        None => return,
+    };
+    let has_refresh = renderer.providers
+        .get(idx)
+        .map(|p| p.commands().iter().any(|c| c == "refresh"))
+        .unwrap_or(false);
+    if !has_refresh { return; }
+    let _ = handle_command(renderer, "refresh", "", 0);
+}
+
 /// Re-fetch only if the active provider requests it (`needs_refresh()`).
 pub fn refresh_if_needed(renderer: &mut AppRenderer) {
     let needs = renderer.providers
@@ -935,6 +953,7 @@ mod tests {
         last_create_file: Option<String>,
         last_delete: Option<String>,
         last_execute: Option<(String, String)>,
+        last_command: Option<String>,
     }
 
     impl MockProvider {
@@ -954,6 +973,7 @@ mod tests {
                 last_create_file: None,
                 last_delete: None,
                 last_execute: None,
+                last_command: None,
             }
         }
     }
@@ -988,6 +1008,10 @@ mod tests {
             self.delete_ok
         }
         fn commands(&self) -> Vec<String> { self.cmds.clone() }
+        fn handle_command(&mut self, cmd: &str, _key: &str, _ty: i32, _err: &mut String) -> Option<FfonElement> {
+            self.last_command = Some(cmd.to_owned());
+            None
+        }
         fn execute_command(&mut self, cmd: &str, sel: &str) -> bool {
             self.last_execute = Some((cmd.to_owned(), sel.to_owned()));
             self.execute_ok
@@ -1257,5 +1281,55 @@ mod tests {
         assert!(find_api_key_for_url("https://api.example.com/v1/data").is_some());
         assert!(find_api_key_for_url("https://example.com/v1/data").is_none());
         clear_auth_registry();
+    }
+
+    // --- dispatch_refresh_command ---
+
+    struct RefreshTrackingProvider {
+        cmds: Vec<String>,
+        last_command: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    }
+
+    impl RefreshTrackingProvider {
+        fn new(cmds: Vec<String>) -> (Self, std::sync::Arc<std::sync::Mutex<Option<String>>>) {
+            let last_command = std::sync::Arc::new(std::sync::Mutex::new(None));
+            (RefreshTrackingProvider { cmds, last_command: last_command.clone() }, last_command)
+        }
+    }
+
+    impl Provider for RefreshTrackingProvider {
+        fn name(&self) -> &str { "tracking" }
+        fn fetch(&mut self) -> Vec<FfonElement> { vec![FfonElement::new_str("item")] }
+        fn commands(&self) -> Vec<String> { self.cmds.clone() }
+        fn handle_command(&mut self, cmd: &str, _: &str, _: i32, _: &mut String) -> Option<FfonElement> {
+            *self.last_command.lock().unwrap() = Some(cmd.to_owned());
+            None
+        }
+    }
+
+    fn make_renderer_with_tracking(p: RefreshTrackingProvider) -> AppRenderer {
+        let mut r = AppRenderer::new();
+        let mut root = FfonElement::new_obj("tracking");
+        root.as_obj_mut().unwrap().push(FfonElement::new_str("item"));
+        r.ffon = vec![root];
+        r.providers = vec![Box::new(p)];
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        r
+    }
+
+    #[test]
+    fn dispatch_refresh_command_invokes_refresh_when_exposed() {
+        let (p, last_cmd) = RefreshTrackingProvider::new(vec!["refresh".to_owned()]);
+        let mut r = make_renderer_with_tracking(p);
+        dispatch_refresh_command(&mut r);
+        assert_eq!(*last_cmd.lock().unwrap(), Some("refresh".to_owned()));
+    }
+
+    #[test]
+    fn dispatch_refresh_command_no_op_without_refresh_command() {
+        let (p, last_cmd) = RefreshTrackingProvider::new(vec!["open".to_owned()]);
+        let mut r = make_renderer_with_tracking(p);
+        dispatch_refresh_command(&mut r);
+        assert_eq!(*last_cmd.lock().unwrap(), None);
     }
 }

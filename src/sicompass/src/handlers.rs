@@ -2745,8 +2745,9 @@ pub fn handle_load_provider_config(r: &mut AppRenderer, path: &str) {
     r.needs_redraw = true;
 }
 
-/// Handle F5 — refresh current provider.
+/// Handle F5 — hard-refresh current provider (clear caches then re-fetch).
 pub fn handle_f5(r: &mut AppRenderer) {
+    crate::provider::dispatch_refresh_command(r);
     crate::provider::refresh_current_directory(r);
     list::create_list_current_layer(r);
     r.sync_current_id_from_list();

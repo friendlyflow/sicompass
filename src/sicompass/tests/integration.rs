@@ -4594,3 +4594,54 @@ fn compose_body_delete_undo_single_element_no_extra_placeholder() {
         "sole child after undo must be the restored element; got: {:?}", body_after_undo
     );
 }
+
+// ---------------------------------------------------------------------------
+// F5 hard-refresh via dispatch_refresh_command
+// ---------------------------------------------------------------------------
+
+/// A minimal provider that records whether its "refresh" command was dispatched.
+struct RefreshTrackingProvider {
+    last_command: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+}
+
+impl RefreshTrackingProvider {
+    fn new() -> (Self, std::sync::Arc<std::sync::Mutex<Option<String>>>) {
+        let shared = std::sync::Arc::new(std::sync::Mutex::new(None));
+        (RefreshTrackingProvider { last_command: shared.clone() }, shared)
+    }
+}
+
+impl Provider for RefreshTrackingProvider {
+    fn name(&self) -> &str { "tracking" }
+    fn fetch(&mut self) -> Vec<FfonElement> { vec![FfonElement::new_str("item")] }
+    fn commands(&self) -> Vec<String> { vec!["refresh".to_owned()] }
+    fn handle_command(&mut self, cmd: &str, _: &str, _: i32, _: &mut String) -> Option<FfonElement> {
+        *self.last_command.lock().unwrap() = Some(cmd.to_owned());
+        None
+    }
+}
+
+#[test]
+fn f5_dispatches_refresh_command_when_provider_exposes_it() {
+    let (p, last_cmd) = RefreshTrackingProvider::new();
+
+    let mut renderer = AppRenderer::new();
+    let mut root = FfonElement::new_obj("tracking");
+    root.as_obj_mut().unwrap().push(FfonElement::new_str("item"));
+    renderer.ffon = vec![root];
+    renderer.providers = vec![Box::new(p)];
+    renderer.current_id = {
+        let mut id = sicompass_sdk::ffon::IdArray::new();
+        id.push(0);
+        id
+    };
+    renderer.coordinate = Coordinate::OperatorGeneral;
+
+    press(&mut renderer, Keycode::F5);
+
+    assert_eq!(
+        *last_cmd.lock().unwrap(),
+        Some("refresh".to_owned()),
+        "F5 must dispatch the provider's 'refresh' command"
+    );
+}
