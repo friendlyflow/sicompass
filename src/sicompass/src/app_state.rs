@@ -356,6 +356,9 @@ pub struct AppRenderer {
     // ---- Cached layout (filled by render loop) ----------------------------
     pub window_height: i32,
     pub cached_line_height: i32,
+    /// Visual line count per list item — index matches `current_id.last()`.
+    /// Populated after each render; empty until first render of a given list.
+    pub cached_line_counts: Vec<usize>,
     /// X position after the input prefix — first-line caret origin.
     pub current_element_x: f32,
     /// X position before the input prefix — continuation-line caret origin.
@@ -468,6 +471,7 @@ impl AppRenderer {
             placeholder_insert_mode: false,
             window_height: WINDOW_HEIGHT as i32,
             cached_line_height: 20,
+            cached_line_counts: Vec::new(),
             current_element_x: 0.0,
             current_element_base_x: 0.0,
             current_element_y: 0.0,

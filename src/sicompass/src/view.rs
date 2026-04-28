@@ -714,6 +714,7 @@ fn update_view(app: &mut AppState) {
     // Cache layout metrics for handler use
     app.renderer.window_height = win_h as i32;
     app.renderer.cached_line_height = line_height;
+    app.renderer.cached_line_counts = line_counts.clone();
 
     // ---- Begin rendering --------------------------------------------------
     let fr = match app.font_renderer.as_mut() { Some(f) => f, None => return };
