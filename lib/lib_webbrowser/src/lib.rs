@@ -22,9 +22,11 @@
 use chromiumoxide::browser::{Browser, BrowserConfig};
 use chromiumoxide::cdp::browser_protocol::page::AddScriptToEvaluateOnNewDocumentParams;
 use futures::StreamExt as _;
-use sicompass_sdk::ffon::FfonElement;
+use sicompass_sdk::ffon::{FfonElement, FormMap, FormNodeKind};
 use sicompass_sdk::provider::Provider;
-use sicompass_sdk::ffon::{html_to_ffon, html_resolve_href};
+use sicompass_sdk::ffon::{html_to_ffon, html_to_ffon_with_forms};
+#[cfg(test)] use sicompass_sdk::ffon::html_resolve_href;
+use std::sync::{Arc, Mutex};
 
 // ---------------------------------------------------------------------------
 // Cached page
@@ -37,39 +39,119 @@ struct CachedPage {
 }
 
 // ---------------------------------------------------------------------------
+// Live page session — kept alive for form interaction
+// ---------------------------------------------------------------------------
+
+struct LivePageSession {
+    session: BrowserSession,
+    page: chromiumoxide::Page,
+}
+
+// ---------------------------------------------------------------------------
 // WebbrowserProvider
 // ---------------------------------------------------------------------------
 
 pub struct WebbrowserProvider {
     current_url: String,
+    // Path segments pushed via push_path — kept separately so that URL
+    // segments containing "://" don't confuse rfind('/') based splitting.
+    path_segments: Vec<String>,
+    path_cache: String, // "/" or "/seg0/seg1/…", rebuilt on every push/pop
     cached_page: Option<CachedPage>,
+    form_map: FormMap,
+    live: Option<LivePageSession>,
+    // Background thread delivers refreshed content here after form submission.
+    ready_content: Arc<Mutex<Option<(Vec<FfonElement>, FormMap)>>>,
 }
 
 impl WebbrowserProvider {
     pub fn new() -> Self {
         WebbrowserProvider {
             current_url: String::new(),
+            path_segments: Vec::new(),
+            path_cache: "/".to_owned(),
             cached_page: None,
+            form_map: FormMap::new(),
+            live: None,
+            ready_content: Arc::new(Mutex::new(None)),
         }
     }
 
-    /// Fetch `url` over HTTP and parse to a Vec of FfonElements.
+    fn rebuild_path_cache(&mut self) {
+        self.path_cache = if self.path_segments.is_empty() {
+            "/".to_owned()
+        } else {
+            format!("/{}", self.path_segments.join("/"))
+        };
+    }
+
+    /// Navigate to `url` using the persistent live session (or create one first).
     fn load_url(&mut self, url: &str) {
-        let html = match fetch_html_chromium(url) {
-            Ok(h) => h,
+        // Ensure we have a live session.
+        if self.live.is_none() {
+            match chromium_runtime().block_on(init_live_session()) {
+                Ok(live) => self.live = Some(live),
+                Err(e) => {
+                    self.cached_page = Some(CachedPage {
+                        url: url.to_owned(),
+                        elements: vec![FfonElement::new_str(format!("Error launching browser: {e}"))],
+                    });
+                    self.current_url = url.to_owned();
+                    return;
+                }
+            }
+        }
+
+        // Clone the page handle so we can navigate without holding &self.live.
+        let page = self.live.as_ref().unwrap().page.clone();
+        let result = chromium_runtime().block_on(navigate_and_get_html(&page, url));
+
+        match result {
+            Ok(html) => {
+                let (elements, form_map) = html_to_ffon_with_forms(&html, url);
+                self.cached_page = Some(CachedPage { url: url.to_owned(), elements });
+                self.form_map = form_map;
+            }
             Err(e) => {
-                let msg = format!("Error loading {url}: {e}");
+                // Drop the session so the next attempt starts fresh.
+                self.live = None;
                 self.cached_page = Some(CachedPage {
                     url: url.to_owned(),
-                    elements: vec![FfonElement::new_str(msg)],
+                    elements: vec![FfonElement::new_str(format!("Error loading {url}: {e}"))],
                 });
-                self.current_url = url.to_owned();
-                return;
+                self.form_map = FormMap::new();
             }
-        };
-        let elements = html_to_ffon(&html, url);
-        self.cached_page = Some(CachedPage { url: url.to_owned(), elements });
+        }
         self.current_url = url.to_owned();
+    }
+
+    /// Persist a form field's new value into `cached_page` so re-fetches keep it.
+    fn patch_cached_form_field(&mut self, form_key: &str, new_value: &str) {
+        let Some(slash) = form_key.find('/') else { return; };
+        let form_name = &form_key[..slash];
+        let field_label = &form_key[slash + 1..];
+        let Some(page) = &mut self.cached_page else { return; };
+        let prefix = format!("{field_label}: <input>");
+        let replacement = format!("{field_label}: <input>{new_value}</input>");
+        patch_form_field_in_tree(&mut page.elements, form_name, &prefix, &replacement);
+    }
+
+    /// Fill a form field via CDP. Called from `commit_edit` when the path
+    /// resolves to a known form-map entry.
+    fn cdp_fill_field(&self, form_key: &str, value: &str) -> bool {
+        let Some(node) = self.form_map.get(form_key) else { return false; };
+        let Some(live) = &self.live else { return false; };
+        let selector = node.css_selector.clone();
+        let value = value.to_owned();
+        let page = live.page.clone();
+        let js = build_fill_js(&selector, &value);
+        let result = chromium_runtime().block_on(async move {
+            tokio::time::timeout(
+                tokio::time::Duration::from_secs(5),
+                page.evaluate(js),
+            ).await
+        });
+        result.map(|r| r.is_ok()).unwrap_or(false)
     }
 }
 
@@ -109,16 +191,116 @@ impl Provider for WebbrowserProvider {
     }
 
     fn commit_edit(&mut self, _old: &str, new_content: &str) -> bool {
+        // Check if the current path points to a form field.
+        if let Some(form_key) = extract_form_key(&self.path_cache) {
+            if self.form_map.contains_key(&form_key) {
+                // Fill Chrome as a side effect. Then persist the value in cached_page
+                // so that any future re-fetch returns it. Return false so the app does
+                // NOT call refresh_current_directory — that would re-invoke fetch() and
+                // overwrite the value the app's unconditional local-FFON update already
+                // wrote into r.ffon (handlers.rs, "Update FFON element regardless of
+                // commit result").
+                self.cdp_fill_field(&form_key, new_content);
+                self.patch_cached_form_field(&form_key, new_content);
+                return false;
+            }
+        }
+        // Otherwise treat as URL navigation.
         let url = new_content.trim().to_owned();
         if url.is_empty() { return false; }
-        // Prepend https:// if no scheme
-        let full_url = if url.contains("://") {
-            url
-        } else {
-            format!("https://{url}")
-        };
+        let full_url = if url.contains("://") { url } else { format!("https://{url}") };
         self.load_url(&full_url);
         true
+    }
+
+    fn push_path(&mut self, segment: &str) {
+        self.path_segments.push(segment.to_owned());
+        self.rebuild_path_cache();
+    }
+
+    fn pop_path(&mut self) {
+        self.path_segments.pop();
+        self.rebuild_path_cache();
+    }
+
+    fn current_path(&self) -> &str { &self.path_cache }
+
+    fn set_current_path(&mut self, path: &str) {
+        // Store the path as-is; clear segment tracking since we can't reliably
+        // split on '/' when segments may contain "://" (URL values).
+        self.path_cache = path.to_owned();
+        self.path_segments.clear();
+    }
+
+    fn on_button_press(&mut self, function_name: &str) {
+        // "submit:form_N" — find the submit button selector and click it.
+        let Some(form_n_str) = function_name.strip_prefix("submit:form_") else { return; };
+        let form_n: usize = form_n_str.parse().unwrap_or(0);
+
+        let selector = self.form_map.iter()
+            .find(|(key, node)| {
+                key.starts_with(&format!("form_{form_n}/"))
+                    && matches!(node.kind, FormNodeKind::Submit)
+            })
+            .map(|(_, node)| node.css_selector.clone())
+            .unwrap_or_else(|| format!("form:nth-of-type({form_n}) [type=\"submit\"]"));
+
+        let Some(live) = &self.live else { return; };
+        let page = live.page.clone();
+        let ready = Arc::clone(&self.ready_content);
+        let url = self.current_url.clone();
+
+        std::thread::spawn(move || {
+            let js = format!(
+                "(() => {{ const el = document.querySelector({}); \
+                 if (el) {{ el.click(); return true; }} \
+                 const f = document.querySelector('form:nth-of-type({form_n})'); \
+                 if (f) {{ f.submit(); return true; }} return false; }})()",
+                js_quote(&selector)
+            );
+            chromium_runtime().block_on(async move {
+                let _ = tokio::time::timeout(
+                    tokio::time::Duration::from_secs(5),
+                    page.evaluate(js),
+                ).await;
+                // Wait for navigation to settle after click.
+                tokio::time::sleep(tokio::time::Duration::from_millis(2500)).await;
+                if let Ok(Ok(html)) = tokio::time::timeout(
+                    tokio::time::Duration::from_secs(10),
+                    page.content(),
+                ).await {
+                    let (elements, form_map) = html_to_ffon_with_forms(&html, &url);
+                    if let Ok(mut guard) = ready.lock() {
+                        *guard = Some((elements, form_map));
+                    }
+                }
+            });
+        });
+    }
+
+    fn tick(&mut self) -> bool {
+        let content = self.ready_content.lock().ok().and_then(|mut g| g.take());
+        if let Some((elements, form_map)) = content {
+            self.cached_page = Some(CachedPage { url: self.current_url.clone(), elements });
+            self.form_map = form_map;
+            return true;
+        }
+        false
+    }
+
+    fn take_error(&mut self) -> Option<String> { None }
+
+    fn cleanup(&mut self) {
+        // Close Chrome cleanly — same pattern as fetch_html_inner.
+        if let Some(live) = self.live.take() {
+            use chromiumoxide::cdp::browser_protocol::browser::CloseParams;
+            let _ = chromium_runtime().block_on(async {
+                tokio::time::timeout(
+                    tokio::time::Duration::from_millis(500),
+                    live.session.browser.execute(CloseParams::default()),
+                ).await
+            });
+        }
     }
 
     fn commands(&self) -> Vec<String> {
@@ -141,6 +323,155 @@ impl Provider for WebbrowserProvider {
         }
         None
     }
+}
+
+// ---------------------------------------------------------------------------
+// Form-interaction helpers
+// ---------------------------------------------------------------------------
+
+/// Extract the form-relative path key from a full provider path.
+///
+/// The provider path looks like `"/https://example.com/form_1/email"`.
+/// We find the first `/form_` segment and return everything from there
+/// (minus the leading slash): `"form_1/email"`.
+fn extract_form_key(path: &str) -> Option<String> {
+    path.find("/form_").map(|pos| path[pos + 1..].to_owned())
+}
+
+/// Wrap a Rust string as a JSON string literal for inline JS use.
+fn js_quote(s: &str) -> String {
+    let escaped = s
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r");
+    format!("\"{escaped}\"")
+}
+
+/// Build a JS snippet that sets an input's value and dispatches input/change
+/// events so React/Vue/etc. reactive frameworks notice the change.
+fn build_fill_js(selector: &str, value: &str) -> String {
+    format!(
+        r#"(() => {{
+            const el = document.querySelector({sel});
+            if (!el) return false;
+            el.focus();
+            const setter =
+                Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
+                || Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+            if (setter) {{ setter.call(el, {val}); }}
+            else {{ el.value = {val}; }}
+            el.dispatchEvent(new Event('input',  {{ bubbles: true }}));
+            el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+            return true;
+        }})()"#,
+        sel = js_quote(selector),
+        val = js_quote(value),
+    )
+}
+
+/// Walk the FFON element tree and update the first `<input>` cell whose label
+/// prefix matches, inside the Obj whose key matches `form_name` (exact or suffix,
+/// to handle `<id>X</id>form_N` keys produced by id-prefixed forms).
+fn patch_form_field_in_tree(
+    elems: &mut Vec<FfonElement>,
+    form_name: &str,
+    prefix: &str,
+    replacement: &str,
+) -> bool {
+    for elem in elems.iter_mut() {
+        let FfonElement::Obj(ref mut obj) = elem else { continue };
+        if obj.key == form_name || obj.key.ends_with(form_name) {
+            for child in obj.children.iter_mut() {
+                if let FfonElement::Str(ref mut s) = child {
+                    if s.starts_with(prefix) {
+                        *s = replacement.to_owned();
+                        return true;
+                    }
+                }
+            }
+        }
+        // Form may be nested under a heading Obj — recurse.
+        if patch_form_field_in_tree(&mut obj.children, form_name, prefix, replacement) {
+            return true;
+        }
+    }
+    false
+}
+
+// ---------------------------------------------------------------------------
+// Async helpers for the persistent live session
+// ---------------------------------------------------------------------------
+
+/// Initialise a long-lived Chrome session: launch the browser, open a blank
+/// tab, and inject the stealth script so it applies to every page load.
+async fn init_live_session() -> Result<LivePageSession, String> {
+    let t = tokio::time::Duration::from_secs;
+    let session = launch_browser().await?;
+    let page = tokio::time::timeout(t(15), session.browser.new_page("about:blank"))
+        .await
+        .map_err(|_| "Chrome took >15 s to open a tab".to_owned())?
+        .map_err(|e| format!("failed to open tab: {e}"))?;
+    tokio::time::timeout(
+        t(10),
+        page.execute(AddScriptToEvaluateOnNewDocumentParams::new(STEALTH_SCRIPT)),
+    )
+    .await
+    .map_err(|_| "stealth script injection timed out".to_owned())?
+    .map_err(|e| format!("stealth script injection failed: {e}"))?;
+    Ok(LivePageSession { session, page })
+}
+
+/// Navigate an existing page to `url` and return the settled HTML.
+/// Mirrors the logic of the old `fetch_page` but reuses the caller's tab.
+async fn navigate_and_get_html(page: &chromiumoxide::Page, url: &str) -> Result<String, String> {
+    let t = tokio::time::Duration::from_secs;
+
+    tokio::time::timeout(t(30), page.goto(url))
+        .await
+        .map_err(|_| format!("navigation to {url} timed out after 30 s"))?
+        .map_err(|e| format!("navigation to {url} failed: {e}"))?;
+
+    let current_url = await_stable_url(page, t(5)).await;
+
+    if is_consent_wall_str(&current_url) {
+        let mut accepted = false;
+        for attempt in 0..4u32 {
+            if attempt > 0 {
+                tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+            }
+            accepted = tokio::time::timeout(t(5), try_accept_consent(page))
+                .await.unwrap_or(false);
+            if accepted { break; }
+        }
+        if accepted {
+            wait_until_off_consent(page, t(8)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        }
+        let post_url = tokio::time::timeout(t(5), page.url())
+            .await.ok().and_then(|r| r.ok()).flatten().unwrap_or_default();
+        if is_consent_wall_str(&post_url) {
+            return Err(
+                "Site redirected to a cookie-consent page that could not be \
+                 auto-accepted. Try visiting the site in a real browser first \
+                 to accept cookies, then reload here."
+                    .to_owned(),
+            );
+        }
+    }
+
+    let html = tokio::time::timeout(t(15), page.content())
+        .await
+        .map_err(|_| "timed out waiting for page content (15 s)".to_owned())?
+        .map_err(|e| format!("failed to get page content: {e}"))?;
+
+    if is_cf_blocked_html(&html) {
+        return Err(format!(
+            "{url} blocked the request. The site may require a CAPTCHA or has \
+             restricted automated access entirely."
+        ));
+    }
+    Ok(html)
 }
 
 // ---------------------------------------------------------------------------
@@ -1571,6 +1902,181 @@ mod tests {
         let html = result.unwrap();
         assert!(!is_cf_blocked_html(&html), "response is a CF block page");
         assert!(!html.is_empty(), "expected non-empty HTML from gva.be");
+    }
+
+    // ---- Provider path / form helpers ----
+
+    #[test]
+    fn extract_form_key_finds_form_segment() {
+        assert_eq!(
+            extract_form_key("/https://example.com/form_1/email"),
+            Some("form_1/email".to_owned())
+        );
+    }
+
+    #[test]
+    fn extract_form_key_returns_none_for_url_path() {
+        assert_eq!(extract_form_key("/https://example.com"), None);
+        assert_eq!(extract_form_key("/"), None);
+    }
+
+    #[test]
+    fn js_quote_escapes_double_quotes() {
+        assert_eq!(js_quote(r#"input[name="q"]"#), r#""input[name=\"q\"]""#);
+    }
+
+    #[test]
+    fn js_quote_escapes_backslashes() {
+        assert_eq!(js_quote(r"a\b"), r#""a\\b""#);
+    }
+
+    #[test]
+    fn provider_push_pop_path() {
+        let mut p = WebbrowserProvider::new();
+        assert_eq!(p.current_path(), "/");
+        p.push_path("https://example.com");
+        assert_eq!(p.current_path(), "/https://example.com");
+        p.push_path("form_1");
+        assert_eq!(p.current_path(), "/https://example.com/form_1");
+        p.pop_path();
+        assert_eq!(p.current_path(), "/https://example.com");
+        p.pop_path();
+        assert_eq!(p.current_path(), "/");
+        // pop at root is a no-op
+        p.pop_path();
+        assert_eq!(p.current_path(), "/");
+    }
+
+    #[test]
+    fn provider_set_current_path() {
+        let mut p = WebbrowserProvider::new();
+        p.set_current_path("/https://x.com/form_2/q");
+        assert_eq!(p.current_path(), "/https://x.com/form_2/q");
+        assert_eq!(extract_form_key(p.current_path()), Some("form_2/q".to_owned()));
+    }
+
+    #[test]
+    fn build_fill_js_contains_selector_and_value() {
+        let js = build_fill_js("#my-input", "hello world");
+        assert!(js.contains("\"#my-input\""), "selector missing: {js}");
+        assert!(js.contains("\"hello world\""), "value missing: {js}");
+        assert!(js.contains("dispatchEvent"), "event dispatch missing");
+    }
+
+    #[test]
+    fn provider_tick_drains_ready_content() {
+        let mut p = WebbrowserProvider::new();
+        // Simulate a background thread delivering content.
+        {
+            let mut guard = p.ready_content.lock().unwrap();
+            *guard = Some((vec![FfonElement::new_str("result")], FormMap::new()));
+        }
+        assert!(p.tick(), "tick should return true when content is ready");
+        assert!(
+            p.cached_page.as_ref()
+                .and_then(|c| c.elements.first())
+                .and_then(|e| e.as_str())
+                .map_or(false, |s| s == "result"),
+            "cached_page should hold the delivered content"
+        );
+        // Second tick with no new content returns false.
+        assert!(!p.tick());
+    }
+
+    #[test]
+    fn patch_form_field_updates_cached_str() {
+        let mut elems = vec![{
+            let mut form = FfonElement::new_obj("form_1");
+            form.as_obj_mut().unwrap().push(FfonElement::new_str("q: <input></input>"));
+            form
+        }];
+        let patched = patch_form_field_in_tree(&mut elems, "form_1", "q: <input>", "q: <input>hello</input>");
+        assert!(patched, "should find and patch the field");
+        let child = elems[0].as_obj().unwrap().children[0].as_str().unwrap();
+        assert_eq!(child, "q: <input>hello</input>");
+    }
+
+    #[test]
+    fn patch_form_field_nested_under_heading() {
+        // Form nested under a heading Obj (common when a page has <h1> before <form>).
+        let mut elems = vec![{
+            let mut heading = FfonElement::new_obj("Search");
+            let mut form = FfonElement::new_obj("form_1");
+            form.as_obj_mut().unwrap().push(FfonElement::new_str("q: <input></input>"));
+            heading.as_obj_mut().unwrap().push(form);
+            heading
+        }];
+        let patched = patch_form_field_in_tree(&mut elems, "form_1", "q: <input>", "q: <input>world</input>");
+        assert!(patched);
+        let heading_obj = elems[0].as_obj().unwrap();
+        let form_obj = heading_obj.children[0].as_obj().unwrap();
+        assert_eq!(form_obj.children[0].as_str().unwrap(), "q: <input>world</input>");
+    }
+
+    #[test]
+    fn patch_form_field_id_prefixed_form_key() {
+        // Form has an <id>X</id> prefix on its key — match by suffix.
+        let mut elems = vec![{
+            let mut form = FfonElement::new_obj("<id>login</id>form_1");
+            form.as_obj_mut().unwrap().push(FfonElement::new_str("email: <input></input>"));
+            form
+        }];
+        let patched = patch_form_field_in_tree(&mut elems, "form_1", "email: <input>", "email: <input>user@x.com</input>");
+        assert!(patched, "should match by suffix for id-prefixed form keys");
+        assert_eq!(elems[0].as_obj().unwrap().children[0].as_str().unwrap(), "email: <input>user@x.com</input>");
+    }
+
+    #[test]
+    fn commit_edit_form_field_returns_false_and_patches_cache() {
+        // commit_edit for a known form field must return false so the app's
+        // unconditional local-FFON update isn't wiped by refresh_current_directory.
+        use sicompass_sdk::provider::Provider;
+        use sicompass_sdk::ffon::FormNode;
+        use sicompass_sdk::ffon::FormNodeKind;
+
+        let mut p = WebbrowserProvider::new();
+        // Build a minimal cached_page with a form field.
+        let mut form = FfonElement::new_obj("form_1");
+        form.as_obj_mut().unwrap().push(FfonElement::new_str("q: <input></input>"));
+        p.cached_page = Some(CachedPage { url: "https://example.com".into(), elements: vec![form] });
+        // Seed form_map with the field.
+        p.form_map.insert("form_1/q".into(), FormNode {
+            css_selector: "#q".into(),
+            kind: FormNodeKind::TextInput,
+        });
+        // Simulate being inside the form field.
+        p.push_path("https://example.com");
+        p.push_path("form_1");
+        p.push_path("q");
+
+        // commit_edit must return false (no refresh_current_directory).
+        let result = p.commit_edit("", "hello");
+        assert!(!result, "commit_edit for form field must return false");
+
+        // cached_page must be patched so re-fetch preserves the value.
+        let child = p.cached_page.as_ref().unwrap().elements[0]
+            .as_obj().unwrap().children[0].as_str().unwrap();
+        assert_eq!(child, "q: <input>hello</input>", "cached_page not patched");
+    }
+
+    // Run with: cargo test -p sicompass-webbrowser -- --ignored
+    #[test]
+    #[ignore]
+    fn test_form_interaction_local_file() {
+        // Verify that a local HTML form is parsed and the provider
+        // exposes its fields as editable FFON cells.  Requires Chrome.
+        use sicompass_sdk::provider::Provider;
+        let html = r#"<!DOCTYPE html><html><body>
+            <form>
+              <input type="search" name="q" placeholder="Search">
+              <input type="submit" value="Go">
+            </form>
+        </body></html>"#;
+        let (elems, map) = html_to_ffon_with_forms(html, "");
+        let form = elems[0].as_obj().expect("expected form obj");
+        assert_eq!(form.key, "form_1");
+        assert!(map.contains_key("form_1/Search"), "Search field missing from map");
+        assert!(map.contains_key("form_1/Go"), "Submit button missing from map");
     }
 }
 
