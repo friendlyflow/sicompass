@@ -1213,7 +1213,7 @@ mod tests {
             .filter_map(|e| e.as_str())
             .filter(|s| s.contains("<input>"))
             .collect();
-        assert_eq!(inputs.len(), 4, "expected 4 text settings, got {}: {:?}", inputs.len(), inputs);
+        assert_eq!(inputs.len(), 5, "expected 5 text settings, got {}: {:?}", inputs.len(), inputs);
     }
 
     #[test]

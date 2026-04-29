@@ -143,6 +143,19 @@ pub struct ChatClientProvider {
     config_path_override: Option<std::path::PathBuf>,
     /// When true, the sync thread is never started (used in tests).
     sync_disabled: bool,
+    /// Email address for registration (3pid binding).
+    email: String,
+    /// sid returned by /register/email/requestToken, used in UIA completion.
+    register_3pid_sid: String,
+    /// client_secret generated for the /register/email/requestToken call.
+    register_3pid_client_secret: String,
+    /// Error surfaced by on_button_press; shown at the top of the register form.
+    register_error: Option<String>,
+    /// True when the user has not yet completed registration (no access token at
+    /// init time). Stays true while the user fills in the form; cleared on
+    /// successful register/login. Prevents the form from disappearing as soon as
+    /// the username field is filled.
+    register_mode: bool,
 }
 
 impl ChatClientProvider {
@@ -162,6 +175,11 @@ impl ChatClientProvider {
             uia_session: String::new(),
             config_path_override: None,
             sync_disabled: false,
+            email: String::new(),
+            register_3pid_sid: String::new(),
+            register_3pid_client_secret: String::new(),
+            register_error: None,
+            register_mode: true,
         }
     }
 
@@ -181,7 +199,7 @@ impl ChatClientProvider {
             .or_else(|| sicompass_sdk::platform::main_config_path())
     }
 
-    fn save_access_token(&self, token: &str) {
+    fn save_setting(&self, key: &str, value: &str) {
         use serde_json::{Map, Value};
         let Some(path) = self.config_path() else { return };
         let mut root: Map<String, Value> = std::fs::read_to_string(&path)
@@ -193,7 +211,7 @@ impl ChatClientProvider {
             .entry("chat client".to_owned())
             .or_insert_with(|| Value::Object(Map::new()));
         if let Value::Object(m) = section {
-            m.insert("chatAccessToken".to_owned(), Value::String(token.to_owned()));
+            m.insert(key.to_owned(), Value::String(value.to_owned()));
         }
         if let Some(parent) = path.parent() {
             sicompass_sdk::platform::make_dirs(parent);
@@ -201,6 +219,10 @@ impl ChatClientProvider {
         if let Ok(json) = serde_json::to_string_pretty(&Value::Object(root)) {
             let _ = std::fs::write(&path, json);
         }
+    }
+
+    fn save_access_token(&self, token: &str) {
+        self.save_setting("chatAccessToken", token);
     }
 
     fn client(&self) -> Result<reqwest::blocking::Client, String> {
@@ -235,7 +257,112 @@ impl ChatClientProvider {
 
     // ---- Matrix API calls --------------------------------------------------
 
+    fn build_register_form(&self) -> Vec<FfonElement> {
+        let homeserver = if self.homeserver.is_empty() { "https://matrix.org" } else { &self.homeserver };
+        let mut items = Vec::new();
+        items.push(FfonElement::new_str(format!("Homeserver: <input>{homeserver}</input>")));
+        items.push(FfonElement::new_str(format!("Username: <input>{}</input>", self.username)));
+        items.push(FfonElement::new_str(format!("Email: <input>{}</input>", self.email)));
+        items.push(FfonElement::new_str(format!("Password: <input>{}</input>", self.password)));
+        items.push(FfonElement::new_str("<button>register</button>Register account".to_owned()));
+        if !self.uia_session.is_empty() {
+            items.push(FfonElement::new_str(
+                "<button>complete-registration</button>Complete registration after email verify".to_owned(),
+            ));
+        }
+        items
+    }
+
+    fn request_email_token(&mut self) -> Result<(), String> {
+        let client = self.client().map_err(|e| format!("HTTP client error: {e}"))?;
+        // Simple client_secret: hex of current time in nanos + process id.
+        let secret = format!(
+            "{:x}{:x}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .subsec_nanos(),
+            std::process::id(),
+        );
+        let homeserver = if self.homeserver.is_empty() { "https://matrix.org".to_owned() } else { self.homeserver.clone() };
+        let url = format!(
+            "{}/_matrix/client/v3/register/email/requestToken",
+            homeserver.trim_end_matches('/'),
+        );
+        let payload = serde_json::json!({
+            "client_secret": secret,
+            "email": self.email,
+            "send_attempt": 1,
+        });
+        let resp = client
+            .post(&url)
+            .json(&payload)
+            .send()
+            .map_err(|e| format!("request failed: {e}"))?;
+        let body: serde_json::Value = resp.json().map_err(|e| format!("parse error: {e}"))?;
+        let sid = body
+            .get("sid")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                let errcode = body.get("errcode").and_then(|v| v.as_str()).unwrap_or("");
+                let errmsg = body.get("error").and_then(|v| v.as_str()).unwrap_or("");
+                format!("{errcode}: {errmsg}")
+            })?;
+        self.register_3pid_sid = sid.to_owned();
+        self.register_3pid_client_secret = secret;
+        Ok(())
+    }
+
+    fn handle_register_result(&mut self, result: AuthResult) {
+        if result.success {
+            self.access_token = result.access_token.clone();
+            self.uia_session.clear();
+            self.register_error = None;
+            self.register_mode = false;
+            self.save_access_token(&result.access_token);
+            self.save_setting("chatHomeserver", &self.homeserver.clone());
+            self.save_setting("chatUsername", &self.username.clone());
+            self.save_setting("chatEmail", &self.email.clone());
+            self.maybe_start_sync();
+        } else if result.requires_auth && !result.session.is_empty() {
+            self.uia_session = result.session.clone();
+            // Show which stage is required so the user knows what to do in the browser.
+            // Preserve any prior email-token error (shown as a note) since it explains
+            // why email verification may not work in the browser fallback.
+            let stage_hint = if result.next_stage.is_empty() {
+                "authentication required in browser".to_owned()
+            } else {
+                format!("complete {} in browser, then click Complete registration", result.next_stage)
+            };
+            let prior_err = self.register_error.take();
+            self.register_error = Some(match prior_err {
+                Some(e) => format!("{stage_hint} (note: {e})"),
+                None => stage_hint,
+            });
+            #[cfg(not(test))]
+            {
+                let fallback_url = format!(
+                    "{}/_matrix/client/v3/auth/{}/fallback/web?session={}",
+                    self.homeserver.trim_end_matches('/'),
+                    result.next_stage,
+                    result.session,
+                );
+                sicompass_sdk::platform::open_with_default(&fallback_url);
+            }
+        } else {
+            self.uia_session.clear();
+            self.register_error = Some(format!("registration failed: {}", result.error));
+        }
+    }
+
     fn fetch_joined_rooms(&self) -> Vec<FfonElement> {
+        // Show register form while register_mode is active (no token yet).
+        // register_mode stays true until a successful register or login clears it,
+        // so the form doesn't disappear as the user fills in each field.
+        if self.register_mode && self.access_token.is_empty() {
+            return self.build_register_form();
+        }
+        // Partial/broken config (token cleared after previous registration): prompt.
         if self.homeserver.is_empty() || self.access_token.is_empty() {
             return vec![FfonElement::new_str(
                 "configure homeserver URL, username and password in settings, then run login command"
@@ -484,6 +611,9 @@ impl Provider for ChatClientProvider {
         load_str!("chatAccessToken", self.access_token);
         load_str!("chatUsername",    self.username);
         load_str!("chatPassword",    self.password);
+        load_str!("chatEmail",       self.email);
+        // Register mode: show the form only until a token is present.
+        self.register_mode = self.access_token.is_empty();
 
         if let Some(nb) = section.get("chatSyncNextBatch").and_then(|v| v.as_str()) {
             if !nb.is_empty() {
@@ -530,9 +660,22 @@ impl Provider for ChatClientProvider {
     }
 
     fn commit_edit(&mut self, _old: &str, new_content: &str) -> bool {
-        // In a room view: treat new_content as a message to send
-        if let Some(room_name) = self.room_name_from_path().map(|s| s.to_owned()) {
-            return self.send_message(&room_name, new_content);
+        // The app temporarily pushes the field's prefix label as a path segment
+        // before calling commit_edit, then pops it after (handlers.rs:1871-1900).
+        // For "Username: <input>...</input>", the path is "/Username" at call time.
+        if let Some(name) = self.room_name_from_path().map(|s| s.to_owned()) {
+            // Register form field edit (path is the field label, value is the typed text).
+            if self.register_mode && self.access_token.is_empty() {
+                return match name.as_str() {
+                    "Homeserver" => { self.homeserver = new_content.to_owned(); self.save_setting("chatHomeserver", new_content); true }
+                    "Username"   => { self.username   = new_content.to_owned(); self.save_setting("chatUsername",   new_content); true }
+                    "Email"      => { self.email      = new_content.to_owned(); self.save_setting("chatEmail",      new_content); true }
+                    "Password"   => { self.password   = new_content.to_owned(); self.save_setting("chatPassword",   new_content); true }
+                    _ => false,
+                };
+            }
+            // In a room view: treat new_content as a message to send.
+            return self.send_message(&name, new_content);
         }
         false
     }
@@ -656,6 +799,35 @@ impl Provider for ChatClientProvider {
         }
     }
 
+    fn on_button_press(&mut self, function_name: &str) {
+        match function_name {
+            "register" => {
+                if !self.email.is_empty() {
+                    if let Err(e) = self.request_email_token() {
+                        self.register_error = Some(format!("email token request failed: {e}"));
+                    }
+                }
+                // Use draft homeserver for the API call if not yet saved to self.homeserver.
+                if self.homeserver.is_empty() {
+                    self.homeserver = "https://matrix.org".to_owned();
+                }
+                let result = self.do_register();
+                self.handle_register_result(result);
+            }
+            "complete-registration" => {
+                if self.uia_session.is_empty() { return; }
+                let session = self.uia_session.clone();
+                let result = self.do_register_complete(&session);
+                self.handle_register_result(result);
+            }
+            _ => {}
+        }
+    }
+
+    fn take_error(&mut self) -> Option<String> {
+        self.register_error.take()
+    }
+
     fn on_setting_change(&mut self, key: &str, value: &str) {
         match key {
             "chatHomeserver" => {
@@ -666,12 +838,16 @@ impl Provider for ChatClientProvider {
             }
             "chatAccessToken" => {
                 self.access_token = value.to_owned();
+                if !value.is_empty() {
+                    self.register_mode = false;
+                }
                 self.sync_controller.stop();
                 *self.sync_cache.lock().unwrap() = sync::SyncCache::default();
                 self.maybe_start_sync();
             }
             "chatUsername" => self.username = value.to_owned(),
             "chatPassword" => self.password = value.to_owned(),
+            "chatEmail"    => self.email    = value.to_owned(),
             _ => {}
         }
     }
@@ -723,6 +899,11 @@ impl ChatClientProvider {
     /// Set the needs_refresh flag as the sync thread would. Intended for test harnesses.
     pub fn test_set_needs_refresh(&self) {
         self.needs_refresh_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Clear register_mode as if the user had previously registered. Intended for test harnesses.
+    pub fn test_clear_register_mode(&mut self) {
+        self.register_mode = false;
     }
 }
 
@@ -800,12 +981,43 @@ mod tests {
     // ---- original 25 tests (adapted) ---------------------------------------
 
     #[test]
-    fn test_fetch_root_no_config_returns_error() {
+    fn test_fetch_root_no_config_shows_register_form() {
+        // Fresh provider with neither token nor username → shows register form.
         let mut p = ChatClientProvider::new();
         let items = p.fetch();
         assert!(items.iter().any(|e| {
+            e.as_str().map_or(false, |s| s.contains("<button>register</button>"))
+        }), "register button should appear for fresh provider");
+    }
+
+    #[test]
+    fn test_fetch_root_partial_config_prefills_register_form() {
+        // Username already set (e.g. from settings) but no token: register form
+        // appears with the username pre-filled so the user can just add a password
+        // and click Register.
+        let mut p = ChatClientProvider::new().with_sync_disabled();
+        p.homeserver = "https://matrix.org".to_owned();
+        p.username = "alice".to_owned();
+        let items = p.fetch();
+        assert!(items.iter().any(|e| {
+            e.as_str().map_or(false, |s| s.contains("<input>alice</input>"))
+        }), "pre-configured username should appear pre-filled in the register form");
+    }
+
+    #[test]
+    fn test_fetch_root_no_token_after_prior_login_shows_login_prompt() {
+        // Simulate a user who previously registered (register_mode=false) but
+        // whose token has since been cleared. The "configure homeserver" prompt
+        // should appear so they know to re-run login from settings.
+        let mut p = ChatClientProvider::new().with_sync_disabled();
+        p.test_clear_register_mode();
+        p.homeserver = "https://matrix.org".to_owned();
+        p.username = "alice".to_owned();
+        // access_token is empty → triggers the partial-config branch
+        let items = p.fetch();
+        assert!(items.iter().any(|e| {
             e.as_str().map_or(false, |s| s.contains("configure homeserver"))
-        }));
+        }), "login prompt should appear when token expired after prior login");
     }
 
     #[test]
@@ -1343,10 +1555,10 @@ mod tests {
         p.init(); // must not panic
         assert!(p.homeserver.is_empty());
         assert!(p.access_token.is_empty());
-        // fetch() returns the "configure homeserver" placeholder
+        // fetch() shows the register form (no credentials at all)
         let items = p.fetch();
         assert!(items.iter().any(|e| {
-            e.as_str().map_or(false, |s| s.contains("configure homeserver"))
+            e.as_str().map_or(false, |s| s.contains("<button>register</button>"))
         }));
     }
 
@@ -1454,6 +1666,168 @@ mod tests {
             e.as_str().map_or(false, |s| s.contains("Loading"))
         }));
     }
+
+    // ---- Register form tests -------------------------------------------------
+
+    #[test]
+    fn register_form_prefills_homeserver_default() {
+        let mut p = ChatClientProvider::new();
+        // homeserver is empty → form should show the matrix.org default.
+        let items = p.fetch();
+        assert!(items.iter().any(|e| {
+            e.as_str().map_or(false, |s| s.contains("https://matrix.org"))
+        }), "form should show https://matrix.org as default homeserver");
+    }
+
+    #[test]
+    fn register_form_renders_four_inputs_and_button() {
+        let mut p = ChatClientProvider::new();
+        let items = p.fetch();
+        let inputs = items.iter().filter(|e| {
+            e.as_str().map_or(false, |s| s.contains("<input>"))
+        }).count();
+        assert_eq!(inputs, 4, "register form should have 4 input fields");
+        assert!(items.iter().any(|e| {
+            e.as_str().map_or(false, |s| s.contains("<button>register</button>"))
+        }));
+    }
+
+    #[test]
+    fn register_form_renders_existing_field_values() {
+        let mut p = ChatClientProvider::new();
+        p.username = "friendlyflow".to_owned();
+        p.email    = "2friendlyflow@gmail.com".to_owned();
+        let items = p.fetch();
+        assert!(items.iter().any(|e| {
+            e.as_str().map_or(false, |s| s.contains("<input>friendlyflow</input>"))
+        }), "username should appear inside its input");
+        assert!(items.iter().any(|e| {
+            e.as_str().map_or(false, |s| s.contains("<input>2friendlyflow@gmail.com</input>"))
+        }), "email should appear inside its input");
+    }
+
+    #[test]
+    fn register_form_shows_complete_button_when_uia_pending() {
+        let mut p = ChatClientProvider::new();
+        p.uia_session = "sess123".to_owned();
+        let items = p.fetch();
+        assert!(items.iter().any(|e| {
+            e.as_str().map_or(false, |s| s.contains("<button>complete-registration</button>"))
+        }));
+    }
+
+    #[test]
+    fn commit_edit_updates_username_and_persists() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = dir.path().join("settings.json");
+        let mut p = ChatClientProvider::new().with_config_path(cfg.clone());
+        // App temporarily pushes the prefix label "Username" before calling commit_edit.
+        p.push_path("Username");
+        let changed = p.commit_edit("", "friendlyflow");
+        p.pop_path();
+        assert!(changed);
+        assert_eq!(p.username, "friendlyflow");
+        let saved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
+        assert_eq!(
+            saved["chat client"]["chatUsername"].as_str(),
+            Some("friendlyflow"),
+        );
+    }
+
+    #[test]
+    fn commit_edit_updates_email_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = dir.path().join("settings.json");
+        let mut p = ChatClientProvider::new().with_config_path(cfg);
+        p.push_path("Email");
+        let changed = p.commit_edit("", "2friendlyflow@gmail.com");
+        p.pop_path();
+        assert!(changed);
+        assert_eq!(p.email, "2friendlyflow@gmail.com");
+    }
+
+    #[test]
+    fn on_button_press_register_without_email_calls_register_endpoint() {
+        let (rt, server) = start_mock_server();
+        mount(&rt, &server, Mock::given(method("POST"))
+            .and(wiremock::matchers::path("/_matrix/client/v3/register"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({
+                    "access_token": "new_tok",
+                    "user_id": "@friendlyflow:localhost",
+                    "device_id": "DEVICE1",
+                }),
+            )));
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = dir.path().join("settings.json");
+        let mut p = ChatClientProvider::new()
+            .with_config_path(cfg)
+            .with_sync_disabled();
+        p.homeserver = server.uri();
+        p.username   = "friendlyflow".to_owned();
+        p.password   = "secret".to_owned();
+        p.on_button_press("register");
+        assert_eq!(p.access_token, "new_tok", "token should be set after successful register");
+        drop(rt);
+    }
+
+    #[test]
+    fn on_button_press_register_with_email_calls_request_token_then_register() {
+        let (rt, server) = start_mock_server();
+        mount(&rt, &server, Mock::given(method("POST"))
+            .and(wiremock::matchers::path("/_matrix/client/v3/register/email/requestToken"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({ "sid": "sid_abc" }),
+            )));
+        mount(&rt, &server, Mock::given(method("POST"))
+            .and(wiremock::matchers::path("/_matrix/client/v3/register"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({
+                    "access_token": "tok2",
+                    "user_id": "@friendlyflow:localhost",
+                    "device_id": "D2",
+                }),
+            )));
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = dir.path().join("settings.json");
+        let mut p = ChatClientProvider::new()
+            .with_config_path(cfg)
+            .with_sync_disabled();
+        p.homeserver = server.uri();
+        p.username   = "friendlyflow".to_owned();
+        p.password   = "secret".to_owned();
+        p.email      = "2friendlyflow@gmail.com".to_owned();
+        p.on_button_press("register");
+        assert_eq!(p.register_3pid_sid, "sid_abc", "3pid sid should be captured");
+        assert_eq!(p.access_token, "tok2", "token should be set after successful register");
+        drop(rt);
+    }
+
+    #[test]
+    fn on_button_press_register_stores_uia_session() {
+        let (rt, server) = start_mock_server();
+        mount(&rt, &server, Mock::given(method("POST"))
+            .and(wiremock::matchers::path("/_matrix/client/v3/register"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({
+                    "session": "uia_sess",
+                    "flows": [{ "stages": ["m.login.dummy"] }],
+                }),
+            )));
+        let mut p = ChatClientProvider::new().with_sync_disabled();
+        p.homeserver = server.uri();
+        p.username   = "friendlyflow".to_owned();
+        p.password   = "secret".to_owned();
+        p.on_button_press("register");
+        assert_eq!(p.uia_session, "uia_sess");
+        // complete-registration button should now be visible in the form.
+        let items = p.fetch();
+        assert!(items.iter().any(|e| {
+            e.as_str().map_or(false, |s| s.contains("<button>complete-registration</button>"))
+        }));
+        drop(rt);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1471,6 +1845,7 @@ pub fn register() {
             sicompass_sdk::SettingDecl::text("chat client", "access token",      "chatAccessToken",  ""),
             sicompass_sdk::SettingDecl::text("chat client", "username",          "chatUsername",     ""),
             sicompass_sdk::SettingDecl::text("chat client", "password",          "chatPassword",     ""),
+            sicompass_sdk::SettingDecl::text("chat client", "email",             "chatEmail",        ""),
         ]),
     );
 }
