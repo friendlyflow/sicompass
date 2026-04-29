@@ -37,7 +37,6 @@ Follow standard Rust idioms. Use `#[allow(...)]` sparingly and only when justifi
 
 - Never remove or weaken test assertions to make a failing test pass. Fix the code instead.
 - If a test itself is genuinely wrong and needs changing, **ask the user first** before modifying it.
-- A PostToolUse hook enforces this rule automatically when test files are edited.
 
 ## Architecture: SDK boundary (hard rule)
 
