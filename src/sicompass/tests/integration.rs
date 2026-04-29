@@ -4596,6 +4596,70 @@ fn compose_body_delete_undo_single_element_no_extra_placeholder() {
 }
 
 // ---------------------------------------------------------------------------
+// Chat client: needs_refresh flag drives FFON rebuild
+// ---------------------------------------------------------------------------
+
+/// Verify that when the chat client's needs_refresh flag is set (as the /sync
+/// background thread would do), the renderer picks it up, clears it, and rebuilds
+/// the FFON tree with the rooms from the cache.
+///
+/// No HTTP is made — the cache is seeded via test helpers and the sync thread is
+/// disabled (wiremock requires tokio; the integration suite is sync).
+#[test]
+fn chat_client_needs_refresh_drives_renderer_redraw() {
+    // Build a ChatClientProvider with no sync thread — flag is driven manually.
+    let mut chat = sicompass_chatclient::ChatClientProvider::new()
+        .with_sync_disabled();
+
+    // Set credentials so fetch() returns the rooms list, not the "configure…" placeholder.
+    chat.test_set_credentials("https://matrix.org", "test_token");
+
+    // Seed the cache as the sync thread would after a /sync response.
+    chat.test_seed_room("!abc:x", "Test Room");
+    chat.test_seed_room("!def:x", "Another Room");
+
+    // Pre-set the flag before boxing — simulates the sync thread firing mid-idle.
+    chat.test_set_needs_refresh();
+
+    // Register: init() + fetch() populates the FFON tree from cache.
+    let mut renderer = AppRenderer::new();
+    let display_name = chat.display_name().to_owned();
+    let children = chat.fetch();
+    let mut root = FfonElement::new_obj(&display_name);
+    for child in children {
+        root.as_obj_mut().unwrap().push(child);
+    }
+    renderer.ffon.push(root);
+    renderer.providers.push(Box::new(chat));
+
+    renderer.current_id = {
+        let mut id = sicompass_sdk::ffon::IdArray::new();
+        id.push(0);
+        id
+    };
+
+    // The flag must still be set (no drain has run yet).
+    assert!(renderer.providers[0].needs_refresh(), "flag must be set before drain");
+
+    // Simulate the per-frame needs_refresh drain from view.rs:
+    // clear the flag *before* rebuild so a signal arriving mid-rebuild is preserved.
+    renderer.providers[0].clear_needs_refresh();
+    sicompass::provider::refresh_current_directory(&mut renderer);
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    // Flag must be cleared after the drain.
+    assert!(!renderer.providers[0].needs_refresh(), "flag must be cleared after drain");
+
+    // FFON tree must contain both rooms (rebuilt from cache).
+    let root = &renderer.ffon[0];
+    let children = &root.as_obj().unwrap().children;
+    let has_test_room = children.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "Test Room"));
+    let has_another = children.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "Another Room"));
+    assert!(has_test_room, "FFON must contain 'Test Room' after refresh; children: {:?}", children);
+    assert!(has_another, "FFON must contain 'Another Room' after refresh; children: {:?}", children);
+}
+
+// ---------------------------------------------------------------------------
 // F5 hard-refresh via dispatch_refresh_command
 // ---------------------------------------------------------------------------
 
