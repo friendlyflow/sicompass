@@ -634,7 +634,37 @@ const HTML_SKIP_TAGS: &[&str] = &[
 const HTML_CONTAINER_TAGS: &[&str] = &[
     "div", "section", "article", "main", "header", "aside", "figure",
     "blockquote", "details", "summary",
+    // Form structure: these are transparent containers so their children are processed normally
+    "label", "fieldset",
 ];
+
+// ---------------------------------------------------------------------------
+// Form-map types (used by html_to_ffon_with_forms)
+// ---------------------------------------------------------------------------
+
+/// The kind of a form control node, for use in Phase 2 CDP interaction.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FormNodeKind {
+    TextInput,
+    Textarea,
+    Checkbox,
+    RadioOption { group: String, value: String },
+    Submit,
+    Select,
+}
+
+/// Describes how to find and interact with a form control via CDP.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FormNode {
+    /// A CSS selector that uniquely identifies this element in the live DOM.
+    pub css_selector: String,
+    pub kind: FormNodeKind,
+}
+
+/// Maps FFON path segments (e.g. `"form_1/email"`) to the corresponding
+/// live DOM node. Populated by `html_to_ffon_with_forms` and consumed
+/// by `WebbrowserProvider` in Phase 2 to drive CDP interactions.
+pub type FormMap = std::collections::HashMap<String, FormNode>;
 
 fn html_normalize_whitespace(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -664,11 +694,25 @@ struct HtmlParseCtx<'a> {
     root: Vec<FfonElement>,
     stack: Vec<(u8, FfonElement)>,
     pending_id: Option<String>,
+    // Form tracking
+    form_count: usize,        // total forms encountered in the document (never reset)
+    current_form_idx: usize,  // 1-based index of the form being parsed (0 = not in a form)
+    form_input_count: usize,  // inputs seen in the current form (for fallback labels)
+    form_map: Vec<(String, FormNode)>, // accumulated path → node entries
 }
 
 impl<'a> HtmlParseCtx<'a> {
     fn new(base_url: &'a str) -> Self {
-        HtmlParseCtx { base_url, root: Vec::new(), stack: Vec::new(), pending_id: None }
+        HtmlParseCtx {
+            base_url,
+            root: Vec::new(),
+            stack: Vec::new(),
+            pending_id: None,
+            form_count: 0,
+            current_form_idx: 0,
+            form_input_count: 0,
+            form_map: Vec::new(),
+        }
     }
 
     fn add_to_current(&mut self, mut elem: FfonElement) {
@@ -697,7 +741,11 @@ impl<'a> HtmlParseCtx<'a> {
         }
     }
 
-    fn finalize(mut self) -> Vec<FfonElement> {
+    fn finalize(self) -> Vec<FfonElement> {
+        self.finalize_with_forms().0
+    }
+
+    fn finalize_with_forms(mut self) -> (Vec<FfonElement>, Vec<(String, FormNode)>) {
         while let Some((_, entry)) = self.stack.pop() {
             if let Some((_, ref mut parent)) = self.stack.last_mut() {
                 parent.as_obj_mut().unwrap().push(entry);
@@ -705,7 +753,7 @@ impl<'a> HtmlParseCtx<'a> {
                 self.root.push(entry);
             }
         }
-        self.root
+        (self.root, self.form_map)
     }
 
     fn process_children(&mut self, node: scraper::ElementRef) {
@@ -818,12 +866,232 @@ impl<'a> HtmlParseCtx<'a> {
                     self.add_to_current(dl_obj);
                 }
             }
+            // ---- Form container ------------------------------------------------
+            "form" => {
+                let form_idx = self.form_count + 1;
+                self.form_count += 1;
+
+                // Isolate: process form children into a fresh root/stack so that
+                // heading levels inside the form don't interfere with the outer tree.
+                let saved_root = std::mem::take(&mut self.root);
+                let saved_stack = std::mem::take(&mut self.stack);
+                let saved_form_input_count = std::mem::replace(&mut self.form_input_count, 0);
+                let saved_form_idx = std::mem::replace(&mut self.current_form_idx, form_idx);
+
+                let id_prefix = self.pending_id.take()
+                    .map(|i| crate::tags::format_id(&i)).unwrap_or_default();
+
+                self.process_children(node);
+
+                // Flush any open heading-level stack entries into root
+                while let Some((_, entry)) = self.stack.pop() {
+                    self.root.push(entry);
+                }
+                let form_children = std::mem::replace(&mut self.root, saved_root);
+                self.stack = saved_stack;
+                self.form_input_count = saved_form_input_count;
+                self.current_form_idx = saved_form_idx;
+
+                if !form_children.is_empty() {
+                    let mut form_obj = FfonElement::new_obj(format!("{id_prefix}form_{form_idx}"));
+                    for child in form_children {
+                        form_obj.as_obj_mut().unwrap().push(child);
+                    }
+                    self.add_to_current(form_obj);
+                }
+                if had_own_id { self.pending_id = prev_id; }
+                return;
+            }
+
+            // ---- Input fields --------------------------------------------------
+            "input" => {
+                // Collect all attributes eagerly to avoid borrow conflicts later.
+                let input_type = node.value().attr("type").unwrap_or("text").to_ascii_lowercase();
+                let name      = node.value().attr("name").unwrap_or("").to_owned();
+                let id_attr   = node.value().attr("id").unwrap_or("").to_owned();
+                let ph        = node.value().attr("placeholder").unwrap_or("").to_owned();
+                let al        = node.value().attr("aria-label").unwrap_or("").to_owned();
+                let value     = node.value().attr("value").unwrap_or("").to_owned();
+                let is_checked = node.value().attr("checked").is_some();
+                let form_n    = self.current_form_idx;
+
+                // Form controls derive their label from id_attr directly; the pending_id
+                // propagation mechanism must not add a spurious <id>X</id> prefix to the
+                // FFON string (which would corrupt the form_map key lookup).
+                let _ = self.pending_id.take();
+
+                match input_type.as_str() {
+                    "hidden" | "file" | "reset" | "image" => {
+                        // Not user-visible; skip.
+                    }
+                    "checkbox" => {
+                        let label = html_input_label(&ph, &al, &name, &id_attr,
+                                                     &mut self.form_input_count);
+                        let tag = if is_checked { "<checkbox checked>" } else { "<checkbox>" };
+                        self.add_to_current(FfonElement::new_str(format!("{tag}{label}")));
+                        if form_n > 0 {
+                            self.form_map.push((
+                                format!("form_{form_n}/{label}"),
+                                FormNode {
+                                    css_selector: html_input_selector(form_n, &name, &id_attr),
+                                    kind: FormNodeKind::Checkbox,
+                                },
+                            ));
+                        }
+                    }
+                    "radio" => {
+                        let label = html_input_label(&ph, &al, &name, &id_attr,
+                                                     &mut self.form_input_count);
+                        let indicator = if is_checked { "(x) " } else { "( ) " };
+                        self.add_to_current(FfonElement::new_str(format!("{indicator}{label}")));
+                        if form_n > 0 && !name.is_empty() {
+                            self.form_map.push((
+                                format!("form_{form_n}/{name}/{label}"),
+                                FormNode {
+                                    css_selector: html_input_selector(form_n, &name, &id_attr),
+                                    kind: FormNodeKind::RadioOption {
+                                        group: name.clone(),
+                                        value: value.clone(),
+                                    },
+                                },
+                            ));
+                        }
+                    }
+                    "submit" | "button" => {
+                        let display = if !value.is_empty() { value.clone() } else { "Submit".to_owned() };
+                        let fn_name = format!("submit:form_{form_n}");
+                        self.add_to_current(FfonElement::new_str(format!("<button>{fn_name}</button>{display}")));
+                        if form_n > 0 {
+                            self.form_map.push((
+                                format!("form_{form_n}/{display}"),
+                                FormNode {
+                                    css_selector: html_submit_selector(form_n, &name, &id_attr),
+                                    kind: FormNodeKind::Submit,
+                                },
+                            ));
+                        }
+                    }
+                    _ => {
+                        // text, email, password, url, search, tel, number, date, …
+                        let label = html_input_label(&ph, &al, &name, &id_attr,
+                                                     &mut self.form_input_count);
+                        self.add_to_current(FfonElement::new_str(
+                            format!("{label}: <input>{value}</input>")
+                        ));
+                        if form_n > 0 {
+                            self.form_map.push((
+                                format!("form_{form_n}/{label}"),
+                                FormNode {
+                                    css_selector: html_input_selector(form_n, &name, &id_attr),
+                                    kind: FormNodeKind::TextInput,
+                                },
+                            ));
+                        }
+                    }
+                }
+                if had_own_id { self.pending_id = prev_id; }
+                return;
+            }
+
+            // ---- Textarea ------------------------------------------------------
+            "textarea" => {
+                let name    = node.value().attr("name").unwrap_or("").to_owned();
+                let id_attr = node.value().attr("id").unwrap_or("").to_owned();
+                let ph      = node.value().attr("placeholder").unwrap_or("").to_owned();
+                let al      = node.value().attr("aria-label").unwrap_or("").to_owned();
+                let content = node.text().collect::<String>().trim().to_owned();
+                let form_n  = self.current_form_idx;
+                let label   = html_input_label(&ph, &al, &name, &id_attr,
+                                               &mut self.form_input_count);
+                let _ = self.pending_id.take();
+                self.add_to_current(FfonElement::new_str(format!("{label}: <input>{content}</input>")));
+                if form_n > 0 {
+                    self.form_map.push((
+                        format!("form_{form_n}/{label}"),
+                        FormNode {
+                            css_selector: html_input_selector(form_n, &name, &id_attr),
+                            kind: FormNodeKind::Textarea,
+                        },
+                    ));
+                }
+                if had_own_id { self.pending_id = prev_id; }
+                return;
+            }
+
+            // ---- Select (dropdown) ---------------------------------------------
+            "select" => {
+                let name    = node.value().attr("name").unwrap_or("").to_owned();
+                let id_attr = node.value().attr("id").unwrap_or("").to_owned();
+                let al      = node.value().attr("aria-label").unwrap_or("").to_owned();
+                let form_n  = self.current_form_idx;
+                let label   = html_input_label("", &al, &name, &id_attr,
+                                               &mut self.form_input_count);
+                let _ = self.pending_id.take();
+
+                let opt_sel = scraper::Selector::parse("option").unwrap();
+                let mut radio_obj = FfonElement::new_obj(format!("<radio>{label}"));
+                for opt in node.select(&opt_sel) {
+                    let val  = opt.value().attr("value").unwrap_or("").to_owned();
+                    let text = opt.text().collect::<String>().trim().to_owned();
+                    let selected = opt.value().attr("selected").is_some();
+                    let display  = if !text.is_empty() { text.clone() } else { val.clone() };
+                    if display.is_empty() { continue; }
+                    let entry = if selected {
+                        FfonElement::new_str(format!("<checked>{display}</checked>"))
+                    } else {
+                        FfonElement::new_str(display.clone())
+                    };
+                    radio_obj.as_obj_mut().unwrap().push(entry);
+                    if form_n > 0 {
+                        self.form_map.push((
+                            format!("form_{form_n}/{label}/{display}"),
+                            FormNode {
+                                css_selector: html_select_option_selector(form_n, &name, &id_attr, &val),
+                                kind: FormNodeKind::Select,
+                            },
+                        ));
+                    }
+                }
+                if radio_obj.as_obj().map_or(false, |o| !o.children.is_empty()) {
+                    self.add_to_current(radio_obj);
+                }
+                if had_own_id { self.pending_id = prev_id; }
+                return;
+            }
+
+            // ---- Standalone button (not <input type=button>) -------------------
+            "button" => {
+                let btn_type = node.value().attr("type").unwrap_or("submit").to_ascii_lowercase();
+                let _ = self.pending_id.take();
+                if matches!(btn_type.as_str(), "submit" | "button") {
+                    let name    = node.value().attr("name").unwrap_or("").to_owned();
+                    let id_attr = node.value().attr("id").unwrap_or("").to_owned();
+                    let display = html_collect_text(node, self.base_url);
+                    let display = if !display.is_empty() { display } else { "Submit".to_owned() };
+                    let form_n  = self.current_form_idx;
+                    let fn_name = format!("submit:form_{form_n}");
+                    self.add_to_current(FfonElement::new_str(format!("<button>{fn_name}</button>{display}")));
+                    if form_n > 0 {
+                        self.form_map.push((
+                            format!("form_{form_n}/{display}"),
+                            FormNode {
+                                css_selector: html_submit_selector(form_n, &name, &id_attr),
+                                kind: FormNodeKind::Submit,
+                            },
+                        ));
+                    }
+                }
+                if had_own_id { self.pending_id = prev_id; }
+                return;
+            }
+
             t if HTML_CONTAINER_TAGS.contains(&t) => { self.process_children(node); }
             _ => {
                 let has_block = node.children().filter_map(scraper::ElementRef::wrap).any(|c| {
                     let t = c.value().name();
                     html_heading_level(t).is_some()
-                        || matches!(t, "p" | "ul" | "ol" | "table" | "dl")
+                        || matches!(t, "p" | "ul" | "ol" | "table" | "dl"
+                                        | "input" | "textarea" | "select" | "button")
                         || HTML_CONTAINER_TAGS.contains(&t)
                 });
                 if has_block { self.process_children(node); }
@@ -836,6 +1104,55 @@ impl<'a> HtmlParseCtx<'a> {
         if had_own_id { self.pending_id = prev_id; }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Form-parsing helpers
+// ---------------------------------------------------------------------------
+
+/// Pick a human-readable label for a form control.
+/// Priority: placeholder → aria-label → name → id → generated fallback.
+fn html_input_label(ph: &str, al: &str, name: &str, id: &str, counter: &mut usize) -> String {
+    if !ph.is_empty()   { return ph.to_owned(); }
+    if !al.is_empty()   { return al.to_owned(); }
+    if !name.is_empty() { return name.to_owned(); }
+    if !id.is_empty()   { return id.to_owned(); }
+    *counter += 1;
+    format!("input_{}", *counter)
+}
+
+/// CSS selector for a form input (text/checkbox/radio/textarea).
+fn html_input_selector(form_n: usize, name: &str, id: &str) -> String {
+    if !id.is_empty()   { return format!("#{id}"); }
+    if !name.is_empty() { return format!("form:nth-of-type({form_n}) [name=\"{name}\"]"); }
+    format!("form:nth-of-type({form_n}) input")
+}
+
+/// CSS selector for a submit button.
+fn html_submit_selector(form_n: usize, name: &str, id: &str) -> String {
+    if !id.is_empty()   { return format!("#{id}"); }
+    if !name.is_empty() { return format!("form:nth-of-type({form_n}) [name=\"{name}\"]"); }
+    format!("form:nth-of-type({form_n}) [type=\"submit\"]")
+}
+
+/// CSS selector for a specific `<option>` within a `<select>`.
+fn html_select_option_selector(form_n: usize, name: &str, id: &str, val: &str) -> String {
+    let sel_base = if !id.is_empty() {
+        format!("#{id}")
+    } else if !name.is_empty() {
+        format!("form:nth-of-type({form_n}) select[name=\"{name}\"]")
+    } else {
+        format!("form:nth-of-type({form_n}) select")
+    };
+    if val.is_empty() {
+        format!("{sel_base} option")
+    } else {
+        format!("{sel_base} option[value=\"{val}\"]")
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Public HTML → FFON conversion
+// ---------------------------------------------------------------------------
 
 /// Convert an HTML string to a list of `FfonElement`s.
 ///
@@ -858,6 +1175,31 @@ pub fn html_to_ffon(html: &str, base_url: &str) -> Vec<FfonElement> {
     ctx.process_children(body);
     let r = ctx.finalize();
     if r.is_empty() { vec![FfonElement::new_str("(empty)")] } else { r }
+}
+
+/// Like `html_to_ffon`, but also returns a [`FormMap`] mapping FFON path
+/// segments (e.g. `"form_1/email"`) to their CSS selectors and control kinds.
+///
+/// Used by `WebbrowserProvider` to drive CDP interactions (Phase 2).
+pub fn html_to_ffon_with_forms(html: &str, base_url: &str) -> (Vec<FfonElement>, FormMap) {
+    use scraper::{Html, Selector};
+    let document = Html::parse_document(html);
+    let body_sel = Selector::parse("body").unwrap();
+    let (r, map_entries) = match document.select(&body_sel).next() {
+        Some(body) => {
+            let mut ctx = HtmlParseCtx::new(base_url);
+            ctx.process_children(body);
+            ctx.finalize_with_forms()
+        }
+        None => {
+            let mut ctx = HtmlParseCtx::new(base_url);
+            ctx.process_children(document.root_element());
+            ctx.finalize_with_forms()
+        }
+    };
+    let elems = if r.is_empty() { vec![FfonElement::new_str("(empty)")] } else { r };
+    let form_map: FormMap = map_entries.into_iter().collect();
+    (elems, form_map)
 }
 
 fn html_collect_text(node: scraper::ElementRef, base_url: &str) -> String {
@@ -1970,5 +2312,189 @@ mod tests {
             _ => false,
         });
         assert!(found, "expected link obj in {elems:?}");
+    }
+
+    // ---- Form parsing tests ------------------------------------------------
+
+    #[test]
+    fn html_form_becomes_form_obj() {
+        let html = r#"<form><input type="text" name="q" placeholder="Search"></form>"#;
+        let elems = html_to_ffon(html, "");
+        assert_eq!(elems.len(), 1, "expected one top-level form obj");
+        let form = elems[0].as_obj().expect("expected Obj for form");
+        assert_eq!(form.key, "form_1");
+        assert_eq!(form.children.len(), 1);
+        let field = form.children[0].as_str().unwrap();
+        assert!(field.contains("<input>"), "expected editable cell: {field}");
+        assert!(field.starts_with("Search: "), "expected placeholder label: {field}");
+    }
+
+    #[test]
+    fn html_form_text_input_uses_name_fallback() {
+        let html = r#"<form><input type="text" name="username"></form>"#;
+        let (elems, map) = html_to_ffon_with_forms(html, "");
+        let form = elems[0].as_obj().unwrap();
+        let field = form.children[0].as_str().unwrap();
+        assert!(field.starts_with("username: "), "got: {field}");
+        assert!(map.contains_key("form_1/username"), "missing key in form_map: {map:?}");
+        let node = &map["form_1/username"];
+        assert_eq!(node.kind, FormNodeKind::TextInput);
+    }
+
+    #[test]
+    fn html_form_email_input() {
+        let html = r#"<form><input type="email" name="email" value="user@example.com"></form>"#;
+        let (elems, _) = html_to_ffon_with_forms(html, "");
+        let field = elems[0].as_obj().unwrap().children[0].as_str().unwrap();
+        assert_eq!(field, "email: <input>user@example.com</input>");
+    }
+
+    #[test]
+    fn html_form_submit_button_renders_as_button_tag() {
+        let html = r#"<form><input type="submit" value="Sign in"></form>"#;
+        let elems = html_to_ffon(html, "");
+        let btn = elems[0].as_obj().unwrap().children[0].as_str().unwrap();
+        assert!(btn.contains("<button>submit:form_1</button>"), "got: {btn}");
+        assert!(btn.contains("Sign in"), "got: {btn}");
+    }
+
+    #[test]
+    fn html_form_standalone_button_element() {
+        let html = r#"<form><button type="submit">Go</button></form>"#;
+        let elems = html_to_ffon(html, "");
+        let btn = elems[0].as_obj().unwrap().children[0].as_str().unwrap();
+        assert!(btn.contains("<button>submit:form_1</button>"), "got: {btn}");
+        assert!(btn.ends_with("Go"), "got: {btn}");
+    }
+
+    #[test]
+    fn html_form_checkbox_unchecked() {
+        let html = r#"<form><input type="checkbox" name="remember">Remember me</form>"#;
+        let elems = html_to_ffon(html, "");
+        let children = &elems[0].as_obj().unwrap().children;
+        let found = children.iter().any(|e| {
+            e.as_str().map_or(false, |s| s.starts_with("<checkbox>"))
+        });
+        assert!(found, "expected <checkbox> element; children: {children:?}");
+    }
+
+    #[test]
+    fn html_form_checkbox_checked() {
+        let html = r#"<form><input type="checkbox" name="agree" checked></form>"#;
+        let elems = html_to_ffon(html, "");
+        let children = &elems[0].as_obj().unwrap().children;
+        let found = children.iter().any(|e| {
+            e.as_str().map_or(false, |s| s.starts_with("<checkbox checked>"))
+        });
+        assert!(found, "expected <checkbox checked>; children: {children:?}");
+    }
+
+    #[test]
+    fn html_form_select_becomes_radio_obj() {
+        let html = r#"<form><select name="country">
+            <option value="us">United States</option>
+            <option value="ca" selected>Canada</option>
+        </select></form>"#;
+        let elems = html_to_ffon(html, "");
+        let form_children = &elems[0].as_obj().unwrap().children;
+        let radio = form_children.iter().find(|e| {
+            e.as_obj().map_or(false, |o| o.key.starts_with("<radio>"))
+        }).expect("expected <radio> obj for select");
+        let opts = &radio.as_obj().unwrap().children;
+        assert_eq!(opts.len(), 2);
+        let canada = opts.iter().find(|e| {
+            e.as_str().map_or(false, |s| s.contains("Canada"))
+        }).expect("Canada option missing");
+        assert!(canada.as_str().unwrap().starts_with("<checked>"),
+            "selected option should use <checked> tag: {canada:?}");
+    }
+
+    #[test]
+    fn html_form_textarea() {
+        let html = r#"<form><textarea name="message" placeholder="Your message"></textarea></form>"#;
+        let (elems, map) = html_to_ffon_with_forms(html, "");
+        let field = elems[0].as_obj().unwrap().children[0].as_str().unwrap();
+        assert!(field.starts_with("Your message: <input>"), "got: {field}");
+        assert!(map.contains_key("form_1/Your message"));
+        assert_eq!(map["form_1/Your message"].kind, FormNodeKind::Textarea);
+    }
+
+    #[test]
+    fn html_two_forms_numbered_separately() {
+        let html = r#"
+            <form><input type="text" name="q"></form>
+            <form><input type="email" name="email"></form>
+        "#;
+        let elems = html_to_ffon(html, "");
+        let forms: Vec<_> = elems.iter().filter(|e| e.is_obj()).collect();
+        assert_eq!(forms.len(), 2);
+        assert_eq!(forms[0].as_obj().unwrap().key, "form_1");
+        assert_eq!(forms[1].as_obj().unwrap().key, "form_2");
+    }
+
+    #[test]
+    fn html_form_hidden_and_file_inputs_skipped() {
+        let html = r#"<form>
+            <input type="hidden" name="csrf" value="token">
+            <input type="file" name="upload">
+            <input type="text" name="visible">
+        </form>"#;
+        let elems = html_to_ffon(html, "");
+        let children = &elems[0].as_obj().unwrap().children;
+        assert_eq!(children.len(), 1, "only visible input expected; got {children:?}");
+        assert!(children[0].as_str().unwrap().contains("visible"));
+    }
+
+    #[test]
+    fn html_form_map_css_selector_by_name() {
+        let html = r#"<form><input type="email" name="email"></form>"#;
+        let (_, map) = html_to_ffon_with_forms(html, "");
+        let node = &map["form_1/email"];
+        assert!(node.css_selector.contains("name=\"email\""), "got: {}", node.css_selector);
+    }
+
+    #[test]
+    fn html_form_map_css_selector_prefers_id() {
+        let html = r#"<form><input type="text" id="search-box" name="q"></form>"#;
+        let (_, map) = html_to_ffon_with_forms(html, "");
+        // label derived from name "q" (no placeholder), so key is form_1/q
+        let node = &map["form_1/q"];
+        assert_eq!(node.css_selector, "#search-box");
+    }
+
+    #[test]
+    fn html_label_wrapping_input_exposes_input() {
+        // <label> is in HTML_CONTAINER_TAGS, so its children are processed normally.
+        let html = r#"<form><label>Email <input type="email" name="email"></label></form>"#;
+        let (elems, map) = html_to_ffon_with_forms(html, "");
+        let form_children = &elems[0].as_obj().unwrap().children;
+        let has_input = form_children.iter().any(|e| {
+            e.as_str().map_or(false, |s| s.contains("<input>"))
+        });
+        assert!(has_input, "labeled input not found in form children: {form_children:?}");
+        assert!(map.contains_key("form_1/email"), "form_map missing labeled input key");
+    }
+
+    #[test]
+    fn html_form_input_with_id_no_spurious_id_prefix() {
+        // An input with an id= attribute must NOT get a <id>X</id> prefix in its
+        // FFON string. The pending_id mechanism must be suppressed for form controls.
+        let html = r#"<form><input type="text" id="search-input" name="q"></form>"#;
+        let (elems, map) = html_to_ffon_with_forms(html, "");
+        let field = elems[0].as_obj().unwrap().children[0].as_str().unwrap();
+        assert!(!field.contains("<id>"), "spurious <id> tag in form field: {field}");
+        assert!(field.starts_with("q: "), "expected name-derived label: {field}");
+        assert!(map.contains_key("form_1/q"), "form_map key must match bare label");
+    }
+
+    #[test]
+    fn html_form_input_id_only_no_name_no_spurious_prefix() {
+        // Input with only an id (no name/placeholder): label = id, still no <id> tag prefix.
+        let html = r#"<form><input type="text" id="email-field"></form>"#;
+        let (elems, map) = html_to_ffon_with_forms(html, "");
+        let field = elems[0].as_obj().unwrap().children[0].as_str().unwrap();
+        assert!(!field.contains("<id>"), "spurious <id> tag in form field: {field}");
+        assert!(field.starts_with("email-field: "), "expected id-derived label: {field}");
+        assert!(map.contains_key("form_1/email-field"), "form_map key must match bare id");
     }
 }
