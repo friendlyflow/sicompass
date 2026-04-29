@@ -993,7 +993,12 @@ pub fn handle_enter_operator(r: &mut AppRenderer) {
     // Button press
     if tags::has_button(&match &elem_clone { FfonElement::Str(s) => s.clone(), FfonElement::Obj(o) => o.key.clone() }) {
         crate::provider::notify_button_pressed(r);
+        // Preserve any error set by the button handler — create_list_current_layer clears it.
+        let button_error = std::mem::take(&mut r.error_message);
         list::create_list_current_layer(r);
+        if r.error_message.is_empty() && !button_error.is_empty() {
+            r.error_message = button_error;
+        }
         r.list_index = r.current_id.last().unwrap_or(0);
         r.needs_redraw = true;
         return;
