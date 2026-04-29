@@ -24,9 +24,12 @@
 //! - `chatUsername`     — Username (for login/register)
 //! - `chatPassword`     — Password (for login/register)
 
+mod sync;
+
 use sicompass_sdk::ffon::FfonElement;
 use sicompass_sdk::provider::Provider;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 // ---------------------------------------------------------------------------
 // Monotonic transaction ID counter (mirrors C's `static uint64_t g_txnId`)
@@ -118,15 +121,6 @@ fn parse_auth_response(resp: serde_json::Value) -> AuthResult {
 }
 
 // ---------------------------------------------------------------------------
-// Room cache entry
-// ---------------------------------------------------------------------------
-
-struct RoomEntry {
-    display_name: String,
-    room_id: String,
-}
-
-// ---------------------------------------------------------------------------
 // ChatClientProvider
 // ---------------------------------------------------------------------------
 
@@ -136,30 +130,49 @@ pub struct ChatClientProvider {
     username: String,
     password: String,
     current_path: String,
-    room_cache: Vec<RoomEntry>,
-    /// Pending UIA session for multi-stage registration
+    /// Shared state cache populated by the /sync background thread.
+    sync_cache: Arc<Mutex<sync::SyncCache>>,
+    /// Set by the sync thread when new data arrives; polled by the renderer.
+    needs_refresh_flag: Arc<AtomicBool>,
+    /// Background /sync controller (mirrors IdleController in lib_emailclient).
+    sync_controller: sync::SyncController,
+    /// Pending UIA session for multi-stage registration.
     uia_session: String,
     /// Override for the settings.json path (used in tests to avoid touching
     /// the real user config file).
     config_path_override: Option<std::path::PathBuf>,
+    /// When true, the sync thread is never started (used in tests).
+    sync_disabled: bool,
 }
 
 impl ChatClientProvider {
     pub fn new() -> Self {
+        let cache = Arc::new(Mutex::new(sync::SyncCache::default()));
+        let flag = Arc::new(AtomicBool::new(false));
+        let ctrl = sync::SyncController::new(Arc::clone(&cache), Arc::clone(&flag));
         ChatClientProvider {
             homeserver: String::new(),
             access_token: String::new(),
             username: String::new(),
             password: String::new(),
             current_path: "/".to_owned(),
-            room_cache: Vec::new(),
+            sync_cache: cache,
+            needs_refresh_flag: flag,
+            sync_controller: ctrl,
             uia_session: String::new(),
             config_path_override: None,
+            sync_disabled: false,
         }
     }
 
     pub fn with_config_path(mut self, path: std::path::PathBuf) -> Self {
         self.config_path_override = Some(path);
+        self
+    }
+
+    /// Disable background sync — for tests that don't want a live HTTP thread.
+    pub fn with_sync_disabled(mut self) -> Self {
+        self.sync_disabled = true;
         self
     }
 
@@ -206,143 +219,69 @@ impl ChatClientProvider {
         format!("{}{}", self.homeserver.trim_end_matches('/'), path)
     }
 
+    // ---- Sync lifecycle ----------------------------------------------------
+
+    /// Start the sync thread if credentials are present and sync is not disabled.
+    fn maybe_start_sync(&mut self) {
+        if self.sync_disabled || self.homeserver.is_empty() || self.access_token.is_empty() {
+            return;
+        }
+        self.sync_controller.start(
+            self.homeserver.clone(),
+            self.access_token.clone(),
+            self.config_path(),
+        );
+    }
+
     // ---- Matrix API calls --------------------------------------------------
 
-    fn fetch_joined_rooms(&mut self) -> Vec<FfonElement> {
+    fn fetch_joined_rooms(&self) -> Vec<FfonElement> {
         if self.homeserver.is_empty() || self.access_token.is_empty() {
             return vec![FfonElement::new_str(
                 "configure homeserver URL, username and password in settings, then run login command"
                     .to_owned(),
             )];
         }
-
-        let client = match self.client() {
-            Ok(c) => c,
-            Err(e) => return vec![FfonElement::new_str(format!("HTTP error: {e}"))],
-        };
-
-        let url = self.api("/_matrix/client/v3/joined_rooms");
-        let resp = match client.get(&url).header("Authorization", self.auth_header()).send() {
-            Ok(r) => r,
-            Err(e) => return vec![FfonElement::new_str(format!("Error: {e}"))],
-        };
-
-        let body: serde_json::Value = match resp.json() {
-            Ok(v) => v,
-            Err(e) => return vec![FfonElement::new_str(format!("Parse error: {e}"))],
-        };
-
-        let room_ids: Vec<String> = body["joined_rooms"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|v| v.as_str().map(|s| s.to_owned()))
-            .collect();
-
-        if room_ids.is_empty() {
-            return vec![FfonElement::new_str("no rooms found".to_owned())];
+        let cache = self.sync_cache.lock().unwrap();
+        if cache.rooms.is_empty() {
+            return if cache.next_batch.is_empty() {
+                vec![FfonElement::new_str("Loading\u{2026}".to_owned())]
+            } else {
+                vec![FfonElement::new_str("no rooms found".to_owned())]
+            };
         }
-
-        self.room_cache.clear();
-        let mut items = Vec::new();
-
-        for room_id in &room_ids {
-            let display_name = self
-                .fetch_room_display_name(&client, room_id)
-                .unwrap_or_else(|| room_id.clone());
-            self.room_cache.push(RoomEntry {
-                display_name: display_name.clone(),
-                room_id: room_id.clone(),
-            });
-            items.push(FfonElement::new_obj(display_name));
-        }
-
-        items
-    }
-
-    fn fetch_room_display_name(
-        &self,
-        client: &reqwest::blocking::Client,
-        room_id: &str,
-    ) -> Option<String> {
-        let encoded_id = encode_room_id(room_id);
-        let url = self.api(&format!(
-            "/_matrix/client/v3/rooms/{encoded_id}/state/m.room.name"
-        ));
-        let resp = client
-            .get(&url)
-            .header("Authorization", self.auth_header())
-            .send()
-            .ok()?;
-        let body: serde_json::Value = resp.json().ok()?;
-        body["name"].as_str().map(|s| s.to_owned())
+        let mut rooms: Vec<&sync::RoomState> = cache.rooms.values().collect();
+        rooms.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+        rooms.iter().map(|r| FfonElement::new_obj(r.display_name.clone())).collect()
     }
 
     fn fetch_room_messages(&self, room_display_name: &str) -> Vec<FfonElement> {
-        let room_id = match self
-            .room_cache
+        let cache = self.sync_cache.lock().unwrap();
+        let Some(room_id) = cache.display_to_id.get(room_display_name) else {
+            return vec![FfonElement::new_str("room not found".to_owned())];
+        };
+        let Some(room) = cache.rooms.get(room_id) else {
+            return vec![FfonElement::new_str("room not found".to_owned())];
+        };
+        let mut items: Vec<FfonElement> = room
+            .timeline
             .iter()
-            .find(|r| r.display_name == room_display_name)
-        {
-            Some(r) => r.room_id.clone(),
-            None => {
-                return vec![FfonElement::new_str("room not found".to_owned())];
-            }
-        };
-
-        let client = match self.client() {
-            Ok(c) => c,
-            Err(e) => return vec![FfonElement::new_str(format!("HTTP error: {e}"))],
-        };
-
-        let encoded_id = encode_room_id(&room_id);
-        let url = self.api(&format!(
-            "/_matrix/client/v3/rooms/{encoded_id}/messages?dir=b&limit=50"
-        ));
-        let resp = match client
-            .get(&url)
-            .header("Authorization", self.auth_header())
-            .send()
-        {
-            Ok(r) => r,
-            Err(e) => return vec![FfonElement::new_str(format!("Error: {e}"))],
-        };
-
-        let body: serde_json::Value = match resp.json() {
-            Ok(v) => v,
-            Err(e) => return vec![FfonElement::new_str(format!("Parse error: {e}"))],
-        };
-
-        let mut messages: Vec<FfonElement> = body["chunk"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default()
-            .iter()
-            .filter(|e| e["type"].as_str() == Some("m.room.message"))
-            .filter_map(|e| {
-                let sender = e["sender"].as_str().unwrap_or("?");
-                let body_text = e["content"]["body"].as_str().unwrap_or("(media)");
-                Some(FfonElement::new_str(format!("{sender}: {body_text}")))
-            })
+            .map(|ev| FfonElement::new_str(format!("{}: {}", ev.sender, ev.body)))
             .collect();
-
-        // API returns newest-first; reverse to chronological order
-        messages.reverse();
-
-        // Append message composition input bar
-        messages.push(FfonElement::new_str("<input></input>".to_owned()));
-
-        messages
+        items.push(FfonElement::new_str("<input></input>".to_owned()));
+        items
     }
 
     fn send_message(&self, room_display_name: &str, body_text: &str) -> bool {
         let room_id = match self
-            .room_cache
-            .iter()
-            .find(|r| r.display_name == room_display_name)
+            .sync_cache
+            .lock()
+            .unwrap()
+            .display_to_id
+            .get(room_display_name)
+            .cloned()
         {
-            Some(r) => r.room_id.clone(),
+            Some(id) => id,
             None => return false,
         };
         let client = match self.client() {
@@ -514,6 +453,60 @@ impl Provider for ChatClientProvider {
     fn name(&self) -> &str { "chatclient" }
     fn display_name(&self) -> &str { "chat client" }
 
+    fn init(&mut self) {
+        use serde_json::Value;
+        let Some(path) = self.config_path() else {
+            self.maybe_start_sync();
+            return;
+        };
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            self.maybe_start_sync();
+            return;
+        };
+        let Ok(root) = serde_json::from_str::<Value>(&content) else {
+            self.maybe_start_sync();
+            return;
+        };
+        let Some(section) = root.get("chat client").and_then(|v| v.as_object()) else {
+            self.maybe_start_sync();
+            return;
+        };
+
+        macro_rules! load_str {
+            ($key:literal, $field:expr) => {
+                if let Some(v) = section.get($key).and_then(|v| v.as_str()) {
+                    if !v.is_empty() { $field = v.to_owned(); }
+                }
+            };
+        }
+
+        load_str!("chatHomeserver",  self.homeserver);
+        load_str!("chatAccessToken", self.access_token);
+        load_str!("chatUsername",    self.username);
+        load_str!("chatPassword",    self.password);
+
+        if let Some(nb) = section.get("chatSyncNextBatch").and_then(|v| v.as_str()) {
+            if !nb.is_empty() {
+                self.sync_cache.lock().unwrap().next_batch = nb.to_owned();
+            }
+        }
+
+        self.maybe_start_sync();
+    }
+
+    fn cleanup(&mut self) {
+        self.sync_controller.stop();
+        *self.sync_cache.lock().unwrap() = sync::SyncCache::default();
+    }
+
+    fn needs_refresh(&self) -> bool {
+        self.needs_refresh_flag.load(Ordering::Relaxed)
+    }
+
+    fn clear_needs_refresh(&mut self) {
+        self.needs_refresh_flag.store(false, Ordering::Relaxed);
+    }
+
     fn fetch(&mut self) -> Vec<FfonElement> {
         if let Some(room_name) = self.room_name_from_path().map(|s| s.to_owned()) {
             self.fetch_room_messages(&room_name)
@@ -576,7 +569,9 @@ impl Provider for ChatClientProvider {
                 }
                 let result = self.do_login();
                 if result.success {
+                    self.access_token = result.access_token.clone();
                     self.save_access_token(&result.access_token);
+                    self.maybe_start_sync();
                     Some(FfonElement::new_str(format!("logged in as {}", result.user_id)))
                 } else {
                     *error = format!("login failed: {}", result.error);
@@ -597,6 +592,7 @@ impl Provider for ChatClientProvider {
                     self.access_token = result.access_token.clone();
                     self.save_access_token(&result.access_token);
                     self.uia_session.clear();
+                    self.maybe_start_sync();
                     Some(FfonElement::new_str(format!("registered as {}", result.user_id)))
                 } else if result.requires_auth && !result.session.is_empty() {
                     self.uia_session = result.session.clone();
@@ -631,6 +627,7 @@ impl Provider for ChatClientProvider {
                     self.access_token = result.access_token.clone();
                     self.save_access_token(&result.access_token);
                     self.uia_session.clear();
+                    self.maybe_start_sync();
                     Some(FfonElement::new_str(format!("registered as {}", result.user_id)))
                 } else if result.requires_auth && !result.session.is_empty() {
                     self.uia_session = result.session.clone();
@@ -661,8 +658,18 @@ impl Provider for ChatClientProvider {
 
     fn on_setting_change(&mut self, key: &str, value: &str) {
         match key {
-            "chatHomeserver" => self.homeserver = value.to_owned(),
-            "chatAccessToken" => self.access_token = value.to_owned(),
+            "chatHomeserver" => {
+                self.homeserver = value.to_owned();
+                self.sync_controller.stop();
+                *self.sync_cache.lock().unwrap() = sync::SyncCache::default();
+                self.maybe_start_sync();
+            }
+            "chatAccessToken" => {
+                self.access_token = value.to_owned();
+                self.sync_controller.stop();
+                *self.sync_cache.lock().unwrap() = sync::SyncCache::default();
+                self.maybe_start_sync();
+            }
             "chatUsername" => self.username = value.to_owned(),
             "chatPassword" => self.password = value.to_owned(),
             _ => {}
@@ -687,6 +694,36 @@ fn encode_room_id(room_id: &str) -> String {
         }
     }
     out
+}
+
+// ---------------------------------------------------------------------------
+// Test helpers — compiled only during `cargo test` and accessible from
+// integration tests in src/sicompass/tests/.
+// ---------------------------------------------------------------------------
+
+impl ChatClientProvider {
+    /// Set homeserver and access_token without the on_setting_change side-effects
+    /// (cache clear, sync restart). Intended for test harnesses.
+    pub fn test_set_credentials(&mut self, homeserver: &str, token: &str) {
+        self.homeserver = homeserver.to_owned();
+        self.access_token = token.to_owned();
+    }
+
+    /// Insert a room directly into the sync cache. Intended for test harnesses.
+    pub fn test_seed_room(&mut self, room_id: &str, display_name: &str) {
+        let mut cache = self.sync_cache.lock().unwrap();
+        cache.rooms.insert(room_id.to_owned(), sync::RoomState {
+            room_id: room_id.to_owned(),
+            display_name: display_name.to_owned(),
+            timeline: Vec::new(),
+        });
+        cache.display_to_id.insert(display_name.to_owned(), room_id.to_owned());
+    }
+
+    /// Set the needs_refresh flag as the sync thread would. Intended for test harnesses.
+    pub fn test_set_needs_refresh(&self) {
+        self.needs_refresh_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -719,10 +756,45 @@ mod tests {
     }
 
     fn provider_for(server: &MockServer) -> ChatClientProvider {
-        let mut p = ChatClientProvider::new();
+        let mut p = ChatClientProvider::new().with_sync_disabled();
         p.homeserver = server.uri();
         p.access_token = "test_token".to_owned();
         p
+    }
+
+    fn seed_room(p: &mut ChatClientProvider, room_id: &str, display_name: &str) {
+        let mut cache = p.sync_cache.lock().unwrap();
+        cache.rooms.insert(room_id.to_owned(), sync::RoomState {
+            room_id: room_id.to_owned(),
+            display_name: display_name.to_owned(),
+            timeline: Vec::new(),
+        });
+        cache.display_to_id.insert(display_name.to_owned(), room_id.to_owned());
+    }
+
+    fn seed_room_with_events(
+        p: &mut ChatClientProvider,
+        room_id: &str,
+        display_name: &str,
+        events: &[(&str, &str, &str)],
+    ) {
+        let timeline = events
+            .iter()
+            .enumerate()
+            .map(|(i, (eid, sender, body))| sync::TimelineEvent {
+                event_id: eid.to_string(),
+                sender: sender.to_string(),
+                body: body.to_string(),
+                origin_server_ts: i as i64,
+            })
+            .collect();
+        let mut cache = p.sync_cache.lock().unwrap();
+        cache.rooms.insert(room_id.to_owned(), sync::RoomState {
+            room_id: room_id.to_owned(),
+            display_name: display_name.to_owned(),
+            timeline,
+        });
+        cache.display_to_id.insert(display_name.to_owned(), room_id.to_owned());
     }
 
     // ---- original 25 tests (adapted) ---------------------------------------
@@ -738,55 +810,37 @@ mod tests {
 
     #[test]
     fn test_fetch_root_empty_rooms_message() {
-        let (rt, server) = start_mock_server();
-        mount(&rt, &server, Mock::given(method("GET"))
-            .and(path("/_matrix/client/v3/joined_rooms"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(
-                serde_json::json!({ "joined_rooms": [] }),
-            )));
-        let mut p = provider_for(&server);
+        let mut p = ChatClientProvider::new().with_sync_disabled();
+        p.homeserver = "https://matrix.org".to_owned();
+        p.access_token = "tok".to_owned();
+        // Simulate a completed sync with no rooms by setting next_batch.
+        p.sync_cache.lock().unwrap().next_batch = "s1".to_owned();
         let items = p.fetch();
         assert!(items.iter().any(|e| {
             e.as_str().map_or(false, |s| s.contains("no rooms found"))
         }));
-        drop(rt);
     }
 
     #[test]
     fn test_fetch_root_rooms_become_objs() {
-        let (rt, server) = start_mock_server();
-        mount(&rt, &server, Mock::given(method("GET"))
-            .and(path("/_matrix/client/v3/joined_rooms"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(
-                serde_json::json!({ "joined_rooms": ["!abc:example.com"] }),
-            )));
-        mount(&rt, &server, Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(404)));
-        let mut p = provider_for(&server);
+        let mut p = ChatClientProvider::new().with_sync_disabled();
+        p.homeserver = "https://matrix.org".to_owned();
+        p.access_token = "tok".to_owned();
+        seed_room(&mut p, "!abc:example.com", "!abc:example.com");
         let items = p.fetch();
         assert!(items.iter().any(|e| e.is_obj() && e.as_obj().map_or(false, |o| o.key != "meta")));
-        drop(rt);
     }
 
     #[test]
     fn test_fetch_root_room_display_name_from_state() {
-        let (rt, server) = start_mock_server();
-        mount(&rt, &server, Mock::given(method("GET"))
-            .and(path("/_matrix/client/v3/joined_rooms"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(
-                serde_json::json!({ "joined_rooms": ["!abc:example.com"] }),
-            )));
-        mount(&rt, &server, Mock::given(method("GET"))
-            .and(path("/_matrix/client/v3/rooms/%21abc%3Aexample.com/state/m.room.name"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(
-                serde_json::json!({ "name": "General" }),
-            )));
-        let mut p = provider_for(&server);
+        let mut p = ChatClientProvider::new().with_sync_disabled();
+        p.homeserver = "https://matrix.org".to_owned();
+        p.access_token = "tok".to_owned();
+        seed_room(&mut p, "!abc:example.com", "General");
         let items = p.fetch();
         assert!(items.iter().any(|e| {
             e.as_obj().map_or(false, |o| o.key == "General")
         }));
-        drop(rt);
     }
 
     #[test]
@@ -811,21 +865,13 @@ mod tests {
 
     #[test]
     fn test_fetch_room_messages_chronological() {
-        let (rt, server) = start_mock_server();
-        mount(&rt, &server, Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(
-                serde_json::json!({
-                    "chunk": [
-                        { "type": "m.room.message", "sender": "@b:x", "content": { "body": "second" } },
-                        { "type": "m.room.message", "sender": "@a:x", "content": { "body": "first" } },
-                    ]
-                })
-            )));
-        let mut p = provider_for(&server);
-        p.room_cache.push(RoomEntry {
-            display_name: "General".to_owned(),
-            room_id: "!abc:x".to_owned(),
-        });
+        let mut p = ChatClientProvider::new().with_sync_disabled();
+        p.homeserver = "https://matrix.org".to_owned();
+        p.access_token = "tok".to_owned();
+        seed_room_with_events(&mut p, "!abc:x", "General", &[
+            ("$e1", "@a:x", "first"),
+            ("$e2", "@b:x", "second"),
+        ]);
         p.push_path("General");
         let items = p.fetch();
         let msg_items: Vec<_> = items.iter()
@@ -835,26 +881,18 @@ mod tests {
         assert_eq!(msg_items.len(), 2);
         assert!(msg_items[0].contains("first"));
         assert!(msg_items[1].contains("second"));
-        drop(rt);
     }
 
     #[test]
     fn test_fetch_room_ends_with_input_bar() {
-        let (rt, server) = start_mock_server();
-        mount(&rt, &server, Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(
-                serde_json::json!({ "chunk": [] }),
-            )));
-        let mut p = provider_for(&server);
-        p.room_cache.push(RoomEntry {
-            display_name: "General".to_owned(),
-            room_id: "!abc:x".to_owned(),
-        });
+        let mut p = ChatClientProvider::new().with_sync_disabled();
+        p.homeserver = "https://matrix.org".to_owned();
+        p.access_token = "tok".to_owned();
+        seed_room(&mut p, "!abc:x", "General");
         p.push_path("General");
         let items = p.fetch();
         let last = items.last().unwrap();
         assert!(last.as_str().map_or(false, |s| s.contains("<input>")));
-        drop(rt);
     }
 
     #[test]
@@ -959,10 +997,7 @@ mod tests {
                 serde_json::json!({ "event_id": "$abc" }),
             )));
         let mut p = provider_for(&server);
-        p.room_cache.push(RoomEntry {
-            display_name: "General".to_owned(),
-            room_id: "!abc:x".to_owned(),
-        });
+        seed_room(&mut p, "!abc:x", "General");
         let ok = p.send_message("General", "Hello!");
         assert!(ok);
         drop(rt);
@@ -983,10 +1018,7 @@ mod tests {
                 serde_json::json!({ "event_id": "$xyz" }),
             )));
         let mut p = provider_for(&server);
-        p.room_cache.push(RoomEntry {
-            display_name: "General".to_owned(),
-            room_id: "!abc:x".to_owned(),
-        });
+        seed_room(&mut p, "!abc:x", "General");
         p.push_path("General");
         let ok = p.commit_edit("", "test message");
         assert!(ok);
@@ -1044,7 +1076,8 @@ mod tests {
             )));
         let dir = tempfile::tempdir().unwrap();
         let mut p = ChatClientProvider::new()
-            .with_config_path(dir.path().join("settings.json"));
+            .with_config_path(dir.path().join("settings.json"))
+            .with_sync_disabled();
         p.homeserver = server.uri();
         p.username = "alice".to_owned();
         p.password = "pass".to_owned();
@@ -1083,7 +1116,8 @@ mod tests {
             )));
         let dir = tempfile::tempdir().unwrap();
         let mut p = ChatClientProvider::new()
-            .with_config_path(dir.path().join("settings.json"));
+            .with_config_path(dir.path().join("settings.json"))
+            .with_sync_disabled();
         p.homeserver = server.uri();
         p.username = "newuser".to_owned();
         p.password = "pass123".to_owned();
@@ -1153,7 +1187,8 @@ mod tests {
             )));
         let dir = tempfile::tempdir().unwrap();
         let mut p = ChatClientProvider::new()
-            .with_config_path(dir.path().join("settings.json"));
+            .with_config_path(dir.path().join("settings.json"))
+            .with_sync_disabled();
         p.homeserver = server.uri();
         p.username = "alice".to_owned();
         p.password = "pass".to_owned();
@@ -1207,10 +1242,7 @@ mod tests {
             )));
 
         let mut p = provider_for(&server);
-        p.room_cache.push(RoomEntry {
-            display_name: "Room".to_owned(),
-            room_id: "!x:x".to_owned(),
-        });
+        seed_room(&mut p, "!x:x", "Room");
 
         let before = TXN_COUNTER.load(Ordering::Relaxed);
         let ok1 = p.send_message("Room", "first");
@@ -1275,6 +1307,152 @@ mod tests {
         assert_eq!(result.access_token, "syt_abc");
         assert_eq!(result.user_id, "@user:server");
         assert_eq!(result.device_id, "ABCDEF");
+    }
+
+    // ---- Stage 1: init() loads credentials from settings.json ---------------
+
+    fn write_settings(path: &std::path::Path, json: serde_json::Value) {
+        std::fs::write(path, serde_json::to_string_pretty(&json).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn init_loads_credentials_from_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = dir.path().join("settings.json");
+        write_settings(&cfg, serde_json::json!({
+            "chat client": {
+                "chatHomeserver":  "https://matrix.org",
+                "chatAccessToken": "syt_test_token",
+                "chatUsername":    "alice",
+                "chatPassword":    "secret"
+            }
+        }));
+        let mut p = ChatClientProvider::new().with_config_path(cfg);
+        p.init();
+        assert_eq!(p.homeserver,    "https://matrix.org");
+        assert_eq!(p.access_token,  "syt_test_token");
+        assert_eq!(p.username,      "alice");
+        assert_eq!(p.password,      "secret");
+    }
+
+    #[test]
+    fn init_missing_config_leaves_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = dir.path().join("settings.json"); // file does not exist
+        let mut p = ChatClientProvider::new().with_config_path(cfg);
+        p.init(); // must not panic
+        assert!(p.homeserver.is_empty());
+        assert!(p.access_token.is_empty());
+        // fetch() returns the "configure homeserver" placeholder
+        let items = p.fetch();
+        assert!(items.iter().any(|e| {
+            e.as_str().map_or(false, |s| s.contains("configure homeserver"))
+        }));
+    }
+
+    #[test]
+    fn init_partial_config_only_loads_present_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = dir.path().join("settings.json");
+        write_settings(&cfg, serde_json::json!({
+            "chat client": {
+                "chatHomeserver": "https://matrix.org",
+                "chatUsername":   "bob"
+            }
+        }));
+        let mut p = ChatClientProvider::new().with_config_path(cfg);
+        p.init();
+        assert_eq!(p.homeserver, "https://matrix.org");
+        assert_eq!(p.username,   "bob");
+        assert!(p.access_token.is_empty());
+        assert!(p.password.is_empty());
+    }
+
+    #[test]
+    fn init_then_setting_change_overrides_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = dir.path().join("settings.json");
+        write_settings(&cfg, serde_json::json!({
+            "chat client": { "chatAccessToken": "old_token" }
+        }));
+        let mut p = ChatClientProvider::new().with_config_path(cfg);
+        p.init();
+        assert_eq!(p.access_token, "old_token");
+        p.on_setting_change("chatAccessToken", "live_token");
+        assert_eq!(p.access_token, "live_token");
+    }
+
+    // ---- Stage 2 tests -------------------------------------------------------
+
+    #[test]
+    fn next_batch_loaded_from_settings_json_on_init() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = dir.path().join("settings.json");
+        write_settings(&cfg, serde_json::json!({
+            "chat client": {
+                "chatHomeserver":    "https://matrix.org",
+                "chatAccessToken":   "tok",
+                "chatSyncNextBatch": "s999"
+            }
+        }));
+        let mut p = ChatClientProvider::new()
+            .with_config_path(cfg)
+            .with_sync_disabled();
+        p.init();
+        assert_eq!(p.sync_cache.lock().unwrap().next_batch, "s999");
+    }
+
+    #[test]
+    fn init_starts_sync_when_credentials_present() {
+        let (rt, server) = start_mock_server();
+        mount(&rt, &server, Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({ "next_batch": "s1", "rooms": { "join": {} } }),
+            )));
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = dir.path().join("settings.json");
+        write_settings(&cfg, serde_json::json!({
+            "chat client": {
+                "chatHomeserver":  server.uri(),
+                "chatAccessToken": "tok"
+            }
+        }));
+        let mut p = ChatClientProvider::new().with_config_path(cfg);
+        p.init();
+        assert!(p.sync_controller.is_running(), "sync should be running after init with credentials");
+        p.sync_controller.stop();
+        drop(rt);
+    }
+
+    #[test]
+    fn needs_refresh_and_clear_works() {
+        let mut p = ChatClientProvider::new();
+        assert!(!p.needs_refresh());
+        p.needs_refresh_flag.store(true, Ordering::Relaxed);
+        assert!(p.needs_refresh());
+        p.clear_needs_refresh();
+        assert!(!p.needs_refresh());
+    }
+
+    #[test]
+    fn on_setting_change_homeserver_clears_cache() {
+        let mut p = ChatClientProvider::new().with_sync_disabled();
+        seed_room(&mut p, "!abc:x", "General");
+        assert!(!p.sync_cache.lock().unwrap().rooms.is_empty());
+        p.on_setting_change("chatHomeserver", "https://new.example.com");
+        assert!(p.sync_cache.lock().unwrap().rooms.is_empty(), "cache should clear on homeserver change");
+    }
+
+    #[test]
+    fn fetch_root_shows_loading_when_no_sync_token() {
+        let mut p = ChatClientProvider::new().with_sync_disabled();
+        p.homeserver = "https://matrix.org".to_owned();
+        p.access_token = "tok".to_owned();
+        // next_batch is empty → sync has not yet completed
+        let items = p.fetch();
+        assert!(items.iter().any(|e| {
+            e.as_str().map_or(false, |s| s.contains("Loading"))
+        }));
     }
 }
 
