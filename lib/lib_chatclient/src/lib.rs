@@ -128,8 +128,10 @@ fn parse_auth_response(resp: serde_json::Value) -> AuthResult {
 #[derive(Debug)]
 enum PendingAction {
     JoinRoom,
-    CreateRoom { encrypted: bool, is_space: bool },
+    CreateRoom { encrypted: bool, is_space: bool, is_public: bool },
     CreateDm,
+    SearchPublicRooms,
+    InviteUser { room_id: String },
     KickMember { room_id: String, member_id: String },
     BanMember { room_id: String, member_id: String },
     UnbanMember { room_id: String, member_id: String },
@@ -192,7 +194,7 @@ impl ChatClientProvider {
             register_3pid_client_secret: String::new(),
             register_error: None,
             last_error: None,
-            register_mode: true,
+            register_mode: false,
             pending_action: None,
             public_rooms_cache: Vec::new(),
         }
@@ -296,14 +298,12 @@ impl ChatClientProvider {
     // ---- Fetch helpers ------------------------------------------------------
 
     fn fetch_joined_rooms(&self) -> Vec<FfonElement> {
-        if self.register_mode && self.access_token.is_empty() {
-            return self.build_register_form();
-        }
-        if self.homeserver.is_empty() || self.access_token.is_empty() {
-            return vec![FfonElement::new_str(
-                "configure homeserver URL, username and password in settings, then run login command"
-                    .to_owned(),
-            )];
+        if self.access_token.is_empty() {
+            return if self.register_mode {
+                self.build_register_form()
+            } else {
+                self.build_login_form()
+            };
         }
         let cache = self.sync_cache.lock().unwrap();
         let has_rooms = !cache.rooms.is_empty();
@@ -482,6 +482,36 @@ impl ChatClientProvider {
                     .to_owned(),
             ));
         }
+        items.push(FfonElement::new_str(
+            "Run :login to sign into an existing account".to_owned(),
+        ));
+        items
+    }
+
+    fn build_login_form(&self) -> Vec<FfonElement> {
+        let homeserver =
+            if self.homeserver.is_empty() { "https://matrix.org" } else { &self.homeserver };
+        let mut items = Vec::new();
+        if let Some(err) = &self.last_error {
+            items.push(FfonElement::new_str(format!("Error: {err}")));
+        }
+        items.push(FfonElement::new_str(format!(
+            "Homeserver: <input>{homeserver}</input>"
+        )));
+        items.push(FfonElement::new_str(format!(
+            "Username: <input>{}</input>",
+            self.username
+        )));
+        items.push(FfonElement::new_str(format!(
+            "Password: <input>{}</input>",
+            self.password
+        )));
+        items.push(FfonElement::new_str(
+            "<button>login</button>Sign in".to_owned(),
+        ));
+        items.push(FfonElement::new_str(
+            "Run :register to create a new account".to_owned(),
+        ));
         items
     }
 
@@ -540,6 +570,7 @@ impl ChatClientProvider {
             self.maybe_start_sync();
         } else if result.requires_auth && !result.session.is_empty() {
             self.uia_session = result.session.clone();
+            self.register_mode = true;
             let stage_hint = if result.next_stage.is_empty() {
                 "authentication required in browser".to_owned()
             } else {
@@ -670,12 +701,14 @@ impl ChatClientProvider {
         name: &str,
         encrypted: bool,
         is_space: bool,
+        is_public: bool,
     ) -> Result<String, String> {
         let client = self.client().map_err(|e| e.to_string())?;
         let url = self.api("/_matrix/client/v3/createRoom");
+        let preset = if is_public { "public_chat" } else { "private_chat" };
         let mut body = serde_json::json!({
             "name": name,
-            "preset": "private_chat",
+            "preset": preset,
         });
         if is_space {
             body["creation_content"] = serde_json::json!({ "type": "m.space" });
@@ -697,6 +730,34 @@ impl ChatClientProvider {
             let b: serde_json::Value = resp.json().map_err(|e| e.to_string())?;
             let room_id =
                 b.get("room_id").and_then(|v| v.as_str()).unwrap_or("").to_owned();
+            // Publish to the room directory so it's discoverable.
+            if is_public && !room_id.is_empty() {
+                let encoded = encode_room_id(&room_id);
+                let dir_url = self.api(&format!(
+                    "/_matrix/client/v3/directory/list/room/{encoded}"
+                ));
+                match client
+                    .put(&dir_url)
+                    .header("Authorization", self.auth_header())
+                    .json(&serde_json::json!({ "visibility": "public" }))
+                    .send()
+                {
+                    Ok(r) if r.status().is_success() => {}
+                    Ok(r) => {
+                        let b: serde_json::Value = r.json().unwrap_or_default();
+                        let err =
+                            b.get("error").and_then(|v| v.as_str()).unwrap_or("unknown error");
+                        return Err(format!(
+                            "room created ({room_id}) but failed to publish to directory: {err}"
+                        ));
+                    }
+                    Err(e) => {
+                        return Err(format!(
+                            "room created ({room_id}) but failed to publish to directory: {e}"
+                        ));
+                    }
+                }
+            }
             Ok(room_id)
         } else {
             let b: serde_json::Value = resp.json().unwrap_or_default();
@@ -776,6 +837,24 @@ impl ChatClientProvider {
         }
     }
 
+    fn do_invite_user(&self, room_id: &str, user_id: &str) -> Result<(), String> {
+        let client = self.client().map_err(|e| e.to_string())?;
+        let encoded = encode_room_id(room_id);
+        let url = self.api(&format!("/_matrix/client/v3/rooms/{encoded}/invite"));
+        let resp = client
+            .post(&url)
+            .header("Authorization", self.auth_header())
+            .json(&serde_json::json!({ "user_id": user_id.trim() }))
+            .send()
+            .map_err(|e| e.to_string())?;
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            let b: serde_json::Value = resp.json().unwrap_or_default();
+            Err(b.get("error").and_then(|v| v.as_str()).unwrap_or("invite failed").to_owned())
+        }
+    }
+
     fn do_unban_member(&self, room_id: &str, member_id: &str) -> Result<(), String> {
         let client = self.client().map_err(|e| e.to_string())?;
         let encoded = encode_room_id(room_id);
@@ -795,10 +874,14 @@ impl ChatClientProvider {
         }
     }
 
-    fn do_public_rooms(&self) -> Result<Vec<String>, String> {
+    fn do_public_rooms(&self, search: &str) -> Result<Vec<String>, String> {
         let client = self.client().map_err(|e| e.to_string())?;
         let url = self.api("/_matrix/client/v3/publicRooms");
-        let body = serde_json::json!({ "limit": 50 });
+        let body = if search.is_empty() {
+            serde_json::json!({ "limit": 50 })
+        } else {
+            serde_json::json!({ "limit": 50, "filter": { "generic_search_term": search } })
+        };
         let resp = client
             .post(&url)
             .header("Authorization", self.auth_header())
@@ -874,23 +957,45 @@ impl ChatClientProvider {
             Err(e) => return AuthResult { error: format!("HTTP client error: {e}"), ..Default::default() },
         };
         let url = self.api("/_matrix/client/v3/register");
-        let payload = serde_json::json!({
-            "auth": { "type": "m.login.dummy" },
+
+        // Step 1: probe UIA flows without auth to discover what the server requires.
+        let probe_payload = serde_json::json!({
             "username": self.username,
             "password": self.password,
         });
-        let resp = match client.post(&url).json(&payload).send() {
+        let resp = match client.post(&url).json(&probe_payload).send() {
             Ok(r) => r,
-            Err(e) => {
-                return AuthResult { error: format!("request failed: {e}"), ..Default::default() }
-            }
+            Err(e) => return AuthResult { error: format!("request failed: {e}"), ..Default::default() },
         };
-        match resp.json::<serde_json::Value>() {
-            Ok(body) => parse_auth_response(body),
-            Err(_) => {
-                AuthResult { error: "failed to parse server response".to_owned(), ..Default::default() }
-            }
+        let probe_body: serde_json::Value = match resp.json() {
+            Ok(b) => b,
+            Err(_) => return AuthResult { error: "failed to parse server response".to_owned(), ..Default::default() },
+        };
+        let probe = parse_auth_response(probe_body);
+
+        if probe.success {
+            return probe;
         }
+
+        // Step 2: if the only required stage is m.login.dummy, complete it immediately.
+        if probe.requires_auth && probe.next_stage == "m.login.dummy" {
+            let auth_payload = serde_json::json!({
+                "auth": { "type": "m.login.dummy", "session": probe.session },
+                "username": self.username,
+                "password": self.password,
+            });
+            let resp2 = match client.post(&url).json(&auth_payload).send() {
+                Ok(r) => r,
+                Err(e) => return AuthResult { error: format!("request failed: {e}"), ..Default::default() },
+            };
+            return match resp2.json::<serde_json::Value>() {
+                Ok(b) => parse_auth_response(b),
+                Err(_) => AuthResult { error: "failed to parse server response".to_owned(), ..Default::default() },
+            };
+        }
+
+        // Any other UIA stage (CAPTCHA, email, etc.) or an error: return probe result.
+        probe
     }
 
     fn do_register_complete(&self, session: &str) -> AuthResult {
@@ -930,6 +1035,25 @@ impl ChatClientProvider {
 
     fn on_button_press(&mut self, function_name: &str) {
         match function_name {
+            "login" => {
+                if self.homeserver.is_empty() {
+                    self.homeserver = "https://matrix.org".to_owned();
+                }
+                let result = self.do_login();
+                if result.success {
+                    self.access_token = result.access_token.clone();
+                    self.user_id = result.user_id.clone();
+                    self.register_mode = false;
+                    self.last_error = None;
+                    self.save_access_token(&result.access_token);
+                    self.save_user_id(&result.user_id);
+                    self.save_setting("chatHomeserver", &self.homeserver.clone());
+                    self.save_setting("chatUsername", &self.username.clone());
+                    self.maybe_start_sync();
+                } else {
+                    self.last_error = Some(format!("login failed: {}", result.error));
+                }
+            }
             "register" => {
                 if !self.email.is_empty() {
                     if let Err(e) = self.request_email_token() {
@@ -939,6 +1063,7 @@ impl ChatClientProvider {
                 if self.homeserver.is_empty() {
                     self.homeserver = "https://matrix.org".to_owned();
                 }
+                self.register_mode = true;
                 let result = self.do_register();
                 self.handle_register_result(result);
             }
@@ -998,8 +1123,8 @@ impl ChatClientProvider {
                     false
                 }
             },
-            PendingAction::CreateRoom { encrypted, is_space } => {
-                match self.do_create_room(text, encrypted, is_space) {
+            PendingAction::CreateRoom { encrypted, is_space, is_public } => {
+                match self.do_create_room(text, encrypted, is_space, is_public) {
                     Ok(_) => true,
                     Err(e) => {
                         *error = format!("create room failed: {e}");
@@ -1007,6 +1132,30 @@ impl ChatClientProvider {
                     }
                 }
             }
+            PendingAction::InviteUser { room_id } => {
+                match self.do_invite_user(&room_id, text) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        *error = format!("invite failed: {e}");
+                        false
+                    }
+                }
+            }
+            PendingAction::SearchPublicRooms => match self.do_public_rooms(text) {
+                Ok(lines) => {
+                    let count = lines.len();
+                    self.public_rooms_cache = lines;
+                    self.current_path = "/[public]".to_owned();
+                    if count == 0 {
+                        *error = format!("no public rooms found matching {:?}", text);
+                    }
+                    true
+                }
+                Err(e) => {
+                    *error = format!("search failed: {e}");
+                    false
+                }
+            },
             PendingAction::CreateDm => match self.do_create_dm(text) {
                 Ok(_) => true,
                 Err(e) => {
@@ -1100,7 +1249,8 @@ impl Provider for ChatClientProvider {
         load_str!("chatPassword", self.password);
         load_str!("chatEmail", self.email);
         load_str!("chatUserId", self.user_id);
-        self.register_mode = self.access_token.is_empty();
+        // register_mode stays false (login form) unless the user has no token and
+        // explicitly ran :register — we don't override it from settings.
 
         if let Some(nb) = section.get("chatSyncNextBatch").and_then(|v| v.as_str()) {
             if !nb.is_empty() {
@@ -1189,8 +1339,8 @@ impl Provider for ChatClientProvider {
         let segs = self.current_path_segments();
         let Some(first) = segs.first().cloned() else { return false };
 
-        // Register form field edit (path is the field label, value is the typed text).
-        if self.register_mode && self.access_token.is_empty() {
+        // Form field edit (login or register form) — path segment is the field label.
+        if self.access_token.is_empty() {
             return match first.as_str() {
                 "Homeserver" => {
                     self.homeserver = new_content.to_owned();
@@ -1202,7 +1352,7 @@ impl Provider for ChatClientProvider {
                     self.save_setting("chatUsername", new_content);
                     true
                 }
-                "Email" => {
+                "Email" if self.register_mode => {
                     self.email = new_content.to_owned();
                     self.save_setting("chatEmail", new_content);
                     true
@@ -1235,14 +1385,18 @@ impl Provider for ChatClientProvider {
             "register".to_owned(),
             "complete registration".to_owned(),
             "join room".to_owned(),
-            "create room".to_owned(),
+            "create private room".to_owned(),
+            "create public room".to_owned(),
             "create encrypted room".to_owned(),
             "create space".to_owned(),
             "create dm".to_owned(),
+            "room info".to_owned(),
+            "invite user".to_owned(),
             "leave room".to_owned(),
             "accept invite".to_owned(),
             "reject invite".to_owned(),
             "browse public rooms".to_owned(),
+            "search public rooms".to_owned(),
             "members".to_owned(),
             "kick member".to_owned(),
             "ban member".to_owned(),
@@ -1263,6 +1417,11 @@ impl Provider for ChatClientProvider {
             "refresh" => None,
 
             "login" => {
+                // Switch to login form if currently showing register form.
+                if self.access_token.is_empty() && self.register_mode {
+                    self.register_mode = false;
+                    return None;
+                }
                 if self.homeserver.is_empty()
                     || self.username.is_empty()
                     || self.password.is_empty()
@@ -1285,6 +1444,11 @@ impl Provider for ChatClientProvider {
             }
 
             "register" => {
+                // Switch to register form if currently showing login form.
+                if self.access_token.is_empty() && !self.register_mode {
+                    self.register_mode = true;
+                    return None;
+                }
                 if self.homeserver.is_empty()
                     || self.username.is_empty()
                     || self.password.is_empty()
@@ -1303,6 +1467,7 @@ impl Provider for ChatClientProvider {
                     Some(FfonElement::new_str(format!("registered as {}", result.user_id)))
                 } else if result.requires_auth && !result.session.is_empty() {
                     self.uia_session = result.session.clone();
+                    self.register_mode = true;
                     #[cfg(not(test))]
                     {
                         let fallback_url = format!(
@@ -1366,26 +1531,67 @@ impl Provider for ChatClientProvider {
                 Some(FfonElement::new_str("<input></input>".to_owned()))
             }
 
-            "create room" => {
+            "create private room" => {
                 self.pending_action =
-                    Some(PendingAction::CreateRoom { encrypted: false, is_space: false });
+                    Some(PendingAction::CreateRoom { encrypted: false, is_space: false, is_public: false });
+                Some(FfonElement::new_str("<input></input>".to_owned()))
+            }
+
+            "create public room" => {
+                self.pending_action =
+                    Some(PendingAction::CreateRoom { encrypted: false, is_space: false, is_public: true });
                 Some(FfonElement::new_str("<input></input>".to_owned()))
             }
 
             "create encrypted room" => {
                 self.pending_action =
-                    Some(PendingAction::CreateRoom { encrypted: true, is_space: false });
+                    Some(PendingAction::CreateRoom { encrypted: true, is_space: false, is_public: false });
                 Some(FfonElement::new_str("<input></input>".to_owned()))
             }
 
             "create space" => {
                 self.pending_action =
-                    Some(PendingAction::CreateRoom { encrypted: false, is_space: true });
+                    Some(PendingAction::CreateRoom { encrypted: false, is_space: true, is_public: false });
                 Some(FfonElement::new_str("<input></input>".to_owned()))
             }
 
             "create dm" => {
                 self.pending_action = Some(PendingAction::CreateDm);
+                Some(FfonElement::new_str("<input></input>".to_owned()))
+            }
+
+            "room info" => {
+                let segs = self.current_path_segments();
+                let Some(room_key) = segs.first().cloned() else {
+                    *error = "navigate into a room first".to_owned();
+                    return None;
+                };
+                let cache = self.sync_cache.lock().unwrap();
+                let room_id = cache.display_to_id.get(&room_key).cloned();
+                drop(cache);
+                match room_id {
+                    Some(id) => Some(FfonElement::new_str(format!("room id: {id}"))),
+                    None => {
+                        *error = "room not found".to_owned();
+                        None
+                    }
+                }
+            }
+
+            "invite user" => {
+                let segs = self.current_path_segments();
+                let Some(room_key) = segs.first().cloned() else {
+                    *error = "navigate into a room first".to_owned();
+                    return None;
+                };
+                let room_id = match self.fetch_room_id_for_path_segment(&room_key) {
+                    Some(id) => id,
+                    None => {
+                        *error = "room not found".to_owned();
+                        return None;
+                    }
+                };
+                self.pending_action = Some(PendingAction::InviteUser { room_id });
                 Some(FfonElement::new_str("<input></input>".to_owned()))
             }
 
@@ -1465,7 +1671,12 @@ impl Provider for ChatClientProvider {
                 Some(FfonElement::new_str("rejected invite".to_owned()))
             }
 
-            "browse public rooms" => match self.do_public_rooms() {
+            "search public rooms" => {
+                self.pending_action = Some(PendingAction::SearchPublicRooms);
+                Some(FfonElement::new_str("<input></input>".to_owned()))
+            }
+
+            "browse public rooms" => match self.do_public_rooms("") {
                 Ok(lines) => {
                     let count = lines.len();
                     self.public_rooms_cache = lines;
@@ -1579,29 +1790,7 @@ impl Provider for ChatClientProvider {
     }
 
     fn on_button_press(&mut self, function_name: &str) {
-        match function_name {
-            "register" => {
-                if !self.email.is_empty() {
-                    if let Err(e) = self.request_email_token() {
-                        self.register_error = Some(format!("email token request failed: {e}"));
-                    }
-                }
-                if self.homeserver.is_empty() {
-                    self.homeserver = "https://matrix.org".to_owned();
-                }
-                let result = self.do_register();
-                self.handle_register_result(result);
-            }
-            "complete-registration" => {
-                if self.uia_session.is_empty() {
-                    return;
-                }
-                let session = self.uia_session.clone();
-                let result = self.do_register_complete(&session);
-                self.handle_register_result(result);
-            }
-            _ => {}
-        }
+        self.on_button_press(function_name);
     }
 
     fn take_error(&mut self) -> Option<String> {
@@ -1673,6 +1862,10 @@ impl ChatClientProvider {
 
     pub fn test_clear_register_mode(&mut self) {
         self.register_mode = false;
+    }
+
+    pub fn test_set_register_mode(&mut self) {
+        self.register_mode = true;
     }
 }
 
@@ -1748,11 +1941,11 @@ mod tests {
     // ---- original tests (adapted) ------------------------------------------
 
     #[test]
-    fn test_fetch_root_no_config_shows_register_form() {
+    fn test_fetch_root_no_config_shows_login_form() {
         let mut p = ChatClientProvider::new();
         let items = p.fetch();
         assert!(items.iter().any(|e| {
-            e.as_str().map_or(false, |s| s.contains("<button>register</button>"))
+            e.as_str().map_or(false, |s| s.contains("<button>login</button>"))
         }));
     }
 
@@ -1770,12 +1963,11 @@ mod tests {
     #[test]
     fn test_fetch_root_no_token_after_prior_login_shows_login_prompt() {
         let mut p = ChatClientProvider::new().with_sync_disabled();
-        p.test_clear_register_mode();
         p.homeserver = "https://matrix.org".to_owned();
         p.username = "alice".to_owned();
         let items = p.fetch();
         assert!(items.iter().any(|e| {
-            e.as_str().map_or(false, |s| s.contains("configure homeserver"))
+            e.as_str().map_or(false, |s| s.contains("<button>login</button>"))
         }));
     }
 
@@ -1984,7 +2176,8 @@ mod tests {
         assert!(cmds.contains(&"register".to_owned()));
         assert!(cmds.contains(&"complete registration".to_owned()));
         assert!(cmds.contains(&"join room".to_owned()));
-        assert!(cmds.contains(&"create room".to_owned()));
+        assert!(cmds.contains(&"create private room".to_owned()));
+        assert!(cmds.contains(&"create public room".to_owned()));
         assert!(cmds.contains(&"leave room".to_owned()));
         assert!(cmds.contains(&"accept invite".to_owned()));
         assert!(cmds.contains(&"reject invite".to_owned()));
@@ -2107,8 +2300,20 @@ mod tests {
     }
 
     #[test]
-    fn test_register_without_credentials() {
+    fn test_register_switches_to_register_form() {
         let mut p = ChatClientProvider::new();
+        // Default is login form; :register switches to register form.
+        let mut err = String::new();
+        let result = p.handle_command("register", "", 0, &mut err);
+        assert!(result.is_none());
+        assert!(err.is_empty(), "mode switch should not produce an error, got: {err}");
+        assert!(p.register_mode);
+    }
+
+    #[test]
+    fn test_register_without_credentials_from_register_form() {
+        let mut p = ChatClientProvider::new();
+        p.test_set_register_mode();
         p.homeserver = "http://localhost".to_owned();
         let mut err = String::new();
         let result = p.handle_command("register", "", 0, &mut err);
@@ -2133,6 +2338,7 @@ mod tests {
         let mut p = ChatClientProvider::new()
             .with_config_path(dir.path().join("settings.json"))
             .with_sync_disabled();
+        p.test_set_register_mode();
         p.homeserver = server.uri();
         p.username = "newuser".to_owned();
         p.password = "pass123".to_owned();
@@ -2161,6 +2367,7 @@ mod tests {
                 }))),
         );
         let mut p = ChatClientProvider::new();
+        p.test_set_register_mode();
         p.homeserver = server.uri();
         p.username = "alice".to_owned();
         p.password = "pass".to_owned();
@@ -2348,7 +2555,7 @@ mod tests {
         assert!(p.access_token.is_empty());
         let items = p.fetch();
         assert!(items.iter().any(|e| {
-            e.as_str().map_or(false, |s| s.contains("<button>register</button>"))
+            e.as_str().map_or(false, |s| s.contains("<button>login</button>"))
         }));
     }
 
@@ -2478,6 +2685,7 @@ mod tests {
     #[test]
     fn register_form_renders_four_inputs_and_button() {
         let mut p = ChatClientProvider::new();
+        p.test_set_register_mode();
         let items = p.fetch();
         let inputs =
             items.iter().filter(|e| e.as_str().map_or(false, |s| s.contains("<input>"))).count();
@@ -2490,6 +2698,7 @@ mod tests {
     #[test]
     fn register_form_renders_existing_field_values() {
         let mut p = ChatClientProvider::new();
+        p.test_set_register_mode();
         p.username = "friendlyflow".to_owned();
         p.email = "2friendlyflow@gmail.com".to_owned();
         let items = p.fetch();
@@ -2505,6 +2714,7 @@ mod tests {
     #[test]
     fn register_form_shows_complete_button_when_uia_pending() {
         let mut p = ChatClientProvider::new();
+        p.test_set_register_mode();
         p.uia_session = "sess123".to_owned();
         let items = p.fetch();
         assert!(items.iter().any(|e| {
@@ -2532,6 +2742,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cfg = dir.path().join("settings.json");
         let mut p = ChatClientProvider::new().with_config_path(cfg);
+        p.test_set_register_mode();
         p.push_path("Email");
         let changed = p.commit_edit("", "2friendlyflow@gmail.com");
         p.pop_path();
@@ -2651,7 +2862,7 @@ mod tests {
         p.homeserver = "https://matrix.org".to_owned();
         p.access_token = "tok".to_owned();
         let mut err = String::new();
-        let elem = p.handle_command("create room", "", 0, &mut err);
+        let elem = p.handle_command("create private room", "", 0, &mut err);
         assert!(elem.is_some());
         assert!(p.pending_action.is_some());
     }
@@ -2701,9 +2912,68 @@ mod tests {
         );
         let mut p = provider_for(&server);
         let mut err = String::new();
-        p.handle_command("create room", "", 0, &mut err);
+        p.handle_command("create private room", "", 0, &mut err);
         let ok = p.commit_edit("", "My Room");
         assert!(ok, "create room should succeed");
+        drop(rt);
+    }
+
+    #[test]
+    fn handle_command_invite_user_posts_to_invite_endpoint() {
+        let (rt, server) = start_mock_server();
+        mount(
+            &rt,
+            &server,
+            Mock::given(method("POST"))
+                .and(wiremock::matchers::path_regex("/_matrix/client/v3/rooms/.*/invite"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({}))),
+        );
+        let mut p = provider_for(&server);
+        seed_room(&mut p, "!abc:x", "General");
+        p.push_path("General");
+        let mut err = String::new();
+        p.handle_command("invite user", "", 0, &mut err);
+        assert!(err.is_empty(), "got: {err}");
+        let ok = p.commit_edit("", "@bob:server");
+        assert!(ok, "invite should succeed");
+        drop(rt);
+    }
+
+    #[test]
+    fn handle_command_invite_user_without_room_errors() {
+        let mut p = ChatClientProvider::new().with_sync_disabled();
+        p.access_token = "tok".to_owned();
+        let mut err = String::new();
+        p.handle_command("invite user", "", 0, &mut err);
+        assert!(!err.is_empty());
+    }
+
+    #[test]
+    fn handle_command_create_public_room_posts_with_public_preset() {
+        let (rt, server) = start_mock_server();
+        mount(
+            &rt,
+            &server,
+            Mock::given(method("POST"))
+                .and(wiremock::matchers::path("/_matrix/client/v3/createRoom"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(
+                    serde_json::json!({ "room_id": "!pub:server" }),
+                )),
+        );
+        mount(
+            &rt,
+            &server,
+            Mock::given(method("PUT"))
+                .and(wiremock::matchers::path_regex(
+                    "/_matrix/client/v3/directory/list/room/.*",
+                ))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({}))),
+        );
+        let mut p = provider_for(&server);
+        let mut err = String::new();
+        p.handle_command("create public room", "", 0, &mut err);
+        let ok = p.commit_edit("", "Public Room");
+        assert!(ok, "create public room should succeed");
         drop(rt);
     }
 
