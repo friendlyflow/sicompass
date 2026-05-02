@@ -232,6 +232,13 @@ pub trait Provider: Send + 'static {
     /// in-memory user edits (e.g. script/form-builder providers).
     fn refresh_on_navigate(&self) -> bool { false }
 
+    /// If `true`, `refresh_current_directory` always uses `display_name()` as
+    /// the provider root Obj's key, regardless of the current path depth.
+    /// Default `false` preserves the existing path-segment breadcrumb label
+    /// (filebrowser shows the current directory name). Chat-style providers
+    /// override this to keep a stable identity label ("chat client").
+    fn stable_root_key(&self) -> bool { false }
+
     // ---- Optional: cross-thread refresh signal -----------------------------
 
     fn needs_refresh(&self) -> bool { false }

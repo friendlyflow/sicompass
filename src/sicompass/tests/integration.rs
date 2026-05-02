@@ -4795,3 +4795,64 @@ fn webbrowser_form_commit_returns_false_and_patches_cache() {
     assert!(!field.contains("<id>"), "form field must not have spurious <id> prefix: {field}");
     assert!(map.contains_key("form_1/Query"), "form_map must contain field key");
 }
+
+// ---------------------------------------------------------------------------
+// Chat client: navigate_right eagerly loads room messages (no F5 needed)
+// ---------------------------------------------------------------------------
+
+/// Right-arrow into a Matrix room must populate its messages without requiring
+/// an explicit F5 refresh. The root Obj key must stay "chat client" throughout.
+#[test]
+fn chat_navigate_right_loads_room_without_f5() {
+    let mut chat = sicompass_chatclient::ChatClientProvider::new()
+        .with_sync_disabled();
+    chat.test_set_credentials("https://matrix.org", "test_token");
+    chat.test_seed_room("!abc:matrix.org", "Matrix.org");
+
+    let mut renderer = AppRenderer::new();
+    let display_name = chat.display_name().to_owned();
+    let children = chat.fetch();
+    let mut root = FfonElement::new_obj(&display_name);
+    for child in children {
+        root.as_obj_mut().unwrap().push(child);
+    }
+    renderer.ffon.push(root);
+    renderer.providers.push(Box::new(chat));
+
+    renderer.current_id = {
+        let mut id = sicompass_sdk::ffon::IdArray::new();
+        id.push(0);
+        id
+    };
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    // Enter provider root (depth 1 → depth 2: cursor on "Matrix.org" room).
+    press_right(&mut renderer);
+    assert_eq!(renderer.current_id.depth(), 2, "should be at room list");
+    assert_eq!(
+        renderer.ffon[0].as_obj().unwrap().key, "chat client",
+        "root key must be 'chat client' at room list"
+    );
+
+    // Enter the room — refresh_on_navigate=true triggers fetch() without F5.
+    press_right(&mut renderer);
+    assert_eq!(renderer.current_id.depth(), 2, "cursor should be at depth 2 inside room");
+
+    let children = &renderer.ffon[0].as_obj().unwrap().children;
+    let has_input = children.iter().any(|e| e.as_str().map_or(false, |s| s.contains("<input>")));
+    assert!(has_input, "room must have <input> child after right-arrow (no F5); children: {children:?}");
+    assert_eq!(
+        renderer.ffon[0].as_obj().unwrap().key, "chat client",
+        "root key must stay 'chat client' inside room"
+    );
+
+    // Navigate left — back to rooms list; root key must still be "chat client".
+    press_left(&mut renderer);
+    assert_eq!(
+        renderer.ffon[0].as_obj().unwrap().key, "chat client",
+        "root key must stay 'chat client' after navigating back to room list"
+    );
+    let children = &renderer.ffon[0].as_obj().unwrap().children;
+    let has_room = children.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "Matrix.org"));
+    assert!(has_room, "rooms list must reappear after left; children: {children:?}");
+}

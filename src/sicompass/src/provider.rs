@@ -83,7 +83,9 @@ pub fn refresh_current_directory(renderer: &mut AppRenderer) {
         renderer.error_message = err;
     }
     let cur_path = renderer.providers[idx].current_path().to_owned();
-    let root_key = if cur_path == "/" {
+    let root_key = if renderer.providers[idx].stable_root_key() {
+        renderer.providers[idx].display_name().to_owned()
+    } else if cur_path == "/" {
         renderer.providers[idx].display_name().to_owned()
     } else {
         std::path::Path::new(&cur_path)
