@@ -205,11 +205,16 @@ pub fn main_loop(app: &mut AppState) {
         // ---- Drain needs_refresh signals (e.g. async folder load, IMAP IDLE) -
         // Only act on the *active* provider's flag so we don't clear another
         // provider's pending signal before the user has navigated there.
-        let active_refresh = app.renderer.current_id.get(0)
+        // Skip while the user is in insert mode — the caret must not jump mid-typing.
+        let in_insert = is_insert_mode(app.renderer.coordinate);
+        let active_refresh = !in_insert && app.renderer.current_id.get(0)
             .and_then(|i| app.renderer.providers.get(i))
             .map(|p| p.needs_refresh())
             .unwrap_or(false);
         if active_refresh {
+            // Save the current list-item label so we can restore the cursor after rebuild.
+            let saved_label = app.renderer.current_list_item().map(|it| it.label.clone());
+
             // Clear flag before rebuild so a signal that arrives *during*
             // rebuild (e.g. IDLE push arriving mid-frame) is preserved.
             if let Some(i) = app.renderer.current_id.get(0) {
@@ -225,7 +230,20 @@ pub fn main_loop(app: &mut AppState) {
             }
             crate::provider::refresh_current_directory(&mut app.renderer);
             crate::list::create_list_current_layer(&mut app.renderer);
-            app.renderer.list_index = app.renderer.current_id.last().unwrap_or(0);
+
+            // Restore cursor to the same labelled item when possible.
+            if let Some(label) = saved_label {
+                if let Some(pos) = app.renderer.total_list.iter().position(|it| it.label == label) {
+                    if let Some(id) = app.renderer.total_list.get(pos).map(|it| it.id.clone()) {
+                        app.renderer.current_id = id;
+                        app.renderer.list_index = pos;
+                    }
+                } else {
+                    app.renderer.list_index = app.renderer.current_id.last().unwrap_or(0);
+                }
+            } else {
+                app.renderer.list_index = app.renderer.current_id.last().unwrap_or(0);
+            }
             app.renderer.needs_redraw = true;
         }
 
