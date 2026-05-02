@@ -579,6 +579,8 @@ impl Default for ChatClientProvider {
 impl Provider for ChatClientProvider {
     fn name(&self) -> &str { "chatclient" }
     fn display_name(&self) -> &str { "chat client" }
+    fn refresh_on_navigate(&self) -> bool { true }
+    fn stable_root_key(&self) -> bool { true }
 
     fn init(&mut self) {
         use serde_json::Value;
