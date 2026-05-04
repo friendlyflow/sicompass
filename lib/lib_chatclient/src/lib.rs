@@ -1211,7 +1211,7 @@ impl Provider for ChatClientProvider {
         true
     }
     fn stable_root_key(&self) -> bool {
-        true
+        false
     }
 
     fn init(&mut self) {

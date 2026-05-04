@@ -4801,7 +4801,8 @@ fn webbrowser_form_commit_returns_false_and_patches_cache() {
 // ---------------------------------------------------------------------------
 
 /// Right-arrow into a Matrix room must populate its messages without requiring
-/// an explicit F5 refresh. The root Obj key must stay "chat client" throughout.
+/// an explicit F5 refresh. The root Obj key becomes the room name inside the
+/// room so the parent label in the UI shows the room name.
 #[test]
 fn chat_navigate_right_loads_room_without_f5() {
     let mut chat = sicompass_chatclient::ChatClientProvider::new()
@@ -4842,17 +4843,71 @@ fn chat_navigate_right_loads_room_without_f5() {
     let has_input = children.iter().any(|e| e.as_str().map_or(false, |s| s.contains("<input>")));
     assert!(has_input, "room must have <input> child after right-arrow (no F5); children: {children:?}");
     assert_eq!(
-        renderer.ffon[0].as_obj().unwrap().key, "chat client",
-        "root key must stay 'chat client' inside room"
+        renderer.ffon[0].as_obj().unwrap().key, "Matrix.org",
+        "root key must be the room name inside room (shown as parent label)"
     );
 
-    // Navigate left — back to rooms list; root key must still be "chat client".
+    // Navigate left — back to rooms list; root key reverts to display_name.
     press_left(&mut renderer);
     assert_eq!(
         renderer.ffon[0].as_obj().unwrap().key, "chat client",
-        "root key must stay 'chat client' after navigating back to room list"
+        "root key must revert to 'chat client' after navigating back to room list"
     );
     let children = &renderer.ffon[0].as_obj().unwrap().children;
     let has_room = children.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "Matrix.org"));
     assert!(has_room, "rooms list must reappear after left; children: {children:?}");
+}
+
+/// Pressing Enter on a bare `<input></input>` element (empty old content) must
+/// route through `commit_edit`, not skip it in favour of a plain FFON update.
+/// Verified by a provider that records what was committed and returns `true`.
+#[test]
+fn empty_input_enter_calls_commit_edit() {
+    use std::sync::{Arc, Mutex};
+
+    let captured: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+
+    struct CommitCapture {
+        path: String,
+        captured: Arc<Mutex<Option<String>>>,
+    }
+    impl Provider for CommitCapture {
+        fn name(&self) -> &str { "capture" }
+        fn fetch(&mut self) -> Vec<FfonElement> {
+            vec![FfonElement::new_str("<input></input>".to_owned())]
+        }
+        fn commit_edit(&mut self, _old: &str, new_content: &str) -> bool {
+            *self.captured.lock().unwrap() = Some(new_content.to_owned());
+            true
+        }
+        fn push_path(&mut self, seg: &str) { self.path = format!("/{seg}"); }
+        fn pop_path(&mut self) { self.path = "/".to_owned(); }
+        fn current_path(&self) -> &str { &self.path }
+        fn set_current_path(&mut self, p: &str) { self.path = p.to_owned(); }
+    }
+
+    let mut renderer = AppRenderer::new();
+    let mut root = FfonElement::new_obj("capture");
+    root.as_obj_mut().unwrap().push(FfonElement::new_str("<input></input>".to_owned()));
+    renderer.ffon.push(root);
+    renderer.providers.push(Box::new(CommitCapture {
+        path: "/".to_owned(),
+        captured: Arc::clone(&captured),
+    }));
+    renderer.current_id = {
+        let mut id = sicompass_sdk::ffon::IdArray::new();
+        id.push(0);
+        id.push(0); // first child: the <input></input> element
+        id
+    };
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    // Enter insert mode on the <input> element, type "hello", press Enter.
+    press(&mut renderer, Keycode::I);
+    type_text(&mut renderer, "hello");
+    press_enter(&mut renderer);
+
+    let committed = captured.lock().unwrap().clone();
+    assert_eq!(committed.as_deref(), Some("hello"),
+        "commit_edit must be called with the typed content for empty <input></input>");
 }
