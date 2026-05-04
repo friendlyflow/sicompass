@@ -1857,7 +1857,25 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
             r.needs_redraw = true;
             return;
         } else if r.error_message.is_empty() {
-            // Provider has no createFile: update FFON element key directly
+            // Provider has no createFile: try commit_edit first (e.g. chat client sending a
+            // message via an empty <input></input> field), then fall back to FFON-only update.
+            let committed = crate::provider::commit_edit(r, &old_content, &new_content);
+            if committed {
+                if !crate::provider::refresh_subtree_parent(r) {
+                    crate::provider::refresh_current_directory(r);
+                }
+                navigate_right_raw(r);
+                handle_escape(r);
+                r.input_buffer.clear();
+                r.cursor_position = 0;
+                let saved_error = r.error_message.clone();
+                list::create_list_current_layer(r);
+                if !saved_error.is_empty() { r.error_message = saved_error; }
+                r.list_index = r.current_id.last().unwrap_or(0);
+                r.scroll_offset = 0;
+                return;
+            }
+            // No provider handled it: update FFON element key directly.
             let new_key = tags::format_input(&new_content);
             let idx = r.current_id.last().unwrap_or(0);
             if let Some(arr) = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id) {
