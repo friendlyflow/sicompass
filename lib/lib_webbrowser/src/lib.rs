@@ -24,7 +24,7 @@ use chromiumoxide::cdp::browser_protocol::page::AddScriptToEvaluateOnNewDocument
 use futures::StreamExt as _;
 use sicompass_sdk::ffon::{FfonElement, FormMap, FormNodeKind};
 use sicompass_sdk::provider::Provider;
-use sicompass_sdk::ffon::{html_to_ffon, html_to_ffon_with_forms};
+use sicompass_sdk::ffon::{html_to_ffon, html_to_ffon_with_forms, html_submit_selector};
 #[cfg(test)] use sicompass_sdk::ffon::html_resolve_href;
 use std::sync::{Arc, Mutex};
 
@@ -243,7 +243,7 @@ impl Provider for WebbrowserProvider {
                     && matches!(node.kind, FormNodeKind::Submit)
             })
             .map(|(_, node)| node.css_selector.clone())
-            .unwrap_or_else(|| format!("form:nth-of-type({form_n}) [type=\"submit\"]"));
+            .unwrap_or_else(|| html_submit_selector(form_n, "", ""));
 
         let Some(live) = &self.live else { return; };
         let page = live.page.clone();
@@ -332,10 +332,16 @@ impl Provider for WebbrowserProvider {
 /// Extract the form-relative path key from a full provider path.
 ///
 /// The provider path looks like `"/https://example.com/form_1/email"`.
-/// We find the first `/form_` segment and return everything from there
-/// (minus the leading slash): `"form_1/email"`.
+/// We find the first segment that starts with `form_` followed by a digit
+/// and return everything from there: `"form_1/email"`.
 fn extract_form_key(path: &str) -> Option<String> {
-    path.find("/form_").map(|pos| path[pos + 1..].to_owned())
+    let trimmed = path.trim_start_matches('/');
+    let segments: Vec<&str> = trimmed.split('/').collect();
+    let start = segments.iter().position(|seg| {
+        seg.starts_with("form_")
+            && seg[5..].chars().next().is_some_and(|c| c.is_ascii_digit())
+    })?;
+    Some(segments[start..].join("/"))
 }
 
 /// Wrap a Rust string as a JSON string literal for inline JS use.
@@ -1386,9 +1392,6 @@ async fn await_stable_url(page: &chromiumoxide::Page, budget: tokio::time::Durat
     }
 }
 
-// html_to_ffon and resolve_href live in sicompass-html (re-exported above).
-
-
 // ---------------------------------------------------------------------------
 // Tests — port of tests/lib_webbrowser/test_webbrowser.c (16 tests)
 // ---------------------------------------------------------------------------
@@ -1483,16 +1486,25 @@ mod tests {
     }
 
     #[test]
-    fn test_nav_skipped() {
+    fn test_nav_renders_children() {
         let result = html_to_ffon(
             "<html><body><nav><a href='/'>Home</a></nav><p>content</p></body></html>",
             "https://example.com",
         );
-        for e in &result {
-            if let Some(s) = e.as_str() {
-                assert!(!s.contains("Home") || s.contains("content"));
-            }
-        }
+        let found = result.iter().any(|e| {
+            e.as_obj().map_or(false, |o| o.key.contains("<link>") && o.key.contains("Home"))
+        });
+        assert!(found, "nav link should be rendered as an Obj with <link> tag, got: {result:?}");
+    }
+
+    #[test]
+    fn test_footer_renders_children() {
+        let result = html_to_ffon(
+            "<html><body><footer><p>Copyright</p></footer></body></html>",
+            "https://example.com",
+        );
+        let found = result.iter().any(|e| e.as_str().map_or(false, |s| s.contains("Copyright")));
+        assert!(found, "footer children should be rendered, got: {result:?}");
     }
 
     #[test]
