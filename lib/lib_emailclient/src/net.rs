@@ -264,8 +264,8 @@ impl ImapBackend for RealImap {
             Err(_) => {
                 // Fallback: COPY then mark \Deleted and expunge.
                 session.uid_copy(&uid_str, dest).map_err(|e| e.to_string())?;
-                let _ = session.uid_store(&uid_str, "+FLAGS (\\Deleted)");
-                let _ = session.uid_expunge(&uid_str);
+                session.uid_store(&uid_str, "+FLAGS (\\Deleted)").map_err(|e| e.to_string())?;
+                session.uid_expunge(&uid_str).map_err(|e| e.to_string())?;
                 Ok(())
             }
         }
@@ -313,14 +313,19 @@ fn parse_smtp_url(url: &str) -> Option<(String, u16)> {
 }
 
 impl SmtpBackend for RealSmtp {
-    fn send(&mut self, from: &str, to: &str, subject: &str, body: &MailBody) -> Result<(), String> {
+    fn send(&mut self, from: &str, to: &[&str], subject: &str, body: &MailBody) -> Result<(), String> {
         let (host, port) = parse_smtp_url(&self.config.smtp_url)
             .ok_or_else(|| format!("cannot parse SMTP URL: {}", self.config.smtp_url))?;
 
-        let builder = Message::builder()
-            .from(from.parse().map_err(|e: lettre::address::AddressError| e.to_string())?)
-            .to(to.parse().map_err(|e: lettre::address::AddressError| e.to_string())?)
-            .subject(subject);
+        if to.is_empty() {
+            return Err("no recipients".to_owned());
+        }
+        let mut builder = Message::builder()
+            .from(from.parse().map_err(|e: lettre::address::AddressError| e.to_string())?);
+        for addr in to {
+            builder = builder.to(addr.parse().map_err(|e: lettre::address::AddressError| e.to_string())?);
+        }
+        let builder = builder.subject(subject);
 
         let email = match body {
             MailBody::Text(s) => builder
