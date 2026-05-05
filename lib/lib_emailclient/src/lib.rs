@@ -246,7 +246,7 @@ pub trait ImapBackend: Send {
 
 /// SMTP backend — send an email message.
 pub trait SmtpBackend: Send {
-    fn send(&mut self, from: &str, to: &str, subject: &str, body: &MailBody) -> Result<(), String>;
+    fn send(&mut self, from: &str, to: &[&str], subject: &str, body: &MailBody) -> Result<(), String>;
 }
 
 // ---------------------------------------------------------------------------
@@ -1010,12 +1010,16 @@ impl EmailClientProvider {
         // re-renders without the ● prefix on the next envelope fetch.
         if let Some(h) = self.message_cache.iter_mut().find(|h| h.uid == uid) {
             if !h.seen {
-                if let Some(ref mut imap) = self.imap {
-                    let _ = imap.set_flags(&real_folder, uid, &["\\Seen"], &[]);
+                let marked = if let Some(ref mut imap) = self.imap {
+                    imap.set_flags(&real_folder, uid, &["\\Seen"], &[]).is_ok()
+                } else {
+                    false
+                };
+                if marked {
+                    h.seen = true;
+                    // Invalidate envelope cache so the list re-renders without ●.
+                    self.envelope_cache = None;
                 }
-                h.seen = true;
-                // Invalidate envelope cache so the list re-renders without ●.
-                self.envelope_cache = None;
             }
         }
 
@@ -1037,6 +1041,15 @@ impl EmailClientProvider {
 
         let folder = self.history_folder.clone();
         let refs = self.history_refs.clone();
+        // Search order: \All (Gmail / archive) first because it contains every
+        // message; fall back to the folder the current message lives in.
+        let mut search_folders: Vec<String> = vec![];
+        if let Some(ref all) = self.special_folders.archive {
+            search_folders.push(all.clone());
+        }
+        if !search_folders.contains(&folder) {
+            search_folders.push(folder);
+        }
 
         let mut items = vec![];
         let mut count = 0;
@@ -1056,11 +1069,14 @@ impl EmailClientProvider {
             let msg_id = &p[..=end];
             p = &p[end + 1..];
 
-            if let Some(ref mut imap) = self.imap {
-                if let Ok(Some(msg)) = imap.fetch_message_by_message_id(&folder, msg_id) {
-                    let key = format!("From: {} — Subject: {}", msg.from, msg.subject);
-                    items.push(FfonElement::new_obj(key));
-                    count += 1;
+            'search: for search_folder in &search_folders {
+                if let Some(ref mut imap) = self.imap {
+                    if let Ok(Some(msg)) = imap.fetch_message_by_message_id(search_folder, msg_id) {
+                        let key = format!("From: {} — Subject: {}", msg.from, msg.subject);
+                        items.push(FfonElement::new_obj(key));
+                        count += 1;
+                        break 'search;
+                    }
                 }
             }
         }
@@ -1134,16 +1150,21 @@ impl EmailClientProvider {
         }
     }
 
-    fn send_draft(&mut self) -> bool {
+    fn send_draft(&mut self) -> Result<(), String> {
         self.ensure_fresh_token();
         if let Some(ref mut smtp) = self.smtp {
             let from = self.config.username.clone();
-            let to = self.compose.draft.to.clone();
+            let to_addrs: Vec<String> = self.compose.draft.to
+                .split(',')
+                .map(|s| s.trim().to_owned())
+                .filter(|s| !s.is_empty())
+                .collect();
+            let to_refs: Vec<&str> = to_addrs.iter().map(|s| s.as_str()).collect();
             let subject = self.compose.draft.subject.clone();
             let body = normalize_body_for_send(&self.compose.draft.body);
-            smtp.send(&from, &to, &subject, &body).is_ok()
+            smtp.send(&from, &to_refs, &subject, &body)
         } else {
-            false
+            Err("no SMTP backend".to_owned())
         }
     }
 
@@ -1271,6 +1292,16 @@ impl EmailClientProvider {
 // Compose pre-fill helper
 // ---------------------------------------------------------------------------
 
+/// Extract the bare email address from a formatted address string.
+/// `"Alice <alice@example.com>"` → `"alice@example.com"`.
+/// Plain `"alice@example.com"` → `"alice@example.com"`.
+fn extract_email_addr(s: &str) -> &str {
+    if let (Some(lt), Some(gt)) = (s.find('<'), s.rfind('>')) {
+        if lt < gt { return s[lt + 1..gt].trim(); }
+    }
+    s.trim()
+}
+
 fn prefill_compose(compose: &mut ComposeState, msg: &EmailMessage, mode: ComposeMode, username: &str) {
     match mode {
         ComposeMode::Reply | ComposeMode::ReplyAll => {
@@ -1280,7 +1311,7 @@ fn prefill_compose(compose: &mut ComposeState, msg: &EmailMessage, mode: Compose
                 let mut recipients = vec![msg.from.clone()];
                 for tok in msg.to.split(',') {
                     let t = tok.trim();
-                    if !t.is_empty() && !t.contains(username) {
+                    if !t.is_empty() && !extract_email_addr(t).eq_ignore_ascii_case(username) {
                         recipients.push(t.to_owned());
                     }
                 }
@@ -1969,9 +2000,15 @@ impl Provider for EmailClientProvider {
     fn on_button_press(&mut self, function_name: &str) {
         match function_name {
             "send" => {
-                self.send_draft();
-                self.compose = ComposeState::default();
-                self.compose_sent = true;
+                match self.send_draft() {
+                    Ok(()) => {
+                        self.compose = ComposeState::default();
+                        self.compose_sent = true;
+                    }
+                    Err(e) => {
+                        self.error_message = Some(format!("send failed: {e}"));
+                    }
+                }
             }
             "login" => {
                 if let Err(e) = self.do_login() {
@@ -2445,7 +2482,12 @@ mod tests {
         messages: Vec<MessageHeader>,
         detail: Option<EmailMessage>,
         by_msg_id: Option<EmailMessage>,
+        /// When set, `fetch_message_by_message_id` returns `None` for any folder
+        /// other than this one, simulating a cross-folder search scenario.
+        by_msg_id_folder: Option<String>,
         error: Option<String>,
+        /// Independent error returned only by `set_flags` (other ops succeed).
+        set_flags_error: Option<String>,
         list_folders_calls: usize,
         list_messages_calls: usize,
         fetch_by_msg_id_calls: usize,
@@ -2462,7 +2504,9 @@ mod tests {
                 messages: vec![],
                 detail: None,
                 by_msg_id: None,
+                by_msg_id_folder: None,
                 error: None,
+                set_flags_error: None,
                 list_folders_calls: 0,
                 list_messages_calls: 0,
                 fetch_by_msg_id_calls: 0,
@@ -2470,6 +2514,15 @@ mod tests {
                 moved: vec![],
                 expunged: vec![],
             }
+        }
+        fn with_by_msg_id_only_in_folder(mut self, folder: &str, msg: EmailMessage) -> Self {
+            self.by_msg_id = Some(msg);
+            self.by_msg_id_folder = Some(folder.to_owned());
+            self
+        }
+        fn with_set_flags_error(mut self, e: &str) -> Self {
+            self.set_flags_error = Some(e.to_owned());
+            self
         }
         fn with_folders(mut self, folders: &[&str]) -> Self {
             self.folders = folders
@@ -2515,13 +2568,17 @@ mod tests {
             if let Some(ref e) = self.error { return Err(e.clone()); }
             Ok(self.detail.clone())
         }
-        fn fetch_message_by_message_id(&mut self, _folder: &str, _msg_id: &str) -> Result<Option<EmailMessage>, String> {
+        fn fetch_message_by_message_id(&mut self, folder: &str, _msg_id: &str) -> Result<Option<EmailMessage>, String> {
             self.fetch_by_msg_id_calls += 1;
             if let Some(ref e) = self.error { return Err(e.clone()); }
+            if let Some(ref req) = self.by_msg_id_folder {
+                if folder != req { return Ok(None); }
+            }
             Ok(self.by_msg_id.clone())
         }
         fn set_flags(&mut self, folder: &str, uid: u32, add: &[&str], remove: &[&str]) -> Result<(), String> {
             if let Some(ref e) = self.error { return Err(e.clone()); }
+            if let Some(ref e) = self.set_flags_error { return Err(e.clone()); }
             if !add.is_empty() {
                 self.stored_flags.push((
                     folder.to_owned(),
@@ -2570,10 +2627,10 @@ mod tests {
     }
 
     impl SmtpBackend for MockSmtp {
-        fn send(&mut self, from: &str, to: &str, subject: &str, body: &MailBody) -> Result<(), String> {
+        fn send(&mut self, from: &str, to: &[&str], subject: &str, body: &MailBody) -> Result<(), String> {
             if self.fail { return Err("SMTP error".to_owned()); }
             self.sent.lock().unwrap().push((
-                from.to_owned(), to.to_owned(), subject.to_owned(), body.clone()
+                from.to_owned(), to.join(", "), subject.to_owned(), body.clone()
             ));
             Ok(())
         }
@@ -2970,6 +3027,46 @@ mod tests {
         assert!(!items.is_empty());
     }
 
+    #[test]
+    fn test_history_finds_message_in_all_folder_when_absent_from_current() {
+        let mut msg = make_message(1);
+        msg.references = "<prev@example.com>".to_owned();
+        let msgs = vec![make_header(1, "alice@example.com", "Hello")];
+        let ref_msg = EmailMessage {
+            uid: 0,
+            from: "old@example.com".to_owned(),
+            to: "bob@example.com".to_owned(),
+            subject: "Previous".to_owned(),
+            date: "2024-12-31".to_owned(),
+            body: MailBody::Text("body".to_owned()),
+            message_id: "<prev@example.com>".to_owned(),
+            in_reply_to: String::new(),
+            references: String::new(),
+        };
+        // Message only exists in "[Gmail]/All Mail", not in INBOX.
+        let imap = MockImap::new()
+            .with_folder_infos(vec![
+                FolderInfo { name: "INBOX".to_owned(), attributes: vec![] },
+                FolderInfo { name: "[Gmail]/All Mail".to_owned(), attributes: vec!["\\All".to_owned()] },
+            ])
+            .with_messages(msgs)
+            .with_detail(msg)
+            .with_by_msg_id_only_in_folder("[Gmail]/All Mail", ref_msg);
+        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        // Fetch at root so build_root populates special_folders.archive from the \All attribute.
+        p.fetch();
+        p.push_path("INBOX");
+        p.fetch();
+        p.push_path("[read] Hello — alice@example.com");
+        p.fetch();
+        p.push_path("History");
+        let items = p.fetch();
+        assert!(
+            items.iter().any(|e| e.as_obj().map_or(false, |o| o.key.contains("Previous"))),
+            "History must find the message via \\All folder; got: {:?}", items
+        );
+    }
+
     // ---- Compose view ----
 
     #[test]
@@ -3100,6 +3197,33 @@ mod tests {
         assert!(p.compose.draft.to.contains("alice@example.com"));
         assert!(p.compose.draft.to.contains("carol@example.com"));
         assert!(!p.compose.draft.to.contains("bob@example.com"));
+    }
+
+    #[test]
+    fn test_reply_all_self_filter_does_not_drop_superset_address() {
+        // username = "bob@example.com"; recipient = "bob@example.com.au"
+        // Substring check would wrongly drop the .au address; exact match must keep it.
+        let mut msg = make_message(1);
+        msg.to = "bob@example.com, bob@example.com.au".to_owned();
+        let msgs = vec![make_header(1, "alice@example.com", "Hi")];
+        let imap = MockImap::new().with_messages(msgs).with_detail(msg);
+        let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
+        p.config.username = "bob@example.com".to_owned();
+        p.push_path("INBOX");
+        p.fetch();
+        p.push_path("[read] Hi — alice@example.com");
+        p.fetch();
+        p.push_path("reply all");
+        p.fetch();
+        assert!(!p.compose.draft.to.contains("bob@example.com,"), "self (bob@example.com) must be filtered");
+        assert!(p.compose.draft.to.contains("bob@example.com.au"), "superset address must be kept");
+    }
+
+    #[test]
+    fn test_extract_email_addr_with_display_name() {
+        assert_eq!(extract_email_addr("Alice <alice@example.com>"), "alice@example.com");
+        assert_eq!(extract_email_addr("alice@example.com"), "alice@example.com");
+        assert_eq!(extract_email_addr("  alice@example.com  "), "alice@example.com");
     }
 
     // ---- Forward ----
@@ -3249,12 +3373,38 @@ mod tests {
     }
 
     #[test]
-    fn test_smtp_failure_does_not_panic() {
+    fn test_smtp_failure_surfaces_error_and_keeps_draft() {
         let smtp = MockSmtp::failing();
         let mut p = EmailClientProvider::new().with_smtp(Box::new(smtp));
         p.push_path("compose");
         p.compose.draft.to = "x@y.com".to_owned();
-        p.on_button_press("send"); // should not panic
+        p.compose.draft.subject = "Test".to_owned();
+        p.on_button_press("send");
+        // Error should be surfaced via take_error.
+        let err = p.take_error();
+        assert!(err.is_some(), "expected an error on send failure");
+        assert!(err.unwrap().contains("send failed"));
+        // Compose state must be preserved so the user doesn't lose their draft.
+        assert!(!p.compose.draft.to.is_empty(), "draft to must be preserved after send failure");
+        assert!(!p.compose_sent, "compose_sent must not be set after send failure");
+    }
+
+    #[test]
+    fn test_reply_all_sends_multiple_recipients() {
+        let smtp = MockSmtp::new();
+        let sent = smtp.sent.clone();
+        let mut p = EmailClientProvider::new().with_smtp(Box::new(smtp));
+        p.push_path("compose");
+        // Simulate reply-all: comma-separated To field with two addresses.
+        p.compose.draft.to = "alice@example.com, bob@example.com".to_owned();
+        p.compose.draft.subject = "Re: Hello".to_owned();
+        p.compose.draft.body = MailBody::Text("Sure!".to_owned());
+        p.on_button_press("send");
+        let records = sent.lock().unwrap();
+        assert_eq!(records.len(), 1, "expected one send call");
+        // MockSmtp joins recipients with ", " — both addresses must appear.
+        assert!(records[0].1.contains("alice@example.com"), "alice must be in recipients");
+        assert!(records[0].1.contains("bob@example.com"), "bob must be in recipients");
     }
 
     // ---- Path navigation ----
@@ -4390,6 +4540,26 @@ mod tests {
             stored.is_empty(),
             "opening an already-read message must not call set_flags; got: {:?}", stored
         );
+    }
+
+    #[test]
+    fn test_opening_unread_message_imap_failure_does_not_update_local_state() {
+        let msgs = vec![make_header_unread(1, "alice@example.com", "Hello")];
+        let msg = make_message(1);
+        let imap = MockImap::new()
+            .with_messages(msgs)
+            .with_detail(msg)
+            .with_set_flags_error("IMAP STORE failed");
+        let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
+        p.push_path("INBOX");
+        p.fetch();
+        p.push_path("[unread] Hello — alice@example.com");
+        p.fetch();
+        // set_flags failed — local cache must still show the message as unread.
+        let still_unread = p.message_cache.iter().any(|h| h.uid == 1 && !h.seen);
+        assert!(still_unread, "message must remain unread in cache when set_flags fails");
+        // Envelope cache must NOT have been invalidated (would flip unread→read in the list).
+        assert!(p.envelope_cache.is_some(), "envelope cache must not be invalidated on set_flags failure");
     }
 
     // ---- mark-read / mark-unread commands ----
