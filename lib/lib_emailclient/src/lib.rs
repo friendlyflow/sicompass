@@ -43,6 +43,7 @@
 //!   History        (obj)  — only for reply/reply-all (lazy)
 //! ```
 
+pub mod connection;
 pub mod idle;
 pub mod net;
 pub mod oauth2;
@@ -282,6 +283,37 @@ pub trait SmtpBackend: Send {
 // Folder display-name → real-name mapping
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Settings file helpers (atomic write)
+// ---------------------------------------------------------------------------
+
+fn load_settings_json(path: &std::path::Path) -> serde_json::Value {
+    let content = std::fs::read_to_string(path).unwrap_or_default();
+    serde_json::from_str(&content)
+        .unwrap_or_else(|_| serde_json::Value::Object(Default::default()))
+}
+
+fn ensure_email_section(root: &mut serde_json::Value) -> &mut serde_json::Map<String, serde_json::Value> {
+    let obj = root.as_object_mut().expect("settings root is object");
+    if !obj.contains_key("email client") {
+        obj.insert("email client".to_owned(), serde_json::Value::Object(Default::default()));
+    }
+    obj.get_mut("email client").expect("just inserted").as_object_mut().expect("email client is object")
+}
+
+/// Write `value` as pretty JSON to `path` atomically (write to `.tmp`, then rename).
+fn atomic_write_json(path: &std::path::Path, value: &serde_json::Value) {
+    let Ok(json) = serde_json::to_string_pretty(value) else { return };
+    let tmp = path.with_extension("json.tmp");
+    if std::fs::write(&tmp, &json).is_ok() {
+        let _ = std::fs::rename(&tmp, path);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Folder display-name helper
+// ---------------------------------------------------------------------------
+
 /// Derive a short display name from a full IMAP folder path.
 /// `"[Gmail]/Verzonden berichten"` → `"Verzonden berichten"`.
 /// Folders without a slash are returned unchanged.
@@ -390,6 +422,14 @@ pub struct EmailClientProvider {
     // Disabled in tests that inject a mock via with_imap() so they keep using the sync path.
     async_folder_fetch_enabled: bool,
 
+    // Parallel INBOX prefetch — started alongside the folder list fetch so
+    // navigating into INBOX doesn't need a second cold-start round-trip.
+    inbox_prefetch_result: Arc<Mutex<Option<Result<Vec<MessageHeader>, String>>>>,
+
+    // Outbox: set when a send fails so tick() retries on the next cycle.
+    // The draft remains in self.compose.draft; this is just the retry flag.
+    outbox_pending: bool,
+
     // Async OAuth token refresh — moves oauth2::refresh_token() off the main thread at startup.
     // Result carries (new_access_token, new_token_expiry) on success.
     token_refresh_inflight: Arc<AtomicBool>,
@@ -437,6 +477,8 @@ impl EmailClientProvider {
             folder_fetch_inflight: Arc::new(AtomicBool::new(false)),
             folder_fetch_result: Arc::new(Mutex::new(None)),
             async_folder_fetch_enabled: true,
+            inbox_prefetch_result: Arc::new(Mutex::new(None)),
+            outbox_pending: false,
             token_refresh_inflight: Arc::new(AtomicBool::new(false)),
             token_refresh_result: Arc::new(Mutex::new(None)),
             error_message: None,
@@ -706,49 +748,23 @@ impl EmailClientProvider {
     /// Persist server connection fields (IMAP URL, SMTP URL, username) to settings.json.
     fn save_server_config(&self) {
         let Some(path) = self.config_path() else { return };
-        let content = std::fs::read_to_string(&path).unwrap_or_default();
-        let mut root: serde_json::Value =
-            serde_json::from_str(&content).unwrap_or_else(|_| serde_json::Value::Object(Default::default()));
-        let section = root
-            .as_object_mut()
-            .and_then(|o| {
-                if !o.contains_key("email client") {
-                    o.insert("email client".to_owned(), serde_json::Value::Object(Default::default()));
-                }
-                o.get_mut("email client")?.as_object_mut()
-            });
-        if let Some(sec) = section {
-            sec.insert("emailImapUrl".to_owned(), self.config.imap_url.clone().into());
-            sec.insert("emailSmtpUrl".to_owned(), self.config.smtp_url.clone().into());
-            sec.insert("emailUsername".to_owned(), self.config.username.clone().into());
-        }
-        if let Ok(json) = serde_json::to_string_pretty(&root) {
-            let _ = std::fs::write(&path, json);
-        }
+        let mut root = load_settings_json(&path);
+        let section = ensure_email_section(&mut root);
+        section.insert("emailImapUrl".to_owned(), self.config.imap_url.clone().into());
+        section.insert("emailSmtpUrl".to_owned(), self.config.smtp_url.clone().into());
+        section.insert("emailUsername".to_owned(), self.config.username.clone().into());
+        atomic_write_json(&path, &root);
     }
 
     /// Persist OAuth tokens to settings.json.
     fn save_oauth_tokens(&self) {
         let Some(path) = self.config_path() else { return };
-        let content = std::fs::read_to_string(&path).unwrap_or_default();
-        let mut root: serde_json::Value =
-            serde_json::from_str(&content).unwrap_or_else(|_| serde_json::Value::Object(Default::default()));
-        let section = root
-            .as_object_mut()
-            .and_then(|o| {
-                if !o.contains_key("email client") {
-                    o.insert("email client".to_owned(), serde_json::Value::Object(Default::default()));
-                }
-                o.get_mut("email client")?.as_object_mut()
-            });
-        if let Some(sec) = section {
-            sec.insert("emailOAuthAccessToken".to_owned(), self.config.oauth_access_token.clone().into());
-            sec.insert("emailOAuthRefreshToken".to_owned(), self.config.oauth_refresh_token.clone().into());
-            sec.insert("emailTokenExpiry".to_owned(), self.config.token_expiry.into());
-        }
-        if let Ok(json) = serde_json::to_string_pretty(&root) {
-            let _ = std::fs::write(&path, json);
-        }
+        let mut root = load_settings_json(&path);
+        let section = ensure_email_section(&mut root);
+        section.insert("emailOAuthAccessToken".to_owned(), self.config.oauth_access_token.clone().into());
+        section.insert("emailOAuthRefreshToken".to_owned(), self.config.oauth_refresh_token.clone().into());
+        section.insert("emailTokenExpiry".to_owned(), self.config.token_expiry.into());
+        atomic_write_json(&path, &root);
     }
 
     // ---- IMAP backend access with lazy real-backend construction -------------
@@ -899,6 +915,21 @@ impl EmailClientProvider {
             }
         }
         self.folder_cache = Some(items.clone());
+
+        // Spawn a parallel INBOX prefetch so the first navigate-into-INBOX is
+        // instant.  Only in async mode (production); tests use injected mocks.
+        if self.async_folder_fetch_enabled {
+            let result_slot = Arc::clone(&self.inbox_prefetch_result);
+            let needs_refresh = Arc::clone(&self.needs_refresh_flag);
+            let config = self.config.clone();
+            std::thread::spawn(move || {
+                let mut imap = crate::net::RealImap::from_config(&config);
+                let result = imap.list_messages("INBOX", 50);
+                *result_slot.lock().unwrap() = Some(result);
+                needs_refresh.store(true, Ordering::Release);
+            });
+        }
+
         items
     }
 
@@ -989,14 +1020,27 @@ impl EmailClientProvider {
 
         let limit = *self.folder_limits.get(&real_folder).unwrap_or(&50);
 
-        let imap = match self.imap_mut() {
-            Some(b) => b,
-            None => {
-                items.push(FfonElement::new_str("(no IMAP backend)".to_owned()));
-                return items;
-            }
+        // Use the parallel INBOX prefetch result when available.
+        let prefetch = if real_folder == "INBOX" {
+            self.inbox_prefetch_result.lock().ok().and_then(|mut g| g.take())
+        } else {
+            None
         };
-        match imap.list_messages(&real_folder, limit) {
+
+        let folder_result = if let Some(result) = prefetch {
+            result
+        } else {
+            let imap = match self.imap_mut() {
+                Some(b) => b,
+                None => {
+                    items.push(FfonElement::new_str("(no IMAP backend)".to_owned()));
+                    return items;
+                }
+            };
+            imap.list_messages(&real_folder, limit)
+        };
+
+        match folder_result {
             Err(e) => items.push(FfonElement::new_str(format!("IMAP error: {e}"))),
             Ok(headers) => {
                 let at_limit = headers.len() >= limit;
@@ -2166,9 +2210,18 @@ impl Provider for EmailClientProvider {
                     Ok(()) => {
                         self.compose = ComposeState::default();
                         self.compose_sent = true;
+                        self.outbox_pending = false;
                     }
                     Err(e) => {
-                        self.error_message = Some(format!("send failed: {e}"));
+                        self.error_message = Some(format!("send failed: {e} — will retry"));
+                        // Save draft to \Drafts so it survives a restart.
+                        if let Some(drafts_folder) = self.special_folders.drafts.clone() {
+                            let bytes = build_draft_bytes(&self.compose.draft, &self.config.username);
+                            if let Some(ref mut imap) = self.imap {
+                                let _ = imap.append(&drafts_folder, &bytes);
+                            }
+                        }
+                        self.outbox_pending = true;
                     }
                 }
             }
@@ -2198,15 +2251,30 @@ impl Provider for EmailClientProvider {
     }
 
     fn tick(&mut self) -> bool {
+        let mut needs_refresh = false;
+
+        // Retry any queued outbox message.
+        if self.outbox_pending {
+            match self.send_draft() {
+                Ok(()) => {
+                    self.outbox_pending = false;
+                    self.compose = ComposeState::default();
+                    self.compose_sent = true;
+                    needs_refresh = true;
+                }
+                Err(_) => {} // keep outbox_pending, retry next tick
+            }
+        }
+
         let handle = match self.active_login.take() {
             Some(h) => h,
-            None => return false,
+            None => return needs_refresh,
         };
         match handle.poll() {
             None => {
                 // Still waiting — put the handle back.
                 self.active_login = Some(handle);
-                false
+                needs_refresh
             }
             Some(result) => {
                 self.finish_login(result);
@@ -2340,9 +2408,13 @@ impl Provider for EmailClientProvider {
             "logout".to_owned(),
             "refresh".to_owned(),
         ];
-        // Message-operation commands are only relevant when current_id points to a
-        // message (inside a folder at depth ≥ 1).
-        if self.path_segments().len() >= 1 {
+        // Message-operation commands are only meaningful when a specific message is
+        // selected (path has ≥ 2 segments: folder + message label) AND the UID
+        // is resolvable from the label in the cache.
+        let segs = self.path_segments();
+        let at_message = segs.len() >= 2
+            && self.lookup_uid(segs[1]).is_some();
+        if at_message {
             cmds.extend([
                 "mark-read".to_owned(),
                 "mark-unread".to_owned(),
@@ -5122,14 +5194,29 @@ mod tests {
     }
 
     #[test]
-    fn test_new_commands_included_when_logged_in() {
-        // Message commands only appear when current_id points into a folder (depth >= 1).
+    fn test_new_commands_included_when_message_selected() {
+        // Message commands only appear at depth 2 (a specific message is selected).
+        let msgs = vec![make_header(1, "alice@example.com", "Hello")];
+        let imap = MockImap::new().with_folders(&["INBOX"]).with_messages(msgs);
+        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        p.push_path("INBOX");
+        p.fetch();
+        p.push_path("[read] Hello — alice@example.com");
+        let cmds = p.commands();
+        for cmd in &["mark-read", "mark-unread", "star", "unstar", "delete", "archive", "move"] {
+            assert!(cmds.contains(&cmd.to_string()), "commands() must include '{cmd}' when message selected");
+        }
+    }
+
+    #[test]
+    fn test_message_commands_hidden_at_folder_with_no_message_selected() {
+        // At /INBOX with no message focused, message-ops must not appear.
         let imap = MockImap::new().with_folders(&["INBOX"]);
         let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
         p.push_path("INBOX");
         let cmds = p.commands();
         for cmd in &["mark-read", "mark-unread", "star", "unstar", "delete", "archive", "move"] {
-            assert!(cmds.contains(&cmd.to_string()), "commands() must include '{cmd}'");
+            assert!(!cmds.contains(&cmd.to_string()), "commands() must not include '{cmd}' at folder without message");
         }
     }
 

@@ -108,7 +108,10 @@ pub fn start(
         ..Default::default()
     })?;
 
-    let port = listener.local_addr().unwrap().port();
+    let port = listener.local_addr().map_err(|e| OAuth2TokenResult {
+        error: format!("failed to get listener address: {e}"),
+        ..Default::default()
+    })?.port();
     let redirect_uri = format!("http://localhost:{port}");
 
     let auth_url = format!(

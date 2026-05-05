@@ -4,14 +4,16 @@
 //! When the server sends EXISTS or EXPUNGE, the shared `notify` flag is set
 //! so the provider can refresh on the next render cycle.
 
+use crate::connection::{connect_imap, ImapSession};
 use crate::EmailClientConfig;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, SyncSender};
 use std::sync::Arc;
 use std::time::Duration;
 
-type ImapSession = imap::Session<native_tls::TlsStream<std::net::TcpStream>>;
-
 const RECONNECT_DELAY_SECS: u64 = 10;
+/// Maximum time to wait for the IDLE thread to exit after stop() is called.
+const STOP_TIMEOUT_SECS: u64 = RECONNECT_DELAY_SECS + 35;
 
 // ---------------------------------------------------------------------------
 // IdleController
@@ -24,6 +26,8 @@ pub struct IdleController {
     running: Arc<AtomicBool>,
     /// Background thread handle.
     thread: Option<std::thread::JoinHandle<()>>,
+    /// Dropping this sender wakes the reconnect-delay sleep in the worker.
+    shutdown_tx: Option<SyncSender<()>>,
 }
 
 impl IdleController {
@@ -32,6 +36,7 @@ impl IdleController {
             notify,
             running: Arc::new(AtomicBool::new(false)),
             thread: None,
+            shutdown_tx: None,
         }
     }
 
@@ -45,20 +50,34 @@ impl IdleController {
         let running = Arc::clone(&self.running);
         running.store(true, Ordering::Relaxed);
 
+        let (tx, rx) = std::sync::mpsc::sync_channel::<()>(1);
+        self.shutdown_tx = Some(tx);
+
         self.thread = Some(std::thread::spawn(move || {
-            idle_loop(config, folder, notify, running);
+            idle_loop(config, folder, notify, running, rx);
         }));
     }
 
-    /// Stop the background IDLE thread.
+    /// Stop the background IDLE thread and wait for it to exit (bounded wait).
     ///
-    /// Sets the running flag to false and drops the handle without joining.
-    /// The thread will exit on its own within IDLE_POLL_INTERVAL (30 s) once
-    /// it wakes from wait_with_timeout and sees running=false.  Not joining
-    /// avoids blocking the main thread for up to 29 minutes on wait_keepalive.
+    /// Signals the shutdown channel and joins the thread via a helper thread
+    /// with a timeout of `STOP_TIMEOUT_SECS`.  The timeout is long enough to
+    /// cover one full IDLE poll interval (30 s) plus reconnect delay, so in
+    /// practice the join always succeeds.
     pub fn stop(&mut self) {
         self.running.store(false, Ordering::Relaxed);
-        let _ = self.thread.take(); // drop handle without joining
+        // Drop the sender — the worker's recv_timeout returns Err immediately,
+        // cutting short any reconnect delay sleep.
+        let _ = self.shutdown_tx.take();
+        if let Some(handle) = self.thread.take() {
+            let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+            std::thread::spawn(move || {
+                let _ = handle.join();
+                let _ = done_tx.send(());
+            });
+            // Best-effort bounded wait — don't block forever.
+            let _ = done_rx.recv_timeout(Duration::from_secs(STOP_TIMEOUT_SECS));
+        }
     }
 }
 
@@ -78,6 +97,7 @@ fn idle_loop(
     folder: String,
     notify: Arc<AtomicBool>,
     running: Arc<AtomicBool>,
+    shutdown_rx: Receiver<()>,
 ) {
     while running.load(Ordering::Relaxed) {
         match run_idle_session(&config, &folder, &notify, &running) {
@@ -91,13 +111,8 @@ fn idle_loop(
             break;
         }
 
-        // Back-off before reconnecting.
-        for _ in 0..RECONNECT_DELAY_SECS {
-            if !running.load(Ordering::Relaxed) {
-                return;
-            }
-            std::thread::sleep(Duration::from_secs(1));
-        }
+        // Back-off before reconnecting — wake up early if shutdown is signaled.
+        let _ = shutdown_rx.recv_timeout(Duration::from_secs(RECONNECT_DELAY_SECS));
     }
 }
 
@@ -108,30 +123,7 @@ fn run_idle_session(
     notify: &Arc<AtomicBool>,
     running: &Arc<AtomicBool>,
 ) -> Result<(), String> {
-    use native_tls::TlsConnector;
-
-    let (host, port) = parse_imap_url(&config.imap_url)
-        .ok_or_else(|| format!("cannot parse IMAP URL: {}", config.imap_url))?;
-
-    let tls = TlsConnector::new().map_err(|e| e.to_string())?;
-    let client: imap::Client<native_tls::TlsStream<std::net::TcpStream>> =
-        imap::connect((host.as_str(), port), &host, &tls)
-            .map_err(|e| e.to_string())?;
-
-    let mut session: ImapSession = if config.oauth_access_token.is_empty() {
-        client
-            .login(&config.username, &config.password)
-            .map_err(|(e, _)| e.to_string())?
-    } else {
-        let auth = XOAuth2Auth {
-            user: config.username.clone(),
-            token: config.oauth_access_token.clone(),
-        };
-        client
-            .authenticate("XOAUTH2", &auth)
-            .map_err(|(e, _)| e.to_string())?
-    };
-
+    let mut session: ImapSession = connect_imap(config)?;
     session.select(folder).map_err(|e| e.to_string())?;
 
     // Inner IDLE loop.
@@ -167,124 +159,12 @@ fn run_idle_session(
 }
 
 // ---------------------------------------------------------------------------
-// XOAUTH2 authenticator
-// ---------------------------------------------------------------------------
-
-/// IMAP Authenticator implementing the XOAUTH2 SASL mechanism.
-///
-/// The `process` method returns the raw SASL initial response (the imap crate
-/// base64-encodes it automatically before sending):
-/// "user=<user>\x01auth=Bearer <token>\x01\x01"
-struct XOAuth2Auth {
-    user: String,
-    token: String,
-}
-
-impl imap::Authenticator for XOAuth2Auth {
-    type Response = String;
-
-    fn process(&self, _challenge: &[u8]) -> Self::Response {
-        format!("user={}\x01auth=Bearer {}\x01\x01", self.user, self.token)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Parse `imaps://host` or `imaps://host:port` into `(host, port)`.
-pub(crate) fn parse_imap_url(url: &str) -> Option<(String, u16)> {
-    let rest = url
-        .strip_prefix("imaps://")
-        .or_else(|| url.strip_prefix("imap://"))?;
-    if let Some(colon) = rest.rfind(':') {
-        let host = rest[..colon].to_owned();
-        let port: u16 = rest[colon + 1..].parse().ok()?;
-        Some((host, port))
-    } else {
-        let default_port = if url.starts_with("imaps://") { 993 } else { 143 };
-        Some((rest.to_owned(), default_port))
-    }
-}
-
-/// Minimal standard base64 encoder (no external dep).
-pub(crate) fn base64_encode(input: &[u8]) -> String {
-    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity((input.len() + 2) / 3 * 4);
-    for chunk in input.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
-        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
-        let triple = (b0 << 16) | (b1 << 8) | b2;
-        out.push(TABLE[((triple >> 18) & 0x3F) as usize] as char);
-        out.push(TABLE[((triple >> 12) & 0x3F) as usize] as char);
-        out.push(if chunk.len() > 1 { TABLE[((triple >> 6) & 0x3F) as usize] as char } else { '=' });
-        out.push(if chunk.len() > 2 { TABLE[(triple & 0x3F) as usize] as char } else { '=' });
-    }
-    out
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_parse_imap_url_with_port() {
-        assert_eq!(parse_imap_url("imaps://imap.gmail.com:993"), Some(("imap.gmail.com".to_owned(), 993)));
-    }
-
-    #[test]
-    fn test_parse_imap_url_without_port_defaults_993() {
-        assert_eq!(parse_imap_url("imaps://imap.gmail.com"), Some(("imap.gmail.com".to_owned(), 993)));
-    }
-
-    #[test]
-    fn test_parse_imap_plain_url_defaults_143() {
-        assert_eq!(parse_imap_url("imap://mail.example.com"), Some(("mail.example.com".to_owned(), 143)));
-    }
-
-    #[test]
-    fn test_parse_imap_url_empty_returns_none() {
-        assert_eq!(parse_imap_url(""), None);
-    }
-
-    #[test]
-    fn test_parse_imap_url_invalid_returns_none() {
-        assert_eq!(parse_imap_url("http://example.com"), None);
-    }
-
-    #[test]
-    fn test_base64_encode_hello() {
-        // "Hello" → "SGVsbG8="
-        assert_eq!(base64_encode(b"Hello"), "SGVsbG8=");
-    }
-
-    #[test]
-    fn test_base64_encode_empty() {
-        assert_eq!(base64_encode(b""), "");
-    }
-
-    #[test]
-    fn test_base64_encode_padding_two() {
-        // "M" → "TQ=="
-        assert_eq!(base64_encode(b"M"), "TQ==");
-    }
-
-    #[test]
-    fn test_base64_encode_padding_one() {
-        // "Ma" → "TWE="
-        assert_eq!(base64_encode(b"Ma"), "TWE=");
-    }
-
-    #[test]
-    fn test_base64_encode_no_padding() {
-        // "Man" → "TWFu"
-        assert_eq!(base64_encode(b"Man"), "TWFu");
-    }
 
     #[test]
     fn test_idle_controller_start_stop_noop_without_config() {
