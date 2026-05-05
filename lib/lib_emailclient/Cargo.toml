@@ -16,6 +16,7 @@ lettre = { workspace = true }
 native-tls = { workspace = true }
 quoted_printable = "0.5"
 base64 = "0.22"
+rusqlite = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

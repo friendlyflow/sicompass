@@ -3818,6 +3818,7 @@ fn email_renderer_inside_message() -> AppRenderer {
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
     struct StubImap { messages: Vec<MessageHeader>, removed_uids: Vec<u32> }
+    #[allow(unused_variables)]
     impl ImapBackend for StubImap {
         fn list_folders(&mut self) -> Result<Vec<FolderInfo>, String> {
             Ok(vec![
@@ -3841,6 +3842,7 @@ fn email_renderer_inside_message() -> AppRenderer {
             self.removed_uids.push(uid); Ok(())
         }
         fn append(&mut self, _: &str, _: &[u8]) -> Result<(), String> { Ok(()) }
+        fn fetch_threads(&mut self, _: &str) -> Result<Option<Vec<Vec<u32>>>, String> { Ok(None) }
     }
 
     let msgs = vec![
@@ -3948,6 +3950,7 @@ fn ctrl_d_from_message_list_removes_message() {
     use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
 
     struct StubImap2 { messages: Vec<MessageHeader>, removed_uids: Vec<u32> }
+    #[allow(unused_variables)]
     impl ImapBackend for StubImap2 {
         fn list_folders(&mut self) -> Result<Vec<FolderInfo>, String> {
             Ok(vec![
@@ -3970,6 +3973,7 @@ fn ctrl_d_from_message_list_removes_message() {
             self.removed_uids.push(uid); Ok(())
         }
         fn append(&mut self, _: &str, _: &[u8]) -> Result<(), String> { Ok(()) }
+        fn fetch_threads(&mut self, _: &str) -> Result<Option<Vec<Vec<u32>>>, String> { Ok(None) }
     }
 
     let msgs = vec![
