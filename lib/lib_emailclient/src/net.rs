@@ -6,7 +6,8 @@
 //! Both are instantiated lazily from `EmailClientConfig` inside `init()`.
 
 use crate::{EmailAttachment, EmailClientConfig, EmailMessage, FolderInfo, ImapBackend, MailBody, MessageHeader, SmtpBackend};
-use crate::connection::{connect_imap, parse_imap_url};
+use crate::cache::EnvelopeCache;
+use crate::connection::connect_imap;
 use lettre::message::{Attachment as LettreAttachment, MultiPart, SinglePart};
 
 use imap_proto::types::Address;
@@ -23,13 +24,20 @@ use crate::connection::ImapSession;
 pub struct RealImap {
     config: EmailClientConfig,
     session: Option<ImapSession>,
+    cache: Option<EnvelopeCache>,
 }
 
 impl RealImap {
     pub fn from_config(config: &EmailClientConfig) -> Self {
+        let cache = if config.username.is_empty() {
+            None
+        } else {
+            EnvelopeCache::open(&config.username)
+        };
         RealImap {
             config: config.clone(),
             session: None,
+            cache,
         }
     }
 
@@ -46,6 +54,81 @@ impl RealImap {
         if let Some(mut s) = self.session.take() {
             let _ = s.logout();
         }
+    }
+
+    /// Inner implementation of `list_messages` that accepts the envelope cache
+    /// as a separate parameter, allowing the caller to satisfy the borrow
+    /// checker by taking the cache out of `self` first.
+    fn list_messages_inner(
+        &mut self,
+        folder: &str,
+        limit: usize,
+        cache: &mut Option<EnvelopeCache>,
+    ) -> Result<Vec<MessageHeader>, String> {
+        let session = match self.session() {
+            Ok(s) => s,
+            Err(e) => { self.reset_session(); return Err(e); }
+        };
+
+        let mailbox = session.select(folder).map_err(|e| e.to_string())?;
+        let total = mailbox.exists as usize;
+        let uid_validity = mailbox.uid_validity.unwrap_or(0);
+
+        if total == 0 {
+            if let Some(ref c) = cache {
+                c.invalidate_folder(folder, uid_validity);
+            }
+            return Ok(vec![]);
+        }
+
+        // --- Cache logic ---
+        if let Some(ref c) = cache {
+            let cached_validity = c.get_uidvalidity(folder);
+            if cached_validity == Some(uid_validity) {
+                let cached_count = c.cached_count(folder);
+                if cached_count >= total {
+                    // Cache is complete — serve without an IMAP fetch.
+                    return Ok(c.get_latest(folder, limit));
+                }
+                // New messages arrived: fetch only UIDs beyond the highest cached UID.
+                if let Some(max_uid) = c.max_uid(folder) {
+                    let new_uid_range = format!("{}:*", max_uid + 1);
+                    let new_messages = session
+                        .uid_fetch(&new_uid_range, "(UID ENVELOPE FLAGS)")
+                        .map_err(|e| e.to_string())?;
+                    let new_headers: Vec<MessageHeader> = new_messages
+                        .iter()
+                        .filter_map(parse_fetch_to_header)
+                        .collect();
+                    if !new_headers.is_empty() {
+                        c.upsert_all(folder, &new_headers);
+                    }
+                    return Ok(c.get_latest(folder, limit));
+                }
+            }
+            // UIDVALIDITY mismatch or first visit: flush and refetch.
+            c.invalidate_folder(folder, uid_validity);
+        }
+
+        // Full IMAP fetch (cache miss or no cache).
+        let start = if total > limit { total - limit + 1 } else { 1 };
+        let fetch_range = format!("{start}:{total}");
+        let messages = session
+            .fetch(&fetch_range, "(UID ENVELOPE FLAGS)")
+            .map_err(|e| e.to_string())?;
+
+        let mut headers: Vec<MessageHeader> = messages
+            .iter()
+            .filter_map(parse_fetch_to_header)
+            .collect();
+
+        headers.reverse(); // Most-recent-first.
+
+        if let Some(ref c) = cache {
+            c.upsert_all(folder, &headers);
+        }
+
+        Ok(headers)
     }
 }
 
@@ -92,57 +175,12 @@ impl ImapBackend for RealImap {
     }
 
     fn list_messages(&mut self, folder: &str, limit: usize) -> Result<Vec<MessageHeader>, String> {
-        let session = match self.session() {
-            Ok(s) => s,
-            Err(e) => { self.reset_session(); return Err(e); }
-        };
-
-        let mailbox = session.select(folder).map_err(|e| e.to_string())?;
-        let total = mailbox.exists as usize;
-        if total == 0 {
-            return Ok(vec![]);
-        }
-
-        let start = if total > limit { total - limit + 1 } else { 1 };
-        let fetch_range = format!("{start}:{total}");
-
-        // Include FLAGS so we can show the unread (●) marker in the list.
-        let messages = session
-            .fetch(&fetch_range, "(UID ENVELOPE FLAGS)")
-            .map_err(|e| e.to_string())?;
-
-        let mut headers: Vec<MessageHeader> = messages
-            .iter()
-            .filter_map(|m| {
-                let uid = m.uid?;
-                let env = m.envelope()?;
-                let subject = env
-                    .subject
-                    .as_deref()
-                    .and_then(|b| std::str::from_utf8(b).ok())
-                    .unwrap_or("")
-                    .to_owned();
-                let from = env
-                    .from
-                    .as_deref()
-                    .and_then(|addrs| addrs.first())
-                    .map(|a| format_address(a))
-                    .unwrap_or_default();
-                let date = env
-                    .date
-                    .as_deref()
-                    .and_then(|b| std::str::from_utf8(b).ok())
-                    .unwrap_or("")
-                    .to_owned();
-                let seen = m.flags().iter().any(|f| matches!(f, imap::types::Flag::Seen));
-                let flagged = m.flags().iter().any(|f| matches!(f, imap::types::Flag::Flagged));
-                Some(MessageHeader { uid, from, subject, date, seen, flagged })
-            })
-            .collect();
-
-        // Most-recent-first order (mirror the C FETCH 1:N reverse).
-        headers.reverse();
-        Ok(headers)
+        // Take the cache out of self so we can hold a session borrow at the
+        // same time (the borrow checker can't prove they're disjoint fields).
+        let mut cache = self.cache.take();
+        let result = self.list_messages_inner(folder, limit, &mut cache);
+        self.cache = cache;
+        result
     }
 
     fn fetch_message(&mut self, folder: &str, uid: u32) -> Result<Option<EmailMessage>, String> {
@@ -215,6 +253,24 @@ impl ImapBackend for RealImap {
             let query = format!("-FLAGS ({})", remove.join(" "));
             session.uid_store(&uid_str, &query).map_err(|e| e.to_string())?;
         }
+        // Keep the envelope cache in sync.
+        if let Some(ref cache) = self.cache {
+            let new_seen = if add.contains(&"\\Seen") {
+                Some(true)
+            } else if remove.contains(&"\\Seen") {
+                Some(false)
+            } else {
+                None
+            };
+            let new_flagged = if add.contains(&"\\Flagged") {
+                Some(true)
+            } else if remove.contains(&"\\Flagged") {
+                Some(false)
+            } else {
+                None
+            };
+            cache.patch_flags(folder, uid, new_seen, new_flagged);
+        }
         Ok(())
     }
 
@@ -266,6 +322,29 @@ impl ImapBackend for RealImap {
             Err(e) => { self.reset_session(); return Err(e); }
         };
         session.append(folder, message).map(|_| ()).map_err(|e| e.to_string())
+    }
+
+    fn fetch_threads(&mut self, folder: &str) -> Result<Option<Vec<Vec<u32>>>, String> {
+        let session = match self.session() {
+            Ok(s) => s,
+            Err(e) => { self.reset_session(); return Err(e); }
+        };
+
+        // Check capability — returns None (unsupported) when THREAD=REFERENCES
+        // is absent so the caller falls back to the per-message-ID SEARCH path.
+        let caps = session.capabilities().map_err(|e| e.to_string())?;
+        if !caps.has_str("THREAD=REFERENCES") && !caps.has_str("THREAD=ORDEREDSUBJECT") {
+            return Ok(None);
+        }
+
+        let algo = if caps.has_str("THREAD=REFERENCES") { "REFERENCES" } else { "ORDEREDSUBJECT" };
+        session.select(folder).map_err(|e| e.to_string())?;
+
+        let raw = session
+            .run_command_and_read_response(&format!("UID THREAD {algo} UTF-8 ALL"))
+            .map_err(|e| e.to_string())?;
+        let response = String::from_utf8_lossy(&raw);
+        Ok(Some(parse_thread_response(&response)))
     }
 }
 
@@ -648,6 +727,34 @@ fn parse_multipart(raw: &str, boundary: &str) -> MailBody {
 }
 
 /// Format an IMAP address struct as "Name <mailbox@host>" or "mailbox@host".
+/// Convert a single IMAP FETCH result into a `MessageHeader`, or `None` if
+/// the fetch result is missing UID or ENVELOPE data.
+fn parse_fetch_to_header(m: &imap::types::Fetch) -> Option<MessageHeader> {
+    let uid = m.uid?;
+    let env = m.envelope()?;
+    let subject = env
+        .subject
+        .as_deref()
+        .and_then(|b| std::str::from_utf8(b).ok())
+        .unwrap_or("")
+        .to_owned();
+    let from = env
+        .from
+        .as_deref()
+        .and_then(|addrs| addrs.first())
+        .map(|a| format_address(a))
+        .unwrap_or_default();
+    let date = env
+        .date
+        .as_deref()
+        .and_then(|b| std::str::from_utf8(b).ok())
+        .unwrap_or("")
+        .to_owned();
+    let seen = m.flags().iter().any(|f| matches!(f, imap::types::Flag::Seen));
+    let flagged = m.flags().iter().any(|f| matches!(f, imap::types::Flag::Flagged));
+    Some(MessageHeader { uid, from, subject, date, seen, flagged })
+}
+
 fn format_address(addr: &Address<'_>) -> String {
     let name = addr
         .name
@@ -678,6 +785,67 @@ fn format_address(addr: &Address<'_>) -> String {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+/// Parse the raw bytes from `UID THREAD … ALL` into a list of threads.
+///
+/// Each thread is a flat `Vec<u32>` of all UIDs belonging to it (nested
+/// children are flattened; ordering is depth-first).  Returns an empty vec
+/// when the response contains no `* THREAD` line or no UIDs.
+///
+/// Example input line: `* THREAD (1 2 3)(4)(5 (6)(7 8))\r\n`
+/// Returns: `[[1,2,3], [4], [5,6,7,8]]`
+pub(crate) fn parse_thread_response(response: &str) -> Vec<Vec<u32>> {
+    // Find the * THREAD untagged response.
+    let data = response
+        .lines()
+        .find(|l| l.starts_with("* THREAD"))
+        .and_then(|l| l.strip_prefix("* THREAD"))
+        .unwrap_or("")
+        .trim();
+
+    let mut threads: Vec<Vec<u32>> = Vec::new();
+    let mut current: Vec<u32> = Vec::new();
+    let mut depth: usize = 0;
+    let mut num_buf = String::new();
+
+    let flush_num = |buf: &mut String, cur: &mut Vec<u32>| {
+        if !buf.is_empty() {
+            if let Ok(uid) = buf.parse::<u32>() {
+                cur.push(uid);
+            }
+            buf.clear();
+        }
+    };
+
+    for ch in data.chars() {
+        match ch {
+            '(' => {
+                flush_num(&mut num_buf, &mut current);
+                depth += 1;
+            }
+            ')' => {
+                flush_num(&mut num_buf, &mut current);
+                if depth > 0 {
+                    depth -= 1;
+                }
+                if depth == 0 && !current.is_empty() {
+                    threads.push(std::mem::take(&mut current));
+                }
+            }
+            ' ' | '\t' => {
+                flush_num(&mut num_buf, &mut current);
+            }
+            c if c.is_ascii_digit() => {
+                num_buf.push(c);
+            }
+            _ => {
+                flush_num(&mut num_buf, &mut current);
+            }
+        }
+    }
+
+    threads
+}
 
 #[cfg(test)]
 mod tests {
@@ -845,5 +1013,42 @@ mod tests {
             .expect("INBOX not found");
         let headers = backend.list_messages(&inbox.name, 5).expect("list_messages failed");
         println!("inbox headers: {headers:?}");
+    }
+
+    // ---- parse_thread_response ----
+
+    #[test]
+    fn test_parse_thread_linear_threads() {
+        let response = "* THREAD (1 2 3)(4)(5)\r\nA001 OK\r\n";
+        let threads = parse_thread_response(response);
+        assert_eq!(threads, vec![vec![1, 2, 3], vec![4], vec![5]]);
+    }
+
+    #[test]
+    fn test_parse_thread_nested() {
+        // (5 (6)(7 8)) → all four UIDs in one thread
+        let response = "* THREAD (1)(2 3)(4)(5 (6)(7 8))\r\nA002 OK\r\n";
+        let threads = parse_thread_response(response);
+        assert_eq!(threads.len(), 4);
+        assert_eq!(threads[0], vec![1]);
+        assert_eq!(threads[1], vec![2, 3]);
+        assert_eq!(threads[2], vec![4]);
+        // 5, then two children (6) and (7 8) — flattened to [5,6,7,8]
+        assert!(threads[3].contains(&5));
+        assert!(threads[3].contains(&6));
+        assert!(threads[3].contains(&7));
+        assert!(threads[3].contains(&8));
+    }
+
+    #[test]
+    fn test_parse_thread_empty_response() {
+        let threads = parse_thread_response("A003 OK THREAD completed\r\n");
+        assert!(threads.is_empty());
+    }
+
+    #[test]
+    fn test_parse_thread_no_thread_line() {
+        let threads = parse_thread_response("* OK [CAPABILITY IMAP4rev1]\r\n");
+        assert!(threads.is_empty());
     }
 }

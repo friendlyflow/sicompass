@@ -43,6 +43,7 @@
 //!   History        (obj)  — only for reply/reply-all (lazy)
 //! ```
 
+pub mod cache;
 pub mod connection;
 pub mod idle;
 pub mod net;
@@ -262,6 +263,12 @@ pub trait ImapBackend: Send {
     fn expunge_uid(&mut self, folder: &str, uid: u32) -> Result<(), String>;
     /// Append a raw RFC 2822 message to a folder (IMAP APPEND).
     fn append(&mut self, folder: &str, message: &[u8]) -> Result<(), String>;
+    /// Fetch the UID thread map for `folder` using the IMAP THREAD extension.
+    ///
+    /// Returns `Some(threads)` where each inner `Vec<u32>` is the flat list of
+    /// UIDs belonging to the same thread.  Returns `None` when the server does
+    /// not advertise `THREAD=REFERENCES` capability.
+    fn fetch_threads(&mut self, folder: &str) -> Result<Option<Vec<Vec<u32>>>, String>;
 }
 
 /// SMTP backend — send an email message.
@@ -405,6 +412,9 @@ pub struct EmailClientProvider {
     // served lazily when the user navigates into "History".
     history_folder: String,
     history_refs: String,
+    history_uid: Option<u32>,
+    // Thread map populated by fetch_threads() on folder entry: uid → all UIDs in that thread.
+    thread_cache: std::collections::HashMap<String, std::collections::HashMap<u32, Vec<u32>>>,
 
     // Cross-thread needs-refresh flag (set by IDLE, cleared by fetch).
     needs_refresh_flag: Arc<AtomicBool>,
@@ -470,6 +480,8 @@ impl EmailClientProvider {
             compose_sent: false,
             history_folder: String::new(),
             history_refs: String::new(),
+            history_uid: None,
+            thread_cache: std::collections::HashMap::new(),
             needs_refresh_flag: Arc::clone(&needs_refresh_flag),
             idle: IdleController::new(needs_refresh_flag),
             imap: None,
@@ -1063,6 +1075,23 @@ impl EmailClientProvider {
         self.envelope_cache = Some(items.clone());
         self.envelope_cache_folder = real_folder.clone();
 
+        // Build a UID→thread map using IMAP THREAD if supported.
+        // Failure is non-fatal: fall back to the References-based path.
+        if !self.thread_cache.contains_key(&real_folder) {
+            if let Some(imap) = self.imap.as_mut() {
+                if let Ok(Some(threads)) = imap.fetch_threads(&real_folder) {
+                    let mut uid_to_thread: std::collections::HashMap<u32, Vec<u32>> =
+                        std::collections::HashMap::new();
+                    for thread in threads {
+                        for &uid in &thread {
+                            uid_to_thread.insert(uid, thread.clone());
+                        }
+                    }
+                    self.thread_cache.insert(real_folder.clone(), uid_to_thread);
+                }
+            }
+        }
+
         // Start IDLE for new mail notifications.
         self.idle.start(self.config.clone(), real_folder);
 
@@ -1117,26 +1146,70 @@ impl EmailClientProvider {
             }
         }
 
-        // Store References for lazy History navigation.
-        if !msg.references.is_empty() {
+        // Store context for lazy History navigation.
+        if !msg.references.is_empty() || self.thread_cache.contains_key(&real_folder) {
             self.history_folder = real_folder;
             self.history_refs = msg.references.clone();
+            self.history_uid = Some(uid);
         } else {
             self.history_refs.clear();
+            self.history_uid = None;
         }
 
         build_message_view(&msg)
     }
 
     fn build_history(&mut self) -> Vec<FfonElement> {
+        let folder = self.history_folder.clone();
+
+        // Fast path: use the IMAP THREAD cache (single THREAD command replaces
+        // N per-Message-ID SEARCH commands).
+        if let Some(uid) = self.history_uid {
+            if let Some(uid_map) = self.thread_cache.get(&folder) {
+                if let Some(thread_uids) = uid_map.get(&uid).cloned() {
+                    let other_uids: Vec<u32> = thread_uids
+                        .iter()
+                        .copied()
+                        .filter(|&u| u != uid)
+                        .take(10)
+                        .collect();
+                    if !other_uids.is_empty() {
+                        let mut items = vec![];
+                        for other_uid in other_uids {
+                            // Check message_cache first (already fetched for this folder).
+                            let label = self
+                                .message_cache
+                                .iter()
+                                .find(|h| h.uid == other_uid)
+                                .map(|h| format!("From: {} — Subject: {}", h.from, h.subject));
+                            if let Some(lbl) = label {
+                                items.push(FfonElement::new_obj(lbl));
+                            } else if let Some(ref mut imap) = self.imap {
+                                // Not in the current-folder cache — fetch by UID.
+                                let uid_str = other_uid.to_string();
+                                if let Ok(Some(msg)) = imap.fetch_message(&folder, other_uid) {
+                                    let _ = uid_str;
+                                    items.push(FfonElement::new_obj(
+                                        format!("From: {} — Subject: {}", msg.from, msg.subject),
+                                    ));
+                                }
+                            }
+                        }
+                        if !items.is_empty() {
+                            return items;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Slow path: parse Message-IDs from the References header and SEARCH.
         if self.history_refs.is_empty() {
             return vec![FfonElement::new_str("(no history)".to_owned())];
         }
 
-        let folder = self.history_folder.clone();
         let refs = self.history_refs.clone();
-        // Search order: \All (Gmail / archive) first because it contains every
-        // message; fall back to the folder the current message lives in.
+        // Search order: \All (Gmail / archive) first; fall back to current folder.
         let mut search_folders: Vec<String> = vec![];
         if let Some(ref all) = self.special_folders.archive {
             search_folders.push(all.clone());
@@ -1148,7 +1221,6 @@ impl EmailClientProvider {
         let mut items = vec![];
         let mut count = 0;
 
-        // Parse space-separated Message-IDs from the References header.
         let mut p = refs.as_str();
         while !p.is_empty() && count < 10 {
             p = p.trim_start();
@@ -2534,6 +2606,8 @@ impl Provider for EmailClientProvider {
                 self.compose_sent = false;
                 self.history_folder.clear();
                 self.history_refs.clear();
+                self.history_uid = None;
+                self.thread_cache.clear();
                 None  // triggers state-toggle refresh in handlers.rs
             }
             "mark-read" | "mark-unread" | "star" | "unstar" => {
@@ -2759,6 +2833,8 @@ mod tests {
         moved: Vec<(String, u32, String)>,           // (from_folder, uid, dest_folder)
         expunged: Vec<(String, u32)>,                // (folder, uid)
         appended: Vec<(String, Vec<u8>)>,            // (folder, raw_bytes)
+        /// Pre-configured thread result for fetch_threads(); None = not supported.
+        thread_result: Option<Vec<Vec<u32>>>,
     }
 
     impl MockImap {
@@ -2778,7 +2854,12 @@ mod tests {
                 moved: vec![],
                 expunged: vec![],
                 appended: vec![],
+                thread_result: None,
             }
+        }
+        fn with_threads(mut self, threads: Vec<Vec<u32>>) -> Self {
+            self.thread_result = Some(threads);
+            self
         }
         fn with_by_msg_id_only_in_folder(mut self, folder: &str, msg: EmailMessage) -> Self {
             self.by_msg_id = Some(msg);
@@ -2879,6 +2960,10 @@ mod tests {
             if let Some(ref e) = self.error { return Err(e.clone()); }
             self.appended.push((folder.to_owned(), message.to_vec()));
             Ok(())
+        }
+        fn fetch_threads(&mut self, _folder: &str) -> Result<Option<Vec<Vec<u32>>>, String> {
+            if let Some(ref e) = self.error { return Err(e.clone()); }
+            Ok(self.thread_result.clone())
         }
     }
 
@@ -3352,6 +3437,34 @@ mod tests {
         assert!(
             items.iter().any(|e| e.as_obj().map_or(false, |o| o.key.contains("Previous"))),
             "History must find the message via \\All folder; got: {:?}", items
+        );
+    }
+
+    #[test]
+    fn test_history_uses_thread_cache_when_available() {
+        // Two messages in INBOX: uid 1 (current) and uid 2 (thread sibling).
+        // fetch_threads returns one thread containing both UIDs.
+        // The thread-cache path looks up uid 2 in message_cache (no SEARCH needed).
+        let msgs = vec![
+            make_header(1, "alice@example.com", "Hello"),
+            make_header(2, "bob@example.com", "Re: Hello"),
+        ];
+        let imap = MockImap::new()
+            .with_messages(msgs)
+            .with_detail(make_message(1))
+            .with_threads(vec![vec![1, 2]]);
+
+        let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
+        p.push_path("INBOX");
+        p.fetch(); // populates message_cache and thread_cache
+        p.push_path("[read] Hello — alice@example.com");
+        p.fetch(); // sets history_uid = 1
+        p.push_path("History");
+        let items = p.fetch();
+        // uid 2 is in message_cache ("Re: Hello" subject) — History must find it.
+        assert!(
+            items.iter().any(|e| e.as_obj().map_or(false, |o| o.key.contains("Re: Hello"))),
+            "History must surface thread sibling via thread cache; got: {:?}", items
         );
     }
 
