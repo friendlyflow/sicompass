@@ -3840,6 +3840,7 @@ fn email_renderer_inside_message() -> AppRenderer {
         fn expunge_uid(&mut self, _: &str, uid: u32) -> Result<(), String> {
             self.removed_uids.push(uid); Ok(())
         }
+        fn append(&mut self, _: &str, _: &[u8]) -> Result<(), String> { Ok(()) }
     }
 
     let msgs = vec![
@@ -3968,6 +3969,7 @@ fn ctrl_d_from_message_list_removes_message() {
         fn expunge_uid(&mut self, _: &str, uid: u32) -> Result<(), String> {
             self.removed_uids.push(uid); Ok(())
         }
+        fn append(&mut self, _: &str, _: &[u8]) -> Result<(), String> { Ok(()) }
     }
 
     let msgs = vec![
@@ -4970,6 +4972,49 @@ fn chat_room_info_returns_room_id() {
 // ---------------------------------------------------------------------------
 // Chat client: mark read command
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Email client: compose with Cc / Bcc
+// ---------------------------------------------------------------------------
+
+/// Compose view must include Cc and Bcc input fields, and commit_edit must
+/// update the draft when navigating to those field segments.
+#[test]
+fn email_compose_cc_bcc_fields_appear_and_commit() {
+    use sicompass_emailclient::EmailClientProvider;
+
+    let mut p = EmailClientProvider::new();
+    p.push_path("compose");
+    let items = p.fetch();
+    assert!(
+        items.iter().any(|e| e.as_str().map_or(false, |s| s.starts_with("Cc:"))),
+        "compose view must include Cc: field; got: {items:?}"
+    );
+    assert!(
+        items.iter().any(|e| e.as_str().map_or(false, |s| s.starts_with("Bcc:"))),
+        "compose view must include Bcc: field; got: {items:?}"
+    );
+
+    // commit_edit at the Cc segment must return true and the value must appear
+    // in the next compose fetch.
+    p.push_path("Cc");
+    assert!(p.commit_edit("", "cc@example.com"), "commit_edit at Cc must return true");
+    p.pop_path();
+    let items2 = p.fetch();
+    assert!(
+        items2.iter().any(|e| e.as_str().map_or(false, |s| s.contains("cc@example.com"))),
+        "compose view must reflect committed Cc value; got: {items2:?}"
+    );
+
+    p.push_path("Bcc");
+    assert!(p.commit_edit("", "bcc@example.com"), "commit_edit at Bcc must return true");
+    p.pop_path();
+    let items3 = p.fetch();
+    assert!(
+        items3.iter().any(|e| e.as_str().map_or(false, |s| s.contains("bcc@example.com"))),
+        "compose view must reflect committed Bcc value; got: {items3:?}"
+    );
+}
 
 /// "mark read" must clear the local unread count immediately (even if the
 /// receipt HTTP call fails). The badge disappears from the room list after the

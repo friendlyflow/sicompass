@@ -5,7 +5,8 @@
 //!
 //! Both are instantiated lazily from `EmailClientConfig` inside `init()`.
 
-use crate::{EmailClientConfig, EmailMessage, FolderInfo, ImapBackend, MailBody, MessageHeader, SmtpBackend};
+use crate::{EmailAttachment, EmailClientConfig, EmailMessage, FolderInfo, ImapBackend, MailBody, MessageHeader, SmtpBackend};
+use lettre::message::{Attachment as LettreAttachment, MultiPart, SinglePart};
 use crate::idle::parse_imap_url;
 
 use imap_proto::types::Address;
@@ -281,6 +282,14 @@ impl ImapBackend for RealImap {
         session.uid_expunge(&uid_str).map_err(|e| e.to_string())?;
         Ok(())
     }
+
+    fn append(&mut self, folder: &str, message: &[u8]) -> Result<(), String> {
+        let session = match self.session() {
+            Ok(s) => s,
+            Err(e) => { self.reset_session(); return Err(e); }
+        };
+        session.append(folder, message).map(|_| ()).map_err(|e| e.to_string())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -313,7 +322,16 @@ fn parse_smtp_url(url: &str) -> Option<(String, u16)> {
 }
 
 impl SmtpBackend for RealSmtp {
-    fn send(&mut self, from: &str, to: &[&str], subject: &str, body: &MailBody) -> Result<(), String> {
+    fn send(
+        &mut self,
+        from: &str,
+        to: &[&str],
+        cc: &[&str],
+        bcc: &[&str],
+        subject: &str,
+        body: &MailBody,
+        attachments: &[(&str, &[u8])],
+    ) -> Result<Vec<u8>, String> {
         let (host, port) = parse_smtp_url(&self.config.smtp_url)
             .ok_or_else(|| format!("cannot parse SMTP URL: {}", self.config.smtp_url))?;
 
@@ -325,22 +343,43 @@ impl SmtpBackend for RealSmtp {
         for addr in to {
             builder = builder.to(addr.parse().map_err(|e: lettre::address::AddressError| e.to_string())?);
         }
+        for addr in cc {
+            builder = builder.cc(addr.parse().map_err(|e: lettre::address::AddressError| e.to_string())?);
+        }
+        for addr in bcc {
+            builder = builder.bcc(addr.parse().map_err(|e: lettre::address::AddressError| e.to_string())?);
+        }
         let builder = builder.subject(subject);
 
-        let email = match body {
-            MailBody::Text(s) => builder
-                .header(ContentType::TEXT_PLAIN)
-                .body(s.clone())
+        let body_str = match body {
+            MailBody::Text(s) => s.clone(),
+            MailBody::Ffon(elems) => sicompass_sdk::ffon::to_json_string(elems)
                 .map_err(|e| e.to_string())?,
-            MailBody::Ffon(elems) => {
-                let json = sicompass_sdk::ffon::to_json_string(elems)
-                    .map_err(|e| e.to_string())?;
-                builder
-                    .header(ContentType::TEXT_PLAIN)
-                    .body(json)
-                    .map_err(|e| e.to_string())?
-            }
         };
+
+        let email = if attachments.is_empty() {
+            builder
+                .header(ContentType::TEXT_PLAIN)
+                .body(body_str)
+                .map_err(|e| e.to_string())?
+        } else {
+            let body_part = SinglePart::builder()
+                .header(ContentType::TEXT_PLAIN)
+                .body(body_str);
+            let mut mp = MultiPart::mixed().singlepart(body_part);
+            for (filename, bytes) in attachments {
+                let ct = "application/octet-stream"
+                    .parse::<ContentType>()
+                    .map_err(|e| e.to_string())?;
+                mp = mp.singlepart(
+                    LettreAttachment::new(filename.to_string())
+                        .body(bytes.to_vec(), ct),
+                );
+            }
+            builder.multipart(mp).map_err(|e| e.to_string())?
+        };
+
+        let raw = email.formatted();
 
         let transport = if self.config.oauth_access_token.is_empty() {
             let creds = Credentials::new(
@@ -353,7 +392,6 @@ impl SmtpBackend for RealSmtp {
                 .credentials(creds)
                 .build()
         } else {
-            // XOAUTH2: lettre accepts the raw access token as password with Xoauth2 mechanism.
             let creds = Credentials::new(
                 self.config.username.clone(),
                 self.config.oauth_access_token.clone(),
@@ -366,7 +404,8 @@ impl SmtpBackend for RealSmtp {
                 .build()
         };
 
-        transport.send(&email).map(|_| ()).map_err(|e| e.to_string())
+        transport.send(&email).map_err(|e| e.to_string())?;
+        Ok(raw)
     }
 }
 
@@ -438,8 +477,92 @@ fn parse_rfc2822(uid: u32, raw: &[u8]) -> EmailMessage {
     }
 
     let body = parse_body_part(raw_body, &content_type, &content_transfer_encoding);
+    let attachments = parse_attachments(raw_body, &content_type);
 
-    EmailMessage { uid, from, to, subject, date, body, message_id, in_reply_to, references }
+    EmailMessage { uid, from, to, subject, date, body, message_id, in_reply_to, references, attachments }
+}
+
+/// Walk a MIME body looking for attachment parts (Content-Disposition: attachment
+/// or non-text, non-multipart parts in multipart/mixed).
+fn parse_attachments(raw_body: &str, content_type: &str) -> Vec<EmailAttachment> {
+    let ct_lc = content_type.to_ascii_lowercase();
+    let mime = ct_lc.split(';').next().unwrap_or("").trim();
+    if !mime.starts_with("multipart/") {
+        return vec![];
+    }
+    let boundary = match extract_boundary(content_type) {
+        Some(b) => b,
+        None => return vec![],
+    };
+    let delimiter = format!("--{boundary}");
+    let mut attachments = Vec::new();
+
+    for chunk in raw_body.split(&delimiter) {
+        let chunk = chunk.trim_start_matches('-').trim();
+        if chunk.is_empty() { continue; }
+
+        let (part_headers, part_body) = if let Some(pos) = chunk.find("\r\n\r\n") {
+            (&chunk[..pos], &chunk[pos + 4..])
+        } else if let Some(pos) = chunk.find("\n\n") {
+            (&chunk[..pos], &chunk[pos + 2..])
+        } else {
+            continue;
+        };
+
+        let mut part_ct = String::new();
+        let mut part_cte = String::new();
+        let mut disposition = String::new();
+        let mut filename = String::new();
+
+        for line in part_headers.lines() {
+            let lc = line.to_ascii_lowercase();
+            if lc.starts_with("content-type: ") {
+                part_ct = line[14..].to_owned();
+            } else if lc.starts_with("content-transfer-encoding: ") {
+                part_cte = line[27..].trim().to_ascii_lowercase();
+            } else if lc.starts_with("content-disposition: ") {
+                disposition = lc[21..].to_owned();
+                // Extract filename= from the same header line.
+                for param in line[21..].split(';') {
+                    let p = param.trim();
+                    let pl = p.to_ascii_lowercase();
+                    if pl.starts_with("filename=") || pl.starts_with("filename*=") {
+                        filename = p.splitn(2, '=').nth(1)
+                            .unwrap_or("")
+                            .trim_matches('"')
+                            .to_owned();
+                    }
+                }
+            }
+        }
+
+        let is_attachment = disposition.trim_start().starts_with("attachment");
+        let part_mime = part_ct.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+        let is_non_text = !part_mime.is_empty()
+            && !part_mime.starts_with("text/")
+            && !part_mime.starts_with("multipart/");
+
+        if is_attachment || is_non_text {
+            // Decode bytes.
+            let data: Vec<u8> = match part_cte.as_str() {
+                "base64" => {
+                    use base64::Engine as _;
+                    let compact: String = part_body.chars().filter(|c| !c.is_whitespace()).collect();
+                    base64::engine::general_purpose::STANDARD
+                        .decode(compact.as_bytes())
+                        .unwrap_or_default()
+                }
+                _ => part_body.as_bytes().to_vec(),
+            };
+            if filename.is_empty() { filename = "attachment".to_owned(); }
+            attachments.push(EmailAttachment {
+                filename,
+                content_type: part_mime,
+                data,
+            });
+        }
+    }
+    attachments
 }
 
 /// Parse a MIME body part given its content-type and transfer-encoding headers.

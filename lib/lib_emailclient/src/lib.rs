@@ -147,8 +147,12 @@ pub struct FolderInfo {
 struct SpecialFolders {
     /// Full IMAP name of the Trash folder (e.g. `[Gmail]/Trash`).
     trash: Option<String>,
-    /// Full IMAP name of the Archive folder (e.g. `[Gmail]/All Mail`).
+    /// Full IMAP name of the Archive / All Mail folder.
     archive: Option<String>,
+    /// Full IMAP name of the Sent folder (e.g. `[Gmail]/Sent Mail`).
+    sent: Option<String>,
+    /// Full IMAP name of the Drafts folder (e.g. `[Gmail]/Drafts`).
+    drafts: Option<String>,
 }
 
 /// A summarised message header (from IMAP ENVELOPE + FLAGS).
@@ -165,6 +169,14 @@ pub struct MessageHeader {
     pub flagged: bool,
 }
 
+/// A file attached to a received message.
+#[derive(Debug, Clone)]
+pub struct EmailAttachment {
+    pub filename: String,
+    pub content_type: String,
+    pub data: Vec<u8>,
+}
+
 /// A fully fetched email message.
 #[derive(Debug, Clone)]
 pub struct EmailMessage {
@@ -177,14 +189,19 @@ pub struct EmailMessage {
     pub message_id: String,
     pub in_reply_to: String,
     pub references: String,
+    pub attachments: Vec<EmailAttachment>,
 }
 
 /// Compose form draft state.
 #[derive(Debug, Clone, Default)]
 pub struct Draft {
     pub to: String,
+    pub cc: String,
+    pub bcc: String,
     pub subject: String,
     pub body: MailBody,
+    /// File paths to attach on send.
+    pub attachments: Vec<String>,
 }
 
 /// Which kind of compose action is in progress.
@@ -242,11 +259,23 @@ pub trait ImapBackend: Send {
     fn move_message(&mut self, folder: &str, uid: u32, dest: &str) -> Result<(), String>;
     /// Expunge a specific UID from a folder (UIDPLUS UID EXPUNGE).
     fn expunge_uid(&mut self, folder: &str, uid: u32) -> Result<(), String>;
+    /// Append a raw RFC 2822 message to a folder (IMAP APPEND).
+    fn append(&mut self, folder: &str, message: &[u8]) -> Result<(), String>;
 }
 
 /// SMTP backend — send an email message.
+/// Returns the raw RFC 2822 bytes of the sent message (for IMAP APPEND to Sent).
 pub trait SmtpBackend: Send {
-    fn send(&mut self, from: &str, to: &[&str], subject: &str, body: &MailBody) -> Result<(), String>;
+    fn send(
+        &mut self,
+        from: &str,
+        to: &[&str],
+        cc: &[&str],
+        bcc: &[&str],
+        subject: &str,
+        body: &MailBody,
+        attachments: &[(&str, &[u8])],
+    ) -> Result<Vec<u8>, String>;
 }
 
 // ---------------------------------------------------------------------------
@@ -315,6 +344,9 @@ pub struct EmailClientProvider {
 
     // Cached root (folder list) FFON — served on back-navigation.
     folder_cache: Option<Vec<FfonElement>>,
+
+    // Per-folder message display limit (default 50; increases via "Load more…").
+    folder_limits: std::collections::HashMap<String, usize>,
 
     // Cached envelope list for the current folder.
     envelope_cache: Option<Vec<FfonElement>>,
@@ -386,6 +418,7 @@ impl EmailClientProvider {
             current_path: "/".to_owned(),
             folder_mappings: Vec::new(),
             folder_cache: None,
+            folder_limits: std::collections::HashMap::new(),
             envelope_cache: None,
             envelope_cache_folder: String::new(),
             message_cache: Vec::new(),
@@ -834,6 +867,16 @@ impl EmailClientProvider {
                                     self.special_folders.archive = Some(info.name.clone());
                                 }
                             }
+                            "\\Sent" => {
+                                if self.special_folders.sent.is_none() {
+                                    self.special_folders.sent = Some(info.name.clone());
+                                }
+                            }
+                            "\\Drafts" => {
+                                if self.special_folders.drafts.is_none() {
+                                    self.special_folders.drafts = Some(info.name.clone());
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -944,6 +987,8 @@ impl EmailClientProvider {
 
         let mut items = vec![];
 
+        let limit = *self.folder_limits.get(&real_folder).unwrap_or(&50);
+
         let imap = match self.imap_mut() {
             Some(b) => b,
             None => {
@@ -951,16 +996,21 @@ impl EmailClientProvider {
                 return items;
             }
         };
-
-        match imap.list_messages(&real_folder, 50) {
+        match imap.list_messages(&real_folder, limit) {
             Err(e) => items.push(FfonElement::new_str(format!("IMAP error: {e}"))),
             Ok(headers) => {
+                let at_limit = headers.len() >= limit;
                 self.message_cache = headers.clone();
                 for h in &headers {
                     items.push(FfonElement::new_obj(message_label(h)));
                 }
                 if items.is_empty() {
                     items.push(FfonElement::new_str("(no messages)".to_owned()));
+                }
+                if at_limit {
+                    items.push(FfonElement::new_str(
+                        "<button>load-more</button>Load more…".to_owned(),
+                    ));
                 }
             }
         }
@@ -1114,9 +1164,27 @@ impl EmailClientProvider {
             self.compose.draft.to
         )));
         items.push(FfonElement::new_str(format!(
+            "Cc: <input>{}</input>",
+            self.compose.draft.cc
+        )));
+        items.push(FfonElement::new_str(format!(
+            "Bcc: <input>{}</input>",
+            self.compose.draft.bcc
+        )));
+        items.push(FfonElement::new_str(format!(
             "Subject: <input>{}</input>",
             self.compose.draft.subject
         )));
+
+        // Attachments: list current files, then an empty input for adding more.
+        let mut attach_children: Vec<FfonElement> = self.compose.draft.attachments.iter()
+            .map(|p| FfonElement::new_str(p.clone()))
+            .collect();
+        attach_children.push(FfonElement::new_str("<input></input>".to_owned()));
+        items.push(FfonElement::Obj(FfonObject {
+            key: "Attachments:".to_owned(),
+            children: attach_children,
+        }));
 
         // Body: is a structured subtree — Ctrl+A/I/Delete work on its children.
         // The key includes the current format so the user sees it live.
@@ -1150,22 +1218,57 @@ impl EmailClientProvider {
         }
     }
 
+    fn split_addrs(s: &str) -> Vec<String> {
+        s.split(',').map(|a| a.trim().to_owned()).filter(|a| !a.is_empty()).collect()
+    }
+
     fn send_draft(&mut self) -> Result<(), String> {
         self.ensure_fresh_token();
-        if let Some(ref mut smtp) = self.smtp {
-            let from = self.config.username.clone();
-            let to_addrs: Vec<String> = self.compose.draft.to
-                .split(',')
-                .map(|s| s.trim().to_owned())
-                .filter(|s| !s.is_empty())
-                .collect();
-            let to_refs: Vec<&str> = to_addrs.iter().map(|s| s.as_str()).collect();
-            let subject = self.compose.draft.subject.clone();
-            let body = normalize_body_for_send(&self.compose.draft.body);
-            smtp.send(&from, &to_refs, &subject, &body)
-        } else {
-            Err("no SMTP backend".to_owned())
+        let Some(ref mut smtp) = self.smtp else {
+            return Err("no SMTP backend".to_owned());
+        };
+        let from = self.config.username.clone();
+        let to_v = Self::split_addrs(&self.compose.draft.to);
+        let cc_v = Self::split_addrs(&self.compose.draft.cc);
+        let bcc_v = Self::split_addrs(&self.compose.draft.bcc);
+        let to_r: Vec<&str> = to_v.iter().map(|s| s.as_str()).collect();
+        let cc_r: Vec<&str> = cc_v.iter().map(|s| s.as_str()).collect();
+        let bcc_r: Vec<&str> = bcc_v.iter().map(|s| s.as_str()).collect();
+        let subject = self.compose.draft.subject.clone();
+        let body = normalize_body_for_send(&self.compose.draft.body);
+
+        // Read attachment files. Files that cannot be read are silently skipped.
+        let attachment_data: Vec<(String, Vec<u8>)> = self.compose.draft.attachments.iter()
+            .filter_map(|path| {
+                let bytes = std::fs::read(path).ok()?;
+                let name = std::path::Path::new(path)
+                    .file_name()?.to_string_lossy().into_owned();
+                Some((name, bytes))
+            })
+            .collect();
+        let attachment_refs: Vec<(&str, &[u8])> = attachment_data.iter()
+            .map(|(n, b)| (n.as_str(), b.as_slice()))
+            .collect();
+
+        let raw = smtp.send(&from, &to_r, &cc_r, &bcc_r, &subject, &body, &attachment_refs)?;
+
+        // APPEND to Sent folder (skip for Gmail — its SMTP server auto-saves).
+        let skip_append = self.config.smtp_url.contains("smtp.gmail.com");
+        if !skip_append {
+            if let Some(sent) = self.special_folders.sent.clone() {
+                if let Some(ref mut imap) = self.imap {
+                    let _ = imap.append(&sent, &raw);
+                }
+            }
         }
+        Ok(())
+    }
+
+    fn is_draft_non_empty(draft: &Draft) -> bool {
+        !draft.to.is_empty()
+            || !draft.subject.is_empty()
+            || !draft.attachments.is_empty()
+            || !matches!(&draft.body, MailBody::Text(s) if s.is_empty())
     }
 
     /// Refresh OAuth2 token if expired; rebuild backends if the token changed.
@@ -1286,6 +1389,27 @@ impl EmailClientProvider {
             self.smtp = Some(Box::new(net::RealSmtp::from_config(&self.config)));
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Draft serialization helper
+// ---------------------------------------------------------------------------
+
+/// Build a minimal RFC 2822 representation of a compose draft for IMAP APPEND.
+fn build_draft_bytes(draft: &Draft, from: &str) -> Vec<u8> {
+    let mut msg = String::new();
+    msg.push_str(&format!("From: {}\r\n", from));
+    if !draft.to.is_empty() { msg.push_str(&format!("To: {}\r\n", draft.to)); }
+    if !draft.cc.is_empty() { msg.push_str(&format!("Cc: {}\r\n", draft.cc)); }
+    if !draft.bcc.is_empty() { msg.push_str(&format!("Bcc: {}\r\n", draft.bcc)); }
+    if !draft.subject.is_empty() { msg.push_str(&format!("Subject: {}\r\n", draft.subject)); }
+    msg.push_str("MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n");
+    let body_text = match &draft.body {
+        MailBody::Text(s) => s.clone(),
+        MailBody::Ffon(elems) => sicompass_sdk::ffon::to_json_string(elems).unwrap_or_default(),
+    };
+    msg.push_str(&body_text);
+    msg.into_bytes()
 }
 
 // ---------------------------------------------------------------------------
@@ -1413,6 +1537,20 @@ fn build_message_view(msg: &EmailMessage) -> Vec<FfonElement> {
         MailBody::Ffon(elems) => {
             items.extend(elems.clone());
         }
+    }
+
+    // List attachments if present.
+    if !msg.attachments.is_empty() {
+        let mut attach_obj = FfonElement::new_obj("Attachments");
+        if let Some(obj) = attach_obj.as_obj_mut() {
+            obj.children = msg.attachments.iter()
+                .map(|a| FfonElement::new_str(format!(
+                    "{} ({}, {} bytes)",
+                    a.filename, a.content_type, a.data.len()
+                )))
+                .collect();
+        }
+        items.push(attach_obj);
     }
 
     if !msg.references.is_empty() {
@@ -1919,9 +2057,17 @@ impl Provider for EmailClientProvider {
     }
 
     fn pop_path(&mut self) {
-        // Reset compose state when navigating away.
+        // Save draft and reset compose state when navigating away.
         if self.at_compose() {
             self.compose_sent = false;
+            if Self::is_draft_non_empty(&self.compose.draft) {
+                if let Some(drafts_folder) = self.special_folders.drafts.clone() {
+                    let bytes = build_draft_bytes(&self.compose.draft, &self.config.username);
+                    if let Some(ref mut imap) = self.imap {
+                        let _ = imap.append(&drafts_folder, &bytes);
+                    }
+                }
+            }
         }
         if let Some(slash) = self.current_path.rfind('/') {
             if slash == 0 {
@@ -1951,6 +2097,22 @@ impl Provider for EmailClientProvider {
         match last {
             "To" => {
                 self.compose.draft.to = new_content.to_owned();
+                true
+            }
+            "Cc" => {
+                self.compose.draft.cc = new_content.to_owned();
+                true
+            }
+            "Bcc" => {
+                self.compose.draft.bcc = new_content.to_owned();
+                true
+            }
+            "Attachments:" => {
+                // Adding a new path — only non-empty strings.
+                let p = new_content.trim();
+                if !p.is_empty() {
+                    self.compose.draft.attachments.push(p.to_owned());
+                }
                 true
             }
             "Subject" => {
@@ -2021,6 +2183,16 @@ impl Provider for EmailClientProvider {
                 renormalize_body_variant(&mut self.compose.draft.body);
                 self.sync_body_path_label();
             }
+            "load-more" => {
+                // Increase the display limit for the current folder by 50.
+                let segs = self.path_segments();
+                if let Some(display) = segs.first().cloned() {
+                    let real = self.lookup_folder(&display).to_owned();
+                    let entry = self.folder_limits.entry(real).or_insert(50);
+                    *entry += 50;
+                    self.envelope_cache = None;
+                }
+            }
             _ => {}
         }
     }
@@ -2041,6 +2213,25 @@ impl Provider for EmailClientProvider {
                 true
             }
         }
+    }
+
+    fn collect_deep_search_items(&self) -> Option<Vec<sicompass_sdk::provider::SearchResultItem>> {
+        use sicompass_sdk::provider::SearchResultItem;
+        let mut results = Vec::new();
+        for h in &self.message_cache {
+            // Look up the folder display name via the reverse of folder_mappings.
+            let folder_display = self.folder_mappings.iter()
+                .find(|(_, real)| real == &self.envelope_cache_folder)
+                .map(|(d, _)| d.as_str())
+                .unwrap_or(&self.envelope_cache_folder);
+            let label = message_label(h);
+            results.push(SearchResultItem {
+                label: label.clone(),
+                breadcrumb: format!("{} > ", folder_display),
+                nav_path: format!("/{}/{}", folder_display, label),
+            });
+        }
+        Some(results)
     }
 
     fn take_error(&mut self) -> Option<String> {
@@ -2495,6 +2686,7 @@ mod tests {
         stored_flags: Vec<(String, u32, String)>,   // (folder, uid, "+/-FLAGS (flags)")
         moved: Vec<(String, u32, String)>,           // (from_folder, uid, dest_folder)
         expunged: Vec<(String, u32)>,                // (folder, uid)
+        appended: Vec<(String, Vec<u8>)>,            // (folder, raw_bytes)
     }
 
     impl MockImap {
@@ -2513,6 +2705,7 @@ mod tests {
                 stored_flags: vec![],
                 moved: vec![],
                 expunged: vec![],
+                appended: vec![],
             }
         }
         fn with_by_msg_id_only_in_folder(mut self, folder: &str, msg: EmailMessage) -> Self {
@@ -2610,29 +2803,49 @@ mod tests {
             self.expunged.push((folder.to_owned(), uid));
             Ok(())
         }
+        fn append(&mut self, folder: &str, message: &[u8]) -> Result<(), String> {
+            if let Some(ref e) = self.error { return Err(e.clone()); }
+            self.appended.push((folder.to_owned(), message.to_vec()));
+            Ok(())
+        }
     }
 
     struct MockSmtp {
         sent: std::sync::Arc<std::sync::Mutex<Vec<(String, String, String, MailBody)>>>,
+        cc_sent: Vec<Vec<String>>,
+        bcc_sent: Vec<Vec<String>>,
+        attachments_sent: Vec<Vec<String>>,
         fail: bool,
     }
 
     impl MockSmtp {
         fn new() -> Self {
-            MockSmtp { sent: Default::default(), fail: false }
+            MockSmtp { sent: Default::default(), cc_sent: vec![], bcc_sent: vec![], attachments_sent: vec![], fail: false }
         }
         fn failing() -> Self {
-            MockSmtp { sent: Default::default(), fail: true }
+            MockSmtp { sent: Default::default(), cc_sent: vec![], bcc_sent: vec![], attachments_sent: vec![], fail: true }
         }
     }
 
     impl SmtpBackend for MockSmtp {
-        fn send(&mut self, from: &str, to: &[&str], subject: &str, body: &MailBody) -> Result<(), String> {
+        fn send(
+            &mut self,
+            from: &str,
+            to: &[&str],
+            cc: &[&str],
+            bcc: &[&str],
+            subject: &str,
+            body: &MailBody,
+            attachments: &[(&str, &[u8])],
+        ) -> Result<Vec<u8>, String> {
             if self.fail { return Err("SMTP error".to_owned()); }
             self.sent.lock().unwrap().push((
                 from.to_owned(), to.join(", "), subject.to_owned(), body.clone()
             ));
-            Ok(())
+            self.cc_sent.push(cc.iter().map(|s| s.to_string()).collect());
+            self.bcc_sent.push(bcc.iter().map(|s| s.to_string()).collect());
+            self.attachments_sent.push(attachments.iter().map(|(n, _)| n.to_string()).collect());
+            Ok(b"fake-raw-message".to_vec())
         }
     }
 
@@ -2669,6 +2882,7 @@ mod tests {
             message_id: "<1@example.com>".to_owned(),
             in_reply_to: String::new(),
             references: String::new(),
+            attachments: vec![],
         }
     }
 
@@ -3006,6 +3220,7 @@ mod tests {
             message_id: "<prev@example.com>".to_owned(),
             in_reply_to: String::new(),
             references: String::new(),
+            attachments: vec![],
         };
         let imap = MockImap::new()
             .with_messages(msgs)
@@ -3042,6 +3257,7 @@ mod tests {
             message_id: "<prev@example.com>".to_owned(),
             in_reply_to: String::new(),
             references: String::new(),
+            attachments: vec![],
         };
         // Message only exists in "[Gmail]/All Mail", not in INBOX.
         let imap = MockImap::new()
@@ -4924,6 +5140,182 @@ mod tests {
         for cmd in &["mark-read", "mark-unread", "star", "unstar", "delete", "archive", "move"] {
             assert!(!cmds.contains(&cmd.to_string()), "commands() must not include '{cmd}' at root");
         }
+    }
+
+    // ---- Tier 2: Cc / Bcc ----
+
+    #[test]
+    fn test_compose_view_has_cc_and_bcc_fields() {
+        let mut p = EmailClientProvider::new();
+        p.push_path("compose");
+        let items = p.fetch();
+        assert!(
+            items.iter().any(|e| e.as_str().map_or(false, |s| s.starts_with("Cc:"))),
+            "compose view must include a Cc: field"
+        );
+        assert!(
+            items.iter().any(|e| e.as_str().map_or(false, |s| s.starts_with("Bcc:"))),
+            "compose view must include a Bcc: field"
+        );
+    }
+
+    #[test]
+    fn test_commit_edit_updates_cc_field() {
+        let mut p = EmailClientProvider::new();
+        p.push_path("compose");
+        p.push_path("Cc");
+        assert!(p.commit_edit("", "cc@example.com"));
+        assert_eq!(p.compose.draft.cc, "cc@example.com");
+    }
+
+    #[test]
+    fn test_commit_edit_updates_bcc_field() {
+        let mut p = EmailClientProvider::new();
+        p.push_path("compose");
+        p.push_path("Bcc");
+        assert!(p.commit_edit("", "bcc@example.com"));
+        assert_eq!(p.compose.draft.bcc, "bcc@example.com");
+    }
+
+    #[test]
+    fn test_send_draft_passes_cc_and_bcc_to_smtp() {
+        let smtp = MockSmtp::new();
+        let sent = std::sync::Arc::clone(&smtp.sent);
+        let mut p = EmailClientProvider::new().with_smtp(Box::new(smtp));
+        p.push_path("compose");
+        p.compose.draft.to = "to@example.com".to_owned();
+        p.compose.draft.cc = "cc@example.com".to_owned();
+        p.compose.draft.bcc = "bcc@example.com".to_owned();
+        p.compose.draft.subject = "Test".to_owned();
+        p.on_button_press("send");
+        assert_eq!(sent.lock().unwrap().len(), 1, "SMTP should have been called once");
+        let smtp_ref = p.smtp.as_ref().unwrap().as_ref() as *const dyn SmtpBackend as *const MockSmtp;
+        let cc = unsafe { &(*smtp_ref).cc_sent };
+        let bcc = unsafe { &(*smtp_ref).bcc_sent };
+        assert!(cc[0].contains(&"cc@example.com".to_owned()), "Cc must be passed to smtp; got: {:?}", cc);
+        assert!(bcc[0].contains(&"bcc@example.com".to_owned()), "Bcc must be passed to smtp; got: {:?}", bcc);
+    }
+
+    // ---- Tier 2: pagination ----
+
+    #[test]
+    fn test_build_folder_shows_load_more_when_at_limit() {
+        // Return exactly 50 messages — at_limit triggers.
+        let msgs: Vec<MessageHeader> = (1u32..=50)
+            .map(|i| make_header(i, "a@b.com", &format!("msg {i}")))
+            .collect();
+        let imap = MockImap::new().with_messages(msgs);
+        let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
+        p.push_path("INBOX");
+        let items = p.fetch();
+        assert!(
+            items.iter().any(|e| e.as_str().map_or(false, |s| s.contains("load-more"))),
+            "folder at limit must show load-more button; items: {:?}", items
+        );
+    }
+
+    #[test]
+    fn test_load_more_increases_folder_limit() {
+        let msgs: Vec<MessageHeader> = (1u32..=50)
+            .map(|i| make_header(i, "a@b.com", &format!("msg {i}")))
+            .collect();
+        let imap = MockImap::new().with_messages(msgs);
+        let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
+        p.push_path("INBOX");
+        p.fetch();
+        // Default limit is 50; pressing load-more should raise it to 100.
+        p.on_button_press("load-more");
+        let limit = *p.folder_limits.get("INBOX").unwrap_or(&50);
+        assert_eq!(limit, 100, "load-more must increment the folder limit by 50");
+    }
+
+    // ---- Tier 2: receive attachments in message view ----
+
+    #[test]
+    fn test_message_view_shows_attachments_section() {
+        let attachment = EmailAttachment {
+            filename: "report.pdf".to_owned(),
+            content_type: "application/pdf".to_owned(),
+            data: vec![1, 2, 3, 4],
+        };
+        let mut msg = make_message(1);
+        msg.attachments = vec![attachment];
+        let items = build_message_view(&msg);
+        let attach_obj = items.iter().find(|e| {
+            e.as_obj().map_or(false, |o| o.key == "Attachments")
+        });
+        assert!(attach_obj.is_some(), "message view must have Attachments obj when attachments are present");
+        let children = &attach_obj.unwrap().as_obj().unwrap().children;
+        assert!(
+            children.iter().any(|c| c.as_str().map_or(false, |s| s.contains("report.pdf"))),
+            "Attachments obj must list the filename; children: {:?}", children
+        );
+    }
+
+    #[test]
+    fn test_message_view_no_attachments_section_when_empty() {
+        let msg = make_message(1);
+        let items = build_message_view(&msg);
+        assert!(
+            !items.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "Attachments")),
+            "message view must not include Attachments obj when there are none"
+        );
+    }
+
+    // ---- Tier 2: draft save to \Drafts on navigate-away ----
+
+    #[test]
+    fn test_pop_path_from_compose_saves_draft_to_drafts_folder() {
+        let imap = MockImap::new()
+            .with_folders(&["INBOX", "[Gmail]/Drafts"])
+            .with_folder_infos(vec![
+                FolderInfo { name: "INBOX".to_owned(), attributes: vec![] },
+                FolderInfo { name: "[Gmail]/Drafts".to_owned(), attributes: vec!["\\Drafts".to_owned()] },
+            ]);
+        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        p.fetch(); // populate special_folders
+        p.push_path("compose");
+        p.compose.draft.to = "to@example.com".to_owned();
+        p.compose.draft.subject = "Draft subject".to_owned();
+        p.pop_path();
+        let mock = p.imap.as_ref().unwrap().as_ref() as *const dyn ImapBackend as *const MockImap;
+        let appended = unsafe { &(*mock).appended };
+        assert!(
+            appended.iter().any(|(folder, _)| folder.contains("Drafts")),
+            "pop_path from compose must APPEND draft to \\Drafts; got: {:?}",
+            appended.iter().map(|(f, b)| (f, b.len())).collect::<Vec<_>>()
+        );
+    }
+
+    // ---- Tier 2: search (collect_deep_search_items) ----
+
+    #[test]
+    fn test_collect_deep_search_items_returns_cached_envelopes() {
+        let msgs = vec![
+            make_header(1, "alice@example.com", "Hello World"),
+            make_header(2, "bob@example.com", "Rust Newsletter"),
+        ];
+        let imap = MockImap::new().with_messages(msgs);
+        let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
+        p.push_path("INBOX");
+        p.fetch(); // populates message_cache
+        let results = p.collect_deep_search_items().unwrap_or_default();
+        assert!(
+            results.iter().any(|r| r.label.to_lowercase().contains("hello")),
+            "search results must include messages matching the query; got: {:?}", results
+        );
+        assert!(
+            results.iter().any(|r| r.label.to_lowercase().contains("rust")),
+            "search results must include second message; got: {:?}", results
+        );
+    }
+
+    #[test]
+    fn test_collect_deep_search_items_empty_before_fetch() {
+        let p = EmailClientProvider::new();
+        // No fetch yet — message_cache is empty so results should be empty.
+        let results = p.collect_deep_search_items().unwrap_or_default();
+        assert!(results.is_empty(), "search must return nothing before any message is cached");
     }
 }
 
