@@ -4911,3 +4911,95 @@ fn empty_input_enter_calls_commit_edit() {
     assert_eq!(committed.as_deref(), Some("hello"),
         "commit_edit must be called with the typed content for empty <input></input>");
 }
+
+// ---------------------------------------------------------------------------
+// Chat client: unread badge renders in the FFON tree
+// ---------------------------------------------------------------------------
+
+/// When a room has unread messages the badge must be embedded in the Obj's key
+/// (not as a child). An obj with children is expanded in-place by the renderer
+/// rather than triggering a provider fetch, which would prevent navigating into
+/// the room.
+#[test]
+fn chat_unread_badge_embedded_in_key() {
+    let mut chat = sicompass_chatclient::ChatClientProvider::new().with_sync_disabled();
+    chat.test_set_credentials("https://matrix.org", "tok");
+
+    chat.test_seed_room("!noisy:s", "Noisy Channel");
+    chat.test_set_unread("Noisy Channel", 3, 1);
+
+    let children = chat.fetch();
+
+    // Badge is in the key; no child nodes.
+    let room_obj = children
+        .iter()
+        .find(|e| e.as_obj().map_or(false, |o| o.key == "Noisy Channel [mention:1]"));
+    assert!(room_obj.is_some(), "room with badge key must appear; got: {children:?}");
+    assert!(
+        room_obj.unwrap().as_obj().unwrap().children.is_empty(),
+        "room obj must have no children so navigation reaches the provider fetch"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Chat client: room info command surface
+// ---------------------------------------------------------------------------
+
+/// The "room info" command must return a string that includes the room ID,
+/// even without a live homeserver.  This confirms the provider wires topic/
+/// member/encryption data through without touching the network.
+#[test]
+fn chat_room_info_returns_room_id() {
+    let mut chat = sicompass_chatclient::ChatClientProvider::new().with_sync_disabled();
+    chat.test_set_credentials("https://matrix.org", "tok");
+    chat.test_seed_room("!info:s", "Info Room");
+    // Navigate into the room so "room info" finds it.
+    chat.push_path("Info Room");
+
+    let mut err = String::new();
+    let result = chat.handle_command("room info", "Info Room", 0, &mut err);
+    assert!(err.is_empty(), "room info must not error: {err}");
+    assert!(result.is_some(), "room info must return a result element");
+    let text = result.unwrap();
+    assert!(
+        text.as_str().map_or(false, |s| s.contains("!info:s")),
+        "room info must contain the room ID; got: {text:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Chat client: mark read command
+// ---------------------------------------------------------------------------
+
+/// "mark read" must clear the local unread count immediately (even if the
+/// receipt HTTP call fails). The badge disappears from the room list after the
+/// command runs.
+#[test]
+fn chat_mark_read_clears_local_unread_count() {
+    let mut chat = sicompass_chatclient::ChatClientProvider::new().with_sync_disabled();
+    // Unreachable server: the receipt POST will fail silently; the local
+    // optimistic update must still apply.
+    chat.test_set_credentials("http://127.0.0.1:1", "tok");
+    chat.test_seed_room("!r:s", "General");
+    chat.test_set_unread("General", 2, 0);
+
+    // Sanity: badge in room list before marking read.
+    let list_before = chat.fetch();
+    assert!(
+        list_before.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "General [unread:2]")),
+        "unread badge must be in key before mark read; got: {list_before:?}"
+    );
+
+    // Navigate into the room so the command knows which room to mark.
+    chat.push_path("General");
+    let mut err = String::new();
+    chat.handle_command("mark read", "", 0, &mut err);
+
+    // Navigate back to root and verify badge is gone.
+    chat.pop_path();
+    let list_after = chat.fetch();
+    assert!(
+        list_after.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "General")),
+        "badge must be gone after mark read; got: {list_after:?}"
+    );
+}
