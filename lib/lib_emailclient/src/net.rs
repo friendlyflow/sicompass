@@ -6,20 +6,19 @@
 //! Both are instantiated lazily from `EmailClientConfig` inside `init()`.
 
 use crate::{EmailAttachment, EmailClientConfig, EmailMessage, FolderInfo, ImapBackend, MailBody, MessageHeader, SmtpBackend};
+use crate::connection::{connect_imap, parse_imap_url};
 use lettre::message::{Attachment as LettreAttachment, MultiPart, SinglePart};
-use crate::idle::parse_imap_url;
 
 use imap_proto::types::Address;
 use lettre::message::header::ContentType;
 use lettre::transport::smtp::authentication::{Credentials, Mechanism};
 use lettre::{Message, SmtpTransport, Transport};
-use native_tls::TlsConnector;
 
 // ---------------------------------------------------------------------------
 // RealImap
 // ---------------------------------------------------------------------------
 
-type ImapSession = imap::Session<native_tls::TlsStream<std::net::TcpStream>>;
+use crate::connection::ImapSession;
 
 pub struct RealImap {
     config: EmailClientConfig,
@@ -37,9 +36,9 @@ impl RealImap {
     /// Get (or create) a live IMAP session.
     fn session(&mut self) -> Result<&mut ImapSession, String> {
         if self.session.is_none() {
-            self.session = Some(connect(&self.config)?);
+            self.session = Some(connect_imap(&self.config)?);
         }
-        Ok(self.session.as_mut().unwrap())
+        Ok(self.session.as_mut().expect("session set above"))
     }
 
     /// Invalidate the cached session (called after errors).
@@ -50,28 +49,6 @@ impl RealImap {
     }
 }
 
-fn connect(config: &EmailClientConfig) -> Result<ImapSession, String> {
-    let (host, port) = parse_imap_url(&config.imap_url)
-        .ok_or_else(|| format!("cannot parse IMAP URL: {}", config.imap_url))?;
-
-    let tls = TlsConnector::new().map_err(|e| e.to_string())?;
-    let client = imap::connect((host.as_str(), port), &host, &tls)
-        .map_err(|e| e.to_string())?;
-
-    if config.oauth_access_token.is_empty() {
-        client
-            .login(&config.username, &config.password)
-            .map_err(|(e, _)| e.to_string())
-    } else {
-        let auth = XOAuth2Auth {
-            user: config.username.clone(),
-            token: config.oauth_access_token.clone(),
-        };
-        client
-            .authenticate("XOAUTH2", &auth)
-            .map_err(|(e, _)| e.to_string())
-    }
-}
 
 impl ImapBackend for RealImap {
     fn list_folders(&mut self) -> Result<Vec<FolderInfo>, String> {
@@ -80,7 +57,7 @@ impl ImapBackend for RealImap {
             self.reset_session();
             return Err(e);
         }
-        let session = self.session.as_mut().unwrap();
+        let session = self.session.as_mut().expect("session() succeeded above");
         let names = session
             .list(None, Some("*"))
             .map_err(|e| e.to_string())?;
@@ -413,19 +390,6 @@ impl SmtpBackend for RealSmtp {
 // XOAUTH2 IMAP authenticator
 // ---------------------------------------------------------------------------
 
-struct XOAuth2Auth {
-    user: String,
-    token: String,
-}
-
-impl imap::Authenticator for XOAuth2Auth {
-    type Response = String;
-    fn process(&self, _challenge: &[u8]) -> Self::Response {
-        // imap crate base64-encodes the response automatically.
-        format!("user={}\x01auth=Bearer {}\x01\x01", self.user, self.token)
-    }
-}
-
 // ---------------------------------------------------------------------------
 // RFC 2822 raw-message parser
 // ---------------------------------------------------------------------------
@@ -459,8 +423,10 @@ fn parse_rfc2822(uid: u32, raw: &[u8]) -> EmailMessage {
         // Unfold continuation lines (lines starting with whitespace).
         let mut value = line.to_owned();
         while lines.peek().map_or(false, |l| l.starts_with(' ') || l.starts_with('\t')) {
-            value.push(' ');
-            value.push_str(lines.next().unwrap().trim());
+            if let Some(cont) = lines.next() {
+                value.push(' ');
+                value.push_str(cont.trim());
+            }
         }
         let lc = value.to_ascii_lowercase();
         if lc.starts_with("from: ") { from = value[6..].to_owned(); }
