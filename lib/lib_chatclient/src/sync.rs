@@ -5,11 +5,15 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 const RECONNECT_DELAY_SECS: u64 = 10;
 pub const MAX_TIMELINE: usize = 200;
+
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 // ---------------------------------------------------------------------------
 // Cache types
@@ -20,6 +24,7 @@ pub struct TimelineEvent {
     pub event_id: String,
     pub sender: String,
     pub body: String,
+    #[allow(dead_code)] // available for future timestamp display / sorting
     pub origin_server_ts: i64,
 }
 
@@ -46,6 +51,12 @@ pub struct RoomState {
     pub is_dm: bool,
     pub members: HashMap<String, Member>,
     pub space_children: Vec<String>,
+    pub unread_count: u32,
+    pub highlight_count: u32,
+    pub topic: Option<String>,
+    pub is_encrypted: bool,
+    /// Token for fetching earlier messages via /messages?dir=b.
+    pub prev_batch: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -209,6 +220,36 @@ pub fn parse_sync_response(json: serde_json::Value, cache: &mut SyncCache) -> bo
                         }
                     }
 
+                    if ev_type == "m.room.encrypted" {
+                        let event_id = ev
+                            .get("event_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_owned();
+                        if event_id.is_empty()
+                            || entry.timeline.iter().any(|e| e.event_id == event_id)
+                        {
+                            continue;
+                        }
+                        let sender = ev
+                            .get("sender")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("?")
+                            .to_owned();
+                        let origin_server_ts = ev
+                            .get("origin_server_ts")
+                            .and_then(|v| v.as_i64())
+                            .unwrap_or(0);
+                        entry.timeline.push(TimelineEvent {
+                            event_id,
+                            sender,
+                            body: "[encrypted message]".to_owned(),
+                            origin_server_ts,
+                        });
+                        changed = true;
+                        continue;
+                    }
+
                     if ev_type != "m.room.message" {
                         continue;
                     }
@@ -245,6 +286,35 @@ pub fn parse_sync_response(json: serde_json::Value, cache: &mut SyncCache) -> bo
                 if entry.timeline.len() > MAX_TIMELINE {
                     let drain = entry.timeline.len() - MAX_TIMELINE;
                     entry.timeline.drain(..drain);
+                }
+
+                // Store the prev_batch token for history pagination.
+                if let Some(pb) = room_data
+                    .get("timeline")
+                    .and_then(|t| t.get("prev_batch"))
+                    .and_then(|v| v.as_str())
+                {
+                    if entry.prev_batch.as_deref() != Some(pb) {
+                        entry.prev_batch = Some(pb.to_owned());
+                    }
+                }
+            }
+
+            // Update unread/mention counts.
+            if let Some(notifs) = room_data.get("unread_notifications") {
+                let unread = notifs
+                    .get("notification_count")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
+                let highlight = notifs
+                    .get("highlight_count")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as u32;
+                let entry = cache.rooms.get_mut(room_id).unwrap();
+                if entry.unread_count != unread || entry.highlight_count != highlight {
+                    entry.unread_count = unread;
+                    entry.highlight_count = highlight;
+                    changed = true;
                 }
             }
         }
@@ -315,6 +385,25 @@ fn apply_state_event(
                 && !entry.space_children.contains(&child_id.to_owned())
             {
                 entry.space_children.push(child_id.to_owned());
+                *changed = true;
+            }
+        }
+        "m.room.topic" => {
+            if let Some(topic) = ev
+                .get("content")
+                .and_then(|c| c.get("topic"))
+                .and_then(|t| t.as_str())
+            {
+                let new_topic = if topic.is_empty() { None } else { Some(topic.to_owned()) };
+                if entry.topic != new_topic {
+                    entry.topic = new_topic;
+                    *changed = true;
+                }
+            }
+        }
+        "m.room.encryption" => {
+            if !entry.is_encrypted {
+                entry.is_encrypted = true;
                 *changed = true;
             }
         }
@@ -464,12 +553,15 @@ impl SyncController {
 
     /// Stop the background sync thread.
     ///
-    /// Sets the running flag to false and drops the handle without joining.
-    /// The thread exits within one HTTP timeout (≤60 s) once it sees
-    /// running=false. Not joining avoids blocking the main thread.
+    /// Sets the running flag to false and hands the join handle to a
+    /// background cleanup thread so the OS doesn't accumulate zombie threads
+    /// across rapid start/stop cycles, while still avoiding a block on the
+    /// main thread (the HTTP long-poll timeout is up to 60 s).
     pub fn stop(&mut self) {
         self.running.store(false, Ordering::Relaxed);
-        let _ = self.thread.take();
+        if let Some(handle) = self.thread.take() {
+            std::thread::spawn(move || { let _ = handle.join(); });
+        }
     }
 
     pub fn is_running(&self) -> bool {
@@ -508,8 +600,7 @@ fn sync_loop(
             &notify,
             &running,
         ) {
-            Ok(()) => {}
-            Err(e) => eprintln!("chatclient_sync: session error: {e}"),
+            Ok(()) | Err(_) => {}
         }
 
         if !running.load(Ordering::Relaxed) {
@@ -539,7 +630,7 @@ fn run_sync_session(
 ) -> Result<(), String> {
     // Seed self_user_id into the cache if provided.
     if !user_id.is_empty() {
-        let mut locked = cache.lock().unwrap();
+        let mut locked = lock(&cache);
         if locked.self_user_id.is_empty() {
             locked.self_user_id = user_id.to_owned();
         }
@@ -558,7 +649,7 @@ fn run_sync_session(
             return Ok(());
         }
 
-        let since = cache.lock().unwrap().next_batch.clone();
+        let since = lock(&cache).next_batch.clone();
         let url = if since.is_empty() {
             format!("{base}/_matrix/client/v3/sync?timeout=0")
         } else {
@@ -583,7 +674,7 @@ fn run_sync_session(
             .to_owned();
 
         let changed = {
-            let mut locked = cache.lock().unwrap();
+            let mut locked = lock(&cache);
             parse_sync_response(body, &mut locked)
         };
 
@@ -603,7 +694,7 @@ fn run_sync_session(
 fn persist_next_batch(config_path: &Option<std::path::PathBuf>, token: &str, file_lock: &Arc<Mutex<()>>) {
     use serde_json::{Map, Value};
     let Some(path) = config_path else { return };
-    let _guard = file_lock.lock().unwrap();
+    let _guard = lock(file_lock);
     let mut root: Map<String, Value> = std::fs::read_to_string(path)
         .ok()
         .and_then(|s| serde_json::from_str::<Value>(&s).ok())
@@ -749,6 +840,45 @@ mod tests {
         let json2 = make_sync_response("s2", "!r:s", None, &[("$e1", "@a:s", "hello")]);
         parse_sync_response(json2, &mut cache);
         assert_eq!(cache.rooms["!r:s"].timeline.len(), 1);
+    }
+
+    #[test]
+    fn parse_sync_response_encrypted_events_appear_as_placeholder() {
+        let mut cache = SyncCache::default();
+        let json = serde_json::json!({
+            "next_batch": "s1",
+            "rooms": {
+                "join": {
+                    "!r:s": {
+                        "state": { "events": [] },
+                        "timeline": {
+                            "events": [
+                                {
+                                    "type": "m.room.encrypted",
+                                    "event_id": "$enc1",
+                                    "sender": "@a:s",
+                                    "origin_server_ts": 1000u64,
+                                    "content": { "algorithm": "m.megolm.v1.aes-sha2" }
+                                },
+                                {
+                                    "type": "m.room.message",
+                                    "event_id": "$msg1",
+                                    "sender": "@b:s",
+                                    "content": { "body": "plaintext" },
+                                    "origin_server_ts": 2000u64
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        });
+        parse_sync_response(json, &mut cache);
+        let tl = &cache.rooms["!r:s"].timeline;
+        assert_eq!(tl.len(), 2);
+        assert_eq!(tl[0].body, "[encrypted message]");
+        assert_eq!(tl[0].sender, "@a:s");
+        assert_eq!(tl[1].body, "plaintext");
     }
 
     #[test]
