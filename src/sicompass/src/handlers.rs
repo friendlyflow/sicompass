@@ -131,10 +131,33 @@ fn find_id_path(arr: &[FfonElement], base_id: &IdArray, target: &str) -> Option<
     None
 }
 
+/// Apply the active provider's preferred coordinate when entering or leaving a
+/// provider root (depth 1 ↔ 2 crossing). Only fires when already in a General
+/// variant so Insert/Search/Command/Scroll states are never clobbered.
+fn sync_coordinate_to_provider(r: &mut AppRenderer) {
+    if !r.coordinate.is_general() { return; }
+    let target = match r.current_id.depth() {
+        1 => Coordinate::OperatorGeneral,
+        _ => {
+            let provider_idx = match r.current_id.get(0) {
+                Some(i) => i,
+                None => return,
+            };
+            let kind = r.providers
+                .get(provider_idx)
+                .map(|p| p.preferred_coordinate_kind())
+                .unwrap_or_default();
+            Coordinate::general_for_kind(kind)
+        }
+    };
+    r.coordinate = target;
+}
+
 /// Navigate into the item at `r.current_id` without rebuilding the list.
 /// Returns `true` if navigation happened.
 pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
     let item_id = r.current_id.clone();
+    let depth_before = item_id.depth();
 
     if !next_layer_exists(&r.ffon, &item_id) {
         return false; // leaf node — not navigable
@@ -250,6 +273,11 @@ pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
             new_id.push(0);
             r.current_id = new_id;
         }
+    }
+
+    // Entering a provider (root → depth 2): switch to its preferred coordinate.
+    if depth_before == 1 && r.current_id.depth() == 2 {
+        sync_coordinate_to_provider(r);
     }
 
     true
@@ -474,6 +502,10 @@ pub fn navigate_left_raw(r: &mut AppRenderer) -> bool {
             }
         }
     }
+
+    // Crossing depth 2 → 1 (leaving provider): switch back to OperatorGeneral.
+    // Staying within a provider: re-confirm its preferred coordinate (no-op if unchanged).
+    sync_coordinate_to_provider(r);
 
     true
 }

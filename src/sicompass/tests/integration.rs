@@ -5107,3 +5107,108 @@ fn editor_provider_lists_directory_and_parses_file() {
     let back = editor.fetch();
     assert_eq!(back.len(), items.len(), "should be back at directory level");
 }
+
+// ---------------------------------------------------------------------------
+// CoordinateKind / editor coordinate tests
+// ---------------------------------------------------------------------------
+
+/// Build an AppRenderer with filebrowser (idx 0) + editor (idx 1).
+/// The editor is rooted at `tmp` which contains one .txt file.
+fn harness_with_editor() -> (AppRenderer, TempDir) {
+    ensure_builtins();
+    let tmp = TempDir::new().expect("tempdir");
+    let root = tmp.path();
+    std::fs::write(root.join("hello.txt"), "fn main() {}").unwrap();
+
+    let mut renderer = AppRenderer::new();
+
+    // Filebrowser at "/" so it doesn't depend on a real directory.
+    register(&mut renderer, sicompass_sdk::create_provider_by_name("filebrowser").unwrap());
+    renderer.providers[0].set_current_path("/");
+    {
+        let children = renderer.providers[0].fetch();
+        let dn = renderer.providers[0].display_name().to_owned();
+        let mut root_elem = FfonElement::new_obj(&dn);
+        for child in children { root_elem.as_obj_mut().unwrap().push(child); }
+        renderer.ffon[0] = root_elem;
+    }
+
+    // Editor at tmp — set path before fetching so init doesn't clobber it.
+    let mut editor = sicompass_sdk::create_provider_by_name("editor").unwrap();
+    editor.on_setting_change("editorPath", root.to_str().unwrap());
+    let children = editor.fetch();
+    let dn = editor.display_name().to_owned();
+    let mut root_elem = FfonElement::new_obj(&dn);
+    for child in children { root_elem.as_obj_mut().unwrap().push(child); }
+    renderer.ffon.push(root_elem);
+    renderer.providers.push(editor);
+
+    sicompass::list::create_list_current_layer(&mut renderer);
+    (renderer, tmp)
+}
+
+#[test]
+fn entering_editor_provider_switches_to_editor_general() {
+    let (mut r, _tmp) = harness_with_editor();
+    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+    navigate_to_provider(&mut r, editor_idx);
+    assert_eq!(r.coordinate, Coordinate::OperatorGeneral, "before entry: OperatorGeneral");
+
+    press_right(&mut r);
+    assert_eq!(r.current_id.depth(), 2, "should be inside editor provider");
+    assert_eq!(r.coordinate, Coordinate::EditorGeneral, "should auto-switch to EditorGeneral");
+}
+
+#[test]
+fn inside_editor_i_yields_editor_insert() {
+    let (mut r, _tmp) = harness_with_editor();
+    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+    navigate_to_provider(&mut r, editor_idx);
+    press_right(&mut r); // enters editor → EditorGeneral
+    assert_eq!(r.coordinate, Coordinate::EditorGeneral);
+
+    press(&mut r, Keycode::I);
+    assert_eq!(r.coordinate, Coordinate::EditorInsert, "'i' from EditorGeneral should give EditorInsert");
+}
+
+#[test]
+fn leaving_editor_provider_reverts_to_operator_general() {
+    let (mut r, _tmp) = harness_with_editor();
+    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+    navigate_to_provider(&mut r, editor_idx);
+    press_right(&mut r); // enter → EditorGeneral
+    assert_eq!(r.coordinate, Coordinate::EditorGeneral);
+
+    press_left(&mut r);
+    assert_eq!(r.current_id.depth(), 1, "should be back at root");
+    assert_eq!(r.coordinate, Coordinate::OperatorGeneral, "should revert to OperatorGeneral");
+}
+
+#[test]
+fn entering_filebrowser_keeps_operator_general() {
+    let (mut r, _tmp) = harness_with_editor();
+    // Start at filebrowser (idx 0)
+    navigate_to_provider(&mut r, 0);
+    press_right(&mut r);
+    assert_eq!(r.current_id.depth(), 2);
+    assert_eq!(r.coordinate, Coordinate::OperatorGeneral, "filebrowser keeps OperatorGeneral");
+}
+
+#[test]
+fn entering_editor_does_not_clobber_non_general_coordinate() {
+    let (mut r, _tmp) = harness_with_editor();
+    // Simulate a non-General coordinate (e.g. user is in a search overlay).
+    r.coordinate = Coordinate::OperatorInsert;
+    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+    // Directly invoke navigate_right_raw so the key-dispatch routing for Insert mode
+    // doesn't interfere — we're testing the guard inside navigate_right_raw itself.
+    while r.current_id.depth() > 1 { r.current_id.pop(); }
+    let cur = r.current_id.get(0).unwrap_or(0);
+    if cur < editor_idx {
+        for _ in 0..(editor_idx - cur) {
+            sicompass::handlers::handle_down(&mut r);
+        }
+    }
+    sicompass::handlers::navigate_right_raw(&mut r);
+    assert_eq!(r.coordinate, Coordinate::OperatorInsert, "non-General coordinate must not be clobbered");
+}
