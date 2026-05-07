@@ -3447,6 +3447,7 @@ name = "sicompass-builtins"
 version = "0.1.0"
 dependencies = [
  "sicompass-chatclient",
+ "sicompass-editor",
  "sicompass-emailclient",
  "sicompass-filebrowser",
  "sicompass-remote",
@@ -3468,6 +3469,15 @@ dependencies = [
  "tempfile",
  "tokio",
  "wiremock",
+]
+
+[[package]]
+name = "sicompass-editor"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "sicompass-sdk",
+ "tempfile",
 ]
 
 [[package]]

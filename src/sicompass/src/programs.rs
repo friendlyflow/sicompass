@@ -167,6 +167,9 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
             if let Some(p) = instantiate_builtin(&m.name) {
                 register_provider(renderer, p);
             }
+            if !m.settings.is_empty() {
+                inject_builtin_manifest_settings(settings.as_mut(), &m);
+            }
         }
     }
 
@@ -1230,5 +1233,25 @@ mod tests {
             .filter(|s| s.contains("<input>"))
             .collect();
         assert_eq!(inputs.len(), 1, "expected 1 text setting, got {}: {:?}", inputs.len(), inputs);
+    }
+
+    #[test]
+    fn hot_enable_editor_registers_settings() {
+        let ffon = settings_ffon_after_enable("editor");
+        let children = section_children(&ffon, "editor")
+            .expect("editor section should be present after hot-enable");
+        assert!(
+            !children.iter().any(|e| e.as_str() == Some("no settings")),
+            "editor section should not show 'no settings'"
+        );
+        let inputs: Vec<_> = children.iter()
+            .filter_map(|e| e.as_str())
+            .filter(|s| s.contains("<input>"))
+            .collect();
+        assert_eq!(inputs.len(), 1, "expected 1 text setting (editor path), got {}: {:?}", inputs.len(), inputs);
+        assert!(
+            inputs[0].contains("editor path"),
+            "the single input should be 'editor path', got: {}", inputs[0]
+        );
     }
 }
