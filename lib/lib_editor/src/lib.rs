@@ -34,18 +34,37 @@ pub struct EditorProvider {
     ffon_sub_path: Vec<String>,
     /// Set to `true` when `editor_path` changes so the app re-fetches the FFON.
     refresh_pending: bool,
+    /// Combined path returned by `current_path()`.
+    ///
+    /// Equals `current_fs_path` when `ffon_sub_path` is empty, otherwise
+    /// `current_fs_path/seg1/seg2/…`.  Keeping the FFON segments in the
+    /// path makes `navigate_left_raw` detect a path change when the user
+    /// presses left from inside a FFON section, enabling correct cursor
+    /// restoration to the section element they came from.
+    current_path_str: String,
 }
 
 impl EditorProvider {
     pub fn new() -> Self {
         let editor_path = home_dir();
         let current_fs_path = PathBuf::from(&editor_path);
+        let current_path_str = editor_path.clone();
         EditorProvider {
             editor_path,
             current_fs_path,
             ffon_sub_path: Vec::new(),
             refresh_pending: false,
+            current_path_str,
         }
+    }
+
+    fn sync_path_str(&mut self) {
+        let base = self.current_fs_path.to_str().unwrap_or("/");
+        self.current_path_str = if self.ffon_sub_path.is_empty() {
+            base.to_string()
+        } else {
+            format!("{}/{}", base, self.ffon_sub_path.join("/"))
+        };
     }
 
     fn root_path(&self) -> PathBuf {
@@ -84,7 +103,11 @@ impl EditorProvider {
             Ok(s) => s,
             Err(_) => return vec![FfonElement::new_str("(binary or unreadable file)")],
         };
-        let tree = parse::parse_file(&contents);
+        let ext = self.current_fs_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
+        let tree = parse::parse_file_ext(&contents, ext);
         if self.ffon_sub_path.is_empty() {
             tree
         } else {
@@ -122,6 +145,7 @@ impl Provider for EditorProvider {
         self.current_fs_path = PathBuf::from(&self.editor_path);
         self.ffon_sub_path.clear();
         self.refresh_pending = false;
+        self.sync_path_str();
     }
 
     fn fetch(&mut self) -> Vec<FfonElement> {
@@ -139,7 +163,6 @@ impl Provider for EditorProvider {
         let clean = tags::strip_display(segment);
         let clean = clean.trim_end_matches('/');
         if self.current_fs_path.is_file() {
-            // Navigate within the parsed FFON tree.
             self.ffon_sub_path.push(clean.to_string());
         } else {
             let candidate = self.current_fs_path.join(clean);
@@ -147,6 +170,7 @@ impl Provider for EditorProvider {
                 self.current_fs_path = candidate;
             }
         }
+        self.sync_path_str();
     }
 
     fn pop_path(&mut self) {
@@ -155,15 +179,17 @@ impl Provider for EditorProvider {
         } else if self.current_fs_path != self.root_path() {
             self.current_fs_path.pop();
         }
+        self.sync_path_str();
     }
 
     fn current_path(&self) -> &str {
-        self.current_fs_path.to_str().unwrap_or("/")
+        &self.current_path_str
     }
 
     fn set_current_path(&mut self, path: &str) {
         self.current_fs_path = PathBuf::from(path);
         self.ffon_sub_path.clear();
+        self.sync_path_str();
     }
 
     fn stable_root_key(&self) -> bool { true }
@@ -184,6 +210,7 @@ impl Provider for EditorProvider {
             self.current_fs_path = PathBuf::from(value);
             self.ffon_sub_path.clear();
             self.refresh_pending = true;
+            self.sync_path_str();
         }
     }
 }
@@ -234,6 +261,7 @@ mod tests {
             current_fs_path: PathBuf::new(),
             ffon_sub_path: vec![],
             refresh_pending: false,
+            current_path_str: String::new(),
         };
         let items = p.fetch();
         assert_eq!(items.len(), 1);
@@ -280,6 +308,31 @@ mod tests {
         p.on_setting_change("someOtherKey", "/etc");
         assert_eq!(p.editor_path, original);
         assert!(!p.needs_refresh());
+    }
+
+    #[test]
+    fn current_path_includes_ffon_sub_path() {
+        let tmp = make_tmp();
+        let file = tmp.path().join("data.txt");
+        std::fs::write(&file, "section:\n{\n  child\n}").unwrap();
+
+        let mut p = EditorProvider::new();
+        p.on_setting_change("editorPath", tmp.path().to_str().unwrap());
+        p.push_path("data.txt");
+        let path_at_file = p.current_path().to_string();
+
+        p.push_path("section:");
+        let path_at_section = p.current_path().to_string();
+
+        // Pushing into a FFON section must change current_path() so that
+        // navigate_left_raw can detect the change and restore the cursor.
+        assert_ne!(path_at_file, path_at_section);
+        assert!(path_at_section.contains("section:"),
+            "current_path should include the FFON segment, got: {}", path_at_section);
+
+        p.pop_path();
+        assert_eq!(p.current_path(), path_at_file,
+            "popping the FFON segment must restore the file path");
     }
 
     #[test]
