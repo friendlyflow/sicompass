@@ -5052,3 +5052,58 @@ fn chat_mark_read_clears_local_unread_count() {
         "badge must be gone after mark read; got: {list_after:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Editor provider
+// ---------------------------------------------------------------------------
+
+#[test]
+fn editor_provider_lists_directory_and_parses_file() {
+    ensure_builtins();
+    let tmp = TempDir::new().expect("tempdir");
+    let root = tmp.path();
+
+    // A plain file and a structured file with sections.
+    std::fs::write(root.join("readme.txt"), "hello world").unwrap();
+    std::fs::write(
+        root.join("code.txt"),
+        "functions:\n{\n  fn foo\n  fn bar\n}\nend",
+    ).unwrap();
+    std::fs::create_dir(root.join("subdir")).unwrap();
+
+    let mut editor = sicompass_sdk::create_provider_by_name("editor")
+        .expect("editor factory must be registered");
+    editor.on_setting_change("editorPath", root.to_str().unwrap());
+
+    // Directory listing contains all three entries.
+    let items = editor.fetch();
+    let names: Vec<String> = items.iter().filter_map(|e| {
+        e.as_obj().map(|o| o.key.clone())
+            .or_else(|| e.as_str().map(|s| s.to_string()))
+    }).collect();
+    assert!(names.iter().any(|n| n.contains("readme.txt")), "expected readme.txt in {names:?}");
+    assert!(names.iter().any(|n| n.contains("code.txt")),   "expected code.txt in {names:?}");
+    assert!(names.iter().any(|n| n.contains("subdir")),     "expected subdir in {names:?}");
+
+    // Entering a file returns its parsed FFON content.
+    editor.push_path("code.txt");
+    let file_items = editor.fetch();
+    assert_eq!(file_items.len(), 2, "code.txt should parse into 2 top-level elements");
+    let section = file_items[0].as_obj().expect("first element must be an Obj section");
+    assert_eq!(section.key, "functions:");
+    assert_eq!(section.children.len(), 2);
+    assert_eq!(file_items[1].as_str(), Some("end"));
+
+    // Navigating into a section returns its children.
+    editor.push_path("functions:");
+    let section_items = editor.fetch();
+    assert_eq!(section_items.len(), 2);
+    assert_eq!(section_items[0].as_str(), Some("fn foo"));
+    assert_eq!(section_items[1].as_str(), Some("fn bar"));
+
+    // pop_path twice returns to the directory listing.
+    editor.pop_path(); // section → file root
+    editor.pop_path(); // file → directory
+    let back = editor.fetch();
+    assert_eq!(back.len(), items.len(), "should be back at directory level");
+}

@@ -24,6 +24,7 @@ static REGISTERED: OnceLock<()> = OnceLock::new();
 pub fn register_all() {
     REGISTERED.get_or_init(|| {
         sicompass_filebrowser::register();
+        sicompass_editor::register();
         sicompass_tutorial::register();
         sicompass_webbrowser::register();
         sicompass_chatclient::register();
@@ -84,6 +85,14 @@ mod tests {
         register_all();
         let p = sicompass_sdk::create_provider_by_name("emailclient");
         assert!(p.is_some(), "emailclient factory should be registered");
+    }
+
+    #[test]
+    fn editor_factory_is_registered() {
+        register_all();
+        let p = sicompass_sdk::create_provider_by_name("editor");
+        assert!(p.is_some(), "editor factory should be registered");
+        assert_eq!(p.unwrap().name(), "editor");
     }
 
     #[test]

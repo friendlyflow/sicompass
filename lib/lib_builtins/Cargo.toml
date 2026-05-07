@@ -12,6 +12,7 @@ sicompass-tutorial = { workspace = true }
 sicompass-webbrowser = { workspace = true }
 sicompass-chatclient = { workspace = true }
 sicompass-emailclient = { workspace = true }
+sicompass-editor = { workspace = true }
 sicompass-remote = { workspace = true }
 sicompass-sales-demo = { workspace = true }
 sicompass-settings = { workspace = true }

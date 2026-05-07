@@ -7,6 +7,7 @@ members = [
     "lib/lib_webbrowser",
     "lib/lib_chatclient",
     "lib/lib_emailclient",
+    "lib/lib_editor",
     "lib/lib_remote",
     "lib/lib_sales_demo",
     "lib/lib_builtins",
@@ -28,6 +29,7 @@ sicompass-filebrowser = { path = "lib/lib_filebrowser" }
 sicompass-webbrowser = { path = "lib/lib_webbrowser" }
 sicompass-chatclient = { path = "lib/lib_chatclient" }
 sicompass-emailclient = { path = "lib/lib_emailclient" }
+sicompass-editor = { path = "lib/lib_editor" }
 sicompass-remote = { path = "lib/lib_remote" }
 sicompass-sales-demo = { path = "lib/lib_sales_demo" }
 sicompass-builtins = { path = "lib/lib_builtins" }
