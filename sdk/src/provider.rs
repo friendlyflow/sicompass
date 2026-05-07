@@ -51,6 +51,17 @@ pub struct SearchResultItem {
     pub nav_path: String,
 }
 
+/// The coordinate family a provider prefers when it is the active root.
+///
+/// The app maps `Operator` → `OperatorGeneral` and `Editor` → `EditorGeneral`
+/// on provider activation, switching back when the provider is left.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CoordinateKind {
+    #[default]
+    Operator,
+    Editor,
+}
+
 // ---------------------------------------------------------------------------
 // Provider trait
 // ---------------------------------------------------------------------------
@@ -208,6 +219,10 @@ pub trait Provider: Send + 'static {
     fn collect_deep_search_items(&self) -> Option<Vec<SearchResultItem>> { None }
 
     // ---- Optional: meta/help -----------------------------------------------
+
+    /// The coordinate family this provider prefers when it is active.
+    /// Default `Operator` covers all providers except the editor.
+    fn preferred_coordinate_kind(&self) -> CoordinateKind { CoordinateKind::Operator }
 
     // ---- Optional: persistent config ---------------------------------------
 
@@ -627,5 +642,11 @@ mod tests {
         let p = GenericProvider::new("myname", "My Name", |_| vec![]);
         assert_eq!(p.display_name(), "My Name");
         assert_eq!(p.name(), "myname");
+    }
+
+    #[test]
+    fn default_preferred_coordinate_kind_is_operator() {
+        let p = GenericProvider::new("p", "P", |_| vec![]);
+        assert_eq!(p.preferred_coordinate_kind(), CoordinateKind::Operator);
     }
 }

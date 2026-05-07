@@ -122,6 +122,19 @@ pub enum Coordinate {
 }
 
 impl Coordinate {
+    /// Map a provider's `CoordinateKind` to the corresponding General variant.
+    pub fn general_for_kind(kind: sicompass_sdk::CoordinateKind) -> Self {
+        match kind {
+            sicompass_sdk::CoordinateKind::Operator => Coordinate::OperatorGeneral,
+            sicompass_sdk::CoordinateKind::Editor => Coordinate::EditorGeneral,
+        }
+    }
+
+    /// Return `true` for the two General variants.
+    pub fn is_general(self) -> bool {
+        matches!(self, Coordinate::OperatorGeneral | Coordinate::EditorGeneral)
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Coordinate::OperatorGeneral => "operator",

@@ -194,6 +194,10 @@ impl Provider for EditorProvider {
 
     fn stable_root_key(&self) -> bool { true }
 
+    fn preferred_coordinate_kind(&self) -> sicompass_sdk::CoordinateKind {
+        sicompass_sdk::CoordinateKind::Editor
+    }
+
     fn refresh_on_navigate(&self) -> bool { true }
 
     fn needs_refresh(&self) -> bool {
@@ -432,5 +436,11 @@ mod tests {
     fn register_is_idempotent() {
         register();
         register(); // second call must not panic (OnceLock in factory registry)
+    }
+
+    #[test]
+    fn editor_provider_preferred_coordinate_kind_is_editor() {
+        let p = EditorProvider::new();
+        assert_eq!(p.preferred_coordinate_kind(), sicompass_sdk::CoordinateKind::Editor);
     }
 }

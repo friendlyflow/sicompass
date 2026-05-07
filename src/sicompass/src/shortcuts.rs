@@ -133,6 +133,10 @@ fn is_filebrowser(r: &AppRenderer) -> bool {
     active_provider_name(r) == Some("filebrowser")
 }
 
+fn is_editor(r: &AppRenderer) -> bool {
+    active_provider_name(r) == Some("editor")
+}
+
 fn has_dashboard(r: &AppRenderer) -> bool {
     r.current_id.get(0)
         .and_then(|i| r.providers.get(i))
@@ -286,6 +290,10 @@ fn avail_enter_op(r: &AppRenderer) -> bool {
 /// I key (edit/enter insert) visible as "Edit" for filebrowser, invisible for others.
 fn avail_i_edit_hint(r: &AppRenderer) -> bool {
     not_at_root(r) && is_filebrowser(r)
+}
+
+fn avail_editor_edit(r: &AppRenderer) -> bool {
+    not_at_root(r) && is_editor(r)
 }
 
 
@@ -563,12 +571,18 @@ pub static SHORTCUTS: &[Shortcut] = &[
     Shortcut { key: Keycode::I, key2: None, ctrl: false, shift: false,
         modes: GENERAL,
         label: "I      Edit input", is_available: avail_insert_on_input, handle: handlers::handle_i },
+    Shortcut { key: Keycode::I, key2: None, ctrl: false, shift: false,
+        modes: &[Coordinate::EditorGeneral],
+        label: "I      Edit", is_available: avail_editor_edit, handle: handlers::handle_i },
     Shortcut { key: Keycode::A, key2: None, ctrl: false, shift: false,
         modes: GENERAL,
         label: "A      Append", is_available: avail_a_edit_hint, handle: handlers::handle_a },
     Shortcut { key: Keycode::A, key2: None, ctrl: false, shift: false,
         modes: GENERAL,
         label: "A      Append", is_available: avail_insert_on_input, handle: handlers::handle_a },
+    Shortcut { key: Keycode::A, key2: None, ctrl: false, shift: false,
+        modes: &[Coordinate::EditorGeneral],
+        label: "A      Append", is_available: avail_editor_edit, handle: handlers::handle_a },
 
     // ---- Ctrl+I / Ctrl+A (structural insert/append) ----------------------
     // OperatorGeneral: insert/append placeholder
