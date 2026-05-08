@@ -373,7 +373,16 @@ impl Provider for EditorProvider {
             return self.flush_source_lines();
         }
 
-        // ── Case 3: directory rename ─────────────────────────────────────────
+        // ── Case 3: directory create (old is empty = new item from placeholder) ─
+        if old_inner.is_empty() && !new_inner.is_empty() && !self.is_in_file_view() {
+            return if new_inner.ends_with(':') {
+                self.create_directory(new_inner.trim_end_matches(':'))
+            } else {
+                self.create_file(&new_inner)
+            };
+        }
+
+        // ── Case 4: directory rename ─────────────────────────────────────────
         if !self.is_in_file_view() {
             return self.rename_fs_item(old, new);
         }

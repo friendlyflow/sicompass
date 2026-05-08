@@ -5333,3 +5333,166 @@ fn editor_ctrl_i_create_dir_restores_editor_general() {
         "after directory creation in editor, coordinate must restore to EditorGeneral");
     assert!(tmp.path().join("subdir").is_dir(), "directory must be created on disk");
 }
+
+/// Navigating into a subdirectory (Obj with no FFON children) works and refreshes contents.
+/// An empty subdirectory seeds an I_PLACEHOLDER so the user has a creation affordance.
+#[test]
+fn editor_right_arrow_into_subdir() {
+    let (mut r, tmp) = harness_with_editor();
+    std::fs::create_dir(tmp.path().join("subdir")).unwrap();
+    std::fs::write(tmp.path().join("subdir/child.txt"), "").unwrap();
+
+    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+    navigate_to_provider(&mut r, editor_idx);
+    press_right(&mut r); // enter editor root dir listing
+
+    // Refresh so subdir appears in the listing.
+    press((&mut r), Keycode::F5);
+
+    let dir_idx = {
+        let children = r.ffon[editor_idx].as_obj().unwrap().children.as_slice();
+        children.iter().position(|e| match e {
+            FfonElement::Obj(o) => sicompass_sdk::tags::strip_display(&o.key).contains("subdir"),
+            _ => false,
+        }).expect("subdir must appear as Obj in listing")
+    };
+    r.current_id.set(1, dir_idx);
+    sicompass::list::create_list_current_layer(&mut r);
+
+    // Right arrow on an Obj dir with no FFON children must navigate into it.
+    let navigated = sicompass::handlers::navigate_right_raw(&mut r);
+    assert!(navigated, "right-arrow on editor subdir (Obj) must navigate in");
+    sicompass::list::create_list_current_layer(&mut r);
+
+    // After navigation the FFON shows the subdir's contents (child.txt).
+    let subdir_children = r.ffon[editor_idx].as_obj().unwrap().children.as_slice();
+    let has_child = subdir_children.iter().any(|e| match e {
+        FfonElement::Str(s) => sicompass_sdk::tags::strip_display(s).contains("child.txt"),
+        _ => false,
+    });
+    assert!(has_child, "child.txt should appear in subdir listing");
+}
+
+/// Navigating into an empty subdirectory seeds an I_PLACEHOLDER for creation.
+#[test]
+fn editor_empty_subdir_seeds_i_placeholder() {
+    let (mut r, tmp) = harness_with_editor();
+    std::fs::create_dir(tmp.path().join("empty_dir")).unwrap();
+
+    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+    navigate_to_provider(&mut r, editor_idx);
+    press_right(&mut r);
+    press((&mut r), Keycode::F5); // refresh to pick up empty_dir
+
+    let dir_idx = {
+        let children = r.ffon[editor_idx].as_obj().unwrap().children.as_slice();
+        children.iter().position(|e| match e {
+            FfonElement::Obj(o) => sicompass_sdk::tags::strip_display(&o.key).contains("empty_dir"),
+            _ => false,
+        }).expect("empty_dir must be in listing")
+    };
+    r.current_id.set(1, dir_idx);
+    sicompass::list::create_list_current_layer(&mut r);
+
+    sicompass::handlers::navigate_right_raw(&mut r);
+    sicompass::list::create_list_current_layer(&mut r);
+
+    let children = r.ffon[editor_idx].as_obj().unwrap().children.as_slice();
+    let has_placeholder = children.iter().any(|e| match e {
+        FfonElement::Str(s) => sicompass_sdk::placeholders::is_i_placeholder(s),
+        _ => false,
+    });
+    assert!(has_placeholder, "empty subdir must seed I_PLACEHOLDER for creation affordance");
+}
+
+/// Pressing `i` on the I_PLACEHOLDER in an empty editor subdir, typing a plain
+/// name (no prefix), and pressing Enter creates a file on disk and returns to
+/// EditorGeneral.
+#[test]
+fn editor_i_on_placeholder_creates_file() {
+    let (mut r, tmp) = harness_with_editor();
+    std::fs::create_dir(tmp.path().join("mydir")).unwrap();
+
+    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+    navigate_to_provider(&mut r, editor_idx);
+    press_right(&mut r);
+    press(&mut r, Keycode::F5);
+
+    // Navigate into mydir (Obj with no FFON children → lazy-load + I_PLACEHOLDER).
+    let dir_idx = r.ffon[editor_idx].as_obj().unwrap().children.iter()
+        .position(|e| matches!(e, FfonElement::Obj(o) if sicompass_sdk::tags::strip_display(&o.key).contains("mydir")))
+        .expect("mydir must be in listing");
+    r.current_id.set(1, dir_idx);
+    sicompass::list::create_list_current_layer(&mut r);
+    sicompass::handlers::navigate_right_raw(&mut r);
+    sicompass::list::create_list_current_layer(&mut r);
+
+    // Cursor is now on I_PLACEHOLDER at [editor_idx, 0].
+    assert_eq!(r.coordinate, Coordinate::EditorGeneral);
+
+    // Press `i` → should detect I_PLACEHOLDER prefix → placeholder_insert_mode.
+    press(&mut r, Keycode::I);
+    assert_eq!(r.coordinate, Coordinate::OperatorInsert, "i on I_PLACEHOLDER must enter OperatorInsert");
+    assert!(r.placeholder_insert_mode, "i on I_PLACEHOLDER must set placeholder_insert_mode");
+
+    // Type a plain name and confirm.
+    type_text(&mut r, "notes.txt");
+    press_enter(&mut r);
+
+    assert_eq!(r.coordinate, Coordinate::EditorGeneral, "must return to EditorGeneral after creation");
+    assert!(tmp.path().join("mydir/notes.txt").exists(), "file must be created on disk");
+}
+
+/// Typing `+name` on the I_PLACEHOLDER creates a directory.
+#[test]
+fn editor_i_on_placeholder_creates_dir_with_plus_prefix() {
+    let (mut r, tmp) = harness_with_editor();
+    std::fs::create_dir(tmp.path().join("mydir2")).unwrap();
+
+    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+    navigate_to_provider(&mut r, editor_idx);
+    press_right(&mut r);
+    press(&mut r, Keycode::F5);
+
+    let dir_idx = r.ffon[editor_idx].as_obj().unwrap().children.iter()
+        .position(|e| matches!(e, FfonElement::Obj(o) if sicompass_sdk::tags::strip_display(&o.key).contains("mydir2")))
+        .expect("mydir2 must be in listing");
+    r.current_id.set(1, dir_idx);
+    sicompass::list::create_list_current_layer(&mut r);
+    sicompass::handlers::navigate_right_raw(&mut r);
+    sicompass::list::create_list_current_layer(&mut r);
+
+    press(&mut r, Keycode::I);
+    type_text(&mut r, "+subdir");
+    press_enter(&mut r);
+
+    assert_eq!(r.coordinate, Coordinate::EditorGeneral);
+    assert!(tmp.path().join("mydir2/subdir").is_dir(), "directory must be created on disk with + prefix");
+}
+
+/// Typing `name:` on the I_PLACEHOLDER creates a directory (colon suffix).
+#[test]
+fn editor_i_on_placeholder_creates_dir_with_colon_suffix() {
+    let (mut r, tmp) = harness_with_editor();
+    std::fs::create_dir(tmp.path().join("mydir3")).unwrap();
+
+    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+    navigate_to_provider(&mut r, editor_idx);
+    press_right(&mut r);
+    press(&mut r, Keycode::F5);
+
+    let dir_idx = r.ffon[editor_idx].as_obj().unwrap().children.iter()
+        .position(|e| matches!(e, FfonElement::Obj(o) if sicompass_sdk::tags::strip_display(&o.key).contains("mydir3")))
+        .expect("mydir3 must be in listing");
+    r.current_id.set(1, dir_idx);
+    sicompass::list::create_list_current_layer(&mut r);
+    sicompass::handlers::navigate_right_raw(&mut r);
+    sicompass::list::create_list_current_layer(&mut r);
+
+    press(&mut r, Keycode::I);
+    type_text(&mut r, "data:");
+    press_enter(&mut r);
+
+    assert_eq!(r.coordinate, Coordinate::EditorGeneral);
+    assert!(tmp.path().join("mydir3/data").is_dir(), "directory must be created on disk with : suffix");
+}

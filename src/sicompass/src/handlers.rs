@@ -160,17 +160,17 @@ pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
     let depth_before = item_id.depth();
 
     if !next_layer_exists(&r.ffon, &item_id) {
-        // Editor provider: Str entries are files — allow right-navigation so pressing
-        // right on a file opens its content (push path + refresh like a directory).
-        let is_editor_file = active_provider_is_editor(r) && {
+        // Editor provider: both Str (file) and Obj (dir) entries may have no FFON children
+        // yet — allow right-navigation so refresh_on_navigate can lazy-load contents.
+        let is_editor_navigable = active_provider_is_editor(r) && {
             let depth = item_id.depth();
             let last = item_id.get(depth.saturating_sub(1)).unwrap_or(0);
             get_ffon_at_id(&r.ffon, &item_id)
                 .and_then(|a| a.get(last))
-                .map(|e| e.is_str())
+                .map(|e| e.is_str() || e.is_obj())
                 .unwrap_or(false)
         };
-        if !is_editor_file { return false; }
+        if !is_editor_navigable { return false; }
     }
 
     // Extract segment name + whether the Obj already has children (static vs lazy) + link URL.
@@ -1593,9 +1593,10 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
                     }
                 }
                 list::create_list_current_layer(r);
-                r.coordinate = Coordinate::OperatorGeneral;
+                let prev = r.previous_coordinate;
+                r.coordinate = prev;
                 r.speak_mode_change(None);
-                r.previous_coordinate = Coordinate::OperatorGeneral;
+                r.previous_coordinate = prev;
                 r.input_buffer.clear();
                 r.cursor_position = 0;
                 r.list_index = r.current_id.last().unwrap_or(0);
@@ -1657,9 +1658,10 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
                     }
                 }
                 list::create_list_current_layer(r);
-                r.coordinate = Coordinate::OperatorGeneral;
+                let prev = r.previous_coordinate;
+                r.coordinate = prev;
                 r.speak_mode_change(None);
-                r.previous_coordinate = Coordinate::OperatorGeneral;
+                r.previous_coordinate = prev;
                 r.input_buffer.clear();
                 r.cursor_position = 0;
                 r.list_index = r.current_id.last().unwrap_or(0);
@@ -3406,6 +3408,9 @@ pub fn handle_editor_provider_i(r: &mut AppRenderer) {
     r.previous_coordinate = r.coordinate;
     r.coordinate = Coordinate::OperatorInsert;
     populate_input_buffer(r);
+    if r.input_prefix.trim() == "i" {
+        r.placeholder_insert_mode = true;
+    }
     let ctx = (!r.input_buffer.is_empty()).then(|| r.input_buffer.clone());
     r.speak_mode_change(ctx);
     r.cursor_position = 0;
@@ -3420,6 +3425,9 @@ pub fn handle_editor_provider_a(r: &mut AppRenderer) {
     r.previous_coordinate = r.coordinate;
     r.coordinate = Coordinate::OperatorInsert;
     populate_input_buffer(r);
+    if r.input_prefix.trim() == "i" {
+        r.placeholder_insert_mode = true;
+    }
     let ctx = (!r.input_buffer.is_empty()).then(|| r.input_buffer.clone());
     r.speak_mode_change(ctx);
     r.cursor_position = r.input_buffer.len();
