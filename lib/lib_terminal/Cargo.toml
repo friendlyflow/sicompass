@@ -8,6 +8,7 @@ description = "Sicompass terminal provider (Rust)"
 [dependencies]
 sicompass-sdk = { workspace = true }
 sicompass-shell = { workspace = true }
+vte = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

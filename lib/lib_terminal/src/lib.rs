@@ -1,15 +1,29 @@
 //! Sicompass terminal provider.
 //!
-//! Renders a scrollback list (one entry per submitted command, with its output
-//! as children) plus a trailing `<input/>` slot for the next command. The
-//! actual shell process lives in the internal `sicompass-shell` crate.
+//! Two views over the same underlying PTY-backed shell:
+//!
+//! * **Scrollback list** (default). `fetch()` exposes one Obj per submitted
+//!   command with its output as children, plus a trailing `<input/>` slot.
+//!   `commit_edit()` writes a line to the shell, `tick()` drains output into
+//!   the latest entry. Suitable for "type a command, see output" workflows.
+//!
+//! * **Interactive dashboard** (Phase 2b). When the user presses `d` the app
+//!   switches to `Coordinate::DashboardInteractive` and routes raw keys +
+//!   text input + resize events to this provider. We feed PTY bytes through
+//!   a [`vte::Parser`]-backed [`emulator::Emulator`] and snapshot the cell
+//!   grid back into a `DashboardFrame` every frame. This is the path that
+//!   makes `vim`, `less`, `htop` etc. usable.
+//!
+//! The actual shell process lives in the internal `sicompass-shell` crate.
+
+mod emulator;
 
 use std::path::PathBuf;
 
+use emulator::{encode_dashboard_key, Emulator};
 use sicompass_sdk::{
-    register_builtin_manifest, register_provider_factory, BuiltinManifest, DashboardCell,
-    DashboardFrame, DashboardKey, DashboardKeysym, DashboardKind, FfonElement, FfonObject,
-    Provider, SettingDecl,
+    register_builtin_manifest, register_provider_factory, BuiltinManifest, DashboardFrame,
+    DashboardKey, DashboardKind, FfonElement, FfonObject, Provider, SettingDecl,
 };
 use sicompass_shell::{default_program, Shell, ShellConfig};
 
@@ -30,13 +44,13 @@ pub struct TerminalProvider {
     cwd: Option<PathBuf>,
     init_attempted: bool,
 
-    // ---- Phase 2a interactive-dashboard demo state ------------------------
-    // These exist only to prove out the dashboard plumbing. Phase 2b replaces
-    // them with a vte::Parser-backed terminal emulator that drives the real
-    // shell over the existing PTY.
-    db_keys_received: u32,
-    db_last_keysym: String,
-    db_text_buffer: String,
+    /// Lazily created on first `enter_dashboard()`. Lives across enter/leave
+    /// so a long-running interactive session (e.g. `vim`) survives toggling
+    /// out of the dashboard and back.
+    emulator: Option<Emulator>,
+    /// While `true`, `tick()` routes shell output into `emulator`; otherwise
+    /// it appends to the scrollback as before.
+    in_dashboard: bool,
 }
 
 impl TerminalProvider {
@@ -47,9 +61,8 @@ impl TerminalProvider {
             shell_program: default_program(),
             cwd: None,
             init_attempted: false,
-            db_keys_received: 0,
-            db_last_keysym: String::new(),
-            db_text_buffer: String::new(),
+            emulator: None,
+            in_dashboard: false,
         }
     }
 
@@ -136,6 +149,14 @@ impl Provider for TerminalProvider {
         if bytes.is_empty() {
             return false;
         }
+        if self.in_dashboard {
+            // Route raw bytes through the ANSI/VT emulator. The next
+            // `dashboard_render` call will snapshot the updated grid.
+            if let Some(em) = self.emulator.as_mut() {
+                em.feed(&bytes);
+            }
+            return true;
+        }
         let text = decode_terminal_output(&bytes);
         if text.is_empty() {
             return false;
@@ -163,110 +184,73 @@ impl Provider for TerminalProvider {
         false
     }
 
-    // ---- Phase 2a interactive-dashboard demo ---------------------------
+    // ---- Interactive dashboard (Phase 2b) -------------------------------
 
     fn dashboard_kind(&self) -> DashboardKind {
         DashboardKind::Interactive
     }
 
     fn enter_dashboard(&mut self) {
-        self.db_keys_received = 0;
-        self.db_last_keysym.clear();
-        self.db_text_buffer.clear();
+        self.ensure_shell();
+        self.in_dashboard = true;
+        if self.emulator.is_none() {
+            // Spawn with a placeholder size. `dashboard_resize` fires on the
+            // first frame and updates the emulator + PTY to the real grid.
+            self.emulator = Some(Emulator::new(80, 24));
+        }
+    }
+
+    fn leave_dashboard(&mut self) {
+        self.in_dashboard = false;
+    }
+
+    fn dashboard_resize(&mut self, rows: u16, cols: u16) {
+        if let Some(shell) = self.shell.as_mut() {
+            let _ = shell.resize(rows, cols);
+        }
+        if let Some(em) = self.emulator.as_mut() {
+            em.resize(cols, rows);
+        }
     }
 
     fn dashboard_key(&mut self, key: DashboardKey) -> bool {
-        self.db_keys_received = self.db_keys_received.saturating_add(1);
-        self.db_last_keysym = format_keysym(&key);
+        if let Some(bytes) = encode_dashboard_key(&key) {
+            if let Some(shell) = self.shell.as_mut() {
+                let _ = shell.write_input(&bytes);
+            }
+        }
+        // Always request redraw — the shell may produce output before the
+        // next tick and we want the cursor blink to keep up.
         true
     }
 
     fn dashboard_text(&mut self, text: &str) {
-        for ch in text.chars() {
-            if self.db_text_buffer.chars().count() >= 60 {
-                self.db_text_buffer.clear();
-            }
-            self.db_text_buffer.push(ch);
+        if text.is_empty() {
+            return;
         }
-    }
-
-    fn dashboard_resize(&mut self, _rows: u16, _cols: u16) {
-        // Phase 2a: nothing to do — the demo regenerates the frame to fit
-        // whatever (cols, rows) `dashboard_render` is called with. Phase 2b
-        // will forward this to `Shell::resize` and the cell-grid emulator.
+        if let Some(shell) = self.shell.as_mut() {
+            let _ = shell.write_input(text.as_bytes());
+        }
     }
 
     fn dashboard_render(&mut self, cols: u16, rows: u16) -> DashboardFrame {
-        let mut frame = DashboardFrame::empty(cols, rows);
-
-        // Checkerboard background so the cell layout is visible.
-        let bg_a: u32 = 0x101820FF;
-        let bg_b: u32 = 0x182030FF;
-        let fg_text: u32 = 0xE0E0E0FF;
-        let fg_accent: u32 = 0x80C0FFFF;
-        for r in 0..rows {
-            for c in 0..cols {
-                let bg = if (c + r) % 2 == 0 { bg_a } else { bg_b };
-                let cell = frame.cell_mut(c, r);
-                cell.bg = bg;
-                cell.fg = fg_text;
+        // Pull any bytes the shell has produced since the last `tick()`.
+        // Normally the main loop's `tick()` runs first, but draining here
+        // means a frame triggered by user input shows the response without
+        // waiting one extra frame.
+        if let Some(shell) = self.shell.as_mut() {
+            let bytes = shell.drain_output();
+            if !bytes.is_empty() {
+                if let Some(em) = self.emulator.as_mut() {
+                    em.feed(&bytes);
+                }
             }
         }
-
-        // Title and stats — clipped automatically by `write_str`.
-        let line1 = "Sicompass Terminal — Phase 2a interactive-dashboard demo";
-        frame.write_str(0, 0, line1, fg_accent);
-
-        let line2 = format!("Grid: {} cols × {} rows", cols, rows);
-        frame.write_str(0, 1, &line2, fg_text);
-
-        let line3 = format!(
-            "Keys received: {}    last: {}",
-            self.db_keys_received,
-            if self.db_last_keysym.is_empty() { "—" } else { self.db_last_keysym.as_str() },
-        );
-        frame.write_str(0, 2, &line3, fg_text);
-
-        let prompt = "Type: ";
-        frame.write_str(0, 4, prompt, fg_accent);
-        let typed_col = prompt.chars().count() as u16;
-        frame.write_str(typed_col, 4, &self.db_text_buffer, fg_text);
-
-        frame.write_str(0, rows.saturating_sub(1), "Esc to exit", fg_accent);
-
-        // Cursor sits one cell after the typed buffer.
-        let cursor_col = typed_col + (self.db_text_buffer.chars().count() as u16);
-        frame.cursor = Some((cursor_col.min(cols.saturating_sub(1)), 4));
-
-        frame
+        match self.emulator.as_ref() {
+            Some(em) => em.snapshot(),
+            None => DashboardFrame::empty(cols, rows),
+        }
     }
-}
-
-fn format_keysym(key: &DashboardKey) -> String {
-    let mut parts: Vec<&str> = Vec::new();
-    if key.ctrl  { parts.push("Ctrl"); }
-    if key.alt   { parts.push("Alt"); }
-    if key.shift { parts.push("Shift"); }
-    let name = match key.keysym {
-        DashboardKeysym::Enter => "Enter".to_owned(),
-        DashboardKeysym::Backspace => "Backspace".to_owned(),
-        DashboardKeysym::Tab => "Tab".to_owned(),
-        DashboardKeysym::Up => "Up".to_owned(),
-        DashboardKeysym::Down => "Down".to_owned(),
-        DashboardKeysym::Left => "Left".to_owned(),
-        DashboardKeysym::Right => "Right".to_owned(),
-        DashboardKeysym::Home => "Home".to_owned(),
-        DashboardKeysym::End => "End".to_owned(),
-        DashboardKeysym::PageUp => "PageUp".to_owned(),
-        DashboardKeysym::PageDown => "PageDown".to_owned(),
-        DashboardKeysym::Insert => "Insert".to_owned(),
-        DashboardKeysym::Delete => "Delete".to_owned(),
-        DashboardKeysym::F(n) => format!("F{n}"),
-        DashboardKeysym::Char(c) => format!("'{c}'"),
-        DashboardKeysym::Unknown => "?".to_owned(),
-    };
-    parts.push(&name);
-    parts.join("+")
 }
 
 /// Decode raw PTY bytes into displayable UTF-8, stripping the most common
@@ -405,7 +389,7 @@ mod tests {
         assert_eq!(s, "a\tb\nc");
     }
 
-    // ---- Phase 2a interactive-dashboard demo tests ---------------------
+    // ---- Phase 2b interactive-dashboard tests --------------------------
 
     #[test]
     fn dashboard_kind_is_interactive() {
@@ -414,87 +398,64 @@ mod tests {
     }
 
     #[test]
-    fn enter_dashboard_resets_demo_state() {
+    fn dashboard_render_without_shell_returns_blank_frame() {
+        // No shell, no emulator → we should still get a well-shaped frame
+        // (so the renderer can paint *something* even if spawn failed).
         let mut p = TerminalProvider::new();
-        p.db_keys_received = 7;
-        p.db_last_keysym = "X".to_owned();
-        p.db_text_buffer = "hello".to_owned();
+        let frame = p.dashboard_render(20, 5);
+        assert_eq!(frame.cols, 20);
+        assert_eq!(frame.rows, 5);
+        assert_eq!(frame.cells.len(), 100);
+    }
+
+    #[test]
+    fn leave_dashboard_clears_in_dashboard_flag() {
+        let mut p = TerminalProvider::new();
+        p.in_dashboard = true;
+        p.leave_dashboard();
+        assert!(!p.in_dashboard);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn end_to_end_dashboard_renders_shell_prompt() {
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        let mut p = TerminalProvider::new();
+        p.on_setting_change("shellProgram", "/bin/sh");
         p.enter_dashboard();
-        assert_eq!(p.db_keys_received, 0);
-        assert!(p.db_last_keysym.is_empty());
-        assert!(p.db_text_buffer.is_empty());
-    }
+        // Skip if spawn failed (e.g. CI sandbox).
+        if p.shell.is_none() {
+            return;
+        }
+        // Fire the resize so the PTY knows about an 80×24 grid (matches what
+        // view.rs does on the first frame).
+        p.dashboard_resize(24, 80);
+        // Send a command and wait for output to land in the emulator grid.
+        p.dashboard_text("echo dashboard-it-marker\n");
 
-    #[test]
-    fn dashboard_key_increments_and_returns_redraw() {
-        let mut p = TerminalProvider::new();
-        let k = DashboardKey {
-            keysym: DashboardKeysym::Up,
-            ctrl: false, shift: false, alt: false,
-        };
-        assert!(p.dashboard_key(k));
-        assert_eq!(p.db_keys_received, 1);
-        assert_eq!(p.db_last_keysym, "Up");
-    }
-
-    #[test]
-    fn dashboard_key_formats_modifiers() {
-        let mut p = TerminalProvider::new();
-        let k = DashboardKey {
-            keysym: DashboardKeysym::Char('c'),
-            ctrl: true, shift: false, alt: false,
-        };
-        p.dashboard_key(k);
-        assert_eq!(p.db_last_keysym, "Ctrl+'c'");
-    }
-
-    #[test]
-    fn dashboard_text_appends_chars() {
-        let mut p = TerminalProvider::new();
-        p.dashboard_text("hi");
-        p.dashboard_text(" there");
-        assert_eq!(p.db_text_buffer, "hi there");
-    }
-
-    #[test]
-    fn dashboard_text_wraps_at_60_chars() {
-        let mut p = TerminalProvider::new();
-        p.dashboard_text(&"x".repeat(60));
-        assert_eq!(p.db_text_buffer.chars().count(), 60);
-        p.dashboard_text("Y");
-        assert_eq!(p.db_text_buffer, "Y");
-    }
-
-    #[test]
-    fn dashboard_render_has_correct_dimensions_and_cursor() {
-        let mut p = TerminalProvider::new();
-        let frame = p.dashboard_render(80, 24);
-        assert_eq!(frame.cols, 80);
-        assert_eq!(frame.rows, 24);
-        assert_eq!(frame.cells.len(), 80 * 24);
-        assert!(frame.cursor.is_some());
-        // Title is drawn on the first row.
-        assert_eq!(frame.cell(0, 0).ch, 'S');
-    }
-
-    #[test]
-    fn dashboard_render_paints_checkerboard_background() {
-        let mut p = TerminalProvider::new();
-        let frame = p.dashboard_render(4, 2);
-        // Adjacent cells alternate background colors.
-        let bg_00 = frame.cell(0, 0).bg;
-        let bg_10 = frame.cell(1, 0).bg;
-        let bg_01 = frame.cell(0, 1).bg;
-        assert_ne!(bg_00, bg_10);
-        assert_ne!(bg_00, bg_01);
-        assert_eq!(bg_10, bg_01);
-    }
-
-    #[test]
-    fn dashboard_render_handles_tiny_grid_without_panicking() {
-        let mut p = TerminalProvider::new();
-        let frame = p.dashboard_render(1, 1);
-        assert_eq!(frame.cells.len(), 1);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut saw = false;
+        while Instant::now() < deadline {
+            p.tick();
+            let frame = p.dashboard_render(80, 24);
+            // Scan all cells for the marker as a contiguous string.
+            let row_text: Vec<String> = (0..frame.rows).map(|r| {
+                (0..frame.cols).map(|c| frame.cell(c, r).ch).collect::<String>()
+            }).collect();
+            if row_text.iter().any(|line| line.contains("dashboard-it-marker")) {
+                saw = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(saw, "expected marker in emulator grid; rows: {:#?}",
+            (0..p.emulator.as_ref().unwrap().rows()).map(|r| {
+                let f = p.emulator.as_ref().unwrap().snapshot();
+                (0..f.cols).map(|c| f.cell(c, r).ch).collect::<String>()
+            }).collect::<Vec<_>>(),
+        );
     }
 
     #[cfg(unix)]
