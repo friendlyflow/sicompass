@@ -1,5 +1,5 @@
 {
-  "model": "opus[1m]", //"opusplan",
+  "model": "opus[1m]",
   "permissions": {
     "defaultMode": "plan"
   },
