@@ -197,7 +197,36 @@ pub fn main_loop(app: &mut AppState) {
                     app.renderer.error_message = err;
                 }
             }
+            // Detect whether the cursor is parked on a terminal/chat-style
+            // `<input></input>` slot. Streaming output (e.g. `ls` results) shifts
+            // the trailing input slot's index in the rebuilt FFON; without this
+            // snap, the cursor would silently drift onto an output line.
+            let was_on_input = sicompass_sdk::ffon::get_ffon_at_id(
+                &app.renderer.ffon, &app.renderer.current_id,
+            )
+            .and_then(|arr| {
+                let idx = app.renderer.current_id.last()?;
+                match arr.get(idx)? {
+                    sicompass_sdk::ffon::FfonElement::Str(s) if s == "<input></input>" => Some(()),
+                    _ => None,
+                }
+            })
+            .is_some();
+
             crate::provider::refresh_current_directory(&mut app.renderer);
+
+            if was_on_input {
+                if let Some(arr) = sicompass_sdk::ffon::get_ffon_at_id(
+                    &app.renderer.ffon, &app.renderer.current_id,
+                ) {
+                    if let Some(idx) = arr.iter().rposition(|e| matches!(
+                        e, sicompass_sdk::ffon::FfonElement::Str(s) if s == "<input></input>"
+                    )) {
+                        app.renderer.current_id.set_last(idx);
+                        app.renderer.scroll_offset = -1;
+                    }
+                }
+            }
             // Rebuild the rendered list from the updated ffon tree — same as
             // what handlers.rs does after notify_button_pressed.
             crate::list::create_list_current_layer(&mut app.renderer);

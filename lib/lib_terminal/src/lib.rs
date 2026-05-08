@@ -23,7 +23,7 @@ use std::path::PathBuf;
 use emulator::{encode_dashboard_key, Emulator};
 use sicompass_sdk::{
     register_builtin_manifest, register_provider_factory, BuiltinManifest, DashboardFrame,
-    DashboardKey, DashboardKind, FfonElement, FfonObject, Provider, SettingDecl,
+    DashboardKey, DashboardKind, FfonElement, Provider, SettingDecl,
 };
 use sicompass_shell::{default_program, Shell, ShellConfig};
 
@@ -111,13 +111,15 @@ impl Provider for TerminalProvider {
     }
 
     fn fetch(&mut self) -> Vec<FfonElement> {
-        let mut out: Vec<FfonElement> = Vec::with_capacity(self.entries.len() + 1);
+        // Flat layout: one Str per prompt-line (`$ <cmd>`) and one Str per
+        // output-line, in chronological order. The trailing element is always
+        // the `<input></input>` slot.
+        let mut out: Vec<FfonElement> = Vec::new();
         for e in &self.entries {
-            let mut obj = FfonObject::new(format!("$ {}", e.input));
+            out.push(FfonElement::Str(format!("$ {}", e.input)));
             for line in entry_lines(&e.input, &e.output) {
-                obj.children.push(FfonElement::Str(line.to_owned()));
+                out.push(FfonElement::Str(line.to_owned()));
             }
-            out.push(FfonElement::Obj(obj));
         }
         out.push(FfonElement::Str(INPUT_PLACEHOLDER.to_owned()));
         out
@@ -538,9 +540,13 @@ mod tests {
         );
 
         let elems = p.fetch();
-        // entries.len() (1) + trailing input slot (1) = 2 elements
-        assert_eq!(elems.len(), 2);
-        assert!(elems[0].is_obj());
-        assert_eq!(elems[1].as_str(), Some(INPUT_PLACEHOLDER));
+        // Flat layout: "$ echo terminal-it-test" + N output lines + <input> slot.
+        // We don't assert the exact line count (depends on shell prompt), but the
+        // first element must be the prompt-line, the last must be the input slot,
+        // and somewhere in between the echoed marker must appear.
+        assert!(elems.len() >= 2);
+        assert_eq!(elems[0].as_str(), Some("$ echo terminal-it-test"));
+        assert_eq!(elems.last().and_then(|e| e.as_str()), Some(INPUT_PLACEHOLDER));
+        assert!(elems.iter().any(|e| e.as_str().map_or(false, |s| s.contains("terminal-it-test"))));
     }
 }

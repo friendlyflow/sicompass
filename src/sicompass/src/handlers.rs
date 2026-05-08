@@ -1899,15 +1899,28 @@ pub fn handle_enter_editor_insert(r: &mut AppRenderer) {
                 if !crate::provider::refresh_subtree_parent(r) {
                     crate::provider::refresh_current_directory(r);
                 }
-                navigate_right_raw(r);
                 handle_escape(r);
                 r.input_buffer.clear();
                 r.cursor_position = 0;
                 let saved_error = r.error_message.clone();
+                // After commit, terminal/chat-style providers re-emit a trailing
+                // <input></input> placeholder. Move the cursor onto it so the
+                // user can type the next command immediately, and request a
+                // bottom-anchored scroll (sentinel -1) so the input sits at the
+                // bottom of the viewport with prior output above it.
+                let input_idx = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)
+                    .and_then(|arr| arr.iter().rposition(|e| matches!(
+                        e, FfonElement::Str(s) if s == "<input></input>"
+                    )));
+                if let Some(idx) = input_idx {
+                    r.current_id.set_last(idx);
+                    r.scroll_offset = -1;
+                } else {
+                    r.scroll_offset = 0;
+                }
                 list::create_list_current_layer(r);
                 if !saved_error.is_empty() { r.error_message = saved_error; }
                 r.list_index = r.current_id.last().unwrap_or(0);
-                r.scroll_offset = 0;
                 return;
             }
             // No provider handled it: update FFON element key directly.
