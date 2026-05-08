@@ -254,6 +254,18 @@ pub trait Provider: Send + 'static {
     /// override this to keep a stable identity label ("chat client").
     fn stable_root_key(&self) -> bool { false }
 
+    /// True when the user has not navigated past the provider's logical root.
+    ///
+    /// The depth-2 parent label uses this to show the provider's `display_name()`
+    /// when at the root and the current path basename only after the user moves
+    /// deeper. Default treats `"/"` and empty as root, which suits providers
+    /// whose `current_path()` is rooted at `"/"`. Providers with a configurable
+    /// or non-`"/"` root (e.g. editor) should override this.
+    fn at_root(&self) -> bool {
+        let p = self.current_path();
+        p.is_empty() || p == "/"
+    }
+
     // ---- Optional: cross-thread refresh signal -----------------------------
 
     fn needs_refresh(&self) -> bool { false }

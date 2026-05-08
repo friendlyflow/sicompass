@@ -445,6 +445,10 @@ impl Provider for EditorProvider {
 
     fn stable_root_key(&self) -> bool { true }
 
+    fn at_root(&self) -> bool {
+        self.current_fs_path == self.root_path() && self.ffon_sub_path.is_empty()
+    }
+
     fn preferred_coordinate_kind(&self) -> sicompass_sdk::CoordinateKind {
         sicompass_sdk::CoordinateKind::Editor
     }

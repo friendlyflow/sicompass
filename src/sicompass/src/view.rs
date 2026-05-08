@@ -529,6 +529,14 @@ fn update_view(app: &mut AppState) {
     // ---- Parent element snapshot -------------------------------------------
     // Always present (empty at root level), so list items are consistently
     // indented one level below the parent line.
+    //
+    // At depth 2 (just inside a provider) the parent is always the provider's
+    // root Obj. For providers that pin their root key (`stable_root_key=true`,
+    // e.g. editor) that key never changes as the user navigates within the
+    // provider, so deriving the label from the active provider's
+    // `current_path()` basename gives a label that follows the list. For other
+    // providers the basename and the FFON root key happen to coincide, so the
+    // result is unchanged.
     let parent_info: ParentInfo = if app.renderer.current_id.depth() > 1 {
         let mut parent_id = app.renderer.current_id.clone();
         parent_id.pop();
@@ -540,7 +548,21 @@ fn update_view(app: &mut AppState) {
                 sicompass_sdk::ffon::FfonElement::Obj(obj) => obj.key.as_str(),
                 sicompass_sdk::ffon::FfonElement::Str(s) => s.as_str(),
             };
-            let display_text = sicompass_sdk::tags::strip_display(raw_text);
+            let mut display_text = sicompass_sdk::tags::strip_display(raw_text);
+            if app.renderer.current_id.depth() == 2 {
+                let provider_idx = app.renderer.current_id.get(0).unwrap_or(0);
+                if let Some(p) = app.renderer.providers.get(provider_idx) {
+                    if !p.at_root() {
+                        if let Some(name) = std::path::Path::new(p.current_path())
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .filter(|s| !s.is_empty())
+                        {
+                            display_text = name.to_owned();
+                        }
+                    }
+                }
+            }
             let (is_radio, radio_summary) = if let sicompass_sdk::ffon::FfonElement::Obj(obj) = elem {
                 if sicompass_sdk::tags::has_radio(&obj.key) {
                     let checked = obj.children.iter().find_map(|child| {
