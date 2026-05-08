@@ -5593,6 +5593,57 @@ fn editor_three_consecutive_writes_all_show_in_list() {
     );
 }
 
+/// The user's "must work infinitely" requirement: ten consecutive Ctrl+A
+/// inserts in an editor file view must all land in the file and the FFON list.
+#[test]
+fn editor_many_consecutive_writes_all_show_in_list() {
+    let (mut r, tmp) = harness_with_editor();
+    std::fs::write(tmp.path().join("log.txt"), "").unwrap();
+
+    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+    navigate_to_provider(&mut r, editor_idx);
+    press_right(&mut r);
+    press(&mut r, Keycode::F5);
+
+    let file_idx = r.ffon[editor_idx].as_obj().unwrap().children.iter()
+        .position(|e| {
+            let k = match e { FfonElement::Str(s) => s.as_str(), FfonElement::Obj(o) => o.key.as_str() };
+            k.contains("log.txt")
+        })
+        .expect("log.txt must be in listing");
+    r.current_id.set(1, file_idx);
+    sicompass::list::create_list_current_layer(&mut r);
+    sicompass::handlers::navigate_right_raw(&mut r);
+    sicompass::list::create_list_current_layer(&mut r);
+
+    // First write via I_PLACEHOLDER.
+    press(&mut r, Keycode::I);
+    type_text(&mut r, "line0");
+    press_enter(&mut r);
+
+    // Nine more Ctrl+A inserts.
+    for n in 1..10 {
+        press_ctrl(&mut r, Keycode::A);
+        assert_eq!(r.coordinate, Coordinate::OperatorInsert,
+            "Ctrl+A iteration {n} must enter OperatorInsert (coord stayed in EditorGeneral after previous commit)");
+        type_text(&mut r, &format!("line{n}"));
+        press_enter(&mut r);
+    }
+
+    let expected_disk = (0..10).map(|n| format!("line{n}")).collect::<Vec<_>>().join("\n");
+    let written = std::fs::read_to_string(tmp.path().join("log.txt")).unwrap();
+    assert_eq!(written, expected_disk, "all ten writes must reach disk in order");
+
+    let labels: Vec<String> = r.ffon[editor_idx].as_obj().unwrap().children.iter()
+        .map(|e| match e {
+            FfonElement::Str(s) => sicompass_sdk::tags::strip_display(s),
+            FfonElement::Obj(o) => sicompass_sdk::tags::strip_display(&o.key),
+        })
+        .collect();
+    let expected_labels: Vec<String> = (0..10).map(|n| format!("line{n}")).collect();
+    assert_eq!(labels, expected_labels, "all ten lines must show in the list");
+}
+
 /// Typing `name:` on the I_PLACEHOLDER creates a directory (colon suffix).
 #[test]
 fn editor_i_on_placeholder_creates_dir_with_colon_suffix() {

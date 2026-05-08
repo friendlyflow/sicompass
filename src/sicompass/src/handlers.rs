@@ -2030,7 +2030,22 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
         }
     }
 
-    handle_escape(r);
+    // On a successful commit, restore the coordinate the user was in before
+    // entering OperatorInsert — `handle_escape`'s OperatorInsert branch hard-
+    // codes a transition to OperatorGeneral, which would prevent subsequent
+    // editor-specific shortcuts (e.g. Ctrl+A in an editor file view) from
+    // matching their EditorGeneral-only bindings on the next keystroke. The
+    // failure path still falls through to `handle_escape` so a not-yet-saved
+    // placeholder can be cleaned up via `placeholder_cancel`.
+    if committed {
+        r.placeholder_insert_mode = false;
+        let prev = r.previous_coordinate;
+        r.coordinate = prev;
+        r.previous_coordinate = prev;
+        r.speak_mode_change(None);
+    } else {
+        handle_escape(r);
+    }
     r.input_buffer.clear();
     r.cursor_position = 0;
 
