@@ -1,0 +1,9 @@
+[package]
+name = "sicompass-shell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Interactive PTY-backed shell session (used by sicompass-terminal)"
+
+[dependencies]
+portable-pty = { workspace = true }

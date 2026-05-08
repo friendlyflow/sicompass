@@ -1,0 +1,13 @@
+[package]
+name = "sicompass-terminal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Sicompass terminal provider (Rust)"
+
+[dependencies]
+sicompass-sdk = { workspace = true }
+sicompass-shell = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -32,6 +32,7 @@ pub fn register_all() {
         sicompass_sales_demo::register();
         sicompass_remote::register();
         sicompass_settings::register();
+        sicompass_terminal::register();
     });
 }
 
@@ -100,6 +101,27 @@ mod tests {
         register_all();
         let p = sicompass_sdk::create_provider_by_name("settings");
         assert!(p.is_some(), "settings factory should be registered");
+    }
+
+    #[test]
+    fn terminal_factory_is_registered() {
+        register_all();
+        let p = sicompass_sdk::create_provider_by_name("terminal");
+        assert!(p.is_some(), "terminal factory should be registered");
+        assert_eq!(p.unwrap().name(), "terminal");
+    }
+
+    #[test]
+    fn builtin_manifests_include_terminal_opt_in_with_shell_setting() {
+        register_all();
+        let manifests = sicompass_sdk::builtin_manifests();
+        let term = manifests.iter().find(|m| m.name == "terminal");
+        assert!(term.is_some(), "terminal manifest should be registered");
+        let term = term.unwrap();
+        assert!(!term.always_enabled, "terminal should not be always_enabled");
+        assert!(!term.enable_default, "terminal should be opt-in (default off)");
+        assert_eq!(term.settings.len(), 1, "terminal should declare 1 setting");
+        assert_eq!(term.settings[0].key, "shellProgram");
     }
 
     #[test]

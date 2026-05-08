@@ -16,3 +16,4 @@ sicompass-editor = { workspace = true }
 sicompass-remote = { workspace = true }
 sicompass-sales-demo = { workspace = true }
 sicompass-settings = { workspace = true }
+sicompass-terminal = { workspace = true }
