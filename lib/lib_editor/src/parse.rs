@@ -1,10 +1,16 @@
 use sicompass_sdk::ffon::FfonElement;
+use sicompass_sdk::tags;
 
 /// Parse file contents into a FFON element tree, dispatching on file extension.
 ///
 /// - `.py` / `.pyw` / `.pyi` → indent-based Python blocks (`line:` opens a block)
 /// - C-family (`.c`, `.h`, `.rs`, `.js`, `.ts`, …) → brace-based blocks (`line {` opens, `}` closes)
 /// - Everything else → generic FFON rules (`:` suffix + `{ }` blocks)
+///
+/// Every produced element is annotated with `<src=N>` where N is the 0-based
+/// source-line index in the original file. The annotation is invisible in the UI
+/// (stripped by `strip_display`) but lets `commit_edit` map each FFON element
+/// back to the exact line that must be modified on disk.
 pub fn parse_file_ext(contents: &str, ext: &str) -> Vec<FfonElement> {
     match ext.to_ascii_lowercase().as_str() {
         "py" | "pyw" | "pyi" => parse_python(contents),
@@ -25,13 +31,19 @@ pub fn parse_file(contents: &str) -> Vec<FfonElement> {
 }
 
 /// Navigate a FFON sub-path (sequence of Obj keys) within a pre-parsed tree.
+///
+/// Obj keys carry a `<src=N>` prefix; the path segments are plain (stripped) key
+/// names, so we strip the annotation before comparing.
 pub fn navigate_path<'a>(elements: &'a [FfonElement], path: &[String]) -> &'a [FfonElement] {
     if path.is_empty() {
         return elements;
     }
     for elem in elements {
         if let Some(obj) = elem.as_obj() {
-            if obj.key == path[0] {
+            // Strip all display tags (<input>, <src=N>, etc.) before comparing
+            // with the stored path segment (which is already stripped by push_path).
+            let key_plain = tags::strip_display(&obj.key);
+            if key_plain == path[0] {
                 return navigate_path(&obj.children, &path[1..]);
             }
         }
@@ -46,6 +58,7 @@ pub fn navigate_path<'a>(elements: &'a [FfonElement], path: &[String]) -> &'a [F
 fn parse_ffon_block(lines: &[&str], i: &mut usize, inside_braces: bool) -> Vec<FfonElement> {
     let mut result = Vec::new();
     while *i < lines.len() {
+        let src_line = *i;
         let line = lines[*i].trim();
 
         if line == "}" {
@@ -58,7 +71,8 @@ fn parse_ffon_block(lines: &[&str], i: &mut usize, inside_braces: bool) -> Vec<F
 
         if line.ends_with(':') {
             let next_is_brace = *i < lines.len() && lines[*i].trim() == "{";
-            let mut obj = FfonElement::new_obj(line);
+            let key = format!("{}{}", tags::format_src(src_line), line);
+            let mut obj = FfonElement::new_obj(&key);
             if next_is_brace {
                 *i += 1;
                 let children = parse_ffon_block(lines, i, true);
@@ -68,7 +82,8 @@ fn parse_ffon_block(lines: &[&str], i: &mut usize, inside_braces: bool) -> Vec<F
             }
             result.push(obj);
         } else {
-            result.push(FfonElement::new_str(line));
+            let content = format!("{}{}", tags::format_src(src_line), line);
+            result.push(FfonElement::new_str(content));
         }
     }
     result
@@ -93,6 +108,7 @@ fn parse_cbrace(contents: &str) -> Vec<FfonElement> {
 fn parse_cbrace_block(lines: &[&str], i: &mut usize, top_level: bool) -> Vec<FfonElement> {
     let mut result = Vec::new();
     while *i < lines.len() {
+        let src_line = *i;
         let line = lines[*i].trim();
         if line.is_empty() { *i += 1; continue; }
 
@@ -109,7 +125,8 @@ fn parse_cbrace_block(lines: &[&str], i: &mut usize, top_level: bool) -> Vec<Ffo
         *i += 1;
 
         if line.ends_with('{') {
-            let mut obj = FfonElement::new_obj(line);
+            let key = format!("{}{}", tags::format_src(src_line), line);
+            let mut obj = FfonElement::new_obj(&key);
             let children = parse_cbrace_block(lines, i, false);
             for child in children {
                 obj.as_obj_mut().unwrap().push(child);
@@ -119,24 +136,25 @@ fn parse_cbrace_block(lines: &[&str], i: &mut usize, top_level: bool) -> Vec<Ffo
             // add them as siblings (one layer to the left of the body).
             // "} else {" / "} catch {" open a new Obj; pure "}" becomes a Str.
             while *i < lines.len() {
+                let cl_src = *i;
                 let cl = lines[*i].trim();
                 if !cl.starts_with('}') { break; }
                 *i += 1;
                 if cl.ends_with('{') {
-                    // Continuation block: recurse, then loop for its closing }.
-                    let mut cont = FfonElement::new_obj(cl);
+                    let cont_key = format!("{}{}", tags::format_src(cl_src), cl);
+                    let mut cont = FfonElement::new_obj(&cont_key);
                     let cont_children = parse_cbrace_block(lines, i, false);
                     for child in cont_children {
                         cont.as_obj_mut().unwrap().push(child);
                     }
                     result.push(cont);
                 } else {
-                    result.push(FfonElement::new_str(cl));
+                    result.push(FfonElement::new_str(format!("{}{}", tags::format_src(cl_src), cl)));
                     break;
                 }
             }
         } else {
-            result.push(FfonElement::new_str(line));
+            result.push(FfonElement::new_str(format!("{}{}", tags::format_src(src_line), line)));
         }
     }
     result
@@ -159,6 +177,7 @@ fn measure_indent(line: &str) -> usize {
 fn parse_python_block(lines: &[&str], i: &mut usize, base_indent: usize) -> Vec<FfonElement> {
     let mut result = Vec::new();
     while *i < lines.len() {
+        let src_line = *i;
         let raw = lines[*i];
         let stripped = raw.trim();
         if stripped.is_empty() { *i += 1; continue; }
@@ -183,13 +202,14 @@ fn parse_python_block(lines: &[&str], i: &mut usize, base_indent: usize) -> Vec<
                 Vec::new()
             };
 
-            let mut obj = FfonElement::new_obj(stripped);
+            let key = format!("{}{}", tags::format_src(src_line), stripped);
+            let mut obj = FfonElement::new_obj(&key);
             for child in children {
                 obj.as_obj_mut().unwrap().push(child);
             }
             result.push(obj);
         } else {
-            result.push(FfonElement::new_str(stripped));
+            result.push(FfonElement::new_str(format!("{}{}", tags::format_src(src_line), stripped)));
         }
     }
     result
@@ -203,15 +223,19 @@ fn parse_python_block(lines: &[&str], i: &mut usize, base_indent: usize) -> Vec<
 mod tests {
     use super::*;
 
+    fn strip_src(s: &str) -> &str {
+        tags::extract_src(s).map(|(_, rest)| rest).unwrap_or(s)
+    }
+
     // --- generic FFON ---
 
     #[test]
     fn parse_file_splits_on_newline() {
         let elements = parse_file("line1\nline2\nline3");
         assert_eq!(elements.len(), 3);
-        assert_eq!(elements[0], FfonElement::new_str("line1"));
-        assert_eq!(elements[1], FfonElement::new_str("line2"));
-        assert_eq!(elements[2], FfonElement::new_str("line3"));
+        assert_eq!(strip_src(elements[0].as_str().unwrap()), "line1");
+        assert_eq!(strip_src(elements[1].as_str().unwrap()), "line2");
+        assert_eq!(strip_src(elements[2].as_str().unwrap()), "line3");
     }
 
     #[test]
@@ -225,7 +249,7 @@ mod tests {
         let elements = parse_file("section:");
         assert_eq!(elements.len(), 1);
         assert!(elements[0].is_obj());
-        assert_eq!(elements[0].as_obj().unwrap().key, "section:");
+        assert_eq!(strip_src(elements[0].as_obj().unwrap().key.as_str()), "section:");
     }
 
     #[test]
@@ -234,9 +258,9 @@ mod tests {
         let elements = parse_file(src);
         assert_eq!(elements.len(), 2);
         let obj = elements[0].as_obj().unwrap();
-        assert_eq!(obj.key, "section:");
+        assert_eq!(strip_src(&obj.key), "section:");
         assert_eq!(obj.children.len(), 2);
-        assert_eq!(elements[1], FfonElement::new_str("plain"));
+        assert_eq!(strip_src(elements[1].as_str().unwrap()), "plain");
     }
 
     #[test]
@@ -246,7 +270,8 @@ mod tests {
         assert_eq!(elements.len(), 1);
         let outer = elements[0].as_obj().unwrap();
         let inner = outer.children[0].as_obj().unwrap();
-        assert_eq!(inner.children[0], FfonElement::new_str("deep"));
+        assert_eq!(strip_src(&inner.key), "inner:");
+        assert_eq!(strip_src(inner.children[0].as_str().unwrap()), "deep");
     }
 
     #[test]
@@ -254,6 +279,15 @@ mod tests {
         let elements = parse_file("name: Alice");
         assert_eq!(elements.len(), 1);
         assert!(elements[0].is_str());
+    }
+
+    #[test]
+    fn parse_file_src_annotations_correct() {
+        let elements = parse_file("alpha\n\nbeta\ngamma");
+        // alpha → line 0, blank skipped, beta → line 2, gamma → line 3
+        assert_eq!(elements[0].as_str().map(|s| tags::extract_src(s).map(|(n,_)| n)), Some(Some(0)));
+        assert_eq!(elements[1].as_str().map(|s| tags::extract_src(s).map(|(n,_)| n)), Some(Some(2)));
+        assert_eq!(elements[2].as_str().map(|s| tags::extract_src(s).map(|(n,_)| n)), Some(Some(3)));
     }
 
     // --- C-brace parser ---
@@ -265,10 +299,10 @@ mod tests {
         // Obj at index 0, closing "}" at index 1 (one layer to the left of the body)
         assert_eq!(elements.len(), 2);
         let obj = elements[0].as_obj().unwrap();
-        assert_eq!(obj.key, "void foo() {");
+        assert_eq!(strip_src(&obj.key), "void foo() {");
         assert_eq!(obj.children.len(), 1);
-        assert_eq!(obj.children[0], FfonElement::new_str("return;"));
-        assert_eq!(elements[1], FfonElement::new_str("}"));
+        assert_eq!(strip_src(obj.children[0].as_str().unwrap()), "return;");
+        assert_eq!(strip_src(elements[1].as_str().unwrap()), "}");
     }
 
     #[test]
@@ -286,15 +320,15 @@ mod tests {
         // outer Obj + outer's closing "}" at top level
         assert_eq!(elements.len(), 2);
         let outer = elements[0].as_obj().unwrap();
-        assert_eq!(outer.key, "fn outer() {");
+        assert_eq!(strip_src(&outer.key), "fn outer() {");
         // inner Obj + inner's closing "}" inside outer's body
         assert_eq!(outer.children.len(), 2);
         let inner = outer.children[0].as_obj().unwrap();
-        assert_eq!(inner.key, "fn inner() {");
-        assert_eq!(inner.children.len(), 1);
-        assert_eq!(inner.children[0], FfonElement::new_str("x"));
-        assert_eq!(outer.children[1], FfonElement::new_str("}"));
-        assert_eq!(elements[1], FfonElement::new_str("}"));
+        assert_eq!(strip_src(&inner.key), "fn inner() {");
+        assert_eq!(outer.children.len(), 2);
+        assert_eq!(strip_src(inner.children[0].as_str().unwrap()), "x");
+        assert_eq!(strip_src(outer.children[1].as_str().unwrap()), "}");
+        assert_eq!(strip_src(elements[1].as_str().unwrap()), "}");
     }
 
     #[test]
@@ -303,9 +337,9 @@ mod tests {
         let elements = parse_file_ext(src, "c");
         // if Obj, else Obj (continuation), then the closing "}"
         assert_eq!(elements.len(), 3);
-        assert_eq!(elements[0].as_obj().unwrap().key, "if (x) {");
-        assert_eq!(elements[1].as_obj().unwrap().key, "} else {");
-        assert_eq!(elements[2], FfonElement::new_str("}"));
+        assert_eq!(strip_src(elements[0].as_obj().unwrap().key.as_str()), "if (x) {");
+        assert_eq!(strip_src(elements[1].as_obj().unwrap().key.as_str()), "} else {");
+        assert_eq!(strip_src(elements[2].as_str().unwrap()), "}");
     }
 
     #[test]
@@ -315,7 +349,7 @@ mod tests {
         // Obj + closing "}"
         assert_eq!(elements.len(), 2);
         assert!(elements[0].is_obj());
-        assert_eq!(elements[1], FfonElement::new_str("}"));
+        assert_eq!(strip_src(elements[1].as_str().unwrap()), "}");
     }
 
     // --- Python indent parser ---
@@ -326,9 +360,9 @@ mod tests {
         let elements = parse_file_ext(src, "py");
         assert_eq!(elements.len(), 1);
         let obj = elements[0].as_obj().unwrap();
-        assert_eq!(obj.key, "def foo():");
+        assert_eq!(strip_src(&obj.key), "def foo():");
         assert_eq!(obj.children.len(), 1);
-        assert_eq!(obj.children[0], FfonElement::new_str("return 1"));
+        assert_eq!(strip_src(obj.children[0].as_str().unwrap()), "return 1");
     }
 
     #[test]
@@ -337,11 +371,11 @@ mod tests {
         let elements = parse_file_ext(src, "py");
         assert_eq!(elements.len(), 1);
         let cls = elements[0].as_obj().unwrap();
-        assert_eq!(cls.key, "class Foo:");
+        assert_eq!(strip_src(&cls.key), "class Foo:");
         assert_eq!(cls.children.len(), 1);
         let method = cls.children[0].as_obj().unwrap();
-        assert_eq!(method.key, "def bar(self):");
-        assert_eq!(method.children[0], FfonElement::new_str("pass"));
+        assert_eq!(strip_src(&method.key), "def bar(self):");
+        assert_eq!(strip_src(method.children[0].as_str().unwrap()), "pass");
     }
 
     #[test]
@@ -350,7 +384,7 @@ mod tests {
         let elements = parse_file_ext(src, "py");
         assert_eq!(elements.len(), 2);
         assert!(elements[0].is_obj());
-        assert_eq!(elements[1], FfonElement::new_str("top = 2"));
+        assert_eq!(strip_src(elements[1].as_str().unwrap()), "top = 2");
     }
 
     #[test]
@@ -358,11 +392,11 @@ mod tests {
         let src = "if True:\n    a = 1\nelse:\n    b = 2\n";
         let elements = parse_file_ext(src, "py");
         assert_eq!(elements.len(), 2);
-        assert_eq!(elements[0].as_obj().unwrap().key, "if True:");
-        assert_eq!(elements[1].as_obj().unwrap().key, "else:");
+        assert_eq!(strip_src(elements[0].as_obj().unwrap().key.as_str()), "if True:");
+        assert_eq!(strip_src(elements[1].as_obj().unwrap().key.as_str()), "else:");
     }
 
-    // --- navigate_path ---
+    // --- navigate_path with src annotations ---
 
     #[test]
     fn navigate_path_empty_returns_all() {
@@ -374,9 +408,10 @@ mod tests {
     fn navigate_path_finds_section_children() {
         let src = "section:\n{\n  child\n}";
         let elems = parse_file(src);
+        // Path uses plain key (no <src=N> prefix) — navigate_path strips it internally.
         let result = navigate_path(&elems, &["section:".to_string()]);
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0], FfonElement::new_str("child"));
+        assert_eq!(strip_src(result[0].as_str().unwrap()), "child");
     }
 
     #[test]

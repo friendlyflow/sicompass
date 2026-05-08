@@ -160,21 +160,35 @@ pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
     let depth_before = item_id.depth();
 
     if !next_layer_exists(&r.ffon, &item_id) {
-        return false; // leaf node — not navigable
+        // Editor provider: Str entries are files — allow right-navigation so pressing
+        // right on a file opens its content (push path + refresh like a directory).
+        let is_editor_file = active_provider_is_editor(r) && {
+            let depth = item_id.depth();
+            let last = item_id.get(depth.saturating_sub(1)).unwrap_or(0);
+            get_ffon_at_id(&r.ffon, &item_id)
+                .and_then(|a| a.get(last))
+                .map(|e| e.is_str())
+                .unwrap_or(false)
+        };
+        if !is_editor_file { return false; }
     }
 
     // Extract segment name + whether the Obj already has children (static vs lazy) + link URL.
     let (segment, has_children, link_url) = {
         let depth = item_id.depth();
         let last_idx = item_id.get(depth.saturating_sub(1)).unwrap_or(0);
-        get_ffon_at_id(&r.ffon, &item_id)
-            .and_then(|s| s.get(last_idx))
-            .and_then(|e| e.as_obj())
-            .map(|o| {
+        let elem = get_ffon_at_id(&r.ffon, &item_id).and_then(|s| s.get(last_idx));
+        match elem {
+            Some(FfonElement::Obj(o)) => {
                 let link = if tags::has_link(&o.key) { tags::extract_link(&o.key) } else { None };
                 (tags::strip_display(&o.key).to_string(), !o.children.is_empty(), link)
-            })
-            .unwrap_or_default()
+            }
+            Some(FfonElement::Str(s)) => {
+                // Editor file — treat as childless navigable entry (refresh_on_navigate handles it).
+                (tags::strip_display(s).to_string(), false, None)
+            }
+            _ => return false,
+        }
     };
 
     // Handle <link> tags: resolve URL and load content as children.
@@ -1757,7 +1771,7 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
         let (is_file, is_dir, item_name) = parse_creation_prefix(&new_content);
 
         if (!is_file && !is_dir) || item_name.is_empty() {
-            r.error_message = "Enter a name (prefix with '- ' for file or '+ ' for directory)".to_owned();
+            r.error_message = "Enter a name: plain or '- name' for file, '+ name' or 'name:' for folder".to_owned();
             r.needs_redraw = true;
             return; // stay in OperatorInsert
         }
@@ -1814,8 +1828,9 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
             }
         }
 
-        r.coordinate = Coordinate::OperatorGeneral;
-        r.previous_coordinate = Coordinate::OperatorGeneral;
+        let prev = r.previous_coordinate;
+        r.coordinate = prev;
+        r.previous_coordinate = prev;
         r.input_buffer.clear();
         r.cursor_position = 0;
         r.needs_redraw = true;
@@ -1936,9 +1951,17 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
     };
 
     // Capture prev element before commit (for FsRename undo).
+    // Track filebrowser renames AND editor edits/renames (but not structural inserts).
     let is_filebrowser_rename = active_provider_is_filebrowser(r) && !old_content.is_empty();
+    // Editor: track undo for line edits and directory renames, but NOT for structural inserts
+    // (<srcins=N> placeholders). Structural inserts get undo via Task::Insert instead.
+    let is_editor_commit = active_provider_is_editor(r)
+        && !old_content.is_empty()
+        && sicompass_sdk::tags::extract_src_insert(&old_content).is_none();
+    let track_undo = is_filebrowser_rename || is_editor_commit;
+
     let rename_id = r.current_id.clone();
-    let prev_elem_for_rename = if is_filebrowser_rename {
+    let prev_elem_for_rename = if track_undo {
         let idx = rename_id.last().unwrap_or(0);
         sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &rename_id)
             .and_then(|arr| arr.get(idx))
@@ -1973,13 +1996,13 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
         }
     }
 
-    // Record FsRename undo entry for filebrowser renames.
+    // Record FsRename undo entry for filebrowser renames (before refresh).
     if committed && is_filebrowser_rename {
         let new_idx = rename_id.last().unwrap_or(0);
         let new_elem_for_rename = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &rename_id)
             .and_then(|arr| arr.get(new_idx))
             .cloned();
-        if let (Some(prev), Some(new)) = (prev_elem_for_rename, new_elem_for_rename) {
+        if let (Some(prev), Some(new)) = (prev_elem_for_rename.clone(), new_elem_for_rename) {
             crate::state::update_history(r, Task::FsRename, &rename_id, Some(prev), Some(new), History::None);
         }
     }
@@ -1993,9 +2016,21 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
         }
         // Auto-navigate into the element if it now has children after refresh
         // (e.g. web browser URL bar gains page content after load).
-        // Skip for filebrowser — renaming a directory must not navigate into it.
-        if !is_filebrowser_rename {
+        // Skip for filebrowser and editor — renaming must not navigate into the target.
+        if !is_filebrowser_rename && !is_editor_commit {
             navigate_right_raw(r);
+        }
+
+        // Record FsRename undo for editor edits AFTER refresh so the new element has
+        // the fresh <src=N> annotation that commit_edit needs for undo replay.
+        if is_editor_commit {
+            let new_idx = rename_id.last().unwrap_or(0);
+            let new_elem_for_undo = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &rename_id)
+                .and_then(|arr| arr.get(new_idx))
+                .cloned();
+            if let (Some(prev), Some(new)) = (prev_elem_for_rename, new_elem_for_undo) {
+                crate::state::update_history(r, Task::FsRename, &rename_id, Some(prev), Some(new), History::None);
+            }
         }
     }
 
@@ -2935,7 +2970,8 @@ fn populate_input_buffer(r: &mut AppRenderer) {
     let extracted = tags::extract_input(element_key);
 
     if let Some(content) = extracted {
-        r.input_buffer = content;
+        // Strip internal annotations (<src=N>, <srcins=N>) so the user edits clean text.
+        r.input_buffer = tags::strip_display(&content);
 
         // Extract prefix (text before the opening tag) and suffix (text after closing tag)
         let (open_tag, close_tag) = ("<input>", "</input>");
@@ -3339,6 +3375,205 @@ pub(crate) fn active_provider_is_filebrowser(r: &AppRenderer) -> bool {
         .and_then(|i| r.providers.get(i))
         .map(|p| p.name() == "filebrowser")
         .unwrap_or(false)
+}
+
+pub(crate) fn active_provider_is_editor(r: &AppRenderer) -> bool {
+    r.current_id.get(0)
+        .and_then(|i| r.providers.get(i))
+        .map(|p| p.name() == "editor")
+        .unwrap_or(false)
+}
+
+/// True when the editor provider is active and the current FFON slice contains
+/// src-annotated elements (indicating a file is open, not a directory listing).
+fn editor_slice_has_src(r: &AppRenderer) -> bool {
+    use sicompass_sdk::ffon::get_ffon_at_id;
+    get_ffon_at_id(&r.ffon, &r.current_id)
+        .map(|slice| slice.iter().any(|e| {
+            let k = match e {
+                sicompass_sdk::ffon::FfonElement::Str(s) => s.as_str(),
+                sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.as_str(),
+            };
+            sicompass_sdk::tags::has_src(k)
+        }))
+        .unwrap_or(false)
+}
+
+/// Press `i` in the editor provider — enter OperatorInsert so Enter calls
+/// `commit_edit`, which writes changes to disk.
+pub fn handle_editor_provider_i(r: &mut AppRenderer) {
+    if !matches!(r.coordinate, Coordinate::EditorGeneral) { return; }
+    r.previous_coordinate = r.coordinate;
+    r.coordinate = Coordinate::OperatorInsert;
+    populate_input_buffer(r);
+    let ctx = (!r.input_buffer.is_empty()).then(|| r.input_buffer.clone());
+    r.speak_mode_change(ctx);
+    r.cursor_position = 0;
+    r.selection_anchor = None;
+    r.caret.reset(sdl_ticks());
+    r.needs_redraw = true;
+}
+
+/// Press `a` in the editor provider — enter OperatorInsert with cursor at end.
+pub fn handle_editor_provider_a(r: &mut AppRenderer) {
+    if !matches!(r.coordinate, Coordinate::EditorGeneral) { return; }
+    r.previous_coordinate = r.coordinate;
+    r.coordinate = Coordinate::OperatorInsert;
+    populate_input_buffer(r);
+    let ctx = (!r.input_buffer.is_empty()).then(|| r.input_buffer.clone());
+    r.speak_mode_change(ctx);
+    r.cursor_position = r.input_buffer.len();
+    r.selection_anchor = None;
+    r.caret.reset(sdl_ticks());
+    r.needs_redraw = true;
+}
+
+/// Ctrl+I in the editor provider — insert before (directory or file view).
+pub fn handle_editor_ctrl_i(r: &mut AppRenderer) {
+    let in_file_view = editor_slice_has_src(r);
+    let slice_len = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)
+        .map(|s| s.len()).unwrap_or(0);
+    if in_file_view {
+        insert_editor_file_line(r, false);
+    } else {
+        if slice_len == 0 && r.current_id.depth() <= 1 { return; }
+        let insert_idx = if slice_len == 0 { 0 }
+            else { r.current_id.last().unwrap_or(0).min(slice_len.saturating_sub(1)) };
+        insert_editor_dir_placeholder(r, insert_idx);
+    }
+}
+
+/// Ctrl+A in the editor provider — insert after (directory or file view).
+pub fn handle_editor_ctrl_a(r: &mut AppRenderer) {
+    let in_file_view = editor_slice_has_src(r);
+    let slice_len = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)
+        .map(|s| s.len()).unwrap_or(0);
+    if in_file_view {
+        insert_editor_file_line(r, true);
+    } else {
+        if slice_len == 0 && r.current_id.depth() <= 1 { return; }
+        let insert_idx = if slice_len == 0 { 0 }
+            else { r.current_id.last().unwrap_or(0).min(slice_len.saturating_sub(1)) + 1 };
+        insert_editor_dir_placeholder(r, insert_idx);
+    }
+}
+
+/// Insert a file/folder placeholder in the editor directory view.
+/// Enters OperatorInsert with `prefixed_insert_mode = true` ("+name"/"−name" syntax).
+fn insert_editor_dir_placeholder(r: &mut AppRenderer, insert_idx: usize) {
+    use sicompass_sdk::ffon::FfonElement;
+    use crate::app_state::PlaceholderCancel;
+
+    let depth = r.current_id.depth();
+    let placeholder = FfonElement::Str("<input></input>".to_owned());
+    let return_id = r.current_id.clone();
+
+    if depth == 1 {
+        r.ffon.insert(insert_idx, placeholder);
+    } else {
+        let mut parent_id = r.current_id.clone();
+        parent_id.pop();
+        if let Some(parent_slice) = crate::state::navigate_to_slice_pub(&mut r.ffon, &parent_id) {
+            let parent_idx = parent_id.last().unwrap_or(0);
+            if let Some(FfonElement::Obj(obj)) = parent_slice.get_mut(parent_idx) {
+                obj.children.insert(insert_idx, placeholder);
+            } else {
+                return;
+            }
+        } else {
+            return;
+        }
+    }
+
+    r.current_id.set_last(insert_idx);
+    r.placeholder_cancel = Some(PlaceholderCancel {
+        insertion_id: r.current_id.clone(),
+        replaced_element: None,
+        return_id,
+    });
+    r.prefixed_insert_mode = true;
+    list::create_list_current_layer(r);
+    r.list_index = insert_idx;
+    r.scroll_offset = 0;
+    r.previous_coordinate = r.coordinate;
+    r.coordinate = Coordinate::OperatorInsert;
+    populate_input_buffer(r);
+    r.cursor_position = 0;
+    r.selection_anchor = None;
+    r.caret.reset(sdl_ticks());
+    r.needs_redraw = true;
+}
+
+/// Insert a blank-line placeholder in the editor file view.
+/// Encodes the target source-line index as `<srcins=N>` inside the placeholder.
+/// `after = false` → insert before current element; `after = true` → insert after.
+fn insert_editor_file_line(r: &mut AppRenderer, after: bool) {
+    use sicompass_sdk::ffon::{FfonElement, get_ffon_at_id};
+    use sicompass_sdk::tags;
+    use crate::app_state::PlaceholderCancel;
+
+    let (elem_key, _is_obj) = {
+        let arr = match get_ffon_at_id(&r.ffon, &r.current_id) {
+            Some(a) => a,
+            None => return,
+        };
+        let idx = r.current_id.last().unwrap_or(0);
+        match arr.get(idx) {
+            Some(FfonElement::Str(s)) => (s.clone(), false),
+            Some(FfonElement::Obj(o)) => (o.key.clone(), true),
+            None => return,
+        }
+    };
+
+    let inner = tags::extract_input(&elem_key).unwrap_or_default();
+    let src_line = match tags::extract_src(&inner) {
+        Some((n, _)) => n,
+        None => return, // no src annotation on this element
+    };
+
+    let insert_src_line = if after { src_line + 1 } else { src_line };
+    let placeholder_key = format!("<input>{}</input>", tags::format_src_insert(insert_src_line));
+
+    let current_ffon_idx = r.current_id.last().unwrap_or(0);
+    let insert_ffon_idx = if after { current_ffon_idx + 1 } else { current_ffon_idx };
+    let return_id = r.current_id.clone();
+    let placeholder = FfonElement::new_str(placeholder_key);
+    let depth = r.current_id.depth();
+
+    if depth == 1 {
+        r.ffon.insert(insert_ffon_idx, placeholder);
+    } else {
+        let mut parent_id = r.current_id.clone();
+        parent_id.pop();
+        if let Some(parent_slice) = crate::state::navigate_to_slice_pub(&mut r.ffon, &parent_id) {
+            let parent_idx = parent_id.last().unwrap_or(0);
+            if let Some(FfonElement::Obj(obj)) = parent_slice.get_mut(parent_idx) {
+                obj.children.insert(insert_ffon_idx, placeholder);
+            } else {
+                return;
+            }
+        } else {
+            return;
+        }
+    }
+
+    r.current_id.set_last(insert_ffon_idx);
+    r.placeholder_cancel = Some(PlaceholderCancel {
+        insertion_id: r.current_id.clone(),
+        replaced_element: None,
+        return_id,
+    });
+    r.prefixed_insert_mode = false;
+    list::create_list_current_layer(r);
+    r.list_index = insert_ffon_idx;
+    r.scroll_offset = 0;
+    r.previous_coordinate = r.coordinate;
+    r.coordinate = Coordinate::OperatorInsert;
+    populate_input_buffer(r);
+    r.cursor_position = 0;
+    r.selection_anchor = None;
+    r.caret.reset(sdl_ticks());
+    r.needs_redraw = true;
 }
 
 /// Ctrl+X — cut selected text (insert modes) or cut FFON element (editor general).

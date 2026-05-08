@@ -5086,20 +5086,28 @@ fn editor_provider_lists_directory_and_parses_file() {
     assert!(names.iter().any(|n| n.contains("subdir")),     "expected subdir in {names:?}");
 
     // Entering a file returns its parsed FFON content.
+    // Elements are wrapped in <input> and annotated with <src=N>; strip for assertions.
     editor.push_path("code.txt");
     let file_items = editor.fetch();
     assert_eq!(file_items.len(), 2, "code.txt should parse into 2 top-level elements");
     let section = file_items[0].as_obj().expect("first element must be an Obj section");
-    assert_eq!(section.key, "functions:");
+    assert_eq!(
+        sicompass_sdk::tags::strip_display(&section.key),
+        "functions:",
+        "section key should strip to 'functions:'"
+    );
     assert_eq!(section.children.len(), 2);
-    assert_eq!(file_items[1].as_str(), Some("end"));
+    let end_raw = file_items[1].as_str().expect("second element should be a Str");
+    assert_eq!(sicompass_sdk::tags::strip_display(end_raw), "end");
 
-    // Navigating into a section returns its children.
+    // Navigating into a section returns its children (stripped keys).
     editor.push_path("functions:");
     let section_items = editor.fetch();
     assert_eq!(section_items.len(), 2);
-    assert_eq!(section_items[0].as_str(), Some("fn foo"));
-    assert_eq!(section_items[1].as_str(), Some("fn bar"));
+    let foo_raw = section_items[0].as_str().expect("first child should be a Str");
+    let bar_raw = section_items[1].as_str().expect("second child should be a Str");
+    assert_eq!(sicompass_sdk::tags::strip_display(foo_raw), "fn foo");
+    assert_eq!(sicompass_sdk::tags::strip_display(bar_raw), "fn bar");
 
     // pop_path twice returns to the directory listing.
     editor.pop_path(); // section → file root
@@ -5167,8 +5175,76 @@ fn inside_editor_i_yields_editor_insert() {
     press_right(&mut r); // enters editor → EditorGeneral
     assert_eq!(r.coordinate, Coordinate::EditorGeneral);
 
+    // The editor provider enters OperatorInsert (not EditorInsert) so that Enter
+    // calls commit_edit and writes changes to disk via the provider.
     press(&mut r, Keycode::I);
-    assert_eq!(r.coordinate, Coordinate::EditorInsert, "'i' from EditorGeneral should give EditorInsert");
+    assert_eq!(r.coordinate, Coordinate::OperatorInsert, "'i' in editor provider should give OperatorInsert for disk writes");
+}
+
+#[test]
+fn editor_directory_files_are_str_dirs_are_obj() {
+    // Files must be Str (renders with -i prefix) and directories Obj (chevron).
+    ensure_builtins();
+    let tmp = TempDir::new().expect("tempdir");
+    std::fs::write(tmp.path().join("readme.md"), "hello").unwrap();
+    std::fs::create_dir(tmp.path().join("subdir")).unwrap();
+
+    let mut ed = sicompass_sdk::create_provider_by_name("editor").unwrap();
+    ed.on_setting_change("editorPath", tmp.path().to_str().unwrap());
+    let items = ed.fetch();
+
+    let file_entry = items.iter().find(|e| {
+        let k = match e { FfonElement::Str(s) => s.as_str(), FfonElement::Obj(o) => o.key.as_str() };
+        k.contains("readme.md")
+    }).expect("readme.md must be in listing");
+    assert!(file_entry.is_str(), "file entry must be Str so it renders with -i prefix");
+
+    let dir_entry = items.iter().find(|e| {
+        let k = match e { FfonElement::Str(s) => s.as_str(), FfonElement::Obj(o) => o.key.as_str() };
+        k.contains("subdir")
+    }).expect("subdir must be in listing");
+    assert!(dir_entry.is_obj(), "directory entry must be Obj so it renders with folder prefix");
+}
+
+#[test]
+fn editor_right_arrow_opens_file() {
+    // Pressing right on a Str file entry should open the file content.
+    let (mut r, tmp) = harness_with_editor();
+    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+    navigate_to_provider(&mut r, editor_idx);
+    press_right(&mut r); // enter editor directory → EditorGeneral at depth 2
+
+    // Find the hello.txt entry and move cursor to it.
+    let file_idx = {
+        let children = r.ffon[editor_idx].as_obj().unwrap().children.as_slice();
+        children.iter().position(|e| match e {
+            FfonElement::Str(s) => s.contains("hello.txt"),
+            _ => false,
+        }).expect("hello.txt must be in listing as Str")
+    };
+    r.current_id.set(1, file_idx);
+    sicompass::list::create_list_current_layer(&mut r);
+
+    // Right arrow on a file Str → opens file, now at depth 2 showing file content.
+    press_right(&mut r);
+    assert_eq!(r.current_id.depth(), 2, "should remain at depth 2 after opening file");
+
+    // File content should now be in the FFON (hello.txt contains "fn main() {}").
+    let content_children = r.ffon[editor_idx].as_obj().unwrap().children.as_slice();
+    let has_content = content_children.iter().any(|e| {
+        let k = match e { FfonElement::Str(s) => s.as_str(), FfonElement::Obj(o) => o.key.as_str() };
+        sicompass_sdk::tags::strip_display(k).contains("fn main")
+    });
+    assert!(has_content, "file content should be visible after opening");
+
+    // Left arrow goes back to directory listing.
+    press_left(&mut r);
+    let back_children = r.ffon[editor_idx].as_obj().unwrap().children.as_slice();
+    let back_to_dir = back_children.iter().any(|e| match e {
+        FfonElement::Str(s) => s.contains("hello.txt"),
+        _ => false,
+    });
+    assert!(back_to_dir, "should be back at directory listing after left");
 }
 
 #[test]
@@ -5211,4 +5287,49 @@ fn entering_editor_does_not_clobber_non_general_coordinate() {
     }
     sicompass::handlers::navigate_right_raw(&mut r);
     assert_eq!(r.coordinate, Coordinate::OperatorInsert, "non-General coordinate must not be clobbered");
+}
+
+/// After creating a file via Ctrl+I in the editor, the coordinate must return
+/// to EditorGeneral (not OperatorGeneral) because that's what was active before
+/// the insert was initiated.
+#[test]
+fn editor_ctrl_i_create_file_restores_editor_general() {
+    let (mut r, tmp) = harness_with_editor();
+    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+    navigate_to_provider(&mut r, editor_idx);
+    press_right(&mut r); // enter editor directory → EditorGeneral
+    assert_eq!(r.coordinate, Coordinate::EditorGeneral, "should be EditorGeneral after entering editor");
+
+    // Ctrl+I → enters OperatorInsert with prefixed_insert_mode
+    press_ctrl(&mut r, Keycode::I);
+    assert_eq!(r.coordinate, Coordinate::OperatorInsert);
+
+    // Type a plain name (no prefix) → creates a file
+    type_text(&mut r, "newfile.txt");
+    press_enter(&mut r);
+
+    assert_eq!(r.coordinate, Coordinate::EditorGeneral,
+        "after file creation in editor, coordinate must restore to EditorGeneral, not OperatorGeneral");
+    assert!(tmp.path().join("newfile.txt").exists(), "file must be created on disk");
+}
+
+/// After creating a directory via Ctrl+I in the editor (using '+' prefix),
+/// the coordinate must return to EditorGeneral.
+#[test]
+fn editor_ctrl_i_create_dir_restores_editor_general() {
+    let (mut r, tmp) = harness_with_editor();
+    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+    navigate_to_provider(&mut r, editor_idx);
+    press_right(&mut r); // enter editor directory → EditorGeneral
+    assert_eq!(r.coordinate, Coordinate::EditorGeneral);
+
+    press_ctrl(&mut r, Keycode::I);
+    assert_eq!(r.coordinate, Coordinate::OperatorInsert);
+
+    type_text(&mut r, "+subdir");
+    press_enter(&mut r);
+
+    assert_eq!(r.coordinate, Coordinate::EditorGeneral,
+        "after directory creation in editor, coordinate must restore to EditorGeneral");
+    assert!(tmp.path().join("subdir").is_dir(), "directory must be created on disk");
 }

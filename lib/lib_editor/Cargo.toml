@@ -8,6 +8,7 @@ description = "Sicompass editor provider"
 [dependencies]
 sicompass-sdk = { workspace = true }
 serde_json = { workspace = true }
+trash = "5"
 
 [dev-dependencies]
 tempfile = { workspace = true }

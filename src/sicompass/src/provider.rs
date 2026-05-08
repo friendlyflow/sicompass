@@ -394,14 +394,16 @@ pub fn delete_item(renderer: &mut AppRenderer) -> bool {
     use sicompass_sdk::ffon::get_ffon_at_id;
     use sicompass_sdk::tags;
 
-    // Get the element name before borrowing providers mutably
+    // Get the raw element key before borrowing providers mutably.
+    // Pass the raw key (not stripped) so providers that embed annotations (e.g. <src=N>)
+    // can decode them in their own delete_item implementation.
     let name = {
         let arr = get_ffon_at_id(&renderer.ffon, &renderer.current_id);
         let idx = renderer.current_id.last().unwrap_or(0);
         arr.and_then(|a| a.get(idx))
             .map(|e| match e {
-                sicompass_sdk::ffon::FfonElement::Str(s) => tags::strip_display(s).to_string(),
-                sicompass_sdk::ffon::FfonElement::Obj(o) => tags::strip_display(&o.key).to_string(),
+                sicompass_sdk::ffon::FfonElement::Str(s) => s.clone(),
+                sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.clone(),
             })
             .unwrap_or_default()
     };

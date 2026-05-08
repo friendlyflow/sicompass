@@ -3478,6 +3478,7 @@ dependencies = [
  "serde_json",
  "sicompass-sdk",
  "tempfile",
+ "trash",
 ]
 
 [[package]]

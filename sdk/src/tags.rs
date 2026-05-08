@@ -76,6 +76,13 @@ fn extract_after<'a>(text: &'a str, open: &str, open_len: usize, close: &str) ->
 // Tag constants
 // ---------------------------------------------------------------------------
 
+// <src=N> — source-line annotation added by the editor parser to each FFON element.
+//   Encodes the 0-based line index of the element in the original source file.
+// <srcins=N> — editor-internal insert placeholder: "insert new line at position N".
+const SRC_PREFIX: &str = "<src=";
+const SRCINS_PREFIX: &str = "<srcins=";
+const TAG_CLOSE_CHAR: char = '>';
+
 const INPUT_OPEN: &str = "<input>";
 const INPUT_CLOSE: &str = "</input>";
 const RADIO_OPEN: &str = "<radio>";
@@ -222,6 +229,41 @@ pub fn format_id(id: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// <src=N> / <srcins=N> — editor source-line annotations (internal to editor provider)
+// ---------------------------------------------------------------------------
+
+/// Encode source line index as a `<src=N>` tag prefix.
+pub fn format_src(n: usize) -> String {
+    format!("{SRC_PREFIX}{n}>")
+}
+
+/// Encode a line-insert position as a `<srcins=N>` tag prefix.
+pub fn format_src_insert(n: usize) -> String {
+    format!("{SRCINS_PREFIX}{n}>")
+}
+
+/// If `text` starts with `<src=N>`, return `(N, &text_after_tag)`.
+pub fn extract_src(text: &str) -> Option<(usize, &str)> {
+    let rest = text.strip_prefix(SRC_PREFIX)?;
+    let close = rest.find(TAG_CLOSE_CHAR)?;
+    let n: usize = rest[..close].parse().ok()?;
+    Some((n, &rest[close + 1..]))
+}
+
+/// If `text` contains `<srcins=N>` anywhere, return `N`.
+pub fn extract_src_insert(text: &str) -> Option<usize> {
+    let pos = text.find(SRCINS_PREFIX)?;
+    let rest = &text[pos + SRCINS_PREFIX.len()..];
+    let close = rest.find(TAG_CLOSE_CHAR)?;
+    rest[..close].parse().ok()
+}
+
+/// True if `text` contains a `<src=N>` or `<srcins=N>` tag.
+pub fn has_src(text: &str) -> bool {
+    text.contains(SRC_PREFIX) || text.contains(SRCINS_PREFIX)
+}
+
+// ---------------------------------------------------------------------------
 // <many-opt></many-opt> / <one-opt></one-opt> prefixes
 // ---------------------------------------------------------------------------
 
@@ -298,7 +340,22 @@ pub fn strip_display(text: &str) -> String {
             .unwrap_or_else(|| unescape(text));
     }
 
-    // 3. <id>...</id>: metadata tag — strip the tag AND its content (id is not display text)
+    // 3. <src=N> / <srcins=N>: editor internal tags — strip the tag and recurse.
+    for prefix in &[SRC_PREFIX, SRCINS_PREFIX] {
+        if let Some(pos) = text.find(prefix) {
+            if let Some(close) = text[pos + prefix.len()..].find(TAG_CLOSE_CHAR) {
+                let num_part = &text[pos + prefix.len()..pos + prefix.len() + close];
+                if num_part.chars().all(|c| c.is_ascii_digit()) {
+                    let before = &text[..pos];
+                    let after = &text[pos + prefix.len() + close + 1..];
+                    let result = format!("{before}{after}");
+                    return strip_display(&result);
+                }
+            }
+        }
+    }
+
+    // 4. <id>...</id>: metadata tag — strip the tag AND its content (id is not display text)
     if let Some(open_pos) = find_unescaped(text, ID_OPEN) {
         let before = &text[..open_pos];
         let after_open = &text[open_pos + ID_OPEN.len()..];
@@ -309,7 +366,7 @@ pub fn strip_display(text: &str) -> String {
         return strip_display(&unescape(&result));
     }
 
-    // 4. Find the first recognized tag pair and strip it
+    // 5. Find the first recognized tag pair and strip it
     let candidates: &[(&str, usize, &str)] = &[
         (INPUT_OPEN,             INPUT_OPEN.len(),             INPUT_CLOSE),
         (RADIO_OPEN,             RADIO_OPEN.len(),             RADIO_CLOSE),
@@ -902,6 +959,94 @@ mod tests {
     #[test]
     fn test_escaped_button_not_recognized() {
         assert!(!has_button("\\<button>fn\\</button>text"));
+    }
+
+    // --- <src=N> / <srcins=N> ---
+
+    #[test]
+    fn test_format_src() {
+        assert_eq!(format_src(42), "<src=42>");
+        assert_eq!(format_src(0), "<src=0>");
+    }
+
+    #[test]
+    fn test_format_src_insert() {
+        assert_eq!(format_src_insert(7), "<srcins=7>");
+    }
+
+    #[test]
+    fn test_extract_src_basic() {
+        assert_eq!(extract_src("<src=42>content"), Some((42, "content")));
+    }
+
+    #[test]
+    fn test_extract_src_zero() {
+        assert_eq!(extract_src("<src=0>hello"), Some((0, "hello")));
+    }
+
+    #[test]
+    fn test_extract_src_empty_rest() {
+        assert_eq!(extract_src("<src=5>"), Some((5, "")));
+    }
+
+    #[test]
+    fn test_extract_src_no_tag() {
+        assert_eq!(extract_src("plain text"), None);
+    }
+
+    #[test]
+    fn test_extract_src_wrong_prefix() {
+        assert_eq!(extract_src("<srcins=3>"), None);
+    }
+
+    #[test]
+    fn test_extract_src_insert_basic() {
+        assert_eq!(extract_src_insert("<srcins=42>"), Some(42));
+    }
+
+    #[test]
+    fn test_extract_src_insert_inside_input() {
+        assert_eq!(extract_src_insert("<srcins=7>"), Some(7));
+    }
+
+    #[test]
+    fn test_extract_src_insert_no_tag() {
+        assert_eq!(extract_src_insert("<src=3>content"), None);
+    }
+
+    #[test]
+    fn test_has_src_with_src_tag() {
+        assert!(has_src("<src=42>content"));
+    }
+
+    #[test]
+    fn test_has_src_with_srcins_tag() {
+        assert!(has_src("<srcins=0>"));
+    }
+
+    #[test]
+    fn test_has_src_plain() {
+        assert!(!has_src("plain text"));
+    }
+
+    #[test]
+    fn test_strip_display_src_tag() {
+        assert_eq!(strip_display("<src=42>line text"), "line text");
+    }
+
+    #[test]
+    fn test_strip_display_srcins_tag() {
+        assert_eq!(strip_display("<srcins=5>"), "");
+    }
+
+    #[test]
+    fn test_strip_display_input_with_src_inside() {
+        assert_eq!(strip_display("<input><src=42>line text</input>"), "line text");
+    }
+
+    #[test]
+    fn test_strip_display_input_with_srcins_inside() {
+        assert_eq!(strip_display("<input><srcins=42></input>"), "");
     }
 
     #[test]

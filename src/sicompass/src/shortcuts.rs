@@ -219,9 +219,9 @@ fn avail_insert_on_input(r: &AppRenderer) -> bool {
     not_at_root(r) && focused_is_input(r)
 }
 
-/// A (filebrowser): mirror of `avail_i_edit_hint` so filebrowser can still rename via A.
+/// A (filebrowser / editor): mirror of `avail_i_edit_hint` so rename via A shows the hint.
 fn avail_a_edit_hint(r: &AppRenderer) -> bool {
-    not_at_root(r) && is_filebrowser(r)
+    not_at_root(r) && (is_filebrowser(r) || is_editor(r))
 }
 
 /// True when we're navigated inside an email compose / reply / forward body section.
@@ -251,10 +251,10 @@ fn has_add_element_sibling(r: &AppRenderer) -> bool {
     siblings.iter().any(|e| matches!(e, FfonElement::Obj(o) if o.key == "Add element:"))
 }
 
-/// Structural editing is available for filebrowser, email compose body, or
-/// createElement providers (those with an "Add element:" sibling in FFON).
+/// Structural editing is available for filebrowser, email compose body,
+/// createElement providers, or the editor provider.
 fn avail_structural_edit(r: &AppRenderer) -> bool {
-    not_at_root(r) && (is_filebrowser(r) || in_email_compose_body(r) || has_add_element_sibling(r))
+    not_at_root(r) && (is_filebrowser(r) || in_email_compose_body(r) || has_add_element_sibling(r) || is_editor(r))
 }
 
 /// Structural edit available in email compose body (OperatorGeneral).
@@ -262,9 +262,9 @@ fn avail_compose_body_edit(r: &AppRenderer) -> bool {
     not_at_root(r) && in_email_compose_body(r)
 }
 
-/// File-level delete (OperatorGeneral Delete / Ctrl+D) — only for filebrowser.
+/// File-level delete (OperatorGeneral Delete / Ctrl+D) — filebrowser or editor provider.
 fn avail_file_delete(r: &AppRenderer) -> bool {
-    not_at_root(r) && is_filebrowser(r)
+    not_at_root(r) && (is_filebrowser(r) || is_editor(r))
 }
 
 /// File clipboard (Ctrl+X/C/V) in OperatorGeneral — only for filebrowser.
@@ -565,24 +565,27 @@ pub static SHORTCUTS: &[Shortcut] = &[
         label: ":      Command", is_available: always, handle: handlers::handle_colon },
 
     // ---- I / A (enter insert/append mode) --------------------------------
+    // Editor provider: i/a enter OperatorInsert so commit_edit fires on Enter → writes to disk.
+    // These rows must precede the generic avail_insert_on_input rows to take priority.
+    Shortcut { key: Keycode::I, key2: None, ctrl: false, shift: false,
+        modes: &[Coordinate::EditorGeneral],
+        label: "I      Edit", is_available: avail_editor_edit, handle: handlers::handle_editor_provider_i },
+    Shortcut { key: Keycode::A, key2: None, ctrl: false, shift: false,
+        modes: &[Coordinate::EditorGeneral],
+        label: "A      Append", is_available: avail_editor_edit, handle: handlers::handle_editor_provider_a },
+    // Generic i/a for filebrowser and other providers with <input> elements.
     Shortcut { key: Keycode::I, key2: None, ctrl: false, shift: false,
         modes: GENERAL,
         label: "I      Edit input", is_available: avail_i_edit_hint, handle: handlers::handle_i },
     Shortcut { key: Keycode::I, key2: None, ctrl: false, shift: false,
         modes: GENERAL,
         label: "I      Edit input", is_available: avail_insert_on_input, handle: handlers::handle_i },
-    Shortcut { key: Keycode::I, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::EditorGeneral],
-        label: "I      Edit", is_available: avail_editor_edit, handle: handlers::handle_i },
     Shortcut { key: Keycode::A, key2: None, ctrl: false, shift: false,
         modes: GENERAL,
         label: "A      Append", is_available: avail_a_edit_hint, handle: handlers::handle_a },
     Shortcut { key: Keycode::A, key2: None, ctrl: false, shift: false,
         modes: GENERAL,
         label: "A      Append", is_available: avail_insert_on_input, handle: handlers::handle_a },
-    Shortcut { key: Keycode::A, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::EditorGeneral],
-        label: "A      Append", is_available: avail_editor_edit, handle: handlers::handle_a },
 
     // ---- Ctrl+I / Ctrl+A (structural insert/append) ----------------------
     // OperatorGeneral: insert/append placeholder
@@ -594,7 +597,17 @@ pub static SHORTCUTS: &[Shortcut] = &[
         modes: &[Coordinate::OperatorGeneral],
         label: "Ctrl+A Insert after", is_available: avail_structural_edit,
         handle: handlers::handle_ctrl_a_operator },
-    // EditorGeneral: insert/append with double-tap undo
+    // EditorGeneral, editor provider: custom insert/append (file-line or dir-placeholder).
+    // Must precede the generic ctrl_i_editor / ctrl_a_editor rows.
+    Shortcut { key: Keycode::I, key2: None, ctrl: true, shift: false,
+        modes: &[Coordinate::EditorGeneral],
+        label: "Ctrl+I Insert before", is_available: avail_editor_edit,
+        handle: handlers::handle_editor_ctrl_i },
+    Shortcut { key: Keycode::A, key2: None, ctrl: true, shift: false,
+        modes: &[Coordinate::EditorGeneral],
+        label: "Ctrl+A Insert after", is_available: avail_editor_edit,
+        handle: handlers::handle_editor_ctrl_a },
+    // EditorGeneral: generic insert/append with double-tap undo (non-editor providers)
     Shortcut { key: Keycode::I, key2: None, ctrl: true, shift: false,
         modes: &[Coordinate::EditorGeneral],
         label: "Ctrl+I Insert before", is_available: avail_structural_edit, handle: ctrl_i_editor },
@@ -652,6 +665,18 @@ pub static SHORTCUTS: &[Shortcut] = &[
         modes: &[Coordinate::OperatorGeneral],
         label: "Del    Delete", is_available: avail_provider_has_delete,
         handle: handlers::invoke_provider_delete },
+
+    // ---- Ctrl+D / Delete in EditorGeneral for editor provider -----------
+    // Routes to handle_file_delete so the provider's delete_item is called (writes to disk).
+    // Must precede the generic delete_editor rows so editor provider wins.
+    Shortcut { key: Keycode::D, key2: None, ctrl: true, shift: false,
+        modes: &[Coordinate::EditorGeneral],
+        label: "Ctrl+D Delete", is_available: avail_editor_edit,
+        handle: handlers::handle_file_delete },
+    Shortcut { key: Keycode::Delete, key2: None, ctrl: false, shift: false,
+        modes: &[Coordinate::EditorGeneral],
+        label: "Del    Delete", is_available: avail_editor_edit,
+        handle: handlers::handle_file_delete },
 
     // ---- Ctrl+D (delete FFON element in EditorGeneral) ------------------
     Shortcut { key: Keycode::D, key2: None, ctrl: true, shift: false,
