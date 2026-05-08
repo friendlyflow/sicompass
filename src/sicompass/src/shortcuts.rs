@@ -325,7 +325,8 @@ pub static SHORTCUTS: &[Shortcut] = &[
                  Coordinate::EditorVisual, Coordinate::OperatorInsert,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
                  Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch,
-                 Coordinate::InputSearch, Coordinate::Meta, Coordinate::Dashboard],
+                 Coordinate::InputSearch, Coordinate::Meta, Coordinate::Dashboard,
+                 Coordinate::DashboardInteractive],
         label: "Esc    Back", is_available: not_at_root, handle: handlers::handle_escape },
     Shortcut { key: Keycode::Escape, key2: None, ctrl: false, shift: false,
         modes: &[Coordinate::OperatorGeneral, Coordinate::EditorGeneral,
@@ -333,7 +334,8 @@ pub static SHORTCUTS: &[Shortcut] = &[
                  Coordinate::EditorVisual, Coordinate::OperatorInsert,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
                  Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch,
-                 Coordinate::InputSearch, Coordinate::Meta, Coordinate::Dashboard],
+                 Coordinate::InputSearch, Coordinate::Meta, Coordinate::Dashboard,
+                 Coordinate::DashboardInteractive],
         label: "", is_available: always, handle: handlers::handle_escape },
 
     // ---- Up / K ----------------------------------------------------------
@@ -827,6 +829,22 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
     let Some(k) = keycode else { return false };
     let ctrl  = keymod.intersects(Mod::LCTRLMOD  | Mod::RCTRLMOD);
     let shift = keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD);
+    let alt   = keymod.intersects(Mod::LALTMOD   | Mod::RALTMOD);
+
+    // Interactive-dashboard fast-path: forward every key *except* Escape to the
+    // active provider. Escape still falls through to the SHORTCUTS table so the
+    // user can always bail out via `handle_escape`.
+    if r.coordinate == Coordinate::DashboardInteractive && k != Keycode::Escape {
+        if let Some(keysym) = sdl_keycode_to_dashboard_keysym(k) {
+            let key = sicompass_sdk::DashboardKey { keysym, ctrl, shift, alt };
+            if let Some(p) = crate::provider::get_active_provider(r) {
+                if p.dashboard_key(key) {
+                    r.needs_redraw = true;
+                }
+            }
+        }
+        return false;
+    }
 
     // During the file-browser-open dialog restrict OperatorGeneral/EditorGeneral
     // to navigation + selection only (same semantics as the original pre-filter).
@@ -892,6 +910,60 @@ pub fn hints_for(r: &AppRenderer) -> Vec<String> {
         })
         .map(|s| s.label.to_string())
         .collect()
+}
+
+// ---------------------------------------------------------------------------
+// SDL → DashboardKeysym mapping (interactive dashboard input)
+// ---------------------------------------------------------------------------
+
+/// Translate an SDL keycode into the SDK-side keysym a provider sees in
+/// interactive-dashboard mode. Returns `None` for keys we don't want to
+/// surface (modifier keys, lock keys, …).
+fn sdl_keycode_to_dashboard_keysym(k: Keycode) -> Option<sicompass_sdk::DashboardKeysym> {
+    use sicompass_sdk::DashboardKeysym as K;
+    let s = match k {
+        Keycode::Return | Keycode::KpEnter => K::Enter,
+        Keycode::Backspace => K::Backspace,
+        Keycode::Tab => K::Tab,
+        Keycode::Up => K::Up,
+        Keycode::Down => K::Down,
+        Keycode::Left => K::Left,
+        Keycode::Right => K::Right,
+        Keycode::Home => K::Home,
+        Keycode::End => K::End,
+        Keycode::PageUp => K::PageUp,
+        Keycode::PageDown => K::PageDown,
+        Keycode::Insert => K::Insert,
+        Keycode::Delete => K::Delete,
+        Keycode::F1 => K::F(1),
+        Keycode::F2 => K::F(2),
+        Keycode::F3 => K::F(3),
+        Keycode::F4 => K::F(4),
+        Keycode::F5 => K::F(5),
+        Keycode::F6 => K::F(6),
+        Keycode::F7 => K::F(7),
+        Keycode::F8 => K::F(8),
+        Keycode::F9 => K::F(9),
+        Keycode::F10 => K::F(10),
+        Keycode::F11 => K::F(11),
+        Keycode::F12 => K::F(12),
+        Keycode::A => K::Char('a'), Keycode::B => K::Char('b'), Keycode::C => K::Char('c'),
+        Keycode::D => K::Char('d'), Keycode::E => K::Char('e'), Keycode::F => K::Char('f'),
+        Keycode::G => K::Char('g'), Keycode::H => K::Char('h'), Keycode::I => K::Char('i'),
+        Keycode::J => K::Char('j'), Keycode::K => K::Char('k'), Keycode::L => K::Char('l'),
+        Keycode::M => K::Char('m'), Keycode::N => K::Char('n'), Keycode::O => K::Char('o'),
+        Keycode::P => K::Char('p'), Keycode::Q => K::Char('q'), Keycode::R => K::Char('r'),
+        Keycode::S => K::Char('s'), Keycode::T => K::Char('t'), Keycode::U => K::Char('u'),
+        Keycode::V => K::Char('v'), Keycode::W => K::Char('w'), Keycode::X => K::Char('x'),
+        Keycode::Y => K::Char('y'), Keycode::Z => K::Char('z'),
+        Keycode::_0 => K::Char('0'), Keycode::_1 => K::Char('1'), Keycode::_2 => K::Char('2'),
+        Keycode::_3 => K::Char('3'), Keycode::_4 => K::Char('4'), Keycode::_5 => K::Char('5'),
+        Keycode::_6 => K::Char('6'), Keycode::_7 => K::Char('7'), Keycode::_8 => K::Char('8'),
+        Keycode::_9 => K::Char('9'),
+        Keycode::Space => K::Char(' '),
+        _ => return Some(K::Unknown),
+    };
+    Some(s)
 }
 
 // ---------------------------------------------------------------------------

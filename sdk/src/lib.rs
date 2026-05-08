@@ -1,3 +1,4 @@
+pub mod dashboard;
 pub mod ffon;
 pub mod manifest;
 pub mod placeholders;
@@ -7,6 +8,9 @@ pub mod provider;
 pub mod tags;
 pub mod url_fetcher;
 
+pub use dashboard::{
+    CellAttrs, DashboardCell, DashboardFrame, DashboardKey, DashboardKeysym, DashboardKind,
+};
 pub use ffon::{FfonElement, FfonObject, IdArray};
 pub use manifest::{
     builtin_manifests, register_builtin_manifest, BuiltinManifest, SettingDecl, SettingKind,

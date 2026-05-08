@@ -1,3 +1,4 @@
+use crate::dashboard::{DashboardFrame, DashboardKey, DashboardKind};
 use crate::ffon::FfonElement;
 use std::path::Path;
 
@@ -231,8 +232,56 @@ pub trait Provider: Send + 'static {
 
     // ---- Optional: metadata ------------------------------------------------
 
-    /// Path to a dashboard image shown fullscreen via `d` key.
+    /// Path to a dashboard image shown fullscreen via `d` key. Used when
+    /// [`Provider::dashboard_kind`] returns [`DashboardKind::Image`] (or, for
+    /// backwards compatibility, when `dashboard_kind` is left at its default
+    /// `None` and a non-empty path is returned here).
     fn dashboard_image_path(&self) -> Option<&str> { None }
+
+    // ---- Optional: interactive dashboard -----------------------------------
+
+    /// What kind of fullscreen view this provider supports when the user
+    /// presses `d`. Default `None`: pressing `d` is a no-op for this provider.
+    ///
+    /// Returning [`DashboardKind::Image`] is equivalent to the legacy
+    /// `dashboard_image_path()` opt-in. Returning [`DashboardKind::Interactive`]
+    /// switches the app into a cell-grid mode where keystrokes, text input,
+    /// and resize events are forwarded to this provider every frame.
+    fn dashboard_kind(&self) -> DashboardKind { DashboardKind::None }
+
+    /// Render one frame of the interactive dashboard.
+    ///
+    /// Called every frame by the app while this provider is active in
+    /// [`DashboardKind::Interactive`] mode. The returned [`DashboardFrame`]
+    /// must have `cells.len() == cols * rows`. Default: a blank frame.
+    fn dashboard_render(&mut self, cols: u16, rows: u16) -> DashboardFrame {
+        DashboardFrame::empty(cols, rows)
+    }
+
+    /// Forward a non-printable / modified key event to the provider while
+    /// it owns the interactive dashboard. Return `true` if the event was
+    /// consumed and the app should request a redraw.
+    fn dashboard_key(&mut self, _key: DashboardKey) -> bool { false }
+
+    /// Forward an SDL `TextInput` event to the provider while it owns the
+    /// interactive dashboard. `text` is what the OS produced (handles dead
+    /// keys / IME). The app skips this call while modifier keys would
+    /// suppress text input on the host platform.
+    fn dashboard_text(&mut self, _text: &str) {}
+
+    /// Notify the provider that the cell-grid viewport has a new size.
+    /// Called once on entry and again whenever the size changes (window
+    /// resize, font scale change). Providers should propagate to any
+    /// upstream PTY here (`ioctl(TIOCSWINSZ)` via `portable-pty::resize`).
+    fn dashboard_resize(&mut self, _rows: u16, _cols: u16) {}
+
+    /// Called once, immediately before the app switches into the interactive
+    /// dashboard for this provider.
+    fn enter_dashboard(&mut self) {}
+
+    /// Called once, immediately after the app exits the interactive
+    /// dashboard for this provider (typically via Escape).
+    fn leave_dashboard(&mut self) {}
 
     /// Enable Ctrl+S/O save/load for this provider.
     fn supports_config_files(&self) -> bool { false }

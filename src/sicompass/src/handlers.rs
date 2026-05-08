@@ -2278,6 +2278,17 @@ pub fn handle_escape(r: &mut AppRenderer) {
             r.needs_redraw = true;
             return;
         }
+        Coordinate::DashboardInteractive => {
+            if let Some(p) = crate::provider::get_active_provider(r) {
+                p.leave_dashboard();
+            }
+            r.dashboard_cell_size = (0, 0);
+            r.coordinate = r.previous_coordinate;
+            r.speak_mode_change(None);
+            r.caret.reset(sdl_ticks());
+            r.needs_redraw = true;
+            return;
+        }
         Coordinate::ScrollSearch => {
             r.coordinate = Coordinate::Scroll;
             r.scroll_search_match_count = 0;
@@ -2333,6 +2344,17 @@ pub fn handle_escape(r: &mut AppRenderer) {
 /// Handle a printable text input event.
 pub fn handle_input(r: &mut AppRenderer, text: &str) {
     if text.is_empty() { return; }
+
+    // Interactive-dashboard fast-path: hand the typed text to the active
+    // provider verbatim. The provider also receives a separate `dashboard_key`
+    // for the underlying keysym; printable bytes flow through here.
+    if r.coordinate == Coordinate::DashboardInteractive {
+        if let Some(p) = crate::provider::get_active_provider(r) {
+            p.dashboard_text(text);
+        }
+        r.needs_redraw = true;
+        return;
+    }
 
     // When entering Command mode via handle_colon, SDL fires both a key event and
     // a text input event for the ':' key. Ignore the text event so the colon is
@@ -3813,19 +3835,63 @@ pub fn handle_ctrl_f(r: &mut AppRenderer) {
     }
 }
 
-/// Enter dashboard mode if the active provider has a dashboard image.
+/// Enter dashboard mode if the active provider opts in.
+///
+/// Branches on `Provider::dashboard_kind`:
+/// * `Image` (or `None` with a non-empty `dashboard_image_path` for
+///   backwards compatibility) → switch to `Coordinate::Dashboard` and let
+///   `view.rs` paint the static image.
+/// * `Interactive` → call `enter_dashboard()`, switch to
+///   `Coordinate::DashboardInteractive`, and let `view.rs` route
+///   `dashboard_render` / `dashboard_key` / `dashboard_text` /
+///   `dashboard_resize` to the provider every frame.
+/// * `None` with no image path → no-op.
 pub fn handle_dashboard(r: &mut AppRenderer) {
-    let provider_idx = r.current_id.get(0).unwrap_or(0);
-    let image_path = r.providers.get(provider_idx)
-        .and_then(|p| p.dashboard_image_path())
-        .map(|s| s.to_owned());
+    use sicompass_sdk::DashboardKind;
 
-    if let Some(path) = image_path {
-        r.dashboard_image_path = path;
-        r.previous_coordinate = r.coordinate;
-        r.coordinate = Coordinate::Dashboard;
-        r.speak_mode_change(None);
-        r.needs_redraw = true;
+    let provider_idx = match r.current_id.get(0) {
+        Some(i) => i,
+        None => return,
+    };
+    let p = match r.providers.get_mut(provider_idx) {
+        Some(p) => p,
+        None => return,
+    };
+
+    let kind = p.dashboard_kind();
+    let image_path = if matches!(kind, DashboardKind::None | DashboardKind::Image) {
+        p.dashboard_image_path().map(|s| s.to_owned())
+    } else {
+        None
+    };
+
+    match kind {
+        DashboardKind::Interactive => {
+            p.enter_dashboard();
+            r.previous_coordinate = r.coordinate;
+            r.coordinate = Coordinate::DashboardInteractive;
+            r.dashboard_cell_size = (0, 0);
+            r.speak_mode_change(None);
+            r.needs_redraw = true;
+        }
+        DashboardKind::Image => {
+            if let Some(path) = image_path {
+                r.dashboard_image_path = path;
+                r.previous_coordinate = r.coordinate;
+                r.coordinate = Coordinate::Dashboard;
+                r.speak_mode_change(None);
+                r.needs_redraw = true;
+            }
+        }
+        DashboardKind::None => {
+            if let Some(path) = image_path {
+                r.dashboard_image_path = path;
+                r.previous_coordinate = r.coordinate;
+                r.coordinate = Coordinate::Dashboard;
+                r.speak_mode_change(None);
+                r.needs_redraw = true;
+            }
+        }
     }
 }
 
