@@ -65,7 +65,12 @@ fn parse_ffon_block(lines: &[&str], i: &mut usize, inside_braces: bool) -> Vec<F
             if inside_braces { *i += 1; }
             return result;
         }
-        if line.is_empty() { *i += 1; continue; }
+        if line.is_empty() {
+            // Emit a blank-line Str so empty lines stay visible in the list.
+            result.push(FfonElement::new_str(tags::format_src(src_line)));
+            *i += 1;
+            continue;
+        }
 
         *i += 1;
 
@@ -116,7 +121,11 @@ fn parse_cbrace_block(lines: &[&str], i: &mut usize, top_level: bool) -> Vec<Ffo
     while *i < lines.len() {
         let src_line = *i;
         let line = lines[*i].trim();
-        if line.is_empty() { *i += 1; continue; }
+        if line.is_empty() {
+            result.push(FfonElement::new_str(tags::format_src(src_line)));
+            *i += 1;
+            continue;
+        }
 
         if line.starts_with('}') {
             if top_level {
@@ -195,7 +204,14 @@ fn parse_python_block(lines: &[&str], i: &mut usize, base_indent: usize) -> Vec<
         let src_line = *i;
         let raw = lines[*i];
         let stripped = raw.trim();
-        if stripped.is_empty() { *i += 1; continue; }
+        if stripped.is_empty() {
+            // Blank lines stay attached to the current block (they don't
+            // dedent in Python), and are emitted as Str so the list shows
+            // them.
+            result.push(FfonElement::new_str(tags::format_src(src_line)));
+            *i += 1;
+            continue;
+        }
 
         let indent = measure_indent(raw);
         if indent < base_indent {
@@ -258,9 +274,14 @@ mod tests {
     }
 
     #[test]
-    fn parse_file_skips_blank_lines() {
+    fn parse_file_emits_blank_line_as_str() {
+        // Blank lines must survive parsing as empty Str elements so they show
+        // up in the editor list.
         let elements = parse_file("a\n\nb");
-        assert_eq!(elements.len(), 2);
+        assert_eq!(elements.len(), 3);
+        assert_eq!(strip_src(elements[0].as_str().unwrap()), "a");
+        assert_eq!(strip_src(elements[1].as_str().unwrap()), "");
+        assert_eq!(strip_src(elements[2].as_str().unwrap()), "b");
     }
 
     #[test]
@@ -341,11 +362,13 @@ mod tests {
 
     #[test]
     fn parse_file_src_annotations_correct() {
+        // Each source line gets its own element, blanks included, and the
+        // `<src=N>` annotations match the file line indices 1:1.
         let elements = parse_file("alpha\n\nbeta\ngamma");
-        // alpha → line 0, blank skipped, beta → line 2, gamma → line 3
         assert_eq!(elements[0].as_str().map(|s| tags::extract_src(s).map(|(n,_)| n)), Some(Some(0)));
-        assert_eq!(elements[1].as_str().map(|s| tags::extract_src(s).map(|(n,_)| n)), Some(Some(2)));
-        assert_eq!(elements[2].as_str().map(|s| tags::extract_src(s).map(|(n,_)| n)), Some(Some(3)));
+        assert_eq!(elements[1].as_str().map(|s| tags::extract_src(s).map(|(n,_)| n)), Some(Some(1)));
+        assert_eq!(elements[2].as_str().map(|s| tags::extract_src(s).map(|(n,_)| n)), Some(Some(2)));
+        assert_eq!(elements[3].as_str().map(|s| tags::extract_src(s).map(|(n,_)| n)), Some(Some(3)));
     }
 
     // --- C-brace parser ---

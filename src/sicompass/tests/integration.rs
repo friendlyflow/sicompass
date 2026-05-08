@@ -5471,6 +5471,128 @@ fn editor_i_on_placeholder_creates_dir_with_plus_prefix() {
     assert!(tmp.path().join("mydir2/subdir").is_dir(), "directory must be created on disk with + prefix");
 }
 
+/// User's repro: create file → right (open) → I_PLACEHOLDER → i → type "first"
+/// → Enter writes the file. Then Ctrl+A on the new line → type "second" →
+/// Enter must show the second line in the list immediately (no F5 needed).
+#[test]
+fn editor_two_consecutive_writes_both_show_in_list() {
+    let (mut r, tmp) = harness_with_editor();
+    std::fs::write(tmp.path().join("notes.txt"), "").unwrap();
+
+    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+    navigate_to_provider(&mut r, editor_idx);
+    press_right(&mut r); // enter editor dir
+    press(&mut r, Keycode::F5); // pick up notes.txt
+
+    // Move cursor onto notes.txt and open it.
+    let file_idx = r.ffon[editor_idx].as_obj().unwrap().children.iter()
+        .position(|e| {
+            let k = match e { FfonElement::Str(s) => s.as_str(), FfonElement::Obj(o) => o.key.as_str() };
+            k.contains("notes.txt")
+        })
+        .expect("notes.txt must be in listing");
+    r.current_id.set(1, file_idx);
+    sicompass::list::create_list_current_layer(&mut r);
+    sicompass::handlers::navigate_right_raw(&mut r);
+    sicompass::list::create_list_current_layer(&mut r);
+
+    // Empty file → I_PLACEHOLDER seeded as the only child.
+    let on_placeholder = r.ffon[editor_idx].as_obj().unwrap().children.iter()
+        .any(|e| matches!(e, FfonElement::Str(s) if sicompass_sdk::placeholders::is_i_placeholder(s)));
+    assert!(on_placeholder, "empty file must seed I_PLACEHOLDER");
+
+    // First write: i, type "first", Enter.
+    press(&mut r, Keycode::I);
+    assert_eq!(r.coordinate, Coordinate::OperatorInsert);
+    type_text(&mut r, "first");
+    press_enter(&mut r);
+
+    let written = std::fs::read_to_string(tmp.path().join("notes.txt")).unwrap();
+    assert_eq!(written, "first", "first write must reach disk");
+
+    let after_first: Vec<String> = r.ffon[editor_idx].as_obj().unwrap().children.iter()
+        .map(|e| match e {
+            FfonElement::Str(s) => sicompass_sdk::tags::strip_display(s),
+            FfonElement::Obj(o) => sicompass_sdk::tags::strip_display(&o.key),
+        })
+        .collect();
+    assert_eq!(after_first, vec!["first".to_owned()], "list must show the first line after commit");
+
+    // Second write: Ctrl+A → placeholder after the current line, type "second", Enter.
+    press_ctrl(&mut r, Keycode::A);
+    assert_eq!(r.coordinate, Coordinate::OperatorInsert, "Ctrl+A must enter insert mode");
+    type_text(&mut r, "second");
+    press_enter(&mut r);
+
+    let written = std::fs::read_to_string(tmp.path().join("notes.txt")).unwrap();
+    assert_eq!(written, "first\nsecond", "second write must reach disk");
+
+    // Critical: list must show both elements WITHOUT pressing F5.
+    let after_second: Vec<String> = r.ffon[editor_idx].as_obj().unwrap().children.iter()
+        .map(|e| match e {
+            FfonElement::Str(s) => sicompass_sdk::tags::strip_display(s),
+            FfonElement::Obj(o) => sicompass_sdk::tags::strip_display(&o.key),
+        })
+        .collect();
+    assert_eq!(
+        after_second, vec!["first".to_owned(), "second".to_owned()],
+        "second element must appear in list without F5"
+    );
+}
+
+/// Three consecutive Ctrl+A inserts must all land in the file and the FFON
+/// list, without the focus jumping or any intermediate line vanishing.
+#[test]
+fn editor_three_consecutive_writes_all_show_in_list() {
+    let (mut r, tmp) = harness_with_editor();
+    std::fs::write(tmp.path().join("notes.txt"), "").unwrap();
+
+    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+    navigate_to_provider(&mut r, editor_idx);
+    press_right(&mut r);
+    press(&mut r, Keycode::F5);
+
+    let file_idx = r.ffon[editor_idx].as_obj().unwrap().children.iter()
+        .position(|e| {
+            let k = match e { FfonElement::Str(s) => s.as_str(), FfonElement::Obj(o) => o.key.as_str() };
+            k.contains("notes.txt")
+        })
+        .expect("notes.txt must be in listing");
+    r.current_id.set(1, file_idx);
+    sicompass::list::create_list_current_layer(&mut r);
+    sicompass::handlers::navigate_right_raw(&mut r);
+    sicompass::list::create_list_current_layer(&mut r);
+
+    // First write via I_PLACEHOLDER.
+    press(&mut r, Keycode::I);
+    type_text(&mut r, "first");
+    press_enter(&mut r);
+
+    // Second write: Ctrl+A on "first".
+    press_ctrl(&mut r, Keycode::A);
+    type_text(&mut r, "second");
+    press_enter(&mut r);
+
+    // Third write: Ctrl+A on "second" (cursor should be on the just-committed line).
+    press_ctrl(&mut r, Keycode::A);
+    type_text(&mut r, "third");
+    press_enter(&mut r);
+
+    let written = std::fs::read_to_string(tmp.path().join("notes.txt")).unwrap();
+    assert_eq!(written, "first\nsecond\nthird", "three writes must reach disk in order");
+
+    let labels: Vec<String> = r.ffon[editor_idx].as_obj().unwrap().children.iter()
+        .map(|e| match e {
+            FfonElement::Str(s) => sicompass_sdk::tags::strip_display(s),
+            FfonElement::Obj(o) => sicompass_sdk::tags::strip_display(&o.key),
+        })
+        .collect();
+    assert_eq!(
+        labels, vec!["first".to_owned(), "second".to_owned(), "third".to_owned()],
+        "all three lines must show in the list"
+    );
+}
+
 /// Typing `name:` on the I_PLACEHOLDER creates a directory (colon suffix).
 #[test]
 fn editor_i_on_placeholder_creates_dir_with_colon_suffix() {

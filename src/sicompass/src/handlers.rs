@@ -1996,6 +1996,14 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
     }
 
     if committed {
+        // The placeholder (if any) has been replaced by the committed value;
+        // clearing `placeholder_cancel` prevents the trailing `handle_escape`
+        // from treating commit as cancellation and stripping the new element
+        // (e.g. Ctrl+A in editor file view inserts a `<srcins=N>` placeholder
+        // and registers a cancel hook — without this clear, the second line
+        // disappears immediately after Enter).
+        r.placeholder_cancel = None;
+
         // Prefer sub-tree refresh for providers that support it (e.g. email client at
         // deep paths like /compose/Body: [ffon]/foo). refresh_current_directory rebuilds
         // the entire provider root and misroutes those paths, leaving the nested list empty.
