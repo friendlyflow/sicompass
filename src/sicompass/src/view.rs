@@ -207,7 +207,7 @@ pub fn main_loop(app: &mut AppState) {
             .and_then(|arr| {
                 let idx = app.renderer.current_id.last()?;
                 match arr.get(idx)? {
-                    sicompass_sdk::ffon::FfonElement::Str(s) if s == "<input></input>" => Some(()),
+                    sicompass_sdk::ffon::FfonElement::Str(s) if s.ends_with("<input></input>") => Some(()),
                     _ => None,
                 }
             })
@@ -220,7 +220,7 @@ pub fn main_loop(app: &mut AppState) {
                     &app.renderer.ffon, &app.renderer.current_id,
                 ) {
                     if let Some(idx) = arr.iter().rposition(|e| matches!(
-                        e, sicompass_sdk::ffon::FfonElement::Str(s) if s == "<input></input>"
+                        e, sicompass_sdk::ffon::FfonElement::Str(s) if s.ends_with("<input></input>")
                     )) {
                         app.renderer.current_id.set_last(idx);
                         app.renderer.scroll_offset = -1;

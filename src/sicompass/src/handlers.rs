@@ -1908,14 +1908,7 @@ pub fn handle_enter_editor_insert(r: &mut AppRenderer) {
                 // user can type the next command immediately, and request a
                 // bottom-anchored scroll (sentinel -1) so the input sits at the
                 // bottom of the viewport with prior output above it.
-                let input_idx = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)
-                    .and_then(|arr| arr.iter().rposition(|e| matches!(
-                        e, FfonElement::Str(s) if s == "<input></input>"
-                    )));
-                if let Some(idx) = input_idx {
-                    r.current_id.set_last(idx);
-                    r.scroll_offset = -1;
-                } else {
+                if !snap_to_trailing_input(r) {
                     r.scroll_offset = 0;
                 }
                 list::create_list_current_layer(r);
@@ -1941,9 +1934,15 @@ pub fn handle_enter_editor_insert(r: &mut AppRenderer) {
 
     // For flat "label: <input>value</input>" items, temporarily push the prefix label
     // onto the provider path so commit_edit can locate the correct setting entry.
-    let prefix_label = r.input_prefix
-        .trim_end_matches(' ').trim_end_matches(':').trim()
-        .to_owned();
+    // Only the colon-suffixed field-label form qualifies; decorative prefixes
+    // (e.g. a shell PS1 like "nico@verysilly:~$ " in front of the terminal's
+    // input slot) do not represent a navigable path component and must NOT be
+    // pushed — doing so would mislead the provider's path lookup.
+    let prefix_trimmed = r.input_prefix.trim_end();
+    let prefix_label = prefix_trimmed
+        .strip_suffix(':')
+        .map(|s| s.trim().to_owned())
+        .unwrap_or_default();
     let prefix_path_pushed = if !prefix_label.is_empty() {
         crate::provider::push_path(r, &prefix_label);
         true
@@ -2063,12 +2062,36 @@ pub fn handle_enter_editor_insert(r: &mut AppRenderer) {
     r.cursor_position = 0;
 
     let saved_error = r.error_message.clone();
+    // Terminal/chat-style providers re-emit a trailing `<input></input>` slot
+    // after every commit. Snap the cursor onto it (with bottom-anchored scroll)
+    // so the user keeps typing where the prompt sits, even if the new entry's
+    // prompt prefix shifts the slot's index in the rebuilt FFON.
+    let snapped = committed && snap_to_trailing_input(r);
     list::create_list_current_layer(r);
     if !saved_error.is_empty() {
         r.error_message = saved_error;
     }
     r.list_index = r.current_id.last().unwrap_or(0);
-    r.scroll_offset = 0;
+    if !snapped {
+        r.scroll_offset = 0;
+    }
+}
+
+/// If the slice at `current_id` ends with an `<input></input>` placeholder
+/// (matched by suffix to allow a prompt prefix), move `current_id` onto it and
+/// arm the bottom-anchor scroll sentinel. Returns `true` if the snap fired.
+fn snap_to_trailing_input(r: &mut AppRenderer) -> bool {
+    let idx = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)
+        .and_then(|arr| arr.iter().rposition(|e| matches!(
+            e, FfonElement::Str(s) if s.ends_with("<input></input>")
+        )));
+    if let Some(idx) = idx {
+        r.current_id.set_last(idx);
+        r.scroll_offset = -1;
+        true
+    } else {
+        false
+    }
 }
 
 /// Outcome of interpreting text typed into a `*` placeholder.

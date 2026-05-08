@@ -168,6 +168,22 @@ pub fn create_list_current_layer(renderer: &mut AppRenderer) {
 /// matching indices (sorted by score) in `filtered_list_indices`.
 /// Matched character positions are stored in `fuzzy_match_positions`.
 /// Passing an empty string clears the filter.
+///
+/// Pattern syntax (fzf-compatible, via `nucleo`'s `Pattern::parse`):
+///
+/// | Token   | Meaning                                                |
+/// |---------|--------------------------------------------------------|
+/// | `^foo`  | anchored prefix — match must start with `foo`          |
+/// | `foo$`  | anchored suffix — match must end with `foo`            |
+/// | `'foo`  | exact substring (skip fuzzy scoring)                   |
+/// | `!foo`  | negation — exclude items containing `foo`              |
+/// | `a\|b`  | OR — match items containing `a` or `b`                 |
+/// | `a b`   | AND — both `a` and `b` must match (terms separated)    |
+/// | `\$`    | literal `$` (escape any operator with `\`)             |
+///
+/// As a result, characters `^ $ ' ! | \` and space are interpreted as
+/// operators rather than literal text. To search for them literally, escape
+/// with `\` (e.g. `\$` for a literal dollar sign).
 pub fn populate_list_current_layer(renderer: &mut AppRenderer, search: &str) {
     renderer.filtered_list_indices.clear();
     renderer.fuzzy_match_positions.clear();

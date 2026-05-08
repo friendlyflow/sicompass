@@ -33,6 +33,11 @@ const INPUT_PLACEHOLDER: &str = "<input></input>";
 /// the shell has produced in response so far.
 #[derive(Debug, Clone)]
 struct Entry {
+    /// The synthesized prompt that was active when this command was submitted
+    /// (e.g. `"nico@verysilly:~$ "`). Captured at submit time so the rendered
+    /// scrollback shows where each command was actually run, not where the
+    /// user is now.
+    prompt: String,
     input: String,
     output: String,
 }
@@ -43,6 +48,12 @@ pub struct TerminalProvider {
     shell_program: String,
     cwd: Option<PathBuf>,
     init_attempted: bool,
+    /// User name for the synthesized prompt — captured once at construction
+    /// from `$USER`, falling back to `"user"`.
+    user: String,
+    /// Hostname for the synthesized prompt — captured once at construction,
+    /// truncated at the first `.`.
+    host: String,
 
     /// Lazily created on first `enter_dashboard()`. Lives across enter/leave
     /// so a long-running interactive session (e.g. `vim`) survives toggling
@@ -61,6 +72,8 @@ impl TerminalProvider {
             shell_program: default_program(),
             cwd: None,
             init_attempted: false,
+            user: std::env::var("USER").unwrap_or_else(|_| "user".to_owned()),
+            host: hostname_short(),
             emulator: None,
             in_dashboard: false,
         }
@@ -79,10 +92,43 @@ impl TerminalProvider {
         match Shell::spawn(cfg) {
             Ok(s) => self.shell = Some(s),
             Err(e) => self.entries.push(Entry {
+                prompt: String::new(),
                 input: format!("(failed to start `{}`)", self.shell_program),
                 output: e.to_string(),
             }),
         }
+    }
+
+    /// Build the prompt string from `user`, `host`, and the shell's *live*
+    /// working directory. We don't try to mimic PS1 escapes from bash because
+    /// those have proven unreliable across shells, locales, and rc-file edge
+    /// cases (literal backslashes, missing prompt on first entry, ...).
+    /// Synthesizing in-process gives us a stable, predictable prompt that
+    /// updates after `cd` (via `/proc/<pid>/cwd`).
+    fn current_prompt(&self) -> String {
+        let cwd = self.shell_cwd();
+        let display_cwd = collapse_home(&cwd);
+        format!("{}@{}:{}$ ", self.user, self.host, display_cwd)
+    }
+
+    /// Read the shell child's current working directory. Linux: `readlink
+    /// /proc/<pid>/cwd`. Other platforms or read failures fall back to the
+    /// initial cwd (or `~`).
+    fn shell_cwd(&self) -> String {
+        #[cfg(target_os = "linux")]
+        {
+            if let Some(pid) = self.shell.as_ref().and_then(|s| s.pid()) {
+                let link = format!("/proc/{}/cwd", pid);
+                if let Ok(p) = std::fs::read_link(&link) {
+                    return p.to_string_lossy().into_owned();
+                }
+            }
+        }
+        self.cwd
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned())
+            .or_else(|| std::env::var("HOME").ok())
+            .unwrap_or_else(|| "/".to_owned())
     }
 }
 
@@ -111,17 +157,19 @@ impl Provider for TerminalProvider {
     }
 
     fn fetch(&mut self) -> Vec<FfonElement> {
-        // Flat layout: one Str per prompt-line (`$ <cmd>`) and one Str per
-        // output-line, in chronological order. The trailing element is always
-        // the `<input></input>` slot.
+        // Flat layout: one Str per prompt-line (`{prompt}{cmd}`) and one Str
+        // per output-line, in chronological order. The trailing element is the
+        // `<input></input>` slot, prefixed with the *live* prompt (recomputed
+        // every fetch so it reflects the shell's current cwd after `cd`).
+        let live_prompt = self.current_prompt();
         let mut out: Vec<FfonElement> = Vec::new();
         for e in &self.entries {
-            out.push(FfonElement::Str(format!("$ {}", e.input)));
+            out.push(FfonElement::Str(format!("{}{}", e.prompt, e.input)));
             for line in entry_lines(&e.input, &e.output) {
                 out.push(FfonElement::Str(line.to_owned()));
             }
         }
-        out.push(FfonElement::Str(INPUT_PLACEHOLDER.to_owned()));
+        out.push(FfonElement::Str(format!("{}{}", live_prompt, INPUT_PLACEHOLDER)));
         out
     }
 
@@ -139,7 +187,11 @@ impl Provider for TerminalProvider {
         if shell.write_line(new).is_err() {
             return false;
         }
+        // Snapshot the prompt at submit time — past entries should display
+        // the cwd they were run in, even after the user runs `cd` afterwards.
+        let prompt = self.current_prompt();
         self.entries.push(Entry {
+            prompt,
             input: new.to_owned(),
             output: String::new(),
         });
@@ -166,8 +218,10 @@ impl Provider for TerminalProvider {
         if text.is_empty() {
             return false;
         }
-        // Drop pre-command output (shell startup banner, initial PS1). It has
-        // no user-typed command to attach to and only clutters the scrollback.
+        // Drop pre-command output (shell startup banner, the shell's own PS1).
+        // We synthesize our own prompt from `{user}@{host}:{cwd}$ ` instead of
+        // capturing what the shell emits, so any PS1 bytes that arrive here
+        // are noise and can be discarded.
         if let Some(last) = self.entries.last_mut() {
             last.output.push_str(&text);
         }
@@ -273,9 +327,35 @@ fn entry_lines<'a>(input: &str, output: &'a str) -> Vec<&'a str> {
     lines
 }
 
-/// Decode raw PTY bytes into displayable UTF-8, stripping the most common
-/// terminal control sequences. Phase-1 best-effort: full ANSI handling is
-/// deferred to the interactive-dashboard follow-up.
+/// Read the system hostname, truncate at the first `.` (so `host.example.com`
+/// renders as `host`), and fall back to `"host"` on failure.
+fn hostname_short() -> String {
+    let raw = std::process::Command::new("hostname")
+        .output()
+        .ok()
+        .and_then(|o| if o.status.success() { String::from_utf8(o.stdout).ok() } else { None })
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| std::env::var("HOSTNAME").unwrap_or_else(|_| "host".to_owned()));
+    raw.split('.').next().unwrap_or("host").to_owned()
+}
+
+/// Replace a leading `$HOME` in `cwd` with `~` for shell-style display.
+fn collapse_home(cwd: &str) -> String {
+    if let Ok(home) = std::env::var("HOME") {
+        if !home.is_empty() {
+            if cwd == home { return "~".to_owned(); }
+            if let Some(rest) = cwd.strip_prefix(&format!("{}/", home)) {
+                return format!("~/{}", rest);
+            }
+        }
+    }
+    cwd.to_owned()
+}
+
+/// Decode raw PTY bytes into displayable UTF-8, stripping terminal control
+/// sequences. Best-effort — full ANSI handling lives in the interactive
+/// dashboard's `Emulator`; this path is only the linear scrollback view.
 fn decode_terminal_output(bytes: &[u8]) -> String {
     let s = String::from_utf8_lossy(bytes);
     let mut out = String::with_capacity(s.len());
@@ -292,23 +372,31 @@ fn decode_terminal_output(bytes: &[u8]) -> String {
                         }
                     }
                 }
-                Some(']') => {
-                    // OSC: terminated by BEL (0x07) or ESC \ .
+                // String-introducer escapes — OSC, DCS, PM, APC. All run until
+                // ST (`ESC \`) or BEL.
+                Some(']') | Some('P') | Some('^') | Some('_') => {
                     while let Some(nc) = chars.next() {
-                        if nc == '\x07' {
-                            break;
-                        }
-                        if nc == '\x1b' {
-                            let _ = chars.next();
-                            break;
-                        }
+                        if nc == '\x07' { break; }
+                        if nc == '\x1b' { let _ = chars.next(); break; }
                     }
                 }
-                _ => { /* drop the 2-byte ESC sequence */ }
+                // nF escape sequences (charset designators like `ESC ( B`,
+                // `ESC ) 0`, etc.) — intermediate byte in 0x20..=0x2F followed
+                // by a final byte. Without this branch the final byte (`B`,
+                // `0`, …) leaks into the rendered output.
+                Some(c) if matches!(c as u32, 0x20..=0x2F) => {
+                    let _ = chars.next();
+                }
+                _ => { /* short ESC sequence (e.g. ESC =, ESC 7) */ }
             },
             '\r' | '\x07' => {} // strip bare CR + BEL
             c if (c as u32) < 0x20 && c != '\n' && c != '\t' => {
-                // drop other C0 control characters
+                // drop other C0 controls
+            }
+            c if matches!(c as u32, 0x7F | 0x80..=0x9F) => {
+                // drop DEL + C1 control range (these sneak in via UTF-8 of
+                // 0xC2 0x80..0x9F or as raw bytes when bash emits 8-bit
+                // control codes).
             }
             _ => out.push(c),
         }
@@ -346,7 +434,8 @@ mod tests {
         let mut p = TerminalProvider::new();
         let elems = p.fetch();
         assert_eq!(elems.len(), 1);
-        assert_eq!(elems[0].as_str(), Some(INPUT_PLACEHOLDER));
+        // Synthesized prompt is appended; the trailing tag must still be present.
+        assert!(elems[0].as_str().unwrap().ends_with(INPUT_PLACEHOLDER));
     }
 
     #[test]
@@ -433,6 +522,44 @@ mod tests {
         // Edge case: shell rewrote the input (e.g. alias expansion). Don't strip.
         let lines = entry_lines("ll", "ls -la\nfile1\nuser@host ~ $ ");
         assert_eq!(lines, vec!["ls -la", "file1"]);
+    }
+
+    #[test]
+    fn fetch_uses_synthesized_prompt_for_input_slot() {
+        // No shell spawned, no entries — the trailing element should still be
+        // a synthesized "{user}@{host}:{cwd}$ <input></input>" line.
+        let mut p = TerminalProvider::new();
+        let elems = p.fetch();
+        assert_eq!(elems.len(), 1);
+        let s = elems[0].as_str().unwrap();
+        assert!(s.ends_with("$ <input></input>"), "expected prompt suffix; got {:?}", s);
+        assert!(s.contains('@'), "expected user@host segment; got {:?}", s);
+    }
+
+    #[test]
+    fn fetch_uses_entry_prompt_for_past_commands() {
+        let mut p = TerminalProvider::new();
+        p.entries.push(Entry {
+            prompt: "user@host:/tmp$ ".to_owned(),
+            input: "ls".to_owned(),
+            output: "ls\nfile1\nfile2\n".to_owned(),
+        });
+        let elems = p.fetch();
+        // Past prompt + cmd, two output lines, then synthesized live prompt.
+        assert_eq!(elems.len(), 4);
+        assert_eq!(elems[0].as_str(), Some("user@host:/tmp$ ls"));
+        assert_eq!(elems[1].as_str(), Some("file1"));
+        assert_eq!(elems[2].as_str(), Some("file2"));
+        assert!(elems[3].as_str().unwrap().ends_with("$ <input></input>"));
+    }
+
+    #[test]
+    fn collapse_home_replaces_leading_home_with_tilde() {
+        std::env::set_var("HOME", "/home/nico");
+        assert_eq!(collapse_home("/home/nico"), "~");
+        assert_eq!(collapse_home("/home/nico/projects"), "~/projects");
+        assert_eq!(collapse_home("/home/nicolae"), "/home/nicolae"); // not a prefix match
+        assert_eq!(collapse_home("/tmp"), "/tmp");
     }
 
     // ---- Phase 2b interactive-dashboard tests --------------------------
@@ -540,13 +667,16 @@ mod tests {
         );
 
         let elems = p.fetch();
-        // Flat layout: "$ echo terminal-it-test" + N output lines + <input> slot.
-        // We don't assert the exact line count (depends on shell prompt), but the
-        // first element must be the prompt-line, the last must be the input slot,
+        // Flat layout: "{PS1}echo terminal-it-test" + N output lines + a final
+        // "{PS1}<input></input>" slot. We don't pin the exact PS1 (depends on
+        // /bin/sh + the user's rc files), but the first element must end with
+        // the submitted command, the last must end with the input placeholder,
         // and somewhere in between the echoed marker must appear.
         assert!(elems.len() >= 2);
-        assert_eq!(elems[0].as_str(), Some("$ echo terminal-it-test"));
-        assert_eq!(elems.last().and_then(|e| e.as_str()), Some(INPUT_PLACEHOLDER));
+        assert!(elems[0].as_str().map_or(false, |s| s.ends_with("echo terminal-it-test")),
+            "first element should end with command; got {:?}", elems[0].as_str());
+        assert!(elems.last().and_then(|e| e.as_str()).map_or(false, |s| s.ends_with(INPUT_PLACEHOLDER)),
+            "last element should end with input slot; got {:?}", elems.last().and_then(|e| e.as_str()));
         assert!(elems.iter().any(|e| e.as_str().map_or(false, |s| s.contains("terminal-it-test"))));
     }
 }

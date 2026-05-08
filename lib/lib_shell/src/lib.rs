@@ -141,6 +141,13 @@ impl Shell {
         matches!(self.child.try_wait(), Ok(None))
     }
 
+    /// PID of the child shell process, if known. Used by callers (e.g. the
+    /// terminal provider) to read the shell's *current* working directory via
+    /// `/proc/<pid>/cwd` so the rendered prompt can update after `cd`.
+    pub fn pid(&self) -> Option<u32> {
+        self.child.process_id()
+    }
+
     /// Best-effort kill of the child process.
     pub fn kill(&mut self) -> std::io::Result<()> {
         self.child.kill()
