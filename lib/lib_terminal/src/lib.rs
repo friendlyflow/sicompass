@@ -114,7 +114,7 @@ impl Provider for TerminalProvider {
         let mut out: Vec<FfonElement> = Vec::with_capacity(self.entries.len() + 1);
         for e in &self.entries {
             let mut obj = FfonObject::new(format!("$ {}", e.input));
-            for line in e.output.split('\n') {
+            for line in entry_lines(&e.input, &e.output) {
                 obj.children.push(FfonElement::Str(line.to_owned()));
             }
             out.push(FfonElement::Obj(obj));
@@ -124,7 +124,10 @@ impl Provider for TerminalProvider {
     }
 
     fn commit_edit(&mut self, old: &str, new: &str) -> bool {
-        if old != INPUT_PLACEHOLDER {
+        // The handler extracts the inner value of `<input>...</input>` before
+        // calling commit_edit, so for the trailing input slot we receive
+        // `old == ""`. Reject any non-empty `old` (e.g. editing a past entry).
+        if !old.is_empty() {
             return false;
         }
         self.ensure_shell();
@@ -161,15 +164,10 @@ impl Provider for TerminalProvider {
         if text.is_empty() {
             return false;
         }
+        // Drop pre-command output (shell startup banner, initial PS1). It has
+        // no user-typed command to attach to and only clutters the scrollback.
         if let Some(last) = self.entries.last_mut() {
             last.output.push_str(&text);
-        } else {
-            // Output arrived before any command (shell prompt / banner). Hide it
-            // in a synthetic header entry so `fetch()` always exposes it.
-            self.entries.push(Entry {
-                input: "(shell)".to_owned(),
-                output: text,
-            });
         }
         true
     }
@@ -251,6 +249,26 @@ impl Provider for TerminalProvider {
             None => DashboardFrame::empty(cols, rows),
         }
     }
+}
+
+/// Render an entry's output as a list of child lines, stripping the noise
+/// produced by the PTY around the actual command output:
+///
+/// * The PTY echoes the typed command back as the first line — drop it if it
+///   matches `input`.
+/// * Bash emits the next `$PS1` immediately after the command — that lands as
+///   a trailing line with no terminating `\n` (bash sits at the prompt waiting
+///   for input). Drop the final element of `split('\n')` to remove it; if the
+///   output ends with `\n` instead, that final element is `""` and dropping
+///   it is also correct.
+fn entry_lines<'a>(input: &str, output: &'a str) -> Vec<&'a str> {
+    let mut lines: Vec<&str> = output.split('\n').collect();
+    // Drop the trailing prompt (or trailing empty string from the final \n).
+    lines.pop();
+    if lines.first() == Some(&input) {
+        lines.remove(0);
+    }
+    lines
 }
 
 /// Decode raw PTY bytes into displayable UTF-8, stripping the most common
@@ -359,9 +377,9 @@ mod tests {
     }
 
     #[test]
-    fn commit_edit_rejects_non_placeholder_old() {
+    fn commit_edit_rejects_non_empty_old() {
         let mut p = TerminalProvider::new();
-        assert!(!p.commit_edit("not the placeholder", "ls"));
+        assert!(!p.commit_edit("previous command", "ls"));
         assert!(p.entries.is_empty());
     }
 
@@ -387,6 +405,32 @@ mod tests {
     fn decode_keeps_newline_and_tab() {
         let s = decode_terminal_output(b"a\tb\nc");
         assert_eq!(s, "a\tb\nc");
+    }
+
+    #[test]
+    fn entry_lines_strips_echoed_input_and_trailing_prompt() {
+        // Typical bash output for `ls`: echo, two output lines, next prompt.
+        let lines = entry_lines("ls", "ls\nfile1\nfile2\nuser@host ~ $ ");
+        assert_eq!(lines, vec!["file1", "file2"]);
+    }
+
+    #[test]
+    fn entry_lines_strips_trailing_empty_string_when_output_ends_with_newline() {
+        // No prompt yet (still streaming), but output ends with \n.
+        let lines = entry_lines("ls", "ls\nfile1\n");
+        assert_eq!(lines, vec!["file1"]);
+    }
+
+    #[test]
+    fn entry_lines_empty_output_yields_no_children() {
+        assert!(entry_lines("ls", "").is_empty());
+    }
+
+    #[test]
+    fn entry_lines_keeps_first_line_when_it_does_not_match_input() {
+        // Edge case: shell rewrote the input (e.g. alias expansion). Don't strip.
+        let lines = entry_lines("ll", "ls -la\nfile1\nuser@host ~ $ ");
+        assert_eq!(lines, vec!["ls -la", "file1"]);
     }
 
     // ---- Phase 2b interactive-dashboard tests --------------------------
@@ -473,7 +517,7 @@ mod tests {
             return;
         }
 
-        assert!(p.commit_edit(INPUT_PLACEHOLDER, "echo terminal-it-test"));
+        assert!(p.commit_edit("", "echo terminal-it-test"));
         assert_eq!(p.entries.len(), 1);
 
         let deadline = Instant::now() + Duration::from_secs(5);

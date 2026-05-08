@@ -62,6 +62,13 @@ impl Shell {
             .map_err(io_err)?;
 
         let mut cmd = CommandBuilder::new(&cfg.program);
+        // Default to interactive mode for known shells. Without `-i` bash/zsh
+        // skip PS1 and disable the `complete` builtin, so a user's rc file
+        // typically prints "complete: command not found" and no prompt shows.
+        // Caller-supplied args override this.
+        if cfg.args.is_empty() && is_interactive_shell(&cfg.program) {
+            cmd.arg("-i");
+        }
         for arg in &cfg.args {
             cmd.arg(arg);
         }
@@ -175,6 +182,16 @@ pub fn default_program() -> String {
 
 fn io_err<E: std::fmt::Display>(e: E) -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
+}
+
+/// Whether `program` is a shell that should be invoked with `-i` so PS1 and
+/// programmable completion work under a PTY.
+fn is_interactive_shell(program: &str) -> bool {
+    let basename = std::path::Path::new(program)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(program);
+    matches!(basename, "bash" | "zsh" | "sh" | "dash" | "ksh" | "fish")
 }
 
 // ---------------------------------------------------------------------------
