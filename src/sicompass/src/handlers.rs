@@ -1487,13 +1487,13 @@ fn toggle_radio(r: &mut AppRenderer) -> bool {
     true
 }
 
-/// Commit the input buffer to the active provider (Enter in OperatorInsert).
+/// Commit the input buffer to the active provider (Enter in EditorInsert / OperatorInsert).
 ///
 /// For elements with `<input>` or `<input-all>` tags, calls `commit_edit` on
 /// the provider with old/new content, then updates the FFON element and exits
 /// insert mode. Falls back to a direct FFON update for providers without
 /// `commit_edit` support.
-pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
+pub fn handle_enter_editor_insert(r: &mut AppRenderer) {
     use sicompass_sdk::ffon::{FfonElement, get_ffon_at_id};
     use sicompass_sdk::tags;
 
@@ -1530,7 +1530,7 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
                 r.error_message =
                     "Enter text: '- name' or plain text → string; '+ name' or 'name:' → object".to_owned();
                 r.needs_redraw = true;
-                return; // stay in OperatorInsert
+                return; // stay in insert mode
             }
             PlaceholderKind::Str(name) => {
                 r.placeholder_insert_mode = false;
@@ -1761,7 +1761,7 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
         if (!is_file && !is_dir) || item_name.is_empty() {
             r.error_message = "Enter a name: plain or '- name' for file, '+ name' or 'name:' for folder".to_owned();
             r.needs_redraw = true;
-            return; // stay in OperatorInsert
+            return; // stay in insert mode
         }
 
         let undo_id = r.current_id.clone();
@@ -1776,7 +1776,7 @@ pub fn handle_enter_operator_insert(r: &mut AppRenderer) {
                 r.error_message = "Failed to create item".to_owned();
             }
             r.needs_redraw = true;
-            return; // stay in OperatorInsert
+            return; // stay in insert mode
         }
 
         // Discard the placeholder Insert/Append undo entry (replaced by FsCreate below)
@@ -2121,13 +2121,64 @@ pub fn handle_redo(r: &mut AppRenderer) {
     r.needs_redraw = true;
 }
 
+/// Cancel a freshly-inserted placeholder (Ctrl+I/A or :create command):
+/// remove the element from the FFON tree, restore the prior selection, and
+/// return to `target_general`. Returns `true` when a `placeholder_cancel`
+/// was consumed; `false` if there was nothing to cancel.
+fn try_cancel_inserted_placeholder(r: &mut AppRenderer, target_general: Coordinate) -> bool {
+    let cancel = match r.placeholder_cancel.take() {
+        Some(c) => c,
+        None => return false,
+    };
+    use sicompass_sdk::ffon::FfonElement;
+    let idx = cancel.insertion_id.last().unwrap_or(0);
+    let mut parent_id = cancel.insertion_id.clone();
+    parent_id.pop();
+    if parent_id.depth() == 0 {
+        match cancel.replaced_element {
+            Some(orig) if idx < r.ffon.len() => r.ffon[idx] = orig,
+            Some(_) => {}
+            None if idx < r.ffon.len() => { r.ffon.remove(idx); }
+            None => {}
+        }
+    } else if let Some(slice) = crate::state::navigate_to_slice_pub(&mut r.ffon, &parent_id) {
+        let parent_idx = parent_id.last().unwrap_or(0);
+        if let Some(FfonElement::Obj(obj)) = slice.get_mut(parent_idx) {
+            match cancel.replaced_element {
+                Some(orig) if idx < obj.children.len() => obj.children[idx] = orig,
+                Some(_) => {}
+                None if idx < obj.children.len() => { obj.children.remove(idx); }
+                None => {}
+            }
+        }
+    }
+    r.current_id = cancel.return_id;
+    r.placeholder_insert_mode = false;
+    r.prefixed_insert_mode = false;
+    r.coordinate = target_general;
+    r.previous_coordinate = target_general;
+    r.input_buffer.clear();
+    r.cursor_position = 0;
+    list::create_list_current_layer(r);
+    r.list_index = r.current_id.last().unwrap_or(0);
+    r.scroll_offset = 0;
+    r.speak_mode_change(None);
+    r.caret.reset(sdl_ticks());
+    r.needs_redraw = true;
+    true
+}
+
 /// Return to the previous/operator mode (Escape).
 pub fn handle_escape(r: &mut AppRenderer) {
     clear_selection(r);
     match r.coordinate {
         Coordinate::EditorInsert => {
-            // Save via updateState, return to EditorGeneral
-            crate::state::update_state(r, Task::Input, History::None);
+            if try_cancel_inserted_placeholder(r, Coordinate::EditorGeneral) { return; }
+            // Discard the input buffer (Esc cancels) and return to EditorGeneral.
+            r.placeholder_insert_mode = false;
+            r.prefixed_insert_mode = false;
+            r.input_buffer.clear();
+            r.cursor_position = 0;
             r.coordinate = Coordinate::EditorGeneral;
         }
         Coordinate::OperatorInsert => {
@@ -2168,47 +2219,7 @@ pub fn handle_escape(r: &mut AppRenderer) {
                 r.needs_redraw = true;
                 return;
             }
-            // Cancel a freshly-inserted placeholder (Ctrl+I/A or :create command):
-            // remove the element from the FFON tree and restore the prior selection.
-            if let Some(cancel) = r.placeholder_cancel.take() {
-                use sicompass_sdk::ffon::FfonElement;
-                let idx = cancel.insertion_id.last().unwrap_or(0);
-                let mut parent_id = cancel.insertion_id.clone();
-                parent_id.pop();
-                if parent_id.depth() == 0 {
-                    // Root-level insertion
-                    match cancel.replaced_element {
-                        Some(orig) if idx < r.ffon.len() => r.ffon[idx] = orig,
-                        Some(_) => {}
-                        None if idx < r.ffon.len() => { r.ffon.remove(idx); }
-                        None => {}
-                    }
-                } else if let Some(slice) = crate::state::navigate_to_slice_pub(&mut r.ffon, &parent_id) {
-                    let parent_idx = parent_id.last().unwrap_or(0);
-                    if let Some(FfonElement::Obj(obj)) = slice.get_mut(parent_idx) {
-                        match cancel.replaced_element {
-                            Some(orig) if idx < obj.children.len() => obj.children[idx] = orig,
-                            Some(_) => {}
-                            None if idx < obj.children.len() => { obj.children.remove(idx); }
-                            None => {}
-                        }
-                    }
-                }
-                r.current_id = cancel.return_id;
-                r.placeholder_insert_mode = false;
-                r.prefixed_insert_mode = false;
-                r.coordinate = Coordinate::OperatorGeneral;
-                r.previous_coordinate = Coordinate::OperatorGeneral;
-                r.input_buffer.clear();
-                r.cursor_position = 0;
-                list::create_list_current_layer(r);
-                r.list_index = r.current_id.last().unwrap_or(0);
-                r.scroll_offset = 0;
-                r.speak_mode_change(None);
-                r.caret.reset(sdl_ticks());
-                r.needs_redraw = true;
-                return;
-            }
+            if try_cancel_inserted_placeholder(r, Coordinate::OperatorGeneral) { return; }
             // Discard changes, return to OperatorGeneral (e.g. pressing `i` on a
             // persistent I_PLACEHOLDER — nothing was inserted, just clear the flag).
             r.placeholder_insert_mode = false;
@@ -2796,7 +2807,7 @@ pub fn handle_save_provider_config(r: &mut AppRenderer) {
 /// Save-as: navigate to filebrowser save-folder, insert a filename `<input>` placeholder,
 /// and enter insert mode so the user can type a filename.
 ///
-/// On Enter (in `handle_enter_operator_insert`), the typed name is used to write the
+/// On Enter (in `handle_enter_editor_insert`), the typed name is used to write the
 /// source provider's FFON data to `<save_folder>/<name>.json`, then navigation returns
 /// to the original provider.
 ///
@@ -3410,12 +3421,12 @@ fn editor_slice_has_src(r: &AppRenderer) -> bool {
         .unwrap_or(false)
 }
 
-/// Press `i` in the editor provider — enter OperatorInsert so Enter calls
+/// Press `i` in the editor provider — enter EditorInsert so Enter calls
 /// `commit_edit`, which writes changes to disk.
 pub fn handle_editor_provider_i(r: &mut AppRenderer) {
     if !matches!(r.coordinate, Coordinate::EditorGeneral) { return; }
     r.previous_coordinate = r.coordinate;
-    r.coordinate = Coordinate::OperatorInsert;
+    r.coordinate = Coordinate::EditorInsert;
     populate_input_buffer(r);
     if r.input_prefix.trim() == "i" {
         r.placeholder_insert_mode = true;
@@ -3428,11 +3439,11 @@ pub fn handle_editor_provider_i(r: &mut AppRenderer) {
     r.needs_redraw = true;
 }
 
-/// Press `a` in the editor provider — enter OperatorInsert with cursor at end.
+/// Press `a` in the editor provider — enter EditorInsert with cursor at end.
 pub fn handle_editor_provider_a(r: &mut AppRenderer) {
     if !matches!(r.coordinate, Coordinate::EditorGeneral) { return; }
     r.previous_coordinate = r.coordinate;
-    r.coordinate = Coordinate::OperatorInsert;
+    r.coordinate = Coordinate::EditorInsert;
     populate_input_buffer(r);
     if r.input_prefix.trim() == "i" {
         r.placeholder_insert_mode = true;
@@ -3476,7 +3487,7 @@ pub fn handle_editor_ctrl_a(r: &mut AppRenderer) {
 }
 
 /// Insert a file/folder placeholder in the editor directory view.
-/// Enters OperatorInsert with `prefixed_insert_mode = true` ("+name"/"−name" syntax).
+/// Enters EditorInsert with `prefixed_insert_mode = true` ("+name"/"−name" syntax).
 fn insert_editor_dir_placeholder(r: &mut AppRenderer, insert_idx: usize) {
     use sicompass_sdk::ffon::FfonElement;
     use crate::app_state::PlaceholderCancel;
@@ -3513,7 +3524,7 @@ fn insert_editor_dir_placeholder(r: &mut AppRenderer, insert_idx: usize) {
     r.list_index = insert_idx;
     r.scroll_offset = 0;
     r.previous_coordinate = r.coordinate;
-    r.coordinate = Coordinate::OperatorInsert;
+    r.coordinate = Coordinate::EditorInsert;
     populate_input_buffer(r);
     r.cursor_position = 0;
     r.selection_anchor = None;
@@ -3585,7 +3596,7 @@ fn insert_editor_file_line(r: &mut AppRenderer, after: bool) {
     r.list_index = insert_ffon_idx;
     r.scroll_offset = 0;
     r.previous_coordinate = r.coordinate;
-    r.coordinate = Coordinate::OperatorInsert;
+    r.coordinate = Coordinate::EditorInsert;
     populate_input_buffer(r);
     r.cursor_position = 0;
     r.selection_anchor = None;
@@ -3898,7 +3909,7 @@ pub fn handle_ctrl_shift_a_placeholder(r: &mut AppRenderer) {
 }
 
 /// Insert an `<input></input>` placeholder at `insert_idx`, set `placeholder_insert_mode`,
-/// and enter OperatorInsert. This is the `*`-placeholder variant of `insert_operator_placeholder`.
+/// and enter the appropriate insert mode via `handle_i`. This is the `*`-placeholder variant of `insert_operator_placeholder`.
 fn insert_placeholder_typed(r: &mut AppRenderer, insert_idx: usize) {
     use crate::app_state::PlaceholderCancel;
     use sicompass_sdk::ffon::FfonElement;
@@ -6953,36 +6964,36 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // handle_enter_operator_insert — guard clause paths
+    // handle_enter_editor_insert — guard clause paths
     // -----------------------------------------------------------------------
 
     #[test]
-    fn enter_operator_insert_no_element_escapes() {
+    fn enter_editor_insert_no_element_escapes() {
         let mut r = AppRenderer::new();
-        r.coordinate = Coordinate::OperatorInsert;
+        r.coordinate = Coordinate::EditorInsert;
         // ffon is empty → get_ffon_at_id returns None → handle_escape called
-        handle_enter_operator_insert(&mut r);
-        // After escape, coordinate should not be OperatorInsert
-        assert_ne!(r.coordinate, Coordinate::OperatorInsert);
+        handle_enter_editor_insert(&mut r);
+        // After escape, coordinate should not be EditorInsert
+        assert_ne!(r.coordinate, Coordinate::EditorInsert);
     }
 
     #[test]
-    fn enter_operator_insert_no_input_tag_escapes() {
+    fn enter_editor_insert_no_input_tag_escapes() {
         let mut r = make_renderer_with_items(&["plain text"]);
-        r.coordinate = Coordinate::OperatorInsert;
-        handle_enter_operator_insert(&mut r);
+        r.coordinate = Coordinate::EditorInsert;
+        handle_enter_editor_insert(&mut r);
         // No <input> tag → escape
-        assert_ne!(r.coordinate, Coordinate::OperatorInsert);
+        assert_ne!(r.coordinate, Coordinate::EditorInsert);
     }
 
     #[test]
-    fn enter_operator_insert_unchanged_content_escapes() {
+    fn enter_editor_insert_unchanged_content_escapes() {
         let mut r = make_renderer_with_items(&["<input>hello</input>"]);
-        r.coordinate = Coordinate::OperatorInsert;
+        r.coordinate = Coordinate::EditorInsert;
         r.input_buffer = "hello".to_owned(); // same as element content
-        handle_enter_operator_insert(&mut r);
+        handle_enter_editor_insert(&mut r);
         // Unchanged → escape
-        assert_ne!(r.coordinate, Coordinate::OperatorInsert);
+        assert_ne!(r.coordinate, Coordinate::EditorInsert);
     }
 
     // ---- find_id_path ----
@@ -7142,7 +7153,7 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------
-    // parse_placeholder_prefix — commit-path integration (handle_enter_operator_insert)
+    // parse_placeholder_prefix — commit-path integration (handle_enter_editor_insert)
     // ---------------------------------------------------------------------------
 
     /// Build a minimal renderer with a single-element FFON list inside a provider,
@@ -7164,7 +7175,7 @@ mod tests {
     fn placeholder_commit_plain_text_becomes_str() {
         let mut r = make_placeholder_renderer();
         r.input_buffer = "hello".to_owned();
-        handle_enter_operator_insert(&mut r);
+        handle_enter_editor_insert(&mut r);
         let arr = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id).unwrap();
         let idx = r.current_id.last().unwrap_or(0);
         // Should be a Str wrapping the text in <input> tags
@@ -7176,7 +7187,7 @@ mod tests {
     fn placeholder_commit_dash_prefix_becomes_str() {
         let mut r = make_placeholder_renderer();
         r.input_buffer = "- myfile".to_owned();
-        handle_enter_operator_insert(&mut r);
+        handle_enter_editor_insert(&mut r);
         // After commit mode exits, current_id may shift; just verify no placeholder flag left
         assert!(!r.placeholder_insert_mode);
     }
@@ -7185,7 +7196,7 @@ mod tests {
     fn placeholder_commit_plus_prefix_becomes_obj() {
         let mut r = make_placeholder_renderer();
         r.input_buffer = "+ mydir".to_owned();
-        handle_enter_operator_insert(&mut r);
+        handle_enter_editor_insert(&mut r);
         // Element should now be an Obj
         // After commit, cursor stays at same position; check FFON directly via depth-1 path.
         let arr = &r.ffon;
@@ -7204,7 +7215,7 @@ mod tests {
     fn placeholder_commit_trailing_colon_becomes_obj() {
         let mut r = make_placeholder_renderer();
         r.input_buffer = "section:".to_owned();
-        handle_enter_operator_insert(&mut r);
+        handle_enter_editor_insert(&mut r);
         let arr = &r.ffon;
         if let Some(FfonElement::Obj(provider)) = arr.get(0) {
             let child = provider.children.get(0);
@@ -7220,7 +7231,7 @@ mod tests {
     fn placeholder_commit_empty_stays_in_insert_with_error() {
         let mut r = make_placeholder_renderer();
         r.input_buffer = String::new();
-        handle_enter_operator_insert(&mut r);
+        handle_enter_editor_insert(&mut r);
         // Should remain in OperatorInsert with an error message
         assert_eq!(r.coordinate, Coordinate::OperatorInsert);
         assert!(!r.error_message.is_empty());

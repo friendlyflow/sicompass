@@ -3734,7 +3734,7 @@ fn commit_trailing_colon_in_nested_body_creates_obj_with_i_placeholder() {
 /// Editing a string leaf inside a nested body Obj (e.g. pressing `i` then typing then Enter)
 /// must leave the nested list non-empty after commit.
 ///
-/// Regression: the non-placeholder commit branch of `handle_enter_operator_insert` used to
+/// Regression: the non-placeholder commit branch of `handle_enter_editor_insert` used to
 /// call `refresh_current_directory` unconditionally, which rebuilds the provider root and
 /// misroutes deep paths like `/compose/Body: [ffon]/foo`, emptying `total_list`.
 /// The fix: try `refresh_subtree_parent` first (same as the placeholder branch), which
@@ -5175,10 +5175,9 @@ fn inside_editor_i_yields_editor_insert() {
     press_right(&mut r); // enters editor → EditorGeneral
     assert_eq!(r.coordinate, Coordinate::EditorGeneral);
 
-    // The editor provider enters OperatorInsert (not EditorInsert) so that Enter
-    // calls commit_edit and writes changes to disk via the provider.
+    // The editor provider enters EditorInsert; Enter routes to commit_edit for disk writes.
     press(&mut r, Keycode::I);
-    assert_eq!(r.coordinate, Coordinate::OperatorInsert, "'i' in editor provider should give OperatorInsert for disk writes");
+    assert_eq!(r.coordinate, Coordinate::EditorInsert, "'i' in editor provider should give EditorInsert (Enter routes to commit_edit for disk writes)");
 }
 
 #[test]
@@ -5301,9 +5300,9 @@ fn editor_ctrl_i_create_file_restores_editor_general() {
     press_right(&mut r); // enter editor directory → EditorGeneral
     assert_eq!(r.coordinate, Coordinate::EditorGeneral, "should be EditorGeneral after entering editor");
 
-    // Ctrl+I → enters OperatorInsert with prefixed_insert_mode
+    // Ctrl+I → enters EditorInsert with prefixed_insert_mode
     press_ctrl(&mut r, Keycode::I);
-    assert_eq!(r.coordinate, Coordinate::OperatorInsert);
+    assert_eq!(r.coordinate, Coordinate::EditorInsert);
 
     // Type a plain name (no prefix) → creates a file
     type_text(&mut r, "newfile.txt");
@@ -5325,7 +5324,7 @@ fn editor_ctrl_i_create_dir_restores_editor_general() {
     assert_eq!(r.coordinate, Coordinate::EditorGeneral);
 
     press_ctrl(&mut r, Keycode::I);
-    assert_eq!(r.coordinate, Coordinate::OperatorInsert);
+    assert_eq!(r.coordinate, Coordinate::EditorInsert);
 
     type_text(&mut r, "+subdir");
     press_enter(&mut r);
@@ -5433,7 +5432,7 @@ fn editor_i_on_placeholder_creates_file() {
 
     // Press `i` → should detect I_PLACEHOLDER prefix → placeholder_insert_mode.
     press(&mut r, Keycode::I);
-    assert_eq!(r.coordinate, Coordinate::OperatorInsert, "i on I_PLACEHOLDER must enter OperatorInsert");
+    assert_eq!(r.coordinate, Coordinate::EditorInsert, "i on I_PLACEHOLDER must enter EditorInsert");
     assert!(r.placeholder_insert_mode, "i on I_PLACEHOLDER must set placeholder_insert_mode");
 
     // Type a plain name and confirm.
@@ -5503,7 +5502,7 @@ fn editor_two_consecutive_writes_both_show_in_list() {
 
     // First write: i, type "first", Enter.
     press(&mut r, Keycode::I);
-    assert_eq!(r.coordinate, Coordinate::OperatorInsert);
+    assert_eq!(r.coordinate, Coordinate::EditorInsert);
     type_text(&mut r, "first");
     press_enter(&mut r);
 
@@ -5520,7 +5519,7 @@ fn editor_two_consecutive_writes_both_show_in_list() {
 
     // Second write: Ctrl+A → placeholder after the current line, type "second", Enter.
     press_ctrl(&mut r, Keycode::A);
-    assert_eq!(r.coordinate, Coordinate::OperatorInsert, "Ctrl+A must enter insert mode");
+    assert_eq!(r.coordinate, Coordinate::EditorInsert, "Ctrl+A must enter insert mode");
     type_text(&mut r, "second");
     press_enter(&mut r);
 
@@ -5624,8 +5623,8 @@ fn editor_many_consecutive_writes_all_show_in_list() {
     // Nine more Ctrl+A inserts.
     for n in 1..10 {
         press_ctrl(&mut r, Keycode::A);
-        assert_eq!(r.coordinate, Coordinate::OperatorInsert,
-            "Ctrl+A iteration {n} must enter OperatorInsert (coord stayed in EditorGeneral after previous commit)");
+        assert_eq!(r.coordinate, Coordinate::EditorInsert,
+            "Ctrl+A iteration {n} must enter EditorInsert (coord stayed in EditorGeneral after previous commit)");
         type_text(&mut r, &format!("line{n}"));
         press_enter(&mut r);
     }

@@ -1003,7 +1003,7 @@ mod tests {
         p.push_path("new.txt");
         p.fetch();
 
-        // Empty `old` mirrors what handle_enter_operator_insert sends when the
+        // Empty `old` mirrors what handle_enter_editor_insert sends when the
         // active element is the I_PLACEHOLDER (`<input></input>` is empty).
         assert!(p.commit_edit("", "hello"));
 

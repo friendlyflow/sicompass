@@ -541,14 +541,14 @@ pub static SHORTCUTS: &[Shortcut] = &[
     Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: true, shift: false,
         modes: &[Coordinate::EditorInsert, Coordinate::OperatorInsert],
         label: "Ctrl+Enter Newline", is_available: always, handle: handlers::handle_ctrl_enter_insert },
-    // EditorInsert/Normal: Return → commit + escape
+    // EditorNormal: Return → commit + escape (no disk write)
     Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
-        modes: &[Coordinate::EditorInsert, Coordinate::EditorNormal],
+        modes: &[Coordinate::EditorNormal],
         label: "Enter  Confirm", is_available: always, handle: handlers::handle_return_editor_insert },
-    // OperatorInsert: Return → commit operator insert
+    // EditorInsert / OperatorInsert: Return → commit edit (disk write via provider)
     Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
-        modes: &[Coordinate::OperatorInsert],
-        label: "Enter  Confirm", is_available: always, handle: handlers::handle_enter_operator_insert },
+        modes: &[Coordinate::EditorInsert, Coordinate::OperatorInsert],
+        label: "Enter  Confirm", is_available: always, handle: handlers::handle_enter_editor_insert },
 
     // ---- Colon / Semicolon+Shift (command mode entry) --------------------
     Shortcut { key: Keycode::Semicolon, key2: None, ctrl: false, shift: true,
@@ -565,7 +565,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
         label: ":      Command", is_available: always, handle: handlers::handle_colon },
 
     // ---- I / A (enter insert/append mode) --------------------------------
-    // Editor provider: i/a enter OperatorInsert so commit_edit fires on Enter → writes to disk.
+    // Editor provider: i/a enter EditorInsert so commit_edit fires on Enter → writes to disk.
     // These rows must precede the generic avail_insert_on_input rows to take priority.
     Shortcut { key: Keycode::I, key2: None, ctrl: false, shift: false,
         modes: &[Coordinate::EditorGeneral],
