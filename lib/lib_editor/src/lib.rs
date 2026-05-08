@@ -153,6 +153,14 @@ impl EditorProvider {
     }
 
     /// Write `source_lines` back to `current_fs_path` and rebuild `cached_ffon`.
+    ///
+    /// If a single `source_lines` entry contains embedded newlines — which
+    /// happens when the user types a multi-line replacement or inserts text
+    /// containing `\n` (Ctrl+Enter while in insert mode) — the joined output
+    /// still produces the correct file on disk, but the in-memory vector
+    /// would be out of sync with the file's line count, breaking any
+    /// subsequent edit that addresses lines by index. Rebuild
+    /// `source_lines` from the just-written content so it matches the file.
     fn flush_source_lines(&mut self) -> bool {
         let mut content = self.source_lines.join("\n");
         if self.trailing_newline {
@@ -161,6 +169,9 @@ impl EditorProvider {
         if std::fs::write(&self.current_fs_path, &content).is_err() {
             return false;
         }
+        // Re-derive source_lines from the freshly-written content so each
+        // vector slot maps to exactly one file line.
+        self.source_lines = content.lines().map(str::to_owned).collect();
         // Rebuild cache from the just-written content.
         let ext = self.current_fs_path
             .extension()
@@ -330,42 +341,55 @@ impl Provider for EditorProvider {
                 return false;
             }
 
-            // Normal line replace: preserve original indentation.
+            // Normal line replace: preserve original indentation. Multi-line
+            // replacements (input buffer contains `\n`, e.g. typed via
+            // Ctrl+Enter) expand into multiple source lines, each carrying the
+            // same indent — empty inner lines are kept empty so the file ends
+            // up with real blank lines.
             let new_text = tags::strip_display(&new_inner);
-            let indent = leading_whitespace(&self.source_lines[line_idx]);
-            let new_line = if new_text.is_empty() {
-                String::new()
-            } else {
-                format!("{indent}{new_text}")
-            };
-            if self.source_lines[line_idx] == new_line {
+            let indent = leading_whitespace(&self.source_lines[line_idx]).to_owned();
+            let new_lines = build_indented_lines(&new_text, &indent);
+            if new_lines.len() == 1 && self.source_lines[line_idx] == new_lines[0] {
                 return true; // nothing actually changed — still signal success
             }
-            self.source_lines[line_idx] = new_line;
+            self.source_lines.splice(line_idx..line_idx + 1, new_lines);
             return self.flush_source_lines();
         }
 
         // ── Case 2: in-file line INSERT placeholder ─────────────────────────
-        // old_inner is "<srcins=N>": insert a new line at position N.
+        // old_inner is "<srcins=N>": insert a new line at position N. Like
+        // Case 1, multi-line input expands into multiple lines each carrying
+        // the surrounding indent; empty input becomes a single blank line so
+        // pressing Ctrl+I and then Enter inserts a true empty line.
         if let Some(insert_idx) = tags::extract_src_insert(&old_inner) {
             let new_text = tags::strip_display(&new_inner);
             // Determine the indent from the line that will be displaced (if any).
             let indent = if insert_idx < self.source_lines.len() {
-                // For insert-before: match the displaced line's indent.
                 leading_whitespace(&self.source_lines[insert_idx]).to_owned()
             } else if !self.source_lines.is_empty() {
-                // Insert at end: match the last line's indent.
                 leading_whitespace(self.source_lines.last().unwrap()).to_owned()
             } else {
                 String::new()
             };
-            let new_line = if new_text.is_empty() {
-                String::new()
-            } else {
-                format!("{indent}{new_text}")
-            };
+            let new_lines = build_indented_lines(&new_text, &indent);
             let clamp = insert_idx.min(self.source_lines.len());
-            self.source_lines.insert(clamp, new_line);
+            self.source_lines.splice(clamp..clamp, new_lines);
+            return self.flush_source_lines();
+        }
+
+        // ── Case 2b: in-file I_PLACEHOLDER ──────────────────────────────────
+        // An empty file (or empty FFON sub-section) gets an `i <input></input>`
+        // placeholder seeded by `navigate_right_raw` so the user has something
+        // to type into. The Enter handler then calls commit_edit with an empty
+        // `old` string. Insert the typed text as new file lines.
+        if old_inner.is_empty() && !new_inner.is_empty() && self.is_in_file_view() {
+            let new_text = tags::strip_display(&new_inner);
+            if new_text.is_empty() {
+                return false;
+            }
+            let new_lines = build_indented_lines(&new_text, "");
+            let pos = self.source_lines.len();
+            self.source_lines.splice(pos..pos, new_lines);
             return self.flush_source_lines();
         }
 
@@ -484,6 +508,21 @@ impl Provider for EditorProvider {
 fn leading_whitespace(s: &str) -> &str {
     let end = s.find(|c: char| !c.is_whitespace()).unwrap_or(0);
     &s[..end]
+}
+
+/// Split `text` on `\n` into one source line per piece, prepending `indent`
+/// to non-empty pieces. Empty input → a single empty line; trailing/leading
+/// `\n` produce blank lines so the on-disk file actually contains them.
+fn build_indented_lines(text: &str, indent: &str) -> Vec<String> {
+    text.split('\n')
+        .map(|piece| {
+            if piece.is_empty() {
+                String::new()
+            } else {
+                format!("{indent}{piece}")
+            }
+        })
+        .collect()
 }
 
 fn home_dir() -> String {
@@ -861,5 +900,173 @@ mod tests {
 
         let written = std::fs::read_to_string(&file).unwrap();
         assert_eq!(written, "alpha\ngamma");
+    }
+
+    #[test]
+    fn commit_edit_multiline_replace_writes_each_line_with_indent() {
+        // Multi-line input from Ctrl+Enter expands into multiple file lines,
+        // each preserving the original indentation of the line being replaced.
+        let tmp = make_tmp();
+        let file = tmp.path().join("py.py");
+        std::fs::write(&file, "def foo():\n    pass\n").unwrap();
+
+        let mut p = make_editor(&tmp);
+        p.push_path("py.py");
+        p.fetch();
+
+        // Replace line 1 ("    pass") with two lines.
+        let old = format!("<input>{}pass</input>", tags::format_src(1));
+        let ok = p.commit_edit(&old, "x = 1\ny = 2");
+        assert!(ok);
+
+        let written = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(written, "def foo():\n    x = 1\n    y = 2\n");
+    }
+
+    #[test]
+    fn commit_edit_after_multiline_replace_keeps_subsequent_edits_aligned() {
+        // Regression: previously source_lines wasn't rebuilt after a
+        // multi-line replace, so a single source slot ended up containing
+        // an embedded `\n`. Subsequent edits used stale indices and either
+        // bailed out or overwrote the wrong line.
+        let tmp = make_tmp();
+        let file = tmp.path().join("sample.txt");
+        std::fs::write(&file, "alpha\nbeta\ngamma\n").unwrap();
+
+        let mut p = make_editor(&tmp);
+        p.push_path("sample.txt");
+        p.fetch();
+
+        // Replace line 1 ("beta") with two lines.
+        let old = format!("<input>{}beta</input>", tags::format_src(1));
+        assert!(p.commit_edit(&old, "b1\nb2"));
+
+        // After re-parsing, "gamma" is now at src=3. Editing it must succeed.
+        let old_gamma = format!("<input>{}gamma</input>", tags::format_src(3));
+        assert!(p.commit_edit(&old_gamma, "GAMMA"));
+
+        let written = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(written, "alpha\nb1\nb2\nGAMMA\n");
+    }
+
+    #[test]
+    fn commit_edit_insert_empty_line() {
+        // Ctrl+I followed by Enter (no text) inserts a blank line at the
+        // placeholder position.
+        let tmp = make_tmp();
+        let file = tmp.path().join("sample.txt");
+        std::fs::write(&file, "alpha\ngamma\n").unwrap();
+
+        let mut p = make_editor(&tmp);
+        p.push_path("sample.txt");
+        p.fetch();
+
+        let old = format!("<input>{}</input>", tags::format_src_insert(1));
+        assert!(p.commit_edit(&old, ""));
+
+        let written = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(written, "alpha\n\ngamma\n");
+    }
+
+    #[test]
+    fn commit_edit_insert_multiline() {
+        // Ctrl+I, type "first\nsecond\nthird", Enter — three lines inserted
+        // before the displaced line, each at the displaced line's indent.
+        let tmp = make_tmp();
+        let file = tmp.path().join("py.py");
+        std::fs::write(&file, "def foo():\n    pass\n").unwrap();
+
+        let mut p = make_editor(&tmp);
+        p.push_path("py.py");
+        p.fetch();
+
+        let old = format!("<input>{}</input>", tags::format_src_insert(1));
+        assert!(p.commit_edit(&old, "a = 1\nb = 2\nc = 3"));
+
+        let written = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(
+            written,
+            "def foo():\n    a = 1\n    b = 2\n    c = 3\n    pass\n"
+        );
+    }
+
+    #[test]
+    fn commit_edit_writes_first_line_to_empty_file() {
+        // Repro: create file → right (open) → i (insert mode on the seeded
+        // placeholder) → type → Enter. Previously commit_edit fell through all
+        // four cases and returned false, leaving the file empty on disk.
+        let tmp = make_tmp();
+        let file = tmp.path().join("new.txt");
+        std::fs::write(&file, "").unwrap();
+
+        let mut p = make_editor(&tmp);
+        p.push_path("new.txt");
+        p.fetch();
+
+        // Empty `old` mirrors what handle_enter_operator_insert sends when the
+        // active element is the I_PLACEHOLDER (`<input></input>` is empty).
+        assert!(p.commit_edit("", "hello"));
+
+        let written = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(written, "hello");
+    }
+
+    #[test]
+    fn commit_edit_writes_multiline_to_empty_file() {
+        // Multi-line input via Ctrl+Enter → each piece becomes its own file
+        // line, including trailing/leading blank lines.
+        let tmp = make_tmp();
+        let file = tmp.path().join("new.txt");
+        std::fs::write(&file, "").unwrap();
+
+        let mut p = make_editor(&tmp);
+        p.push_path("new.txt");
+        p.fetch();
+
+        assert!(p.commit_edit("", "first\n\nthird"));
+
+        let written = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(written, "first\n\nthird");
+    }
+
+    #[test]
+    fn commit_edit_after_first_write_can_edit_following_lines() {
+        // Regression for the empty-file flow: after the placeholder commit,
+        // source_lines must mirror the file so a subsequent edit lands on
+        // the right line.
+        let tmp = make_tmp();
+        let file = tmp.path().join("new.txt");
+        std::fs::write(&file, "").unwrap();
+
+        let mut p = make_editor(&tmp);
+        p.push_path("new.txt");
+        p.fetch();
+
+        assert!(p.commit_edit("", "first\nsecond"));
+
+        // After the placeholder commit the file has two lines (src=0,1).
+        let old = format!("<input>{}second</input>", tags::format_src(1));
+        assert!(p.commit_edit(&old, "SECOND"));
+
+        let written = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(written, "first\nSECOND");
+    }
+
+    #[test]
+    fn commit_edit_replace_with_empty_string_blanks_line() {
+        // Replacing a line with empty input keeps the slot but blanks it out.
+        let tmp = make_tmp();
+        let file = tmp.path().join("sample.txt");
+        std::fs::write(&file, "alpha\nbeta\ngamma\n").unwrap();
+
+        let mut p = make_editor(&tmp);
+        p.push_path("sample.txt");
+        p.fetch();
+
+        let old = format!("<input>{}beta</input>", tags::format_src(1));
+        assert!(p.commit_edit(&old, ""));
+
+        let written = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(written, "alpha\n\ngamma\n");
     }
 }
