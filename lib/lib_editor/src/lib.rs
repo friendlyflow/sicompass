@@ -105,13 +105,9 @@ impl EditorProvider {
         });
         entries
             .into_iter()
-            .map(|(is_dir, name)| {
+            .map(|(_is_dir, name)| {
                 let tagged = tags::format_input(&name);
-                if is_dir {
-                    FfonElement::new_obj(&tagged)
-                } else {
-                    FfonElement::new_str(tagged)
-                }
+                FfonElement::new_obj(&tagged)
             })
             .collect()
     }

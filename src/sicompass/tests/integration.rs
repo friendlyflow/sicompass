@@ -5182,8 +5182,9 @@ fn inside_editor_i_yields_editor_insert() {
 }
 
 #[test]
-fn editor_directory_files_are_str_dirs_are_obj() {
-    // Files must be Str (renders with -i prefix) and directories Obj (chevron).
+fn editor_directory_entries_are_obj() {
+    // Both files and directories are Obj — going right on either enters its
+    // contents (file body or subdir listing), so both render with `+i`.
     ensure_builtins();
     let tmp = TempDir::new().expect("tempdir");
     std::fs::write(tmp.path().join("readme.md"), "hello").unwrap();
@@ -5197,18 +5198,18 @@ fn editor_directory_files_are_str_dirs_are_obj() {
         let k = match e { FfonElement::Str(s) => s.as_str(), FfonElement::Obj(o) => o.key.as_str() };
         k.contains("readme.md")
     }).expect("readme.md must be in listing");
-    assert!(file_entry.is_str(), "file entry must be Str so it renders with -i prefix");
+    assert!(file_entry.is_obj(), "file entry must be Obj — right-arrow enters its contents");
 
     let dir_entry = items.iter().find(|e| {
         let k = match e { FfonElement::Str(s) => s.as_str(), FfonElement::Obj(o) => o.key.as_str() };
         k.contains("subdir")
     }).expect("subdir must be in listing");
-    assert!(dir_entry.is_obj(), "directory entry must be Obj so it renders with folder prefix");
+    assert!(dir_entry.is_obj(), "directory entry must be Obj");
 }
 
 #[test]
 fn editor_right_arrow_opens_file() {
-    // Pressing right on a Str file entry should open the file content.
+    // Pressing right on a file Obj entry should open the file content.
     let (mut r, tmp) = harness_with_editor();
     let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
     navigate_to_provider(&mut r, editor_idx);
@@ -5218,14 +5219,14 @@ fn editor_right_arrow_opens_file() {
     let file_idx = {
         let children = r.ffon[editor_idx].as_obj().unwrap().children.as_slice();
         children.iter().position(|e| match e {
-            FfonElement::Str(s) => s.contains("hello.txt"),
+            FfonElement::Obj(o) => o.key.contains("hello.txt"),
             _ => false,
-        }).expect("hello.txt must be in listing as Str")
+        }).expect("hello.txt must be in listing as Obj")
     };
     r.current_id.set(1, file_idx);
     sicompass::list::create_list_current_layer(&mut r);
 
-    // Right arrow on a file Str → opens file, now at depth 2 showing file content.
+    // Right arrow on a file Obj → opens file, now at depth 2 showing file content.
     press_right(&mut r);
     assert_eq!(r.current_id.depth(), 2, "should remain at depth 2 after opening file");
 
@@ -5241,7 +5242,7 @@ fn editor_right_arrow_opens_file() {
     press_left(&mut r);
     let back_children = r.ffon[editor_idx].as_obj().unwrap().children.as_slice();
     let back_to_dir = back_children.iter().any(|e| match e {
-        FfonElement::Str(s) => s.contains("hello.txt"),
+        FfonElement::Obj(o) => o.key.contains("hello.txt"),
         _ => false,
     });
     assert!(back_to_dir, "should be back at directory listing after left");
@@ -5367,7 +5368,7 @@ fn editor_right_arrow_into_subdir() {
     // After navigation the FFON shows the subdir's contents (child.txt).
     let subdir_children = r.ffon[editor_idx].as_obj().unwrap().children.as_slice();
     let has_child = subdir_children.iter().any(|e| match e {
-        FfonElement::Str(s) => sicompass_sdk::tags::strip_display(s).contains("child.txt"),
+        FfonElement::Obj(o) => sicompass_sdk::tags::strip_display(&o.key).contains("child.txt"),
         _ => false,
     });
     assert!(has_child, "child.txt should appear in subdir listing");
