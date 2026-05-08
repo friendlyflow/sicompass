@@ -232,6 +232,20 @@ fn build_str_label(s: &str, parent_has_radio: bool) -> String {
     };
     let _ = stripped_opt; // suppress unused warning
 
+    // Editor file-content placeholder (`"ci <input></input>"`) renders as the
+    // bare label `"ci"` — parallel to how I_PLACEHOLDER renders as `"i"`.
+    if sicompass_sdk::placeholders::is_ci_placeholder(s) {
+        return "ci".to_owned();
+    }
+
+    // Editor file-content Str — Str inside <input> with a <src=N> annotation
+    // (only the editor emits these). Render as `-ci <text>`.
+    if let Some(inner) = tags::extract_input(s) {
+        if tags::has_src(&inner) {
+            return format!("-ci {}", tags::strip_display(s));
+        }
+    }
+
     let (prefix, content): (&str, String) = if tags::has_image(s) {
         ("-p", tags::strip_display(s))
     } else if tags::has_checkbox_checked(s) {
@@ -275,6 +289,22 @@ fn build_obj_label(obj: &FfonObject) -> String {
         raw_key
     };
     let _ = stripped_opt;
+
+    // Editor file-content Obj — Obj key wrapped in <input> with a <src=N>
+    // annotation (only the editor emits these). Render as `+ci <text>`.
+    if let Some(inner) = tags::extract_input(key) {
+        if tags::has_src(&inner) {
+            return format!("+ci {}", tags::strip_display(key));
+        }
+    }
+    // Editor directory-view dir entry: `<dir><input>name</input>` → `+di name`.
+    if tags::has_dir(key) {
+        return format!("+di {}", tags::strip_display(key));
+    }
+    // Editor directory-view file entry: `<file><input>name</input>` → `+fi name`.
+    if tags::has_file(key) {
+        return format!("+fi {}", tags::strip_display(key));
+    }
 
     if tags::has_checkbox_checked(key) {
         let content = tags::extract_checkbox_checked(key)
@@ -497,6 +527,50 @@ mod tests {
         // I_PLACEHOLDER must render as plain `"i"`, not `"-i "` —
         // the "i " prefix before the empty <input> tag is the sentinel.
         assert_eq!(build_str_label(sicompass_sdk::placeholders::I_PLACEHOLDER, false), "i");
+    }
+
+    #[test]
+    fn ci_placeholder_str_label_is_ci() {
+        // CI_PLACEHOLDER (editor file-content insert sentinel) renders as plain `"ci"`.
+        assert_eq!(build_str_label(sicompass_sdk::placeholders::CI_PLACEHOLDER, false), "ci");
+    }
+
+    #[test]
+    fn file_content_str_label_emits_minus_ci() {
+        // <input><src=N>...</input> (file-content line) → `-ci <text>`.
+        let label = build_str_label("<input><src=5>line text</input>", false);
+        assert!(label.starts_with("-ci "), "expected `-ci ` prefix, got {label:?}");
+        assert!(label.contains("line text"));
+    }
+
+    #[test]
+    fn dir_obj_label_emits_plus_di() {
+        let label = build_obj_label(&FfonObject {
+            key: "<dir><input>folder</input>".to_owned(),
+            children: vec![],
+        });
+        assert!(label.starts_with("+di "), "expected `+di ` prefix, got {label:?}");
+        assert!(label.contains("folder"));
+    }
+
+    #[test]
+    fn file_obj_label_emits_plus_fi() {
+        let label = build_obj_label(&FfonObject {
+            key: "<file><input>thing.txt</input>".to_owned(),
+            children: vec![],
+        });
+        assert!(label.starts_with("+fi "), "expected `+fi ` prefix, got {label:?}");
+        assert!(label.contains("thing.txt"));
+    }
+
+    #[test]
+    fn file_content_obj_label_emits_plus_ci() {
+        let label = build_obj_label(&FfonObject {
+            key: "<input><src=3>section</input>".to_owned(),
+            children: vec![],
+        });
+        assert!(label.starts_with("+ci "), "expected `+ci ` prefix, got {label:?}");
+        assert!(label.contains("section"));
     }
 
     fn make_renderer_with_items(items: &[&str]) -> AppRenderer {

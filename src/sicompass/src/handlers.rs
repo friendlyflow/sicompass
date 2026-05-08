@@ -3560,7 +3560,9 @@ fn insert_editor_file_line(r: &mut AppRenderer, after: bool) {
     };
 
     let insert_src_line = if after { src_line + 1 } else { src_line };
-    let placeholder_key = format!("<input>{}</input>", tags::format_src_insert(insert_src_line));
+    // "ci " prefix sits outside <input> (parallel to I_PLACEHOLDER's "i ") so the
+    // list-label builder can render this placeholder as the bare label "ci".
+    let placeholder_key = format!("ci <input>{}</input>", tags::format_src_insert(insert_src_line));
 
     let current_ffon_idx = r.current_id.last().unwrap_or(0);
     let insert_ffon_idx = if after { current_ffon_idx + 1 } else { current_ffon_idx };

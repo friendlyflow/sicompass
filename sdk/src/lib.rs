@@ -12,7 +12,8 @@ pub use manifest::{
     builtin_manifests, register_builtin_manifest, BuiltinManifest, SettingDecl, SettingKind,
 };
 pub use placeholders::{
-    is_i_placeholder, new_obj_with_i_placeholder, seed_i_placeholders, I_PLACEHOLDER,
+    is_ci_placeholder, is_i_placeholder, new_obj_with_i_placeholder, seed_i_placeholders,
+    CI_PLACEHOLDER, I_PLACEHOLDER,
 };
 pub use provider::{
     create_provider_by_name, register_provider_factory, CoordinateKind, ListItem, Provider,

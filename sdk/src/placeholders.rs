@@ -12,9 +12,18 @@ use crate::ffon::FfonElement;
 /// the file browser (for freshly created / empty directories).
 pub const I_PLACEHOLDER: &str = "i <input></input>";
 
+/// The editor's "insert new line here" placeholder used inside file content.
+/// Renders as the bare label `"ci"` (parallel to how `I_PLACEHOLDER` renders as `"i"`).
+pub const CI_PLACEHOLDER: &str = "ci <input></input>";
+
 /// True when a FFON Str element's payload is the placeholder sentinel.
 pub fn is_i_placeholder(s: &str) -> bool {
     s == I_PLACEHOLDER
+}
+
+/// True when a FFON Str element's payload is the file-content insert sentinel.
+pub fn is_ci_placeholder(s: &str) -> bool {
+    s == CI_PLACEHOLDER
 }
 
 /// Create a new Obj pre-seeded with [`I_PLACEHOLDER`] as its first child.
@@ -61,6 +70,16 @@ mod tests {
     #[test]
     fn is_i_placeholder_rejects_empty() {
         assert!(!is_i_placeholder(""));
+    }
+
+    #[test]
+    fn is_ci_placeholder_recognises_sentinel() {
+        assert!(is_ci_placeholder(CI_PLACEHOLDER));
+    }
+
+    #[test]
+    fn is_ci_placeholder_rejects_i_placeholder() {
+        assert!(!is_ci_placeholder(I_PLACEHOLDER));
     }
 
     #[test]

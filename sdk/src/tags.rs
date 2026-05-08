@@ -79,9 +79,12 @@ fn extract_after<'a>(text: &'a str, open: &str, open_len: usize, close: &str) ->
 // <src=N> — source-line annotation added by the editor parser to each FFON element.
 //   Encodes the 0-based line index of the element in the original source file.
 // <srcins=N> — editor-internal insert placeholder: "insert new line at position N".
+// <dir> / <file> — editor directory-view markers distinguishing directory from file entries.
 const SRC_PREFIX: &str = "<src=";
 const SRCINS_PREFIX: &str = "<srcins=";
 const TAG_CLOSE_CHAR: char = '>';
+const DIR_TAG: &str = "<dir>";
+const FILE_TAG: &str = "<file>";
 
 const INPUT_OPEN: &str = "<input>";
 const INPUT_CLOSE: &str = "</input>";
@@ -264,6 +267,20 @@ pub fn has_src(text: &str) -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// <dir> / <file> — editor directory-view entry markers
+// ---------------------------------------------------------------------------
+
+/// True if `text` contains a `<dir>` marker (editor-emitted directory entry).
+pub fn has_dir(text: &str) -> bool {
+    text.contains(DIR_TAG)
+}
+
+/// True if `text` contains a `<file>` marker (editor-emitted file entry).
+pub fn has_file(text: &str) -> bool {
+    text.contains(FILE_TAG)
+}
+
+// ---------------------------------------------------------------------------
 // <many-opt></many-opt> / <one-opt></one-opt> prefixes
 // ---------------------------------------------------------------------------
 
@@ -352,6 +369,16 @@ pub fn strip_display(text: &str) -> String {
                     return strip_display(&result);
                 }
             }
+        }
+    }
+
+    // 3b. <dir> / <file>: editor directory-view markers — strip and recurse.
+    for marker in &[DIR_TAG, FILE_TAG] {
+        if let Some(pos) = text.find(marker) {
+            let before = &text[..pos];
+            let after = &text[pos + marker.len()..];
+            let result = format!("{before}{after}");
+            return strip_display(&result);
         }
     }
 
@@ -1047,6 +1074,38 @@ mod tests {
     #[test]
     fn test_strip_display_input_with_srcins_inside() {
         assert_eq!(strip_display("<input><srcins=42></input>"), "");
+    }
+
+    // --- <dir> / <file> tags ---
+
+    #[test]
+    fn test_has_dir_true() {
+        assert!(has_dir("<dir><input>folder</input>"));
+    }
+
+    #[test]
+    fn test_has_dir_false() {
+        assert!(!has_dir("<file><input>thing</input>"));
+    }
+
+    #[test]
+    fn test_has_file_true() {
+        assert!(has_file("<file><input>thing</input>"));
+    }
+
+    #[test]
+    fn test_has_file_false() {
+        assert!(!has_file("<dir><input>folder</input>"));
+    }
+
+    #[test]
+    fn test_strip_display_strips_dir_tag() {
+        assert_eq!(strip_display("<dir><input>folder</input>"), "folder");
+    }
+
+    #[test]
+    fn test_strip_display_strips_file_tag() {
+        assert_eq!(strip_display("<file><input>thing</input>"), "thing");
     }
 
     #[test]

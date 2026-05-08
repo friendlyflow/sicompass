@@ -105,8 +105,9 @@ impl EditorProvider {
         });
         entries
             .into_iter()
-            .map(|(_is_dir, name)| {
-                let tagged = tags::format_input(&name);
+            .map(|(is_dir, name)| {
+                let marker = if is_dir { "<dir>" } else { "<file>" };
+                let tagged = format!("{marker}{}", tags::format_input(&name));
                 FfonElement::new_obj(&tagged)
             })
             .collect()
@@ -696,6 +697,37 @@ mod tests {
         }).collect();
         assert!(all_text.iter().any(|n| n.contains("hello.txt")));
         assert!(all_text.iter().any(|n| n.contains("subdir")));
+    }
+
+    #[test]
+    fn list_directory_tags_dirs_and_files() {
+        let tmp = make_tmp();
+        std::fs::write(tmp.path().join("hello.txt"), "hi").unwrap();
+        std::fs::create_dir(tmp.path().join("subdir")).unwrap();
+
+        let mut p = make_editor(&tmp);
+        let items = p.fetch();
+
+        let mut saw_dir = false;
+        let mut saw_file = false;
+        for item in &items {
+            let key = match item {
+                FfonElement::Obj(o) => o.key.as_str(),
+                FfonElement::Str(s) => s.as_str(),
+            };
+            if key == I_PLACEHOLDER { continue; }
+            if key.contains("subdir") {
+                assert!(tags::has_dir(key), "subdir entry must carry <dir>: {key}");
+                assert!(!tags::has_file(key), "subdir entry must not carry <file>: {key}");
+                saw_dir = true;
+            }
+            if key.contains("hello.txt") {
+                assert!(tags::has_file(key), "hello.txt entry must carry <file>: {key}");
+                assert!(!tags::has_dir(key), "hello.txt entry must not carry <dir>: {key}");
+                saw_file = true;
+            }
+        }
+        assert!(saw_dir && saw_file, "expected both dir and file entries");
     }
 
     #[test]
