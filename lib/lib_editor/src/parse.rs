@@ -72,15 +72,21 @@ fn parse_ffon_block(lines: &[&str], i: &mut usize, inside_braces: bool) -> Vec<F
         if line.ends_with(':') {
             let next_is_brace = *i < lines.len() && lines[*i].trim() == "{";
             let key = format!("{}{}", tags::format_src(src_line), line);
-            let mut obj = FfonElement::new_obj(&key);
-            if next_is_brace {
+            let children = if next_is_brace {
                 *i += 1;
-                let children = parse_ffon_block(lines, i, true);
+                parse_ffon_block(lines, i, true)
+            } else {
+                Vec::new()
+            };
+            if children.is_empty() {
+                result.push(FfonElement::new_str(key));
+            } else {
+                let mut obj = FfonElement::new_obj(&key);
                 for child in children {
                     obj.as_obj_mut().unwrap().push(child);
                 }
+                result.push(obj);
             }
-            result.push(obj);
         } else {
             let content = format!("{}{}", tags::format_src(src_line), line);
             result.push(FfonElement::new_str(content));
@@ -126,15 +132,20 @@ fn parse_cbrace_block(lines: &[&str], i: &mut usize, top_level: bool) -> Vec<Ffo
 
         if line.ends_with('{') {
             let key = format!("{}{}", tags::format_src(src_line), line);
-            let mut obj = FfonElement::new_obj(&key);
             let children = parse_cbrace_block(lines, i, false);
-            for child in children {
-                obj.as_obj_mut().unwrap().push(child);
+            if children.is_empty() {
+                result.push(FfonElement::new_str(key));
+            } else {
+                let mut obj = FfonElement::new_obj(&key);
+                for child in children {
+                    obj.as_obj_mut().unwrap().push(child);
+                }
+                result.push(obj);
             }
-            result.push(obj);
             // After the body, consume the closing/continuation brace(s) and
             // add them as siblings (one layer to the left of the body).
-            // "} else {" / "} catch {" open a new Obj; pure "}" becomes a Str.
+            // "} else {" / "} catch {" open a new Obj (or Str if its body is
+            // empty); pure "}" becomes a Str.
             while *i < lines.len() {
                 let cl_src = *i;
                 let cl = lines[*i].trim();
@@ -142,12 +153,16 @@ fn parse_cbrace_block(lines: &[&str], i: &mut usize, top_level: bool) -> Vec<Ffo
                 *i += 1;
                 if cl.ends_with('{') {
                     let cont_key = format!("{}{}", tags::format_src(cl_src), cl);
-                    let mut cont = FfonElement::new_obj(&cont_key);
                     let cont_children = parse_cbrace_block(lines, i, false);
-                    for child in cont_children {
-                        cont.as_obj_mut().unwrap().push(child);
+                    if cont_children.is_empty() {
+                        result.push(FfonElement::new_str(cont_key));
+                    } else {
+                        let mut cont = FfonElement::new_obj(&cont_key);
+                        for child in cont_children {
+                            cont.as_obj_mut().unwrap().push(child);
+                        }
+                        result.push(cont);
                     }
-                    result.push(cont);
                 } else {
                     result.push(FfonElement::new_str(format!("{}{}", tags::format_src(cl_src), cl)));
                     break;
@@ -203,11 +218,15 @@ fn parse_python_block(lines: &[&str], i: &mut usize, base_indent: usize) -> Vec<
             };
 
             let key = format!("{}{}", tags::format_src(src_line), stripped);
-            let mut obj = FfonElement::new_obj(&key);
-            for child in children {
-                obj.as_obj_mut().unwrap().push(child);
+            if children.is_empty() {
+                result.push(FfonElement::new_str(key));
+            } else {
+                let mut obj = FfonElement::new_obj(&key);
+                for child in children {
+                    obj.as_obj_mut().unwrap().push(child);
+                }
+                result.push(obj);
             }
-            result.push(obj);
         } else {
             result.push(FfonElement::new_str(format!("{}{}", tags::format_src(src_line), stripped)));
         }
@@ -245,11 +264,50 @@ mod tests {
     }
 
     #[test]
-    fn parse_file_colon_suffix_makes_obj() {
+    fn parse_file_colon_suffix_without_body_is_str() {
+        // A bare "section:" with no `{ }` body has nothing to navigate into,
+        // so it renders as a Str (`-i`) rather than an empty Obj (`+i`).
         let elements = parse_file("section:");
+        assert_eq!(elements.len(), 1);
+        assert!(elements[0].is_str());
+        assert_eq!(strip_src(elements[0].as_str().unwrap()), "section:");
+    }
+
+    #[test]
+    fn parse_file_colon_suffix_with_body_is_obj() {
+        let elements = parse_file("section:\n{\n  child\n}");
         assert_eq!(elements.len(), 1);
         assert!(elements[0].is_obj());
         assert_eq!(strip_src(elements[0].as_obj().unwrap().key.as_str()), "section:");
+    }
+
+    #[test]
+    fn parse_file_colon_suffix_with_empty_braces_is_str() {
+        // `{` followed immediately by `}` is not a real body — the header
+        // should still collapse to Str.
+        let elements = parse_file("section:\n{\n}");
+        assert_eq!(elements.len(), 1);
+        assert!(elements[0].is_str());
+    }
+
+    #[test]
+    fn cbrace_empty_block_collapses_to_str() {
+        // `struct Foo {` with an immediate `}` has no body, so the opener is a
+        // Str sibling of the closing brace rather than an empty Obj.
+        let elements = parse_file_ext("struct Foo {\n}", "rs");
+        assert_eq!(elements.len(), 2);
+        assert!(elements[0].is_str(), "empty-body opener must be Str");
+        assert_eq!(strip_src(elements[0].as_str().unwrap()), "struct Foo {");
+        assert_eq!(strip_src(elements[1].as_str().unwrap()), "}");
+    }
+
+    #[test]
+    fn python_empty_def_collapses_to_str() {
+        // `def foo():` with no indented body is a Str.
+        let elements = parse_file_ext("def foo():\nx = 1\n", "py");
+        assert_eq!(elements.len(), 2);
+        assert!(elements[0].is_str(), "empty-body def must be Str");
+        assert_eq!(strip_src(elements[0].as_str().unwrap()), "def foo():");
     }
 
     #[test]

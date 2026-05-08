@@ -160,17 +160,7 @@ pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
     let depth_before = item_id.depth();
 
     if !next_layer_exists(&r.ffon, &item_id) {
-        // Editor provider: both Str (file) and Obj (dir) entries may have no FFON children
-        // yet — allow right-navigation so refresh_on_navigate can lazy-load contents.
-        let is_editor_navigable = active_provider_is_editor(r) && {
-            let depth = item_id.depth();
-            let last = item_id.get(depth.saturating_sub(1)).unwrap_or(0);
-            get_ffon_at_id(&r.ffon, &item_id)
-                .and_then(|a| a.get(last))
-                .map(|e| e.is_str() || e.is_obj())
-                .unwrap_or(false)
-        };
-        if !is_editor_navigable { return false; }
+        return false;
     }
 
     // Extract segment name + whether the Obj already has children (static vs lazy) + link URL.
@@ -182,10 +172,6 @@ pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
             Some(FfonElement::Obj(o)) => {
                 let link = if tags::has_link(&o.key) { tags::extract_link(&o.key) } else { None };
                 (tags::strip_display(&o.key).to_string(), !o.children.is_empty(), link)
-            }
-            Some(FfonElement::Str(s)) => {
-                // Editor file — treat as childless navigable entry (refresh_on_navigate handles it).
-                (tags::strip_display(s).to_string(), false, None)
             }
             _ => return false,
         }
