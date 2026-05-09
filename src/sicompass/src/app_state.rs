@@ -101,16 +101,16 @@ pub const PALETTE_LIGHT: ColorPalette = ColorPalette {
 
 // ---------------------------------------------------------------------------
 
-/// Navigation / edit mode — mirrors the C `Coordinate` enum.
+/// Navigation / edit mode. Vim-style modes (general/insert/normal/visual)
+/// apply to every provider; operator vs editor behavior is decided by
+/// `Provider::has_editor_semantics()`, not by the variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Coordinate {
     #[default]
-    OperatorGeneral,
-    OperatorInsert,
-    EditorGeneral,
-    EditorInsert,
-    EditorNormal,
-    EditorVisual,
+    General,
+    Insert,
+    Normal,
+    Visual,
     SimpleSearch,
     ExtendedSearch,
     Command,
@@ -123,27 +123,16 @@ pub enum Coordinate {
 }
 
 impl Coordinate {
-    /// Map a provider's `CoordinateKind` to the corresponding General variant.
-    pub fn general_for_kind(kind: sicompass_sdk::CoordinateKind) -> Self {
-        match kind {
-            sicompass_sdk::CoordinateKind::Operator => Coordinate::OperatorGeneral,
-            sicompass_sdk::CoordinateKind::Editor => Coordinate::EditorGeneral,
-        }
-    }
-
-    /// Return `true` for the two General variants.
     pub fn is_general(self) -> bool {
-        matches!(self, Coordinate::OperatorGeneral | Coordinate::EditorGeneral)
+        matches!(self, Coordinate::General)
     }
 
     pub fn as_str(self) -> &'static str {
         match self {
-            Coordinate::OperatorGeneral => "operator",
-            Coordinate::OperatorInsert => "operator insert",
-            Coordinate::EditorGeneral => "editor",
-            Coordinate::EditorInsert => "editor insert",
-            Coordinate::EditorNormal => "editor normal",
-            Coordinate::EditorVisual => "editor visual",
+            Coordinate::General => "general mode",
+            Coordinate::Insert => "insert mode",
+            Coordinate::Normal => "normal mode",
+            Coordinate::Visual => "visual mode",
             Coordinate::SimpleSearch => "search",
             Coordinate::ExtendedSearch => "extended search",
             Coordinate::Command => "command",
@@ -260,9 +249,9 @@ pub struct UndoEntry {
 
 /// Stashed state for cancelling an in-progress placeholder insertion via Escape.
 ///
-/// Set by `insert_placeholder_typed`, `insert_operator_placeholder`, and the
+/// Set by `insert_placeholder_typed`, `insert_general_placeholder`, and the
 /// insert path in `handle_enter_command`. Consumed (and cleared) by
-/// `handle_escape` when the user presses Escape during `OperatorInsert`.
+/// `handle_escape` when the user presses Escape during `Insert`.
 #[derive(Clone)]
 pub struct PlaceholderCancel {
     /// Full navigation id of the inserted (or replaced) placeholder element.
@@ -372,7 +361,7 @@ pub struct AppRenderer {
     pub needs_redraw: bool,
     pub input_down: bool,
     pub prefixed_insert_mode: bool,
-    /// True when the current OperatorInsert session is for a `*` placeholder —
+    /// True when the current Insert session is for a `*` placeholder —
     /// the typed text is interpreted by `parse_placeholder_prefix` at commit time
     /// to resolve to either a `Str` or an `Obj`.
     pub placeholder_insert_mode: bool,
@@ -461,8 +450,8 @@ impl AppRenderer {
             current_id,
             previous_id: IdArray::new(),
             current_insert_id: IdArray::new(),
-            coordinate: Coordinate::OperatorGeneral,
-            previous_coordinate: Coordinate::OperatorGeneral,
+            coordinate: Coordinate::General,
+            previous_coordinate: Coordinate::General,
             total_list: Vec::new(),
             filtered_list_indices: Vec::new(),
             fuzzy_match_positions: Vec::new(),
@@ -774,33 +763,23 @@ mod tests {
     // --- Coordinate::as_str ---
 
     #[test]
-    fn coordinate_as_str_operator_general() {
-        assert_eq!(Coordinate::OperatorGeneral.as_str(), "operator");
+    fn coordinate_as_str_general() {
+        assert_eq!(Coordinate::General.as_str(), "general mode");
     }
 
     #[test]
-    fn coordinate_as_str_operator_insert() {
-        assert_eq!(Coordinate::OperatorInsert.as_str(), "operator insert");
+    fn coordinate_as_str_insert() {
+        assert_eq!(Coordinate::Insert.as_str(), "insert mode");
     }
 
     #[test]
-    fn coordinate_as_str_editor_general() {
-        assert_eq!(Coordinate::EditorGeneral.as_str(), "editor");
+    fn coordinate_as_str_normal() {
+        assert_eq!(Coordinate::Normal.as_str(), "normal mode");
     }
 
     #[test]
-    fn coordinate_as_str_editor_insert() {
-        assert_eq!(Coordinate::EditorInsert.as_str(), "editor insert");
-    }
-
-    #[test]
-    fn coordinate_as_str_editor_normal() {
-        assert_eq!(Coordinate::EditorNormal.as_str(), "editor normal");
-    }
-
-    #[test]
-    fn coordinate_as_str_editor_visual() {
-        assert_eq!(Coordinate::EditorVisual.as_str(), "editor visual");
+    fn coordinate_as_str_visual() {
+        assert_eq!(Coordinate::Visual.as_str(), "visual mode");
     }
 
     #[test]

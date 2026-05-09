@@ -20,7 +20,6 @@ pub use placeholders::{
     CI_PLACEHOLDER, I_PLACEHOLDER,
 };
 pub use provider::{
-    create_provider_by_name, register_provider_factory, CoordinateKind, ListItem, Provider,
-    SearchResultItem,
+    create_provider_by_name, register_provider_factory, ListItem, Provider, SearchResultItem,
 };
 pub use url_fetcher::{fetch_url_to_ffon, register_url_fetcher};

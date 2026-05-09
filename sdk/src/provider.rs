@@ -52,17 +52,6 @@ pub struct SearchResultItem {
     pub nav_path: String,
 }
 
-/// The coordinate family a provider prefers when it is the active root.
-///
-/// The app maps `Operator` → `OperatorGeneral` and `Editor` → `EditorGeneral`
-/// on provider activation, switching back when the provider is left.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum CoordinateKind {
-    #[default]
-    Operator,
-    Editor,
-}
-
 // ---------------------------------------------------------------------------
 // Provider trait
 // ---------------------------------------------------------------------------
@@ -221,9 +210,13 @@ pub trait Provider: Send + 'static {
 
     // ---- Optional: meta/help -----------------------------------------------
 
-    /// The coordinate family this provider prefers when it is active.
-    /// Default `Operator` covers all providers except the editor.
-    fn preferred_coordinate_kind(&self) -> CoordinateKind { CoordinateKind::Operator }
+    /// True for providers that behave like a text editor: exiting Insert
+    /// commits the buffer to the underlying store via `commit_edit`,
+    /// structural list edits target the in-memory document rather than
+    /// running through a generic placeholder flow, and the meta/scroll
+    /// hint screens are suppressed. Default `false`; the editor provider
+    /// overrides.
+    fn has_editor_semantics(&self) -> bool { false }
 
     // ---- Optional: persistent config ---------------------------------------
 
@@ -706,8 +699,8 @@ mod tests {
     }
 
     #[test]
-    fn default_preferred_coordinate_kind_is_operator() {
+    fn default_has_editor_semantics_is_false() {
         let p = GenericProvider::new("p", "P", |_| vec![]);
-        assert_eq!(p.preferred_coordinate_kind(), CoordinateKind::Operator);
+        assert!(!p.has_editor_semantics());
     }
 }

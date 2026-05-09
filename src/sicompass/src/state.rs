@@ -96,8 +96,7 @@ pub fn update_ids(r: &mut AppRenderer, is_key: bool, task: Task, history: Histor
             }
         }
         Task::Append => {
-            let in_editor = is_editor_general_or_operator_general(r.coordinate);
-            if in_editor {
+            if r.coordinate.is_general() {
                 if !is_key {
                     r.current_id.set_last(current_idx + 1);
                 } else if next_layer_exists(&r.ffon, &r.previous_id) {
@@ -108,7 +107,7 @@ pub fn update_ids(r: &mut AppRenderer, is_key: bool, task: Task, history: Histor
             }
         }
         Task::AppendAppend => {
-            if is_editor_general_or_operator_general(r.coordinate) {
+            if r.coordinate.is_general() {
                 r.current_id.set_last(max_id + 1);
             }
         }
@@ -116,7 +115,7 @@ pub fn update_ids(r: &mut AppRenderer, is_key: bool, task: Task, history: Histor
             // Position stays the same
         }
         Task::InsertInsert => {
-            if is_editor_general_or_operator_general(r.coordinate) {
+            if r.coordinate.is_general() {
                 r.current_id.set_last(0);
             }
         }
@@ -167,7 +166,10 @@ pub fn update_ffon(r: &mut AppRenderer, line: &str, is_key: bool, task: Task, hi
         return;
     }
 
-    let is_editor = is_editor_coordinate(r.coordinate);
+    let is_editor = r.current_id.get(0)
+        .and_then(|i| r.providers.get(i))
+        .map(|p| p.has_editor_semantics())
+        .unwrap_or(false);
 
     // Clone the ids so we can still mutate r.current_id
     let prev_id = r.previous_id.clone();
@@ -276,7 +278,7 @@ pub fn update_ffon(r: &mut AppRenderer, line: &str, is_key: bool, task: Task, hi
             replace_at(&mut r.ffon, &prev_id, prev_idx, FfonElement::new_str(line));
         }
     } else if matches!(task, Task::Delete | Task::Cut) {
-        // Non-editor delete/cut (e.g. file browser in OperatorGeneral)
+        // Non-editor delete/cut (e.g. file browser in General)
         remove_at(&mut r.ffon, &prev_id, prev_idx);
         let new_len = get_parent_len(&r.ffon, &prev_id);
         if new_len == 0 {
@@ -711,22 +713,6 @@ pub fn strip_trailing_colon(s: &str) -> String {
     }
 }
 
-fn is_editor_coordinate(coord: Coordinate) -> bool {
-    matches!(
-        coord,
-        Coordinate::EditorGeneral
-            | Coordinate::EditorInsert
-            | Coordinate::EditorNormal
-            | Coordinate::EditorVisual
-    )
-}
-
-fn is_editor_general_or_operator_general(coord: Coordinate) -> bool {
-    matches!(
-        coord,
-        Coordinate::EditorGeneral | Coordinate::OperatorGeneral
-    )
-}
 
 /// Get the element at `id` (immutable).
 fn get_element_at<'a>(ffon: &'a [FfonElement], id: &IdArray) -> Option<&'a FfonElement> {
@@ -846,10 +832,7 @@ fn replace_element_at_id(r: &mut AppRenderer, id: &IdArray, elem: FfonElement) {
 // ---------------------------------------------------------------------------
 
 fn get_current_line(r: &AppRenderer) -> (String, bool) {
-    if matches!(
-        r.coordinate,
-        Coordinate::EditorInsert | Coordinate::OperatorInsert
-    ) {
+    if matches!(r.coordinate, Coordinate::Insert) {
         return (r.input_buffer.clone(), false);
     }
 
@@ -929,11 +912,23 @@ mod tests {
     use super::*;
     use crate::app_state::{AppRenderer, Coordinate, History, Task};
     use sicompass_sdk::ffon::{FfonElement, IdArray};
+    use sicompass_sdk::Provider;
+
+    /// Stand-in for the editor provider so `update_ffon` / `update_state`
+    /// take the editor-semantics branch in tests that don't wire up a real
+    /// provider stack.
+    struct MockEditorProvider;
+    impl Provider for MockEditorProvider {
+        fn name(&self) -> &str { "mock_editor" }
+        fn fetch(&mut self) -> Vec<FfonElement> { Vec::new() }
+        fn has_editor_semantics(&self) -> bool { true }
+    }
 
     fn make_renderer(ffon: Vec<FfonElement>) -> AppRenderer {
         let mut r = AppRenderer::new();
         r.ffon = ffon;
         r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        r.providers.push(Box::new(MockEditorProvider));
         r
     }
 
@@ -1003,7 +998,7 @@ mod tests {
     #[test]
     fn update_ffon_input_string_value() {
         let mut r = make_renderer(vec![FfonElement::new_str("old")]);
-        r.coordinate = Coordinate::EditorInsert;
+        r.coordinate = Coordinate::Insert;
         r.input_buffer = "new value".to_owned();
         r.previous_id = r.current_id.clone();
         update_ffon(&mut r, "new value", false, Task::Input, History::None);
@@ -1013,7 +1008,7 @@ mod tests {
     #[test]
     fn update_ffon_input_empty_root_creates_string() {
         let mut r = make_renderer(vec![]);
-        r.coordinate = Coordinate::EditorInsert;
+        r.coordinate = Coordinate::Insert;
         r.previous_id = r.current_id.clone();
         update_ffon(&mut r, "hello", false, Task::Input, History::None);
         assert_eq!(r.ffon.len(), 1);
@@ -1023,7 +1018,7 @@ mod tests {
     #[test]
     fn update_ffon_input_empty_root_creates_obj_for_key() {
         let mut r = make_renderer(vec![]);
-        r.coordinate = Coordinate::EditorInsert;
+        r.coordinate = Coordinate::Insert;
         r.previous_id = r.current_id.clone();
         update_ffon(&mut r, "Section:", true, Task::Input, History::None);
         assert_eq!(r.ffon.len(), 1);
@@ -1037,7 +1032,7 @@ mod tests {
             FfonElement::new_str("keep"),
             FfonElement::new_str("remove"),
         ]);
-        r.coordinate = Coordinate::EditorGeneral;
+        r.coordinate = Coordinate::General;
         r.current_id.set_last(1);
         r.previous_id = r.current_id.clone();
         update_ffon(&mut r, "remove", false, Task::Delete, History::None);
@@ -1050,7 +1045,7 @@ mod tests {
     #[test]
     fn update_state_input_commits_value() {
         let mut r = make_renderer(vec![FfonElement::new_str("old")]);
-        r.coordinate = Coordinate::EditorInsert;
+        r.coordinate = Coordinate::Insert;
         r.input_buffer = "updated".to_owned();
         update_state(&mut r, Task::Input, History::None);
         assert_eq!(r.ffon[0].as_str(), Some("updated"));
@@ -1059,7 +1054,7 @@ mod tests {
     #[test]
     fn update_state_records_undo_for_input() {
         let mut r = make_renderer(vec![FfonElement::new_str("before")]);
-        r.coordinate = Coordinate::EditorInsert;
+        r.coordinate = Coordinate::Insert;
         r.input_buffer = "after".to_owned();
         update_state(&mut r, Task::Input, History::None);
         assert_eq!(r.undo_history.len(), 1);
@@ -1183,7 +1178,7 @@ mod tests {
             root.as_obj_mut().unwrap().push(child);
             root
         }]);
-        r.coordinate = Coordinate::EditorInsert;
+        r.coordinate = Coordinate::Insert;
         r.current_id = {
             let mut id = IdArray::new();
             id.push(0);

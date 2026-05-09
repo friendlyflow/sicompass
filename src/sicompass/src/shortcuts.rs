@@ -26,22 +26,20 @@ use sicompass_sdk::tags;
 // Mode group constants
 // ---------------------------------------------------------------------------
 
-const GENERAL: &[Coordinate] = &[Coordinate::OperatorGeneral, Coordinate::EditorGeneral];
+const GENERAL: &[Coordinate] = &[Coordinate::General];
 
 const INSERT: &[Coordinate] = &[
-    Coordinate::EditorInsert,
-    Coordinate::EditorNormal,
-    Coordinate::EditorVisual,
-    Coordinate::OperatorInsert,
+    Coordinate::Insert,
+    Coordinate::Normal,
+    Coordinate::Visual,
 ];
 
 const SEARCH: &[Coordinate] = &[Coordinate::SimpleSearch, Coordinate::ExtendedSearch];
 
 const TEXT: &[Coordinate] = &[
-    Coordinate::EditorInsert,
-    Coordinate::EditorNormal,
-    Coordinate::EditorVisual,
-    Coordinate::OperatorInsert,
+    Coordinate::Insert,
+    Coordinate::Normal,
+    Coordinate::Visual,
     Coordinate::SimpleSearch,
     Coordinate::ExtendedSearch,
     Coordinate::Command,
@@ -49,8 +47,7 @@ const TEXT: &[Coordinate] = &[
 
 // Modes where Up/Down navigate the list (not text cursor movement)
 const NAV_UP_DOWN: &[Coordinate] = &[
-    Coordinate::OperatorGeneral,
-    Coordinate::EditorGeneral,
+    Coordinate::General,
     Coordinate::SimpleSearch,
     Coordinate::ExtendedSearch,
     Coordinate::Command,
@@ -61,13 +58,12 @@ const NAV_UP_DOWN: &[Coordinate] = &[
 
 // Modes where Undo/Redo are active
 const UNDO_MODES_ALL: &[Coordinate] = &[
-    Coordinate::EditorGeneral,
+    Coordinate::General,
     Coordinate::SimpleSearch,
     Coordinate::ExtendedSearch,
-    Coordinate::EditorInsert,
-    Coordinate::EditorNormal,
-    Coordinate::EditorVisual,
-    Coordinate::OperatorInsert,
+    Coordinate::Insert,
+    Coordinate::Normal,
+    Coordinate::Visual,
     Coordinate::Command,
     Coordinate::Scroll,
     Coordinate::ScrollSearch,
@@ -134,7 +130,10 @@ fn is_filebrowser(r: &AppRenderer) -> bool {
 }
 
 fn is_editor(r: &AppRenderer) -> bool {
-    active_provider_name(r) == Some("editor")
+    r.current_id.get(0)
+        .and_then(|i| r.providers.get(i))
+        .map(|p| p.has_editor_semantics())
+        .unwrap_or(false)
 }
 
 fn has_dashboard(r: &AppRenderer) -> bool {
@@ -252,22 +251,41 @@ fn has_add_element_sibling(r: &AppRenderer) -> bool {
 }
 
 /// Structural editing is available for filebrowser, email compose body,
-/// createElement providers, or the editor provider.
+/// or createElement providers. The editor provider has dedicated rows
+/// (avail_editor_edit) — keeping it out of this predicate stops the
+/// generic operator-style handlers from racing the editor-specific ones
+/// now that operator/editor coordinates are unified.
 fn avail_structural_edit(r: &AppRenderer) -> bool {
-    not_at_root(r) && (is_filebrowser(r) || in_email_compose_body(r) || has_add_element_sibling(r) || is_editor(r))
+    not_at_root(r) && (is_filebrowser(r) || in_email_compose_body(r) || has_add_element_sibling(r))
 }
 
-/// Structural edit available in email compose body (OperatorGeneral).
+/// FFON-tree delete is only meaningful in compose body and createElement
+/// providers — filebrowser/editor route Ctrl+D to file/disk delete.
+fn avail_ffon_delete(r: &AppRenderer) -> bool {
+    not_at_root(r) && (in_email_compose_body(r) || has_add_element_sibling(r))
+}
+
+/// Predicates for keys that are operator-only after the coordinate collapse —
+/// the editor provider opts out (no scroll-mode / meta hint screen).
+fn avail_scroll_key(r: &AppRenderer) -> bool {
+    not_at_root(r) && !is_editor(r)
+}
+
+fn avail_meta_key(r: &AppRenderer) -> bool {
+    !is_editor(r)
+}
+
+/// Structural edit available in email compose body (General).
 fn avail_compose_body_edit(r: &AppRenderer) -> bool {
     not_at_root(r) && in_email_compose_body(r)
 }
 
-/// File-level delete (OperatorGeneral Delete / Ctrl+D) — filebrowser or editor provider.
+/// File-level delete (General Delete / Ctrl+D) — filebrowser or editor provider.
 fn avail_file_delete(r: &AppRenderer) -> bool {
     not_at_root(r) && (is_filebrowser(r) || is_editor(r))
 }
 
-/// File clipboard (Ctrl+X/C/V) in OperatorGeneral — only for filebrowser.
+/// File clipboard (Ctrl+X/C/V) in General — only for filebrowser.
 fn avail_file_clipboard(r: &AppRenderer) -> bool {
     not_at_root(r) && is_filebrowser(r)
 }
@@ -282,7 +300,7 @@ fn avail_enter_follow_link(r: &AppRenderer) -> bool {
     not_at_root(r) && focused_is_link(r)
 }
 
-/// Enter in OperatorGeneral: not at root, not a link/button hint
+/// Enter in General: not at root, not a link/button hint
 fn avail_enter_op(r: &AppRenderer) -> bool {
     not_at_root(r)
 }
@@ -301,12 +319,6 @@ fn avail_editor_edit(r: &AppRenderer) -> bool {
 // Handler wrappers (for History param or mode-specific disambiguation)
 // ---------------------------------------------------------------------------
 
-fn ctrl_a_editor(r: &mut AppRenderer) {
-    handlers::handle_ctrl_a(r, crate::app_state::History::None);
-}
-fn ctrl_i_editor(r: &mut AppRenderer) {
-    handlers::handle_ctrl_i(r, crate::app_state::History::None);
-}
 fn delete_editor(r: &mut AppRenderer) {
     handlers::handle_delete(r, crate::app_state::History::None);
 }
@@ -320,18 +332,18 @@ pub static SHORTCUTS: &[Shortcut] = &[
     // ---- Escape (all meaningful modes) -----------------------------------
     // Hint only inside providers; dispatch fires everywhere.
     Shortcut { key: Keycode::Escape, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::OperatorGeneral, Coordinate::EditorGeneral,
-                 Coordinate::EditorInsert, Coordinate::EditorNormal,
-                 Coordinate::EditorVisual, Coordinate::OperatorInsert,
+        modes: &[Coordinate::General,
+                 Coordinate::Insert, Coordinate::Normal,
+                 Coordinate::Visual,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
                  Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch,
                  Coordinate::InputSearch, Coordinate::Meta, Coordinate::Dashboard,
                  Coordinate::DashboardInteractive],
         label: "Esc    Back", is_available: not_at_root, handle: handlers::handle_escape },
     Shortcut { key: Keycode::Escape, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::OperatorGeneral, Coordinate::EditorGeneral,
-                 Coordinate::EditorInsert, Coordinate::EditorNormal,
-                 Coordinate::EditorVisual, Coordinate::OperatorInsert,
+        modes: &[Coordinate::General,
+                 Coordinate::Insert, Coordinate::Normal,
+                 Coordinate::Visual,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
                  Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch,
                  Coordinate::InputSearch, Coordinate::Meta, Coordinate::Dashboard,
@@ -409,25 +421,25 @@ pub static SHORTCUTS: &[Shortcut] = &[
     // ---- PageUp / PageDown -----------------------------------------------
     // Hint only inside providers; dispatch fires everywhere.
     Shortcut { key: Keycode::PageUp, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::OperatorGeneral, Coordinate::EditorGeneral,
+        modes: &[Coordinate::General,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
                  Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch,
                  Coordinate::InputSearch],
         label: "PgUp   Page up", is_available: not_at_root, handle: handlers::handle_page_up },
     Shortcut { key: Keycode::PageUp, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::OperatorGeneral, Coordinate::EditorGeneral,
+        modes: &[Coordinate::General,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
                  Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch,
                  Coordinate::InputSearch],
         label: "", is_available: always, handle: handlers::handle_page_up },
     Shortcut { key: Keycode::PageDown, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::OperatorGeneral, Coordinate::EditorGeneral,
+        modes: &[Coordinate::General,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
                  Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch,
                  Coordinate::InputSearch],
         label: "PgDn   Page dn", is_available: not_at_root, handle: handlers::handle_page_down },
     Shortcut { key: Keycode::PageDown, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::OperatorGeneral, Coordinate::EditorGeneral,
+        modes: &[Coordinate::General,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
                  Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch,
                  Coordinate::InputSearch],
@@ -436,33 +448,33 @@ pub static SHORTCUTS: &[Shortcut] = &[
     // ---- Home / End (no modifier) ----------------------------------------
     // Hint only inside providers; dispatch fires everywhere.
     Shortcut { key: Keycode::Home, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::OperatorGeneral, Coordinate::EditorGeneral,
-                 Coordinate::EditorInsert, Coordinate::EditorNormal,
-                 Coordinate::EditorVisual, Coordinate::OperatorInsert,
+        modes: &[Coordinate::General,
+                 Coordinate::Insert, Coordinate::Normal,
+                 Coordinate::Visual,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
                  Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch,
                  Coordinate::InputSearch],
         label: "Home   First", is_available: not_at_root, handle: handlers::handle_home },
     Shortcut { key: Keycode::Home, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::OperatorGeneral, Coordinate::EditorGeneral,
-                 Coordinate::EditorInsert, Coordinate::EditorNormal,
-                 Coordinate::EditorVisual, Coordinate::OperatorInsert,
+        modes: &[Coordinate::General,
+                 Coordinate::Insert, Coordinate::Normal,
+                 Coordinate::Visual,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
                  Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch,
                  Coordinate::InputSearch],
         label: "", is_available: always, handle: handlers::handle_home },
     Shortcut { key: Keycode::End, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::OperatorGeneral, Coordinate::EditorGeneral,
-                 Coordinate::EditorInsert, Coordinate::EditorNormal,
-                 Coordinate::EditorVisual, Coordinate::OperatorInsert,
+        modes: &[Coordinate::General,
+                 Coordinate::Insert, Coordinate::Normal,
+                 Coordinate::Visual,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
                  Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch,
                  Coordinate::InputSearch],
         label: "End    Last", is_available: not_at_root, handle: handlers::handle_end },
     Shortcut { key: Keycode::End, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::OperatorGeneral, Coordinate::EditorGeneral,
-                 Coordinate::EditorInsert, Coordinate::EditorNormal,
-                 Coordinate::EditorVisual, Coordinate::OperatorInsert,
+        modes: &[Coordinate::General,
+                 Coordinate::Insert, Coordinate::Normal,
+                 Coordinate::Visual,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
                  Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch,
                  Coordinate::InputSearch],
@@ -488,48 +500,48 @@ pub static SHORTCUTS: &[Shortcut] = &[
     Shortcut { key: Keycode::Tab, key2: None, ctrl: false, shift: false,
         modes: GENERAL,
         label: "Tab    Search", is_available: always, handle: handlers::handle_tab },
-    // OperatorInsert Tab
+    // Insert Tab
     Shortcut { key: Keycode::Tab, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::OperatorInsert],
+        modes: &[Coordinate::Insert],
         label: "Tab    Next field", is_available: always, handle: handlers::handle_tab },
 
     // ---- Backspace -------------------------------------------------------
     Shortcut { key: Keycode::Backspace, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: "Bspc   Backspace", is_available: not_at_root, handle: handlers::handle_backspace },
     Shortcut { key: Keycode::Backspace, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::EditorGeneral,
-                 Coordinate::EditorInsert, Coordinate::EditorNormal,
-                 Coordinate::EditorVisual, Coordinate::OperatorInsert,
+        modes: &[Coordinate::General,
+                 Coordinate::Insert, Coordinate::Normal,
+                 Coordinate::Visual,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
                  Coordinate::Command, Coordinate::ScrollSearch, Coordinate::InputSearch],
         label: "Bspc   Backspace", is_available: always, handle: handlers::handle_backspace },
 
     // ---- Delete (forward) ------------------------------------------------
     Shortcut { key: Keycode::Delete, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::EditorInsert, Coordinate::EditorNormal,
-                 Coordinate::EditorVisual, Coordinate::OperatorInsert,
+        modes: &[Coordinate::Insert, Coordinate::Normal,
+                 Coordinate::Visual,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
                  Coordinate::Command, Coordinate::ScrollSearch, Coordinate::InputSearch],
         label: "Del    Delete fwd", is_available: always, handle: handlers::handle_delete_forward },
 
     // ---- Return ----------------------------------------------------------
-    // OperatorGeneral: Enter → activate element
+    // General: Enter → activate element
     Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: "Enter  Follow link", is_available: avail_enter_follow_link,
-        handle: handlers::handle_enter_operator },
+        handle: handlers::handle_enter_general },
     Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: "Enter  Activate", is_available: avail_enter_activate,
-        handle: handlers::handle_enter_operator },
+        handle: handlers::handle_enter_general },
     Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: "Enter  Open", is_available: avail_enter_op,
-        handle: handlers::handle_enter_operator },
-    // EditorGeneral: Enter → append
+        handle: handlers::handle_enter_general },
+    // General: Enter → append
     Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
-        modes: &[Coordinate::EditorGeneral],
+        modes: &[Coordinate::General],
         label: "Enter  Append", is_available: always, handle: handlers::handle_append },
     // Search: Enter → commit search
     Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
@@ -541,39 +553,33 @@ pub static SHORTCUTS: &[Shortcut] = &[
         label: "Enter  Execute", is_available: always, handle: handlers::handle_enter_command },
     // Insert modes: Ctrl+Return → newline
     Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: true, shift: false,
-        modes: &[Coordinate::EditorInsert, Coordinate::OperatorInsert],
+        modes: &[Coordinate::Insert],
         label: "Ctrl+Enter Newline", is_available: always, handle: handlers::handle_ctrl_enter_insert },
-    // EditorNormal: Return → commit + escape (no disk write)
+    // Normal: Return → commit + escape (no disk write)
     Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
-        modes: &[Coordinate::EditorNormal],
-        label: "Enter  Confirm", is_available: always, handle: handlers::handle_return_editor_insert },
-    // EditorInsert / OperatorInsert: Return → commit edit (disk write via provider)
+        modes: &[Coordinate::Normal],
+        label: "Enter  Confirm", is_available: always, handle: handlers::handle_return_in_normal },
+    // Insert / Insert: Return → commit edit (disk write via provider)
     Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
-        modes: &[Coordinate::EditorInsert, Coordinate::OperatorInsert],
-        label: "Enter  Confirm", is_available: always, handle: handlers::handle_enter_editor_insert },
+        modes: &[Coordinate::Insert],
+        label: "Enter  Confirm", is_available: always, handle: handlers::handle_enter_insert },
 
     // ---- Colon / Semicolon+Shift (command mode entry) --------------------
     Shortcut { key: Keycode::Semicolon, key2: None, ctrl: false, shift: true,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: ":      Command", is_available: always, handle: handlers::handle_colon },
     Shortcut { key: Keycode::Colon, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::OperatorGeneral],
-        label: ":      Command", is_available: always, handle: handlers::handle_colon },
-    Shortcut { key: Keycode::Semicolon, key2: None, ctrl: false, shift: true,
-        modes: &[Coordinate::EditorGeneral],
-        label: ":      Command", is_available: always, handle: handlers::handle_colon },
-    Shortcut { key: Keycode::Colon, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::EditorGeneral],
+        modes: &[Coordinate::General],
         label: ":      Command", is_available: always, handle: handlers::handle_colon },
 
     // ---- I / A (enter insert/append mode) --------------------------------
-    // Editor provider: i/a enter EditorInsert so commit_edit fires on Enter → writes to disk.
+    // Editor provider: i/a enter Insert so commit_edit fires on Enter → writes to disk.
     // These rows must precede the generic avail_insert_on_input rows to take priority.
     Shortcut { key: Keycode::I, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::EditorGeneral],
+        modes: &[Coordinate::General],
         label: "I      Edit", is_available: avail_editor_edit, handle: handlers::handle_editor_provider_i },
     Shortcut { key: Keycode::A, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::EditorGeneral],
+        modes: &[Coordinate::General],
         label: "A      Append", is_available: avail_editor_edit, handle: handlers::handle_editor_provider_a },
     // Generic i/a for filebrowser and other providers with <input> elements.
     Shortcut { key: Keycode::I, key2: None, ctrl: false, shift: false,
@@ -590,39 +596,32 @@ pub static SHORTCUTS: &[Shortcut] = &[
         label: "A      Append", is_available: avail_insert_on_input, handle: handlers::handle_a },
 
     // ---- Ctrl+I / Ctrl+A (structural insert/append) ----------------------
-    // OperatorGeneral: insert/append placeholder
+    // General: insert/append placeholder
     Shortcut { key: Keycode::I, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: "Ctrl+I Insert before", is_available: avail_structural_edit,
-        handle: handlers::handle_ctrl_i_operator },
+        handle: handlers::handle_ctrl_i_general },
     Shortcut { key: Keycode::A, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: "Ctrl+A Insert after", is_available: avail_structural_edit,
-        handle: handlers::handle_ctrl_a_operator },
-    // EditorGeneral, editor provider: custom insert/append (file-line or dir-placeholder).
+        handle: handlers::handle_ctrl_a_general },
+    // General, editor provider: custom insert/append (file-line or dir-placeholder).
     // Must precede the generic ctrl_i_editor / ctrl_a_editor rows.
     Shortcut { key: Keycode::I, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::EditorGeneral],
+        modes: &[Coordinate::General],
         label: "Ctrl+I Insert before", is_available: avail_editor_edit,
         handle: handlers::handle_editor_ctrl_i },
     Shortcut { key: Keycode::A, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::EditorGeneral],
+        modes: &[Coordinate::General],
         label: "Ctrl+A Insert after", is_available: avail_editor_edit,
         handle: handlers::handle_editor_ctrl_a },
-    // EditorGeneral: generic insert/append with double-tap undo (non-editor providers)
-    Shortcut { key: Keycode::I, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::EditorGeneral],
-        label: "Ctrl+I Insert before", is_available: avail_structural_edit, handle: ctrl_i_editor },
-    Shortcut { key: Keycode::A, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::EditorGeneral],
-        label: "Ctrl+A Insert after", is_available: avail_structural_edit, handle: ctrl_a_editor },
-    // EditorInsert: Ctrl+Shift+I/A — escape, insert/append, re-enter insert
+    // Insert: Ctrl+Shift+I/A — escape, insert/append, re-enter insert
     Shortcut { key: Keycode::I, key2: None, ctrl: true, shift: true,
-        modes: &[Coordinate::EditorInsert],
+        modes: &[Coordinate::Insert],
         label: "Ctrl+Shift+I Insert before", is_available: avail_structural_edit,
         handle: handlers::handle_ctrl_shift_i_insert },
     Shortcut { key: Keycode::A, key2: None, ctrl: true, shift: true,
-        modes: &[Coordinate::EditorInsert],
+        modes: &[Coordinate::Insert],
         label: "Ctrl+Shift+A Insert after", is_available: avail_structural_edit,
         handle: handlers::handle_ctrl_shift_a_insert },
     // Search/Insert/Command: Ctrl+A → select all
@@ -630,126 +629,123 @@ pub static SHORTCUTS: &[Shortcut] = &[
         modes: TEXT,
         label: "Ctrl+A Select all", is_available: always, handle: handlers::handle_select_all },
 
-    // ---- Space -----------------------------------------------------------
-    // Toggle operator/editor mode (always available, shown as hint; fires when not already a label match)
-    Shortcut { key: Keycode::Space, key2: None, ctrl: false, shift: false,
-        modes: GENERAL,
-        label: "Space  Toggle operator/editor mode", is_available: always,
-        handle: handlers::handle_space },
-
     // ---- D ---------------------------------------------------------------
     Shortcut { key: Keycode::D, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: "D      Dashboard", is_available: has_dashboard,
         handle: handlers::handle_dashboard },
     Shortcut { key: Keycode::D, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: "", is_available: always, handle: handlers::handle_dashboard },
 
     // ---- S (enter scroll mode) -------------------------------------------
+    // Suppressed for editor providers (which manage their own buffer view).
     Shortcut { key: Keycode::S, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::OperatorGeneral],
-        label: "S      Scroll", is_available: not_at_root, handle: handlers::handle_s },
+        modes: &[Coordinate::General],
+        label: "S      Scroll", is_available: avail_scroll_key, handle: handlers::handle_s },
 
     // ---- M (enter meta/hint screen) --------------------------------------
+    // Suppressed for editor providers (vim conventions reserve M for jumps).
     Shortcut { key: Keycode::M, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::OperatorGeneral],
-        label: "M      Meta", is_available: always, handle: handlers::handle_meta },
+        modes: &[Coordinate::General],
+        label: "M      Meta", is_available: avail_meta_key, handle: handlers::handle_meta },
 
     // ---- Ctrl+D / Delete key → provider delete command (email message delete) ----
     // These must come before the editor/filebrowser Ctrl+D rows so they win when
     // the active provider advertises "delete" (e.g. email client in folder/message view).
     Shortcut { key: Keycode::D, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: "Ctrl+D Delete", is_available: avail_provider_has_delete,
         handle: handlers::invoke_provider_delete },
     Shortcut { key: Keycode::Delete, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: "Del    Delete", is_available: avail_provider_has_delete,
         handle: handlers::invoke_provider_delete },
 
-    // ---- Ctrl+D / Delete in EditorGeneral for editor provider -----------
+    // ---- Ctrl+D / Delete in General for editor provider -----------
     // Routes to handle_file_delete so the provider's delete_item is called (writes to disk).
     // Must precede the generic delete_editor rows so editor provider wins.
     Shortcut { key: Keycode::D, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::EditorGeneral],
+        modes: &[Coordinate::General],
         label: "Ctrl+D Delete", is_available: avail_editor_edit,
         handle: handlers::handle_file_delete },
     Shortcut { key: Keycode::Delete, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::EditorGeneral],
+        modes: &[Coordinate::General],
         label: "Del    Delete", is_available: avail_editor_edit,
         handle: handlers::handle_file_delete },
 
-    // ---- Ctrl+D (delete FFON element in EditorGeneral) ------------------
+    // ---- Ctrl+D (delete FFON element in General) ------------------
+    // Only fires for compose body / has_add_element_sibling providers.
+    // Filebrowser/editor have dedicated file-delete rows above.
     Shortcut { key: Keycode::D, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::EditorGeneral],
-        label: "Ctrl+D Delete", is_available: avail_structural_edit,
+        modes: &[Coordinate::General],
+        label: "Ctrl+D Delete", is_available: avail_ffon_delete,
         handle: delete_editor },
-    // OperatorGeneral Ctrl+D → compose body element delete (before filebrowser entry)
+    // General Ctrl+D → compose body element delete (before filebrowser entry)
     Shortcut { key: Keycode::D, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: "Ctrl+D Delete", is_available: avail_compose_body_edit,
         handle: handlers::handle_delete_body_element },
-    // OperatorGeneral Ctrl+D → file delete
+    // General Ctrl+D → file delete
     Shortcut { key: Keycode::D, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: "Ctrl+D Delete", is_available: avail_file_delete, handle: handlers::handle_file_delete },
 
-    // ---- Delete key (file delete in OperatorGeneral) --------------------
+    // ---- Delete key (file delete in General) --------------------
     // Compose body delete (before filebrowser entry)
     Shortcut { key: Keycode::Delete, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: "Del    Delete", is_available: avail_compose_body_edit,
         handle: handlers::handle_delete_body_element },
     Shortcut { key: Keycode::Delete, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: "Del    Delete", is_available: avail_file_delete,
         handle: handlers::handle_file_delete },
 
     // ---- Ctrl+X / C / V -------------------------------------------------
-    // OperatorGeneral: compose body clipboard (before filebrowser entries)
+    // General: compose body clipboard (before filebrowser entries)
     Shortcut { key: Keycode::X, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: "Ctrl+X Cut", is_available: avail_compose_body_edit,
         handle: handlers::handle_ctrl_x },
     Shortcut { key: Keycode::C, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: "Ctrl+C Copy", is_available: avail_compose_body_edit,
         handle: handlers::handle_ctrl_c },
     Shortcut { key: Keycode::V, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: "Ctrl+V Paste", is_available: avail_compose_body_edit,
         handle: handlers::handle_ctrl_v },
-    // OperatorGeneral: filebrowser file clipboard (show hint)
+    // General: filebrowser file clipboard (show hint)
     Shortcut { key: Keycode::X, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: "Ctrl+X Cut", is_available: avail_file_clipboard,
         handle: handlers::handle_ctrl_x },
     Shortcut { key: Keycode::C, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: "Ctrl+C Copy", is_available: avail_file_clipboard,
         handle: handlers::handle_ctrl_c },
     Shortcut { key: Keycode::V, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: "Ctrl+V Paste", is_available: avail_file_clipboard,
         handle: handlers::handle_ctrl_v },
-    // EditorGeneral + text modes: clipboard (dispatch always, hint for structural contexts)
+    // General + text modes: clipboard (dispatch always, hint for structural contexts)
     Shortcut { key: Keycode::X, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::EditorGeneral],
+        modes: &[Coordinate::General],
         label: "Ctrl+X Cut", is_available: avail_structural_edit,
         handle: handlers::handle_ctrl_x },
     Shortcut { key: Keycode::X, key2: None, ctrl: true, shift: false,
         modes: TEXT,
         label: "Ctrl+X Cut", is_available: always, handle: handlers::handle_ctrl_x },
     Shortcut { key: Keycode::C, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::EditorGeneral],
+        modes: &[Coordinate::General],
         label: "Ctrl+C Copy", is_available: avail_structural_edit,
         handle: handlers::handle_ctrl_c },
     Shortcut { key: Keycode::C, key2: None, ctrl: true, shift: false,
         modes: TEXT,
         label: "Ctrl+C Copy", is_available: always, handle: handlers::handle_ctrl_c },
     Shortcut { key: Keycode::V, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::EditorGeneral],
+        modes: &[Coordinate::General],
         label: "Ctrl+V Paste", is_available: avail_structural_edit,
         handle: handlers::handle_ctrl_v },
     Shortcut { key: Keycode::V, key2: None, ctrl: true, shift: false,
@@ -758,9 +754,9 @@ pub static SHORTCUTS: &[Shortcut] = &[
 
     // ---- Ctrl+F (extended search) ----------------------------------------
     Shortcut { key: Keycode::F, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::OperatorGeneral, Coordinate::EditorGeneral,
-                 Coordinate::EditorInsert, Coordinate::EditorNormal,
-                 Coordinate::EditorVisual, Coordinate::OperatorInsert,
+        modes: &[Coordinate::General,
+                 Coordinate::Insert, Coordinate::Normal,
+                 Coordinate::Visual,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
                  Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch,
                  Coordinate::InputSearch],
@@ -769,13 +765,13 @@ pub static SHORTCUTS: &[Shortcut] = &[
 
     // ---- Ctrl+Z / Ctrl+Shift+Z (undo / redo) ----------------------------
     Shortcut { key: Keycode::Z, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: "Ctrl+Z Undo", is_available: not_at_root, handle: handlers::handle_undo },
     Shortcut { key: Keycode::Z, key2: None, ctrl: true, shift: false,
         modes: UNDO_MODES_ALL,
         label: "Ctrl+Z Undo", is_available: always, handle: handlers::handle_undo },
     Shortcut { key: Keycode::Z, key2: None, ctrl: true, shift: true,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: "Ctrl+Shift+Z Redo", is_available: not_at_root, handle: handlers::handle_redo },
     Shortcut { key: Keycode::Z, key2: None, ctrl: true, shift: true,
         modes: UNDO_MODES_ALL,
@@ -783,36 +779,36 @@ pub static SHORTCUTS: &[Shortcut] = &[
 
     // ---- F5 (refresh) ----------------------------------------------------
     Shortcut { key: Keycode::F5, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: "F5     Refresh", is_available: always, handle: handlers::handle_f5 },
     Shortcut { key: Keycode::F5, key2: None, ctrl: false, shift: false,
-        modes: &[Coordinate::EditorGeneral],
+        modes: &[Coordinate::General],
         label: "F5     Refresh", is_available: always, handle: handlers::handle_f5 },
 
     // ---- Ctrl+S / Ctrl+Shift+S / Ctrl+O (config file ops) ---------------
     // Hints only inside providers; dispatch fires anywhere the provider supports it.
     Shortcut { key: Keycode::S, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: "Ctrl+S Save", is_available: supports_config_files_hint,
         handle: handlers::handle_save_provider_config },
     Shortcut { key: Keycode::S, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: "", is_available: supports_config_files,
         handle: handlers::handle_save_provider_config },
     Shortcut { key: Keycode::S, key2: None, ctrl: true, shift: true,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: "Ctrl+Shift+S Save as", is_available: supports_config_files_hint,
         handle: handlers::handle_save_as_provider_config },
     Shortcut { key: Keycode::S, key2: None, ctrl: true, shift: true,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: "", is_available: supports_config_files,
         handle: handlers::handle_save_as_provider_config },
     Shortcut { key: Keycode::O, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: "Ctrl+O Open", is_available: supports_config_files_hint,
         handle: handlers::handle_file_browser_open },
     Shortcut { key: Keycode::O, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::OperatorGeneral],
+        modes: &[Coordinate::General],
         label: "", is_available: supports_config_files,
         handle: handlers::handle_file_browser_open },
 
@@ -846,11 +842,11 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
         return false;
     }
 
-    // During the file-browser-open dialog restrict OperatorGeneral/EditorGeneral
+    // During the file-browser-open dialog restrict General/General
     // to navigation + selection only (same semantics as the original pre-filter).
     if r.pending_file_browser_open {
         match r.coordinate {
-            Coordinate::OperatorGeneral | Coordinate::EditorGeneral => {
+            Coordinate::General => {
                 const ALLOWED: &[Keycode] = &[
                     Keycode::Up, Keycode::K, Keycode::Down, Keycode::J,
                     Keycode::Right, Keycode::L, Keycode::Left, Keycode::H,
@@ -982,29 +978,14 @@ mod tests {
     // --- dispatch correctness ---
 
     #[test]
-    fn tab_in_operator_switches_to_simple_search() {
+    fn tab_in_general_switches_to_simple_search() {
         let mut r = AppRenderer::new();
         dispatch_key(&mut r, Some(Keycode::Tab), no_mod());
         assert_eq!(r.coordinate, Coordinate::SimpleSearch);
     }
 
     #[test]
-    fn space_in_operator_switches_to_editor() {
-        let mut r = AppRenderer::new();
-        dispatch_key(&mut r, Some(Keycode::Space), no_mod());
-        assert_eq!(r.coordinate, Coordinate::EditorGeneral);
-    }
-
-    #[test]
-    fn space_in_editor_switches_to_operator() {
-        let mut r = AppRenderer::new();
-        r.coordinate = Coordinate::EditorGeneral;
-        dispatch_key(&mut r, Some(Keycode::Space), no_mod());
-        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
-    }
-
-    #[test]
-    fn ctrl_f_in_operator_switches_to_extended_search() {
+    fn ctrl_f_in_general_switches_to_extended_search() {
         let mut r = AppRenderer::new();
         dispatch_key(&mut r, Some(Keycode::F), ctrl());
         assert_eq!(r.coordinate, Coordinate::ExtendedSearch);
@@ -1025,11 +1006,11 @@ mod tests {
     }
 
     #[test]
-    fn escape_in_editor_insert_returns_to_editor_general() {
+    fn escape_in_insert_returns_to_general() {
         let mut r = AppRenderer::new();
-        r.coordinate = Coordinate::EditorInsert;
+        r.coordinate = Coordinate::Insert;
         dispatch_key(&mut r, Some(Keycode::Escape), no_mod());
-        assert_eq!(r.coordinate, Coordinate::EditorGeneral);
+        assert_eq!(r.coordinate, Coordinate::General);
     }
 
     // --- hints ---
@@ -1055,8 +1036,8 @@ mod tests {
     #[test]
     fn hints_for_in_insert_mode_has_navigation_and_editing() {
         let mut r = AppRenderer::new();
-        r.coordinate = Coordinate::EditorInsert;
-        // Simulate being inside a provider (EditorInsert always happens at depth > 1).
+        r.coordinate = Coordinate::Insert;
+        // Simulate being inside a provider (Insert always happens at depth > 1).
         r.current_id.push(0);
         r.current_id.push(0);
         let hints = hints_for(&r);

@@ -14,10 +14,9 @@ use tracing;
 fn is_insert_mode(c: Coordinate) -> bool {
     matches!(
         c,
-        Coordinate::EditorInsert
-            | Coordinate::EditorNormal
-            | Coordinate::EditorVisual
-            | Coordinate::OperatorInsert
+        Coordinate::Insert
+            | Coordinate::Normal
+            | Coordinate::Visual
             | Coordinate::SimpleSearch
             | Coordinate::ExtendedSearch
             | Coordinate::Command
@@ -615,7 +614,7 @@ fn update_view(app: &mut AppState) {
     // Snapshot insert-mode state before mutable borrows
     let in_insert_mode = matches!(
         app.renderer.coordinate,
-        Coordinate::EditorInsert | Coordinate::EditorNormal | Coordinate::EditorVisual | Coordinate::OperatorInsert
+        Coordinate::Insert | Coordinate::Normal | Coordinate::Visual
     );
     let insert_buf = app.renderer.input_buffer.clone();
     let insert_prefix = app.renderer.input_prefix.clone();

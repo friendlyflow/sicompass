@@ -474,9 +474,7 @@ impl Provider for EditorProvider {
         self.current_fs_path == self.root_path() && self.ffon_sub_path.is_empty()
     }
 
-    fn preferred_coordinate_kind(&self) -> sicompass_sdk::CoordinateKind {
-        sicompass_sdk::CoordinateKind::Editor
-    }
+    fn has_editor_semantics(&self) -> bool { true }
 
     fn refresh_on_navigate(&self) -> bool { true }
 
@@ -778,9 +776,9 @@ mod tests {
     }
 
     #[test]
-    fn editor_provider_preferred_coordinate_kind_is_editor() {
+    fn editor_provider_has_editor_semantics() {
         let p = EditorProvider::new();
-        assert_eq!(p.preferred_coordinate_kind(), sicompass_sdk::CoordinateKind::Editor);
+        assert!(p.has_editor_semantics());
     }
 
     // ---- directory create / delete / rename --------------------------------
@@ -1035,7 +1033,7 @@ mod tests {
         p.push_path("new.txt");
         p.fetch();
 
-        // Empty `old` mirrors what handle_enter_editor_insert sends when the
+        // Empty `old` mirrors what handle_enter_insert sends when the
         // active element is the I_PLACEHOLDER (`<input></input>` is empty).
         assert!(p.commit_edit("", "hello"));
 

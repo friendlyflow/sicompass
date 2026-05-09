@@ -44,7 +44,7 @@ pub fn handle_up(r: &mut AppRenderer) {
             }
             r.needs_redraw = true;
         }
-        Coordinate::EditorInsert | Coordinate::OperatorInsert => {
+        Coordinate::Insert => {
             r.needs_redraw = true;
         }
         _ => {
@@ -92,7 +92,7 @@ pub fn handle_down(r: &mut AppRenderer) {
             }
             r.needs_redraw = true;
         }
-        Coordinate::EditorInsert | Coordinate::OperatorInsert => {
+        Coordinate::Insert => {
             // noop in insert modes
         }
         _ => {
@@ -131,33 +131,10 @@ fn find_id_path(arr: &[FfonElement], base_id: &IdArray, target: &str) -> Option<
     None
 }
 
-/// Apply the active provider's preferred coordinate when entering or leaving a
-/// provider root (depth 1 ↔ 2 crossing). Only fires when already in a General
-/// variant so Insert/Search/Command/Scroll states are never clobbered.
-fn sync_coordinate_to_provider(r: &mut AppRenderer) {
-    if !r.coordinate.is_general() { return; }
-    let target = match r.current_id.depth() {
-        1 => Coordinate::OperatorGeneral,
-        _ => {
-            let provider_idx = match r.current_id.get(0) {
-                Some(i) => i,
-                None => return,
-            };
-            let kind = r.providers
-                .get(provider_idx)
-                .map(|p| p.preferred_coordinate_kind())
-                .unwrap_or_default();
-            Coordinate::general_for_kind(kind)
-        }
-    };
-    r.coordinate = target;
-}
-
 /// Navigate into the item at `r.current_id` without rebuilding the list.
 /// Returns `true` if navigation happened.
 pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
     let item_id = r.current_id.clone();
-    let depth_before = item_id.depth();
 
     if !next_layer_exists(&r.ffon, &item_id) {
         return false;
@@ -275,10 +252,6 @@ pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
         }
     }
 
-    // Entering a provider (root → depth 2): switch to its preferred coordinate.
-    if depth_before == 1 && r.current_id.depth() == 2 {
-        sync_coordinate_to_provider(r);
-    }
 
     true
 }
@@ -503,10 +476,6 @@ pub fn navigate_left_raw(r: &mut AppRenderer) -> bool {
         }
     }
 
-    // Crossing depth 2 → 1 (leaving provider): switch back to OperatorGeneral.
-    // Staying within a provider: re-confirm its preferred coordinate (no-op if unchanged).
-    sync_coordinate_to_provider(r);
-
     true
 }
 
@@ -572,7 +541,7 @@ fn step_forward_by_lines(line_counts: &[usize], cur: usize, max_id: usize, budge
 /// Page up (scroll a full screen up).
 pub fn handle_page_up(r: &mut AppRenderer) {
     match r.coordinate {
-        Coordinate::EditorInsert | Coordinate::OperatorInsert => return,
+        Coordinate::Insert => return,
         _ => {}
     }
 
@@ -598,7 +567,7 @@ pub fn handle_page_up(r: &mut AppRenderer) {
             r.scroll_offset = r.list_index as i32;
             r.speak_current_element();
         }
-        Coordinate::OperatorGeneral | Coordinate::EditorGeneral => {
+        Coordinate::General => {
             if let Some(slice) = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id) {
                 let max_id = slice.len().saturating_sub(1);
                 let cur = r.current_id.last().unwrap_or(0).min(max_id);
@@ -620,7 +589,7 @@ pub fn handle_page_up(r: &mut AppRenderer) {
 /// Page down (scroll a full screen down).
 pub fn handle_page_down(r: &mut AppRenderer) {
     match r.coordinate {
-        Coordinate::EditorInsert | Coordinate::OperatorInsert => return,
+        Coordinate::Insert => return,
         _ => {}
     }
 
@@ -652,7 +621,7 @@ pub fn handle_page_down(r: &mut AppRenderer) {
                 r.speak_current_element();
             }
         }
-        Coordinate::OperatorGeneral | Coordinate::EditorGeneral => {
+        Coordinate::General => {
             if let Some(slice) = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id) {
                 let max_id = slice.len().saturating_sub(1);
                 let cur = r.current_id.last().unwrap_or(0);
@@ -701,14 +670,14 @@ pub fn handle_ctrl_end(r: &mut AppRenderer) {
 
 /// Enter insert mode (cursor at start) on the current item.
 pub fn handle_i(r: &mut AppRenderer) {
-    if !matches!(r.coordinate, Coordinate::EditorGeneral | Coordinate::OperatorGeneral) {
+    if !matches!(r.coordinate, Coordinate::General) {
         return;
     }
     r.previous_coordinate = r.coordinate;
-    r.coordinate = if r.coordinate == Coordinate::OperatorGeneral {
-        Coordinate::OperatorInsert
+    r.coordinate = if r.coordinate == Coordinate::General {
+        Coordinate::Insert
     } else {
-        Coordinate::EditorInsert
+        Coordinate::Insert
     };
     populate_input_buffer(r);
     // Detect permanent `*` placeholder elements (e.g. from email compose body).
@@ -726,14 +695,14 @@ pub fn handle_i(r: &mut AppRenderer) {
 
 /// Enter append mode (cursor at end) on the current item.
 pub fn handle_a(r: &mut AppRenderer) {
-    if !matches!(r.coordinate, Coordinate::EditorGeneral | Coordinate::OperatorGeneral) {
+    if !matches!(r.coordinate, Coordinate::General) {
         return;
     }
     r.previous_coordinate = r.coordinate;
-    r.coordinate = if r.coordinate == Coordinate::OperatorGeneral {
-        Coordinate::OperatorInsert
+    r.coordinate = if r.coordinate == Coordinate::General {
+        Coordinate::Insert
     } else {
-        Coordinate::EditorInsert
+        Coordinate::Insert
     };
     populate_input_buffer(r);
     // Detect permanent `*` placeholder elements (e.g. from email compose body).
@@ -748,26 +717,9 @@ pub fn handle_a(r: &mut AppRenderer) {
     r.needs_redraw = true;
 }
 
-/// Toggle between OperatorGeneral and EditorGeneral (Space key).
-pub fn handle_space(r: &mut AppRenderer) {
-    match r.coordinate {
-        Coordinate::OperatorGeneral => {
-            r.previous_coordinate = r.coordinate;
-            r.coordinate = Coordinate::EditorGeneral;
-        }
-        Coordinate::EditorGeneral => {
-            r.previous_coordinate = r.coordinate;
-            r.coordinate = Coordinate::OperatorGeneral;
-        }
-        _ => return,
-    }
-    r.speak_mode_change(None);
-    r.needs_redraw = true;
-}
-
-/// Enter scroll mode (S key in OperatorGeneral).
+/// Enter scroll mode (S key in General).
 pub fn handle_s(r: &mut AppRenderer) {
-    if r.coordinate != Coordinate::OperatorGeneral {
+    if r.coordinate != Coordinate::General {
         return;
     }
     r.previous_coordinate = r.coordinate;
@@ -778,9 +730,9 @@ pub fn handle_s(r: &mut AppRenderer) {
     r.needs_redraw = true;
 }
 
-/// Navigate into / out of the meta object (M key in OperatorGeneral).
+/// Navigate into / out of the meta object (M key in General).
 pub fn handle_meta(r: &mut AppRenderer) {
-    if r.coordinate != Coordinate::OperatorGeneral {
+    if r.coordinate != Coordinate::General {
         return;
     }
 
@@ -798,7 +750,7 @@ pub fn handle_tab(r: &mut AppRenderer) {
         Coordinate::Scroll | Coordinate::ScrollSearch => {
             // noop in scroll modes
         }
-        Coordinate::OperatorGeneral | Coordinate::OperatorInsert | Coordinate::EditorGeneral => {
+        Coordinate::General | Coordinate::Insert => {
             r.previous_coordinate = r.coordinate;
             r.search_origin_id = r.current_id.clone();
             r.coordinate = Coordinate::SimpleSearch;
@@ -902,7 +854,7 @@ pub fn handle_enter_command(r: &mut AppRenderer) {
                     });
                 }
                 r.current_command = CommandPhase::None;
-                r.coordinate = Coordinate::OperatorGeneral;
+                r.coordinate = Coordinate::General;
                 list::create_list_current_layer(r);
                 r.list_index = r.current_id.last().unwrap_or(0);
                 r.scroll_offset = 0;
@@ -911,7 +863,7 @@ pub fn handle_enter_command(r: &mut AppRenderer) {
             } else if !r.error_message.is_empty() {
                 // Provider set an error
                 r.current_command = CommandPhase::None;
-                r.coordinate = Coordinate::OperatorGeneral;
+                r.coordinate = Coordinate::General;
                 r.speak_mode_change(None);
                 list::create_list_current_layer(r);
                 r.needs_redraw = true;
@@ -927,7 +879,7 @@ pub fn handle_enter_command(r: &mut AppRenderer) {
                     r.current_command = CommandPhase::None;
                     r.coordinate = r.previous_coordinate;
                     r.speak_mode_change(None);
-                    r.previous_coordinate = Coordinate::OperatorGeneral;
+                    r.previous_coordinate = Coordinate::General;
 
                     // Navigate back to provider root if deeper (matches C: while depth > 2)
                     while r.current_id.depth() > 2 {
@@ -964,20 +916,20 @@ pub fn handle_enter_command(r: &mut AppRenderer) {
     }
 }
 
-/// Append a new empty element after the current one (Ctrl+A / Enter in EditorGeneral).
+/// Append a new empty element after the current one (Ctrl+A / Enter in General).
 pub fn handle_append(r: &mut AppRenderer) {
     crate::state::update_state(r, Task::Append, History::None);
     r.needs_redraw = true;
 }
 
-/// Insert a new empty element before the current one (Ctrl+I in EditorGeneral).
+/// Insert a new empty element before the current one (Ctrl+I in General).
 pub fn handle_insert(r: &mut AppRenderer) {
     crate::state::update_state(r, Task::Insert, History::None);
     r.needs_redraw = true;
 }
 
-/// Enter in OperatorGeneral — toggle checkbox/radio, activate input, or open file.
-pub fn handle_enter_operator(r: &mut AppRenderer) {
+/// Enter in General — toggle checkbox/radio, activate input, or open file.
+pub fn handle_enter_general(r: &mut AppRenderer) {
     use sicompass_sdk::ffon::{FfonElement, get_ffon_at_id};
     use sicompass_sdk::tags;
 
@@ -1220,9 +1172,9 @@ pub fn handle_enter_search(r: &mut AppRenderer) {
     r.needs_redraw = true;
 
     // If a file-browser open is pending, immediately process the selected item as a
-    // file to load (same logic as Enter in OperatorGeneral).
+    // file to load (same logic as Enter in General).
     if r.pending_file_browser_open {
-        handle_enter_operator(r);
+        handle_enter_general(r);
     }
 }
 
@@ -1487,13 +1439,13 @@ fn toggle_radio(r: &mut AppRenderer) -> bool {
     true
 }
 
-/// Commit the input buffer to the active provider (Enter in EditorInsert / OperatorInsert).
+/// Commit the input buffer to the active provider (Enter in Insert / Insert).
 ///
 /// For elements with `<input>` or `<input-all>` tags, calls `commit_edit` on
 /// the provider with old/new content, then updates the FFON element and exits
 /// insert mode. Falls back to a direct FFON update for providers without
 /// `commit_edit` support.
-pub fn handle_enter_editor_insert(r: &mut AppRenderer) {
+pub fn handle_enter_insert(r: &mut AppRenderer) {
     use sicompass_sdk::ffon::{FfonElement, get_ffon_at_id};
     use sicompass_sdk::tags;
 
@@ -1731,9 +1683,9 @@ pub fn handle_enter_editor_insert(r: &mut AppRenderer) {
         let return_id = r.save_as_return_id.clone();
         r.current_id = return_id;
         r.pending_file_browser_save_as = false;
-        r.coordinate = Coordinate::OperatorGeneral;
+        r.coordinate = Coordinate::General;
         r.speak_mode_change(None);
-        r.previous_coordinate = Coordinate::OperatorGeneral;
+        r.previous_coordinate = Coordinate::General;
         r.input_buffer.clear();
         r.cursor_position = 0;
 
@@ -1848,9 +1800,9 @@ pub fn handle_enter_editor_insert(r: &mut AppRenderer) {
                     }
                 }
             }
-            r.coordinate = Coordinate::OperatorGeneral;
+            r.coordinate = Coordinate::General;
             r.speak_mode_change(None);
-            r.previous_coordinate = Coordinate::OperatorGeneral;
+            r.previous_coordinate = Coordinate::General;
             r.input_buffer.clear();
             r.cursor_position = 0;
             r.list_index = r.current_id.last().unwrap_or(0);
@@ -1883,9 +1835,9 @@ pub fn handle_enter_editor_insert(r: &mut AppRenderer) {
                     }
                 }
             }
-            r.coordinate = Coordinate::OperatorGeneral;
+            r.coordinate = Coordinate::General;
             r.speak_mode_change(None);
-            r.previous_coordinate = Coordinate::OperatorGeneral;
+            r.previous_coordinate = Coordinate::General;
             r.input_buffer.clear();
             r.cursor_position = 0;
             r.list_index = r.current_id.last().unwrap_or(0);
@@ -2043,10 +1995,10 @@ pub fn handle_enter_editor_insert(r: &mut AppRenderer) {
     }
 
     // On a successful commit, restore the coordinate the user was in before
-    // entering OperatorInsert — `handle_escape`'s OperatorInsert branch hard-
-    // codes a transition to OperatorGeneral, which would prevent subsequent
+    // entering Insert — `handle_escape`'s Insert branch hard-
+    // codes a transition to General, which would prevent subsequent
     // editor-specific shortcuts (e.g. Ctrl+A in an editor file view) from
-    // matching their EditorGeneral-only bindings on the next keystroke. The
+    // matching their General-only bindings on the next keystroke. The
     // failure path still falls through to `handle_escape` so a not-yet-saved
     // placeholder can be cleaned up via `placeholder_cancel`.
     if committed {
@@ -2204,20 +2156,11 @@ fn try_cancel_inserted_placeholder(r: &mut AppRenderer, target_general: Coordina
     true
 }
 
-/// Return to the previous/operator mode (Escape).
+/// Return to the previous mode (Escape).
 pub fn handle_escape(r: &mut AppRenderer) {
     clear_selection(r);
     match r.coordinate {
-        Coordinate::EditorInsert => {
-            if try_cancel_inserted_placeholder(r, Coordinate::EditorGeneral) { return; }
-            // Discard the input buffer (Esc cancels) and return to EditorGeneral.
-            r.placeholder_insert_mode = false;
-            r.prefixed_insert_mode = false;
-            r.input_buffer.clear();
-            r.cursor_position = 0;
-            r.coordinate = Coordinate::EditorGeneral;
-        }
-        Coordinate::OperatorInsert => {
+        Coordinate::Insert => {
             // Cancel file-browser save-as: remove placeholder and return to source provider
             if r.pending_file_browser_save_as {
                 use sicompass_sdk::ffon::FfonElement;
@@ -2243,9 +2186,9 @@ pub fn handle_escape(r: &mut AppRenderer) {
                 let return_id = r.save_as_return_id.clone();
                 r.current_id = return_id;
                 r.pending_file_browser_save_as = false;
-                r.coordinate = Coordinate::OperatorGeneral;
+                r.coordinate = Coordinate::General;
                 r.speak_mode_change(None);
-                r.previous_coordinate = Coordinate::OperatorGeneral;
+                r.previous_coordinate = Coordinate::General;
                 r.input_buffer.clear();
                 r.cursor_position = 0;
                 list::create_list_current_layer(r);
@@ -2255,11 +2198,13 @@ pub fn handle_escape(r: &mut AppRenderer) {
                 r.needs_redraw = true;
                 return;
             }
-            if try_cancel_inserted_placeholder(r, Coordinate::OperatorGeneral) { return; }
-            // Discard changes, return to OperatorGeneral (e.g. pressing `i` on a
-            // persistent I_PLACEHOLDER — nothing was inserted, just clear the flag).
+            if try_cancel_inserted_placeholder(r, Coordinate::General) { return; }
+            // Discard the input buffer (Esc cancels) and return to General.
             r.placeholder_insert_mode = false;
-            r.coordinate = Coordinate::OperatorGeneral;
+            r.prefixed_insert_mode = false;
+            r.input_buffer.clear();
+            r.cursor_position = 0;
+            r.coordinate = Coordinate::General;
         }
         Coordinate::Command => {
             r.coordinate = r.previous_coordinate;
@@ -2357,15 +2302,9 @@ pub fn handle_escape(r: &mut AppRenderer) {
                 r.needs_redraw = true;
                 return;
             }
-            // EditorGeneral, EditorNormal, EditorVisual, OperatorGeneral, etc.
-            // Go to previous if it was an operator mode, else editor
-            if r.previous_coordinate == Coordinate::OperatorGeneral
-                || r.previous_coordinate == Coordinate::OperatorInsert
-            {
-                r.coordinate = Coordinate::OperatorGeneral;
-            } else {
-                r.coordinate = Coordinate::EditorGeneral;
-            }
+            // Fallback for any remaining mode (Scroll/Search/etc. were handled above):
+            // return to General.
+            r.coordinate = Coordinate::General;
         }
     }
     r.speak_mode_change(None);
@@ -2424,7 +2363,7 @@ pub fn handle_input(r: &mut AppRenderer, text: &str) {
             r.speak_current_element();
             r.needs_redraw = true;
         }
-        Coordinate::EditorInsert | Coordinate::OperatorInsert => {
+        Coordinate::Insert => {
             // Replace selection if active
             if has_selection(r) { delete_selection(r); }
             // Insert text at cursor position (byte offset)
@@ -2476,7 +2415,7 @@ pub fn handle_backspace(r: &mut AppRenderer) {
                 r.needs_redraw = true;
             }
         }
-        Coordinate::Command | Coordinate::EditorInsert | Coordinate::OperatorInsert | Coordinate::ScrollSearch | Coordinate::ExtendedSearch => {
+        Coordinate::Command | Coordinate::Insert | Coordinate::ScrollSearch | Coordinate::ExtendedSearch => {
             if has_selection(r) {
                 delete_selection(r);
                 r.caret.reset(sdl_ticks());
@@ -2785,7 +2724,7 @@ pub fn handle_file_paste(r: &mut AppRenderer) {
     r.needs_redraw = true;
 }
 
-/// Ctrl+A in EditorGeneral — double-tap undo+append.
+/// Ctrl+A in General — double-tap undo+append.
 ///
 /// A single tap appends a new element after the current one.
 /// A double tap (within DELTA_MS) undoes the previous append and performs append-append.
@@ -2803,9 +2742,9 @@ pub fn handle_ctrl_a(r: &mut AppRenderer, history: crate::app_state::History) {
     r.needs_redraw = true;
 }
 
-/// Ctrl+I in EditorGeneral — double-tap undo+insert.
+/// Ctrl+I in General — double-tap undo+insert.
 ///
-/// A single tap inserts a new item (same as Ctrl+I operator).
+/// A single tap inserts a new item (same as `handle_ctrl_i_general`).
 /// A double tap (within DELTA_MS) undoes the previous insert and re-enters insert.
 /// Mirrors C `handleCtrlI`.
 pub fn handle_ctrl_i(r: &mut AppRenderer, history: crate::app_state::History) {
@@ -2827,7 +2766,7 @@ pub fn handle_ctrl_i(r: &mut AppRenderer, history: crate::app_state::History) {
 pub fn handle_ctrl_enter(r: &mut AppRenderer) {
     if matches!(
         r.coordinate,
-        Coordinate::EditorInsert | Coordinate::OperatorInsert
+        Coordinate::Insert
     ) {
         handle_input(r, "\n");
     }
@@ -2865,7 +2804,7 @@ pub fn handle_save_provider_config(r: &mut AppRenderer) {
 /// Save-as: navigate to filebrowser save-folder, insert a filename `<input>` placeholder,
 /// and enter insert mode so the user can type a filename.
 ///
-/// On Enter (in `handle_enter_editor_insert`), the typed name is used to write the
+/// On Enter (in `handle_enter_insert`), the typed name is used to write the
 /// source provider's FFON data to `<save_folder>/<name>.json`, then navigation returns
 /// to the original provider.
 ///
@@ -2912,7 +2851,7 @@ pub fn handle_save_as_provider_config(r: &mut AppRenderer) {
     // Point cursor at position 0 (the new placeholder)
     r.current_id.set_last(0);
     r.pending_file_browser_save_as = true;
-    r.coordinate = Coordinate::OperatorGeneral;
+    r.coordinate = Coordinate::General;
     list::create_list_current_layer(r);
     r.list_index = 0;
     r.scroll_offset = 0;
@@ -3216,14 +3155,14 @@ pub fn handle_shift_right(r: &mut AppRenderer) {
     r.needs_redraw = true;
 }
 
-/// Home — go to first list item (OperatorGeneral/EditorGeneral) or line start (insert/search).
+/// Home — go to first list item (General/General) or line start (insert/search).
 pub fn handle_home(r: &mut AppRenderer) {
     match r.coordinate {
         Coordinate::Scroll => {
             r.text_scroll_offset = 0;
             r.needs_redraw = true;
         }
-        Coordinate::OperatorGeneral | Coordinate::EditorGeneral => {
+        Coordinate::General => {
             let now = sdl_ticks();
             if now.saturating_sub(r.last_keypress_time) <= DELTA_MS && r.current_id.depth() > 1 {
                 // Double-tap: navigate to root
@@ -3249,7 +3188,7 @@ pub fn handle_home(r: &mut AppRenderer) {
     }
 }
 
-/// End — go to last list item (OperatorGeneral/EditorGeneral) or line end (insert/search).
+/// End — go to last list item (General/General) or line end (insert/search).
 pub fn handle_end(r: &mut AppRenderer) {
     match r.coordinate {
         Coordinate::Scroll => {
@@ -3259,7 +3198,7 @@ pub fn handle_end(r: &mut AppRenderer) {
             r.text_scroll_offset = max_offset;
             r.needs_redraw = true;
         }
-        Coordinate::OperatorGeneral | Coordinate::EditorGeneral => {
+        Coordinate::General => {
             if let Some(slice) = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id) {
                 let max_id = slice.len().saturating_sub(1);
                 r.current_id.set_last(max_id);
@@ -3439,8 +3378,7 @@ fn sdl_get_clipboard() -> Option<String> {
 pub(crate) fn is_text_edit_mode(r: &AppRenderer) -> bool {
     matches!(
         r.coordinate,
-        Coordinate::EditorInsert
-            | Coordinate::OperatorInsert
+        Coordinate::Insert
             | Coordinate::SimpleSearch
             | Coordinate::ExtendedSearch
             | Coordinate::Command
@@ -3449,7 +3387,7 @@ pub(crate) fn is_text_edit_mode(r: &AppRenderer) -> bool {
 
 /// Returns true when the active provider is the file browser.
 ///
-/// Used to route Ctrl+C/X/V to filesystem clipboard ops in OperatorGeneral.
+/// Used to route Ctrl+C/X/V to filesystem clipboard ops in General.
 pub(crate) fn active_provider_is_filebrowser(r: &AppRenderer) -> bool {
     r.current_id.get(0)
         .and_then(|i| r.providers.get(i))
@@ -3460,7 +3398,7 @@ pub(crate) fn active_provider_is_filebrowser(r: &AppRenderer) -> bool {
 pub(crate) fn active_provider_is_editor(r: &AppRenderer) -> bool {
     r.current_id.get(0)
         .and_then(|i| r.providers.get(i))
-        .map(|p| p.name() == "editor")
+        .map(|p| p.has_editor_semantics())
         .unwrap_or(false)
 }
 
@@ -3479,12 +3417,12 @@ fn editor_slice_has_src(r: &AppRenderer) -> bool {
         .unwrap_or(false)
 }
 
-/// Press `i` in the editor provider — enter EditorInsert so Enter calls
+/// Press `i` in the editor provider — enter Insert so Enter calls
 /// `commit_edit`, which writes changes to disk.
 pub fn handle_editor_provider_i(r: &mut AppRenderer) {
-    if !matches!(r.coordinate, Coordinate::EditorGeneral) { return; }
+    if !matches!(r.coordinate, Coordinate::General) { return; }
     r.previous_coordinate = r.coordinate;
-    r.coordinate = Coordinate::EditorInsert;
+    r.coordinate = Coordinate::Insert;
     populate_input_buffer(r);
     if r.input_prefix.trim() == "i" {
         r.placeholder_insert_mode = true;
@@ -3497,11 +3435,11 @@ pub fn handle_editor_provider_i(r: &mut AppRenderer) {
     r.needs_redraw = true;
 }
 
-/// Press `a` in the editor provider — enter EditorInsert with cursor at end.
+/// Press `a` in the editor provider — enter Insert with cursor at end.
 pub fn handle_editor_provider_a(r: &mut AppRenderer) {
-    if !matches!(r.coordinate, Coordinate::EditorGeneral) { return; }
+    if !matches!(r.coordinate, Coordinate::General) { return; }
     r.previous_coordinate = r.coordinate;
-    r.coordinate = Coordinate::EditorInsert;
+    r.coordinate = Coordinate::Insert;
     populate_input_buffer(r);
     if r.input_prefix.trim() == "i" {
         r.placeholder_insert_mode = true;
@@ -3545,7 +3483,7 @@ pub fn handle_editor_ctrl_a(r: &mut AppRenderer) {
 }
 
 /// Insert a file/folder placeholder in the editor directory view.
-/// Enters EditorInsert with `prefixed_insert_mode = true` ("+name"/"−name" syntax).
+/// Enters Insert with `prefixed_insert_mode = true` ("+name"/"−name" syntax).
 fn insert_editor_dir_placeholder(r: &mut AppRenderer, insert_idx: usize) {
     use sicompass_sdk::ffon::FfonElement;
     use crate::app_state::PlaceholderCancel;
@@ -3582,7 +3520,7 @@ fn insert_editor_dir_placeholder(r: &mut AppRenderer, insert_idx: usize) {
     r.list_index = insert_idx;
     r.scroll_offset = 0;
     r.previous_coordinate = r.coordinate;
-    r.coordinate = Coordinate::EditorInsert;
+    r.coordinate = Coordinate::Insert;
     populate_input_buffer(r);
     r.cursor_position = 0;
     r.selection_anchor = None;
@@ -3656,7 +3594,7 @@ fn insert_editor_file_line(r: &mut AppRenderer, after: bool) {
     r.list_index = insert_ffon_idx;
     r.scroll_offset = 0;
     r.previous_coordinate = r.coordinate;
-    r.coordinate = Coordinate::EditorInsert;
+    r.coordinate = Coordinate::Insert;
     populate_input_buffer(r);
     r.cursor_position = 0;
     r.selection_anchor = None;
@@ -3664,7 +3602,7 @@ fn insert_editor_file_line(r: &mut AppRenderer, after: bool) {
     r.needs_redraw = true;
 }
 
-/// Ctrl+X — cut selected text (insert modes) or cut FFON element (editor general).
+/// Ctrl+X — cut selected text (insert modes) or cut FFON element (general mode).
 pub fn handle_ctrl_x(r: &mut AppRenderer) {
     if is_text_edit_mode(r) {
         if !has_selection(r) { return; }
@@ -3678,12 +3616,12 @@ pub fn handle_ctrl_x(r: &mut AppRenderer) {
         return;
     }
     // File browser: filesystem cut
-    if r.coordinate == Coordinate::OperatorGeneral && active_provider_is_filebrowser(r) {
+    if r.coordinate == Coordinate::General && active_provider_is_filebrowser(r) {
         handle_file_cut(r);
         return;
     }
     // Compose body: copy element to internal clipboard then delete via provider
-    if r.coordinate == Coordinate::OperatorGeneral && crate::provider::is_in_email_compose_body(r) {
+    if r.coordinate == Coordinate::General && crate::provider::is_in_email_compose_body(r) {
         let idx = r.current_id.last().unwrap_or(0);
         if let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) {
             r.clipboard = slice.get(idx).cloned();
@@ -3691,7 +3629,7 @@ pub fn handle_ctrl_x(r: &mut AppRenderer) {
         handle_delete_body_element(r);
         return;
     }
-    if matches!(r.coordinate, Coordinate::EditorGeneral) {
+    if matches!(r.coordinate, Coordinate::General) {
         // Cut FFON element into internal clipboard
         if let Some(item) = r.current_list_item().cloned() {
             if let Some(slice) = get_ffon_at_id(&r.ffon, &item.id) {
@@ -3716,12 +3654,12 @@ pub fn handle_ctrl_c(r: &mut AppRenderer) {
         return;
     }
     // File browser: record filesystem copy path
-    if r.coordinate == Coordinate::OperatorGeneral && active_provider_is_filebrowser(r) {
+    if r.coordinate == Coordinate::General && active_provider_is_filebrowser(r) {
         handle_file_copy(r);
         return;
     }
     // Compose body: copy focused element to internal clipboard
-    if r.coordinate == Coordinate::OperatorGeneral && crate::provider::is_in_email_compose_body(r) {
+    if r.coordinate == Coordinate::General && crate::provider::is_in_email_compose_body(r) {
         let idx = r.current_id.last().unwrap_or(0);
         if let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) {
             r.clipboard = slice.get(idx).cloned();
@@ -3729,7 +3667,7 @@ pub fn handle_ctrl_c(r: &mut AppRenderer) {
         r.needs_redraw = true;
         return;
     }
-    if matches!(r.coordinate, Coordinate::EditorGeneral) {
+    if matches!(r.coordinate, Coordinate::General) {
         if let Some(item) = r.current_list_item().cloned() {
             if let Some(slice) = get_ffon_at_id(&r.ffon, &item.id) {
                 if let Some(idx) = item.id.last() {
@@ -3761,12 +3699,12 @@ pub fn handle_ctrl_v(r: &mut AppRenderer) {
         return;
     }
     // File browser: paste file from clipboard
-    if r.coordinate == Coordinate::OperatorGeneral && active_provider_is_filebrowser(r) {
+    if r.coordinate == Coordinate::General && active_provider_is_filebrowser(r) {
         handle_file_paste(r);
         return;
     }
     // Compose body: paste internal clipboard element via commit_edit
-    if r.coordinate == Coordinate::OperatorGeneral && crate::provider::is_in_email_compose_body(r) {
+    if r.coordinate == Coordinate::General && crate::provider::is_in_email_compose_body(r) {
         use sicompass_sdk::ffon::FfonElement;
         use sicompass_sdk::tags;
         let elem = r.clipboard.clone();
@@ -3786,7 +3724,7 @@ pub fn handle_ctrl_v(r: &mut AppRenderer) {
         }
         return;
     }
-    if matches!(r.coordinate, Coordinate::EditorGeneral) {
+    if matches!(r.coordinate, Coordinate::General) {
         crate::state::update_state(r, Task::Paste, History::None);
         r.needs_redraw = true;
     }
@@ -3817,7 +3755,7 @@ pub fn handle_ctrl_f(r: &mut AppRenderer) {
         Coordinate::ScrollSearch | Coordinate::InputSearch => {
             // noop
         }
-        Coordinate::EditorInsert | Coordinate::OperatorInsert => {
+        Coordinate::Insert => {
             r.previous_coordinate = r.coordinate;
             r.coordinate = Coordinate::InputSearch;
             r.speak_mode_change(None);
@@ -3932,14 +3870,14 @@ pub fn handle_dashboard(r: &mut AppRenderer) {
 }
 
 // ---------------------------------------------------------------------------
-// Operator-mode insert/append placeholders (Ctrl+I / Ctrl+A in OperatorGeneral)
+// Generic structural insert/append placeholders (Ctrl+I / Ctrl+A in General)
 // ---------------------------------------------------------------------------
 
-/// Ctrl+I in OperatorGeneral — insert a placeholder before the current item.
+/// Ctrl+I in General — insert a placeholder before the current item.
 ///
 /// In email compose body: inserts a `i` typed placeholder (commit resolves to Str or Obj).
 /// Elsewhere: inserts a plain `<input></input>` and enters insert mode immediately.
-pub fn handle_ctrl_i_operator(r: &mut AppRenderer) {
+pub fn handle_ctrl_i_general(r: &mut AppRenderer) {
     let slice = match sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id) {
         Some(s) => s,
         None => return,
@@ -3953,15 +3891,15 @@ pub fn handle_ctrl_i_operator(r: &mut AppRenderer) {
     if crate::provider::is_in_email_compose_body(r) {
         insert_placeholder_typed(r, insert_idx);
     } else {
-        insert_operator_placeholder(r, insert_idx);
+        insert_general_placeholder(r, insert_idx);
     }
 }
 
-/// Ctrl+A in OperatorGeneral — append a placeholder after the current item.
+/// Ctrl+A in General — append a placeholder after the current item.
 ///
 /// In email compose body: appends a `i` typed placeholder (commit resolves to Str or Obj).
 /// Elsewhere: appends a plain `<input></input>` and enters insert mode immediately.
-pub fn handle_ctrl_a_operator(r: &mut AppRenderer) {
+pub fn handle_ctrl_a_general(r: &mut AppRenderer) {
     let slice = match sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id) {
         Some(s) => s,
         None => return,
@@ -3975,11 +3913,11 @@ pub fn handle_ctrl_a_operator(r: &mut AppRenderer) {
     if crate::provider::is_in_email_compose_body(r) {
         insert_placeholder_typed(r, insert_idx);
     } else {
-        insert_operator_placeholder(r, insert_idx);
+        insert_general_placeholder(r, insert_idx);
     }
 }
 
-/// Ctrl+Shift+I in OperatorGeneral / EditorGeneral — insert a `*` placeholder before
+/// Ctrl+Shift+I in General / General — insert a `*` placeholder before
 /// the current item and enter insert mode. At commit time the typed text determines the
 /// final type: `Str` or `Obj` (see `parse_placeholder_prefix`).
 pub fn handle_ctrl_shift_i_placeholder(r: &mut AppRenderer) {
@@ -3996,7 +3934,7 @@ pub fn handle_ctrl_shift_i_placeholder(r: &mut AppRenderer) {
     insert_placeholder_typed(r, insert_idx);
 }
 
-/// Ctrl+Shift+A in OperatorGeneral / EditorGeneral — append a `*` placeholder after
+/// Ctrl+Shift+A in General / General — append a `*` placeholder after
 /// the current item and enter insert mode.
 pub fn handle_ctrl_shift_a_placeholder(r: &mut AppRenderer) {
     let slice = match sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id) {
@@ -4013,7 +3951,7 @@ pub fn handle_ctrl_shift_a_placeholder(r: &mut AppRenderer) {
 }
 
 /// Insert an `<input></input>` placeholder at `insert_idx`, set `placeholder_insert_mode`,
-/// and enter the appropriate insert mode via `handle_i`. This is the `*`-placeholder variant of `insert_operator_placeholder`.
+/// and enter the appropriate insert mode via `handle_i`. This is the `*`-placeholder variant of `insert_general_placeholder`.
 fn insert_placeholder_typed(r: &mut AppRenderer, insert_idx: usize) {
     use crate::app_state::PlaceholderCancel;
     use sicompass_sdk::ffon::FfonElement;
@@ -4059,14 +3997,14 @@ fn insert_placeholder_typed(r: &mut AppRenderer, insert_idx: usize) {
 /// Insert a placeholder at `insert_idx` in the current parent.
 ///
 /// For providers with `create_element` support: find the "Add element:" sibling object,
-/// clone it, and insert the clone at `insert_idx`. Stays in OperatorGeneral — the user
+/// clone it, and insert the clone at `insert_idx`. Stays in General — the user
 /// then navigates into the clone and presses Enter on a button to create the element.
 ///
 /// For other providers (e.g. filebrowser): insert a `<input></input>` string placeholder
 /// and immediately enter insert mode.
 ///
 /// Mirrors C `insertOperatorPlaceholder`.
-fn insert_operator_placeholder(r: &mut AppRenderer, insert_idx: usize) {
+fn insert_general_placeholder(r: &mut AppRenderer, insert_idx: usize) {
     use sicompass_sdk::ffon::FfonElement;
 
     let depth = r.current_id.depth();
@@ -4357,25 +4295,25 @@ pub fn handle_input_search_down(r: &mut AppRenderer) {
     r.needs_redraw = true;
 }
 
-/// Return in EditorInsert / EditorNormal — commit the input buffer and exit insert mode.
-pub fn handle_return_editor_insert(r: &mut AppRenderer) {
+/// Return in Insert / Normal — commit the input buffer and exit insert mode.
+pub fn handle_return_in_normal(r: &mut AppRenderer) {
     crate::state::update_state(r, Task::Input, History::None);
     handle_escape(r);
 }
 
-/// Ctrl+Return in EditorInsert / OperatorInsert — insert a literal newline character.
+/// Ctrl+Return in Insert / Insert — insert a literal newline character.
 pub fn handle_ctrl_enter_insert(r: &mut AppRenderer) {
     handle_input(r, "\n");
 }
 
-/// Ctrl+Shift+A in EditorInsert — escape insert mode, append after, then re-enter insert.
+/// Ctrl+Shift+A in Insert — escape insert mode, append after, then re-enter insert.
 pub fn handle_ctrl_shift_a_insert(r: &mut AppRenderer) {
     handle_escape(r);
     handle_ctrl_a(r, History::None);
     handle_a(r);
 }
 
-/// Ctrl+Shift+I in EditorInsert — escape insert mode, insert before, then re-enter insert.
+/// Ctrl+Shift+I in Insert — escape insert mode, insert before, then re-enter insert.
 pub fn handle_ctrl_shift_i_insert(r: &mut AppRenderer) {
     handle_escape(r);
     handle_ctrl_i(r, History::None);
@@ -4842,7 +4780,7 @@ mod tests {
         r.coordinate = Coordinate::SimpleSearch;
         r.search_string = "query".to_owned();
         handle_escape(&mut r);
-        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+        assert_eq!(r.coordinate, Coordinate::General);
         assert!(r.search_string.is_empty());
     }
 
@@ -4909,9 +4847,9 @@ mod tests {
     }
 
     #[test]
-    fn handle_input_noop_in_operator_general() {
+    fn handle_input_noop_in_general() {
         let mut r = make_renderer();
-        // OperatorGeneral is not a text-edit mode — input is ignored
+        // General is not a text-edit mode — input is ignored
         handle_input(&mut r, "abc");
         assert_eq!(r.input_buffer, "");
     }
@@ -4936,7 +4874,7 @@ mod tests {
         r.input_buffer = text.to_string();
         r.cursor_position = 0;
         r.selection_anchor = None;
-        r.coordinate = Coordinate::EditorInsert;
+        r.coordinate = Coordinate::Insert;
         r
     }
 
@@ -5247,10 +5185,10 @@ mod tests {
     #[test]
     fn colon_enters_command_mode() {
         let mut r = make_renderer();
-        r.coordinate = Coordinate::OperatorGeneral;
+        r.coordinate = Coordinate::General;
         handle_colon(&mut r);
         assert_eq!(r.coordinate, Coordinate::Command);
-        assert_eq!(r.previous_coordinate, Coordinate::OperatorGeneral);
+        assert_eq!(r.previous_coordinate, Coordinate::General);
     }
 
     #[test]
@@ -5332,7 +5270,7 @@ mod tests {
         let items = vec![sicompass_sdk::provider::ListItem { label: "App A".to_string(), data: "/usr/bin/a".to_string() }];
         let mut r = make_renderer_with_cmd_provider(&["open"], None, items);
         r.coordinate = Coordinate::Command;
-        r.previous_coordinate = Coordinate::OperatorGeneral;
+        r.previous_coordinate = Coordinate::General;
         // Manually populate command list
         list::create_list_current_layer(&mut r);
         // Should show 1 command: "open"
@@ -5351,7 +5289,7 @@ mod tests {
     fn enter_command_phase_provider_executes_and_returns() {
         let mut r = make_renderer_with_cmd_provider(&["open"], None, vec![]);
         r.coordinate = Coordinate::Command;
-        r.previous_coordinate = Coordinate::OperatorGeneral;
+        r.previous_coordinate = Coordinate::General;
         r.current_command = CommandPhase::Provider;
         r.provider_command_name = "open".to_string();
         // Build a secondary list manually
@@ -5366,7 +5304,7 @@ mod tests {
         handle_enter_command(&mut r);
 
         // Should return to previous coordinate and reset phase
-        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+        assert_eq!(r.coordinate, Coordinate::General);
         assert_eq!(r.current_command, CommandPhase::None);
     }
 
@@ -5383,12 +5321,12 @@ mod tests {
     }
 
     #[test]
-    fn tab_from_operator_enters_simple_search() {
+    fn tab_from_general_enters_simple_search() {
         let mut r = make_renderer();
-        r.coordinate = Coordinate::OperatorGeneral;
+        r.coordinate = Coordinate::General;
         handle_tab(&mut r);
         assert_eq!(r.coordinate, Coordinate::SimpleSearch);
-        assert_eq!(r.previous_coordinate, Coordinate::OperatorGeneral);
+        assert_eq!(r.previous_coordinate, Coordinate::General);
         assert!(r.search_string.is_empty());
         // handle_tab passes the current item label as context ("minus item 0"
         // because make_renderer starts at list index 0 with label "- item 0").
@@ -5411,18 +5349,18 @@ mod tests {
     fn escape_from_command_mode() {
         let mut r = make_renderer();
         r.coordinate = Coordinate::Command;
-        r.previous_coordinate = Coordinate::OperatorGeneral;
+        r.previous_coordinate = Coordinate::General;
         handle_escape(&mut r);
-        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+        assert_eq!(r.coordinate, Coordinate::General);
     }
 
     #[test]
     fn escape_from_extended_search() {
         let mut r = make_renderer();
         r.coordinate = Coordinate::ExtendedSearch;
-        r.previous_coordinate = Coordinate::OperatorGeneral;
+        r.previous_coordinate = Coordinate::General;
         handle_escape(&mut r);
-        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+        assert_eq!(r.coordinate, Coordinate::General);
     }
 
     #[test]
@@ -5437,27 +5375,27 @@ mod tests {
     fn escape_from_scroll_returns_to_previous() {
         let mut r = make_renderer();
         r.coordinate = Coordinate::Scroll;
-        r.previous_coordinate = Coordinate::OperatorGeneral;
+        r.previous_coordinate = Coordinate::General;
         handle_escape(&mut r);
-        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+        assert_eq!(r.coordinate, Coordinate::General);
     }
 
     #[test]
     fn escape_clears_selection_anchor() {
         let mut r = make_input_renderer("hello");
-        r.coordinate = Coordinate::OperatorInsert;
+        r.coordinate = Coordinate::Insert;
         r.selection_anchor = Some(5);
         handle_escape(&mut r);
         assert_eq!(r.selection_anchor, None);
     }
 
     #[test]
-    fn escape_from_editor_insert_goes_to_editor_general() {
-        // C spec: EditorInsert → updateState(Input) → EditorGeneral
+    fn escape_from_insert_goes_to_general() {
+        // C spec: Insert → updateState(Input) → General
         let mut r = make_renderer();
-        r.coordinate = Coordinate::EditorInsert;
+        r.coordinate = Coordinate::Insert;
         handle_escape(&mut r);
-        assert_eq!(r.coordinate, Coordinate::EditorGeneral);
+        assert_eq!(r.coordinate, Coordinate::General);
     }
 
     // -----------------------------------------------------------------------
@@ -5465,18 +5403,18 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn s_from_operator_enters_scroll() {
+    fn s_from_general_enters_scroll() {
         let mut r = make_renderer();
-        r.coordinate = Coordinate::OperatorGeneral;
+        r.coordinate = Coordinate::General;
         handle_s(&mut r);
         assert_eq!(r.coordinate, Coordinate::Scroll);
-        assert_eq!(r.previous_coordinate, Coordinate::OperatorGeneral);
+        assert_eq!(r.previous_coordinate, Coordinate::General);
         assert_eq!(r.text_scroll_offset, -1); // sentinel: renderer computes initial offset
         assert_eq!(r.text_scroll_total_height, 0);
     }
 
     #[test]
-    fn s_noop_outside_operator() {
+    fn s_noop_outside_general() {
         let mut r = make_renderer();
         r.coordinate = Coordinate::SimpleSearch;
         handle_s(&mut r);
@@ -5504,21 +5442,21 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_f_from_operator_enters_extended_search() {
+    fn ctrl_f_from_general_enters_extended_search() {
         let mut r = make_renderer();
-        r.coordinate = Coordinate::OperatorGeneral;
+        r.coordinate = Coordinate::General;
         handle_ctrl_f(&mut r);
         assert_eq!(r.coordinate, Coordinate::ExtendedSearch);
-        assert_eq!(r.previous_coordinate, Coordinate::OperatorGeneral);
+        assert_eq!(r.previous_coordinate, Coordinate::General);
     }
 
     #[test]
     fn ctrl_f_from_insert_enters_input_search() {
         let mut r = make_renderer();
-        r.coordinate = Coordinate::OperatorInsert;
+        r.coordinate = Coordinate::Insert;
         handle_ctrl_f(&mut r);
         assert_eq!(r.coordinate, Coordinate::InputSearch);
-        assert_eq!(r.previous_coordinate, Coordinate::OperatorInsert);
+        assert_eq!(r.previous_coordinate, Coordinate::Insert);
     }
 
     // -----------------------------------------------------------------------
@@ -5601,9 +5539,9 @@ mod tests {
         handle_input(&mut r, "0");
         assert_eq!(r.list_index, 0);
         // Escape should restore current_id to the pre-search position
-        r.previous_coordinate = Coordinate::OperatorGeneral;
+        r.previous_coordinate = Coordinate::General;
         handle_escape(&mut r);
-        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+        assert_eq!(r.coordinate, Coordinate::General);
         assert_eq!(r.current_id.last().unwrap_or(99), origin_last,
             "current_id.last() should be restored to item index before search");
     }
@@ -5614,16 +5552,16 @@ mod tests {
         r.list_index = 2;
         r.sync_current_id_from_list();
         let origin_last = r.current_id.last().unwrap_or(0);
-        // Enter ExtendedSearch from OperatorGeneral — saves search_origin_id
-        r.coordinate = Coordinate::OperatorGeneral;
+        // Enter ExtendedSearch from General — saves search_origin_id
+        r.coordinate = Coordinate::General;
         handle_ctrl_f(&mut r);
         assert_eq!(r.coordinate, Coordinate::ExtendedSearch);
         // Type something so list_index moves to 0
         handle_input(&mut r, "0");
         // Escape restores origin
-        r.previous_coordinate = Coordinate::OperatorGeneral;
+        r.previous_coordinate = Coordinate::General;
         handle_escape(&mut r);
-        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+        assert_eq!(r.coordinate, Coordinate::General);
         assert_eq!(r.current_id.last().unwrap_or(99), origin_last,
             "current_id.last() should be restored to item index before search");
     }
@@ -5639,12 +5577,12 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_f_from_operator_saves_search_origin_id() {
+    fn ctrl_f_from_general_saves_search_origin_id() {
         let mut r = make_renderer();
         r.list_index = 1;
         r.sync_current_id_from_list();
         let expected = r.current_id.clone();
-        r.coordinate = Coordinate::OperatorGeneral;
+        r.coordinate = Coordinate::General;
         handle_ctrl_f(&mut r);
         assert_eq!(r.search_origin_id, expected);
     }
@@ -5668,7 +5606,7 @@ mod tests {
     // Clipboard — Ctrl+C / Ctrl+X / Ctrl+V
     // -----------------------------------------------------------------------
 
-    /// Set up an EditorGeneral renderer whose list shows `items` as string children
+    /// Set up an General renderer whose list shows `items` as string children
     /// of provider 0. `list_index` is left at 0 (first child).
     fn make_editor_with_items(items: &[&str]) -> AppRenderer {
         use sicompass_sdk::ffon::IdArray;
@@ -5678,7 +5616,7 @@ mod tests {
         }
         let mut r = AppRenderer::new();
         r.ffon = vec![root];
-        r.coordinate = Coordinate::EditorGeneral;
+        r.coordinate = Coordinate::General;
         let mut id = IdArray::new();
         id.push(0);
         id.push(0);
@@ -5718,7 +5656,7 @@ mod tests {
         root.as_obj_mut().unwrap().push(section);
         let mut r = AppRenderer::new();
         r.ffon = vec![root];
-        r.coordinate = Coordinate::EditorGeneral;
+        r.coordinate = Coordinate::General;
         let mut id = IdArray::new();
         id.push(0); id.push(0);
         r.current_id = id;
@@ -5768,7 +5706,7 @@ mod tests {
     // --- Ctrl+X element mode ---
 
     #[test]
-    fn ctrl_x_sets_clipboard_in_editor_general() {
+    fn ctrl_x_sets_clipboard_in_general() {
         let mut r = make_editor_with_items(&["first", "second", "third"]);
         r.list_index = 1;
         handle_ctrl_x(&mut r);
@@ -5831,7 +5769,7 @@ mod tests {
 
     #[test]
     fn ctrl_v_element_mode_no_clipboard_still_redraws() {
-        // In Rust, handle_ctrl_v in EditorGeneral always calls update_state(Paste)
+        // In Rust, handle_ctrl_v in General always calls update_state(Paste)
         // and sets needs_redraw regardless of whether clipboard is set.
         let mut r = make_editor_with_items(&["original"]);
         r.clipboard = None;
@@ -6025,10 +5963,10 @@ mod tests {
     #[test]
     fn tab_from_editor_enters_simple_search() {
         let mut r = make_renderer();
-        r.coordinate = Coordinate::EditorGeneral;
+        r.coordinate = Coordinate::General;
         handle_tab(&mut r);
         assert_eq!(r.coordinate, Coordinate::SimpleSearch);
-        assert_eq!(r.previous_coordinate, Coordinate::EditorGeneral);
+        assert_eq!(r.previous_coordinate, Coordinate::General);
         // handle_tab passes the current item label as context.
         assert_eq!(announced_text(&r).as_deref(), Some("search - minus item 0"));
     }
@@ -6038,55 +5976,55 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn escape_from_operator_insert_goes_to_operator_general() {
+    fn escape_from_insert_with_default_previous_goes_to_general() {
         let mut r = make_renderer();
-        r.coordinate = Coordinate::OperatorInsert;
+        r.coordinate = Coordinate::Insert;
         handle_escape(&mut r);
-        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+        assert_eq!(r.coordinate, Coordinate::General);
     }
 
     #[test]
     fn escape_from_simple_search_returns_to_previous() {
         let mut r = make_renderer();
         r.coordinate = Coordinate::SimpleSearch;
-        r.previous_coordinate = Coordinate::EditorGeneral;
+        r.previous_coordinate = Coordinate::General;
         // Simulate the origin id saved when search was entered (item at index 3)
         r.search_origin_id = { let mut id = r.current_id.clone(); id.set_last(3); id };
         // Simulate search having moved current_id to a different position
         r.current_id.set_last(1);
         handle_escape(&mut r);
-        assert_eq!(r.coordinate, Coordinate::EditorGeneral);
+        assert_eq!(r.coordinate, Coordinate::General);
         // list_index should be restored to the origin id, not the mid-search position
         assert_eq!(r.list_index, 3);
     }
 
     #[test]
-    fn escape_from_unknown_with_operator_previous() {
-        // EditorGeneral + previousCoordinate=OperatorGeneral → OperatorGeneral
+    fn escape_from_unknown_with_general_previous() {
+        // General + previousCoordinate=General → General
         let mut r = make_renderer();
-        r.coordinate = Coordinate::EditorGeneral;
-        r.previous_coordinate = Coordinate::OperatorGeneral;
+        r.coordinate = Coordinate::General;
+        r.previous_coordinate = Coordinate::General;
         handle_escape(&mut r);
-        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+        assert_eq!(r.coordinate, Coordinate::General);
     }
 
     #[test]
     fn escape_from_unknown_defaults_to_editor() {
-        // EditorGeneral + previousCoordinate=EditorGeneral → EditorGeneral
+        // General + previousCoordinate=General → General
         let mut r = make_renderer();
-        r.coordinate = Coordinate::EditorGeneral;
-        r.previous_coordinate = Coordinate::EditorGeneral;
+        r.coordinate = Coordinate::General;
+        r.previous_coordinate = Coordinate::General;
         handle_escape(&mut r);
-        assert_eq!(r.coordinate, Coordinate::EditorGeneral);
+        assert_eq!(r.coordinate, Coordinate::General);
     }
 
     #[test]
     fn escape_from_dashboard_returns_to_previous() {
         let mut r = make_renderer();
         r.coordinate = Coordinate::Dashboard;
-        r.previous_coordinate = Coordinate::OperatorGeneral;
+        r.previous_coordinate = Coordinate::General;
         handle_escape(&mut r);
-        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+        assert_eq!(r.coordinate, Coordinate::General);
         assert!(r.needs_redraw);
     }
 
@@ -6119,10 +6057,10 @@ mod tests {
         // C: when coming from SimpleSearch, don't overwrite previousCoordinate
         let mut r = make_renderer();
         r.coordinate = Coordinate::SimpleSearch;
-        r.previous_coordinate = Coordinate::OperatorGeneral;
+        r.previous_coordinate = Coordinate::General;
         handle_ctrl_f(&mut r);
         assert_eq!(r.coordinate, Coordinate::ExtendedSearch);
-        assert_eq!(r.previous_coordinate, Coordinate::OperatorGeneral); // not overwritten
+        assert_eq!(r.previous_coordinate, Coordinate::General); // not overwritten
     }
 
     #[test]
@@ -6204,9 +6142,9 @@ mod tests {
 
     #[test]
     fn up_in_general_sets_needs_redraw() {
-        // OperatorGeneral calls updateState(ArrowUp); just verify no crash + needsRedraw
+        // General calls updateState(ArrowUp); just verify no crash + needsRedraw
         let mut r = make_renderer();
-        r.coordinate = Coordinate::OperatorGeneral;
+        r.coordinate = Coordinate::General;
         handle_up(&mut r);
         assert!(r.needs_redraw);
     }
@@ -6215,7 +6153,7 @@ mod tests {
     fn up_noop_in_insert_mode_but_redraws() {
         // C: insert modes set needsRedraw but don't call updateState
         let mut r = make_renderer();
-        r.coordinate = Coordinate::EditorInsert;
+        r.coordinate = Coordinate::Insert;
         handle_up(&mut r);
         assert!(r.needs_redraw);
     }
@@ -6258,16 +6196,16 @@ mod tests {
     #[test]
     fn down_in_general_sets_needs_redraw() {
         let mut r = make_renderer();
-        r.coordinate = Coordinate::EditorGeneral;
+        r.coordinate = Coordinate::General;
         handle_down(&mut r);
         assert!(r.needs_redraw);
     }
 
     #[test]
-    fn down_noop_in_operator_insert() {
-        // OperatorInsert: down does nothing (no updateState, no listIndex change)
+    fn down_noop_in_insert() {
+        // Insert: down does nothing (no updateState, no listIndex change)
         let mut r = make_renderer_with_items(&["a", "b", "c"]);
-        r.coordinate = Coordinate::OperatorInsert;
+        r.coordinate = Coordinate::Insert;
         r.list_index = 1;
         handle_down(&mut r);
         assert_eq!(r.list_index, 1); // unchanged
@@ -6367,7 +6305,7 @@ mod tests {
     fn ctrl_i_single_tap_performs_insert() {
         let mut r = AppRenderer::new();
         r.last_keypress_time = 0; // ensure no double-tap
-        r.coordinate = Coordinate::OperatorGeneral;
+        r.coordinate = Coordinate::General;
         handle_ctrl_i(&mut r, History::None);
         assert!(r.needs_redraw);
         assert!(r.last_keypress_time > 0);
@@ -6597,27 +6535,18 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn ctrl_enter_inserts_newline_in_editor_insert() {
+    fn ctrl_enter_inserts_newline_in_insert() {
         let mut r = make_input_renderer("hello");
         r.cursor_position = 5;
-        r.coordinate = Coordinate::EditorInsert;
+        r.coordinate = Coordinate::Insert;
         handle_ctrl_enter(&mut r);
         assert!(r.input_buffer.contains('\n'));
     }
 
     #[test]
-    fn ctrl_enter_inserts_newline_in_operator_insert() {
+    fn ctrl_enter_noop_in_general() {
         let mut r = make_input_renderer("abc");
-        r.cursor_position = 3;
-        r.coordinate = Coordinate::OperatorInsert;
-        handle_ctrl_enter(&mut r);
-        assert!(r.input_buffer.contains('\n'));
-    }
-
-    #[test]
-    fn ctrl_enter_noop_in_operator_general() {
-        let mut r = make_input_renderer("abc");
-        r.coordinate = Coordinate::OperatorGeneral;
+        r.coordinate = Coordinate::General;
         handle_ctrl_enter(&mut r);
         assert_eq!(r.input_buffer, "abc"); // unchanged
     }
@@ -6713,18 +6642,18 @@ mod tests {
     }
 
     #[test]
-    fn page_up_noop_in_editor_insert() {
+    fn page_up_noop_in_insert() {
         let mut r = make_renderer_paged();
-        r.coordinate = Coordinate::EditorInsert;
+        r.coordinate = Coordinate::Insert;
         r.list_index = 2;
         handle_page_up(&mut r);
         assert_eq!(r.list_index, 2); // unchanged
     }
 
     #[test]
-    fn page_down_noop_in_operator_insert() {
+    fn page_down_noop_in_insert() {
         let mut r = make_renderer_paged();
-        r.coordinate = Coordinate::OperatorInsert;
+        r.coordinate = Coordinate::Insert;
         r.list_index = 0;
         handle_page_down(&mut r);
         assert_eq!(r.list_index, 0); // unchanged
@@ -6854,7 +6783,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // step_back_by_lines / step_forward_by_lines + OperatorGeneral page nav
+    // step_back_by_lines / step_forward_by_lines + General page nav
     // -----------------------------------------------------------------------
 
     fn make_renderer_paged_large() -> AppRenderer {
@@ -6936,7 +6865,7 @@ mod tests {
         // counts=[1,1,1,1,8,1,1,1,1,1,1,1], page_size=10, start at 0 → land at index 4
         let counts = vec![1usize, 1, 1, 1, 8, 1, 1, 1, 1, 1, 1, 1];
         let mut r = make_renderer_general_with_counts(counts);
-        r.coordinate = Coordinate::OperatorGeneral;
+        r.coordinate = Coordinate::General;
         r.current_id.set_last(0);
         list::create_list_current_layer(&mut r);
         handle_page_down(&mut r);
@@ -6949,7 +6878,7 @@ mod tests {
         // Without the fix (element-index step) this would land at 1, skipping the image entirely
         let counts = vec![1usize, 1, 1, 1, 8, 1, 1, 1, 1, 1, 1, 1];
         let mut r = make_renderer_general_with_counts(counts);
-        r.coordinate = Coordinate::OperatorGeneral;
+        r.coordinate = Coordinate::General;
         r.current_id.set_last(11);
         list::create_list_current_layer(&mut r);
         handle_page_up(&mut r);
@@ -6960,7 +6889,7 @@ mod tests {
     fn page_down_general_advances_one_on_oversized_image() {
         let counts = vec![1usize, 50, 1];
         let mut r = make_renderer_general_with_counts(counts);
-        r.coordinate = Coordinate::OperatorGeneral;
+        r.coordinate = Coordinate::General;
         r.current_id.set_last(0);
         list::create_list_current_layer(&mut r);
         handle_page_down(&mut r);
@@ -6971,7 +6900,7 @@ mod tests {
     fn page_down_general_falls_back_when_cache_empty() {
         // No cached_line_counts → old element-index arithmetic
         let mut r = make_renderer_paged_large();
-        r.coordinate = Coordinate::OperatorGeneral;
+        r.coordinate = Coordinate::General;
         r.current_id.set_last(0);
         list::create_list_current_layer(&mut r);
         let max_id = {
@@ -7033,11 +6962,11 @@ mod tests {
     fn enter_search_no_item_returns_to_previous() {
         let mut r = AppRenderer::new();
         r.coordinate = Coordinate::SimpleSearch;
-        r.previous_coordinate = Coordinate::OperatorGeneral;
+        r.previous_coordinate = Coordinate::General;
         r.search_string = "abc".to_owned();
         // total_list is empty → current_list_item_id() returns None
         handle_enter_search(&mut r);
-        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+        assert_eq!(r.coordinate, Coordinate::General);
         assert!(r.search_string.is_empty());
         assert!(r.needs_redraw);
     }
@@ -7046,12 +6975,12 @@ mod tests {
     fn enter_search_selects_item_and_exits() {
         let mut r = make_renderer();
         r.coordinate = Coordinate::SimpleSearch;
-        r.previous_coordinate = Coordinate::OperatorGeneral;
+        r.previous_coordinate = Coordinate::General;
         r.list_index = 2;
         r.search_string = "item".to_owned();
         r.sync_current_id_from_list();
         handle_enter_search(&mut r);
-        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+        assert_eq!(r.coordinate, Coordinate::General);
         assert!(r.search_string.is_empty());
         assert!(r.needs_redraw);
     }
@@ -7060,44 +6989,44 @@ mod tests {
     fn enter_search_extended_empty_list_escapes() {
         let mut r = AppRenderer::new();
         r.coordinate = Coordinate::ExtendedSearch;
-        r.previous_coordinate = Coordinate::OperatorGeneral;
+        r.previous_coordinate = Coordinate::General;
         // Empty list → handle_enter_extended_search will escape
         handle_enter_search(&mut r);
-        assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+        assert_eq!(r.coordinate, Coordinate::General);
         assert!(r.needs_redraw);
     }
 
     // -----------------------------------------------------------------------
-    // handle_enter_editor_insert — guard clause paths
+    // handle_enter_insert — guard clause paths
     // -----------------------------------------------------------------------
 
     #[test]
-    fn enter_editor_insert_no_element_escapes() {
+    fn enter_insert_no_element_escapes() {
         let mut r = AppRenderer::new();
-        r.coordinate = Coordinate::EditorInsert;
+        r.coordinate = Coordinate::Insert;
         // ffon is empty → get_ffon_at_id returns None → handle_escape called
-        handle_enter_editor_insert(&mut r);
-        // After escape, coordinate should not be EditorInsert
-        assert_ne!(r.coordinate, Coordinate::EditorInsert);
+        handle_enter_insert(&mut r);
+        // After escape, coordinate should not be Insert
+        assert_ne!(r.coordinate, Coordinate::Insert);
     }
 
     #[test]
-    fn enter_editor_insert_no_input_tag_escapes() {
+    fn enter_insert_no_input_tag_escapes() {
         let mut r = make_renderer_with_items(&["plain text"]);
-        r.coordinate = Coordinate::EditorInsert;
-        handle_enter_editor_insert(&mut r);
+        r.coordinate = Coordinate::Insert;
+        handle_enter_insert(&mut r);
         // No <input> tag → escape
-        assert_ne!(r.coordinate, Coordinate::EditorInsert);
+        assert_ne!(r.coordinate, Coordinate::Insert);
     }
 
     #[test]
-    fn enter_editor_insert_unchanged_content_escapes() {
+    fn enter_insert_unchanged_content_escapes() {
         let mut r = make_renderer_with_items(&["<input>hello</input>"]);
-        r.coordinate = Coordinate::EditorInsert;
+        r.coordinate = Coordinate::Insert;
         r.input_buffer = "hello".to_owned(); // same as element content
-        handle_enter_editor_insert(&mut r);
+        handle_enter_insert(&mut r);
         // Unchanged → escape
-        assert_ne!(r.coordinate, Coordinate::EditorInsert);
+        assert_ne!(r.coordinate, Coordinate::Insert);
     }
 
     // ---- find_id_path ----
@@ -7257,7 +7186,7 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------
-    // parse_placeholder_prefix — commit-path integration (handle_enter_editor_insert)
+    // parse_placeholder_prefix — commit-path integration (handle_enter_insert)
     // ---------------------------------------------------------------------------
 
     /// Build a minimal renderer with a single-element FFON list inside a provider,
@@ -7268,8 +7197,8 @@ mod tests {
         let mut r = AppRenderer::new();
         r.ffon = vec![root];
         r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
-        r.coordinate = Coordinate::OperatorInsert;
-        r.previous_coordinate = Coordinate::OperatorGeneral;
+        r.coordinate = Coordinate::Insert;
+        r.previous_coordinate = Coordinate::General;
         r.placeholder_insert_mode = true;
         list::create_list_current_layer(&mut r);
         r
@@ -7279,7 +7208,7 @@ mod tests {
     fn placeholder_commit_plain_text_becomes_str() {
         let mut r = make_placeholder_renderer();
         r.input_buffer = "hello".to_owned();
-        handle_enter_editor_insert(&mut r);
+        handle_enter_insert(&mut r);
         let arr = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id).unwrap();
         let idx = r.current_id.last().unwrap_or(0);
         // Should be a Str wrapping the text in <input> tags
@@ -7291,7 +7220,7 @@ mod tests {
     fn placeholder_commit_dash_prefix_becomes_str() {
         let mut r = make_placeholder_renderer();
         r.input_buffer = "- myfile".to_owned();
-        handle_enter_editor_insert(&mut r);
+        handle_enter_insert(&mut r);
         // After commit mode exits, current_id may shift; just verify no placeholder flag left
         assert!(!r.placeholder_insert_mode);
     }
@@ -7300,7 +7229,7 @@ mod tests {
     fn placeholder_commit_plus_prefix_becomes_obj() {
         let mut r = make_placeholder_renderer();
         r.input_buffer = "+ mydir".to_owned();
-        handle_enter_editor_insert(&mut r);
+        handle_enter_insert(&mut r);
         // Element should now be an Obj
         // After commit, cursor stays at same position; check FFON directly via depth-1 path.
         let arr = &r.ffon;
@@ -7319,7 +7248,7 @@ mod tests {
     fn placeholder_commit_trailing_colon_becomes_obj() {
         let mut r = make_placeholder_renderer();
         r.input_buffer = "section:".to_owned();
-        handle_enter_editor_insert(&mut r);
+        handle_enter_insert(&mut r);
         let arr = &r.ffon;
         if let Some(FfonElement::Obj(provider)) = arr.get(0) {
             let child = provider.children.get(0);
@@ -7335,9 +7264,9 @@ mod tests {
     fn placeholder_commit_empty_stays_in_insert_with_error() {
         let mut r = make_placeholder_renderer();
         r.input_buffer = String::new();
-        handle_enter_editor_insert(&mut r);
-        // Should remain in OperatorInsert with an error message
-        assert_eq!(r.coordinate, Coordinate::OperatorInsert);
+        handle_enter_insert(&mut r);
+        // Should remain in Insert with an error message
+        assert_eq!(r.coordinate, Coordinate::Insert);
         assert!(!r.error_message.is_empty());
         assert!(r.placeholder_insert_mode);
     }

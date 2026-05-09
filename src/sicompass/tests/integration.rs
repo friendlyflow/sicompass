@@ -186,7 +186,7 @@ fn navigate_to_provider(r: &mut AppRenderer, target_idx: usize) {
 fn initial_state() {
     let h = Harness::new();
     let r = &h.renderer;
-    assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(r.coordinate, Coordinate::General);
     assert_eq!(r.current_id.depth(), 1);
     assert_eq!(r.current_id.get(0), Some(0));
     assert!(r.ffon.len() >= 2, "should have at least filebrowser + settings");
@@ -199,7 +199,7 @@ fn navigate_between_providers_up_down() {
 
     press_down(h.r());
     assert_eq!(h.renderer.current_id.get(0).unwrap_or(0), start + 1);
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
 
     press_up(h.r());
     assert_eq!(h.renderer.current_id.get(0).unwrap_or(0), start);
@@ -225,7 +225,7 @@ fn enter_provider_and_navigate_back() {
 
     press_right(h.r());
     assert_eq!(h.renderer.current_id.depth(), 2, "should be inside provider");
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
 
     press_left(h.r());
     assert_eq!(h.renderer.current_id.depth(), 1, "should be back at root");
@@ -320,7 +320,7 @@ fn search_mode_via_tab() {
     );
 
     press_escape(h.r());
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
 }
 
 #[test]
@@ -410,11 +410,11 @@ fn file_creation_via_insert_mode() {
     press_right(h.r());
 
     press_ctrl(h.r(), Keycode::I);
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorInsert);
+    assert_eq!(h.renderer.coordinate, Coordinate::Insert);
 
     type_text(h.r(), "- newfile.txt");
     press_enter(h.r());
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
 
     assert!(tmp.join("newfile.txt").exists(), "newfile.txt should exist on disk");
 }
@@ -435,23 +435,23 @@ fn directory_creation_via_insert_mode() {
 }
 
 #[test]
-fn escape_returns_to_operator_general() {
+fn escape_returns_to_general() {
     let mut h = Harness::new();
 
     // From search mode
     press_tab(h.r());
     assert_eq!(h.renderer.coordinate, Coordinate::SimpleSearch);
     press_escape(h.r());
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
 
     // From insert mode
     let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
     press_ctrl(h.r(), Keycode::I);
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorInsert);
+    assert_eq!(h.renderer.coordinate, Coordinate::Insert);
     press_escape(h.r());
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
 }
 
 #[test]
@@ -495,7 +495,7 @@ fn file_deletion() {
 fn mode_transitions_tab_escape_chain() {
     let mut h = Harness::new();
 
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
 
     press_tab(h.r());
     assert_eq!(h.renderer.coordinate, Coordinate::SimpleSearch);
@@ -505,7 +505,7 @@ fn mode_transitions_tab_escape_chain() {
     assert_eq!(h.renderer.coordinate, Coordinate::SimpleSearch);
 
     press_escape(h.r());
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
 
     // S key enters Scroll from inside a provider (not at root)
     let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
@@ -515,7 +515,7 @@ fn mode_transitions_tab_escape_chain() {
     assert_eq!(h.renderer.coordinate, Coordinate::Scroll);
 
     press_escape(h.r());
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
 }
 
 #[test]
@@ -536,7 +536,7 @@ fn scroll_search_esc_chain() {
     assert_eq!(h.renderer.coordinate, Coordinate::Scroll);
 
     press_escape(h.r());
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
 }
 
 #[test]
@@ -597,7 +597,7 @@ fn handle_i_populates_input_buffer() {
             for _ in 0..(-diff) { press_up(h.r()); }
         }
         press(h.r(), Keycode::I);
-        assert_eq!(h.renderer.coordinate, Coordinate::OperatorInsert);
+        assert_eq!(h.renderer.coordinate, Coordinate::Insert);
         assert!(
             h.renderer.input_buffer.contains("alpha.txt"),
             "input_buffer should contain filename, got: '{}'",
@@ -687,7 +687,7 @@ fn webbrowser_url_commit_updates_ffon() {
     press(h.r(), Keycode::I);
     assert_eq!(
         h.renderer.coordinate,
-        Coordinate::OperatorInsert,
+        Coordinate::Insert,
         "should be in insert mode after I"
     );
     assert!(
@@ -699,10 +699,10 @@ fn webbrowser_url_commit_updates_ffon() {
     type_text(h.r(), "https://example.invalid");
     press_enter(h.r());
 
-    // After Enter, we should be back in operator mode
+    // After Enter, we should be back in general mode
     assert_eq!(
         h.renderer.coordinate,
-        Coordinate::OperatorGeneral,
+        Coordinate::General,
         "should exit insert mode after Enter"
     );
 
@@ -734,13 +734,13 @@ fn webbrowser_url_same_content_exits_insert_mode() {
 
     // Enter insert mode — don't change anything — press Enter
     press(h.r(), Keycode::I);
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorInsert);
+    assert_eq!(h.renderer.coordinate, Coordinate::Insert);
     press_enter(h.r());
 
     // Must exit insert mode even though content was unchanged
     assert_eq!(
         h.renderer.coordinate,
-        Coordinate::OperatorGeneral,
+        Coordinate::General,
         "should exit insert mode after Enter even with same content"
     );
     // And the provider index should still be valid
@@ -784,7 +784,7 @@ fn webbrowser_fragment_link_navigates_to_target() {
     );
 }
 
-/// Enter in OperatorGeneral on an Obj whose key has an <input> tag should NOT
+/// Enter in General on an Obj whose key has an <input> tag should NOT
 /// re-activate/re-commit it — C only activates <input> on FFON_STRING elements.
 #[test]
 fn enter_on_input_obj_does_not_activate() {
@@ -812,11 +812,11 @@ fn enter_on_input_obj_does_not_activate() {
     // Press Enter — should NOT navigate into the Obj's children or re-commit
     press_enter(h.r());
 
-    // We should still be in OperatorGeneral at the same depth (2), not deeper
+    // We should still be in General at the same depth (2), not deeper
     assert_eq!(
         h.renderer.coordinate,
-        Coordinate::OperatorGeneral,
-        "should stay in OperatorGeneral"
+        Coordinate::General,
+        "should stay in General"
     );
     assert_eq!(
         h.renderer.current_id.depth(), 2,
@@ -920,13 +920,13 @@ fn test_full_workflow() {
     press_ctrl(h.r(), Keycode::I);
     type_text(h.r(), "- report.txt");
     press_enter(h.r());
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
     assert!(tmp.join("Downloads/report.txt").exists(), "report.txt should be created");
 
     // ---- Step 4: Navigate back to root ----
     while h.renderer.current_id.depth() > 1 { press_left(h.r()); }
     assert_eq!(h.renderer.current_id.depth(), 1);
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
 }
 
 // ---------------------------------------------------------------------------
@@ -939,7 +939,7 @@ fn test_meta_enters_coordinate() {
     let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
 
     press(h.r(), Keycode::M);
     assert_eq!(h.renderer.coordinate, Coordinate::Meta);
@@ -970,7 +970,7 @@ fn test_escape_from_meta_restores_position() {
     assert_eq!(h.renderer.coordinate, Coordinate::Meta);
 
     press(h.r(), Keycode::Escape);
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
     assert_eq!(h.renderer.current_id, saved_id);
     assert_eq!(h.renderer.list_index, saved_index);
 }
@@ -1121,9 +1121,9 @@ fn filebrowser_show_properties_refreshes_listing() {
 
     execute_provider_command(&mut h, "show/hide properties");
 
-    // Should be back in OperatorGeneral after a state-toggle
-    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::OperatorGeneral,
-        "should return to OperatorGeneral after show/hide properties");
+    // Should be back in General after a state-toggle
+    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::General,
+        "should return to General after show/hide properties");
 
     // Labels must have changed — properties prefix should now be present
     let labels_after: Vec<String> = h.renderer.total_list.iter()
@@ -1154,8 +1154,8 @@ fn filebrowser_sort_chrono_refreshes_listing() {
     let count_before = h.renderer.total_list.len();
     execute_provider_command(&mut h, "sort chronologically");
 
-    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::OperatorGeneral,
-        "should return to OperatorGeneral after sort chronologically");
+    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::General,
+        "should return to General after sort chronologically");
     assert_eq!(h.renderer.total_list.len(), count_before,
         "item count should be unchanged after sort");
 }
@@ -1167,7 +1167,7 @@ fn colon_blocked_at_root() {
     // Ensure we're at root
     while h.renderer.current_id.depth() > 1 { press_left(h.r()); }
     dispatch_key(h.r(), Some(Keycode::Semicolon), Mod::LSHIFTMOD);
-    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::OperatorGeneral,
+    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::General,
         "command mode must not activate at root depth");
 }
 
@@ -1368,7 +1368,7 @@ fn create_file_on_placeholder_replaces_in_place() {
         "create file on placeholder should stay at idx 0 (replaced in-place)");
 
     // Should enter insert mode to type the filename
-    assert_eq!(renderer.coordinate, sicompass::app_state::Coordinate::OperatorInsert,
+    assert_eq!(renderer.coordinate, sicompass::app_state::Coordinate::Insert,
         "should enter insert mode after create file");
 }
 
@@ -1412,7 +1412,7 @@ fn filebrowser_i_placeholder_creates_file() {
     press_enter(&mut renderer);
 
     assert!(root.join("emptydir/notes.txt").exists(), "notes.txt should have been created on disk");
-    assert_eq!(renderer.coordinate, sicompass::app_state::Coordinate::OperatorGeneral);
+    assert_eq!(renderer.coordinate, sicompass::app_state::Coordinate::General);
 }
 
 /// Typing `name:` on the `i` placeholder in an empty directory creates a subdirectory.
@@ -1452,7 +1452,7 @@ fn filebrowser_i_placeholder_creates_subdirectory() {
     press_enter(&mut renderer);
 
     assert!(root.join("emptydir/subdir").is_dir(), "subdir should have been created on disk");
-    assert_eq!(renderer.coordinate, sicompass::app_state::Coordinate::OperatorGeneral);
+    assert_eq!(renderer.coordinate, sicompass::app_state::Coordinate::General);
 }
 
 /// Ctrl+A after creating a file (prefixed insert mode) must not panic.
@@ -1491,9 +1491,9 @@ fn ctrl_a_after_prefixed_creation_no_panic() {
 
     assert_eq!(h.renderer.current_id.last(), Some(0));
 
-    // Ctrl+A → append placeholder after index 0, enter OperatorInsert
+    // Ctrl+A → append placeholder after index 0, enter Insert
     press_ctrl(h.r(), Keycode::A);
-    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::OperatorInsert);
+    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::Insert);
 
     // Create a file
     type_text(h.r(), "- newfile.txt");
@@ -1501,7 +1501,7 @@ fn ctrl_a_after_prefixed_creation_no_panic() {
 
     assert!(h.tmp.path().join("testdir/newfile.txt").exists(),
         "newfile.txt should be created");
-    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::OperatorGeneral);
+    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::General);
 
     // current_id must be in-bounds after refresh
     let cur_last = h.renderer.current_id.last().unwrap_or(0);
@@ -1515,8 +1515,8 @@ fn ctrl_a_after_prefixed_creation_no_panic() {
 
     // Ctrl+A again — must not panic
     press_ctrl(h.r(), Keycode::A);
-    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::OperatorInsert,
-        "Ctrl+A after creation should enter OperatorInsert without panic");
+    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::Insert,
+        "Ctrl+A after creation should enter Insert without panic");
 }
 
 /// After creating a file whose name sorts last (e.g. "zzz.txt"), the cursor
@@ -1534,7 +1534,7 @@ fn prefixed_create_cursor_follows_sorted_file() {
     press_enter(h.r());
 
     assert!(h.tmp_path().join("zzz.txt").exists(), "zzz.txt should be created");
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
 
     // Cursor label content should be "zzz.txt" — both current_id and list_index must agree
     let cur_idx = h.renderer.current_id.last().unwrap_or(0);
@@ -1560,7 +1560,7 @@ fn prefixed_create_cursor_follows_sorted_dir() {
     press_enter(h.r());
 
     assert!(h.tmp_path().join("aaa").is_dir(), "aaa/ should be created");
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
 
     let cur_idx = h.renderer.current_id.last().unwrap_or(0);
     let list_idx = h.renderer.list_index;
@@ -1582,8 +1582,8 @@ fn filebrowser_sort_alpha_refreshes_listing() {
     let count_before = h.renderer.total_list.len();
     execute_provider_command(&mut h, "sort alphanumerically");
 
-    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::OperatorGeneral,
-        "should return to OperatorGeneral after sort alphanumerically");
+    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::General,
+        "should return to General after sort alphanumerically");
     assert_eq!(h.renderer.total_list.len(), count_before,
         "item count should be unchanged after sort");
 }
@@ -1651,7 +1651,7 @@ fn open_file_with_secondary_list_uses_nav_path_not_data() {
 
 #[test]
 fn undo_from_search_mode() {
-    // Ctrl+Z while in SimpleSearch should undo and return to OperatorGeneral.
+    // Ctrl+Z while in SimpleSearch should undo and return to General.
     let mut h = Harness::new();
     let tmp = h.tmp_path().to_path_buf();
     let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
@@ -1667,13 +1667,13 @@ fn undo_from_search_mode() {
     press_tab(h.r());
     assert_eq!(h.renderer.coordinate, Coordinate::SimpleSearch);
     press_ctrl(h.r(), Keycode::Z);
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral, "undo should exit search mode");
+    assert_eq!(h.renderer.coordinate, Coordinate::General, "undo should exit search mode");
     assert!(!tmp.join("searchundo.txt").exists(), "file should be deleted after undo from search mode");
 }
 
 #[test]
 fn undo_from_insert_mode() {
-    // Ctrl+Z while in OperatorInsert should undo and return to OperatorGeneral.
+    // Ctrl+Z while in Insert should undo and return to General.
     let mut h = Harness::new();
     let tmp = h.tmp_path().to_path_buf();
     let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
@@ -1687,9 +1687,9 @@ fn undo_from_insert_mode() {
 
     // Re-enter insert mode, then undo
     press_ctrl(h.r(), Keycode::I);
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorInsert);
+    assert_eq!(h.renderer.coordinate, Coordinate::Insert);
     press_ctrl(h.r(), Keycode::Z);
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral, "undo should exit insert mode");
+    assert_eq!(h.renderer.coordinate, Coordinate::General, "undo should exit insert mode");
     assert!(!tmp.join("insertundo.txt").exists(), "file should be deleted after undo from insert mode");
 }
 
@@ -1713,7 +1713,7 @@ fn undo_redo_rename() {
     h.renderer.current_id = h.renderer.total_list[alpha_idx].id.clone();
 
     press(h.r(), Keycode::I); // enter rename mode
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorInsert);
+    assert_eq!(h.renderer.coordinate, Coordinate::Insert);
     // Clear the buffer and type new name
     h.renderer.input_buffer.clear();
     h.renderer.cursor_position = 0;
@@ -1736,7 +1736,7 @@ fn undo_redo_rename() {
 
 #[test]
 fn rename_directory_does_not_navigate_into_it() {
-    // Renaming a directory must leave the user at OperatorGeneral in the parent,
+    // Renaming a directory must leave the user at General in the parent,
     // not navigate inside the renamed directory.
     let mut h = Harness::new();
     let tmp = h.tmp_path().to_path_buf();
@@ -1758,8 +1758,8 @@ fn rename_directory_does_not_navigate_into_it() {
     press_enter(h.r());
 
     assert!(tmp.join("subdir2").is_dir(), "directory should be renamed");
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral,
-        "should stay in OperatorGeneral, not navigate into the renamed dir");
+    assert_eq!(h.renderer.coordinate, Coordinate::General,
+        "should stay in General, not navigate into the renamed dir");
     assert_eq!(h.renderer.current_id.depth(), 2,
         "should remain at depth 2 (inside filebrowser root), not deeper");
 }
@@ -2112,19 +2112,19 @@ fn root_blocks_editing_keys() {
     press(h.r(), Keycode::S);
     assert_eq!(h.renderer.coordinate, coord_before, "S must be no-op at root");
 
-    // I — should not enter EditorInsert at root
+    // I — should not enter Insert at root
     press(h.r(), Keycode::I);
     assert_eq!(h.renderer.coordinate, coord_before, "I must be no-op at root");
 
-    // A — should not enter EditorInsert at root
+    // A — should not enter Insert at root
     press(h.r(), Keycode::A);
     assert_eq!(h.renderer.coordinate, coord_before, "A must be no-op at root");
 
-    // Ctrl+I — should not enter EditorInsert at root
+    // Ctrl+I — should not enter Insert at root
     press_ctrl(h.r(), Keycode::I);
     assert_eq!(h.renderer.coordinate, coord_before, "Ctrl+I must be no-op at root");
 
-    // Ctrl+A — should not enter EditorInsert at root
+    // Ctrl+A — should not enter Insert at root
     press_ctrl(h.r(), Keycode::A);
     assert_eq!(h.renderer.coordinate, coord_before, "Ctrl+A must be no-op at root");
 
@@ -2146,19 +2146,19 @@ fn root_allows_navigation_tab_ctrl_f_meta_d_space() {
     press_tab(h.r());
     assert_eq!(h.renderer.coordinate, Coordinate::SimpleSearch);
     press_escape(h.r());
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
 
     // Ctrl+F enters ExtendedSearch
     press_ctrl(h.r(), Keycode::F);
     assert_eq!(h.renderer.coordinate, Coordinate::ExtendedSearch);
     press_escape(h.r());
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
 
     // M enters Meta
     press(h.r(), Keycode::M);
     assert_eq!(h.renderer.coordinate, Coordinate::Meta);
     press_escape(h.r());
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
 }
 
 #[test]
@@ -2169,35 +2169,35 @@ fn test_dashboard_key_transitions_and_escape() {
     // Also prime the provider's dashboard_image_path via direct state manipulation
     // by setting it on the renderer directly (handle_dashboard reads from provider,
     // so we test the dispatch + escape cycle with the coordinate set directly)
-    h.renderer.coordinate = Coordinate::OperatorGeneral;
-    h.renderer.previous_coordinate = Coordinate::OperatorGeneral;
+    h.renderer.coordinate = Coordinate::General;
+    h.renderer.previous_coordinate = Coordinate::General;
 
     // Enter Dashboard mode
     h.renderer.previous_coordinate = h.renderer.coordinate;
     h.renderer.coordinate = Coordinate::Dashboard;
     assert_eq!(h.renderer.coordinate, Coordinate::Dashboard);
 
-    // Escape should return to OperatorGeneral
+    // Escape should return to General
     press_escape(h.r());
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral, "Escape from Dashboard should restore previous coordinate");
+    assert_eq!(h.renderer.coordinate, Coordinate::General, "Escape from Dashboard should restore previous coordinate");
 }
 
 #[test]
 fn test_d_key_noop_without_dashboard_image() {
     let mut h = Harness::new();
-    // No dashboard_image_path set on providers — pressing D at root should stay in OperatorGeneral
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+    // No dashboard_image_path set on providers — pressing D at root should stay in General
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
     press(h.r(), Keycode::D);
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral, "D without dashboard image should not enter Dashboard mode");
+    assert_eq!(h.renderer.coordinate, Coordinate::General, "D without dashboard image should not enter Dashboard mode");
 }
 
 // ---------------------------------------------------------------------------
-// Tests: Ctrl+A/I insert_operator_placeholder with createElement provider
+// Tests: Ctrl+A/I insert_general_placeholder with createElement provider
 // ---------------------------------------------------------------------------
 
-/// Ctrl+A in OperatorGeneral for a createElement provider should clone the
+/// Ctrl+A in General for a createElement provider should clone the
 /// "Add element:" section rather than inserting a raw `<input></input>`.
-/// The cursor should land on the clone and stay in OperatorGeneral (not EditorInsert).
+/// The cursor should land on the clone and stay in General (not Insert).
 #[test]
 fn ctrl_a_operator_clones_add_element_section_for_create_element_provider() {
     let mut renderer = AppRenderer::new();
@@ -2225,9 +2225,9 @@ fn ctrl_a_operator_clones_add_element_section_for_create_element_provider() {
     // Ctrl+A — should clone "Add element:" and insert it after current item.
     press_ctrl(&mut renderer, Keycode::A);
 
-    // Must stay in OperatorGeneral (no insert mode for createElement providers).
-    assert_eq!(renderer.coordinate, Coordinate::OperatorGeneral,
-        "Ctrl+A with createElement provider must stay in OperatorGeneral");
+    // Must stay in General (no insert mode for createElement providers).
+    assert_eq!(renderer.coordinate, Coordinate::General,
+        "Ctrl+A with createElement provider must stay in General");
 
     // List should now have one more item.
     sicompass::list::create_list_current_layer(&mut renderer);
@@ -2241,7 +2241,7 @@ fn ctrl_a_operator_clones_add_element_section_for_create_element_provider() {
     assert_eq!(clone_count, 2, "both the original and the clone should be visible");
 }
 
-/// Ctrl+I in OperatorGeneral for a createElement provider should clone the
+/// Ctrl+I in General for a createElement provider should clone the
 /// "Add element:" section before the current item (same logic as Ctrl+A but different index).
 #[test]
 fn ctrl_i_operator_clones_add_element_section_for_create_element_provider() {
@@ -2262,8 +2262,8 @@ fn ctrl_i_operator_clones_add_element_section_for_create_element_provider() {
 
     press_ctrl(&mut renderer, Keycode::I);
 
-    assert_eq!(renderer.coordinate, Coordinate::OperatorGeneral,
-        "Ctrl+I with createElement provider must stay in OperatorGeneral");
+    assert_eq!(renderer.coordinate, Coordinate::General,
+        "Ctrl+I with createElement provider must stay in General");
 
     sicompass::list::create_list_current_layer(&mut renderer);
     assert_eq!(renderer.total_list.len(), count_before + 1,
@@ -2276,27 +2276,35 @@ fn ctrl_i_operator_clones_add_element_section_for_create_element_provider() {
 }
 
 // ---------------------------------------------------------------------------
-// Tests: handle_ctrl_a double-tap in EditorGeneral
+// Tests: handle_ctrl_a double-tap in General
 // ---------------------------------------------------------------------------
 
-/// In EditorGeneral, pressing Ctrl+A twice quickly should undo the first append
+/// In General, pressing Ctrl+A twice quickly should undo the first append
 /// and perform AppendAppend (mirroring C handleCtrlA double-tap behavior).
 ///
-/// We set the coordinate directly since EditorGeneral is reached via the FFON
-/// editor (after escaping EditorInsert), not via list navigation.
+/// We set the coordinate directly since General is reached via the FFON
+/// editor (after escaping Insert), not via list navigation.
 #[test]
-fn ctrl_a_editor_general_double_tap_does_append_append() {
+fn ctrl_a_in_general_double_tap_does_append_append() {
     use sicompass::app_state::Task;
 
-    // Set up a renderer with two items in an obj (depth-2 EditorGeneral context).
+    struct EditorMock;
+    impl Provider for EditorMock {
+        fn name(&self) -> &str { "mock_editor" }
+        fn fetch(&mut self) -> Vec<FfonElement> { Vec::new() }
+        fn has_editor_semantics(&self) -> bool { true }
+    }
+
+    // Set up a renderer with two items in an obj (depth-2 General context).
     let mut r = AppRenderer::new();
+    r.providers.push(Box::new(EditorMock));
     let mut root = FfonElement::new_obj("section");
     root.as_obj_mut().unwrap().push(FfonElement::new_str("alpha"));
     root.as_obj_mut().unwrap().push(FfonElement::new_str("beta"));
     r.ffon = vec![root];
     r.current_id = { let mut id = sicompass_sdk::ffon::IdArray::new(); id.push(0); id.push(0); id };
-    r.coordinate = Coordinate::EditorGeneral;
-    r.previous_coordinate = Coordinate::EditorGeneral;
+    r.coordinate = Coordinate::General;
+    r.previous_coordinate = Coordinate::General;
     sicompass::list::create_list_current_layer(&mut r);
 
     // First Ctrl+A — single tap append.
@@ -2531,7 +2539,7 @@ fn file_browser_shows_all_files_outside_open_flow() {
         ".json file should be visible when not in open flow");
 }
 
-/// Destructive keys (Ctrl+A, Ctrl+I, Delete) are no-ops in OperatorGeneral
+/// Destructive keys (Ctrl+A, Ctrl+I, Delete) are no-ops in General
 /// while pending_file_browser_open is true.
 #[test]
 fn open_flow_blocks_destructive_keys() {
@@ -2548,18 +2556,18 @@ fn open_flow_blocks_destructive_keys() {
         let mut id = sicompass_sdk::ffon::IdArray::new();
         id.push(1); id.push(0); id
     };
-    r.coordinate = Coordinate::OperatorGeneral;
+    r.coordinate = Coordinate::General;
     sicompass::list::create_list_current_layer(&mut r);
     let initial_list_len = r.total_list.len();
 
     // Ctrl+A (append) must be blocked
     press_ctrl(&mut r, Keycode::A);
-    assert_eq!(r.coordinate, Coordinate::OperatorGeneral,
+    assert_eq!(r.coordinate, Coordinate::General,
         "Ctrl+A should not enter insert mode during open flow");
 
     // Ctrl+I (insert) must be blocked
     press_ctrl(&mut r, Keycode::I);
-    assert_eq!(r.coordinate, Coordinate::OperatorGeneral,
+    assert_eq!(r.coordinate, Coordinate::General,
         "Ctrl+I should not enter insert mode during open flow");
 
     // Delete must be blocked — filebrowser children count should be unchanged
@@ -2597,7 +2605,7 @@ fn open_flow_simple_search_enter_triggers_load() {
 
     // Simulate the user using SimpleSearch: set coordinate and list state
     r.coordinate = Coordinate::SimpleSearch;
-    r.previous_coordinate = Coordinate::OperatorGeneral;
+    r.previous_coordinate = Coordinate::General;
 
     // The search result points at the found.json entry
     let json_idx = r.total_list.iter()
@@ -2637,7 +2645,7 @@ fn save_as_writes_children_not_root_wrapper() {
         "saved JSON must not contain root wrapper key, got: {raw}");
 }
 
-/// Ctrl+S + Escape during save-as (OperatorInsert) cancels and returns to source provider.
+/// Ctrl+S + Escape during save-as (Insert) cancels and returns to source provider.
 #[test]
 fn escape_in_save_as_insert_cancels_and_returns_to_source() {
     let (mut r, _tmp) = harness_with_config_provider();
@@ -2645,13 +2653,13 @@ fn escape_in_save_as_insert_cancels_and_returns_to_source() {
     // Trigger save-as (no existing save path → falls through to file-browser save-as)
     press_ctrl(&mut r, Keycode::S);
     assert!(r.pending_file_browser_save_as, "save-as should be pending after Ctrl+S with no path");
-    assert_eq!(r.coordinate, Coordinate::OperatorInsert, "should be in OperatorInsert for filename entry");
+    assert_eq!(r.coordinate, Coordinate::Insert, "should be in Insert for filename entry");
 
     press(&mut r, Keycode::Escape);
 
     assert!(!r.pending_file_browser_save_as, "save-as flag should be cleared after Escape");
     assert_eq!(r.current_id.get(0), Some(0), "should be back at config provider after Escape");
-    assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(r.coordinate, Coordinate::General);
 }
 
 // ---------------------------------------------------------------------------
@@ -2676,7 +2684,7 @@ fn announced_text(r: &AppRenderer) -> Option<String> {
 #[test]
 fn editor_insert_left_announces_char() {
     let mut r = AppRenderer::new();
-    r.coordinate = Coordinate::EditorInsert;
+    r.coordinate = Coordinate::Insert;
     r.input_buffer = "hello".to_string();
     r.cursor_position = 5;
 
@@ -2696,7 +2704,7 @@ fn editor_insert_left_announces_char() {
 #[test]
 fn editor_insert_right_announces_char() {
     let mut r = AppRenderer::new();
-    r.coordinate = Coordinate::EditorInsert;
+    r.coordinate = Coordinate::Insert;
     r.input_buffer = "hello".to_string();
     r.cursor_position = 0;
 
@@ -2711,7 +2719,7 @@ fn editor_insert_right_announces_char() {
 #[test]
 fn editor_insert_shift_left_announces_and_extends_selection() {
     let mut r = AppRenderer::new();
-    r.coordinate = Coordinate::EditorInsert;
+    r.coordinate = Coordinate::Insert;
     r.input_buffer = "abc".to_string();
     r.cursor_position = 3;
 
@@ -2727,7 +2735,7 @@ fn editor_insert_shift_left_announces_and_extends_selection() {
 #[test]
 fn editor_insert_shift_right_announces_and_extends_selection() {
     let mut r = AppRenderer::new();
-    r.coordinate = Coordinate::EditorInsert;
+    r.coordinate = Coordinate::Insert;
     r.input_buffer = "abc".to_string();
     r.cursor_position = 0;
 
@@ -2739,7 +2747,7 @@ fn editor_insert_shift_right_announces_and_extends_selection() {
 #[test]
 fn editor_insert_left_no_announcement_on_selection_collapse() {
     let mut r = AppRenderer::new();
-    r.coordinate = Coordinate::EditorInsert;
+    r.coordinate = Coordinate::Insert;
     r.input_buffer = "abc".to_string();
     r.cursor_position = 3;
     // Select all then collapse with Left — should NOT announce a char.
@@ -3073,8 +3081,6 @@ fn get_meta_at_root_returns_universal_hints() {
         "root should have Search hint, got: {meta:?}");
     assert!(meta.iter().any(|s| s.contains("Ctrl+F")),
         "root should have Ctrl+F");
-    assert!(meta.iter().any(|s| s.contains("Space")),
-        "root should have Space (mode toggle)");
     // Provider-specific hints (e.g. filebrowser's Ctrl+I) must NOT appear at root.
     assert!(!meta.iter().any(|s| s.contains("Ctrl+I")),
         "root should not show provider-only shortcut Ctrl+I");
@@ -3158,20 +3164,20 @@ fn make_placeholder_harness() -> AppRenderer {
     r.current_id = sicompass_sdk::ffon::IdArray::new();
     r.current_id.push(0);
     r.current_id.push(0); // depth 2, on "first"
-    r.coordinate = Coordinate::OperatorGeneral;
-    r.previous_coordinate = Coordinate::OperatorGeneral;
+    r.coordinate = Coordinate::General;
+    r.previous_coordinate = Coordinate::General;
     sicompass::list::create_list_current_layer(&mut r);
     r.list_index = 0;
     r
 }
 
 #[test]
-fn placeholder_ctrl_shift_i_enters_operator_insert() {
+fn placeholder_ctrl_shift_i_enters_insert() {
     let mut r = make_placeholder_harness();
     // Ctrl+Shift+I is invoked from code, not from key dispatch (shortcut removed by design).
     sicompass::handlers::handle_ctrl_shift_i_placeholder(&mut r);
-    assert_eq!(r.coordinate, Coordinate::OperatorInsert,
-        "handle_ctrl_shift_i_placeholder should enter OperatorInsert");
+    assert_eq!(r.coordinate, Coordinate::Insert,
+        "handle_ctrl_shift_i_placeholder should enter Insert");
     assert!(r.placeholder_insert_mode, "placeholder_insert_mode should be set");
 }
 
@@ -3179,11 +3185,11 @@ fn placeholder_ctrl_shift_i_enters_operator_insert() {
 fn placeholder_commit_plain_text_becomes_string_element() {
     let mut r = make_placeholder_harness();
     sicompass::handlers::handle_ctrl_shift_i_placeholder(&mut r); // insert placeholder before "first"
-    assert_eq!(r.coordinate, Coordinate::OperatorInsert);
+    assert_eq!(r.coordinate, Coordinate::Insert);
     type_text(&mut r, "myvalue");
     press_enter(&mut r);
     // Should exit insert mode and produce a Str element
-    assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(r.coordinate, Coordinate::General);
     assert!(!r.placeholder_insert_mode);
     // Check the FFON: provider now has 3 children, one of which contains "myvalue"
     if let Some(FfonElement::Obj(prov)) = r.ffon.get(0) {
@@ -3203,7 +3209,7 @@ fn placeholder_commit_plus_prefix_becomes_obj_element() {
     sicompass::handlers::handle_ctrl_shift_i_placeholder(&mut r);
     type_text(&mut r, "+ myobj");
     press_enter(&mut r);
-    assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(r.coordinate, Coordinate::General);
     assert!(!r.placeholder_insert_mode);
     if let Some(FfonElement::Obj(prov)) = r.ffon.get(0) {
         let has_obj = prov.children.iter().any(|e| matches!(e, FfonElement::Obj(o) if o.key == "myobj"));
@@ -3219,7 +3225,7 @@ fn placeholder_commit_trailing_colon_becomes_obj_element() {
     sicompass::handlers::handle_ctrl_shift_a_placeholder(&mut r); // append after "first"
     type_text(&mut r, "section:");
     press_enter(&mut r);
-    assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(r.coordinate, Coordinate::General);
     if let Some(FfonElement::Obj(prov)) = r.ffon.get(0) {
         let has_obj = prov.children.iter().any(|e| matches!(e, FfonElement::Obj(o) if o.key == "section"));
         assert!(has_obj, "expected Obj(section), got: {:?}", prov.children);
@@ -3229,13 +3235,13 @@ fn placeholder_commit_trailing_colon_becomes_obj_element() {
 }
 
 #[test]
-fn placeholder_commit_empty_stays_in_operator_insert() {
+fn placeholder_commit_empty_stays_in_insert() {
     let mut r = make_placeholder_harness();
     sicompass::handlers::handle_ctrl_shift_i_placeholder(&mut r);
     // Don't type anything — commit empty
     press_enter(&mut r);
-    assert_eq!(r.coordinate, Coordinate::OperatorInsert,
-        "empty commit should stay in OperatorInsert");
+    assert_eq!(r.coordinate, Coordinate::Insert,
+        "empty commit should stay in Insert");
     assert!(!r.error_message.is_empty(), "should show an error message");
     assert!(r.placeholder_insert_mode, "placeholder_insert_mode should still be set");
 }
@@ -3247,7 +3253,7 @@ fn placeholder_escape_clears_flag() {
     assert!(r.placeholder_insert_mode);
     press_escape(&mut r);
     assert!(!r.placeholder_insert_mode, "escape should clear placeholder_insert_mode");
-    assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(r.coordinate, Coordinate::General);
 }
 
 /// Build a renderer whose top-level FFON list contains an `I_PLACEHOLDER` element.
@@ -3263,8 +3269,8 @@ fn make_star_prefix_harness() -> AppRenderer {
     r.current_id = sicompass_sdk::ffon::IdArray::new();
     r.current_id.push(0);
     r.current_id.push(0); // on I_PLACEHOLDER
-    r.coordinate = Coordinate::OperatorGeneral;
-    r.previous_coordinate = Coordinate::OperatorGeneral;
+    r.coordinate = Coordinate::General;
+    r.previous_coordinate = Coordinate::General;
     sicompass::list::create_list_current_layer(&mut r);
     r.list_index = 0;
     r
@@ -3275,8 +3281,8 @@ fn handle_i_on_star_prefix_element_sets_placeholder_insert_mode() {
     let mut r = make_star_prefix_harness();
     // Press 'i' — handle_i should detect the "* " input_prefix and set the flag.
     press(&mut r, Keycode::I);
-    assert_eq!(r.coordinate, Coordinate::OperatorInsert,
-        "pressing 'i' should enter OperatorInsert");
+    assert_eq!(r.coordinate, Coordinate::Insert,
+        "pressing 'i' should enter Insert");
     assert!(r.placeholder_insert_mode,
         "handle_i should set placeholder_insert_mode when input_prefix is '* '");
 }
@@ -3288,7 +3294,7 @@ fn handle_i_on_star_element_commit_plain_text_produces_str() {
     assert!(r.placeholder_insert_mode);
     type_text(&mut r, "hello");
     press_enter(&mut r);
-    assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(r.coordinate, Coordinate::General);
     assert!(!r.placeholder_insert_mode);
     // The element should now contain "hello".
     if let Some(FfonElement::Obj(prov)) = r.ffon.get(0) {
@@ -3308,7 +3314,7 @@ fn handle_i_on_star_element_commit_plus_prefix_produces_obj() {
     press(&mut r, Keycode::I);
     type_text(&mut r, "+ section");
     press_enter(&mut r);
-    assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(r.coordinate, Coordinate::General);
     if let Some(FfonElement::Obj(prov)) = r.ffon.get(0) {
         let has_obj = prov.children.iter().any(|e| matches!(e, FfonElement::Obj(o) if o.key == "section"));
         assert!(has_obj, "expected Obj(section); got: {:?}", prov.children);
@@ -3322,7 +3328,7 @@ fn handle_a_on_star_prefix_element_sets_placeholder_insert_mode() {
     let mut r = make_star_prefix_harness();
     // Navigate to the "* " element and press 'a' (append mode).
     sicompass::handlers::handle_a(&mut r);
-    assert_eq!(r.coordinate, Coordinate::OperatorInsert);
+    assert_eq!(r.coordinate, Coordinate::Insert);
     assert!(r.placeholder_insert_mode,
         "handle_a should set placeholder_insert_mode when input_prefix is '* '");
 }
@@ -3381,7 +3387,7 @@ fn navigate_into_empty_compose_body_shows_i_placeholder() {
         id.push(0);
         id
     };
-    renderer.coordinate = Coordinate::OperatorGeneral;
+    renderer.coordinate = Coordinate::General;
     sicompass::list::create_list_current_layer(&mut renderer);
 
     // Navigate right into the empty Body: [text] Obj.
@@ -3438,7 +3444,7 @@ fn delete_last_compose_body_element_keeps_i_placeholder() {
         id.push(0); // child index within root
         id
     };
-    renderer.coordinate = Coordinate::OperatorGeneral;
+    renderer.coordinate = Coordinate::General;
     sicompass::list::create_list_current_layer(&mut renderer);
 
     // Delete the only body element.
@@ -3499,7 +3505,7 @@ fn delete_body_element_str_with_obj_sibling_integration() {
         id.push(0);
         id
     };
-    renderer.coordinate = Coordinate::OperatorGeneral;
+    renderer.coordinate = Coordinate::General;
     sicompass::list::create_list_current_layer(&mut renderer);
 
     // Delete the first Str — must succeed even with an Obj sibling.
@@ -3568,7 +3574,7 @@ fn navigate_into_reply_from_message_body_shows_i_placeholder() {
         id.push(0);
         id
     };
-    renderer.coordinate = Coordinate::OperatorGeneral;
+    renderer.coordinate = Coordinate::General;
     sicompass::list::create_list_current_layer(&mut renderer);
 
     // Navigate right into the empty Body: Obj.
@@ -3629,7 +3635,7 @@ fn navigate_into_nested_body_obj_shows_i_placeholder() {
         id.push(0);  // foo: Obj (child 0 of body)
         id
     };
-    renderer.coordinate = Coordinate::OperatorGeneral;
+    renderer.coordinate = Coordinate::General;
     sicompass::list::create_list_current_layer(&mut renderer);
 
     // Navigate right into `foo:` — must show the seeded `i` placeholder.
@@ -3734,7 +3740,7 @@ fn commit_trailing_colon_in_nested_body_creates_obj_with_i_placeholder() {
 /// Editing a string leaf inside a nested body Obj (e.g. pressing `i` then typing then Enter)
 /// must leave the nested list non-empty after commit.
 ///
-/// Regression: the non-placeholder commit branch of `handle_enter_editor_insert` used to
+/// Regression: the non-placeholder commit branch of `handle_enter_insert` used to
 /// call `refresh_current_directory` unconditionally, which rebuilds the provider root and
 /// misroutes deep paths like `/compose/Body: [ffon]/foo`, emptying `total_list`.
 /// The fix: try `refresh_subtree_parent` first (same as the placeholder branch), which
@@ -3785,8 +3791,8 @@ fn editing_leaf_in_nested_compose_body_does_not_empty_list() {
         id.push(0); // "original" string
         id
     };
-    renderer.coordinate = Coordinate::OperatorInsert;
-    renderer.previous_coordinate = Coordinate::OperatorGeneral;
+    renderer.coordinate = Coordinate::Insert;
+    renderer.previous_coordinate = Coordinate::General;
     renderer.placeholder_insert_mode = false;
     // Simulate user having typed "updated" into the existing "original" element.
     renderer.input_buffer = "updated".to_owned();
@@ -3796,8 +3802,8 @@ fn editing_leaf_in_nested_compose_body_does_not_empty_list() {
     press_enter(&mut renderer);
 
     assert_eq!(
-        renderer.coordinate, Coordinate::OperatorGeneral,
-        "Enter in OperatorInsert must exit to OperatorGeneral"
+        renderer.coordinate, Coordinate::General,
+        "Enter in Insert must exit to General"
     );
     assert!(
         !renderer.total_list.is_empty(),
@@ -3883,7 +3889,7 @@ fn email_renderer_inside_message() -> AppRenderer {
         id.push(0); // first body element
         id
     };
-    renderer.coordinate = Coordinate::OperatorGeneral;
+    renderer.coordinate = Coordinate::General;
     sicompass::list::create_list_current_layer(&mut renderer);
     renderer
 }
@@ -4005,7 +4011,7 @@ fn ctrl_d_from_message_list_removes_message() {
         id.push(0); // Alpha
         id
     };
-    renderer.coordinate = Coordinate::OperatorGeneral;
+    renderer.coordinate = Coordinate::General;
     sicompass::list::create_list_current_layer(&mut renderer);
 
     let before_len = renderer.ffon[0].as_obj().map(|o| o.children.len()).unwrap_or(0);
@@ -4041,14 +4047,14 @@ fn placeholder_escape_removes_inserted_element() {
     let pre_len = r.ffon[0].as_obj().unwrap().children.len(); // 2 ("first", "second")
 
     sicompass::handlers::handle_ctrl_shift_i_placeholder(&mut r);
-    assert_eq!(r.coordinate, Coordinate::OperatorInsert);
+    assert_eq!(r.coordinate, Coordinate::Insert);
     assert!(r.placeholder_insert_mode);
     // Placeholder was inserted: child count should have grown.
     assert_eq!(r.ffon[0].as_obj().unwrap().children.len(), pre_len + 1);
 
     press_escape(&mut r);
 
-    assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(r.coordinate, Coordinate::General);
     assert!(!r.placeholder_insert_mode);
     // Placeholder must be gone.
     assert_eq!(
@@ -4067,12 +4073,12 @@ fn placeholder_ctrl_a_escape_removes_inserted_element() {
     let pre_len = r.ffon[0].as_obj().unwrap().children.len();
 
     sicompass::handlers::handle_ctrl_shift_a_placeholder(&mut r);
-    assert_eq!(r.coordinate, Coordinate::OperatorInsert);
+    assert_eq!(r.coordinate, Coordinate::Insert);
     assert_eq!(r.ffon[0].as_obj().unwrap().children.len(), pre_len + 1);
 
     press_escape(&mut r);
 
-    assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(r.coordinate, Coordinate::General);
     assert_eq!(r.ffon[0].as_obj().unwrap().children.len(), pre_len);
     assert_eq!(r.current_id, pre_id);
 }
@@ -4084,15 +4090,15 @@ fn persistent_i_placeholder_escape_does_not_remove() {
     let mut r = make_star_prefix_harness(); // seeds a permanent I_PLACEHOLDER
     let pre_len = r.ffon[0].as_obj().unwrap().children.len();
 
-    press(&mut r, Keycode::I); // enters OperatorInsert on the persistent placeholder
-    assert_eq!(r.coordinate, Coordinate::OperatorInsert);
+    press(&mut r, Keycode::I); // enters Insert on the persistent placeholder
+    assert_eq!(r.coordinate, Coordinate::Insert);
     assert!(r.placeholder_insert_mode);
     // placeholder_cancel must be None because nothing was freshly inserted.
     assert!(r.placeholder_cancel.is_none());
 
     press_escape(&mut r);
 
-    assert_eq!(r.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(r.coordinate, Coordinate::General);
     // The I_PLACEHOLDER element must still be present.
     assert_eq!(
         r.ffon[0].as_obj().unwrap().children.len(), pre_len,
@@ -4119,14 +4125,14 @@ fn filebrowser_ctrl_i_escape_removes_placeholder() {
     let pre_id = h.renderer.current_id.clone();
     let pre_len = h.renderer.ffon[fb_idx].as_obj().unwrap().children.len();
 
-    press_ctrl(h.r(), Keycode::I); // inserts <input></input>, enters OperatorInsert
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorInsert);
+    press_ctrl(h.r(), Keycode::I); // inserts <input></input>, enters Insert
+    assert_eq!(h.renderer.coordinate, Coordinate::Insert);
     assert_eq!(h.renderer.ffon[fb_idx].as_obj().unwrap().children.len(), pre_len + 1,
         "Ctrl+I should insert a placeholder element");
 
     press_escape(h.r());
 
-    assert_eq!(h.renderer.coordinate, Coordinate::OperatorGeneral);
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
     assert_eq!(
         h.renderer.ffon[fb_idx].as_obj().unwrap().children.len(), pre_len,
         "Escape should remove the filebrowser placeholder"
@@ -4184,7 +4190,7 @@ fn compose_body_delete_undo_syncs_draft_body() {
         id.push(0); id.push(0); id.push(0);
         id
     };
-    renderer.coordinate = Coordinate::OperatorGeneral;
+    renderer.coordinate = Coordinate::General;
     sicompass::list::create_list_current_layer(&mut renderer);
 
     // Delete "line1".
@@ -4244,7 +4250,7 @@ fn compose_body_delete_undo_redo_syncs_draft_body() {
         id.push(0); id.push(0); id.push(0);
         id
     };
-    renderer.coordinate = Coordinate::OperatorGeneral;
+    renderer.coordinate = Coordinate::General;
     sicompass::list::create_list_current_layer(&mut renderer);
 
     // Delete → undo → redo.
@@ -4298,18 +4304,18 @@ fn compose_body_insert_undo_redo_syncs_draft_body() {
         id.push(0); id.push(0); id.push(0);
         id
     };
-    renderer.coordinate = Coordinate::OperatorGeneral;
+    renderer.coordinate = Coordinate::General;
     sicompass::list::create_list_current_layer(&mut renderer);
 
-    // Ctrl+A → append placeholder after line1, enters OperatorInsert.
+    // Ctrl+A → append placeholder after line1, enters Insert.
     press_ctrl(&mut renderer, Keycode::A);
     assert!(
         renderer.placeholder_insert_mode,
         "placeholder_insert_mode must be set after Ctrl+A in compose body"
     );
     assert_eq!(
-        renderer.coordinate, Coordinate::OperatorInsert,
-        "must enter OperatorInsert after Ctrl+A"
+        renderer.coordinate, Coordinate::Insert,
+        "must enter Insert after Ctrl+A"
     );
 
     // Type "line2" and commit via Enter.
@@ -4317,8 +4323,8 @@ fn compose_body_insert_undo_redo_syncs_draft_body() {
     press_enter(&mut renderer);
 
     assert_eq!(
-        renderer.coordinate, Coordinate::OperatorGeneral,
-        "must return to OperatorGeneral after commit"
+        renderer.coordinate, Coordinate::General,
+        "must return to General after commit"
     );
 
     // Verify "line2" appears in FFON body children.
@@ -4414,10 +4420,10 @@ fn compose_body_insert_into_empty_undo_syncs_draft_body() {
         id.push(0); id.push(0); id.push(0);
         id
     };
-    renderer.coordinate = Coordinate::OperatorGeneral;
+    renderer.coordinate = Coordinate::General;
     sicompass::list::create_list_current_layer(&mut renderer);
 
-    // Ctrl+A → insert placeholder, enter OperatorInsert.
+    // Ctrl+A → insert placeholder, enter Insert.
     press_ctrl(&mut renderer, Keycode::A);
     assert!(renderer.placeholder_insert_mode, "placeholder_insert_mode must be set");
 
@@ -4487,10 +4493,10 @@ fn compose_body_undo_last_element_restores_i_placeholder() {
         id.push(0); id.push(0); id.push(0);
         id
     };
-    renderer.coordinate = Coordinate::OperatorGeneral;
+    renderer.coordinate = Coordinate::General;
     sicompass::list::create_list_current_layer(&mut renderer);
 
-    // Ctrl+A → append placeholder, enter OperatorInsert.
+    // Ctrl+A → append placeholder, enter Insert.
     press_ctrl(&mut renderer, Keycode::A);
     assert!(renderer.placeholder_insert_mode, "must enter placeholder insert mode");
 
@@ -4572,7 +4578,7 @@ fn compose_body_delete_undo_single_element_no_extra_placeholder() {
         id.push(0); id.push(0); id.push(0);
         id
     };
-    renderer.coordinate = Coordinate::OperatorGeneral;
+    renderer.coordinate = Coordinate::General;
     sicompass::list::create_list_current_layer(&mut renderer);
 
     // Delete the only body element.
@@ -4705,7 +4711,7 @@ fn f5_dispatches_refresh_command_when_provider_exposes_it() {
         id.push(0);
         id
     };
-    renderer.coordinate = Coordinate::OperatorGeneral;
+    renderer.coordinate = Coordinate::General;
 
     press(&mut renderer, Keycode::F5);
 
@@ -5117,7 +5123,7 @@ fn editor_provider_lists_directory_and_parses_file() {
 }
 
 // ---------------------------------------------------------------------------
-// CoordinateKind / editor coordinate tests
+// has_editor_semantics / editor coordinate tests
 // ---------------------------------------------------------------------------
 
 /// Build an AppRenderer with filebrowser (idx 0) + editor (idx 1).
@@ -5156,28 +5162,28 @@ fn harness_with_editor() -> (AppRenderer, TempDir) {
 }
 
 #[test]
-fn entering_editor_provider_switches_to_editor_general() {
+fn entering_editor_provider_keeps_general() {
     let (mut r, _tmp) = harness_with_editor();
     let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
     navigate_to_provider(&mut r, editor_idx);
-    assert_eq!(r.coordinate, Coordinate::OperatorGeneral, "before entry: OperatorGeneral");
+    assert_eq!(r.coordinate, Coordinate::General, "before entry: General");
 
     press_right(&mut r);
     assert_eq!(r.current_id.depth(), 2, "should be inside editor provider");
-    assert_eq!(r.coordinate, Coordinate::EditorGeneral, "should auto-switch to EditorGeneral");
+    assert_eq!(r.coordinate, Coordinate::General, "should auto-switch to General");
 }
 
 #[test]
-fn inside_editor_i_yields_editor_insert() {
+fn inside_editor_i_yields_insert() {
     let (mut r, _tmp) = harness_with_editor();
     let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
     navigate_to_provider(&mut r, editor_idx);
-    press_right(&mut r); // enters editor → EditorGeneral
-    assert_eq!(r.coordinate, Coordinate::EditorGeneral);
+    press_right(&mut r); // enters editor → General
+    assert_eq!(r.coordinate, Coordinate::General);
 
-    // The editor provider enters EditorInsert; Enter routes to commit_edit for disk writes.
+    // The editor provider enters Insert; Enter routes to commit_edit for disk writes.
     press(&mut r, Keycode::I);
-    assert_eq!(r.coordinate, Coordinate::EditorInsert, "'i' in editor provider should give EditorInsert (Enter routes to commit_edit for disk writes)");
+    assert_eq!(r.coordinate, Coordinate::Insert, "'i' in editor provider should give Insert (Enter routes to commit_edit for disk writes)");
 }
 
 #[test]
@@ -5212,7 +5218,7 @@ fn editor_right_arrow_opens_file() {
     let (mut r, tmp) = harness_with_editor();
     let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
     navigate_to_provider(&mut r, editor_idx);
-    press_right(&mut r); // enter editor directory → EditorGeneral at depth 2
+    press_right(&mut r); // enter editor directory → General at depth 2
 
     // Find the hello.txt entry and move cursor to it.
     let file_idx = {
@@ -5248,33 +5254,33 @@ fn editor_right_arrow_opens_file() {
 }
 
 #[test]
-fn leaving_editor_provider_reverts_to_operator_general() {
+fn leaving_editor_provider_keeps_general() {
     let (mut r, _tmp) = harness_with_editor();
     let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
     navigate_to_provider(&mut r, editor_idx);
-    press_right(&mut r); // enter → EditorGeneral
-    assert_eq!(r.coordinate, Coordinate::EditorGeneral);
+    press_right(&mut r); // enter → General
+    assert_eq!(r.coordinate, Coordinate::General);
 
     press_left(&mut r);
     assert_eq!(r.current_id.depth(), 1, "should be back at root");
-    assert_eq!(r.coordinate, Coordinate::OperatorGeneral, "should revert to OperatorGeneral");
+    assert_eq!(r.coordinate, Coordinate::General, "should revert to General");
 }
 
 #[test]
-fn entering_filebrowser_keeps_operator_general() {
+fn entering_filebrowser_keeps_general() {
     let (mut r, _tmp) = harness_with_editor();
     // Start at filebrowser (idx 0)
     navigate_to_provider(&mut r, 0);
     press_right(&mut r);
     assert_eq!(r.current_id.depth(), 2);
-    assert_eq!(r.coordinate, Coordinate::OperatorGeneral, "filebrowser keeps OperatorGeneral");
+    assert_eq!(r.coordinate, Coordinate::General, "filebrowser keeps General");
 }
 
 #[test]
 fn entering_editor_does_not_clobber_non_general_coordinate() {
     let (mut r, _tmp) = harness_with_editor();
     // Simulate a non-General coordinate (e.g. user is in a search overlay).
-    r.coordinate = Coordinate::OperatorInsert;
+    r.coordinate = Coordinate::Insert;
     let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
     // Directly invoke navigate_right_raw so the key-dispatch routing for Insert mode
     // doesn't interfere — we're testing the guard inside navigate_right_raw itself.
@@ -5286,51 +5292,51 @@ fn entering_editor_does_not_clobber_non_general_coordinate() {
         }
     }
     sicompass::handlers::navigate_right_raw(&mut r);
-    assert_eq!(r.coordinate, Coordinate::OperatorInsert, "non-General coordinate must not be clobbered");
+    assert_eq!(r.coordinate, Coordinate::Insert, "non-General coordinate must not be clobbered");
 }
 
 /// After creating a file via Ctrl+I in the editor, the coordinate must return
-/// to EditorGeneral (not OperatorGeneral) because that's what was active before
+/// to General (not General) because that's what was active before
 /// the insert was initiated.
 #[test]
-fn editor_ctrl_i_create_file_restores_editor_general() {
+fn editor_ctrl_i_create_file_restores_general() {
     let (mut r, tmp) = harness_with_editor();
     let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
     navigate_to_provider(&mut r, editor_idx);
-    press_right(&mut r); // enter editor directory → EditorGeneral
-    assert_eq!(r.coordinate, Coordinate::EditorGeneral, "should be EditorGeneral after entering editor");
+    press_right(&mut r); // enter editor directory → General
+    assert_eq!(r.coordinate, Coordinate::General, "should be General after entering editor");
 
-    // Ctrl+I → enters EditorInsert with prefixed_insert_mode
+    // Ctrl+I → enters Insert with prefixed_insert_mode
     press_ctrl(&mut r, Keycode::I);
-    assert_eq!(r.coordinate, Coordinate::EditorInsert);
+    assert_eq!(r.coordinate, Coordinate::Insert);
 
     // Type a plain name (no prefix) → creates a file
     type_text(&mut r, "newfile.txt");
     press_enter(&mut r);
 
-    assert_eq!(r.coordinate, Coordinate::EditorGeneral,
-        "after file creation in editor, coordinate must restore to EditorGeneral, not OperatorGeneral");
+    assert_eq!(r.coordinate, Coordinate::General,
+        "after file creation in editor, coordinate must restore to General");
     assert!(tmp.path().join("newfile.txt").exists(), "file must be created on disk");
 }
 
 /// After creating a directory via Ctrl+I in the editor (using '+' prefix),
-/// the coordinate must return to EditorGeneral.
+/// the coordinate must return to General.
 #[test]
-fn editor_ctrl_i_create_dir_restores_editor_general() {
+fn editor_ctrl_i_create_dir_restores_general() {
     let (mut r, tmp) = harness_with_editor();
     let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
     navigate_to_provider(&mut r, editor_idx);
-    press_right(&mut r); // enter editor directory → EditorGeneral
-    assert_eq!(r.coordinate, Coordinate::EditorGeneral);
+    press_right(&mut r); // enter editor directory → General
+    assert_eq!(r.coordinate, Coordinate::General);
 
     press_ctrl(&mut r, Keycode::I);
-    assert_eq!(r.coordinate, Coordinate::EditorInsert);
+    assert_eq!(r.coordinate, Coordinate::Insert);
 
     type_text(&mut r, "+subdir");
     press_enter(&mut r);
 
-    assert_eq!(r.coordinate, Coordinate::EditorGeneral,
-        "after directory creation in editor, coordinate must restore to EditorGeneral");
+    assert_eq!(r.coordinate, Coordinate::General,
+        "after directory creation in editor, coordinate must restore to General");
     assert!(tmp.path().join("subdir").is_dir(), "directory must be created on disk");
 }
 
@@ -5407,7 +5413,7 @@ fn editor_empty_subdir_seeds_i_placeholder() {
 
 /// Pressing `i` on the I_PLACEHOLDER in an empty editor subdir, typing a plain
 /// name (no prefix), and pressing Enter creates a file on disk and returns to
-/// EditorGeneral.
+/// General.
 #[test]
 fn editor_i_on_placeholder_creates_file() {
     let (mut r, tmp) = harness_with_editor();
@@ -5428,18 +5434,18 @@ fn editor_i_on_placeholder_creates_file() {
     sicompass::list::create_list_current_layer(&mut r);
 
     // Cursor is now on I_PLACEHOLDER at [editor_idx, 0].
-    assert_eq!(r.coordinate, Coordinate::EditorGeneral);
+    assert_eq!(r.coordinate, Coordinate::General);
 
     // Press `i` → should detect I_PLACEHOLDER prefix → placeholder_insert_mode.
     press(&mut r, Keycode::I);
-    assert_eq!(r.coordinate, Coordinate::EditorInsert, "i on I_PLACEHOLDER must enter EditorInsert");
+    assert_eq!(r.coordinate, Coordinate::Insert, "i on I_PLACEHOLDER must enter Insert");
     assert!(r.placeholder_insert_mode, "i on I_PLACEHOLDER must set placeholder_insert_mode");
 
     // Type a plain name and confirm.
     type_text(&mut r, "notes.txt");
     press_enter(&mut r);
 
-    assert_eq!(r.coordinate, Coordinate::EditorGeneral, "must return to EditorGeneral after creation");
+    assert_eq!(r.coordinate, Coordinate::General, "must return to General after creation");
     assert!(tmp.path().join("mydir/notes.txt").exists(), "file must be created on disk");
 }
 
@@ -5466,7 +5472,7 @@ fn editor_i_on_placeholder_creates_dir_with_plus_prefix() {
     type_text(&mut r, "+subdir");
     press_enter(&mut r);
 
-    assert_eq!(r.coordinate, Coordinate::EditorGeneral);
+    assert_eq!(r.coordinate, Coordinate::General);
     assert!(tmp.path().join("mydir2/subdir").is_dir(), "directory must be created on disk with + prefix");
 }
 
@@ -5502,7 +5508,7 @@ fn editor_two_consecutive_writes_both_show_in_list() {
 
     // First write: i, type "first", Enter.
     press(&mut r, Keycode::I);
-    assert_eq!(r.coordinate, Coordinate::EditorInsert);
+    assert_eq!(r.coordinate, Coordinate::Insert);
     type_text(&mut r, "first");
     press_enter(&mut r);
 
@@ -5519,7 +5525,7 @@ fn editor_two_consecutive_writes_both_show_in_list() {
 
     // Second write: Ctrl+A → placeholder after the current line, type "second", Enter.
     press_ctrl(&mut r, Keycode::A);
-    assert_eq!(r.coordinate, Coordinate::EditorInsert, "Ctrl+A must enter insert mode");
+    assert_eq!(r.coordinate, Coordinate::Insert, "Ctrl+A must enter insert mode");
     type_text(&mut r, "second");
     press_enter(&mut r);
 
@@ -5623,8 +5629,8 @@ fn editor_many_consecutive_writes_all_show_in_list() {
     // Nine more Ctrl+A inserts.
     for n in 1..10 {
         press_ctrl(&mut r, Keycode::A);
-        assert_eq!(r.coordinate, Coordinate::EditorInsert,
-            "Ctrl+A iteration {n} must enter EditorInsert (coord stayed in EditorGeneral after previous commit)");
+        assert_eq!(r.coordinate, Coordinate::Insert,
+            "Ctrl+A iteration {n} must enter Insert (coord stayed in General after previous commit)");
         type_text(&mut r, &format!("line{n}"));
         press_enter(&mut r);
     }
@@ -5666,6 +5672,6 @@ fn editor_i_on_placeholder_creates_dir_with_colon_suffix() {
     type_text(&mut r, "data:");
     press_enter(&mut r);
 
-    assert_eq!(r.coordinate, Coordinate::EditorGeneral);
+    assert_eq!(r.coordinate, Coordinate::General);
     assert!(tmp.path().join("mydir3/data").is_dir(), "directory must be created on disk with : suffix");
 }

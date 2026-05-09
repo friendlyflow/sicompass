@@ -537,9 +537,9 @@ mod tests {
     #[test]
     fn speak_mode_change_with_context() {
         let mut r = AppRenderer::new();
-        r.coordinate = crate::app_state::Coordinate::EditorInsert;
+        r.coordinate = crate::app_state::Coordinate::Insert;
         r.speak_mode_change(Some("filename.txt".to_string()));
-        assert_eq!(announced_text(&r).as_deref(), Some("editor insert - filename.txt"));
+        assert_eq!(announced_text(&r).as_deref(), Some("insert mode - filename.txt"));
     }
 
     #[test]
@@ -551,26 +551,34 @@ mod tests {
     }
 
     #[test]
-    fn speak_mode_change_operator_general() {
-        let mut r = AppRenderer::new(); // default is OperatorGeneral
+    fn speak_mode_change_general() {
+        let mut r = AppRenderer::new(); // default is General
         r.speak_mode_change(None);
-        assert_eq!(announced_text(&r).as_deref(), Some("operator"));
+        assert_eq!(announced_text(&r).as_deref(), Some("general mode"));
     }
 
     #[test]
-    fn speak_mode_change_operator_insert_with_context() {
+    fn speak_mode_change_insert_with_context() {
         let mut r = AppRenderer::new();
-        r.coordinate = crate::app_state::Coordinate::OperatorInsert;
+        r.coordinate = crate::app_state::Coordinate::Insert;
         r.speak_mode_change(Some("Documents".to_string()));
-        assert_eq!(announced_text(&r).as_deref(), Some("operator insert - Documents"));
+        assert_eq!(announced_text(&r).as_deref(), Some("insert mode - Documents"));
     }
 
     #[test]
-    fn speak_mode_change_editor_general() {
+    fn speak_mode_change_normal() {
         let mut r = AppRenderer::new();
-        r.coordinate = crate::app_state::Coordinate::EditorGeneral;
+        r.coordinate = crate::app_state::Coordinate::Normal;
         r.speak_mode_change(None);
-        assert_eq!(announced_text(&r).as_deref(), Some("editor"));
+        assert_eq!(announced_text(&r).as_deref(), Some("normal mode"));
+    }
+
+    #[test]
+    fn speak_mode_change_visual() {
+        let mut r = AppRenderer::new();
+        r.coordinate = crate::app_state::Coordinate::Visual;
+        r.speak_mode_change(None);
+        assert_eq!(announced_text(&r).as_deref(), Some("visual mode"));
     }
 
     #[test]

@@ -82,11 +82,9 @@ pub fn create_list_current_layer(renderer: &mut AppRenderer) {
     renderer.error_message.clear();
 
     match renderer.coordinate {
-        Coordinate::OperatorGeneral
-        | Coordinate::OperatorInsert
-        | Coordinate::SimpleSearch
-        | Coordinate::EditorGeneral
-        | Coordinate::EditorInsert => {}
+        Coordinate::General
+        | Coordinate::Insert
+        | Coordinate::SimpleSearch => {}
         Coordinate::ExtendedSearch => {
             create_list_extended_search(renderer);
             return;
