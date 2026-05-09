@@ -62,6 +62,27 @@ pub struct TerminalProvider {
     /// While `true`, `tick()` routes shell output into `emulator`; otherwise
     /// it appends to the scrollback as before.
     in_dashboard: bool,
+    /// Caps the in-memory `entries` scrollback. Older entries are dropped from
+    /// the front. `0` disables the cap. RAM-only — never persisted (matching
+    /// gnome-terminal, alacritty, kitty: scrollback dies with the session).
+    scrollback_size: usize,
+
+    /// Persisted ↑-recall history (just commands, no output). Loaded from
+    /// disk on first `ensure_shell()`, appended on every successful
+    /// `commit_edit()`. Bounded by `command_history_size` both in RAM and on
+    /// disk.
+    command_history: Vec<String>,
+    /// Cap on `command_history` length, enforced in memory and via periodic
+    /// file compaction.
+    command_history_size: usize,
+    /// `true` once `load_command_history()` has run for this provider.
+    command_history_loaded: bool,
+    /// On-disk path for the recall history. `None` → resolved at use time
+    /// from `platform::state_home()`. Tests set this directly.
+    command_history_path: Option<PathBuf>,
+    /// Counts appends since the last full file rewrite. We compact when this
+    /// reaches `command_history_size`, bounding the file at ~2× the cap.
+    appends_since_compact: usize,
 }
 
 impl TerminalProvider {
@@ -76,7 +97,102 @@ impl TerminalProvider {
             host: hostname_short(),
             emulator: None,
             in_dashboard: false,
+            scrollback_size: 50_000,
+            command_history: Vec::new(),
+            command_history_size: 50_000,
+            command_history_loaded: false,
+            command_history_path: None,
+            appends_since_compact: 0,
         }
+    }
+
+    fn trim_scrollback(&mut self) {
+        if self.scrollback_size > 0 && self.entries.len() > self.scrollback_size {
+            let drop = self.entries.len() - self.scrollback_size;
+            self.entries.drain(..drop);
+        }
+    }
+
+    fn trim_command_history_in_memory(&mut self) {
+        if self.command_history_size > 0
+            && self.command_history.len() > self.command_history_size
+        {
+            let drop = self.command_history.len() - self.command_history_size;
+            self.command_history.drain(..drop);
+        }
+    }
+
+    /// Resolve the on-disk path for the persisted ↑-recall history. Returns
+    /// `None` if no usable state directory is available (e.g. `$HOME` unset).
+    fn resolve_command_history_path(&self) -> Option<PathBuf> {
+        if let Some(p) = &self.command_history_path {
+            return Some(p.clone());
+        }
+        sicompass_sdk::platform::state_home()
+            .map(|s| s.join("sicompass").join("terminal").join("history"))
+    }
+
+    /// Read the recall-history file, keep the last `command_history_size`
+    /// lines. No-op on subsequent calls.
+    fn load_command_history(&mut self) {
+        if self.command_history_loaded {
+            return;
+        }
+        self.command_history_loaded = true;
+        let Some(path) = self.resolve_command_history_path() else { return };
+        let Ok(content) = std::fs::read_to_string(&path) else { return };
+        let mut lines: Vec<String> = content
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(|l| l.to_owned())
+            .collect();
+        if self.command_history_size > 0 && lines.len() > self.command_history_size {
+            let drop = lines.len() - self.command_history_size;
+            lines.drain(..drop);
+        }
+        self.command_history = lines;
+    }
+
+    /// Append a single submitted command to the recall history (memory + disk).
+    /// Skips empty lines; replaces embedded newlines with a space.
+    fn record_command(&mut self, line: &str) {
+        let line = line.replace('\n', " ");
+        if line.is_empty() {
+            return;
+        }
+        self.command_history.push(line.clone());
+        self.trim_command_history_in_memory();
+
+        let Some(path) = self.resolve_command_history_path() else { return };
+        if let Some(parent) = path.parent() {
+            sicompass_sdk::platform::make_dirs(parent);
+        }
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(&path)
+        {
+            let _ = writeln!(f, "{}", line);
+        }
+        self.appends_since_compact += 1;
+        if self.command_history_size > 0
+            && self.appends_since_compact >= self.command_history_size
+        {
+            self.compact_command_history_file(&path);
+        }
+    }
+
+    /// Rewrite the recall-history file from current memory state. Called
+    /// periodically from `record_command()` to bound file growth.
+    fn compact_command_history_file(&mut self, path: &std::path::Path) {
+        let mut content = String::with_capacity(self.command_history.len() * 32);
+        for line in &self.command_history {
+            content.push_str(line);
+            content.push('\n');
+        }
+        let _ = std::fs::write(path, content);
+        self.appends_since_compact = 0;
     }
 
     fn ensure_shell(&mut self) {
@@ -97,6 +213,7 @@ impl TerminalProvider {
                 output: e.to_string(),
             }),
         }
+        self.trim_scrollback();
     }
 
     /// Build the prompt string from `user`, `host`, and the shell's *live*
@@ -181,12 +298,14 @@ impl Provider for TerminalProvider {
             return false;
         }
         self.ensure_shell();
+        self.load_command_history();
         let Some(shell) = self.shell.as_mut() else {
             return false;
         };
         if shell.write_line(new).is_err() {
             return false;
         }
+        self.record_command(new);
         // Snapshot the prompt at submit time — past entries should display
         // the cwd they were run in, even after the user runs `cd` afterwards.
         let prompt = self.current_prompt();
@@ -195,6 +314,7 @@ impl Provider for TerminalProvider {
             input: new.to_owned(),
             output: String::new(),
         });
+        self.trim_scrollback();
         true
     }
 
@@ -229,8 +349,26 @@ impl Provider for TerminalProvider {
     }
 
     fn on_setting_change(&mut self, key: &str, value: &str) {
-        if key == "shellProgram" && !value.is_empty() {
-            self.shell_program = value.to_owned();
+        match key {
+            "shellProgram" if !value.is_empty() => {
+                self.shell_program = value.to_owned();
+            }
+            "initialPath" if !value.is_empty() => {
+                self.cwd = Some(expand_home(value));
+            }
+            "scrollbackSize" => {
+                if let Ok(n) = value.parse::<usize>() {
+                    self.scrollback_size = n;
+                    self.trim_scrollback();
+                }
+            }
+            "commandHistorySize" => {
+                if let Ok(n) = value.parse::<usize>() {
+                    self.command_history_size = n;
+                    self.trim_command_history_in_memory();
+                }
+            }
+            _ => {}
         }
     }
 
@@ -340,6 +478,20 @@ fn hostname_short() -> String {
     raw.split('.').next().unwrap_or("host").to_owned()
 }
 
+/// Expand a leading `~` or `~/` to `$HOME`. Other input passes through verbatim.
+fn expand_home(value: &str) -> PathBuf {
+    if value == "~" {
+        if let Ok(home) = std::env::var("HOME") {
+            return PathBuf::from(home);
+        }
+    } else if let Some(rest) = value.strip_prefix("~/") {
+        if let Ok(home) = std::env::var("HOME") {
+            return PathBuf::from(format!("{}/{}", home, rest));
+        }
+    }
+    PathBuf::from(value)
+}
+
 /// Replace a leading `$HOME` in `cwd` with `~` for shell-style display.
 fn collapse_home(cwd: &str) -> String {
     if let Ok(home) = std::env::var("HOME") {
@@ -411,13 +563,35 @@ fn decode_terminal_output(bytes: &[u8]) -> String {
 /// Register the terminal with the SDK factory and manifest registries.
 pub fn register() {
     register_provider_factory("terminal", || Box::new(TerminalProvider::new()));
+    let initial_path_default =
+        std::env::var("HOME").unwrap_or_else(|_| "~".to_owned());
     register_builtin_manifest(
-        BuiltinManifest::new("terminal", "terminal").with_settings(vec![SettingDecl::text(
-            "terminal",
-            "shell program",
-            "shellProgram",
-            &default_program(),
-        )]),
+        BuiltinManifest::new("terminal", "terminal").with_settings(vec![
+            SettingDecl::text(
+                "terminal",
+                "shell program",
+                "shellProgram",
+                &default_program(),
+            ),
+            SettingDecl::text(
+                "terminal",
+                "initial path",
+                "initialPath",
+                &initial_path_default,
+            ),
+            SettingDecl::text(
+                "terminal",
+                "shell command history",
+                "commandHistorySize",
+                "50000",
+            ),
+            SettingDecl::text(
+                "terminal",
+                "terminal emulator scrollback",
+                "scrollbackSize",
+                "50000",
+            ),
+        ]),
     );
 }
 
@@ -459,10 +633,182 @@ mod tests {
     }
 
     #[test]
+    fn on_setting_change_updates_initial_path() {
+        let mut p = TerminalProvider::new();
+        p.on_setting_change("initialPath", "/tmp");
+        assert_eq!(p.cwd, Some(PathBuf::from("/tmp")));
+    }
+
+    #[test]
+    fn on_setting_change_initial_path_expands_tilde() {
+        let mut p = TerminalProvider::new();
+        let home = std::env::var("HOME").unwrap_or_default();
+        if home.is_empty() {
+            return;
+        }
+        p.on_setting_change("initialPath", "~");
+        assert_eq!(p.cwd, Some(PathBuf::from(&home)));
+        p.on_setting_change("initialPath", "~/sub");
+        assert_eq!(p.cwd, Some(PathBuf::from(format!("{}/sub", home))));
+    }
+
+    #[test]
+    fn on_setting_change_updates_command_history_size() {
+        let mut p = TerminalProvider::new();
+        p.on_setting_change("commandHistorySize", "42");
+        assert_eq!(p.command_history_size, 42);
+    }
+
+    #[test]
+    fn on_setting_change_command_history_size_ignores_garbage() {
+        let mut p = TerminalProvider::new();
+        let original = p.command_history_size;
+        p.on_setting_change("commandHistorySize", "not-a-number");
+        assert_eq!(p.command_history_size, original);
+    }
+
+    #[test]
+    fn on_setting_change_updates_scrollback_size() {
+        let mut p = TerminalProvider::new();
+        p.on_setting_change("scrollbackSize", "9");
+        assert_eq!(p.scrollback_size, 9);
+    }
+
+    #[test]
+    fn trim_scrollback_caps_entries_to_scrollback_size() {
+        let mut p = TerminalProvider::new();
+        p.scrollback_size = 3;
+        for i in 0..5 {
+            p.entries.push(Entry {
+                prompt: String::new(),
+                input: format!("cmd{}", i),
+                output: String::new(),
+            });
+        }
+        p.trim_scrollback();
+        assert_eq!(p.entries.len(), 3);
+        assert_eq!(p.entries[0].input, "cmd2");
+        assert_eq!(p.entries[2].input, "cmd4");
+    }
+
+    #[test]
+    fn trim_scrollback_zero_disables_capping() {
+        let mut p = TerminalProvider::new();
+        p.scrollback_size = 0;
+        for i in 0..5 {
+            p.entries.push(Entry {
+                prompt: String::new(),
+                input: format!("cmd{}", i),
+                output: String::new(),
+            });
+        }
+        p.trim_scrollback();
+        assert_eq!(p.entries.len(), 5);
+    }
+
+    #[test]
+    fn load_command_history_reads_last_n_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history");
+        std::fs::write(&path, "a\nb\nc\nd\ne\n").unwrap();
+        let mut p = TerminalProvider::new();
+        p.command_history_size = 3;
+        p.command_history_path = Some(path);
+        p.load_command_history();
+        assert_eq!(p.command_history, vec!["c", "d", "e"]);
+    }
+
+    #[test]
+    fn load_command_history_handles_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = TerminalProvider::new();
+        p.command_history_path = Some(dir.path().join("absent"));
+        p.load_command_history();
+        assert!(p.command_history.is_empty());
+        assert!(p.command_history_loaded);
+    }
+
+    #[test]
+    fn record_command_appends_to_file_and_memory() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history");
+        let mut p = TerminalProvider::new();
+        p.command_history_path = Some(path.clone());
+        p.record_command("ls -la");
+        p.record_command("cd /tmp");
+        assert_eq!(p.command_history, vec!["ls -la", "cd /tmp"]);
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(on_disk, "ls -la\ncd /tmp\n");
+    }
+
+    #[test]
+    fn record_command_skips_empty_and_replaces_newlines() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history");
+        let mut p = TerminalProvider::new();
+        p.command_history_path = Some(path.clone());
+        p.record_command("");
+        p.record_command("a\nb");
+        assert_eq!(p.command_history, vec!["a b"]);
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(on_disk, "a b\n");
+    }
+
+    #[test]
+    fn record_command_caps_memory_at_command_history_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history");
+        let mut p = TerminalProvider::new();
+        p.command_history_size = 3;
+        p.command_history_path = Some(path);
+        for i in 0..5 {
+            p.record_command(&format!("cmd{}", i));
+        }
+        assert_eq!(p.command_history, vec!["cmd2", "cmd3", "cmd4"]);
+    }
+
+    #[test]
+    fn record_command_compacts_file_when_appends_reach_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history");
+        let mut p = TerminalProvider::new();
+        p.command_history_size = 3;
+        p.command_history_path = Some(path.clone());
+        // With cap=3, compaction fires every 3 appends. After 6 appends the
+        // second compaction has run and the file holds exactly the last 3.
+        for i in 0..6 {
+            p.record_command(&format!("cmd{}", i));
+        }
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(on_disk, "cmd3\ncmd4\ncmd5\n");
+        assert_eq!(p.appends_since_compact, 0);
+    }
+
+    #[test]
+    fn resolve_command_history_path_prefers_override() {
+        let mut p = TerminalProvider::new();
+        let custom = PathBuf::from("/tmp/sicompass-test-history");
+        p.command_history_path = Some(custom.clone());
+        assert_eq!(p.resolve_command_history_path(), Some(custom));
+    }
+
+    #[test]
+    fn resolve_command_history_path_uses_state_home() {
+        let p = TerminalProvider::new();
+        let resolved = p.resolve_command_history_path();
+        if let Some(path) = resolved {
+            let s = path.to_string_lossy();
+            assert!(s.contains("sicompass"));
+            assert!(s.ends_with("history"));
+        }
+    }
+
+    #[test]
     fn on_setting_change_ignores_empty_and_other_keys() {
         let mut p = TerminalProvider::new();
         let original = p.shell_program.clone();
         p.on_setting_change("shellProgram", "");
+        p.on_setting_change("initialPath", "");
         p.on_setting_change("unrelated", "/bin/zsh");
         assert_eq!(p.shell_program, original);
     }
