@@ -345,7 +345,7 @@ jobs:
   #         Version:        ${VERSION}
   #         Release:        1
   #         Summary:        Accessible document editor
-  #         License:        MIT
+  #         License:        GPL-3.0-only
   #         URL:            https://github.com/friendlyflow/sicompass
   #         Requires:       vulkan-loader
   #         Requires:       freetype
@@ -441,7 +441,7 @@ jobs:
   #         packager = GitHub Actions
   #         size = $(du -sb pkg/usr | cut -f1)
   #         arch = x86_64
-  #         license = MIT
+  #         license = GPL-3.0-only
   #         depend = vulkan-icd-loader
   #         depend = freetype2
   #         depend = harfbuzz
