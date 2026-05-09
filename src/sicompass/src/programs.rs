@@ -411,6 +411,62 @@ pub fn read_maximized() -> bool {
     }
 }
 
+/// Read `sicompass.tabs` and `sicompass.activeTab` from settings.json and
+/// apply them to `r`. Falls back to the existing single-tab default if either
+/// key is absent or unparseable.
+///
+/// `tabs` is a JSON-encoded array of `{"id":[u, ...], "path":"…"}` objects.
+/// Tabs whose first index points to a provider that is no longer registered
+/// (e.g. the program was disabled) are dropped; if everything is filtered out,
+/// the existing default is preserved.
+pub fn load_tabs_state(r: &mut crate::app_state::AppRenderer) {
+    use sicompass_sdk::ffon::IdArray;
+    use crate::app_state::TabSnapshot;
+    let Some(path) = sicompass_sdk::platform::main_config_path() else { return };
+    let Ok(data) = std::fs::read_to_string(&path) else { return };
+    let Ok(root) = serde_json::from_str::<serde_json::Value>(&data) else { return };
+    let Some(sec) = root.get("sicompass").and_then(|v| v.as_object()) else { return };
+
+    let provider_count = r.providers.len();
+
+    if let Some(tabs_str) = sec.get("tabs").and_then(|v| v.as_str()) {
+        if let Ok(serde_json::Value::Array(arr)) = serde_json::from_str::<serde_json::Value>(tabs_str) {
+            let parsed: Vec<TabSnapshot> = arr.into_iter().filter_map(|v| {
+                let obj = v.as_object()?;
+                let ids = obj.get("id")?.as_array()?;
+                let path = obj.get("path")?.as_str()?.to_owned();
+                let mut id = IdArray::new();
+                for n in ids {
+                    id.push(n.as_u64()? as usize);
+                }
+                match id.get(0) {
+                    Some(pi) if pi < provider_count && id.depth() > 0 => Some(TabSnapshot {
+                        current_id: id,
+                        provider_path: path,
+                    }),
+                    _ => None,
+                }
+            }).collect();
+            if !parsed.is_empty() {
+                r.tabs = parsed;
+            }
+        }
+    }
+
+    if let Some(active_str) = sec.get("activeTab").and_then(|v| v.as_str()) {
+        if let Ok(n) = active_str.parse::<usize>() {
+            if n < r.tabs.len() {
+                r.active_tab = n;
+            }
+        }
+    }
+    if r.active_tab >= r.tabs.len() { r.active_tab = 0; }
+
+    // Apply the active tab's saved state (path + current_id), re-fetching the
+    // provider's FFON tree so saved indices index into the right content.
+    r.load_active_tab();
+}
+
 /// Read `sicompass.fontScale` from settings.json.
 /// Returns 1.0 if absent or unparseable. Clamped to [1.0, 2.5].
 pub fn read_font_scale() -> f32 {

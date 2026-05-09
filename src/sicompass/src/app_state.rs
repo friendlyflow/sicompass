@@ -437,12 +437,50 @@ pub struct AppRenderer {
     /// When true the visual output is suppressed (blank screen). Navigation,
     /// FFON state, and AccessKit/screen-reader output continue to work normally.
     pub privacy_blank: bool,
+
+    // ---- Tabs --------------------------------------------------------------
+    /// Saved navigation snapshots, one per tab. `tabs[active_tab]` mirrors
+    /// the live `current_id` + active provider's path between tab switches.
+    pub tabs: Vec<TabSnapshot>,
+    /// Index into `tabs` of the currently active tab.
+    pub active_tab: usize,
+}
+
+/// One tab's saved state.
+///
+/// Both fields matter because all tabs share the same FFON tree and provider
+/// instances. Saving only `current_id` would leave other tabs indexing into a
+/// stale tree (e.g. tab A navigates the file browser into `/Downloads`, which
+/// rebuilds `r.ffon[0]`; tab B's saved indices then point at the wrong
+/// directory). Saving the active provider's `current_path` lets the switch
+/// logic call `set_current_path` + re-fetch and rebuild the tree to match.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TabSnapshot {
+    pub current_id: IdArray,
+    /// `current_path()` of the provider at `current_id[0]` at snapshot time.
+    /// Empty when there is no provider (shouldn't happen in practice).
+    pub provider_path: String,
+}
+
+impl TabSnapshot {
+    /// Capture the live state of `r` into a snapshot.
+    pub fn capture(r: &AppRenderer) -> Self {
+        let provider_path = r.current_id.get(0)
+            .and_then(|i| r.providers.get(i))
+            .map(|p| p.current_path().to_owned())
+            .unwrap_or_default();
+        TabSnapshot {
+            current_id: r.current_id.clone(),
+            provider_path,
+        }
+    }
 }
 
 impl AppRenderer {
     pub fn new() -> Self {
         let mut current_id = IdArray::new();
         current_id.push(0);
+        let current_id_clone = current_id.clone();
 
         AppRenderer {
             ffon: Vec::new(),
@@ -507,7 +545,65 @@ impl AppRenderer {
             pending_announcement: None,
             announcement_parity: false,
             privacy_blank: false,
+            tabs: vec![TabSnapshot {
+                current_id: current_id_clone,
+                provider_path: String::new(),
+            }],
+            active_tab: 0,
         }
+    }
+
+    /// Switch to the tab at `target`. Saves the current navigation + active
+    /// provider's path into the outgoing tab slot, then loads the target snapshot
+    /// and re-fetches the provider's FFON tree if the saved path differs from the
+    /// provider's current path. No-op if `target` is out of range or already active.
+    pub fn switch_to_tab(&mut self, target: usize) {
+        if target >= self.tabs.len() || target == self.active_tab { return; }
+        self.tabs[self.active_tab] = TabSnapshot::capture(self);
+        self.active_tab = target;
+        self.load_active_tab();
+    }
+
+    /// Restore live state from `tabs[active_tab]`. Called by `switch_to_tab`
+    /// (after saving the outgoing tab) and by `handle_tab_close` (which has
+    /// nothing to save into the slot it just removed).
+    pub fn load_active_tab(&mut self) {
+        let snap = self.tabs[self.active_tab].clone();
+
+        // Restore the saved provider's internal path and re-fetch its FFON tree
+        // so saved indices in `current_id` index into the right content.
+        if let Some(provider_idx) = snap.current_id.get(0) {
+            if provider_idx < self.providers.len() && !snap.provider_path.is_empty() {
+                let provider = &mut self.providers[provider_idx];
+                if provider.current_path() != snap.provider_path {
+                    provider.set_current_path(&snap.provider_path);
+                    let children = provider.fetch();
+                    let display_name = provider.display_name().to_owned();
+                    let mut root_elem = sicompass_sdk::ffon::FfonElement::new_obj(&display_name);
+                    for child in children {
+                        if let Some(obj) = root_elem.as_obj_mut() {
+                            obj.push(child);
+                        }
+                    }
+                    if provider_idx < self.ffon.len() {
+                        self.ffon[provider_idx] = root_elem;
+                    }
+                }
+            }
+        }
+
+        self.current_id = snap.current_id;
+        self.list_index = self.current_id.last().unwrap_or(0);
+    }
+
+    /// Set the screen-reader announcement to "tab N/M: <label>". Toggles the
+    /// parity sentinel so back-to-back identical announcements still produce
+    /// an AccessKit tree diff.
+    pub fn speak_tab_change(&mut self, label: &str) {
+        let text = format!("tab {}/{}: {}", self.active_tab + 1, self.tabs.len(), label);
+        self.announcement_parity = !self.announcement_parity;
+        let sentinel = if self.announcement_parity { "\u{200B}" } else { "" };
+        self.pending_announcement = Some(format!("{text}{sentinel}"));
     }
 
     /// Set the screen-reader announcement to the current coordinate's spoken
@@ -735,6 +831,10 @@ impl AppState {
         // Apply initial settings (skip enable_* — providers already loaded above)
         crate::programs::apply_pending_settings(&mut state.renderer, &queue, true);
         state.settings_queue = Some(queue);
+
+        // Restore persisted tab layout (no-op if none stored).
+        // Must run AFTER providers are loaded so provider-index validation works.
+        crate::programs::load_tabs_state(&mut state.renderer);
 
         crate::list::create_list_current_layer(&mut state.renderer);
         Ok(state)

@@ -357,6 +357,9 @@ fn update_view(app: &mut AppState) {
         em_width = fr.get_width_em(scale);
     }
 
+    // Tabs band sits at y=0..line_height; everything else shifts down by this amount.
+    let top_offset: f32 = line_height as f32;
+
     // Snapshot the display state so we can borrow font_renderer mutably after
     let header = build_header_text(&app.renderer, line_height);
     let win_w = app.swapchain_extent.width as f32;
@@ -430,11 +433,18 @@ fn update_view(app: &mut AppState) {
             ir.begin_image_rendering();
         }
 
-        // Header separator and text (same as list mode)
-        if let Some(rr) = app.rect_renderer.as_mut() {
-            rr.prepare_rectangle(0.0, line_height as f32, win_w, 1.0, p.header_sep, 0.0);
+        // Tabs band above the header
+        {
+            let fr = app.font_renderer.as_mut().unwrap();
+            render_tabs_band(fr, app.rect_renderer.as_mut(), &app.renderer,
+                win_w, line_height, scale, ascender, em_width, &p);
         }
-        let header_baseline = (ascender * scale + crate::text::TEXT_PADDING) as f32;
+
+        // Header separator and text (same as list mode), shifted down by the tabs band
+        if let Some(rr) = app.rect_renderer.as_mut() {
+            rr.prepare_rectangle(0.0, line_height as f32 + top_offset, win_w, 1.0, p.header_sep, 0.0);
+        }
+        let header_baseline = (ascender * scale + crate::text::TEXT_PADDING) as f32 + top_offset;
         app.font_renderer.as_mut().unwrap().prepare_text_for_rendering(&header, text_x, header_baseline, scale, p.text);
         if !error_msg.is_empty() {
             let fr = app.font_renderer.as_mut().unwrap();
@@ -455,7 +465,7 @@ fn update_view(app: &mut AppState) {
                 search_current_match,
                 search_needs_position,
                 search_snap,
-                scale, line_height, ascender, em_width, text_x, max_content_w, win_h, &p,
+                scale, line_height, ascender, em_width, text_x, max_content_w, win_h, top_offset, &p,
             );
             app.renderer.text_scroll_total_height = result.total_height;
             app.renderer.scroll_search_match_count = result.match_count;
@@ -473,7 +483,7 @@ fn update_view(app: &mut AppState) {
                 &list_items,
                 list_index,
                 text_scroll_offset,
-                scale, line_height, ascender, em_width, text_x, max_content_w, win_h, &p,
+                scale, line_height, ascender, em_width, text_x, max_content_w, win_h, top_offset, &p,
             );
             app.renderer.text_scroll_total_height = total_height;
             app.renderer.text_scroll_offset = resolved_offset;
@@ -495,11 +505,18 @@ fn update_view(app: &mut AppState) {
             ir.begin_image_rendering();
         }
 
-        // Header separator and text
-        if let Some(rr) = app.rect_renderer.as_mut() {
-            rr.prepare_rectangle(0.0, line_height as f32, win_w, 1.0, p.header_sep, 0.0);
+        // Tabs band above the header
+        {
+            let fr = app.font_renderer.as_mut().unwrap();
+            render_tabs_band(fr, app.rect_renderer.as_mut(), &app.renderer,
+                win_w, line_height, scale, ascender, em_width, &p);
         }
-        let header_baseline = (ascender * scale + crate::text::TEXT_PADDING) as f32;
+
+        // Header separator and text, shifted down by the tabs band
+        if let Some(rr) = app.rect_renderer.as_mut() {
+            rr.prepare_rectangle(0.0, line_height as f32 + top_offset, win_w, 1.0, p.header_sep, 0.0);
+        }
+        let header_baseline = (ascender * scale + crate::text::TEXT_PADDING) as f32 + top_offset;
         app.font_renderer.as_mut().unwrap().prepare_text_for_rendering(&header, text_x, header_baseline, scale, p.text);
         let error_msg = app.renderer.error_message.clone();
         if !error_msg.is_empty() {
@@ -508,11 +525,11 @@ fn update_view(app: &mut AppState) {
             fr.prepare_text_for_rendering(&error_msg, err_x, header_baseline, scale, p.error);
         }
 
-        // Render the dashboard image
+        // Render the dashboard image (tabs band + header occupy two line_heights)
         if !dashboard_path.is_empty() {
             if let Some(ir) = app.image_renderer.as_mut() {
                 let avail_w = win_w - 100.0;
-                let avail_h = win_h - line_height as f32 * 2.0;
+                let avail_h = win_h - line_height as f32 * 2.0 - top_offset;
                 if let Some((img_w, img_h)) = unsafe { ir.texture_size(&dashboard_path) } {
                     let img_w = img_w as f32;
                     let img_h = img_h as f32;
@@ -522,7 +539,7 @@ fn update_view(app: &mut AppState) {
                     let display_w = img_w * display_scale;
                     let display_h = img_h * display_scale;
                     let img_x = (win_w - display_w) / 2.0;
-                    let img_y = line_height as f32 + (avail_h - display_h) / 2.0;
+                    let img_y = line_height as f32 + top_offset + (avail_h - display_h) / 2.0;
                     unsafe { ir.prepare_image(&dashboard_path, img_x, img_y, display_w, display_h); }
                 }
             }
@@ -535,7 +552,7 @@ fn update_view(app: &mut AppState) {
     if app.renderer.coordinate == Coordinate::DashboardInteractive {
         let cell_w = em_width.max(1.0);
         let cell_h = line_height.max(1) as f32;
-        let header_h = line_height as f32;
+        let header_h = line_height as f32 + top_offset;
         let grid_top = header_h;
         let avail_h = (win_h - grid_top).max(0.0);
         let cols = (win_w / cell_w).floor().max(1.0) as u16;
@@ -565,11 +582,18 @@ fn update_view(app: &mut AppState) {
             ir.begin_image_rendering();
         }
 
-        // Header separator + title
-        if let Some(rr) = app.rect_renderer.as_mut() {
-            rr.prepare_rectangle(0.0, line_height as f32, win_w, 1.0, p.header_sep, 0.0);
+        // Tabs band above the header
+        {
+            let fr = app.font_renderer.as_mut().unwrap();
+            render_tabs_band(fr, app.rect_renderer.as_mut(), &app.renderer,
+                win_w, line_height, scale, ascender, em_width, &p);
         }
-        let header_baseline = (ascender * scale + crate::text::TEXT_PADDING) as f32;
+
+        // Header separator + title, shifted down by the tabs band
+        if let Some(rr) = app.rect_renderer.as_mut() {
+            rr.prepare_rectangle(0.0, line_height as f32 + top_offset, win_w, 1.0, p.header_sep, 0.0);
+        }
+        let header_baseline = (ascender * scale + crate::text::TEXT_PADDING) as f32 + top_offset;
         app.font_renderer.as_mut().unwrap().prepare_text_for_rendering(
             &header, text_x, header_baseline, scale, p.text,
         );
@@ -705,7 +729,7 @@ fn update_view(app: &mut AppState) {
     } else {
         1 + if parent_info.radio_summary.is_some() { 1 } else { 0 }
     };
-    let first_item_y = (line_height as f32) * (1.0 + extra_lines as f32) + ascender * scale + crate::text::TEXT_PADDING;
+    let first_item_y = (line_height as f32) * (1.0 + extra_lines as f32) + ascender * scale + crate::text::TEXT_PADDING + top_offset;
     let available_lines = ((win_h - first_item_y) / line_height as f32).max(1.0) as usize;
     let item_max_w = max_content_w.max(1.0);
 
@@ -879,13 +903,17 @@ fn update_view(app: &mut AppState) {
         ir.begin_image_rendering();
     }
 
-    // ---- Header separator line -------------------------------------------
+    // ---- Tabs band (above the header) ------------------------------------
+    render_tabs_band(fr, app.rect_renderer.as_mut(), &app.renderer,
+        win_w, line_height, scale, ascender, em_width, &p);
+
+    // ---- Header separator line (between header and content) --------------
     if let Some(rr) = app.rect_renderer.as_mut() {
-        rr.prepare_rectangle(0.0, line_height as f32, win_w, 1.0, p.header_sep, 0.0);
+        rr.prepare_rectangle(0.0, line_height as f32 + top_offset, win_w, 1.0, p.header_sep, 0.0);
     }
 
     // ---- Header text -----------------------------------------------------
-    let header_baseline = (ascender * scale + crate::text::TEXT_PADDING) as f32;
+    let header_baseline = (ascender * scale + crate::text::TEXT_PADDING) as f32 + top_offset;
     fr.prepare_text_for_rendering(&header, text_x, header_baseline, scale, p.text);
 
     // ---- Error message (right of header) ---------------------------------
@@ -896,7 +924,7 @@ fn update_view(app: &mut AppState) {
 
     // ---- Parent element (when navigated into a child level) ---------------
     if !parent_info.display_text.is_empty() && search_str.is_none() {
-        let parent_y = line_height as f32 + ascender * scale + crate::text::TEXT_PADDING;
+        let parent_y = line_height as f32 + ascender * scale + crate::text::TEXT_PADDING + top_offset;
         let parent_display = if parent_info.is_radio {
             let state = parent_info.radio_summary.as_deref().unwrap_or("");
             format!("{} [{}]", parent_info.display_text, state)
@@ -918,7 +946,7 @@ fn update_view(app: &mut AppState) {
 
     // ---- Search / command line -------------------------------------------
     if let Some(ref s) = search_str {
-        let search_y = line_height as f32 + ascender * scale + crate::text::TEXT_PADDING;
+        let search_y = line_height as f32 + ascender * scale + crate::text::TEXT_PADDING + top_offset;
         fr.prepare_text_for_rendering(s, text_x, search_y, scale, p.text);
     }
 
@@ -1201,7 +1229,7 @@ fn update_view(app: &mut AppState) {
                     .map(|fr| fr.measure_text_width(prefix, scale))
                     .unwrap_or(0.0);
                 // search baseline is (line_height + ascender*scale + TEXT_PADDING); shift to cell top
-                (text_x + pfx_w, line_height as f32 + crate::text::TEXT_PADDING)
+                (text_x + pfx_w, line_height as f32 + crate::text::TEXT_PADDING + top_offset)
             };
             let sel_height = line_height as f32 - 2.0 * crate::text::TEXT_PADDING;
             let search_buf;
@@ -1290,7 +1318,7 @@ fn update_view(app: &mut AppState) {
                 _ => ("search: ", app.renderer.search_string.as_str(), insert_cursor),
             };
             // search_y is the baseline — shift to cell top + padding
-            let search_y = line_height as f32 + ascender * scale + crate::text::TEXT_PADDING;
+            let search_y = line_height as f32 + ascender * scale + crate::text::TEXT_PADDING + top_offset;
             let caret_top_y = search_y - ascender * scale;
             if let Some(fr) = app.font_renderer.as_ref() {
                 let pfx_w = fr.measure_text_width(prefix, scale);
@@ -1343,10 +1371,11 @@ fn render_scroll_full(
     text_x: f32,
     max_content_w: f32,
     win_h: f32,
+    top_offset: f32,
     p: &crate::app_state::ColorPalette,
 ) -> (i32, i32) {
     let _ = em_width;
-    let clip_y = line_height as f32;
+    let clip_y = line_height as f32 + top_offset;
     let viewport_h = win_h - clip_y;
     let max_w = max_content_w.max(1.0);
     let lh = line_height as f32;
@@ -1451,11 +1480,12 @@ fn render_scroll_search_full(
     text_x: f32,
     max_content_w: f32,
     win_h: f32,
+    top_offset: f32,
     p: &crate::app_state::ColorPalette,
 ) -> ScrollSearchResult {
     let _ = em_width;
-    // Search bar occupies line 1 (below header), content starts at line 2
-    let clip_y = line_height as f32 * 2.0;
+    // Tabs band + header + search bar occupy three line_heights from the top.
+    let clip_y = line_height as f32 * 2.0 + top_offset;
     let viewport_h = win_h - clip_y;
     let max_w = max_content_w.max(1.0);
     let lh = line_height as f32;
@@ -1529,8 +1559,8 @@ fn render_scroll_search_full(
         viewport_top.clamp(0, max_offset)
     };
 
-    // Render search bar at line 1 (immediately below header separator)
-    let search_bar_y = line_height as f32 + ascender * scale + crate::text::TEXT_PADDING;
+    // Render search bar at line 1 (immediately below header separator), shifted down by tabs band
+    let search_bar_y = line_height as f32 + ascender * scale + crate::text::TEXT_PADDING + top_offset;
     let search_bar = format!("search: {} [{} items]", search_query, match_count);
     fr.prepare_text_for_rendering(&search_bar, text_x, search_bar_y, scale, p.text);
 
@@ -1585,6 +1615,55 @@ fn rgba_u32_to_f32(c: u32) -> [f32; 4] {
         ((c >>  8) & 0xFF) as f32 / 255.0,
         ( c        & 0xFF) as f32 / 255.0,
     ]
+}
+
+/// Render the tabs band at the top of the window.
+///
+/// Layout:
+/// - Each cell is a fixed `22 * em_width` wide (1ch padding + 20ch label + 1ch padding).
+/// - Active tab gets a `selected`-coloured background; others render on the window background.
+/// - 1px vertical `header_sep` separator between adjacent cells.
+/// - 1px horizontal `header_sep` separator at `y = line_height` between the band and the header.
+/// - Labels are the active provider's `display_name()` truncated to 20 chars and centred in the cell.
+fn render_tabs_band(
+    fr: &mut crate::text::FontRenderer,
+    rr: Option<&mut crate::rectangle::RectangleRenderer>,
+    r: &AppRenderer,
+    win_w: f32,
+    line_height: i32,
+    scale: f32,
+    ascender: f32,
+    em_width: f32,
+    p: &crate::app_state::ColorPalette,
+) {
+    let cell_w = 22.0 * em_width;
+    let band_h = line_height as f32;
+    let baseline = ascender * scale + crate::text::TEXT_PADDING;
+
+    if let Some(rr) = rr {
+        for (i, _t) in r.tabs.iter().enumerate() {
+            let x = i as f32 * cell_w;
+            if i == r.active_tab {
+                rr.prepare_rectangle(x, 0.0, cell_w, band_h, p.selected, 0.0);
+            }
+            if i + 1 < r.tabs.len() {
+                rr.prepare_rectangle(x + cell_w - 1.0, 0.0, 1.0, band_h, p.header_sep, 0.0);
+            }
+        }
+        // Horizontal separator between tabs band and header.
+        rr.prepare_rectangle(0.0, band_h, win_w, 1.0, p.header_sep, 0.0);
+    }
+
+    for (i, tab) in r.tabs.iter().enumerate() {
+        let label: String = tab.current_id.get(0)
+            .and_then(|pi| r.providers.get(pi))
+            .map(|prov| prov.display_name().chars().take(20).collect::<String>())
+            .unwrap_or_else(|| "—".to_string());
+        let cell_x = i as f32 * cell_w;
+        let label_w = fr.measure_text_width(&label, scale);
+        let text_x = cell_x + (cell_w - label_w) / 2.0;
+        fr.prepare_text_for_rendering(&label, text_x, baseline, scale, p.text);
+    }
 }
 
 /// Build the header status line (mirrors C updateView header format).

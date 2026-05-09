@@ -193,6 +193,11 @@ pub trait Provider: Send + 'static {
     fn add_radio_setting(&mut self, _section: &str, _label: &str,
                          _config_key: &str, _options: &[&str], _default: &str) {}
 
+    /// Write a string setting under `section` / `key`, persisting to disk.
+    /// Used by the app to persist runtime state (e.g. tab layout). Default: no-op.
+    /// Implemented by `SettingsProvider`.
+    fn write_text_setting(&mut self, _section: &str, _key: &str, _value: &str) {}
+
     /// Called when any setting changes (key/value pair from the settings apply callback).
     ///
     /// Providers implement this to react to settings that affect them

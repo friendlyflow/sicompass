@@ -99,6 +99,8 @@ pub struct Shortcut {
 
 fn always(_: &AppRenderer) -> bool { true }
 
+fn more_than_one_tab(r: &AppRenderer) -> bool { r.tabs.len() > 1 }
+
 fn not_at_root(r: &AppRenderer) -> bool {
     r.current_id.depth() > 1
 }
@@ -784,6 +786,42 @@ pub static SHORTCUTS: &[Shortcut] = &[
     Shortcut { key: Keycode::F5, key2: None, ctrl: false, shift: false,
         modes: &[Coordinate::General],
         label: "F5     Refresh", is_available: always, handle: handlers::handle_f5 },
+
+    // ---- Tab management (Ctrl+T / Ctrl+W / Ctrl+Tab / Ctrl+Shift+Tab / Ctrl+1..9)
+    Shortcut { key: Keycode::T, key2: None, ctrl: true, shift: false,
+        modes: GENERAL,
+        label: "Ctrl+T New tab", is_available: always, handle: handlers::handle_tab_new },
+    Shortcut { key: Keycode::W, key2: None, ctrl: true, shift: false,
+        modes: GENERAL,
+        label: "Ctrl+W Close tab", is_available: more_than_one_tab,
+        handle: handlers::handle_tab_close },
+    Shortcut { key: Keycode::Tab, key2: None, ctrl: true, shift: false,
+        modes: GENERAL,
+        label: "Ctrl+Tab Next tab", is_available: more_than_one_tab,
+        handle: handlers::handle_tab_next },
+    Shortcut { key: Keycode::Tab, key2: None, ctrl: true, shift: true,
+        modes: GENERAL,
+        label: "Ctrl+Shift+Tab Prev tab", is_available: more_than_one_tab,
+        handle: handlers::handle_tab_prev },
+    // Ctrl+1..9 — labels empty (Ctrl+Tab/Ctrl+Shift+Tab already advertise tab nav)
+    Shortcut { key: Keycode::_1, key2: None, ctrl: true, shift: false,
+        modes: GENERAL, label: "", is_available: always, handle: handlers::handle_tab_select_1 },
+    Shortcut { key: Keycode::_2, key2: None, ctrl: true, shift: false,
+        modes: GENERAL, label: "", is_available: always, handle: handlers::handle_tab_select_2 },
+    Shortcut { key: Keycode::_3, key2: None, ctrl: true, shift: false,
+        modes: GENERAL, label: "", is_available: always, handle: handlers::handle_tab_select_3 },
+    Shortcut { key: Keycode::_4, key2: None, ctrl: true, shift: false,
+        modes: GENERAL, label: "", is_available: always, handle: handlers::handle_tab_select_4 },
+    Shortcut { key: Keycode::_5, key2: None, ctrl: true, shift: false,
+        modes: GENERAL, label: "", is_available: always, handle: handlers::handle_tab_select_5 },
+    Shortcut { key: Keycode::_6, key2: None, ctrl: true, shift: false,
+        modes: GENERAL, label: "", is_available: always, handle: handlers::handle_tab_select_6 },
+    Shortcut { key: Keycode::_7, key2: None, ctrl: true, shift: false,
+        modes: GENERAL, label: "", is_available: always, handle: handlers::handle_tab_select_7 },
+    Shortcut { key: Keycode::_8, key2: None, ctrl: true, shift: false,
+        modes: GENERAL, label: "", is_available: always, handle: handlers::handle_tab_select_8 },
+    Shortcut { key: Keycode::_9, key2: None, ctrl: true, shift: false,
+        modes: GENERAL, label: "", is_available: always, handle: handlers::handle_tab_select_9 },
 
     // ---- Ctrl+S / Ctrl+Shift+S / Ctrl+O (config file ops) ---------------
     // Hints only inside providers; dispatch fires anywhere the provider supports it.

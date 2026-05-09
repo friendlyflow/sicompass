@@ -5675,3 +5675,285 @@ fn editor_i_on_placeholder_creates_dir_with_colon_suffix() {
     assert_eq!(r.coordinate, Coordinate::General);
     assert!(tmp.path().join("mydir3/data").is_dir(), "directory must be created on disk with : suffix");
 }
+
+// ---------------------------------------------------------------------------
+// Tabs
+// ---------------------------------------------------------------------------
+
+fn strip_announcement_sentinel(s: &str) -> &str {
+    s.trim_end_matches('\u{200B}')
+}
+
+#[test]
+fn tabs_initial_state_has_one_tab() {
+    let h = Harness::new();
+    assert_eq!(h.renderer.tabs.len(), 1);
+    assert_eq!(h.renderer.active_tab, 0);
+}
+
+#[test]
+fn ctrl_t_creates_new_tab_and_activates_it() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+    let saved = h.renderer.current_id.clone();
+
+    press_ctrl(h.r(), Keycode::T);
+
+    assert_eq!(h.renderer.tabs.len(), 2);
+    assert_eq!(h.renderer.active_tab, 1);
+    assert_eq!(h.renderer.tabs[0].current_id, saved);
+    assert_eq!(h.renderer.tabs[1].current_id, saved);
+    assert_eq!(h.renderer.current_id, saved);
+}
+
+#[test]
+fn ctrl_w_with_one_tab_is_noop() {
+    let mut h = Harness::new();
+    let before = h.renderer.tabs.clone();
+    press_ctrl(h.r(), Keycode::W);
+    assert_eq!(h.renderer.tabs, before);
+    assert_eq!(h.renderer.active_tab, 0);
+}
+
+#[test]
+fn ctrl_w_closes_active_and_activates_previous() {
+    let mut h = Harness::new();
+    press_ctrl(h.r(), Keycode::T);
+    press_ctrl(h.r(), Keycode::T);
+    assert_eq!(h.renderer.tabs.len(), 3);
+    assert_eq!(h.renderer.active_tab, 2);
+
+    // Move active to middle, then close.
+    h.renderer.active_tab = 1;
+    h.renderer.current_id = h.renderer.tabs[1].current_id.clone();
+
+    press_ctrl(h.r(), Keycode::W);
+
+    assert_eq!(h.renderer.tabs.len(), 2);
+    assert_eq!(h.renderer.active_tab, 0);
+}
+
+#[test]
+fn ctrl_w_closes_index_zero_keeps_zero() {
+    let mut h = Harness::new();
+    press_ctrl(h.r(), Keycode::T);
+    press_ctrl(h.r(), Keycode::T);
+    h.renderer.active_tab = 0;
+    h.renderer.current_id = h.renderer.tabs[0].current_id.clone();
+
+    press_ctrl(h.r(), Keycode::W);
+
+    assert_eq!(h.renderer.tabs.len(), 2);
+    assert_eq!(h.renderer.active_tab, 0);
+}
+
+#[test]
+fn ctrl_tab_cycles_with_wraparound() {
+    let mut h = Harness::new();
+    press_ctrl(h.r(), Keycode::T);
+    press_ctrl(h.r(), Keycode::T);
+    assert_eq!(h.renderer.active_tab, 2);
+
+    press_ctrl(h.r(), Keycode::Tab);
+
+    assert_eq!(h.renderer.active_tab, 0);
+}
+
+#[test]
+fn ctrl_shift_tab_prev_with_wraparound() {
+    let mut h = Harness::new();
+    press_ctrl(h.r(), Keycode::T);
+    press_ctrl(h.r(), Keycode::T);
+    h.renderer.active_tab = 0;
+    h.renderer.current_id = h.renderer.tabs[0].current_id.clone();
+
+    press_ctrl_shift(h.r(), Keycode::Tab);
+
+    assert_eq!(h.renderer.active_tab, 2);
+}
+
+#[test]
+fn ctrl_n_activates_nth_tab_or_noop() {
+    let mut h = Harness::new();
+    press_ctrl(h.r(), Keycode::T);
+    press_ctrl(h.r(), Keycode::T);
+    assert_eq!(h.renderer.tabs.len(), 3);
+
+    press_ctrl(h.r(), Keycode::_3);
+    assert_eq!(h.renderer.active_tab, 2);
+
+    press_ctrl(h.r(), Keycode::_1);
+    assert_eq!(h.renderer.active_tab, 0);
+
+    press_ctrl(h.r(), Keycode::_9);
+    assert_eq!(h.renderer.active_tab, 0);
+}
+
+#[test]
+fn tab_switch_preserves_per_tab_navigation() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+    let tab0_path = h.renderer.current_id.clone();
+
+    press_ctrl(h.r(), Keycode::T);
+    // Move within tab 1.
+    press_down(h.r());
+    let tab1_path = h.renderer.current_id.clone();
+    assert_ne!(tab0_path, tab1_path, "navigation should diverge between tabs");
+
+    press_ctrl(h.r(), Keycode::_1);
+    assert_eq!(h.renderer.current_id, tab0_path);
+
+    press_ctrl(h.r(), Keycode::_2);
+    assert_eq!(h.renderer.current_id, tab1_path);
+}
+
+#[test]
+fn ctrl_t_blocked_outside_general() {
+    let mut h = Harness::new();
+    h.renderer.coordinate = Coordinate::Insert;
+    let before_len = h.renderer.tabs.len();
+
+    press_ctrl(h.r(), Keycode::T);
+
+    assert_eq!(h.renderer.tabs.len(), before_len);
+}
+
+#[test]
+fn tab_switch_announces_via_pending_announcement() {
+    let mut h = Harness::new();
+    press_ctrl(h.r(), Keycode::T);
+    h.renderer.pending_announcement = None;
+    press_ctrl(h.r(), Keycode::Tab);
+
+    let raw = h.renderer.pending_announcement.as_ref()
+        .expect("Ctrl+Tab must produce an announcement");
+    let text = strip_announcement_sentinel(raw);
+    assert!(text.starts_with("tab "), "announcement should start with 'tab ', got: {text:?}");
+    assert!(text.contains("/"), "announcement should contain N/M, got: {text:?}");
+}
+
+#[test]
+fn tabs_persist_to_settings_provider() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+
+    press_ctrl(h.r(), Keycode::T);
+
+    // The settings provider was created with config_path set to tmp/settings.json.
+    let cfg = h.tmp_path().join("settings.json");
+    let data = std::fs::read_to_string(&cfg).expect("settings.json should exist after a tab op");
+    let json: serde_json::Value = serde_json::from_str(&data).unwrap();
+    let sicompass_section = json.get("sicompass")
+        .and_then(|v| v.as_object())
+        .expect("sicompass section must exist");
+    assert!(sicompass_section.get("tabs").and_then(|v| v.as_str()).is_some(),
+        "tabs key should be persisted as a string");
+    assert!(sicompass_section.get("activeTab").and_then(|v| v.as_str()).is_some(),
+        "activeTab key should be persisted as a string");
+    assert_eq!(
+        sicompass_section.get("activeTab").and_then(|v| v.as_str()).unwrap(),
+        "1",
+        "activeTab should be 1 after Ctrl+T"
+    );
+}
+
+#[test]
+fn load_tabs_state_restores_persisted_layout() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+    press_ctrl(h.r(), Keycode::T);
+    let expected_tabs = h.renderer.tabs.clone();
+    let expected_active = h.renderer.active_tab;
+
+    // Re-parse the on-disk settings using the same JSON shape the production
+    // loader expects (`load_tabs_state`), then assert the round-trip preserves
+    // both `current_id` and `provider_path`.
+    let cfg = h.tmp_path().join("settings.json");
+    let data = std::fs::read_to_string(&cfg).expect("settings.json should exist");
+    let json: serde_json::Value = serde_json::from_str(&data).unwrap();
+    let sec = json.get("sicompass").and_then(|v| v.as_object()).unwrap();
+    let tabs_str = sec.get("tabs").and_then(|v| v.as_str()).unwrap();
+    let active_str = sec.get("activeTab").and_then(|v| v.as_str()).unwrap();
+
+    use sicompass_sdk::ffon::IdArray;
+    use sicompass::app_state::TabSnapshot;
+    let arr = match serde_json::from_str::<serde_json::Value>(tabs_str).unwrap() {
+        serde_json::Value::Array(a) => a,
+        _ => panic!("tabs should serialize to a JSON array"),
+    };
+    let parsed: Vec<TabSnapshot> = arr.into_iter().map(|v| {
+        let obj = v.as_object().unwrap();
+        let ids = obj.get("id").unwrap().as_array().unwrap();
+        let path = obj.get("path").unwrap().as_str().unwrap().to_owned();
+        let mut id = IdArray::new();
+        for n in ids {
+            id.push(n.as_u64().unwrap() as usize);
+        }
+        TabSnapshot { current_id: id, provider_path: path }
+    }).collect();
+    let parsed_active: usize = active_str.parse().unwrap();
+
+    assert_eq!(parsed, expected_tabs);
+    assert_eq!(parsed_active, expected_active);
+}
+
+/// Regression test for the bug the user reported: navigating Left in tab A
+/// rebuilds the file browser's FFON tree, leaving tab B's saved indices
+/// pointing at the wrong content. With per-tab provider_path snapshots,
+/// switching back to tab B should restore its directory and re-fetch.
+#[test]
+fn tab_switch_restores_provider_path_after_other_tab_navigates() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+
+    // Tab 1: enter file browser, then enter the `subdir` directory.
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r()); // into file browser
+    // Navigate to "subdir" (which we know was created by Harness::new).
+    let subdir_idx = {
+        let provider_root = h.renderer.ffon[fb_idx].as_obj().unwrap();
+        provider_root.children.iter().position(|c| matches!(c, FfonElement::Obj(o)
+            if sicompass_sdk::tags::strip_display(&o.key).contains("subdir")))
+            .expect("subdir must be in the listing")
+    };
+    h.renderer.current_id.set(1, subdir_idx);
+    sicompass::list::create_list_current_layer(h.r());
+    press_right(h.r()); // into subdir
+    let tab1_path_before = sicompass::provider::current_path(h.r()).to_owned();
+    assert!(tab1_path_before.ends_with("subdir"),
+        "expected to be inside subdir, got {tab1_path_before:?}");
+
+    // Open a second tab (duplicate of tab 1, both inside subdir).
+    press_ctrl(h.r(), Keycode::T);
+    assert_eq!(h.renderer.tabs.len(), 2);
+    assert_eq!(h.renderer.active_tab, 1);
+
+    // In tab 2, navigate Left back to the file-browser root. This rebuilds
+    // r.ffon[fb_idx] for the parent directory.
+    press_left(h.r());
+    let tab2_path_after = sicompass::provider::current_path(h.r()).to_owned();
+    assert_ne!(tab1_path_before, tab2_path_after,
+        "Left in tab 2 should change the file browser's path");
+
+    // Switch back to tab 1: the file browser should be re-set to subdir, and
+    // the FFON tree should reflect subdir contents (containing nested.txt).
+    press_ctrl(h.r(), Keycode::_1);
+    let tab1_path_restored = sicompass::provider::current_path(h.r()).to_owned();
+    assert_eq!(tab1_path_restored, tab1_path_before,
+        "switching back to tab 1 must restore its saved provider path");
+
+    // The FFON tree at the file browser root now reflects subdir; verify
+    // nested.txt is present in the list.
+    let labels: Vec<String> = h.renderer.total_list.iter().map(|i| i.label.clone()).collect();
+    let any_nested = labels.iter().any(|l| sicompass_sdk::tags::strip_display(l).contains("nested.txt"));
+    assert!(any_nested, "tab 1 listing must contain nested.txt after restore, got {labels:?}");
+}

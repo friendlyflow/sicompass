@@ -534,6 +534,10 @@ impl Provider for SettingsProvider {
         self.add_radio(section, label, config_key, options, default);
     }
 
+    fn write_text_setting(&mut self, section: &str, key: &str, value: &str) {
+        self.write_key_string(section, key, value);
+    }
+
     fn add_priority_section(&mut self, name: &str) {
         // Inline the inherent add_priority_section body to avoid recursive
         // dispatch (both inherent and trait have the same name).

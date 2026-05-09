@@ -4417,6 +4417,105 @@ fn insert_ffon_element(r: &mut AppRenderer, insert_idx: usize, elem: sicompass_s
 }
 
 // ---------------------------------------------------------------------------
+// Tab management
+// ---------------------------------------------------------------------------
+
+/// Persist `tabs` and `activeTab` to settings.json via the settings provider.
+///
+/// Stores the tab list as a JSON-encoded string so each tab can carry both
+/// its `current_id` indices and the provider path to restore on next launch.
+fn persist_tabs(r: &mut AppRenderer) {
+    let arr: Vec<serde_json::Value> = r.tabs.iter().map(|t| {
+        let ids: Vec<serde_json::Value> = t.current_id.as_slice().iter()
+            .map(|&n| serde_json::Value::from(n as u64))
+            .collect();
+        let mut obj = serde_json::Map::new();
+        obj.insert("id".to_string(), serde_json::Value::Array(ids));
+        obj.insert("path".to_string(), serde_json::Value::String(t.provider_path.clone()));
+        serde_json::Value::Object(obj)
+    }).collect();
+    let serialized = serde_json::to_string(&serde_json::Value::Array(arr))
+        .unwrap_or_else(|_| String::from("[]"));
+    let active = r.active_tab.to_string();
+    for p in r.providers.iter_mut() {
+        if p.name() == "settings" {
+            p.write_text_setting("sicompass", "tabs", &serialized);
+            p.write_text_setting("sicompass", "activeTab", &active);
+            break;
+        }
+    }
+}
+
+/// Provider display_name for the active tab, truncated to 10 chars; "—" if none.
+fn active_tab_label(r: &AppRenderer) -> String {
+    r.current_id.get(0)
+        .and_then(|i| r.providers.get(i))
+        .map(|p| p.display_name().chars().take(20).collect::<String>())
+        .unwrap_or_else(|| "—".to_string())
+}
+
+/// Refresh the rendered list, request a redraw, announce the tab, and persist.
+fn after_tab_change(r: &mut AppRenderer) {
+    list::create_list_current_layer(r);
+    r.needs_redraw = true;
+    let label = active_tab_label(r);
+    r.speak_tab_change(&label);
+    persist_tabs(r);
+}
+
+/// Ctrl+T — duplicate the current navigation into a new tab inserted to the
+/// right of the active tab; the new tab becomes active.
+pub fn handle_tab_new(r: &mut AppRenderer) {
+    let snap = crate::app_state::TabSnapshot::capture(r);
+    r.tabs[r.active_tab] = snap.clone();
+    let insert_at = r.active_tab + 1;
+    r.tabs.insert(insert_at, snap);
+    r.active_tab = insert_at;
+    after_tab_change(r);
+}
+
+/// Ctrl+W — close the active tab. No-op when only one tab remains.
+pub fn handle_tab_close(r: &mut AppRenderer) {
+    if r.tabs.len() <= 1 { return; }
+    r.tabs.remove(r.active_tab);
+    if r.active_tab > 0 { r.active_tab -= 1; }
+    r.load_active_tab();
+    after_tab_change(r);
+}
+
+/// Ctrl+Tab — cycle to next tab (wraps around).
+pub fn handle_tab_next(r: &mut AppRenderer) {
+    if r.tabs.len() < 2 { return; }
+    let target = (r.active_tab + 1) % r.tabs.len();
+    r.switch_to_tab(target);
+    after_tab_change(r);
+}
+
+/// Ctrl+Shift+Tab — cycle to previous tab (wraps around).
+pub fn handle_tab_prev(r: &mut AppRenderer) {
+    if r.tabs.len() < 2 { return; }
+    let target = (r.active_tab + r.tabs.len() - 1) % r.tabs.len();
+    r.switch_to_tab(target);
+    after_tab_change(r);
+}
+
+fn handle_tab_select_n(r: &mut AppRenderer, n: usize) {
+    if n >= r.tabs.len() || n == r.active_tab { return; }
+    r.switch_to_tab(n);
+    after_tab_change(r);
+}
+
+pub fn handle_tab_select_1(r: &mut AppRenderer) { handle_tab_select_n(r, 0); }
+pub fn handle_tab_select_2(r: &mut AppRenderer) { handle_tab_select_n(r, 1); }
+pub fn handle_tab_select_3(r: &mut AppRenderer) { handle_tab_select_n(r, 2); }
+pub fn handle_tab_select_4(r: &mut AppRenderer) { handle_tab_select_n(r, 3); }
+pub fn handle_tab_select_5(r: &mut AppRenderer) { handle_tab_select_n(r, 4); }
+pub fn handle_tab_select_6(r: &mut AppRenderer) { handle_tab_select_n(r, 5); }
+pub fn handle_tab_select_7(r: &mut AppRenderer) { handle_tab_select_n(r, 6); }
+pub fn handle_tab_select_8(r: &mut AppRenderer) { handle_tab_select_n(r, 7); }
+pub fn handle_tab_select_9(r: &mut AppRenderer) { handle_tab_select_n(r, 8); }
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
