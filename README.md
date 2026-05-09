@@ -29,20 +29,21 @@ Built for users who prefer or require keyboard-driven interaction, Sicompass off
 Sicompass comes with several providers out of the box, each turning a different data source into the same keyboard-navigable tree:
 
 - **File Browser** — Navigate your filesystem as a navigable tree with inline rename, copy, paste, and delete
-- **Email** — Integrated communication tools using IMAP/SMTP protocol
-- **Web Browser** — Browse the web with HTML-to-FFON conversion, turning web pages into keyboard-navigable trees
+- **Editor** — Browse the filesystem and open files as language-aware FFON trees, with inline line editing and create/delete/rename
+- **Email** — IMAP/SMTP client with Google OAuth, Cc/Bcc, attachments, drafts, flag/move/delete, undo/redo, threaded history, and FFON-bodied messages
+- **Chat** — Matrix client with public and private rooms, invites, member management, encrypted messages, unread badges, and a background sync thread
+- **Web Browser** — Browse the web with HTML-to-FFON conversion; fill and submit forms via the Chrome DevTools Protocol; cookie-consent banners are auto-accepted
+- **Terminal** — Interactive shell backed by a vte PTY, with a synthesized prompt and the cursor pinned to an input slot
 - **Sales Demo** — Interactive HVAC equipment configurator showcasing hierarchical data navigation with inline editing and diagram view
 - **Plugin Store** — Enable and disable providers on the fly with checkbox toggles, no restart needed
-- **Settings** — Configure color scheme, loaded programs, and provider-specific options in a unified settings tree
+- **Settings** — Configure color scheme, display scaling, shoulder-surfing protection, loaded programs, and provider-specific options in a unified settings tree
 
 ## The Vision
 
 Sicompass is the foundation for a unified, accessible platform. Future development includes:
 
-- **Chat** — Integrated communication tools using Matrix protocol
 - **Notes** — Structured note-taking with server-side sync
 - **IDE** — Code as a navigable structure, with Rust code generation
-- **Terminal** — A terminal emulator integrated as a provider
 - **Mobile Support** — Android and iOS versions
 - **Login Manager and Desktop Environment** — A fully keyboard-driven Linux session
 - **Screen Reader and Braille Display** — D-Bus in- and output on Linux that drives the users of these technologies
