@@ -273,10 +273,6 @@ fn avail_scroll_key(r: &AppRenderer) -> bool {
     not_at_root(r) && !is_editor(r)
 }
 
-fn avail_meta_key(r: &AppRenderer) -> bool {
-    !is_editor(r)
-}
-
 /// Structural edit available in email compose body (General).
 fn avail_compose_body_edit(r: &AppRenderer) -> bool {
     not_at_root(r) && in_email_compose_body(r)
@@ -647,10 +643,11 @@ pub static SHORTCUTS: &[Shortcut] = &[
         label: "S      Scroll", is_available: avail_scroll_key, handle: handlers::handle_s },
 
     // ---- M (enter meta/hint screen) --------------------------------------
-    // Suppressed for editor providers (vim conventions reserve M for jumps).
+    // General mode only — including when the active provider is an editor
+    // (after Escape from Insert).
     Shortcut { key: Keycode::M, key2: None, ctrl: false, shift: false,
         modes: &[Coordinate::General],
-        label: "M      Meta", is_available: avail_meta_key, handle: handlers::handle_meta },
+        label: "M      Meta", is_available: always, handle: handlers::handle_meta },
 
     // ---- Ctrl+D / Delete key → provider delete command (email message delete) ----
     // These must come before the editor/filebrowser Ctrl+D rows so they win when

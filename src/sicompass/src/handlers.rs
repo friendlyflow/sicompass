@@ -730,12 +730,11 @@ pub fn handle_s(r: &mut AppRenderer) {
     r.needs_redraw = true;
 }
 
-/// Navigate into / out of the meta object (M key in General).
+/// Navigate into the meta hint screen. M is only bound in General mode.
 pub fn handle_meta(r: &mut AppRenderer) {
     if r.coordinate != Coordinate::General {
         return;
     }
-
     r.previous_coordinate = r.coordinate;
     r.coordinate = Coordinate::Meta;
     r.speak_mode_change(None);

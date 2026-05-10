@@ -1031,6 +1031,59 @@ fn test_meta_at_root_shows_root_hints() {
     assert!(labels.iter().any(|l| l.contains("Ctrl+F")), "root meta should mention Ctrl+F");
 }
 
+/// Helper: build a renderer rooted in an editor-semantics provider at depth 2,
+/// in a given coordinate. Used by the M-in-editor tests below.
+fn editor_renderer_in(coord: Coordinate) -> AppRenderer {
+    struct EditorMock;
+    impl Provider for EditorMock {
+        fn name(&self) -> &str { "mock_editor" }
+        fn fetch(&mut self) -> Vec<FfonElement> { Vec::new() }
+        fn has_editor_semantics(&self) -> bool { true }
+    }
+
+    let mut r = AppRenderer::new();
+    r.providers.push(Box::new(EditorMock));
+    let mut root = FfonElement::new_obj("buffer");
+    root.as_obj_mut().unwrap().push(FfonElement::new_str("alpha"));
+    r.ffon = vec![root];
+    r.current_id = { let mut id = sicompass_sdk::ffon::IdArray::new(); id.push(0); id.push(0); id };
+    r.coordinate = coord;
+    r.previous_coordinate = coord;
+    sicompass::list::create_list_current_layer(&mut r);
+    r
+}
+
+#[test]
+fn meta_key_enters_meta_from_editor_general() {
+    // M works in General even when the active provider is an editor
+    // (i.e. after Escape from Insert).
+    let mut r = editor_renderer_in(Coordinate::General);
+    press(&mut r, Keycode::M);
+    assert_eq!(r.coordinate, Coordinate::Meta);
+    assert_eq!(r.previous_coordinate, Coordinate::General);
+}
+
+#[test]
+fn meta_key_does_not_enter_meta_from_editor_normal() {
+    let mut r = editor_renderer_in(Coordinate::Normal);
+    press(&mut r, Keycode::M);
+    assert_eq!(r.coordinate, Coordinate::Normal);
+}
+
+#[test]
+fn meta_key_does_not_enter_meta_from_editor_visual() {
+    let mut r = editor_renderer_in(Coordinate::Visual);
+    press(&mut r, Keycode::M);
+    assert_eq!(r.coordinate, Coordinate::Visual);
+}
+
+#[test]
+fn meta_key_does_not_enter_meta_from_editor_insert() {
+    let mut r = editor_renderer_in(Coordinate::Insert);
+    press(&mut r, Keycode::M);
+    assert_eq!(r.coordinate, Coordinate::Insert);
+}
+
 /// A `<link>` Obj injected into the webbrowser FFON (simulating what
 /// `html_to_ffon` produces for `<a>` tags) should show the `+l` prefix in
 /// the visual list and navigating Right into it should push depth by one.
