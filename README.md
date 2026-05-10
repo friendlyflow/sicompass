@@ -19,7 +19,7 @@ Built for users who prefer or require keyboard-driven interaction, Sicompass off
 - **Flat Interface** — No popups, dialogs, or overlays — everything is navigated inline within the tree
 - **Keyboard-First Design** — Faster and handier navigation because your hands never leave the keyboard
 - **Native Accessibility** — Built-in support for screen readers on Linux, macOS, and Windows
-- **Cross-Platform** — Currently developed and tested on Ubuntu, with macOS and Windows releases planned for later
+- **Cross-Platform** — Shipped and tested on Ubuntu today; paths, shells, and PTY plumbing route through platform helpers (XDG / `~/Library` / `%APPDATA%`, `bash`/`zsh`/`fish`/`pwsh`/`cmd.exe`, `forkpty`/ConPTY), with packaged macOS and Windows releases planned
 - **High-Performance Rendering** — Vulkan-powered graphics with FreeType2/HarfBuzz text shaping
 - **Extensible Architecture** — Provider-based plugin system with a built-in plugin store for hot enable/disable
 - **Simpler UI Development** — Functionality over design means less complexity and faster development with minimal styling, design doen't need to be programmed as it's already worked out
@@ -33,7 +33,7 @@ Sicompass comes with several providers out of the box, each turning a different 
 - **Email** — IMAP/SMTP client with Google OAuth, Cc/Bcc, attachments, drafts, flag/move/delete, undo/redo, threaded history, and FFON-bodied messages
 - **Chat** — Matrix client with public and private rooms, invites, member management, encrypted messages, unread badges, and a background sync thread
 - **Web Browser** — Browse the web with HTML-to-FFON conversion; fill and submit forms via the Chrome DevTools Protocol; cookie-consent banners are auto-accepted
-- **Terminal** — Interactive shell backed by a vte PTY, with a synthesized prompt and the cursor pinned to an input slot
+- **Terminal** — Interactive shell backed by a vte PTY with a synthesized prompt and the cursor pinned to an input slot; auto-switches to a fullscreen interactive dashboard the moment a child program enters the alt-screen (vim, htop, less, …) and routes every key straight to the TUI; cross-platform shell selection — `$SHELL` on Unix, `%ComSpec%` on Windows — with platform-appropriate prompts
 - **Sales Demo** — Interactive HVAC equipment configurator showcasing hierarchical data navigation with inline editing and diagram view
 - **Plugin Store** — Enable and disable providers on the fly with checkbox toggles, no restart needed
 - **Settings** — Configure color scheme, display scaling, shoulder-surfing protection, loaded programs, and provider-specific options in a unified settings tree

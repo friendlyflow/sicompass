@@ -206,9 +206,10 @@ static SECTIONS: &[Node] = &[
             ]},
             Branch { key: "Terminal", children: &[
                 Leaf("The terminal is a real interactive shell rendered as an FFON tree. Output from the shell appears as lines in the tree, and an editable <input> slot is pinned to the bottom for typing commands."),
-                Leaf("It's backed by a PTY and a vte-based emulator, so interactive shells (bash, zsh) work as expected. The shell is invoked with -i so your shell rc files are loaded and your aliases work."),
-                Leaf("Each prompt is synthesized as {user}@{host}:{cwd}$ before your input slot, so the location is always announced clearly to your screen reader."),
+                Leaf("It's backed by a PTY and a vte-based emulator. On Unix the shell is taken from $SHELL (bash, zsh, fish, …) and invoked with -i so your shell rc files are loaded and your aliases work; on Windows it's taken from %ComSpec% (cmd.exe by default, PowerShell also recognised) and invoked with -NoLogo where applicable."),
+                Leaf("Each prompt is synthesized in-process so the location is always announced clearly to your screen reader: {user}@{host}:{cwd}$ on Unix, {cwd}> on Windows. On Linux the prompt updates after `cd`; on macOS and Windows it reflects the initial cwd, since live tracking would need OS-specific process introspection."),
                 Leaf("Type a command, press Enter to run it, and the output is appended above the input slot. Use the standard navigation keys to scroll back through history."),
+                Leaf("When a child program switches the terminal to the alt-screen — vim, htop, less, man, and most full-screen TUIs do this — Sicompass auto-enters its interactive dashboard mode and forwards every key (including arrows, function keys, and chords) straight to the TUI. Pressing Escape from the TUI's perspective leaves the alt-screen and Sicompass drops back to the linear scrollback view."),
             ]},
             Branch { key: "Plugin Store", children: &[
                 Leaf("The Plugin Store lets you manage which providers are active. It appears in Settings under 'Available programs'."),
