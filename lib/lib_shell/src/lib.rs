@@ -62,12 +62,15 @@ impl Shell {
             .map_err(io_err)?;
 
         let mut cmd = CommandBuilder::new(&cfg.program);
-        // Default to interactive mode for known shells. Without `-i` bash/zsh
-        // skip PS1 and disable the `complete` builtin, so a user's rc file
-        // typically prints "complete: command not found" and no prompt shows.
+        // Default to interactive mode for known shells. Without an interactive
+        // flag bash/zsh skip PS1 and disable the `complete` builtin, so a
+        // user's rc file typically prints "complete: command not found" and no
+        // prompt shows. PowerShell uses `-NoLogo`; cmd.exe has no analog.
         // Caller-supplied args override this.
-        if cfg.args.is_empty() && is_interactive_shell(&cfg.program) {
-            cmd.arg("-i");
+        if cfg.args.is_empty() {
+            if let Some(flag) = interactive_flag(&cfg.program) {
+                cmd.arg(flag);
+            }
         }
         for arg in &cfg.args {
             cmd.arg(arg);
@@ -191,14 +194,23 @@ fn io_err<E: std::fmt::Display>(e: E) -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
 }
 
-/// Whether `program` is a shell that should be invoked with `-i` so PS1 and
-/// programmable completion work under a PTY.
-fn is_interactive_shell(program: &str) -> bool {
+/// For known interactive shells, return the flag that should be appended so
+/// PS1 and programmable completion work under a PTY. Returns `None` if the
+/// shell either has no such flag (cmd.exe) or is unrecognized.
+fn interactive_flag(program: &str) -> Option<&'static str> {
     let basename = std::path::Path::new(program)
         .file_name()
         .and_then(|s| s.to_str())
-        .unwrap_or(program);
-    matches!(basename, "bash" | "zsh" | "sh" | "dash" | "ksh" | "fish")
+        .unwrap_or(program)
+        .to_ascii_lowercase();
+    let basename = basename.strip_suffix(".exe").unwrap_or(&basename);
+    match basename {
+        "bash" | "zsh" | "sh" | "dash" | "ksh" | "fish" => Some("-i"),
+        "pwsh" | "powershell" => Some("-NoLogo"),
+        // cmd.exe has no interactive flag; spawning it bare already gives a
+        // prompt under ConPTY.
+        _ => None,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -259,5 +271,71 @@ mod tests {
     #[test]
     fn default_program_returns_non_empty() {
         assert!(!default_program().is_empty());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn spawn_cmd_echo_observes_output() {
+        let cfg = ShellConfig {
+            program: "cmd.exe".to_owned(),
+            ..Default::default()
+        };
+        let mut shell = Shell::spawn(cfg).expect("spawn cmd.exe");
+        shell
+            .write_line("echo sicompass-shell-test")
+            .expect("write");
+
+        let mut acc: Vec<u8> = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            acc.extend(shell.drain_output());
+            if String::from_utf8_lossy(&acc).contains("sicompass-shell-test") {
+                return;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        panic!(
+            "did not observe echoed marker; got: {:?}",
+            String::from_utf8_lossy(&acc)
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn kill_terminates_cmd_child() {
+        let cfg = ShellConfig {
+            program: "cmd.exe".to_owned(),
+            ..Default::default()
+        };
+        let mut shell = Shell::spawn(cfg).expect("spawn cmd.exe");
+        assert!(shell.is_alive());
+        shell.kill().expect("kill");
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            if !shell.is_alive() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        panic!("child still alive after kill");
+    }
+
+    #[test]
+    fn interactive_flag_recognises_unix_shells() {
+        assert_eq!(interactive_flag("/bin/bash"), Some("-i"));
+        assert_eq!(interactive_flag("/usr/bin/zsh"), Some("-i"));
+        assert_eq!(interactive_flag("fish"), Some("-i"));
+    }
+
+    #[test]
+    fn interactive_flag_recognises_windows_shells() {
+        assert_eq!(interactive_flag("powershell.exe"), Some("-NoLogo"));
+        assert_eq!(interactive_flag("PowerShell.EXE"), Some("-NoLogo"));
+        assert_eq!(interactive_flag("pwsh"), Some("-NoLogo"));
+        // cmd.exe and unknown shells get no flag.
+        assert_eq!(interactive_flag("cmd.exe"), None);
+        assert_eq!(interactive_flag("CMD.exe"), None);
+        assert_eq!(interactive_flag("nu"), None);
     }
 }

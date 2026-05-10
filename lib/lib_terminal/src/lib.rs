@@ -25,8 +25,9 @@ use std::path::PathBuf;
 use altscreen_detect::{AltScreenDetector, AltScreenEvent};
 use emulator::{encode_dashboard_key, Emulator};
 use sicompass_sdk::{
-    register_builtin_manifest, register_provider_factory, BuiltinManifest, DashboardFrame,
-    DashboardKey, DashboardKind, DashboardRequest, FfonElement, Provider, SettingDecl,
+    platform, register_builtin_manifest, register_provider_factory, BuiltinManifest,
+    DashboardFrame, DashboardKey, DashboardKind, DashboardRequest, FfonElement, Provider,
+    SettingDecl,
 };
 use sicompass_shell::{default_program, Shell, ShellConfig};
 
@@ -287,16 +288,24 @@ impl TerminalProvider {
     /// those have proven unreliable across shells, locales, and rc-file edge
     /// cases (literal backslashes, missing prompt on first entry, ...).
     /// Synthesizing in-process gives us a stable, predictable prompt that
-    /// updates after `cd` (via `/proc/<pid>/cwd`).
+    /// updates after `cd` on Linux (via `/proc/<pid>/cwd`); on macOS and
+    /// Windows the prompt reflects the *initial* cwd, since live tracking
+    /// would require platform-specific process-introspection APIs.
     fn current_prompt(&self) -> String {
         let cwd = self.shell_cwd();
-        let display_cwd = collapse_home(&cwd);
-        format!("{}@{}:{}$ ", self.user, self.host, display_cwd)
+        if platform::is_windows() {
+            // cmd.exe / PowerShell convention: `C:\path>` with no user@host.
+            format!("{}> ", cwd)
+        } else {
+            let display_cwd = collapse_home(&cwd);
+            format!("{}@{}:{}$ ", self.user, self.host, display_cwd)
+        }
     }
 
     /// Read the shell child's current working directory. Linux: `readlink
-    /// /proc/<pid>/cwd`. Other platforms or read failures fall back to the
-    /// initial cwd (or `~`).
+    /// /proc/<pid>/cwd`. Other platforms (macOS, Windows) have no equivalent
+    /// cheap-and-portable read, so the prompt does not auto-update after
+    /// `cd` there — it falls back to the initial cwd (or `$HOME`/`/`).
     fn shell_cwd(&self) -> String {
         #[cfg(target_os = "linux")]
         {
@@ -310,8 +319,8 @@ impl TerminalProvider {
         self.cwd
             .as_ref()
             .map(|p| p.to_string_lossy().into_owned())
-            .or_else(|| std::env::var("HOME").ok())
-            .unwrap_or_else(|| "/".to_owned())
+            .or_else(|| platform::home_dir().map(|h| h.to_string_lossy().into_owned()))
+            .unwrap_or_else(|| platform::path_separator().to_owned())
     }
 }
 
@@ -573,27 +582,39 @@ fn hostname_short() -> String {
 
 /// Expand a leading `~` or `~/` to `$HOME`. Other input passes through verbatim.
 fn expand_home(value: &str) -> PathBuf {
-    if value == "~" {
-        if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home);
-        }
-    } else if let Some(rest) = value.strip_prefix("~/") {
-        if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(format!("{}/{}", home, rest));
+    // Accept both `~` and `~/foo` and `~\foo` (the latter for Windows users
+    // who type their settings paths native-style).
+    let rest = if value == "~" {
+        Some("")
+    } else if let Some(r) = value.strip_prefix("~/") {
+        Some(r)
+    } else if cfg!(target_os = "windows") {
+        value.strip_prefix("~\\")
+    } else {
+        None
+    };
+    if let Some(rest) = rest {
+        if let Some(home) = platform::home_dir() {
+            return if rest.is_empty() { home } else { home.join(rest) };
         }
     }
     PathBuf::from(value)
 }
 
 /// Replace a leading `$HOME` in `cwd` with `~` for shell-style display.
+/// Uses `Path::strip_prefix` so the comparison works with both `/` and `\\`
+/// separators rather than relying on a hard-coded `/`.
 fn collapse_home(cwd: &str) -> String {
-    if let Ok(home) = std::env::var("HOME") {
-        if !home.is_empty() {
-            if cwd == home { return "~".to_owned(); }
-            if let Some(rest) = cwd.strip_prefix(&format!("{}/", home)) {
-                return format!("~/{}", rest);
-            }
-        }
+    let Some(home) = platform::home_dir() else { return cwd.to_owned(); };
+    let cwd_path = std::path::Path::new(cwd);
+    if cwd_path == home {
+        return "~".to_owned();
+    }
+    if let Ok(rest) = cwd_path.strip_prefix(&home) {
+        let rest_str = rest.to_string_lossy();
+        // Re-emit with forward slashes — the prompt is always shell-style.
+        let normalized = rest_str.replace('\\', "/");
+        return format!("~/{}", normalized);
     }
     cwd.to_owned()
 }
@@ -969,6 +990,7 @@ mod tests {
         assert_eq!(lines, vec!["ls -la", "file1"]);
     }
 
+    #[cfg(unix)]
     #[test]
     fn fetch_uses_synthesized_prompt_for_input_slot() {
         // No shell spawned, no entries — the trailing element should still be
@@ -981,6 +1003,19 @@ mod tests {
         assert!(s.contains('@'), "expected user@host segment; got {:?}", s);
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn fetch_uses_synthesized_prompt_for_input_slot_windows() {
+        // Windows convention: `cwd> <input></input>` with no user@host.
+        let mut p = TerminalProvider::new();
+        let elems = p.fetch();
+        assert_eq!(elems.len(), 1);
+        let s = elems[0].as_str().unwrap();
+        assert!(s.ends_with("> <input></input>"), "expected prompt suffix; got {:?}", s);
+        assert!(!s.contains('@'), "Windows prompt should omit user@host; got {:?}", s);
+    }
+
+    #[cfg(unix)]
     #[test]
     fn fetch_uses_entry_prompt_for_past_commands() {
         let mut p = TerminalProvider::new();
@@ -998,6 +1033,7 @@ mod tests {
         assert!(elems[3].as_str().unwrap().ends_with("$ <input></input>"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn collapse_home_replaces_leading_home_with_tilde() {
         std::env::set_var("HOME", "/home/nico");
@@ -1005,6 +1041,18 @@ mod tests {
         assert_eq!(collapse_home("/home/nico/projects"), "~/projects");
         assert_eq!(collapse_home("/home/nicolae"), "/home/nicolae"); // not a prefix match
         assert_eq!(collapse_home("/tmp"), "/tmp");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn collapse_home_replaces_leading_userprofile_with_tilde() {
+        std::env::set_var("USERPROFILE", "C:\\Users\\nico");
+        assert_eq!(collapse_home("C:\\Users\\nico"), "~");
+        // Backslash-separated subpath gets re-emitted with `/`.
+        assert_eq!(collapse_home("C:\\Users\\nico\\projects"), "~/projects");
+        // Sibling dir that just shares a prefix must NOT collapse.
+        assert_eq!(collapse_home("C:\\Users\\nicolae"), "C:\\Users\\nicolae");
+        assert_eq!(collapse_home("C:\\Temp"), "C:\\Temp");
     }
 
     // ---- Phase 2b interactive-dashboard tests --------------------------

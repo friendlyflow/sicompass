@@ -6,10 +6,12 @@
 //! different UIDVALIDITY for a folder, the cached envelopes for that folder
 //! are flushed and rebuilt from scratch.
 //!
-//! DB location: `~/.cache/sicompass/email/<hex_username>.db`
+//! DB location: platform cache dir + `/sicompass/email/<hex_username>.db`
+//! (Linux: `~/.cache`, macOS: `~/Library/Caches`, Windows: `%LOCALAPPDATA%`).
 
 use crate::MessageHeader;
 use rusqlite::{params, Connection};
+use sicompass_sdk::platform;
 
 pub struct EnvelopeCache {
     conn: Connection,
@@ -21,7 +23,7 @@ impl EnvelopeCache {
     /// Returns `None` if the cache directory cannot be created or the DB
     /// cannot be opened — the caller silently falls back to uncached IMAP.
     pub fn open(username: &str) -> Option<Self> {
-        let cache_dir = dirs_cache_dir()?.join("sicompass").join("email");
+        let cache_dir = platform::cache_home()?.join("sicompass").join("email");
         std::fs::create_dir_all(&cache_dir).ok()?;
         // Safe filename: hex-encode the username bytes.
         let hex: String = username.bytes().map(|b| format!("{b:02x}")).collect();
@@ -228,19 +230,6 @@ impl EnvelopeCache {
             params![folder, count],
         );
     }
-}
-
-/// Portable replacement for `dirs::cache_dir()` without adding a dep.
-fn dirs_cache_dir() -> Option<std::path::PathBuf> {
-    // Linux/macOS: $XDG_CACHE_HOME or $HOME/.cache
-    if let Ok(p) = std::env::var("XDG_CACHE_HOME") {
-        let path = std::path::PathBuf::from(p);
-        if path.is_absolute() {
-            return Some(path);
-        }
-    }
-    let home = std::env::var("HOME").ok()?;
-    Some(std::path::PathBuf::from(home).join(".cache"))
 }
 
 // ---------------------------------------------------------------------------
