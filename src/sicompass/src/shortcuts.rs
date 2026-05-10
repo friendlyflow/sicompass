@@ -335,8 +335,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
                  Coordinate::Visual,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
                  Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch,
-                 Coordinate::InputSearch, Coordinate::Meta, Coordinate::Dashboard,
-                 Coordinate::DashboardInteractive],
+                 Coordinate::InputSearch, Coordinate::Meta, Coordinate::Dashboard],
         label: "Esc    Back", is_available: not_at_root, handle: handlers::handle_escape },
     Shortcut { key: Keycode::Escape, key2: None, ctrl: false, shift: false,
         modes: &[Coordinate::General,
@@ -344,8 +343,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
                  Coordinate::Visual,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
                  Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch,
-                 Coordinate::InputSearch, Coordinate::Meta, Coordinate::Dashboard,
-                 Coordinate::DashboardInteractive],
+                 Coordinate::InputSearch, Coordinate::Meta, Coordinate::Dashboard],
         label: "", is_available: always, handle: handlers::handle_escape },
 
     // ---- Up / K ----------------------------------------------------------
@@ -864,8 +862,13 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
 
     // Interactive-dashboard fast-path: forward every key *except* Escape to the
     // active provider. Escape still falls through to the SHORTCUTS table so the
-    // user can always bail out via `handle_escape`.
-    if r.coordinate == Coordinate::DashboardInteractive && k != Keycode::Escape {
+    // user can always bail out via `handle_escape`. The image variant of the
+    // dashboard ignores keystrokes entirely, so we gate on
+    // `active_dashboard_is_interactive`.
+    if r.coordinate == Coordinate::Dashboard
+        && k != Keycode::Escape
+        && handlers::active_dashboard_is_interactive(r)
+    {
         if let Some(keysym) = sdl_keycode_to_dashboard_keysym(k) {
             let key = sicompass_sdk::DashboardKey { keysym, ctrl, shift, alt };
             if let Some(p) = crate::provider::get_active_provider(r) {

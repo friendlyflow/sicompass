@@ -8,8 +8,9 @@
 //!   the latest entry. Suitable for "type a command, see output" workflows.
 //!
 //! * **Interactive dashboard** (Phase 2b). When the user presses `d` the app
-//!   switches to `Coordinate::DashboardInteractive` and routes raw keys +
-//!   text input + resize events to this provider. We feed PTY bytes through
+//!   switches to `Coordinate::Dashboard` (with `DashboardKind::Interactive`)
+//!   and routes raw keys + text input + resize events to this provider. We
+//!   feed PTY bytes through
 //!   a [`vte::Parser`]-backed [`emulator::Emulator`] and snapshot the cell
 //!   grid back into a `DashboardFrame` every frame. This is the path that
 //!   makes `vim`, `less`, `htop` etc. usable.

@@ -118,7 +118,6 @@ pub enum Coordinate {
     ScrollSearch,
     InputSearch,
     Dashboard,
-    DashboardInteractive,
     Meta,
 }
 
@@ -140,7 +139,6 @@ impl Coordinate {
             Coordinate::ScrollSearch => "scroll search",
             Coordinate::InputSearch => "input search",
             Coordinate::Dashboard => "dashboard",
-            Coordinate::DashboardInteractive => "dashboard interactive",
             Coordinate::Meta => "meta",
         }
     }
@@ -332,8 +330,9 @@ pub struct AppRenderer {
     // ---- Dashboard state ---------------------------------------------------
     pub dashboard_image_path: String,
     /// Last (cols, rows) the active provider was told about while in
-    /// `DashboardInteractive`. Used by view.rs to fire `dashboard_resize`
-    /// only on actual size changes. Reset to `(0, 0)` on enter/leave.
+    /// `Coordinate::Dashboard` with `DashboardKind::Interactive`. Used by
+    /// view.rs to fire `dashboard_resize` only on actual size changes.
+    /// Reset to `(0, 0)` on enter/leave.
     pub dashboard_cell_size: (u16, u16),
 
     // ---- Keypress timing (for double-tap detection) ------------------------

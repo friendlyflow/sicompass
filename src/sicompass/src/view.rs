@@ -22,9 +22,11 @@ fn is_insert_mode(c: Coordinate) -> bool {
             | Coordinate::Command
             | Coordinate::ScrollSearch
             | Coordinate::InputSearch
-            // Interactive dashboard takes typed characters too; without this
-            // SDL would not fire TextInput events while it owns the screen.
-            | Coordinate::DashboardInteractive
+            // Dashboard's interactive variant takes typed characters too;
+            // without this SDL would not fire TextInput events while it owns
+            // the screen. The image variant ignores text input, so always
+            // enabling it in Dashboard is harmless.
+            | Coordinate::Dashboard
     )
 }
 
@@ -492,143 +494,147 @@ fn update_view(app: &mut AppState) {
     }
 
     // ---- Dashboard early dispatch --------------------------------------------
+    // Single coordinate for both flavors. Image vs interactive (cell-grid) is
+    // decided by the active provider's `dashboard_kind()`.
     if app.renderer.coordinate == Coordinate::Dashboard {
-        let dashboard_path = app.renderer.dashboard_image_path.clone();
+        let is_interactive = crate::provider::get_active_provider_ref(&app.renderer)
+            .map(|p| p.dashboard_kind() == sicompass_sdk::DashboardKind::Interactive)
+            .unwrap_or(false);
 
-        // Begin render passes
-        let fr = match app.font_renderer.as_mut() { Some(f) => f, None => return };
-        fr.begin_text_rendering();
-        if let Some(rr) = app.rect_renderer.as_mut() {
-            rr.begin_rect_rendering();
-        }
-        if let Some(ir) = app.image_renderer.as_mut() {
-            ir.begin_image_rendering();
-        }
+        if is_interactive {
+            let cell_w = em_width.max(1.0);
+            let cell_h = line_height.max(1) as f32;
+            let header_h = line_height as f32 + top_offset;
+            let grid_top = header_h;
+            let avail_h = (win_h - grid_top).max(0.0);
+            let cols = (win_w / cell_w).floor().max(1.0) as u16;
+            let rows = (avail_h / cell_h).floor().max(1.0) as u16;
 
-        // Tabs band above the header
-        {
-            let fr = app.font_renderer.as_mut().unwrap();
-            render_tabs_band(fr, app.rect_renderer.as_mut(), &app.renderer,
-                win_w, line_height, scale, ascender, em_width, &p);
-        }
+            // Forward resize once whenever the cell-grid size changes (incl. on
+            // first entry, since `dashboard_cell_size` starts at (0, 0)).
+            let prev_size = app.renderer.dashboard_cell_size;
+            let frame = match crate::provider::get_active_provider(&mut app.renderer) {
+                Some(prov) => {
+                    if prev_size != (cols, rows) {
+                        prov.dashboard_resize(rows, cols);
+                    }
+                    prov.dashboard_render(cols, rows)
+                }
+                None => return,
+            };
+            app.renderer.dashboard_cell_size = (cols, rows);
 
-        // Header separator and text, shifted down by the tabs band
-        if let Some(rr) = app.rect_renderer.as_mut() {
-            rr.prepare_rectangle(0.0, line_height as f32 + top_offset, win_w, 1.0, p.header_sep, 0.0);
-        }
-        let header_baseline = (ascender * scale + crate::text::TEXT_PADDING) as f32 + top_offset;
-        app.font_renderer.as_mut().unwrap().prepare_text_for_rendering(&header, text_x, header_baseline, scale, p.text);
-        let error_msg = app.renderer.error_message.clone();
-        if !error_msg.is_empty() {
-            let fr = app.font_renderer.as_mut().unwrap();
-            let err_x = text_x + (header.len() as f32 * fr.get_width_em(scale)) + 10.0;
-            fr.prepare_text_for_rendering(&error_msg, err_x, header_baseline, scale, p.error);
-        }
-
-        // Render the dashboard image (tabs band + header occupy two line_heights)
-        if !dashboard_path.is_empty() {
+            // Begin render passes
+            let fr = match app.font_renderer.as_mut() { Some(f) => f, None => return };
+            fr.begin_text_rendering();
+            if let Some(rr) = app.rect_renderer.as_mut() {
+                rr.begin_rect_rendering();
+            }
             if let Some(ir) = app.image_renderer.as_mut() {
-                let avail_w = win_w - 100.0;
-                let avail_h = win_h - line_height as f32 * 2.0 - top_offset;
-                if let Some((img_w, img_h)) = unsafe { ir.texture_size(&dashboard_path) } {
-                    let img_w = img_w as f32;
-                    let img_h = img_h as f32;
-                    let mut display_scale = 1.0_f32;
-                    if img_w > avail_w { display_scale = avail_w / img_w; }
-                    if img_h * display_scale > avail_h { display_scale = avail_h / img_h; }
-                    let display_w = img_w * display_scale;
-                    let display_h = img_h * display_scale;
-                    let img_x = (win_w - display_w) / 2.0;
-                    let img_y = line_height as f32 + top_offset + (avail_h - display_h) / 2.0;
-                    unsafe { ir.prepare_image(&dashboard_path, img_x, img_y, display_w, display_h); }
+                ir.begin_image_rendering();
+            }
+
+            // Tabs band above the header
+            {
+                let fr = app.font_renderer.as_mut().unwrap();
+                render_tabs_band(fr, app.rect_renderer.as_mut(), &app.renderer,
+                    win_w, line_height, scale, ascender, em_width, &p);
+            }
+
+            // Header separator + title, shifted down by the tabs band
+            if let Some(rr) = app.rect_renderer.as_mut() {
+                rr.prepare_rectangle(0.0, line_height as f32 + top_offset, win_w, 1.0, p.header_sep, 0.0);
+            }
+            let header_baseline = (ascender * scale + crate::text::TEXT_PADDING) as f32 + top_offset;
+            app.font_renderer.as_mut().unwrap().prepare_text_for_rendering(
+                &header, text_x, header_baseline, scale, p.text,
+            );
+
+            // Pass 1: cell backgrounds (and the cursor block).
+            if let Some(rr) = app.rect_renderer.as_mut() {
+                for row in 0..rows {
+                    for col in 0..cols {
+                        let cell = frame.cell(col, row);
+                        let is_cursor = frame.cursor == Some((col, row));
+                        let bg = if is_cursor { cell.fg } else { cell.bg };
+                        if (bg & 0xFF) == 0 { continue; }
+                        let x = col as f32 * cell_w;
+                        let y = grid_top + row as f32 * cell_h;
+                        rr.prepare_rectangle(x, y, cell_w, cell_h, bg, 0.0);
+                    }
                 }
             }
-        }
 
-        return;
-    }
-
-    // ---- Interactive dashboard early dispatch -------------------------------
-    if app.renderer.coordinate == Coordinate::DashboardInteractive {
-        let cell_w = em_width.max(1.0);
-        let cell_h = line_height.max(1) as f32;
-        let header_h = line_height as f32 + top_offset;
-        let grid_top = header_h;
-        let avail_h = (win_h - grid_top).max(0.0);
-        let cols = (win_w / cell_w).floor().max(1.0) as u16;
-        let rows = (avail_h / cell_h).floor().max(1.0) as u16;
-
-        // Forward resize once whenever the cell-grid size changes (incl. on
-        // first entry, since `dashboard_cell_size` starts at (0, 0)).
-        let prev_size = app.renderer.dashboard_cell_size;
-        let frame = match crate::provider::get_active_provider(&mut app.renderer) {
-            Some(prov) => {
-                if prev_size != (cols, rows) {
-                    prov.dashboard_resize(rows, cols);
-                }
-                prov.dashboard_render(cols, rows)
-            }
-            None => return,
-        };
-        app.renderer.dashboard_cell_size = (cols, rows);
-
-        // Begin render passes
-        let fr = match app.font_renderer.as_mut() { Some(f) => f, None => return };
-        fr.begin_text_rendering();
-        if let Some(rr) = app.rect_renderer.as_mut() {
-            rr.begin_rect_rendering();
-        }
-        if let Some(ir) = app.image_renderer.as_mut() {
-            ir.begin_image_rendering();
-        }
-
-        // Tabs band above the header
-        {
+            // Pass 2: glyphs. Cursor cell is rendered with fg/bg swapped so the
+            // character stays legible against the cursor block.
             let fr = app.font_renderer.as_mut().unwrap();
-            render_tabs_band(fr, app.rect_renderer.as_mut(), &app.renderer,
-                win_w, line_height, scale, ascender, em_width, &p);
-        }
-
-        // Header separator + title, shifted down by the tabs band
-        if let Some(rr) = app.rect_renderer.as_mut() {
-            rr.prepare_rectangle(0.0, line_height as f32 + top_offset, win_w, 1.0, p.header_sep, 0.0);
-        }
-        let header_baseline = (ascender * scale + crate::text::TEXT_PADDING) as f32 + top_offset;
-        app.font_renderer.as_mut().unwrap().prepare_text_for_rendering(
-            &header, text_x, header_baseline, scale, p.text,
-        );
-
-        // Pass 1: cell backgrounds (and the cursor block).
-        if let Some(rr) = app.rect_renderer.as_mut() {
+            let mut utf8 = [0u8; 4];
             for row in 0..rows {
+                let baseline = grid_top + row as f32 * cell_h
+                    + (ascender * scale + crate::text::TEXT_PADDING) as f32;
                 for col in 0..cols {
                     let cell = frame.cell(col, row);
+                    if cell.ch == ' ' { continue; }
                     let is_cursor = frame.cursor == Some((col, row));
-                    let bg = if is_cursor { cell.fg } else { cell.bg };
-                    if (bg & 0xFF) == 0 { continue; }
+                    let fg = if is_cursor { cell.bg } else { cell.fg };
+                    if (fg & 0xFF) == 0 { continue; }
+                    let s: &str = cell.ch.encode_utf8(&mut utf8);
                     let x = col as f32 * cell_w;
-                    let y = grid_top + row as f32 * cell_h;
-                    rr.prepare_rectangle(x, y, cell_w, cell_h, bg, 0.0);
+                    fr.prepare_text_for_rendering(s, x, baseline, scale, fg);
                 }
             }
-        }
+        } else {
+            // Image (or legacy `None` + dashboard_image_path) flavor.
+            let dashboard_path = app.renderer.dashboard_image_path.clone();
 
-        // Pass 2: glyphs. Cursor cell is rendered with fg/bg swapped so the
-        // character stays legible against the cursor block.
-        let fr = app.font_renderer.as_mut().unwrap();
-        let mut utf8 = [0u8; 4];
-        for row in 0..rows {
-            let baseline = grid_top + row as f32 * cell_h
-                + (ascender * scale + crate::text::TEXT_PADDING) as f32;
-            for col in 0..cols {
-                let cell = frame.cell(col, row);
-                if cell.ch == ' ' { continue; }
-                let is_cursor = frame.cursor == Some((col, row));
-                let fg = if is_cursor { cell.bg } else { cell.fg };
-                if (fg & 0xFF) == 0 { continue; }
-                let s: &str = cell.ch.encode_utf8(&mut utf8);
-                let x = col as f32 * cell_w;
-                fr.prepare_text_for_rendering(s, x, baseline, scale, fg);
+            // Begin render passes
+            let fr = match app.font_renderer.as_mut() { Some(f) => f, None => return };
+            fr.begin_text_rendering();
+            if let Some(rr) = app.rect_renderer.as_mut() {
+                rr.begin_rect_rendering();
+            }
+            if let Some(ir) = app.image_renderer.as_mut() {
+                ir.begin_image_rendering();
+            }
+
+            // Tabs band above the header
+            {
+                let fr = app.font_renderer.as_mut().unwrap();
+                render_tabs_band(fr, app.rect_renderer.as_mut(), &app.renderer,
+                    win_w, line_height, scale, ascender, em_width, &p);
+            }
+
+            // Header separator and text, shifted down by the tabs band
+            if let Some(rr) = app.rect_renderer.as_mut() {
+                rr.prepare_rectangle(0.0, line_height as f32 + top_offset, win_w, 1.0, p.header_sep, 0.0);
+            }
+            let header_baseline = (ascender * scale + crate::text::TEXT_PADDING) as f32 + top_offset;
+            app.font_renderer.as_mut().unwrap().prepare_text_for_rendering(&header, text_x, header_baseline, scale, p.text);
+            let error_msg = app.renderer.error_message.clone();
+            if !error_msg.is_empty() {
+                let fr = app.font_renderer.as_mut().unwrap();
+                let err_x = text_x + (header.len() as f32 * fr.get_width_em(scale)) + 10.0;
+                fr.prepare_text_for_rendering(&error_msg, err_x, header_baseline, scale, p.error);
+            }
+
+            // Render the dashboard image (tabs band + header occupy two line_heights)
+            if !dashboard_path.is_empty() {
+                if let Some(ir) = app.image_renderer.as_mut() {
+                    let avail_w = win_w - 100.0;
+                    let avail_h = win_h - line_height as f32 * 2.0 - top_offset;
+                    if let Some((img_w, img_h)) = unsafe { ir.texture_size(&dashboard_path) } {
+                        let img_w = img_w as f32;
+                        let img_h = img_h as f32;
+                        let mut display_scale = 1.0_f32;
+                        if img_w > avail_w { display_scale = avail_w / img_w; }
+                        if img_h * display_scale > avail_h { display_scale = avail_h / img_h; }
+                        let display_w = img_w * display_scale;
+                        let display_h = img_h * display_scale;
+                        let img_x = (win_w - display_w) / 2.0;
+                        let img_y = line_height as f32 + top_offset + (avail_h - display_h) / 2.0;
+                        unsafe { ir.prepare_image(&dashboard_path, img_x, img_y, display_w, display_h); }
+                    }
+                }
             }
         }
 

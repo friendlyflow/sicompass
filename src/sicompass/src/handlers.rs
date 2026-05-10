@@ -2252,17 +2252,12 @@ pub fn handle_escape(r: &mut AppRenderer) {
             return;
         }
         Coordinate::Dashboard => {
-            r.coordinate = r.previous_coordinate;
-            r.speak_mode_change(None);
-            r.caret.reset(sdl_ticks());
-            r.needs_redraw = true;
-            return;
-        }
-        Coordinate::DashboardInteractive => {
-            if let Some(p) = crate::provider::get_active_provider(r) {
-                p.leave_dashboard();
+            if active_dashboard_is_interactive(r) {
+                if let Some(p) = crate::provider::get_active_provider(r) {
+                    p.leave_dashboard();
+                }
+                r.dashboard_cell_size = (0, 0);
             }
-            r.dashboard_cell_size = (0, 0);
             r.coordinate = r.previous_coordinate;
             r.speak_mode_change(None);
             r.caret.reset(sdl_ticks());
@@ -2322,7 +2317,7 @@ pub fn handle_input(r: &mut AppRenderer, text: &str) {
     // Interactive-dashboard fast-path: hand the typed text to the active
     // provider verbatim. The provider also receives a separate `dashboard_key`
     // for the underlying keysym; printable bytes flow through here.
-    if r.coordinate == Coordinate::DashboardInteractive {
+    if r.coordinate == Coordinate::Dashboard && active_dashboard_is_interactive(r) {
         if let Some(p) = crate::provider::get_active_provider(r) {
             p.dashboard_text(text);
         }
@@ -3808,16 +3803,25 @@ pub fn handle_ctrl_f(r: &mut AppRenderer) {
     }
 }
 
+/// True if the active provider currently advertises an interactive (cell-grid)
+/// dashboard. Assumes `dashboard_kind()` is stable for the duration of a
+/// dashboard session, which is how every existing provider behaves.
+pub(crate) fn active_dashboard_is_interactive(r: &AppRenderer) -> bool {
+    crate::provider::get_active_provider_ref(r)
+        .map(|p| p.dashboard_kind() == sicompass_sdk::DashboardKind::Interactive)
+        .unwrap_or(false)
+}
+
 /// Enter dashboard mode if the active provider opts in.
 ///
-/// Branches on `Provider::dashboard_kind`:
+/// Always switches to `Coordinate::Dashboard`. The image-vs-interactive
+/// distinction is delegated to `Provider::dashboard_kind` and re-checked at
+/// the dispatch sites that actually need it (render, input forwarding,
+/// lifecycle hooks).
+///
+/// * `Interactive` → call `enter_dashboard()`, reset `dashboard_cell_size`.
 /// * `Image` (or `None` with a non-empty `dashboard_image_path` for
-///   backwards compatibility) → switch to `Coordinate::Dashboard` and let
-///   `view.rs` paint the static image.
-/// * `Interactive` → call `enter_dashboard()`, switch to
-///   `Coordinate::DashboardInteractive`, and let `view.rs` route
-///   `dashboard_render` / `dashboard_key` / `dashboard_text` /
-///   `dashboard_resize` to the provider every frame.
+///   backwards compatibility) → record the image path for `view.rs`.
 /// * `None` with no image path → no-op.
 pub fn handle_dashboard(r: &mut AppRenderer) {
     use sicompass_sdk::DashboardKind;
@@ -3832,32 +3836,17 @@ pub fn handle_dashboard(r: &mut AppRenderer) {
     };
 
     let kind = p.dashboard_kind();
-    let image_path = if matches!(kind, DashboardKind::None | DashboardKind::Image) {
-        p.dashboard_image_path().map(|s| s.to_owned())
-    } else {
-        None
-    };
-
     match kind {
         DashboardKind::Interactive => {
             p.enter_dashboard();
             r.previous_coordinate = r.coordinate;
-            r.coordinate = Coordinate::DashboardInteractive;
+            r.coordinate = Coordinate::Dashboard;
             r.dashboard_cell_size = (0, 0);
             r.speak_mode_change(None);
             r.needs_redraw = true;
         }
-        DashboardKind::Image => {
-            if let Some(path) = image_path {
-                r.dashboard_image_path = path;
-                r.previous_coordinate = r.coordinate;
-                r.coordinate = Coordinate::Dashboard;
-                r.speak_mode_change(None);
-                r.needs_redraw = true;
-            }
-        }
-        DashboardKind::None => {
-            if let Some(path) = image_path {
+        DashboardKind::Image | DashboardKind::None => {
+            if let Some(path) = p.dashboard_image_path().map(|s| s.to_owned()) {
                 r.dashboard_image_path = path;
                 r.previous_coordinate = r.coordinate;
                 r.coordinate = Coordinate::Dashboard;
@@ -6124,6 +6113,67 @@ mod tests {
         handle_escape(&mut r);
         assert_eq!(r.coordinate, Coordinate::General);
         assert!(r.needs_redraw);
+    }
+
+    // Stub provider whose `dashboard_kind` is configurable and which counts
+    // `leave_dashboard` invocations. Used by the two tests below to verify
+    // that the merged escape arm only calls `leave_dashboard` for the
+    // interactive flavor.
+    struct DashboardProv {
+        kind: sicompass_sdk::DashboardKind,
+        leave_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+    impl sicompass_sdk::provider::Provider for DashboardProv {
+        fn name(&self) -> &str { "dashboardprov" }
+        fn display_name(&self) -> &str { "dashboardprov" }
+        fn fetch(&mut self) -> Vec<sicompass_sdk::ffon::FfonElement> { vec![] }
+        fn dashboard_kind(&self) -> sicompass_sdk::DashboardKind { self.kind }
+        fn leave_dashboard(&mut self) {
+            self.leave_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    #[test]
+    fn escape_from_dashboard_calls_leave_when_interactive() {
+        use sicompass_sdk::ffon::IdArray;
+        let leave_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut r = AppRenderer::new();
+        r.providers.push(Box::new(DashboardProv {
+            kind: sicompass_sdk::DashboardKind::Interactive,
+            leave_count: std::sync::Arc::clone(&leave_count),
+        }));
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        r.coordinate = Coordinate::Dashboard;
+        r.previous_coordinate = Coordinate::General;
+        r.dashboard_cell_size = (80, 24);
+
+        handle_escape(&mut r);
+
+        assert_eq!(r.coordinate, Coordinate::General);
+        assert_eq!(leave_count.load(std::sync::atomic::Ordering::Relaxed), 1,
+            "leave_dashboard should be called exactly once for interactive providers");
+        assert_eq!(r.dashboard_cell_size, (0, 0),
+            "dashboard_cell_size should be reset on interactive leave");
+    }
+
+    #[test]
+    fn escape_from_dashboard_skips_leave_when_image() {
+        use sicompass_sdk::ffon::IdArray;
+        let leave_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut r = AppRenderer::new();
+        r.providers.push(Box::new(DashboardProv {
+            kind: sicompass_sdk::DashboardKind::Image,
+            leave_count: std::sync::Arc::clone(&leave_count),
+        }));
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        r.coordinate = Coordinate::Dashboard;
+        r.previous_coordinate = Coordinate::General;
+
+        handle_escape(&mut r);
+
+        assert_eq!(r.coordinate, Coordinate::General);
+        assert_eq!(leave_count.load(std::sync::atomic::Ordering::Relaxed), 0,
+            "leave_dashboard should NOT be called for image providers");
     }
 
     #[test]
