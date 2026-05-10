@@ -860,13 +860,14 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
     let shift = keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD);
     let alt   = keymod.intersects(Mod::LALTMOD   | Mod::RALTMOD);
 
-    // Interactive-dashboard fast-path: forward every key *except* Escape to the
-    // active provider. Escape still falls through to the SHORTCUTS table so the
-    // user can always bail out via `handle_escape`. The image variant of the
-    // dashboard ignores keystrokes entirely, so we gate on
-    // `active_dashboard_is_interactive`.
+    // Interactive-dashboard fast-path: forward every key to the active
+    // provider verbatim — including Escape (vim's normal mode etc.) and
+    // Ctrl+C (the SIGINT byte that lets `btop`/`htop`/etc. terminate). The
+    // dashboard auto-leaves when the program emits ESC[?1049l. The image
+    // variant ignores keystrokes entirely, so we gate on
+    // `active_dashboard_is_interactive`; image dashboards still exit on Esc
+    // via the SHORTCUTS table further down.
     if r.coordinate == Coordinate::Dashboard
-        && k != Keycode::Escape
         && handlers::active_dashboard_is_interactive(r)
     {
         if let Some(keysym) = sdl_keycode_to_dashboard_keysym(k) {
@@ -959,6 +960,7 @@ fn sdl_keycode_to_dashboard_keysym(k: Keycode) -> Option<sicompass_sdk::Dashboar
         Keycode::Return | Keycode::KpEnter => K::Enter,
         Keycode::Backspace => K::Backspace,
         Keycode::Tab => K::Tab,
+        Keycode::Escape => K::Escape,
         Keycode::Up => K::Up,
         Keycode::Down => K::Down,
         Keycode::Left => K::Left,

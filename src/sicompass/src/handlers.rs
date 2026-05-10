@@ -2252,16 +2252,7 @@ pub fn handle_escape(r: &mut AppRenderer) {
             return;
         }
         Coordinate::Dashboard => {
-            if active_dashboard_is_interactive(r) {
-                if let Some(p) = crate::provider::get_active_provider(r) {
-                    p.leave_dashboard();
-                }
-                r.dashboard_cell_size = (0, 0);
-            }
-            r.coordinate = r.previous_coordinate;
-            r.speak_mode_change(None);
-            r.caret.reset(sdl_ticks());
-            r.needs_redraw = true;
+            handle_dashboard_leave(r);
             return;
         }
         Coordinate::ScrollSearch => {
@@ -3812,18 +3803,31 @@ pub(crate) fn active_dashboard_is_interactive(r: &AppRenderer) -> bool {
         .unwrap_or(false)
 }
 
-/// Enter dashboard mode if the active provider opts in.
+/// Manual `d`-keypress entry into the dashboard. Honors
+/// [`Provider::manual_dashboard_entry_allowed`] so providers like the
+/// terminal (which can only be cleanly exited via the program emitting
+/// `ESC[?1049l`) can refuse manual entry while still being auto-launched.
+pub fn handle_dashboard(r: &mut AppRenderer) {
+    let allowed = r.current_id.get(0)
+        .and_then(|i| r.providers.get(i))
+        .map(|p| p.manual_dashboard_entry_allowed())
+        .unwrap_or(false);
+    if !allowed {
+        return;
+    }
+    enter_dashboard_for_active(r);
+}
+
+/// Enter dashboard mode for the active provider unconditionally — bypasses
+/// the manual-entry guard. Used by both [`handle_dashboard`] (after the
+/// guard passes) and the auto-launch path in `view.rs` (which polls
+/// [`sicompass_sdk::Provider::take_dashboard_request`]).
 ///
 /// Always switches to `Coordinate::Dashboard`. The image-vs-interactive
 /// distinction is delegated to `Provider::dashboard_kind` and re-checked at
 /// the dispatch sites that actually need it (render, input forwarding,
 /// lifecycle hooks).
-///
-/// * `Interactive` → call `enter_dashboard()`, reset `dashboard_cell_size`.
-/// * `Image` (or `None` with a non-empty `dashboard_image_path` for
-///   backwards compatibility) → record the image path for `view.rs`.
-/// * `None` with no image path → no-op.
-pub fn handle_dashboard(r: &mut AppRenderer) {
+pub fn enter_dashboard_for_active(r: &mut AppRenderer) {
     use sicompass_sdk::DashboardKind;
 
     let provider_idx = match r.current_id.get(0) {
@@ -3855,6 +3859,25 @@ pub fn handle_dashboard(r: &mut AppRenderer) {
             }
         }
     }
+}
+
+/// Leave the dashboard back to `previous_coordinate`. Idempotent — no-op if
+/// not currently in a dashboard. Used by both Esc handling and the auto-leave
+/// dispatch when an interactive program emits `ESC[?1049l` / `?47l` / `?1047l`.
+pub fn handle_dashboard_leave(r: &mut AppRenderer) {
+    if r.coordinate != Coordinate::Dashboard {
+        return;
+    }
+    if active_dashboard_is_interactive(r) {
+        if let Some(p) = crate::provider::get_active_provider(r) {
+            p.leave_dashboard();
+        }
+        r.dashboard_cell_size = (0, 0);
+    }
+    r.coordinate = r.previous_coordinate;
+    r.speak_mode_change(None);
+    r.caret.reset(sdl_ticks());
+    r.needs_redraw = true;
 }
 
 // ---------------------------------------------------------------------------

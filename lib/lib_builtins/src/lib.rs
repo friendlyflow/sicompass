@@ -120,8 +120,12 @@ mod tests {
         let term = term.unwrap();
         assert!(!term.always_enabled, "terminal should not be always_enabled");
         assert!(!term.enable_default, "terminal should be opt-in (default off)");
-        assert_eq!(term.settings.len(), 1, "terminal should declare 1 setting");
-        assert_eq!(term.settings[0].key, "shellProgram");
+        assert!(!term.settings.is_empty(), "terminal should declare at least one setting");
+        let keys: Vec<&str> = term.settings.iter().map(|s| s.key.as_str()).collect();
+        assert!(keys.contains(&"shellProgram"),
+            "terminal manifest must include shellProgram setting; got {keys:?}");
+        assert!(keys.contains(&"autoEnterDashboard"),
+            "terminal manifest must include autoEnterDashboard setting; got {keys:?}");
     }
 
     #[test]

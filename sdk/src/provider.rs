@@ -1,4 +1,4 @@
-use crate::dashboard::{DashboardFrame, DashboardKey, DashboardKind};
+use crate::dashboard::{DashboardFrame, DashboardKey, DashboardKind, DashboardRequest};
 use crate::ffon::FfonElement;
 use std::path::Path;
 
@@ -280,6 +280,28 @@ pub trait Provider: Send + 'static {
     /// Called once, immediately after the app exits the interactive
     /// dashboard for this provider (typically via Escape).
     fn leave_dashboard(&mut self) {}
+
+    /// If `false`, the user pressing `d` while this provider is active is a
+    /// no-op. The provider can still be auto-entered into its dashboard via
+    /// [`Provider::take_dashboard_request`]. Default `true`.
+    ///
+    /// Used by providers (e.g. terminal) where the dashboard is only useful
+    /// while a TUI is running, and a "stuck in a bare-shell dashboard" state
+    /// would have no clean manual exit path.
+    fn manual_dashboard_entry_allowed(&self) -> bool { true }
+
+    /// Take any pending dashboard mode-switch request this provider has
+    /// accumulated since the last poll.
+    ///
+    /// The app calls this every frame after `tick()` for every provider.
+    /// Two-call semantics: a second call without an intervening request
+    /// must return `None`. Default: no request.
+    ///
+    /// Used by providers that need to switch modes outside a user keypress
+    /// — e.g. the terminal provider noticing a child program just emitted
+    /// `ESC[?1049h` (vim, less, htop, …) and wanting to surface as the
+    /// interactive dashboard automatically.
+    fn take_dashboard_request(&mut self) -> Option<DashboardRequest> { None }
 
     /// Enable Ctrl+S/O save/load for this provider.
     fn supports_config_files(&self) -> bool { false }

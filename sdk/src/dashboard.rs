@@ -148,6 +148,22 @@ pub struct DashboardKey {
     pub alt: bool,
 }
 
+/// A request from a provider for the app to switch its dashboard mode.
+///
+/// Returned by [`crate::Provider::take_dashboard_request`]. The app polls
+/// this in its tick loop after `Provider::tick()` and dispatches accordingly.
+/// Honored only when the requesting provider is the active one — never yanks
+/// the user out of one tab into another tab's dashboard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DashboardRequest {
+    /// Enter the active provider's interactive dashboard. Equivalent to the
+    /// user pressing `d`. No-op if a dashboard is already entered.
+    Enter,
+    /// Leave the dashboard, restoring the prior coordinate. No-op if no
+    /// dashboard is currently entered.
+    Leave,
+}
+
 /// Keysym variants the app maps SDL keycodes onto. Kept deliberately small —
 /// providers handle printable input through `dashboard_text` and reach for
 /// `Char(c)` only when modifiers (e.g. Ctrl+letter) suppress the text-input
@@ -157,6 +173,7 @@ pub enum DashboardKeysym {
     Enter,
     Backspace,
     Tab,
+    Escape,
     Up,
     Down,
     Left,

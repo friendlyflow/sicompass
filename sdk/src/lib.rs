@@ -10,6 +10,7 @@ pub mod url_fetcher;
 
 pub use dashboard::{
     CellAttrs, DashboardCell, DashboardFrame, DashboardKey, DashboardKeysym, DashboardKind,
+    DashboardRequest,
 };
 pub use ffon::{FfonElement, FfonObject, IdArray};
 pub use manifest::{

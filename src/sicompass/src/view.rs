@@ -189,7 +189,53 @@ pub fn main_loop(app: &mut AppState) {
         }
 
         // ---- Let providers drive background state (e.g. async OAuth login) --
-        let any_tick_update = app.renderer.providers.iter_mut().any(|p| p.tick());
+        let mut any_tick_update = false;
+        let mut dashboard_requests: Vec<(usize, sicompass_sdk::DashboardRequest)> = Vec::new();
+        for (i, p) in app.renderer.providers.iter_mut().enumerate() {
+            if p.tick() {
+                any_tick_update = true;
+            }
+            if let Some(req) = p.take_dashboard_request() {
+                dashboard_requests.push((i, req));
+            }
+        }
+        // Honor only requests from the *active* provider — never yank the user
+        // out of one tab into another tab's dashboard.
+        for (i, req) in dashboard_requests {
+            if app.renderer.current_id.get(0) != Some(i) {
+                continue;
+            }
+            match req {
+                sicompass_sdk::DashboardRequest::Enter
+                    if app.renderer.coordinate != Coordinate::Dashboard =>
+                {
+                    // Reset the baseline to General before entering. The user
+                    // typed a command at the input slot (likely in Insert
+                    // mode); without this, auto-leave restores Insert and
+                    // `i`/`a` would type literally instead of re-entering
+                    // Insert. Bypass the manual-entry guard — the provider
+                    // asked for this directly via take_dashboard_request.
+                    app.renderer.coordinate = Coordinate::General;
+                    app.renderer.input_buffer.clear();
+                    app.renderer.cursor_position = 0;
+                    handlers::enter_dashboard_for_active(&mut app.renderer);
+                }
+                sicompass_sdk::DashboardRequest::Leave => {
+                    handlers::handle_dashboard_leave(&mut app.renderer);
+                }
+                _ => {}
+            }
+        }
+        // Sync SDL text-input state with the coordinate after the dispatch.
+        // Without this, the dashboard's text-input-enabled state lingers
+        // through auto-leave; the next `i` keypress would fire BOTH the
+        // mode-switch (General+i → Insert) AND a queued TextInput("i")
+        // event, typing the literal `i` into the just-entered Insert mode.
+        if is_insert_mode(app.renderer.coordinate) {
+            app._video.text_input().start(&app.window);
+        } else {
+            app._video.text_input().stop(&app.window);
+        }
         if any_tick_update {
             // Clear any stale status, then let providers re-assert their error.
             app.renderer.error_message.clear();

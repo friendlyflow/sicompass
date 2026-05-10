@@ -6010,3 +6010,222 @@ fn tab_switch_restores_provider_path_after_other_tab_navigates() {
     let any_nested = labels.iter().any(|l| sicompass_sdk::tags::strip_display(l).contains("nested.txt"));
     assert!(any_nested, "tab 1 listing must contain nested.txt after restore, got {labels:?}");
 }
+
+// ---------------------------------------------------------------------------
+// Auto-launch dashboard on alt-screen sequence (terminal provider)
+// ---------------------------------------------------------------------------
+
+/// Mirrors the tick + auto-dashboard dispatch block from `view.rs`. Tests
+/// can't run the SDL main loop, so this drains pending requests and routes
+/// them through the same handler functions the loop uses.
+fn pump_tick(r: &mut AppRenderer) {
+    let mut requests: Vec<(usize, sicompass_sdk::DashboardRequest)> = Vec::new();
+    for (i, p) in r.providers.iter_mut().enumerate() {
+        let _ = p.tick();
+        if let Some(req) = p.take_dashboard_request() {
+            requests.push((i, req));
+        }
+    }
+    for (i, req) in requests {
+        if r.current_id.get(0) != Some(i) {
+            continue;
+        }
+        match req {
+            sicompass_sdk::DashboardRequest::Enter
+                if r.coordinate != Coordinate::Dashboard =>
+            {
+                // Mirror view.rs: reset to General + clear input buffer,
+                // then bypass the manual-entry guard.
+                r.coordinate = Coordinate::General;
+                r.input_buffer.clear();
+                r.cursor_position = 0;
+                sicompass::handlers::enter_dashboard_for_active(r);
+            }
+            sicompass_sdk::DashboardRequest::Leave => {
+                sicompass::handlers::handle_dashboard_leave(r);
+            }
+            _ => {}
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn terminal_auto_enters_and_leaves_dashboard_on_alt_screen() {
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register(&mut renderer, sicompass_sdk::create_provider_by_name("terminal").unwrap());
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    // Sanity: terminal is the active provider (idx 0) and we're not in dashboard.
+    assert_eq!(renderer.current_id.get(0), Some(0));
+    assert_ne!(renderer.coordinate, Coordinate::Dashboard);
+
+    // Submit a one-liner that opens the alt screen, sleeps long enough for
+    // us to observe the entered state, then closes it.
+    let term_idx = renderer.providers.iter().position(|p| p.name() == "terminal").unwrap();
+    let submitted = renderer.providers[term_idx]
+        .commit_edit("", "printf '\\033[?1049h'; sleep 1; printf '\\033[?1049l'");
+    if !submitted {
+        // Shell spawn failed (e.g. CI sandbox without /bin/sh). Skip.
+        return;
+    }
+
+    // Drive the tick loop until we see Dashboard.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut entered = false;
+    while Instant::now() < deadline {
+        pump_tick(&mut renderer);
+        if renderer.coordinate == Coordinate::Dashboard {
+            entered = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(entered, "expected auto-enter into Dashboard after alt-screen-h");
+
+    // Continue ticking until the trailing alt-screen-l is observed and we
+    // auto-leave back to the prior coordinate.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut left = false;
+    while Instant::now() < deadline {
+        pump_tick(&mut renderer);
+        if renderer.coordinate != Coordinate::Dashboard {
+            left = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(left, "expected auto-leave from Dashboard after alt-screen-l");
+}
+
+#[cfg(unix)]
+#[test]
+fn auto_leave_lands_in_general_mode_even_if_user_was_in_insert() {
+    // Repro: user is on the input slot in Insert mode typing `btop`. They
+    // press Enter; auto-launch fires; they Ctrl+C btop; auto-leave fires.
+    // They must land in General mode — otherwise pressing `i`/`a` to
+    // re-enter Insert mode would type those letters literally.
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register(&mut renderer, sicompass_sdk::create_provider_by_name("terminal").unwrap());
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    // Simulate "user was in Insert mode with a stale buffer".
+    renderer.coordinate = Coordinate::Insert;
+    renderer.input_buffer = "btop".to_owned();
+    renderer.cursor_position = 4;
+
+    let term_idx = renderer.providers.iter().position(|p| p.name() == "terminal").unwrap();
+    if !renderer.providers[term_idx]
+        .commit_edit("", "printf '\\033[?1049h'; sleep 1; printf '\\033[?1049l'")
+    {
+        return;
+    }
+
+    // Pump until we're in the dashboard.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline && renderer.coordinate != Coordinate::Dashboard {
+        pump_tick(&mut renderer);
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(renderer.coordinate, Coordinate::Dashboard,
+        "expected auto-enter into Dashboard");
+
+    // Pump until we're back out (auto-leave).
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline && renderer.coordinate == Coordinate::Dashboard {
+        pump_tick(&mut renderer);
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert_ne!(renderer.coordinate, Coordinate::Dashboard,
+        "expected auto-leave from Dashboard");
+
+    // The fix: regardless of what mode the user was in before auto-launch,
+    // auto-leave returns them to a clean General mode with no stale Insert
+    // state. Otherwise `i`/`a` would type literally instead of switching
+    // back into Insert.
+    assert_eq!(renderer.coordinate, Coordinate::General,
+        "auto-leave must land in General mode, not the pre-launch Insert mode");
+    assert!(renderer.input_buffer.is_empty(),
+        "auto-leave must clear stale input_buffer; got {:?}", renderer.input_buffer);
+}
+
+#[cfg(unix)]
+#[test]
+fn terminal_manual_d_keypress_is_blocked() {
+    // Pressing `d` while the terminal provider is active must NOT enter the
+    // dashboard. Auto-launch (via alt-screen detection) is the only valid
+    // path — a manually-entered terminal dashboard at a bare shell prompt
+    // would have no clean exit (every key, including Esc and Ctrl+C, is
+    // forwarded to the program).
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register(&mut renderer, sicompass_sdk::create_provider_by_name("terminal").unwrap());
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    let term_idx = renderer.providers.iter().position(|p| p.name() == "terminal").unwrap();
+    if !renderer.providers[term_idx].commit_edit("", "true") {
+        return;
+    }
+
+    let coord_before = renderer.coordinate;
+    sicompass::handlers::handle_dashboard(&mut renderer);
+    assert_eq!(renderer.coordinate, coord_before,
+        "manual handle_dashboard must be a no-op for the terminal provider");
+}
+
+#[cfg(unix)]
+#[test]
+fn esc_in_interactive_dashboard_does_not_exit() {
+    // Esc must pass through to the program (vim normal mode etc.). The
+    // dashboard must stay open so the program receives the byte.
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register(&mut renderer, sicompass_sdk::create_provider_by_name("terminal").unwrap());
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    let term_idx = renderer.providers.iter().position(|p| p.name() == "terminal").unwrap();
+    if !renderer.providers[term_idx].commit_edit("", "true") {
+        return;
+    }
+
+    // Bypass the manual-entry guard the same way the auto-launch path does.
+    sicompass::handlers::enter_dashboard_for_active(&mut renderer);
+    assert_eq!(renderer.coordinate, Coordinate::Dashboard);
+
+    press_escape(&mut renderer);
+    assert_eq!(renderer.coordinate, Coordinate::Dashboard,
+        "Esc must be forwarded to the interactive dashboard program, not exit");
+}
+
+#[cfg(unix)]
+#[test]
+fn ctrl_c_in_interactive_dashboard_does_not_exit() {
+    // Ctrl+C must pass through to the program as the SIGINT byte (0x03) so
+    // `btop`/`htop`/etc. actually terminate. Without this, killing btop
+    // from the dashboard left it running on the PTY and re-launching it
+    // failed silently.
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register(&mut renderer, sicompass_sdk::create_provider_by_name("terminal").unwrap());
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    let term_idx = renderer.providers.iter().position(|p| p.name() == "terminal").unwrap();
+    if !renderer.providers[term_idx].commit_edit("", "true") {
+        return;
+    }
+
+    sicompass::handlers::enter_dashboard_for_active(&mut renderer);
+    assert_eq!(renderer.coordinate, Coordinate::Dashboard);
+
+    press_ctrl(&mut renderer, Keycode::C);
+    assert_eq!(renderer.coordinate, Coordinate::Dashboard,
+        "Ctrl+C must be forwarded to the program (SIGINT), not exit the dashboard");
+}

@@ -17,14 +17,16 @@
 //!
 //! The actual shell process lives in the internal `sicompass-shell` crate.
 
+mod altscreen_detect;
 mod emulator;
 
 use std::path::PathBuf;
 
+use altscreen_detect::{AltScreenDetector, AltScreenEvent};
 use emulator::{encode_dashboard_key, Emulator};
 use sicompass_sdk::{
     register_builtin_manifest, register_provider_factory, BuiltinManifest, DashboardFrame,
-    DashboardKey, DashboardKind, FfonElement, Provider, SettingDecl,
+    DashboardKey, DashboardKind, DashboardRequest, FfonElement, Provider, SettingDecl,
 };
 use sicompass_shell::{default_program, Shell, ShellConfig};
 
@@ -84,6 +86,20 @@ pub struct TerminalProvider {
     /// Counts appends since the last full file rewrite. We compact when this
     /// reaches `command_history_size`, bounding the file at ~2× the cap.
     appends_since_compact: usize,
+
+    /// `true` when `terminal.autoEnterDashboard` is enabled (default true).
+    /// Gates the alt-screen detector entirely — when off, no auto enter/leave.
+    auto_enter_dashboard: bool,
+    /// `true` only while the dashboard was entered *because* the detector saw
+    /// an alt-screen-enter sequence, not because the user pressed `d`. Gates
+    /// auto-leave so manual entries always require Esc to exit.
+    auto_entered_dashboard: bool,
+    /// Pending mode-switch request produced by the detector since the last
+    /// `take_dashboard_request()` poll. The app drains this every frame.
+    pending_dashboard_request: Option<DashboardRequest>,
+    /// Watches PTY bytes for `CSI ? {1049,47,1047} {h,l}` toggles emitted by
+    /// vim/less/htop/man/etc. Drives `pending_dashboard_request`.
+    alt_detect: AltScreenDetector,
 }
 
 impl TerminalProvider {
@@ -104,6 +120,55 @@ impl TerminalProvider {
             command_history_loaded: false,
             command_history_path: None,
             appends_since_compact: 0,
+            auto_enter_dashboard: true,
+            auto_entered_dashboard: false,
+            pending_dashboard_request: None,
+            alt_detect: AltScreenDetector::new(),
+        }
+    }
+
+    /// Drive the alt-screen detector with a fresh PTY chunk, then update
+    /// `pending_dashboard_request` based on any transitions seen.
+    ///
+    /// Called from both `tick()` (scrollback path) and `dashboard_render()`
+    /// (the mid-render drain) so an alt-screen-leave that arrives while the
+    /// dashboard is rendering still triggers an auto-leave on the next poll.
+    fn drive_alt_screen_detector(&mut self, bytes: &[u8]) {
+        if !self.auto_enter_dashboard {
+            return;
+        }
+        // Two-phase: collect events under the &mut self.alt_detect borrow,
+        // then dispatch on &mut self.
+        let mut events: [Option<AltScreenEvent>; 4] = [None; 4];
+        let mut n = 0;
+        self.alt_detect.feed(bytes, |e| {
+            if n < events.len() {
+                events[n] = Some(e);
+                n += 1;
+            }
+        });
+        for slot in events.iter().take(n) {
+            if let Some(e) = slot {
+                self.handle_alt_screen_event(*e);
+            }
+        }
+    }
+
+    fn handle_alt_screen_event(&mut self, e: AltScreenEvent) {
+        match e {
+            AltScreenEvent::Enter if !self.in_dashboard => {
+                self.pending_dashboard_request = Some(DashboardRequest::Enter);
+                self.auto_entered_dashboard = true;
+            }
+            AltScreenEvent::Leave
+                if self.in_dashboard && self.auto_entered_dashboard =>
+            {
+                self.pending_dashboard_request = Some(DashboardRequest::Leave);
+            }
+            // Ignore Enter while already in dashboard (e.g. nested alt-screen
+            // toggle inside vim) and Leave when the user manually pressed `d`
+            // — those exit only on Esc.
+            _ => {}
         }
     }
 
@@ -327,6 +392,10 @@ impl Provider for TerminalProvider {
         if bytes.is_empty() {
             return false;
         }
+        // Run the alt-screen detector on every chunk regardless of mode — it
+        // sees both the entering toggle (in scrollback) and the exiting toggle
+        // (during dashboard) so the app can auto-switch in either direction.
+        self.drive_alt_screen_detector(&bytes);
         if self.in_dashboard {
             // Route raw bytes through the ANSI/VT emulator. The next
             // `dashboard_render` call will snapshot the updated grid.
@@ -369,6 +438,9 @@ impl Provider for TerminalProvider {
                     self.trim_command_history_in_memory();
                 }
             }
+            "autoEnterDashboard" => {
+                self.auto_enter_dashboard = matches!(value, "true" | "1" | "on");
+            }
             _ => {}
         }
     }
@@ -383,6 +455,14 @@ impl Provider for TerminalProvider {
         DashboardKind::Interactive
     }
 
+    fn manual_dashboard_entry_allowed(&self) -> bool {
+        // Only auto-launch (alt-screen detection) enters the dashboard. A
+        // manual `d` at a bare shell prompt would have no clean exit path
+        // because every key — including Esc and Ctrl+C — is forwarded to
+        // the program; auto-leave only fires on ESC[?1049l.
+        false
+    }
+
     fn enter_dashboard(&mut self) {
         self.ensure_shell();
         self.in_dashboard = true;
@@ -395,6 +475,13 @@ impl Provider for TerminalProvider {
 
     fn leave_dashboard(&mut self) {
         self.in_dashboard = false;
+        // Clear the auto-entered flag so a future manual `d` press doesn't
+        // get auto-left by a stale Leave detection later.
+        self.auto_entered_dashboard = false;
+    }
+
+    fn take_dashboard_request(&mut self) -> Option<DashboardRequest> {
+        self.pending_dashboard_request.take()
     }
 
     fn dashboard_resize(&mut self, rows: u16, cols: u16) {
@@ -431,12 +518,17 @@ impl Provider for TerminalProvider {
         // Normally the main loop's `tick()` runs first, but draining here
         // means a frame triggered by user input shows the response without
         // waiting one extra frame.
-        if let Some(shell) = self.shell.as_mut() {
-            let bytes = shell.drain_output();
-            if !bytes.is_empty() {
-                if let Some(em) = self.emulator.as_mut() {
-                    em.feed(&bytes);
-                }
+        let drained: Vec<u8> = self
+            .shell
+            .as_mut()
+            .map(|s| s.drain_output())
+            .unwrap_or_default();
+        if !drained.is_empty() {
+            // Detector first — Leave during dashboard render must be observed
+            // before the next `take_dashboard_request()` poll.
+            self.drive_alt_screen_detector(&drained);
+            if let Some(em) = self.emulator.as_mut() {
+                em.feed(&drained);
             }
         }
         match self.emulator.as_ref() {
@@ -591,6 +683,12 @@ pub fn register() {
                 "terminal emulator scrollback",
                 "scrollbackSize",
                 "50000",
+            ),
+            SettingDecl::checkbox(
+                "terminal",
+                "auto-launch dashboard for interactive programs",
+                "autoEnterDashboard",
+                true,
             ),
         ]),
     );
@@ -934,6 +1032,89 @@ mod tests {
         p.in_dashboard = true;
         p.leave_dashboard();
         assert!(!p.in_dashboard);
+    }
+
+    // ---- Auto-launch dashboard tests -----------------------------------
+
+    #[test]
+    fn auto_enter_dashboard_default_is_true() {
+        let p = TerminalProvider::new();
+        assert!(p.auto_enter_dashboard);
+    }
+
+    #[test]
+    fn on_setting_change_toggles_auto_enter_dashboard() {
+        let mut p = TerminalProvider::new();
+        p.on_setting_change("autoEnterDashboard", "false");
+        assert!(!p.auto_enter_dashboard);
+        p.on_setting_change("autoEnterDashboard", "true");
+        assert!(p.auto_enter_dashboard);
+    }
+
+    #[test]
+    fn detector_emits_enter_request_from_scrollback() {
+        let mut p = TerminalProvider::new();
+        // Not in dashboard, default-on: feeding alt-screen-enter bytes
+        // should produce an Enter request.
+        p.drive_alt_screen_detector(b"\x1b[?1049h");
+        assert_eq!(p.take_dashboard_request(), Some(DashboardRequest::Enter));
+        // Two-call semantics: second poll returns None.
+        assert_eq!(p.take_dashboard_request(), None);
+        // And the auto-entered flag is set so a future Leave will fire.
+        assert!(p.auto_entered_dashboard);
+    }
+
+    #[test]
+    fn detector_emits_leave_request_only_when_auto_entered() {
+        let mut p = TerminalProvider::new();
+        p.in_dashboard = true;
+        p.auto_entered_dashboard = true;
+        p.drive_alt_screen_detector(b"\x1b[?1049l");
+        assert_eq!(p.take_dashboard_request(), Some(DashboardRequest::Leave));
+
+        // Same bytes when auto_entered_dashboard is false (manual `d` entry):
+        // no request.
+        let mut q = TerminalProvider::new();
+        q.in_dashboard = true;
+        q.auto_entered_dashboard = false;
+        q.drive_alt_screen_detector(b"\x1b[?1049l");
+        assert_eq!(q.take_dashboard_request(), None);
+    }
+
+    #[test]
+    fn detector_silent_when_setting_disabled() {
+        let mut p = TerminalProvider::new();
+        p.on_setting_change("autoEnterDashboard", "false");
+        p.drive_alt_screen_detector(b"\x1b[?1049h");
+        assert_eq!(p.take_dashboard_request(), None);
+        assert!(!p.auto_entered_dashboard);
+    }
+
+    #[test]
+    fn detector_silent_for_enter_when_already_in_dashboard() {
+        // Nested alt-screen toggle inside a TUI shouldn't re-fire Enter.
+        let mut p = TerminalProvider::new();
+        p.in_dashboard = true;
+        p.drive_alt_screen_detector(b"\x1b[?1049h");
+        assert_eq!(p.take_dashboard_request(), None);
+    }
+
+    #[test]
+    fn leave_dashboard_clears_auto_entered_flag() {
+        let mut p = TerminalProvider::new();
+        p.auto_entered_dashboard = true;
+        p.in_dashboard = true;
+        p.leave_dashboard();
+        assert!(!p.auto_entered_dashboard);
+    }
+
+    #[test]
+    fn detector_resumes_across_chunk_boundaries_in_provider() {
+        let mut p = TerminalProvider::new();
+        p.drive_alt_screen_detector(b"\x1b[");
+        p.drive_alt_screen_detector(b"?10");
+        p.drive_alt_screen_detector(b"49h");
+        assert_eq!(p.take_dashboard_request(), Some(DashboardRequest::Enter));
     }
 
     #[cfg(unix)]

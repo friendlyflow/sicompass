@@ -675,6 +675,7 @@ pub fn encode_dashboard_key(key: &DashboardKey) -> Option<Vec<u8>> {
         DashboardKeysym::Enter => Some(b"\r".to_vec()),
         DashboardKeysym::Backspace => Some(b"\x7F".to_vec()),
         DashboardKeysym::Tab => Some(b"\t".to_vec()),
+        DashboardKeysym::Escape => Some(b"\x1b".to_vec()),
         DashboardKeysym::Up => Some(b"\x1b[A".to_vec()),
         DashboardKeysym::Down => Some(b"\x1b[B".to_vec()),
         DashboardKeysym::Right => Some(b"\x1b[C".to_vec()),
@@ -972,6 +973,14 @@ mod tests {
             }).unwrap(),
             b"\x1b[15~",
         );
+    }
+
+    #[test]
+    fn encode_escape_keysym_emits_esc_byte() {
+        let bytes = encode_dashboard_key(&DashboardKey {
+            keysym: DashboardKeysym::Escape, ctrl: false, shift: false, alt: false,
+        }).unwrap();
+        assert_eq!(bytes, b"\x1b");
     }
 
     #[test]
