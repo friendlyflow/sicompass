@@ -58,6 +58,7 @@ use sicompass_sdk::placeholders::{
 };
 use sicompass_sdk::platform;
 use sicompass_sdk::provider::{Provider, ProviderUndoDescriptor};
+use sicompass_sdk::timeline::{ImapOpKind, TimelineEntry};
 
 use idle::IdleController;
 
@@ -452,6 +453,10 @@ pub struct EmailClientProvider {
     // Drained by the app dispatcher after each handle_command/execute_command call.
     last_undo_descriptor: Option<ProviderUndoDescriptor>,
 
+    // Unified-timeline emission queue. Each undoable IMAP command pushes a
+    // typed `ImapOp` here, drained by the app via `take_timeline_entries`.
+    pending_timeline_entries: Vec<TimelineEntry>,
+
     // In-flight OAuth2 login handle (None when no login is in progress).
     active_login: Option<oauth2::PendingAuthorize>,
 
@@ -495,9 +500,18 @@ impl EmailClientProvider {
             token_refresh_result: Arc::new(Mutex::new(None)),
             error_message: None,
             last_undo_descriptor: None,
+            pending_timeline_entries: Vec::new(),
             active_login: None,
             config_path_override: None,
         }
+    }
+
+    fn push_imap_op(&mut self, op: ImapOpKind) {
+        self.pending_timeline_entries.push(TimelineEntry::ImapOp {
+            provider_idx: 0, // patched by app
+            id: sicompass_sdk::ffon::IdArray::new(),
+            op,
+        });
     }
 
     /// Override the settings.json path (used in tests to avoid touching real config).
@@ -601,6 +615,78 @@ impl EmailClientProvider {
 
     /// Execute an undo (`is_undo=true`) or redo (`is_undo=false`) of a
     /// previously recorded provider command descriptor.
+    /// Apply an `ImapOpKind` for undo (`is_undo = true`) or redo
+    /// (`is_undo = false`). Mirrors `apply_provider_command` but operates on
+    /// the typed enum instead of a JSON payload.
+    fn apply_imap_op(&mut self, op: &ImapOpKind, is_undo: bool, error: &mut String) {
+        let imap = match self.imap.as_mut() {
+            Some(i) => i,
+            None => {
+                *error = "not connected".to_owned();
+                return;
+            }
+        };
+        let label = if is_undo { "undo" } else { "redo" };
+        match op {
+            ImapOpKind::Trash { msg_id, src_folder, trash_folder }
+            | ImapOpKind::Archive { msg_id, src_folder, archive_folder: trash_folder }
+            | ImapOpKind::Move { msg_id, src_folder, dst_folder: trash_folder } => {
+                let (search_in, move_to): (&str, &str) = if is_undo {
+                    (trash_folder.as_str(), src_folder.as_str())
+                } else {
+                    (src_folder.as_str(), trash_folder.as_str())
+                };
+                match imap.fetch_message_by_message_id(search_in, msg_id) {
+                    Ok(Some(msg)) => {
+                        if let Err(e) = imap.move_message(search_in, msg.uid, move_to) {
+                            *error = format!("{label} imap-move failed: {e}");
+                        }
+                    }
+                    Ok(None) => {
+                        *error = format!("{label} imap-move: message no longer in {search_in}");
+                    }
+                    Err(e) => {
+                        *error = format!("{label} imap-move failed: {e}");
+                    }
+                }
+                self.envelope_cache = None;
+                self.message_cache.clear();
+            }
+            ImapOpKind::SetSeen { msg_uid, folder, prev, new } => {
+                let target = if is_undo { *prev } else { *new };
+                let (add, remove): (&[&str], &[&str]) = if target {
+                    (&["\\Seen"], &[])
+                } else {
+                    (&[], &["\\Seen"])
+                };
+                if let Err(e) = imap.set_flags(folder, *msg_uid, add, remove) {
+                    *error = format!("{label} set-seen failed: {e}");
+                } else {
+                    if let Some(h) = self.message_cache.iter_mut().find(|h| h.uid == *msg_uid) {
+                        h.seen = target;
+                    }
+                    self.envelope_cache = None;
+                }
+            }
+            ImapOpKind::SetFlagged { msg_uid, folder, prev, new } => {
+                let target = if is_undo { *prev } else { *new };
+                let (add, remove): (&[&str], &[&str]) = if target {
+                    (&["\\Flagged"], &[])
+                } else {
+                    (&[], &["\\Flagged"])
+                };
+                if let Err(e) = imap.set_flags(folder, *msg_uid, add, remove) {
+                    *error = format!("{label} set-flagged failed: {e}");
+                } else {
+                    if let Some(h) = self.message_cache.iter_mut().find(|h| h.uid == *msg_uid) {
+                        h.flagged = target;
+                    }
+                    self.envelope_cache = None;
+                }
+            }
+        }
+    }
+
     fn apply_provider_command(
         &mut self,
         descriptor: &ProviderUndoDescriptor,
@@ -2390,6 +2476,26 @@ impl Provider for EmailClientProvider {
         self.apply_provider_command(descriptor, false, error);
     }
 
+    fn take_timeline_entries(&mut self) -> Vec<TimelineEntry> {
+        std::mem::take(&mut self.pending_timeline_entries)
+    }
+
+    fn undo(&mut self, entry: &TimelineEntry, error: &mut String) {
+        let op = match entry {
+            TimelineEntry::ImapOp { op, .. } => op,
+            _ => return,
+        };
+        self.apply_imap_op(op, true, error);
+    }
+
+    fn redo(&mut self, entry: &TimelineEntry, error: &mut String) {
+        let op = match entry {
+            TimelineEntry::ImapOp { op, .. } => op,
+            _ => return,
+        };
+        self.apply_imap_op(op, false, error);
+    }
+
     fn fetch_subtree_parent_key(&mut self) -> Option<String> {
         // Collect as owned strings to avoid borrow conflicts with self.compose.
         let segs: Vec<String> = self.current_path
@@ -2554,12 +2660,17 @@ impl Provider for EmailClientProvider {
             self.last_undo_descriptor = Some(ProviderUndoDescriptor::new(
                 "move",
                 FfonElement::new_str(serde_json::json!({
-                    "msg_id": msg_id,
-                    "src": from,
-                    "dest": dest,
+                    "msg_id": msg_id.clone(),
+                    "src": from.clone(),
+                    "dest": dest.clone(),
                 }).to_string()),
                 "move email",
             ));
+            self.push_imap_op(ImapOpKind::Move {
+                msg_id: msg_id.clone(),
+                src_folder: from.to_owned(),
+                dst_folder: dest.to_owned(),
+            });
         }
         true
     }
@@ -2659,6 +2770,32 @@ impl Provider for EmailClientProvider {
                         FfonElement::new_str(payload),
                         cmd.replace('-', " "),
                     ));
+                    match cmd {
+                        "mark-read" => self.push_imap_op(ImapOpKind::SetSeen {
+                            msg_uid: uid,
+                            folder: real_folder.clone(),
+                            prev: prev_seen,
+                            new: true,
+                        }),
+                        "mark-unread" => self.push_imap_op(ImapOpKind::SetSeen {
+                            msg_uid: uid,
+                            folder: real_folder.clone(),
+                            prev: prev_seen,
+                            new: false,
+                        }),
+                        "star" => self.push_imap_op(ImapOpKind::SetFlagged {
+                            msg_uid: uid,
+                            folder: real_folder.clone(),
+                            prev: prev_flagged,
+                            new: true,
+                        }),
+                        _ /* unstar */ => self.push_imap_op(ImapOpKind::SetFlagged {
+                            msg_uid: uid,
+                            folder: real_folder.clone(),
+                            prev: prev_flagged,
+                            new: false,
+                        }),
+                    }
                 } else {
                     *error = format!("{cmd}: not viewing a message");
                 }
@@ -2689,12 +2826,17 @@ impl Provider for EmailClientProvider {
                                 self.last_undo_descriptor = Some(ProviderUndoDescriptor::new(
                                     "delete-trash",
                                     FfonElement::new_str(serde_json::json!({
-                                        "msg_id": msg_id,
-                                        "src": real_folder,
-                                        "trash": t,
+                                        "msg_id": msg_id.clone(),
+                                        "src": real_folder.clone(),
+                                        "trash": t.clone(),
                                     }).to_string()),
                                     "delete email",
                                 ));
+                                self.push_imap_op(ImapOpKind::Trash {
+                                    msg_id: msg_id.clone(),
+                                    src_folder: real_folder.clone(),
+                                    trash_folder: t.clone(),
+                                });
                             }
                             true
                         } else {
@@ -2746,12 +2888,17 @@ impl Provider for EmailClientProvider {
                                 self.last_undo_descriptor = Some(ProviderUndoDescriptor::new(
                                     "archive",
                                     FfonElement::new_str(serde_json::json!({
-                                        "msg_id": msg_id,
-                                        "src": real_folder,
-                                        "archive": dest,
+                                        "msg_id": msg_id.clone(),
+                                        "src": real_folder.clone(),
+                                        "archive": dest.clone(),
                                     }).to_string()),
                                     "archive email",
                                 ));
+                                self.push_imap_op(ImapOpKind::Archive {
+                                    msg_id: msg_id.clone(),
+                                    src_folder: real_folder.clone(),
+                                    archive_folder: dest.clone(),
+                                });
                             }
                         }
                     }
@@ -5516,6 +5663,100 @@ mod tests {
         // No fetch yet — message_cache is empty so results should be empty.
         let results = p.collect_deep_search_items().unwrap_or_default();
         assert!(results.is_empty(), "search must return nothing before any message is cached");
+    }
+
+    // ---- ImapOp emission tests (step 8) ------------------------------------
+
+    #[test]
+    fn mark_read_emits_imapop_set_seen() {
+        let msgs = vec![make_header_unread(1, "alice@example.com", "Hello")];
+        let msg = make_message(1);
+        let imap = MockImap::new().with_messages(msgs).with_detail(msg);
+        let mut p = EmailClientProvider::new()
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
+        p.push_path("INBOX");
+        p.fetch();
+        p.push_path("[unread] Hello — alice@example.com");
+        p.fetch();
+        // Clear any auto-emit from fetch
+        let _ = p.take_timeline_entries();
+        let mut err = String::new();
+        p.handle_command("mark-read", "", 0, &mut err);
+        assert!(err.is_empty(), "{err}");
+        let entries = p.take_timeline_entries();
+        assert_eq!(entries.len(), 1);
+        match &entries[0] {
+            TimelineEntry::ImapOp {
+                op: ImapOpKind::SetSeen { msg_uid, folder, new, .. },
+                ..
+            } => {
+                assert_eq!(*msg_uid, 1);
+                assert_eq!(folder, "INBOX");
+                assert!(*new);
+            }
+            other => panic!("expected ImapOp::SetSeen, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn star_emits_imapop_set_flagged() {
+        let msgs = vec![make_header(1, "alice@example.com", "Hello")];
+        let msg = make_message(1);
+        let imap = MockImap::new().with_messages(msgs).with_detail(msg);
+        let mut p = EmailClientProvider::new()
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
+        p.push_path("INBOX");
+        p.fetch();
+        p.push_path("[read] Hello — alice@example.com");
+        p.fetch();
+        let _ = p.take_timeline_entries();
+        let mut err = String::new();
+        p.handle_command("star", "", 0, &mut err);
+        let entries = p.take_timeline_entries();
+        assert_eq!(entries.len(), 1);
+        assert!(matches!(
+            &entries[0],
+            TimelineEntry::ImapOp {
+                op: ImapOpKind::SetFlagged { msg_uid: 1, new: true, .. },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn undo_setseen_imapop_reverts_flag_on_imap() {
+        // Start with a read message so `mark-unread` flips seen=true→false
+        // with a clean `prev_seen=true`. (`make_header_unread` would let the
+        // fetch's auto-mark-read mutate prev_seen behind our backs.)
+        let msgs = vec![make_header(1, "alice@example.com", "Hello")];
+        let msg = make_message(1);
+        let imap = MockImap::new().with_messages(msgs).with_detail(msg);
+        let mut p = EmailClientProvider::new()
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
+        p.push_path("INBOX");
+        p.fetch();
+        p.push_path("[read] Hello — alice@example.com");
+        p.fetch();
+        let _ = p.take_timeline_entries();
+        let mut err = String::new();
+        p.handle_command("mark-unread", "", 0, &mut err);
+        assert!(err.is_empty(), "{err}");
+        let entries = p.take_timeline_entries();
+        // mark-unread issued -FLAGS \Seen. Now undo: should issue +FLAGS \Seen.
+        let mock = p.imap.as_mut().unwrap().as_mut() as *mut dyn ImapBackend as *mut MockImap;
+        unsafe { (*mock).stored_flags.clear(); }
+        p.undo(&entries[0], &mut err);
+        assert!(err.is_empty(), "{err}");
+        let stored = unsafe { &(*mock).stored_flags };
+        assert!(
+            stored.iter().any(|(_, uid, flag)|
+                *uid == 1 && flag.contains("\\Seen") && flag.starts_with("+FLAGS")
+            ),
+            "undo must re-add \\Seen; got: {:?}", stored
+        );
     }
 }
 

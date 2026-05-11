@@ -7,7 +7,9 @@ use crate::render;
 use crate::view;
 use sicompass_sdk::ffon::{FfonElement, IdArray};
 use sicompass_sdk::provider::Provider;
+use sicompass_sdk::timeline::TimelineEntry;
 use std::fmt;
+use std::time::Instant;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -242,6 +244,44 @@ pub struct UndoEntry {
 }
 
 // ---------------------------------------------------------------------------
+// Timeline (unified undo/redo, per-tab)
+// ---------------------------------------------------------------------------
+
+/// Per-tab undo/redo timeline. Replaces the app-global `undo_history` +
+/// `undo_position` pair once migration is complete. During migration both
+/// coexist (the legacy stack runs the show until the gating flag flips).
+///
+/// Coalescing rules live in `state::record_entry`:
+/// - `TimelineEntry::TextChunk` entries on the same `id` within
+///   `TEXT_CHUNK_IDLE_MS` collapse into the tail entry.
+/// - `TimelineEntry::Navigate` entries collapse with the immediately
+///   preceding `Navigate` so a burst of arrow keys is one undo step.
+#[derive(Debug, Default, Clone)]
+pub struct Timeline {
+    pub entries: Vec<TimelineEntry>,
+    /// 0 = at HEAD. Walking back increments; walking forward decrements.
+    pub position: usize,
+    pub last_text_edit_at: Option<Instant>,
+    pub last_text_id: Option<IdArray>,
+    pub next_chunk_seq: u32,
+    /// Set by `walk_back` / `walk_forward` to prevent the next `record_entry`
+    /// from coalescing the next user action with the entry that ended up at
+    /// the new HEAD. Without this flag, undoing and then pressing another
+    /// arrow key would silently extend the pre-undo Navigate entry instead
+    /// of recording a new branch.
+    pub coalesce_break: bool,
+}
+
+impl Timeline {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+pub const TIMELINE_CAPACITY: usize = 1024;
+pub const TEXT_CHUNK_IDLE_MS: u64 = 500;
+
+// ---------------------------------------------------------------------------
 // PlaceholderCancel
 // ---------------------------------------------------------------------------
 
@@ -443,6 +483,18 @@ pub struct AppRenderer {
     pub tabs: Vec<TabSnapshot>,
     /// Index into `tabs` of the currently active tab.
     pub active_tab: usize,
+    /// Per-tab undo/redo timeline, parallel to `tabs`. `tab_timelines.len()`
+    /// is always equal to `tabs.len()`. `tab_timelines[active_tab]` is the
+    /// timeline that ctrl-Z / ctrl-Shift-Z operate on.
+    pub tab_timelines: Vec<Timeline>,
+
+    // ---- Undo/redo migration gate ------------------------------------------
+    /// While migrating from the legacy `undo_history` to the unified
+    /// `Timeline`, both stacks coexist. When `false` (default), the legacy
+    /// `update_history` / `handle_history_action` runs the show. When `true`,
+    /// `record_entry` / `walk_back` / `walk_forward` take over. Flipped in
+    /// step 11 of the migration plan.
+    pub use_unified_timeline: bool,
 }
 
 /// One tab's saved state.
@@ -549,7 +601,20 @@ impl AppRenderer {
                 provider_path: String::new(),
             }],
             active_tab: 0,
+            tab_timelines: vec![Timeline::new()],
+            use_unified_timeline: false,
         }
+    }
+
+    /// Borrow the active tab's timeline. Panics if `active_tab` is out of
+    /// bounds — but the constructor and tab handlers maintain the invariant
+    /// that `tab_timelines.len() == tabs.len() > 0`.
+    pub fn active_timeline(&self) -> &Timeline {
+        &self.tab_timelines[self.active_tab]
+    }
+
+    pub fn active_timeline_mut(&mut self) -> &mut Timeline {
+        &mut self.tab_timelines[self.active_tab]
     }
 
     /// Switch to the tab at `target`. Saves the current navigation + active

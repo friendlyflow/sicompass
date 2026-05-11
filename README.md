@@ -22,16 +22,17 @@ Built for users who prefer or require keyboard-driven interaction, Sicompass off
 - **Cross-Platform** — Shipped and tested on Ubuntu today; paths, shells, and PTY plumbing route through platform helpers (XDG / `~/Library` / `%APPDATA%`, `bash`/`zsh`/`fish`/`pwsh`/`cmd.exe`, `forkpty`/ConPTY), with packaged macOS and Windows releases planned
 - **High-Performance Rendering** — Vulkan-powered graphics with FreeType2/HarfBuzz text shaping
 - **Extensible Architecture** — Provider-based plugin system with a built-in plugin store for hot enable/disable
+- **Unified Undo/Redo** — One ctrl-Z model covering navigation, typed text (coalesced per word burst), file create/rename/delete (with content snapshot for delete restore), email IMAP ops, Matrix room ops, and settings changes — per-tab history that walks back through navigation steps so undo retraces the path the user actually took
 - **Simpler UI Development** — Functionality over design means less complexity and faster development with minimal styling, design doen't need to be programmed as it's already worked out
 
 ## Built-in Providers
 
 Sicompass comes with several providers out of the box, each turning a different data source into the same keyboard-navigable tree:
 
-- **File Browser** — Navigate your filesystem as a navigable tree with inline rename, copy, paste, and delete
+- **File Browser** — Navigate your filesystem as a navigable tree with inline rename, copy, paste, and delete (delete-undo restores from a content snapshot when the OS trash is empty)
 - **Editor** — Browse the filesystem and open files as language-aware FFON trees, with inline line editing and create/delete/rename
-- **Email** — IMAP/SMTP client with Google OAuth, Cc/Bcc, attachments, drafts, flag/move/delete, undo/redo, threaded history, and FFON-bodied messages
-- **Chat** — Matrix client with public and private rooms, invites, member management, encrypted messages, unread badges, and a background sync thread
+- **Email** — IMAP/SMTP client with Google OAuth, Cc/Bcc, attachments, drafts, flag/move/delete (typed `ImapOp` undo by Message-ID so the operation survives folder moves), threaded history, and FFON-bodied messages
+- **Chat** — Matrix client with public and private rooms, invites, member management (leave/kick/ban are undoable), encrypted messages, unread badges, and a background sync thread
 - **Web Browser** — Browse the web with HTML-to-FFON conversion; fill and submit forms via the Chrome DevTools Protocol; cookie-consent banners are auto-accepted
 - **Terminal** — Interactive shell backed by a vte PTY with a synthesized prompt and the cursor pinned to an input slot; auto-switches to a fullscreen interactive dashboard the moment a child program enters the alt-screen (vim, htop, less, …) and routes every key straight to the TUI; cross-platform shell selection — `$SHELL` on Unix, `%ComSpec%` on Windows — with platform-appropriate prompts
 - **Sales Demo** — Interactive HVAC equipment configurator showcasing hierarchical data navigation with inline editing and diagram view

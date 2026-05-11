@@ -48,7 +48,9 @@ pub fn handle_up(r: &mut AppRenderer) {
             r.needs_redraw = true;
         }
         _ => {
+            let from_id = r.current_id.clone();
             crate::state::update_state(r, Task::ArrowUp, History::None);
+            record_navigation_if_moved(r, from_id, sicompass_sdk::timeline::NavKind::ArrowUp);
             r.needs_redraw = true;
         }
     }
@@ -96,10 +98,71 @@ pub fn handle_down(r: &mut AppRenderer) {
             // noop in insert modes
         }
         _ => {
+            let from_id = r.current_id.clone();
             crate::state::update_state(r, Task::ArrowDown, History::None);
+            record_navigation_if_moved(r, from_id, sicompass_sdk::timeline::NavKind::ArrowDown);
             r.needs_redraw = true;
         }
     }
+}
+
+/// Push an `FsOp` entry onto the active tab's timeline. Dual-write helper
+/// used during the undo/redo refactor — emits TimelineEntry alongside the
+/// legacy Task::FsCreate / Task::FsRename / Task::FsPaste stack.
+fn record_fs_op(
+    r: &mut AppRenderer,
+    id: sicompass_sdk::ffon::IdArray,
+    op: sicompass_sdk::timeline::FsOpKind,
+    before: Option<FfonElement>,
+    after: Option<FfonElement>,
+) {
+    let provider_idx = id.get(0).unwrap_or(0);
+    let entry = sicompass_sdk::timeline::TimelineEntry::FsOp {
+        provider_idx,
+        id,
+        op,
+        before,
+        after,
+        side_effect: sicompass_sdk::timeline::FsSideEffect::None,
+    };
+    crate::state::record_entry(r, entry);
+}
+
+/// Push a `Navigate` entry onto the active tab's timeline when current_id
+/// actually moved. Captures the active provider's path when the provider
+/// supports refresh_on_navigate (filebrowser, email).
+///
+/// Dual-write helper used during the undo/redo refactor — emits TimelineEntry
+/// alongside the legacy Task::Arrow* / Task::FsNavigate stack.
+fn record_navigation_if_moved(
+    r: &mut AppRenderer,
+    from_id: sicompass_sdk::ffon::IdArray,
+    kind: sicompass_sdk::timeline::NavKind,
+) {
+    if from_id == r.current_id {
+        return;
+    }
+    let provider_idx = r.current_id.get(0).unwrap_or(0);
+    let has_path = r
+        .providers
+        .get(provider_idx)
+        .map(|p| p.refresh_on_navigate())
+        .unwrap_or(false);
+    let (from_path, to_path) = if has_path {
+        let path = crate::provider::current_path(r).to_owned();
+        (Some(path.clone()), Some(path))
+    } else {
+        (None, None)
+    };
+    let entry = sicompass_sdk::timeline::TimelineEntry::Navigate {
+        provider_idx,
+        from_id,
+        to_id: r.current_id.clone(),
+        from_path,
+        to_path,
+        kind,
+    };
+    crate::state::record_entry(r, entry);
 }
 
 /// Recursively search `arr` for the first element whose key/text contains
@@ -288,7 +351,7 @@ pub fn handle_right(r: &mut AppRenderer) {
     r.current_id = item_id;
     if navigate_right_raw(r) {
         if is_fb {
-            if let Some(pb) = path_before {
+            if let Some(pb) = path_before.clone() {
                 let path_after = crate::provider::current_path(r).to_owned();
                 if path_after != pb {
                     // id stored = pre-nav id (so undo knows where cursor was)
@@ -304,6 +367,21 @@ pub fn handle_right(r: &mut AppRenderer) {
         list::create_list_current_layer(r);
         r.sync_current_id_from_list();
         r.caret.reset(sdl_ticks());
+        // Dual-write the new TimelineEntry::Navigate alongside the legacy stack.
+        let provider_idx = r.current_id.get(0).unwrap_or(0);
+        let entry = sicompass_sdk::timeline::TimelineEntry::Navigate {
+            provider_idx,
+            from_id: pre_nav_id,
+            to_id: r.current_id.clone(),
+            from_path: path_before.clone(),
+            to_path: if path_before.is_some() {
+                Some(crate::provider::current_path(r).to_owned())
+            } else {
+                None
+            },
+            kind: sicompass_sdk::timeline::NavKind::ArrowRight,
+        };
+        crate::state::record_entry(r, entry);
         r.needs_redraw = true;
     }
 }
@@ -486,7 +564,7 @@ pub fn handle_left(r: &mut AppRenderer) {
     let pre_nav_id = r.current_id.clone();
     if navigate_left_raw(r) {
         if is_fb {
-            if let Some(pb) = path_before {
+            if let Some(pb) = path_before.clone() {
                 let path_after = crate::provider::current_path(r).to_owned();
                 if path_after != pb {
                     crate::state::update_history(
@@ -502,6 +580,21 @@ pub fn handle_left(r: &mut AppRenderer) {
         list::create_list_current_layer(r);
         r.sync_current_id_from_list();
         r.caret.reset(sdl_ticks());
+        // Dual-write the new TimelineEntry::Navigate alongside the legacy stack.
+        let provider_idx = r.current_id.get(0).unwrap_or(0);
+        let entry = sicompass_sdk::timeline::TimelineEntry::Navigate {
+            provider_idx,
+            from_id: pre_nav_id,
+            to_id: r.current_id.clone(),
+            from_path: path_before.clone(),
+            to_path: if path_before.is_some() {
+                Some(crate::provider::current_path(r).to_owned())
+            } else {
+                None
+            },
+            kind: sicompass_sdk::timeline::NavKind::ArrowLeft,
+        };
+        crate::state::record_entry(r, entry);
         r.needs_redraw = true;
     }
 }
@@ -1743,8 +1836,9 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
         };
         crate::state::update_history(
             r, Task::FsCreate, &undo_id,
-            None, Some(undo_elem), History::None,
+            None, Some(undo_elem.clone()), History::None,
         );
+        record_fs_op(r, undo_id.clone(), sicompass_sdk::timeline::FsOpKind::Create, None, Some(undo_elem));
 
         r.prefixed_insert_mode = false;
         r.placeholder_cancel = None;
@@ -1783,7 +1877,9 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
             if r.undo_history.last().map(|e| matches!(e.task, Task::Insert | Task::InsertInsert | Task::Append | Task::AppendAppend)).unwrap_or(false) {
                 r.undo_history.pop();
             }
-            crate::state::update_history(r, Task::FsCreate, &undo_id, None, Some(FfonElement::new_obj(&new_content)), History::None);
+            let dir_elem = FfonElement::new_obj(&new_content);
+            crate::state::update_history(r, Task::FsCreate, &undo_id, None, Some(dir_elem.clone()), History::None);
+            record_fs_op(r, undo_id.clone(), sicompass_sdk::timeline::FsOpKind::Create, None, Some(dir_elem));
             r.placeholder_cancel = None;
             crate::provider::refresh_current_directory(r);
             list::create_list_current_layer(r);
@@ -1819,7 +1915,9 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
             if r.undo_history.last().map(|e| matches!(e.task, Task::Insert | Task::InsertInsert | Task::Append | Task::AppendAppend)).unwrap_or(false) {
                 r.undo_history.pop();
             }
-            crate::state::update_history(r, Task::FsCreate, &undo_id, None, Some(FfonElement::new_str(new_content.clone())), History::None);
+            let file_elem = FfonElement::new_str(new_content.clone());
+            crate::state::update_history(r, Task::FsCreate, &undo_id, None, Some(file_elem.clone()), History::None);
+            record_fs_op(r, undo_id.clone(), sicompass_sdk::timeline::FsOpKind::Create, None, Some(file_elem));
             crate::provider::refresh_current_directory(r);
             list::create_list_current_layer(r);
             {
@@ -1954,7 +2052,14 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
             .and_then(|arr| arr.get(new_idx))
             .cloned();
         if let (Some(prev), Some(new)) = (prev_elem_for_rename.clone(), new_elem_for_rename) {
-            crate::state::update_history(r, Task::FsRename, &rename_id, Some(prev), Some(new), History::None);
+            crate::state::update_history(r, Task::FsRename, &rename_id, Some(prev.clone()), Some(new.clone()), History::None);
+            record_fs_op(
+                r,
+                rename_id.clone(),
+                sicompass_sdk::timeline::FsOpKind::Rename,
+                Some(prev),
+                Some(new),
+            );
         }
     }
 
@@ -1988,7 +2093,14 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                 .and_then(|arr| arr.get(new_idx))
                 .cloned();
             if let (Some(prev), Some(new)) = (prev_elem_for_rename, new_elem_for_undo) {
-                crate::state::update_history(r, Task::FsRename, &rename_id, Some(prev), Some(new), History::None);
+                crate::state::update_history(r, Task::FsRename, &rename_id, Some(prev.clone()), Some(new.clone()), History::None);
+                record_fs_op(
+                    r,
+                    rename_id.clone(),
+                    sicompass_sdk::timeline::FsOpKind::Rename,
+                    Some(prev),
+                    Some(new),
+                );
             }
         }
     }
@@ -2701,7 +2813,14 @@ pub fn handle_file_paste(r: &mut AppRenderer) {
                 let mut record_id = paste_id.clone();
                 record_id.set_last(i);
                 crate::state::update_history(r, Task::FsPaste, &record_id,
-                    Some(src_path_elem), Some(dest_elem), History::None);
+                    Some(src_path_elem.clone()), Some(dest_elem.clone()), History::None);
+                record_fs_op(
+                    r,
+                    record_id.clone(),
+                    sicompass_sdk::timeline::FsOpKind::Paste,
+                    Some(src_path_elem),
+                    Some(dest_elem),
+                );
                 break;
             }
         }
@@ -4481,6 +4600,10 @@ pub fn handle_tab_new(r: &mut AppRenderer) {
     r.tabs[r.active_tab] = snap.clone();
     let insert_at = r.active_tab + 1;
     r.tabs.insert(insert_at, snap);
+    // Keep `tab_timelines` parallel to `tabs`. New tabs start with an empty
+    // timeline — duplicating navigation does not duplicate history.
+    r.tab_timelines
+        .insert(insert_at, crate::app_state::Timeline::new());
     r.active_tab = insert_at;
     after_tab_change(r);
 }
@@ -4489,6 +4612,7 @@ pub fn handle_tab_new(r: &mut AppRenderer) {
 pub fn handle_tab_close(r: &mut AppRenderer) {
     if r.tabs.len() <= 1 { return; }
     r.tabs.remove(r.active_tab);
+    r.tab_timelines.remove(r.active_tab);
     if r.active_tab > 0 { r.active_tab -= 1; }
     r.load_active_tab();
     after_tab_change(r);

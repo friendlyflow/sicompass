@@ -1,10 +1,14 @@
 //! FFON mutation — mirrors `update.c` (`updateState`, `updateIds`, `updateFfon`,
 //! `updateHistory`, `handleHistoryAction`).
 
-use crate::app_state::{AppRenderer, Coordinate, History, Task, UndoEntry};
+use crate::app_state::{
+    AppRenderer, Coordinate, History, Task, UndoEntry, TEXT_CHUNK_IDLE_MS, TIMELINE_CAPACITY,
+};
 use crate::list;
 use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray, next_layer_exists};
 use sicompass_sdk::provider::ProviderUndoDescriptor;
+use sicompass_sdk::timeline::{StructuralOp, StructuralPayload, TimelineEntry};
+use std::time::Instant;
 
 const UNDO_HISTORY_SIZE: usize = 100;
 
@@ -54,7 +58,67 @@ pub fn update_state(r: &mut AppRenderer, task: Task, history: History) {
     } else {
         r.current_id.clone()
     };
+
+    // Dual-write a TimelineEntry for Task::Input / Append / Insert / Delete /
+    // Cut / Paste. The unified `record_entry` runs alongside the legacy
+    // `update_history` stack until the gating flag flips in step 11.
+    let timeline_payload = if history == History::None {
+        match task {
+            Task::Input => match (&prev_element, &new_element) {
+                (Some(before), Some(after)) => Some(TimelineEntry::TextChunk {
+                    id: record_id.clone(),
+                    before: before.clone(),
+                    after: after.clone(),
+                    chunk_seq: 0,
+                }),
+                _ => None,
+            },
+            Task::Append | Task::AppendAppend => new_element.as_ref().map(|e| {
+                TimelineEntry::Structural {
+                    id: record_id.clone(),
+                    op: StructuralOp::Append,
+                    payload: StructuralPayload::Inserted(e.clone()),
+                }
+            }),
+            Task::Insert | Task::InsertInsert => new_element.as_ref().map(|e| {
+                TimelineEntry::Structural {
+                    id: record_id.clone(),
+                    op: StructuralOp::Insert,
+                    payload: StructuralPayload::Inserted(e.clone()),
+                }
+            }),
+            Task::Delete => prev_element.as_ref().map(|e| TimelineEntry::Structural {
+                id: record_id.clone(),
+                op: StructuralOp::Delete,
+                payload: StructuralPayload::Removed(e.clone()),
+            }),
+            Task::Cut => prev_element.as_ref().map(|e| TimelineEntry::Structural {
+                id: record_id.clone(),
+                op: StructuralOp::Cut,
+                payload: StructuralPayload::Removed(e.clone()),
+            }),
+            Task::Paste => match (&prev_element, &new_element) {
+                (Some(before), Some(after)) => Some(TimelineEntry::Structural {
+                    id: record_id.clone(),
+                    op: StructuralOp::Paste,
+                    payload: StructuralPayload::Pasted {
+                        before: before.clone(),
+                        after: after.clone(),
+                    },
+                }),
+                _ => None,
+            },
+            _ => None,
+        }
+    } else {
+        None
+    };
+
     update_history(r, task, &record_id, prev_element, new_element, history);
+
+    if let Some(entry) = timeline_payload {
+        record_entry(r, entry);
+    }
 
     list::create_list_current_layer(r);
 }
@@ -664,6 +728,481 @@ pub fn handle_history_action(r: &mut AppRenderer, history: History) {
     list::create_list_current_layer(r);
     r.list_index = r.current_id.last().unwrap_or(0);
     r.scroll_offset = r.list_index as i32;
+}
+
+// ---------------------------------------------------------------------------
+// Unified Timeline dispatcher (new model)
+// ---------------------------------------------------------------------------
+
+/// Push a `TimelineEntry` onto the active tab's timeline, applying coalescing
+/// rules for `TextChunk` (≤500 ms idle on same id) and `Navigate` (consecutive
+/// arrow keys merge into one entry).
+///
+/// Replaces `update_history` once the migration completes. During migration
+/// both stacks coexist; this function is dormant until `use_unified_timeline`
+/// flips to `true`.
+pub fn record_entry(r: &mut AppRenderer, entry: TimelineEntry) {
+    let tl = r.active_timeline_mut();
+
+    // Truncate the redo branch on a new action. The truncation itself implies
+    // a branch off the timeline, so disable coalescing for this push.
+    let mut just_branched = false;
+    if tl.position > 0 {
+        let new_count = tl.entries.len().saturating_sub(tl.position);
+        tl.entries.truncate(new_count);
+        tl.position = 0;
+        just_branched = true;
+    }
+    // A walk_back / walk_forward without truncation (position landed on an
+    // existing entry) sets the same break.
+    let break_coalesce = just_branched || std::mem::take(&mut tl.coalesce_break);
+
+    // Navigate coalescing: a burst of arrow keys is one entry.
+    if !break_coalesce {
+        if let TimelineEntry::Navigate {
+            to_id, to_path, kind, ..
+        } = &entry
+        {
+            if let Some(TimelineEntry::Navigate {
+                to_id: tail_to_id,
+                to_path: tail_to_path,
+                kind: tail_kind,
+                ..
+            }) = tl.entries.last_mut()
+            {
+                *tail_to_id = to_id.clone();
+                *tail_to_path = to_path.clone();
+                *tail_kind = *kind;
+                // Any navigation breaks an in-flight text-chunk run.
+                tl.last_text_id = None;
+                tl.last_text_edit_at = None;
+                return;
+            }
+        }
+    }
+
+    // TextChunk coalescing: same id within TEXT_CHUNK_IDLE_MS extends the tail.
+    if !break_coalesce {
+        if let TimelineEntry::TextChunk { id, after, .. } = &entry {
+            let now = Instant::now();
+            let coalesce = tl.last_text_id.as_ref() == Some(id)
+                && tl
+                    .last_text_edit_at
+                    .map(|t| (now - t).as_millis() as u64 <= TEXT_CHUNK_IDLE_MS)
+                    .unwrap_or(false);
+            if coalesce {
+                if let Some(TimelineEntry::TextChunk {
+                    after: tail_after, ..
+                }) = tl.entries.last_mut()
+                {
+                    *tail_after = after.clone();
+                    tl.last_text_edit_at = Some(now);
+                    return;
+                }
+            }
+        }
+    }
+
+    // Update text-tracking based on the new entry kind.
+    match &entry {
+        TimelineEntry::TextChunk { id, .. } => {
+            tl.last_text_id = Some(id.clone());
+            tl.last_text_edit_at = Some(Instant::now());
+        }
+        _ => {
+            tl.last_text_id = None;
+            tl.last_text_edit_at = None;
+        }
+    }
+
+    // Cap the timeline by dropping the oldest entry.
+    if tl.entries.len() >= TIMELINE_CAPACITY {
+        tl.entries.remove(0);
+    }
+
+    // Assign a chunk_seq for TextChunk entries.
+    let entry = match entry {
+        TimelineEntry::TextChunk {
+            id, before, after, ..
+        } => {
+            let seq = tl.next_chunk_seq;
+            tl.next_chunk_seq = tl.next_chunk_seq.wrapping_add(1);
+            TimelineEntry::TextChunk {
+                id,
+                before,
+                after,
+                chunk_seq: seq,
+            }
+        }
+        other => other,
+    };
+
+    tl.entries.push(entry);
+    tl.position = 0;
+}
+
+/// Apply one undo step to the active tab's timeline.
+pub fn walk_back(r: &mut AppRenderer) {
+    if r.active_timeline().entries.is_empty() {
+        r.error_message = "No undo history".to_owned();
+        return;
+    }
+    if r.active_timeline().position >= r.active_timeline().entries.len() {
+        r.error_message = "Nothing to undo".to_owned();
+        return;
+    }
+
+    crate::handlers::handle_escape(r);
+
+    let entry = {
+        let tl = r.active_timeline_mut();
+        tl.position += 1;
+        tl.coalesce_break = true;
+        let idx = tl.entries.len() - tl.position;
+        tl.entries[idx].clone()
+    };
+
+    apply_undo(r, &entry);
+
+    list::create_list_current_layer(r);
+    r.list_index = r.current_id.last().unwrap_or(0);
+    r.scroll_offset = r.list_index as i32;
+}
+
+/// Apply one redo step to the active tab's timeline.
+pub fn walk_forward(r: &mut AppRenderer) {
+    if r.active_timeline().entries.is_empty() {
+        r.error_message = "No undo history".to_owned();
+        return;
+    }
+    if r.active_timeline().position == 0 {
+        r.error_message = "Nothing to redo".to_owned();
+        return;
+    }
+
+    crate::handlers::handle_escape(r);
+
+    let entry = {
+        let tl = r.active_timeline_mut();
+        let idx = tl.entries.len() - tl.position;
+        tl.position -= 1;
+        tl.coalesce_break = true;
+        tl.entries[idx].clone()
+    };
+
+    apply_redo(r, &entry);
+
+    list::create_list_current_layer(r);
+    r.list_index = r.current_id.last().unwrap_or(0);
+    r.scroll_offset = r.list_index as i32;
+}
+
+fn apply_undo(r: &mut AppRenderer, entry: &TimelineEntry) {
+    match entry {
+        TimelineEntry::Navigate {
+            from_id, from_path, ..
+        } => {
+            r.current_id = from_id.clone();
+            if let Some(path) = from_path {
+                crate::provider::set_provider_path(r, path);
+                crate::provider::refresh_current_directory(r);
+            }
+        }
+        TimelineEntry::TextChunk { id, before, .. } => {
+            replace_element_at_id(r, id, before.clone());
+            r.current_id = id.clone();
+            sync_compose_body_if_body_element(r, id);
+        }
+        TimelineEntry::Structural { id, op, payload } => match (op, payload) {
+            (StructuralOp::Append | StructuralOp::Insert, _) => {
+                r.current_id = id.clone();
+                crate::handlers::handle_delete(r, History::Undo);
+                upgrade_body_bare_placeholder(r, id);
+                sync_compose_body_if_body_element(r, id);
+                if r.current_id.last().unwrap_or(0) > 0 {
+                    let cur = r.current_id.last().unwrap_or(1);
+                    r.current_id.set_last(cur - 1);
+                }
+            }
+            (
+                StructuralOp::Delete | StructuralOp::Cut,
+                StructuralPayload::Removed(elem),
+            ) => {
+                clear_sole_i_placeholder_if_body_element(r, id);
+                insert_element_at_id(r, id, elem.clone());
+                r.current_id = id.clone();
+                sync_compose_body_if_body_element(r, id);
+            }
+            (StructuralOp::Paste, StructuralPayload::Pasted { before, .. }) => {
+                replace_element_at_id(r, id, before.clone());
+                r.current_id = id.clone();
+            }
+            _ => {}
+        },
+        TimelineEntry::FsOp {
+            id,
+            op,
+            before,
+            after,
+            ..
+        } => apply_fs_op_undo(r, id, *op, before.as_ref(), after.as_ref()),
+        TimelineEntry::ImapOp { provider_idx, .. }
+        | TimelineEntry::ChatOp { provider_idx, .. }
+        | TimelineEntry::ProviderOp { provider_idx, .. } => {
+            dispatch_provider_undo(r, *provider_idx, entry);
+        }
+    }
+}
+
+fn apply_redo(r: &mut AppRenderer, entry: &TimelineEntry) {
+    match entry {
+        TimelineEntry::Navigate {
+            to_id, to_path, ..
+        } => {
+            r.current_id = to_id.clone();
+            if let Some(path) = to_path {
+                crate::provider::set_provider_path(r, path);
+                crate::provider::refresh_current_directory(r);
+            }
+        }
+        TimelineEntry::TextChunk { id, after, .. } => {
+            replace_element_at_id(r, id, after.clone());
+            r.current_id = id.clone();
+            sync_compose_body_if_body_element(r, id);
+        }
+        TimelineEntry::Structural { id, op, payload } => match (op, payload) {
+            (
+                StructuralOp::Append | StructuralOp::Insert,
+                StructuralPayload::Inserted(elem),
+            ) => {
+                clear_sole_i_placeholder_if_body_element(r, id);
+                insert_element_at_id(r, id, elem.clone());
+                r.current_id = id.clone();
+                sync_compose_body_if_body_element(r, id);
+            }
+            (StructuralOp::Delete | StructuralOp::Cut, _) => {
+                r.current_id = id.clone();
+                crate::handlers::handle_delete(r, History::Redo);
+                upgrade_body_bare_placeholder(r, id);
+                sync_compose_body_if_body_element(r, id);
+                let count = get_parent_len(&r.ffon, id);
+                if let Some(idx) = r.current_id.last() {
+                    if idx >= count && count > 0 {
+                        r.current_id.set_last(count - 1);
+                    }
+                }
+            }
+            (StructuralOp::Paste, StructuralPayload::Pasted { after, .. }) => {
+                replace_element_at_id(r, id, after.clone());
+                r.current_id = id.clone();
+            }
+            _ => {}
+        },
+        TimelineEntry::FsOp {
+            id,
+            op,
+            before,
+            after,
+            ..
+        } => apply_fs_op_redo(r, id, *op, before.as_ref(), after.as_ref()),
+        TimelineEntry::ImapOp { provider_idx, .. }
+        | TimelineEntry::ChatOp { provider_idx, .. }
+        | TimelineEntry::ProviderOp { provider_idx, .. } => {
+            dispatch_provider_redo(r, *provider_idx, entry);
+        }
+    }
+}
+
+fn apply_fs_op_undo(
+    r: &mut AppRenderer,
+    id: &IdArray,
+    op: sicompass_sdk::timeline::FsOpKind,
+    before: Option<&FfonElement>,
+    after: Option<&FfonElement>,
+) {
+    use sicompass_sdk::timeline::FsOpKind;
+    match op {
+        FsOpKind::Create => {
+            if let Some(elem) = after {
+                let name = elem_key_str(elem);
+                let is_dir = matches!(elem, FfonElement::Obj(_));
+                if is_dir {
+                    let cur_path = crate::provider::current_path(r).to_owned();
+                    let tail = format!("/{}", name);
+                    if cur_path.ends_with(&tail) || cur_path == name {
+                        crate::provider::pop_path(r);
+                    }
+                }
+                while r.current_id.depth() > id.depth() && r.current_id.depth() > 1 {
+                    crate::provider::pop_path(r);
+                    r.current_id.pop();
+                }
+                r.current_id = id.clone();
+                crate::provider::delete_item_by_name(r, &name);
+                crate::provider::refresh_current_directory(r);
+                let parent_len = get_parent_len(&r.ffon, id);
+                if parent_len == 0 {
+                    insert_at(&mut r.ffon, id, 0, FfonElement::new_str("<input></input>"));
+                    r.current_id.set_last(0);
+                } else if let Some(idx) = r.current_id.last() {
+                    if idx >= parent_len {
+                        r.current_id.set_last(parent_len - 1);
+                    }
+                }
+            }
+        }
+        FsOpKind::Rename => {
+            if let (Some(prev_elem), Some(new_elem)) = (before, after) {
+                let old_str = elem_key_str(new_elem);
+                let new_str = elem_key_str(prev_elem);
+                r.current_id = id.clone();
+                crate::provider::commit_edit(r, &old_str, &new_str);
+                replace_element_at_id(r, id, prev_elem.clone());
+                crate::provider::refresh_current_directory(r);
+                r.current_id = id.clone();
+            }
+        }
+        FsOpKind::Paste => {
+            if let Some(new_elem) = after {
+                let name =
+                    sicompass_sdk::tags::strip_display(&elem_key_str(new_elem)).to_owned();
+                r.current_id = id.clone();
+                crate::provider::delete_item_by_name(r, &name);
+                crate::provider::refresh_current_directory(r);
+                let parent_len = get_parent_len(&r.ffon, id);
+                if parent_len == 0 {
+                    insert_at(&mut r.ffon, id, 0, FfonElement::new_str("<input></input>"));
+                    r.current_id.set_last(0);
+                } else if let Some(idx) = r.current_id.last() {
+                    if idx >= parent_len {
+                        r.current_id.set_last(parent_len - 1);
+                    }
+                }
+            }
+        }
+        FsOpKind::Delete | FsOpKind::Move => {
+            // Full restore-from-trash logic lands in step 6 alongside the
+            // lib_filebrowser emission. For now, just reinsert `before` into
+            // FFON so tests can exercise the dispatcher.
+            if let Some(prev_elem) = before {
+                clear_sole_i_placeholder_if_body_element(r, id);
+                insert_element_at_id(r, id, prev_elem.clone());
+                r.current_id = id.clone();
+            }
+        }
+    }
+}
+
+fn apply_fs_op_redo(
+    r: &mut AppRenderer,
+    id: &IdArray,
+    op: sicompass_sdk::timeline::FsOpKind,
+    before: Option<&FfonElement>,
+    after: Option<&FfonElement>,
+) {
+    use sicompass_sdk::timeline::FsOpKind;
+    match op {
+        FsOpKind::Create => {
+            if let Some(elem) = after {
+                let name = elem_key_str(elem);
+                let is_dir = matches!(elem, FfonElement::Obj(_));
+                r.current_id = id.clone();
+                if is_dir {
+                    crate::provider::create_directory(r, &name);
+                    crate::provider::push_path(r, &name);
+                    crate::provider::refresh_current_directory(r);
+                    let provider_idx = r.current_id.get(0).unwrap_or(0);
+                    if let Some(root) = r.ffon.get_mut(provider_idx) {
+                        if let Some(obj) = root.as_obj_mut() {
+                            if obj.children.is_empty() {
+                                obj.children
+                                    .push(FfonElement::new_str("<input></input>"));
+                            }
+                        }
+                    }
+                    let mut new_id = IdArray::new();
+                    new_id.push(provider_idx);
+                    new_id.push(0);
+                    r.current_id = new_id;
+                } else {
+                    crate::provider::create_file(r, &name);
+                    crate::provider::refresh_current_directory(r);
+                }
+            }
+        }
+        FsOpKind::Rename => {
+            if let (Some(prev_elem), Some(new_elem)) = (before, after) {
+                let old_str = elem_key_str(prev_elem);
+                let new_str = elem_key_str(new_elem);
+                r.current_id = id.clone();
+                crate::provider::commit_edit(r, &old_str, &new_str);
+                replace_element_at_id(r, id, new_elem.clone());
+                crate::provider::refresh_current_directory(r);
+                r.current_id = id.clone();
+            }
+        }
+        FsOpKind::Paste => {
+            if let (Some(src_elem), Some(dest_elem)) = (before, after) {
+                let src_path = elem_key_str(src_elem);
+                let dest_name =
+                    sicompass_sdk::tags::strip_display(&elem_key_str(dest_elem)).to_owned();
+                let slash = src_path.rfind('/').unwrap_or(0);
+                let src_dir = &src_path[..slash];
+                let src_name = &src_path[slash + 1..];
+                r.current_id = id.clone();
+                let dest_dir = crate::provider::current_path(r).to_owned();
+                crate::provider::copy_item(r, src_dir, src_name, &dest_dir, &dest_name);
+                crate::provider::refresh_current_directory(r);
+                r.current_id = id.clone();
+            }
+        }
+        FsOpKind::Delete | FsOpKind::Move => {
+            // Step 6 fills these arms once lib_filebrowser emits them.
+            let _ = (id, before, after);
+        }
+    }
+}
+
+fn dispatch_provider_undo(r: &mut AppRenderer, provider_idx: usize, entry: &TimelineEntry) {
+    let mut error = String::new();
+    let pname = r
+        .providers
+        .get(provider_idx)
+        .map(|p| p.display_name().to_owned());
+    if let Some(p) = r.providers.get_mut(provider_idx) {
+        p.undo(entry, &mut error);
+    }
+    if !error.is_empty() {
+        r.error_message = error;
+    } else if r.current_id.get(0) == Some(provider_idx) {
+        crate::provider::refresh_current_directory(r);
+    } else {
+        r.error_message = format!(
+            "undid on {}",
+            pname.as_deref().unwrap_or("provider")
+        );
+    }
+}
+
+fn dispatch_provider_redo(r: &mut AppRenderer, provider_idx: usize, entry: &TimelineEntry) {
+    let mut error = String::new();
+    let pname = r
+        .providers
+        .get(provider_idx)
+        .map(|p| p.display_name().to_owned());
+    if let Some(p) = r.providers.get_mut(provider_idx) {
+        p.redo(entry, &mut error);
+    }
+    if !error.is_empty() {
+        r.error_message = error;
+    } else if r.current_id.get(0) == Some(provider_idx) {
+        crate::provider::refresh_current_directory(r);
+    } else {
+        r.error_message = format!(
+            "redid on {}",
+            pname.as_deref().unwrap_or("provider")
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

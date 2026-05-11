@@ -1,7 +1,8 @@
 use serde_json::{Map, Value};
-use sicompass_sdk::ffon::FfonElement;
+use sicompass_sdk::ffon::{FfonElement, IdArray};
 use sicompass_sdk::platform;
 use sicompass_sdk::provider::Provider;
+use sicompass_sdk::timeline::TimelineEntry;
 use std::path::{Path, PathBuf};
 
 // ---------------------------------------------------------------------------
@@ -57,6 +58,12 @@ pub struct SettingsProvider {
     apply_fn: Option<ApplyFn>,
     /// Override config path (used in tests to avoid touching real config)
     config_path_override: Option<PathBuf>,
+    /// Timeline entries accumulated since the last drain (via
+    /// `take_timeline_entries`). Each mutation method (`commit_edit`,
+    /// `on_radio_change`, `on_checkbox_change`) pushes a `ProviderOp`
+    /// here. The `id` field is left as the empty `IdArray` — the app
+    /// patches in the current_id when it drains.
+    pending_timeline_entries: Vec<TimelineEntry>,
 }
 
 impl SettingsProvider {
@@ -71,6 +78,7 @@ impl SettingsProvider {
             checkbox_entries: Vec::new(),
             apply_fn: Some(Box::new(apply_fn)),
             config_path_override: None,
+            pending_timeline_entries: Vec::new(),
         }
     }
 
@@ -86,7 +94,71 @@ impl SettingsProvider {
             checkbox_entries: Vec::new(),
             apply_fn: None,
             config_path_override: None,
+            pending_timeline_entries: Vec::new(),
         }
+    }
+
+    /// Build a `ProviderOp` payload for a settings mutation. Layout:
+    /// `Obj { key: "section", children: [
+    ///     Str("<config_key>"),
+    ///     Str("<prev_value>"),
+    ///     Str("<new_value>"),
+    ///     Str("<kind>"),  // "text" | "radio" | "checkbox"
+    /// ] }`
+    /// The `kind` discriminator lets `undo`/`redo` route to write_key_string or
+    /// write_key_bool. The outermost key carries the section so undo can
+    /// re-target the same setting entry.
+    fn build_provider_op_payload(
+        section: &str,
+        config_key: &str,
+        prev: &str,
+        new: &str,
+        kind: &str,
+    ) -> FfonElement {
+        let mut obj = FfonElement::new_obj(section);
+        if let Some(o) = obj.as_obj_mut() {
+            o.push(FfonElement::Str(config_key.to_owned()));
+            o.push(FfonElement::Str(prev.to_owned()));
+            o.push(FfonElement::Str(new.to_owned()));
+            o.push(FfonElement::Str(kind.to_owned()));
+        }
+        obj
+    }
+
+    fn parse_provider_op_payload(
+        payload: &FfonElement,
+    ) -> Option<(String, String, String, String, String)> {
+        let obj = match payload {
+            FfonElement::Obj(o) => o,
+            _ => return None,
+        };
+        let section = obj.key.clone();
+        let str_at = |i: usize| match obj.children.get(i)? {
+            FfonElement::Str(s) => Some(s.clone()),
+            _ => None,
+        };
+        Some((section, str_at(0)?, str_at(1)?, str_at(2)?, str_at(3)?))
+    }
+
+    fn push_settings_op(
+        &mut self,
+        command: &str,
+        section: &str,
+        config_key: &str,
+        prev: &str,
+        new: &str,
+        kind: &str,
+        label: &str,
+    ) {
+        let payload =
+            Self::build_provider_op_payload(section, config_key, prev, new, kind);
+        self.pending_timeline_entries.push(TimelineEntry::ProviderOp {
+            provider_idx: 0, // patched by app on drain
+            command: command.to_owned(),
+            payload,
+            label: label.to_owned(),
+        });
+        let _ = IdArray::new(); // suppress unused-import lint if IdArray ends up unused
     }
 
     /// Override the settings.json path (for tests).
@@ -475,10 +547,20 @@ impl Provider for SettingsProvider {
             .find(|e| e.section == section && e.label == label)
         {
             if e.current_value == new_content { return true; }
+            let prev = e.current_value.clone();
             e.current_value = new_content.to_owned();
-            let (sec, config_key) = (e.section.clone(), e.config_key.clone());
+            let (sec, config_key, lbl) = (e.section.clone(), e.config_key.clone(), e.label.clone());
             self.write_key_string(&sec, &config_key, new_content);
             self.fire_apply(&config_key, new_content);
+            self.push_settings_op(
+                "settings-text",
+                &sec,
+                &config_key,
+                &prev,
+                new_content,
+                "text",
+                &format!("edit {lbl}"),
+            );
             return true;
         }
         false
@@ -487,27 +569,180 @@ impl Provider for SettingsProvider {
     fn on_radio_change(&mut self, group_key: &str, selected_value: &str) {
         if group_key == "color scheme" {
             if self.color_scheme == selected_value { return; }
+            let prev = self.color_scheme.clone();
             self.color_scheme = selected_value.to_owned();
             self.write_key_string("sicompass", "colorScheme", selected_value);
             self.fire_apply("colorScheme", selected_value);
+            self.push_settings_op(
+                "settings-radio",
+                "sicompass",
+                "colorScheme",
+                &prev,
+                selected_value,
+                "radio",
+                "color scheme",
+            );
             return;
         }
         if let Some(e) = self.radio_entries.iter_mut().find(|e| e.radio_key == group_key) {
             if e.current_value == selected_value { return; }
+            let prev = e.current_value.clone();
             e.current_value = selected_value.to_owned();
-            let (section, config_key) = (e.section.clone(), e.config_key.clone());
+            let (section, config_key, rkey) =
+                (e.section.clone(), e.config_key.clone(), e.radio_key.clone());
             self.write_key_string(&section, &config_key, selected_value);
             self.fire_apply(&config_key, selected_value);
+            self.push_settings_op(
+                "settings-radio",
+                &section,
+                &config_key,
+                &prev,
+                selected_value,
+                "radio",
+                &format!("set {rkey}"),
+            );
         }
     }
 
     fn on_checkbox_change(&mut self, label: &str, checked: bool) {
         if let Some(e) = self.checkbox_entries.iter_mut().find(|e| e.label == label) {
             if e.checked == checked { return; }
+            let prev = e.checked;
             e.checked = checked;
-            let (section, config_key) = (e.section.clone(), e.config_key.clone());
+            let (section, config_key, lbl) =
+                (e.section.clone(), e.config_key.clone(), e.label.clone());
             self.write_key_bool(&section, &config_key, checked);
             self.fire_apply(&config_key, if checked { "true" } else { "false" });
+            self.push_settings_op(
+                "settings-checkbox",
+                &section,
+                &config_key,
+                if prev { "true" } else { "false" },
+                if checked { "true" } else { "false" },
+                "checkbox",
+                &format!("toggle {lbl}"),
+            );
+        }
+    }
+
+    fn take_timeline_entries(&mut self) -> Vec<TimelineEntry> {
+        std::mem::take(&mut self.pending_timeline_entries)
+    }
+
+    fn undo(&mut self, entry: &TimelineEntry, error: &mut String) {
+        let payload = match entry {
+            TimelineEntry::ProviderOp { command, payload, .. }
+                if command.starts_with("settings-") =>
+            {
+                payload
+            }
+            _ => return,
+        };
+        let (section, key, prev, new, kind) = match Self::parse_provider_op_payload(payload) {
+            Some(p) => p,
+            None => {
+                *error = "settings: malformed undo payload".to_owned();
+                return;
+            }
+        };
+        let _ = new;
+        match kind.as_str() {
+            "text" => {
+                if let Some(e) = self
+                    .text_entries
+                    .iter_mut()
+                    .find(|e| e.section == section && e.config_key == key)
+                {
+                    e.current_value = prev.clone();
+                }
+                self.write_key_string(&section, &key, &prev);
+                self.fire_apply(&key, &prev);
+            }
+            "radio" => {
+                if section == "sicompass" && key == "colorScheme" {
+                    self.color_scheme = prev.clone();
+                }
+                if let Some(e) = self
+                    .radio_entries
+                    .iter_mut()
+                    .find(|e| e.section == section && e.config_key == key)
+                {
+                    e.current_value = prev.clone();
+                }
+                self.write_key_string(&section, &key, &prev);
+                self.fire_apply(&key, &prev);
+            }
+            "checkbox" => {
+                let checked = prev == "true";
+                if let Some(e) = self
+                    .checkbox_entries
+                    .iter_mut()
+                    .find(|e| e.section == section && e.config_key == key)
+                {
+                    e.checked = checked;
+                }
+                self.write_key_bool(&section, &key, checked);
+                self.fire_apply(&key, &prev);
+            }
+            _ => {}
+        }
+    }
+
+    fn redo(&mut self, entry: &TimelineEntry, error: &mut String) {
+        let payload = match entry {
+            TimelineEntry::ProviderOp { command, payload, .. }
+                if command.starts_with("settings-") =>
+            {
+                payload
+            }
+            _ => return,
+        };
+        let (section, key, _prev, new, kind) = match Self::parse_provider_op_payload(payload) {
+            Some(p) => p,
+            None => {
+                *error = "settings: malformed redo payload".to_owned();
+                return;
+            }
+        };
+        match kind.as_str() {
+            "text" => {
+                if let Some(e) = self
+                    .text_entries
+                    .iter_mut()
+                    .find(|e| e.section == section && e.config_key == key)
+                {
+                    e.current_value = new.clone();
+                }
+                self.write_key_string(&section, &key, &new);
+                self.fire_apply(&key, &new);
+            }
+            "radio" => {
+                if section == "sicompass" && key == "colorScheme" {
+                    self.color_scheme = new.clone();
+                }
+                if let Some(e) = self
+                    .radio_entries
+                    .iter_mut()
+                    .find(|e| e.section == section && e.config_key == key)
+                {
+                    e.current_value = new.clone();
+                }
+                self.write_key_string(&section, &key, &new);
+                self.fire_apply(&key, &new);
+            }
+            "checkbox" => {
+                let checked = new == "true";
+                if let Some(e) = self
+                    .checkbox_entries
+                    .iter_mut()
+                    .find(|e| e.section == section && e.config_key == key)
+                {
+                    e.checked = checked;
+                }
+                self.write_key_bool(&section, &key, checked);
+                self.fire_apply(&key, &new);
+            }
+            _ => {}
         }
     }
 

@@ -5757,6 +5757,39 @@ fn tabs_initial_state_has_one_tab() {
 }
 
 #[test]
+fn tab_timelines_stay_parallel_to_tabs() {
+    let mut h = Harness::new();
+    // Invariant at startup.
+    assert_eq!(h.renderer.tabs.len(), 1);
+    assert_eq!(h.renderer.tab_timelines.len(), 1);
+
+    // Open two more.
+    press_ctrl(h.r(), Keycode::T);
+    press_ctrl(h.r(), Keycode::T);
+    assert_eq!(h.renderer.tabs.len(), 3);
+    assert_eq!(h.renderer.tab_timelines.len(), 3);
+
+    // Each tab starts with an empty timeline.
+    for t in &h.renderer.tab_timelines {
+        assert!(t.entries.is_empty(), "new tabs start with empty timeline");
+        assert_eq!(t.position, 0);
+    }
+
+    // Close one.
+    press_ctrl(h.r(), Keycode::W);
+    assert_eq!(h.renderer.tabs.len(), 2);
+    assert_eq!(h.renderer.tab_timelines.len(), 2);
+
+    // Close down to one — Ctrl+W is a no-op at one tab.
+    press_ctrl(h.r(), Keycode::W);
+    assert_eq!(h.renderer.tabs.len(), 1);
+    assert_eq!(h.renderer.tab_timelines.len(), 1);
+    press_ctrl(h.r(), Keycode::W);
+    assert_eq!(h.renderer.tabs.len(), 1);
+    assert_eq!(h.renderer.tab_timelines.len(), 1);
+}
+
+#[test]
 fn ctrl_t_creates_new_tab_and_activates_it() {
     let mut h = Harness::new();
     let fb_idx = h.provider_idx("filebrowser").unwrap();
@@ -6307,4 +6340,631 @@ fn ctrl_c_in_interactive_dashboard_does_not_exit() {
     press_ctrl(&mut renderer, Keycode::C);
     assert_eq!(renderer.coordinate, Coordinate::Dashboard,
         "Ctrl+C must be forwarded to the program (SIGINT), not exit the dashboard");
+}
+
+// ---------------------------------------------------------------------------
+// Unified Timeline dispatcher (step 3 of the undo/redo refactor)
+// ---------------------------------------------------------------------------
+//
+// These tests exercise `record_entry`, `walk_back`, `walk_forward` directly
+// (the public dispatcher entry points in `sicompass::state`). Emission sites
+// don't call these yet — step 4+ wires them in.
+
+use sicompass::state as state_mod;
+use sicompass_sdk::timeline::{NavKind, StructuralOp, StructuralPayload, TimelineEntry};
+use sicompass_sdk::ffon::IdArray;
+use std::thread::sleep;
+use std::time::Duration;
+
+fn id(parts: &[usize]) -> IdArray {
+    let mut a = IdArray::new();
+    for p in parts {
+        a.push(*p);
+    }
+    a
+}
+
+#[test]
+fn record_entry_pushes_to_active_tab_timeline() {
+    let mut h = Harness::new();
+    let entry = TimelineEntry::Navigate {
+        provider_idx: 0,
+        from_id: id(&[0]),
+        to_id: id(&[0, 1]),
+        from_path: None,
+        to_path: None,
+        kind: NavKind::ArrowRight,
+    };
+    state_mod::record_entry(h.r(), entry);
+    assert_eq!(h.renderer.active_timeline().entries.len(), 1);
+    assert_eq!(h.renderer.active_timeline().position, 0);
+}
+
+#[test]
+fn record_entry_coalesces_navigate_burst() {
+    let mut h = Harness::new();
+    // Five consecutive Navigates collapse to one entry.
+    for i in 0..5 {
+        state_mod::record_entry(
+            h.r(),
+            TimelineEntry::Navigate {
+                provider_idx: 0,
+                from_id: id(&[0, i]),
+                to_id: id(&[0, i + 1]),
+                from_path: None,
+                to_path: None,
+                kind: NavKind::ArrowDown,
+            },
+        );
+    }
+    assert_eq!(h.renderer.active_timeline().entries.len(), 1);
+    // The single surviving entry preserves the first `from_id` and the latest `to_id`.
+    match &h.renderer.active_timeline().entries[0] {
+        TimelineEntry::Navigate { from_id, to_id, .. } => {
+            assert_eq!(*from_id, id(&[0, 0]));
+            assert_eq!(*to_id, id(&[0, 5]));
+        }
+        _ => panic!("expected Navigate"),
+    }
+}
+
+#[test]
+fn record_entry_breaks_navigate_run_on_text_chunk() {
+    let mut h = Harness::new();
+    state_mod::record_entry(
+        h.r(),
+        TimelineEntry::Navigate {
+            provider_idx: 0,
+            from_id: id(&[0]),
+            to_id: id(&[0, 1]),
+            from_path: None,
+            to_path: None,
+            kind: NavKind::ArrowDown,
+        },
+    );
+    state_mod::record_entry(
+        h.r(),
+        TimelineEntry::TextChunk {
+            id: id(&[0, 1]),
+            before: FfonElement::Str("a".into()),
+            after: FfonElement::Str("ab".into()),
+            chunk_seq: 0,
+        },
+    );
+    state_mod::record_entry(
+        h.r(),
+        TimelineEntry::Navigate {
+            provider_idx: 0,
+            from_id: id(&[0, 1]),
+            to_id: id(&[0, 2]),
+            from_path: None,
+            to_path: None,
+            kind: NavKind::ArrowDown,
+        },
+    );
+    // Should be three entries — the TextChunk breaks coalescing.
+    assert_eq!(h.renderer.active_timeline().entries.len(), 3);
+}
+
+#[test]
+fn record_entry_coalesces_text_chunk_within_idle() {
+    let mut h = Harness::new();
+    state_mod::record_entry(
+        h.r(),
+        TimelineEntry::TextChunk {
+            id: id(&[0, 0]),
+            before: FfonElement::Str("".into()),
+            after: FfonElement::Str("h".into()),
+            chunk_seq: 0,
+        },
+    );
+    state_mod::record_entry(
+        h.r(),
+        TimelineEntry::TextChunk {
+            id: id(&[0, 0]),
+            before: FfonElement::Str("h".into()),
+            after: FfonElement::Str("hi".into()),
+            chunk_seq: 0,
+        },
+    );
+    assert_eq!(h.renderer.active_timeline().entries.len(), 1);
+    match &h.renderer.active_timeline().entries[0] {
+        TimelineEntry::TextChunk { before, after, .. } => {
+            assert_eq!(before, &FfonElement::Str("".into()));
+            assert_eq!(after, &FfonElement::Str("hi".into()));
+        }
+        _ => panic!("expected TextChunk"),
+    }
+}
+
+#[test]
+fn record_entry_starts_new_text_chunk_after_idle_period() {
+    let mut h = Harness::new();
+    state_mod::record_entry(
+        h.r(),
+        TimelineEntry::TextChunk {
+            id: id(&[0, 0]),
+            before: FfonElement::Str("".into()),
+            after: FfonElement::Str("h".into()),
+            chunk_seq: 0,
+        },
+    );
+    // Wait past TEXT_CHUNK_IDLE_MS (500 ms) — a short buffer is enough.
+    sleep(Duration::from_millis(550));
+    state_mod::record_entry(
+        h.r(),
+        TimelineEntry::TextChunk {
+            id: id(&[0, 0]),
+            before: FfonElement::Str("h".into()),
+            after: FfonElement::Str("hi".into()),
+            chunk_seq: 0,
+        },
+    );
+    assert_eq!(h.renderer.active_timeline().entries.len(), 2);
+}
+
+#[test]
+fn record_entry_truncates_redo_branch_on_new_action() {
+    let mut h = Harness::new();
+    // Two entries, undo once → position=1, redo branch holds 1 entry.
+    state_mod::record_entry(
+        h.r(),
+        TimelineEntry::Navigate {
+            provider_idx: 0,
+            from_id: id(&[0]),
+            to_id: id(&[0, 1]),
+            from_path: None,
+            to_path: None,
+            kind: NavKind::ArrowDown,
+        },
+    );
+    state_mod::record_entry(
+        h.r(),
+        TimelineEntry::TextChunk {
+            id: id(&[0, 1]),
+            before: FfonElement::Str("a".into()),
+            after: FfonElement::Str("ab".into()),
+            chunk_seq: 0,
+        },
+    );
+    state_mod::walk_back(h.r());
+    assert_eq!(h.renderer.active_timeline().position, 1);
+    assert_eq!(h.renderer.active_timeline().entries.len(), 2);
+
+    // New action: truncates the dangling redo entry.
+    state_mod::record_entry(
+        h.r(),
+        TimelineEntry::Navigate {
+            provider_idx: 0,
+            from_id: id(&[0, 1]),
+            to_id: id(&[0, 0]),
+            from_path: None,
+            to_path: None,
+            kind: NavKind::ArrowUp,
+        },
+    );
+    assert_eq!(h.renderer.active_timeline().entries.len(), 2);
+    assert_eq!(h.renderer.active_timeline().position, 0);
+}
+
+#[test]
+fn walk_back_reports_nothing_to_undo_when_empty() {
+    let mut h = Harness::new();
+    state_mod::walk_back(h.r());
+    assert_eq!(h.renderer.error_message, "No undo history");
+}
+
+#[test]
+fn walk_forward_reports_nothing_to_redo_when_at_head() {
+    let mut h = Harness::new();
+    state_mod::record_entry(
+        h.r(),
+        TimelineEntry::Navigate {
+            provider_idx: 0,
+            from_id: id(&[0]),
+            to_id: id(&[0, 1]),
+            from_path: None,
+            to_path: None,
+            kind: NavKind::ArrowDown,
+        },
+    );
+    state_mod::walk_forward(h.r());
+    assert_eq!(h.renderer.error_message, "Nothing to redo");
+}
+
+#[test]
+fn walk_back_then_forward_restores_position() {
+    let mut h = Harness::new();
+    let start = id(&[0, 0]);
+    let end = id(&[0, 3]);
+    h.renderer.current_id = start.clone();
+    state_mod::record_entry(
+        h.r(),
+        TimelineEntry::Navigate {
+            provider_idx: 0,
+            from_id: start.clone(),
+            to_id: end.clone(),
+            from_path: None,
+            to_path: None,
+            kind: NavKind::ArrowDown,
+        },
+    );
+    h.renderer.current_id = end.clone();
+
+    state_mod::walk_back(h.r());
+    assert_eq!(h.renderer.current_id, start);
+
+    state_mod::walk_forward(h.r());
+    assert_eq!(h.renderer.current_id, end);
+}
+
+#[test]
+fn timelines_are_per_tab() {
+    let mut h = Harness::new();
+    state_mod::record_entry(
+        h.r(),
+        TimelineEntry::Navigate {
+            provider_idx: 0,
+            from_id: id(&[0]),
+            to_id: id(&[0, 1]),
+            from_path: None,
+            to_path: None,
+            kind: NavKind::ArrowDown,
+        },
+    );
+    assert_eq!(h.renderer.active_timeline().entries.len(), 1);
+
+    press_ctrl(h.r(), Keycode::T);
+    // Switched to fresh tab 1 — its timeline is empty.
+    assert_eq!(h.renderer.active_tab, 1);
+    assert_eq!(h.renderer.active_timeline().entries.len(), 0);
+
+    // Tab 0's history is preserved.
+    assert_eq!(h.renderer.tab_timelines[0].entries.len(), 1);
+}
+
+#[test]
+fn arrow_down_emits_navigate_entry() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb_idx);
+    let before = h.renderer.active_timeline().entries.len();
+    let pre_id = h.renderer.current_id.clone();
+    press_down(h.r());
+    let after = h.renderer.active_timeline().entries.len();
+    if h.renderer.current_id == pre_id {
+        // Single-item list — Arrow Down had nothing to do; nothing recorded.
+        assert_eq!(after, before);
+        return;
+    }
+    assert_eq!(after, before + 1, "exactly one Navigate entry emitted");
+    match h.renderer.active_timeline().entries.last().unwrap() {
+        TimelineEntry::Navigate { kind, .. } => {
+            assert_eq!(*kind, NavKind::ArrowDown);
+        }
+        _ => panic!("expected Navigate"),
+    }
+}
+
+#[test]
+fn arrow_down_burst_coalesces_in_handler() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb_idx);
+    let pre_id = h.renderer.current_id.clone();
+    let before_count = h.renderer.active_timeline().entries.len();
+    for _ in 0..5 {
+        press_down(h.r());
+    }
+    let after_count = h.renderer.active_timeline().entries.len();
+    if h.renderer.current_id == pre_id {
+        // No movement happened — nothing to assert.
+        assert_eq!(after_count, before_count);
+        return;
+    }
+    // Whatever movement occurred, all 5 down-arrows collapse to a single
+    // Navigate entry — burst coalescing.
+    assert_eq!(after_count, before_count + 1, "burst coalesced");
+}
+
+#[test]
+fn arrow_right_into_directory_emits_navigate_with_paths() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r()); // descend into the filebrowser listing
+    // Harness pre-populates `subdir`. Find it in the list and step onto it.
+    let subdir_idx = h
+        .renderer
+        .total_list
+        .iter()
+        .position(|item| item.label.contains("subdir"))
+        .expect("subdir from Harness fixture");
+    h.renderer.list_index = subdir_idx;
+    h.renderer.current_id = h.renderer.total_list[subdir_idx].id.clone();
+    let path_before = sicompass::provider::current_path(h.r()).to_owned();
+    press_right(h.r());
+    let path_after = sicompass::provider::current_path(h.r()).to_owned();
+    assert_ne!(path_after, path_before, "right-arrow descended into subdir");
+    // Both press_right calls produced consecutive Navigate entries which
+    // coalesce into one. The merged entry's `to_path` must reflect the final
+    // landing (the subdir), and the `kind` is ArrowRight.
+    match h.renderer.active_timeline().entries.last().unwrap() {
+        TimelineEntry::Navigate { kind, to_path, .. } => {
+            assert_eq!(*kind, NavKind::ArrowRight);
+            assert_eq!(to_path.as_deref(), Some(path_after.as_str()));
+        }
+        other => panic!("expected Navigate, got {:?}", other),
+    }
+}
+
+#[test]
+fn task_input_via_update_state_emits_text_chunk() {
+    // Coordinate::Normal + Enter routes to handle_return_in_normal which fires
+    // update_state(Task::Input). We exercise the underlying machinery directly
+    // because Normal mode is rarely entered from the keyboard alone.
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+    // Position cursor on a file element so update_state has something to read.
+    let alpha_idx = h
+        .renderer
+        .total_list
+        .iter()
+        .position(|item| item.label.contains("alpha.txt"))
+        .expect("alpha.txt fixture");
+    h.renderer.list_index = alpha_idx;
+    h.renderer.current_id = h.renderer.total_list[alpha_idx].id.clone();
+
+    // Set up the input buffer as if the user had typed a new label, then call
+    // update_state with Task::Input — the dual-write should emit a TextChunk.
+    h.renderer.input_buffer = "renamed_label".to_string();
+    h.renderer.cursor_position = h.renderer.input_buffer.len();
+    let before_count = h.renderer.active_timeline().entries.len();
+    sicompass::state::update_state(h.r(), sicompass::app_state::Task::Input, sicompass::app_state::History::None);
+    let after_count = h.renderer.active_timeline().entries.len();
+    assert!(after_count > before_count, "Task::Input emitted at least one entry");
+    let new_entries: Vec<_> = h.renderer.active_timeline().entries[before_count..].to_vec();
+    assert!(
+        new_entries.iter().any(|e| matches!(e, TimelineEntry::TextChunk { .. })),
+        "expected a TextChunk among new entries, got {:?}",
+        new_entries
+    );
+}
+
+#[test]
+fn append_emits_structural_inserted_entry() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+    let before_count = h.renderer.active_timeline().entries.len();
+    h.renderer.input_buffer = "- newfile.txt".to_string();
+    h.renderer.cursor_position = h.renderer.input_buffer.len();
+    sicompass::state::update_state(
+        h.r(),
+        sicompass::app_state::Task::Append,
+        sicompass::app_state::History::None,
+    );
+    let after_count = h.renderer.active_timeline().entries.len();
+    assert!(after_count > before_count, "Task::Append recorded at least one entry");
+    let new_entries: Vec<_> = h.renderer.active_timeline().entries[before_count..].to_vec();
+    assert!(
+        new_entries.iter().any(|e| matches!(
+            e,
+            TimelineEntry::Structural { op: StructuralOp::Append, payload: StructuralPayload::Inserted(_), .. }
+        )),
+        "expected Structural{{Append, Inserted}}, got {:?}",
+        new_entries
+    );
+}
+
+#[test]
+fn delete_emits_structural_removed_entry() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+    let alpha_idx = h
+        .renderer
+        .total_list
+        .iter()
+        .position(|item| item.label.contains("alpha.txt"))
+        .unwrap();
+    h.renderer.list_index = alpha_idx;
+    h.renderer.current_id = h.renderer.total_list[alpha_idx].id.clone();
+    let before_count = h.renderer.active_timeline().entries.len();
+    sicompass::state::update_state(
+        h.r(),
+        sicompass::app_state::Task::Delete,
+        sicompass::app_state::History::None,
+    );
+    let after_count = h.renderer.active_timeline().entries.len();
+    assert!(after_count > before_count);
+    let new_entries: Vec<_> = h.renderer.active_timeline().entries[before_count..].to_vec();
+    assert!(
+        new_entries.iter().any(|e| matches!(
+            e,
+            TimelineEntry::Structural { op: StructuralOp::Delete, payload: StructuralPayload::Removed(_), .. }
+        )),
+        "expected Structural{{Delete, Removed}}, got {:?}",
+        new_entries
+    );
+}
+
+use sicompass_sdk::timeline::FsOpKind;
+
+#[test]
+fn fscreate_directory_emits_fsop_create_obj() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+    let before_count = h.renderer.active_timeline().entries.len();
+    press_ctrl(h.r(), Keycode::I);
+    type_text(h.r(), "+ a_unique_test_dir");
+    press_enter(h.r());
+    let after_count = h.renderer.active_timeline().entries.len();
+    assert!(after_count > before_count);
+    let new_entries: Vec<_> = h.renderer.active_timeline().entries[before_count..].to_vec();
+    let fsop = new_entries
+        .iter()
+        .find(|e| matches!(e, TimelineEntry::FsOp { op: FsOpKind::Create, .. }));
+    let fsop = fsop.expect(&format!("expected FsOp::Create, got {:?}", new_entries));
+    match fsop {
+        TimelineEntry::FsOp { op, after, .. } => {
+            assert_eq!(*op, FsOpKind::Create);
+            assert!(matches!(after, Some(FfonElement::Obj(_))), "directory = Obj");
+        }
+        _ => unreachable!(),
+    }
+    // Cleanup so tests don't pollute the temp dir
+    std::fs::remove_dir_all(h.tmp.path().join("a_unique_test_dir")).ok();
+}
+
+#[test]
+fn fscreate_file_emits_fsop_create_str() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+    let before_count = h.renderer.active_timeline().entries.len();
+    press_ctrl(h.r(), Keycode::I);
+    type_text(h.r(), "- a_unique_test_file.txt");
+    press_enter(h.r());
+    let after_count = h.renderer.active_timeline().entries.len();
+    assert!(after_count > before_count);
+    let new_entries: Vec<_> = h.renderer.active_timeline().entries[before_count..].to_vec();
+    let fsop = new_entries
+        .iter()
+        .find(|e| matches!(e, TimelineEntry::FsOp { op: FsOpKind::Create, .. }))
+        .expect(&format!("expected FsOp::Create, got {:?}", new_entries));
+    match fsop {
+        TimelineEntry::FsOp { op, after, .. } => {
+            assert_eq!(*op, FsOpKind::Create);
+            assert!(matches!(after, Some(FfonElement::Str(_))), "file = Str");
+        }
+        _ => unreachable!(),
+    }
+    std::fs::remove_file(h.tmp.path().join("a_unique_test_file.txt")).ok();
+}
+
+#[test]
+fn fsrename_emits_fsop_rename() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+    let alpha_idx = h
+        .renderer
+        .total_list
+        .iter()
+        .position(|item| item.label.contains("alpha.txt"))
+        .unwrap();
+    h.renderer.list_index = alpha_idx;
+    h.renderer.current_id = h.renderer.total_list[alpha_idx].id.clone();
+    press(h.r(), Keycode::I);
+    h.renderer.input_buffer.clear();
+    h.renderer.cursor_position = 0;
+    type_text(h.r(), "renamed_unique.txt");
+    let before_count = h.renderer.active_timeline().entries.len();
+    press_enter(h.r());
+    let new_entries: Vec<_> =
+        h.renderer.active_timeline().entries[before_count..].to_vec();
+    let fsop = new_entries
+        .iter()
+        .find(|e| matches!(e, TimelineEntry::FsOp { op: FsOpKind::Rename, .. }))
+        .expect(&format!("expected FsOp::Rename, got {:?}", new_entries));
+    match fsop {
+        TimelineEntry::FsOp { op, before, after, .. } => {
+            assert_eq!(*op, FsOpKind::Rename);
+            assert!(before.is_some());
+            assert!(after.is_some());
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn settings_checkbox_emits_provider_op_and_undoes() {
+    use sicompass_sdk::provider::Provider;
+    let mut p = sicompass_settings::SettingsProvider::new_headless();
+    let tmp = TempDir::new().unwrap();
+    p.set_config_path(tmp.path().join("settings.json"));
+    p.add_section("test");
+    p.add_checkbox("test", "Enable feature", "test.enableFeature", false);
+
+    // Toggle the checkbox: should emit a ProviderOp.
+    p.on_checkbox_change("Enable feature", true);
+    let entries = p.take_timeline_entries();
+    assert_eq!(entries.len(), 1, "one ProviderOp emitted");
+    match &entries[0] {
+        TimelineEntry::ProviderOp { command, .. } => {
+            assert_eq!(command, "settings-checkbox");
+        }
+        _ => panic!("expected ProviderOp"),
+    }
+
+    // The new value should be persisted to JSON.
+    let written = std::fs::read_to_string(tmp.path().join("settings.json")).unwrap();
+    assert!(written.contains("\"test.enableFeature\": true"), "value persisted: {}", written);
+
+    // provider.undo should restore the prior value.
+    let mut err = String::new();
+    p.undo(&entries[0], &mut err);
+    assert!(err.is_empty(), "undo error: {}", err);
+    let written = std::fs::read_to_string(tmp.path().join("settings.json")).unwrap();
+    assert!(written.contains("\"test.enableFeature\": false"), "value reverted on undo: {}", written);
+
+    // provider.redo should re-apply the change.
+    p.redo(&entries[0], &mut err);
+    assert!(err.is_empty(), "redo error: {}", err);
+    let written = std::fs::read_to_string(tmp.path().join("settings.json")).unwrap();
+    assert!(written.contains("\"test.enableFeature\": true"), "value re-applied on redo: {}", written);
+}
+
+#[test]
+fn settings_radio_emits_provider_op_and_undoes() {
+    use sicompass_sdk::provider::Provider;
+    let mut p = sicompass_settings::SettingsProvider::new_headless();
+    let tmp = TempDir::new().unwrap();
+    p.set_config_path(tmp.path().join("settings.json"));
+    p.add_section("test");
+    p.add_radio("test", "Direction", "test.dir", &["north", "south"], "north");
+
+    p.on_radio_change("Direction", "south");
+    let entries = p.take_timeline_entries();
+    assert_eq!(entries.len(), 1);
+    let written = std::fs::read_to_string(tmp.path().join("settings.json")).unwrap();
+    assert!(written.contains("\"test.dir\": \"south\""), "wrote south: {}", written);
+
+    let mut err = String::new();
+    p.undo(&entries[0], &mut err);
+    assert!(err.is_empty(), "undo error: {}", err);
+    let written = std::fs::read_to_string(tmp.path().join("settings.json")).unwrap();
+    assert!(written.contains("\"test.dir\": \"north\""), "reverted on undo: {}", written);
+}
+
+#[test]
+fn settings_text_emits_provider_op_and_undoes() {
+    use sicompass_sdk::provider::Provider;
+    let mut p = sicompass_settings::SettingsProvider::new_headless();
+    let tmp = TempDir::new().unwrap();
+    p.set_config_path(tmp.path().join("settings.json"));
+    p.add_section("test");
+    p.add_text("test", "Greeting", "test.greeting", "hello");
+    p.set_current_path("/test/Greeting");
+
+    assert!(p.commit_edit("hello", "bonjour"));
+    let entries = p.take_timeline_entries();
+    assert_eq!(entries.len(), 1);
+    let written = std::fs::read_to_string(tmp.path().join("settings.json")).unwrap();
+    assert!(written.contains("\"test.greeting\": \"bonjour\""), "wrote new value: {}", written);
+
+    let mut err = String::new();
+    p.undo(&entries[0], &mut err);
+    assert!(err.is_empty(), "undo error: {}", err);
+    let written = std::fs::read_to_string(tmp.path().join("settings.json")).unwrap();
+    assert!(written.contains("\"test.greeting\": \"hello\""), "reverted on undo: {}", written);
 }

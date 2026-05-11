@@ -1,5 +1,6 @@
 use crate::dashboard::{DashboardFrame, DashboardKey, DashboardKind, DashboardRequest};
 use crate::ffon::FfonElement;
+use crate::timeline::TimelineEntry;
 use std::path::Path;
 
 // ---------------------------------------------------------------------------
@@ -142,6 +143,28 @@ pub trait Provider: Send + 'static {
 
     /// Re-apply the operation described by `descriptor`. Sets `error` on failure.
     fn redo_command(&mut self, _descriptor: &ProviderUndoDescriptor, _error: &mut String) {}
+
+    // ---- Optional: unified timeline undo/redo ------------------------------
+    //
+    // The new model that will eventually replace the legacy
+    // `take_last_undo_descriptor` / `undo_command` / `redo_command` trio.
+    // During migration, providers may implement either or both; the app
+    // dispatcher prefers timeline entries when present and falls back to the
+    // legacy descriptor.
+
+    /// Drain timeline entries emitted since the last poll. A single command
+    /// may emit zero, one, or several entries. The app dispatcher calls this
+    /// after every `handle_command` / `execute_command` / `commit_edit` and
+    /// pushes the entries onto the active tab's timeline in order.
+    fn take_timeline_entries(&mut self) -> Vec<TimelineEntry> { Vec::new() }
+
+    /// Reverse a previously emitted timeline entry. Providers match on the
+    /// variants they emit; others can leave this as a no-op. Sets `error` on
+    /// failure.
+    fn undo(&mut self, _entry: &TimelineEntry, _error: &mut String) {}
+
+    /// Re-apply a previously emitted timeline entry. Same shape as `undo`.
+    fn redo(&mut self, _entry: &TimelineEntry, _error: &mut String) {}
 
     // ---- Optional: interactive element callbacks ---------------------------
 

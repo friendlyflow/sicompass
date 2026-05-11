@@ -151,6 +151,42 @@ static SECTIONS: &[Node] = &[
         ],
     },
     Branch {
+        key: "Undo and Redo",
+        children: &[
+            Leaf("Ctrl+Z walks back through your actions. Ctrl+Shift+Z walks forward."),
+            Leaf("Each tab keeps its own history — undoing in one tab leaves the others alone."),
+            Branch {
+                key: "What gets recorded",
+                children: &[
+                    Leaf("Every arrow-key navigation step. A burst of arrows collapses into one undo step so a long scroll is reversible in one press."),
+                    Leaf("Typed text. Successive characters within about half a second merge into one chunk, so each undo removes a word-sized piece rather than one letter at a time."),
+                    Leaf("Structural edits: creating, inserting, deleting, cutting, and pasting elements in the FFON tree."),
+                    Leaf("Filesystem operations: creating, renaming, moving, and deleting files. Delete keeps a content snapshot up to 4 MiB so undo can restore the file even after the OS trash is emptied."),
+                    Leaf("Email IMAP operations: trash, archive, move, mark-read/unread, star/unstar. The Message-ID is captured so a moved email can still be found and moved back."),
+                    Leaf("Matrix chat operations: leaving a room, accepting or rejecting invites, kicking and banning members."),
+                    Leaf("Settings changes: text fields, radio buttons, and checkboxes write the old value into the timeline before applying the new one."),
+                ],
+            },
+            Branch {
+                key: "What cannot be undone",
+                children: &[
+                    Leaf("Terminal commands that have already been executed — only the unsubmitted input line is undoable."),
+                    Leaf("Directory deletions larger than 4 MiB if the OS trash has been emptied — undo reports an error rather than corrupting state."),
+                    Leaf("IMAP operations where the server-side message has moved or been deleted by another client."),
+                    Leaf("Matrix posted messages can only be redacted on undo — recipients see 'message deleted' rather than the message vanishing."),
+                ],
+            },
+            Branch {
+                key: "Walking the path back",
+                children: &[
+                    Leaf("Because navigation is recorded, undo replays the route you actually took."),
+                    Leaf("If you create a directory, type its name and press Enter, step into it with Right, press 'a' to append a file name, press Enter, step back out with Left, create another file at the parent level, type its name, and press Enter — then twelve presses of Ctrl+Z reverse each action in order: deleting the second file, undoing its name in word-sized chunks, undoing the Left navigation, deleting the inner file, undoing its name in chunks, undoing the Right navigation, deleting the directory, and finally undoing its name in chunks."),
+                    Leaf("Ctrl+Shift+Z replays the same path forward."),
+                ],
+            },
+        ],
+    },
+    Branch {
         key: "Commands",
         children: &[
             Leaf("Commands let you perform actions beyond simple navigation and editing. Each provider can define its own set of commands."),
@@ -738,6 +774,37 @@ mod tests {
         let elems = p.fetch();
         assert!(!elems.is_empty());
         assert!(elems[0].is_str());
+    }
+
+    // Undo and Redo section
+
+    #[test]
+    fn test_undo_and_redo_section_present_at_root() {
+        let mut p = provider();
+        let elems = p.fetch();
+        let keys: Vec<&str> = elems
+            .iter()
+            .filter_map(|e| e.as_obj().map(|o| o.key.as_str()))
+            .collect();
+        assert!(
+            keys.iter().any(|k| *k == "Undo and Redo"),
+            "Undo and Redo section must appear at the root; got: {:?}",
+            keys
+        );
+    }
+
+    #[test]
+    fn test_undo_and_redo_section_has_subsections() {
+        let mut p = provider();
+        p.push_path("Undo and Redo");
+        let elems = p.fetch();
+        let section_keys: Vec<&str> = elems
+            .iter()
+            .filter_map(|e| e.as_obj().map(|o| o.key.as_str()))
+            .collect();
+        assert!(section_keys.contains(&"What gets recorded"));
+        assert!(section_keys.contains(&"What cannot be undone"));
+        assert!(section_keys.contains(&"Walking the path back"));
     }
 }
 

@@ -38,6 +38,59 @@ Follow standard Rust idioms. Use `#[allow(...)]` sparingly and only when justifi
 - Never remove or weaken test assertions to make a failing test pass. Fix the code instead.
 - If a test itself is genuinely wrong and needs changing, **ask the user first** before modifying it.
 
+## Architecture: Unified undo/redo (TimelineEntry model)
+
+Undo/redo flows through `sicompass_sdk::timeline::TimelineEntry`, a tagged enum
+that subsumes every reversible action in the app:
+
+- `Navigate { from_id, to_id, from_path, to_path, kind }` — arrow-key cursor
+  motion. Consecutive arrow presses **coalesce into one entry** (the burst's
+  start `from_id`/`from_path` plus the latest `to_id`/`to_path`), so a 50-row
+  scroll is one undo step.
+- `TextChunk { id, before, after, chunk_seq }` — typed text. Repeated text
+  edits on the same `id` within `TEXT_CHUNK_IDLE_MS` (default 500 ms) merge
+  into the tail entry; typing a long word doesn't fill the timeline.
+- `Structural { id, op, payload }` — FFON-tree mutations: Append, Insert,
+  Delete, Cut, Paste.
+- `FsOp { provider_idx, id, op, before, after, side_effect }` — filesystem
+  ops (Create, Rename, Delete, Move, Paste). `FsSideEffect::TrashedFile` /
+  `TrashedDir` carry a content snapshot (capped at `TRASH_SNAPSHOT_LIMIT_BYTES =
+  4 MiB`) so undo restores even when the OS trash is empty; oversized
+  directories fall back to a `RenameOnly` marker and report an error if the
+  trash entry is gone.
+- `ImapOp { provider_idx, id, op }` — email IMAP ops. Trash/Archive/Move use
+  the RFC 5322 Message-ID for lookup (UIDs change after a move);
+  SetSeen/SetFlagged use the folder-local UID.
+- `ChatOp { provider_idx, id, op }` — Matrix ops (LeaveRoom, AcceptInvite,
+  RejectInvite, KickMember, BanMember, PostMessage).
+- `ProviderOp { provider_idx, command, payload, label }` — catch-all for
+  simple in-process toggles (settings radio/checkbox, etc.).
+
+The `Timeline` lives **per tab** (`AppRenderer::tab_timelines`); ctrl-Z and
+ctrl-Shift-Z operate on the active tab's timeline only. Provider undo logic
+lives behind the `Provider` trait methods `take_timeline_entries(&mut self)
+-> Vec<TimelineEntry>`, `undo(&mut self, &TimelineEntry, &mut String)`, and
+`redo(&mut self, &TimelineEntry, &mut String)`.
+
+**Irreversibility caveats** (document these in new features):
+- Terminal `commit_edit` (Enter on a typed command line) is irrevocable — the
+  shell has already executed the line. Only the unsubmitted input slot is
+  undoable.
+- Directory deletes larger than 4 MiB rely on the OS trash; if the user
+  empties the trash, undo reports an error rather than silently failing.
+- IMAP undo can fail when the server-side state diverges (message no longer
+  in source folder) — the error path returns "message no longer in {folder}"
+  rather than corrupting state.
+- Matrix `PostMessage` undo is **redact**, not retraction: recipients see
+  "message deleted" rather than the message vanishing.
+
+Migration state: legacy `UndoEntry` + `ProviderUndoDescriptor` stacks coexist
+with the unified `Timeline` behind `AppRenderer::use_unified_timeline` (default
+`false`). Both are dual-written so the unified path can be validated before
+the gate flips. After flipping (step 11 in the migration plan), the legacy
+types and `Task::{FsCreate,FsRename,FsPaste,FsNavigate,ProviderCommand}`
+variants are retired (step 12).
+
 ## Architecture: SDK boundary (hard rule)
 
 The `sicompass` app crate (`src/sicompass/src/**`) must not import any `lib_*`

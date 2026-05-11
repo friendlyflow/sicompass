@@ -184,7 +184,7 @@ pub fn commit_edit(renderer: &mut AppRenderer, old: &str, new: &str) -> bool {
         Some(i) => i,
         None => return false,
     };
-    if let Some(p) = renderer.providers.get_mut(idx) {
+    let ok = if let Some(p) = renderer.providers.get_mut(idx) {
         let ok = p.commit_edit(old, new);
         if !ok {
             if let Some(err) = p.take_error() {
@@ -194,7 +194,11 @@ pub fn commit_edit(renderer: &mut AppRenderer, old: &str, new: &str) -> bool {
         ok
     } else {
         false
+    };
+    if ok {
+        push_provider_entries_if_present(renderer, idx);
     }
+    ok
 }
 
 /// Delete a file or directory by name via the active provider.
@@ -203,7 +207,7 @@ pub fn delete_item_by_name(renderer: &mut AppRenderer, name: &str) -> bool {
         Some(i) => i,
         None => return false,
     };
-    if let Some(p) = renderer.providers.get_mut(idx) {
+    let ok = if let Some(p) = renderer.providers.get_mut(idx) {
         let ok = p.delete_item(name);
         if !ok {
             if let Some(err) = p.take_error() {
@@ -213,7 +217,11 @@ pub fn delete_item_by_name(renderer: &mut AppRenderer, name: &str) -> bool {
         ok
     } else {
         false
+    };
+    if ok {
+        push_provider_entries_if_present(renderer, idx);
     }
+    ok
 }
 
 /// Copy an item via the active provider.
@@ -387,6 +395,96 @@ pub(crate) fn push_provider_descriptor_if_present(
             crate::app_state::History::None,
         );
     }
+
+    // Unified-timeline dual-write: drain any TimelineEntry the provider has
+    // accumulated since the last call and push each through `record_entry`.
+    // Providers leave the `id` and `provider_idx` fields to be patched here,
+    // since they don't have access to the renderer's `current_id`.
+    push_provider_entries_if_present(renderer, provider_idx);
+}
+
+/// Drain a provider's `take_timeline_entries` queue and push each entry onto
+/// the active tab's timeline. Patches `provider_idx` and the leading id
+/// component so providers can emit without knowing the renderer's state.
+pub(crate) fn push_provider_entries_if_present(
+    renderer: &mut AppRenderer,
+    provider_idx: usize,
+) {
+    let entries = match renderer.providers.get_mut(provider_idx) {
+        Some(p) => p.take_timeline_entries(),
+        None => return,
+    };
+    if entries.is_empty() {
+        return;
+    }
+    let mut originator_id = sicompass_sdk::ffon::IdArray::new();
+    originator_id.push(provider_idx);
+    for entry in entries {
+        let patched = patch_provider_entry(entry, provider_idx, &originator_id);
+        crate::state::record_entry(renderer, patched);
+    }
+}
+
+fn patch_provider_entry(
+    entry: sicompass_sdk::timeline::TimelineEntry,
+    target_provider_idx: usize,
+    target_id: &sicompass_sdk::ffon::IdArray,
+) -> sicompass_sdk::timeline::TimelineEntry {
+    use sicompass_sdk::timeline::TimelineEntry;
+    match entry {
+        TimelineEntry::ProviderOp {
+            command,
+            payload,
+            label,
+            ..
+        } => TimelineEntry::ProviderOp {
+            provider_idx: target_provider_idx,
+            command,
+            payload,
+            label,
+        },
+        TimelineEntry::ImapOp { op, id, .. } => TimelineEntry::ImapOp {
+            provider_idx: target_provider_idx,
+            id: if id.depth() == 0 {
+                target_id.clone()
+            } else {
+                id
+            },
+            op,
+        },
+        TimelineEntry::ChatOp { op, id, .. } => TimelineEntry::ChatOp {
+            provider_idx: target_provider_idx,
+            id: if id.depth() == 0 {
+                target_id.clone()
+            } else {
+                id
+            },
+            op,
+        },
+        TimelineEntry::FsOp {
+            op,
+            id,
+            before,
+            after,
+            side_effect,
+            ..
+        } => TimelineEntry::FsOp {
+            provider_idx: target_provider_idx,
+            id: if id.depth() == 0 {
+                target_id.clone()
+            } else {
+                id
+            },
+            op,
+            before,
+            after,
+            side_effect,
+        },
+        // Navigate/TextChunk/Structural are app-emitted, not provider-emitted —
+        // but pass through unchanged in case a provider ever wants to emit them
+        // (e.g. lib_emailclient flagging body edits as TextChunks).
+        other => other,
+    }
 }
 
 /// Delete the currently selected item via the active provider.
@@ -418,6 +516,7 @@ pub fn delete_item(renderer: &mut AppRenderer) -> bool {
         .unwrap_or(false);
 
     if ok {
+        push_provider_entries_if_present(renderer, provider_idx);
         refresh_current_directory(renderer);
     }
     ok
@@ -472,6 +571,9 @@ pub fn notify_checkbox_changed(renderer: &mut AppRenderer, new_elem_text: &str) 
 
     if let Some(p) = get_active_provider(renderer) {
         p.on_checkbox_change(&label, checked);
+    }
+    if let Some(pi) = renderer.current_id.get(0) {
+        push_provider_entries_if_present(renderer, pi);
     }
 }
 
@@ -544,6 +646,9 @@ pub fn notify_radio_changed(renderer: &mut AppRenderer) {
 
     if let Some(p) = get_active_provider(renderer) {
         p.on_radio_change(&group_key, &selected_value);
+    }
+    if let Some(pi) = renderer.current_id.get(0) {
+        push_provider_entries_if_present(renderer, pi);
     }
 }
 
