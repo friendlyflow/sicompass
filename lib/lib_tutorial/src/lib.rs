@@ -158,7 +158,7 @@ static SECTIONS: &[Node] = &[
             Branch {
                 key: "What gets recorded",
                 children: &[
-                    Leaf("Every arrow-key navigation step. A burst of arrows collapses into one undo step so a long scroll is reversible in one press."),
+                    Leaf("Every arrow-key navigation step. Each press is its own undo step, so Ctrl+Z walks back one move at a time."),
                     Leaf("Typed text. Successive characters within about half a second merge into one chunk, so each undo removes a word-sized piece rather than one letter at a time."),
                     Leaf("Structural edits: creating, inserting, deleting, cutting, and pasting elements in the FFON tree."),
                     Leaf("Filesystem operations: creating, renaming, moving, and deleting files. Delete keeps a content snapshot up to 4 MiB so undo can restore the file even after the OS trash is emptied."),

@@ -22,7 +22,7 @@ Built for users who prefer or require keyboard-driven interaction, Sicompass off
 - **Cross-Platform** — Shipped and tested on Ubuntu today; paths, shells, and PTY plumbing route through platform helpers (XDG / `~/Library` / `%APPDATA%`, `bash`/`zsh`/`fish`/`pwsh`/`cmd.exe`, `forkpty`/ConPTY), with packaged macOS and Windows releases planned
 - **High-Performance Rendering** — Vulkan-powered graphics with FreeType2/HarfBuzz text shaping
 - **Extensible Architecture** — Provider-based plugin system with a built-in plugin store for hot enable/disable
-- **Unified Undo/Redo** — One ctrl-Z model covering navigation, typed text (coalesced per word burst), file create/rename/delete (with content snapshot for delete restore), email IMAP ops, Matrix room ops, and settings changes — per-tab history that walks back through navigation steps so undo retraces the path the user actually took
+- **Unified Undo/Redo** — One ctrl-Z model covering navigation (one step per arrow press), typed text (coalesced per word burst), file create/rename/delete (with content snapshot for delete restore), email IMAP ops, Matrix room ops, and settings changes — per-tab history that walks back through navigation steps so undo retraces the path the user actually took
 - **Simpler UI Development** — Functionality over design means less complexity and faster development with minimal styling, design doen't need to be programmed as it's already worked out
 
 ## Built-in Providers

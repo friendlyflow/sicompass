@@ -44,9 +44,8 @@ Undo/redo flows through `sicompass_sdk::timeline::TimelineEntry`, a tagged enum
 that subsumes every reversible action in the app:
 
 - `Navigate { from_id, to_id, from_path, to_path, kind }` — arrow-key cursor
-  motion. Consecutive arrow presses **coalesce into one entry** (the burst's
-  start `from_id`/`from_path` plus the latest `to_id`/`to_path`), so a 50-row
-  scroll is one undo step.
+  motion. Each press is recorded as its own entry; ctrl-Z walks the cursor
+  back one move at a time.
 - `TextChunk { id, before, after, chunk_seq }` — typed text. Repeated text
   edits on the same `id` within `TEXT_CHUNK_IDLE_MS` (default 500 ms) merge
   into the tail entry; typing a long word doesn't fill the timeline.
