@@ -6968,3 +6968,121 @@ fn settings_text_emits_provider_op_and_undoes() {
     let written = std::fs::read_to_string(tmp.path().join("settings.json")).unwrap();
     assert!(written.contains("\"test.greeting\": \"hello\""), "reverted on undo: {}", written);
 }
+
+// ---- Step 11: unified-timeline gate flip ----------------------------------
+
+#[test]
+fn unified_undo_reverts_path_changing_navigation() {
+    // Descend into a subdirectory (which DOES change the filebrowser path),
+    // then verify that ctrl-Z through the unified path restores the parent.
+    let mut h = Harness::new();
+    h.renderer.use_unified_timeline = true;
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r()); // enter the filebrowser's listing (no path change)
+    let parent_path = sicompass::provider::current_path(h.r()).to_owned();
+
+    let subdir_idx = h
+        .renderer
+        .total_list
+        .iter()
+        .position(|item| item.label.contains("subdir"))
+        .expect("subdir fixture");
+    h.renderer.list_index = subdir_idx;
+    h.renderer.current_id = h.renderer.total_list[subdir_idx].id.clone();
+    press_right(h.r()); // descend into subdir — pushes path
+    let inside_path = sicompass::provider::current_path(h.r()).to_owned();
+    assert_ne!(inside_path, parent_path, "subdir push changed the path");
+
+    press_ctrl(h.r(), Keycode::Z);
+    let after_undo_path = sicompass::provider::current_path(h.r()).to_owned();
+    assert_eq!(after_undo_path, parent_path, "undo restored parent path");
+}
+
+#[test]
+fn unified_redo_replays_path_changing_navigation() {
+    let mut h = Harness::new();
+    h.renderer.use_unified_timeline = true;
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+    let subdir_idx = h
+        .renderer
+        .total_list
+        .iter()
+        .position(|item| item.label.contains("subdir"))
+        .expect("subdir fixture");
+    h.renderer.list_index = subdir_idx;
+    h.renderer.current_id = h.renderer.total_list[subdir_idx].id.clone();
+    press_right(h.r());
+    let inside_path = sicompass::provider::current_path(h.r()).to_owned();
+    press_ctrl(h.r(), Keycode::Z);
+    press_ctrl_shift(h.r(), Keycode::Z);
+    let after_redo_path = sicompass::provider::current_path(h.r()).to_owned();
+    assert_eq!(after_redo_path, inside_path, "redo restored subdir path");
+}
+
+#[test]
+fn unified_undo_reverts_directory_creation() {
+    let mut h = Harness::new();
+    h.renderer.use_unified_timeline = true;
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+
+    let dir_name = "unified_undo_dir";
+    let dir_path = h.tmp.path().join(dir_name);
+    press_ctrl(h.r(), Keycode::I);
+    type_text(h.r(), &format!("+ {}", dir_name));
+    press_enter(h.r());
+    assert!(dir_path.exists(), "directory created on disk");
+
+    // ctrl-Z must walk back through the unified path and call delete_item.
+    press_ctrl(h.r(), Keycode::Z);
+    assert!(!dir_path.exists(), "ctrl-Z removed the directory");
+}
+
+#[test]
+fn unified_undo_reverts_file_deletion_with_snapshot() {
+    let mut h = Harness::new();
+    h.renderer.use_unified_timeline = true;
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+
+    let target = h.tmp.path().join("alpha.txt");
+    assert!(target.exists());
+    let alpha_idx = h
+        .renderer
+        .total_list
+        .iter()
+        .position(|item| item.label.contains("alpha.txt"))
+        .unwrap();
+    h.renderer.list_index = alpha_idx;
+    h.renderer.current_id = h.renderer.total_list[alpha_idx].id.clone();
+
+    sicompass::state::update_state(
+        h.r(),
+        sicompass::app_state::Task::Delete,
+        sicompass::app_state::History::None,
+    );
+    // The legacy Task::Delete only removes the FFON entry; the filebrowser's
+    // own delete_item is called via the explicit delete path. Call it directly
+    // here to mirror what the user-facing Delete keybind does, then exercise
+    // the unified undo path on the resulting FsOp::Delete entry.
+    let prior_entries_len = h.renderer.active_timeline().entries.len();
+    assert!(sicompass::provider::delete_item_by_name(h.r(), "alpha.txt"));
+    let new_entries = &h.renderer.active_timeline().entries[prior_entries_len..];
+    assert!(
+        new_entries.iter().any(|e| matches!(
+            e,
+            TimelineEntry::FsOp { op: sicompass_sdk::timeline::FsOpKind::Delete, .. }
+        )),
+        "delete_item_by_name emitted FsOp::Delete"
+    );
+    assert!(!target.exists(), "file gone from disk");
+
+    press_ctrl(h.r(), Keycode::Z);
+    assert!(target.exists(), "ctrl-Z restored the file");
+    assert_eq!(std::fs::read(&target).unwrap(), b"test content");
+}

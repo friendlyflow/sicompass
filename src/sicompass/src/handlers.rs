@@ -2210,13 +2210,21 @@ fn parse_creation_prefix(input: &str) -> (bool, bool, String) {
 
 /// Undo the last edit action.
 pub fn handle_undo(r: &mut AppRenderer) {
-    crate::state::handle_history_action(r, History::Undo);
+    if r.use_unified_timeline {
+        crate::state::walk_back(r);
+    } else {
+        crate::state::handle_history_action(r, History::Undo);
+    }
     r.needs_redraw = true;
 }
 
 /// Redo the last undone action.
 pub fn handle_redo(r: &mut AppRenderer) {
-    crate::state::handle_history_action(r, History::Redo);
+    if r.use_unified_timeline {
+        crate::state::walk_forward(r);
+    } else {
+        crate::state::handle_history_action(r, History::Redo);
+    }
     r.needs_redraw = true;
 }
 

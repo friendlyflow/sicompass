@@ -758,25 +758,46 @@ pub fn record_entry(r: &mut AppRenderer, entry: TimelineEntry) {
     let break_coalesce = just_branched || std::mem::take(&mut tl.coalesce_break);
 
     // Navigate coalescing: a burst of arrow keys is one entry.
+    //
+    // Coalesce only when the provider context is consistent — a Navigate that
+    // crosses from "no path tracking" (e.g. root provider-list navigation) into
+    // "path tracking" (e.g. descending into filebrowser) must NOT swallow the
+    // newer entry's `from_path`. Otherwise the merged entry's `from_path` is
+    // `None`, and undo cannot restore the filebrowser's pre-descent path.
     if !break_coalesce {
         if let TimelineEntry::Navigate {
-            to_id, to_path, kind, ..
+            provider_idx,
+            to_id,
+            to_path,
+            kind,
+            ..
         } = &entry
         {
-            if let Some(TimelineEntry::Navigate {
-                to_id: tail_to_id,
-                to_path: tail_to_path,
-                kind: tail_kind,
-                ..
-            }) = tl.entries.last_mut()
-            {
-                *tail_to_id = to_id.clone();
-                *tail_to_path = to_path.clone();
-                *tail_kind = *kind;
-                // Any navigation breaks an in-flight text-chunk run.
-                tl.last_text_id = None;
-                tl.last_text_edit_at = None;
-                return;
+            let new_has_path = to_path.is_some();
+            let can_coalesce = matches!(
+                tl.entries.last(),
+                Some(TimelineEntry::Navigate {
+                    provider_idx: tail_pidx,
+                    to_path: tail_tp,
+                    ..
+                }) if tail_pidx == provider_idx && tail_tp.is_some() == new_has_path
+            );
+            if can_coalesce {
+                if let Some(TimelineEntry::Navigate {
+                    to_id: tail_to_id,
+                    to_path: tail_to_path,
+                    kind: tail_kind,
+                    ..
+                }) = tl.entries.last_mut()
+                {
+                    *tail_to_id = to_id.clone();
+                    *tail_to_path = to_path.clone();
+                    *tail_kind = *kind;
+                    // Any navigation breaks an in-flight text-chunk run.
+                    tl.last_text_id = None;
+                    tl.last_text_edit_at = None;
+                    return;
+                }
             }
         }
     }
@@ -940,12 +961,33 @@ fn apply_undo(r: &mut AppRenderer, entry: &TimelineEntry) {
             _ => {}
         },
         TimelineEntry::FsOp {
+            provider_idx,
             id,
             op,
             before,
             after,
             ..
-        } => apply_fs_op_undo(r, id, *op, before.as_ref(), after.as_ref()),
+        } => {
+            // Delete / Move carry an `FsSideEffect` snapshot that only the
+            // provider knows how to reverse (write bytes back to disk,
+            // recreate a directory tree). Dispatch to `provider.undo` first
+            // so the disk-side restore runs, then fall through to the FFON
+            // reinsertion arm so the in-memory tree mirrors the file system.
+            if matches!(
+                op,
+                sicompass_sdk::timeline::FsOpKind::Delete
+                    | sicompass_sdk::timeline::FsOpKind::Move
+            ) {
+                let mut error = String::new();
+                if let Some(p) = r.providers.get_mut(*provider_idx) {
+                    p.undo(entry, &mut error);
+                }
+                if !error.is_empty() {
+                    r.error_message = error;
+                }
+            }
+            apply_fs_op_undo(r, id, *op, before.as_ref(), after.as_ref());
+        }
         TimelineEntry::ImapOp { provider_idx, .. }
         | TimelineEntry::ChatOp { provider_idx, .. }
         | TimelineEntry::ProviderOp { provider_idx, .. } => {
@@ -999,12 +1041,31 @@ fn apply_redo(r: &mut AppRenderer, entry: &TimelineEntry) {
             _ => {}
         },
         TimelineEntry::FsOp {
+            provider_idx,
             id,
             op,
             before,
             after,
             ..
-        } => apply_fs_op_redo(r, id, *op, before.as_ref(), after.as_ref()),
+        } => {
+            // Mirror the undo side: provider.redo handles the disk-side
+            // re-application for Delete/Move (re-trashes a restored file,
+            // re-moves a message).
+            if matches!(
+                op,
+                sicompass_sdk::timeline::FsOpKind::Delete
+                    | sicompass_sdk::timeline::FsOpKind::Move
+            ) {
+                let mut error = String::new();
+                if let Some(p) = r.providers.get_mut(*provider_idx) {
+                    p.redo(entry, &mut error);
+                }
+                if !error.is_empty() {
+                    r.error_message = error;
+                }
+            }
+            apply_fs_op_redo(r, id, *op, before.as_ref(), after.as_ref());
+        }
         TimelineEntry::ImapOp { provider_idx, .. }
         | TimelineEntry::ChatOp { provider_idx, .. }
         | TimelineEntry::ProviderOp { provider_idx, .. } => {
