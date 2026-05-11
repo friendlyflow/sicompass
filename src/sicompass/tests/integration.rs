@@ -2383,10 +2383,16 @@ fn ctrl_a_in_general_double_tap_does_append_append() {
     // Second Ctrl+A immediately — double tap: undo + AppendAppend.
     sicompass::handlers::handle_ctrl_a(&mut r, sicompass::app_state::History::None);
 
-    let last_task = r.undo_history.last().map(|e| e.task);
+    let tail = r.active_timeline().entries.last().cloned();
     assert!(
-        matches!(last_task, Some(Task::AppendAppend)),
-        "double-tap Ctrl+A should record AppendAppend in undo history, got {last_task:?}"
+        matches!(
+            tail,
+            Some(sicompass_sdk::timeline::TimelineEntry::Structural {
+                op: sicompass_sdk::timeline::StructuralOp::Append,
+                ..
+            })
+        ),
+        "double-tap Ctrl+A should leave a Structural::Append entry as the tail, got {tail:?}"
     );
 }
 
@@ -6976,7 +6982,6 @@ fn unified_undo_reverts_path_changing_navigation() {
     // Descend into a subdirectory (which DOES change the filebrowser path),
     // then verify that ctrl-Z through the unified path restores the parent.
     let mut h = Harness::new();
-    h.renderer.use_unified_timeline = true;
     let fb_idx = h.provider_idx("filebrowser").unwrap();
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r()); // enter the filebrowser's listing (no path change)
@@ -7002,7 +7007,6 @@ fn unified_undo_reverts_path_changing_navigation() {
 #[test]
 fn unified_redo_replays_path_changing_navigation() {
     let mut h = Harness::new();
-    h.renderer.use_unified_timeline = true;
     let fb_idx = h.provider_idx("filebrowser").unwrap();
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
@@ -7025,7 +7029,6 @@ fn unified_redo_replays_path_changing_navigation() {
 #[test]
 fn unified_undo_reverts_directory_creation() {
     let mut h = Harness::new();
-    h.renderer.use_unified_timeline = true;
     let fb_idx = h.provider_idx("filebrowser").unwrap();
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
@@ -7045,7 +7048,6 @@ fn unified_undo_reverts_directory_creation() {
 #[test]
 fn unified_undo_reverts_file_deletion_with_snapshot() {
     let mut h = Harness::new();
-    h.renderer.use_unified_timeline = true;
     let fb_idx = h.provider_idx("filebrowser").unwrap();
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());

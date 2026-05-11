@@ -41,7 +41,7 @@ mod messages;
 mod rooms;
 
 use sicompass_sdk::ffon::FfonElement;
-use sicompass_sdk::provider::{Provider, ProviderUndoDescriptor};
+use sicompass_sdk::provider::Provider;
 use sicompass_sdk::timeline::{ChatOpKind, TimelineEntry};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -173,8 +173,6 @@ pub struct ChatClientProvider {
     public_rooms_cache: Vec<(String, String)>,
     /// Per-room compose drafts: display_key → draft text.
     drafts: HashMap<String, String>,
-    /// Undo descriptor for the last reversible action.
-    last_undo_descriptor: Option<ProviderUndoDescriptor>,
     /// Unified-timeline emission queue. Drained by the app via
     /// `take_timeline_entries` after each command.
     pending_timeline_entries: Vec<TimelineEntry>,
@@ -206,7 +204,6 @@ impl ChatClientProvider {
             pending_action: None,
             public_rooms_cache: Vec::new(),
             drafts: HashMap::new(),
-            last_undo_descriptor: None,
             pending_timeline_entries: Vec::new(),
         }
     }
@@ -711,11 +708,6 @@ impl ChatClientProvider {
             PendingAction::KickMember { room_id, member_id } => {
                 match self.do_kick_member(&room_id, &member_id, text) {
                     Ok(()) => {
-                        self.last_undo_descriptor = Some(ProviderUndoDescriptor::new(
-                            "kick-member",
-                            FfonElement::new_str(serde_json::json!({ "room_id": room_id.clone(), "member_id": member_id.clone() }).to_string()),
-                            "kick member",
-                        ));
                         let reason = if text.is_empty() { None } else { Some(text.to_owned()) };
                         self.push_chat_op(ChatOpKind::KickMember {
                             room_id: room_id.clone(),
@@ -733,11 +725,6 @@ impl ChatClientProvider {
             PendingAction::BanMember { room_id, member_id } => {
                 match self.do_ban_member(&room_id, &member_id, text) {
                     Ok(()) => {
-                        self.last_undo_descriptor = Some(ProviderUndoDescriptor::new(
-                            "ban-member",
-                            FfonElement::new_str(serde_json::json!({ "room_id": room_id.clone(), "member_id": member_id.clone() }).to_string()),
-                            "ban member",
-                        ));
                         let reason = if text.is_empty() { None } else { Some(text.to_owned()) };
                         self.push_chat_op(ChatOpKind::BanMember {
                             room_id: room_id.clone(),
@@ -755,27 +742,6 @@ impl ChatClientProvider {
         }
     }
 
-    fn apply_undo_redo(&mut self, descriptor: &ProviderUndoDescriptor, is_undo: bool, error: &mut String) {
-        let json: serde_json::Value =
-            serde_json::from_str(descriptor.payload_str()).unwrap_or_default();
-        let room_id = json["room_id"].as_str().unwrap_or("");
-        let member_id = json["member_id"].as_str().unwrap_or("");
-        let label = if is_undo { "undo" } else { "redo" };
-        let result = match (descriptor.command.as_str(), is_undo) {
-            ("leave-room", true) => self.do_join(room_id).map(|_| ()),
-            ("leave-room", false) => self.do_leave(room_id),
-            ("accept-invite", true) => self.do_leave(room_id),
-            ("accept-invite", false) => self.do_join(room_id).map(|_| ()),
-            ("kick-member", true) => self.do_invite_user(room_id, member_id),
-            ("kick-member", false) => self.do_kick_member(room_id, member_id, ""),
-            ("ban-member", true) => self.do_unban_member(room_id, member_id),
-            ("ban-member", false) => self.do_ban_member(room_id, member_id, ""),
-            _ => Err(format!("unknown undo command: {}", descriptor.command)),
-        };
-        if let Err(e) = result {
-            *error = format!("{label} {} failed: {e}", descriptor.command);
-        }
-    }
 }
 
 impl Default for ChatClientProvider {
@@ -1279,11 +1245,6 @@ impl Provider for ChatClientProvider {
                 };
                 match self.do_leave(&room_id) {
                     Ok(()) => {
-                        self.last_undo_descriptor = Some(ProviderUndoDescriptor::new(
-                            "leave-room",
-                            FfonElement::new_str(serde_json::json!({ "room_id": room_id.clone() }).to_string()),
-                            "leave room",
-                        ));
                         self.push_chat_op(ChatOpKind::LeaveRoom {
                             room_id: room_id.clone(),
                         });
@@ -1311,11 +1272,6 @@ impl Provider for ChatClientProvider {
                 };
                 match self.do_join(&room_id) {
                     Ok(_) => {
-                        self.last_undo_descriptor = Some(ProviderUndoDescriptor::new(
-                            "accept-invite",
-                            FfonElement::new_str(serde_json::json!({ "room_id": room_id.clone() }).to_string()),
-                            "accept invite",
-                        ));
                         self.push_chat_op(ChatOpKind::AcceptInvite {
                             room_id: room_id.clone(),
                         });
@@ -1502,18 +1458,6 @@ impl Provider for ChatClientProvider {
 
     fn take_error(&mut self) -> Option<String> {
         self.take_error()
-    }
-
-    fn take_last_undo_descriptor(&mut self) -> Option<ProviderUndoDescriptor> {
-        self.last_undo_descriptor.take()
-    }
-
-    fn undo_command(&mut self, descriptor: &ProviderUndoDescriptor, error: &mut String) {
-        self.apply_undo_redo(descriptor, true, error);
-    }
-
-    fn redo_command(&mut self, descriptor: &ProviderUndoDescriptor, error: &mut String) {
-        self.apply_undo_redo(descriptor, false, error);
     }
 
     fn take_timeline_entries(&mut self) -> Vec<TimelineEntry> {
@@ -3159,65 +3103,6 @@ mod tests {
         p.push_path("nonexistent");
         let items = p.fetch();
         assert!(items.iter().any(|e| e.as_str().map_or(false, |s| s.contains("not found"))));
-    }
-
-    // ---- undo descriptor for destructive actions ----------------------------
-
-    #[test]
-    fn leave_room_sets_undo_descriptor() {
-        let (rt, server) = start_mock_server();
-        mount(
-            &rt,
-            &server,
-            Mock::given(method("POST"))
-                .and(wiremock::matchers::path_regex(".*leave.*"))
-                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({}))),
-        );
-        let mut p = provider_for(&server);
-        seed_room(&mut p, "!r:s", "General");
-        p.push_path("General");
-        let mut err = String::new();
-        p.handle_command("leave room", "General", 0, &mut err);
-        assert!(err.is_empty(), "leave must not error: {err}");
-        assert!(
-            p.last_undo_descriptor.is_some(),
-            "undo descriptor must be set after leave"
-        );
-        assert_eq!(p.last_undo_descriptor.as_ref().unwrap().command, "leave-room");
-        drop(rt);
-    }
-
-    #[test]
-    fn accept_invite_sets_undo_descriptor() {
-        let (rt, server) = start_mock_server();
-        mount(
-            &rt,
-            &server,
-            Mock::given(method("POST"))
-                .and(wiremock::matchers::path_regex(".*join.*"))
-                .respond_with(ResponseTemplate::new(200)
-                    .set_body_json(serde_json::json!({ "room_id": "!r:s" }))),
-        );
-        let mut p = provider_for(&server);
-        {
-            let mut cache = p.sync_cache.lock().unwrap();
-            cache.invites.insert(
-                "!r:s".to_owned(),
-                sync::InviteState {
-                    room_id: "!r:s".to_owned(),
-                    display_name: "Invited Room".to_owned(),
-                    inviter: "@bob:s".to_owned(),
-                },
-            );
-            cache.invite_display_to_id
-                .insert("[invite] Invited Room".to_owned(), "!r:s".to_owned());
-        }
-        let mut err = String::new();
-        p.handle_command("accept invite", "[invite] Invited Room", 0, &mut err);
-        assert!(err.is_empty(), "accept must not error: {err}");
-        assert!(p.last_undo_descriptor.is_some(), "undo descriptor must be set after accept");
-        assert_eq!(p.last_undo_descriptor.as_ref().unwrap().command, "accept-invite");
-        drop(rt);
     }
 
     // -- ChatOp unified-timeline emission tests -----------------------------

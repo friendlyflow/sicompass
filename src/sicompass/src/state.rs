@@ -1,16 +1,14 @@
-//! FFON mutation — mirrors `update.c` (`updateState`, `updateIds`, `updateFfon`,
-//! `updateHistory`, `handleHistoryAction`).
+//! FFON mutation: `update_state` rebuilds the FFON tree on every recordable
+//! task; `record_entry` / `walk_back` / `walk_forward` drive the per-tab
+//! `Timeline` for undo/redo.
 
 use crate::app_state::{
-    AppRenderer, Coordinate, History, Task, UndoEntry, TEXT_CHUNK_IDLE_MS, TIMELINE_CAPACITY,
+    AppRenderer, Coordinate, History, Task, TEXT_CHUNK_IDLE_MS, TIMELINE_CAPACITY,
 };
 use crate::list;
 use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray, next_layer_exists};
-use sicompass_sdk::provider::ProviderUndoDescriptor;
 use sicompass_sdk::timeline::{StructuralOp, StructuralPayload, TimelineEntry};
 use std::time::Instant;
-
-const UNDO_HISTORY_SIZE: usize = 100;
 
 // ---------------------------------------------------------------------------
 // Public entry point
@@ -114,7 +112,9 @@ pub fn update_state(r: &mut AppRenderer, task: Task, history: History) {
         None
     };
 
-    update_history(r, task, &record_id, prev_element, new_element, history);
+    let _ = record_id;
+    let _ = prev_element;
+    let _ = new_element;
 
     if let Some(entry) = timeline_payload {
         record_entry(r, entry);
@@ -357,378 +357,6 @@ pub fn update_ffon(r: &mut AppRenderer, line: &str, is_key: bool, task: Task, hi
     }
 }
 
-// ---------------------------------------------------------------------------
-// updateHistory
-// ---------------------------------------------------------------------------
-
-pub fn update_history(
-    r: &mut AppRenderer,
-    task: Task,
-    id: &IdArray,
-    prev_element: Option<FfonElement>,
-    new_element: Option<FfonElement>,
-    history: History,
-) {
-    if history != History::None {
-        return;
-    }
-
-    if !matches!(
-        task,
-        Task::Append
-            | Task::AppendAppend
-            | Task::Insert
-            | Task::InsertInsert
-            | Task::Delete
-            | Task::Input
-            | Task::Cut
-            | Task::Paste
-            | Task::FsCreate
-            | Task::FsRename
-            | Task::FsPaste
-            | Task::FsNavigate
-            | Task::ProviderCommand
-    ) {
-        return;
-    }
-
-    // Truncate redo entries beyond current position
-    if r.undo_position > 0 {
-        let new_count = r.undo_history.len().saturating_sub(r.undo_position);
-        r.undo_history.truncate(new_count);
-    }
-
-    // Remove oldest entry if at capacity
-    if r.undo_history.len() >= UNDO_HISTORY_SIZE {
-        r.undo_history.remove(0);
-    }
-
-    r.undo_history.push(UndoEntry {
-        id: id.clone(),
-        task,
-        prev_element,
-        new_element,
-    });
-    r.undo_position = 0;
-}
-
-// ---------------------------------------------------------------------------
-// handleHistoryAction (undo/redo)
-// ---------------------------------------------------------------------------
-
-pub fn handle_history_action(r: &mut AppRenderer, history: History) {
-    if r.undo_history.is_empty() {
-        r.error_message = "No undo history".to_owned();
-        return;
-    }
-
-    crate::handlers::handle_escape(r);
-
-    if history == History::Undo {
-        if r.undo_position >= r.undo_history.len() {
-            r.error_message = "Nothing to undo".to_owned();
-            return;
-        }
-
-        r.undo_position += 1;
-        let entry_idx = r.undo_history.len() - r.undo_position;
-        let entry_id = r.undo_history[entry_idx].id.clone();
-        let entry_task = r.undo_history[entry_idx].task;
-        let entry_prev = r.undo_history[entry_idx].prev_element.clone();
-        let entry_new_for_undo = r.undo_history[entry_idx].new_element.clone();
-
-        match entry_task {
-            Task::Append | Task::AppendAppend | Task::Insert | Task::InsertInsert => {
-                r.current_id = entry_id.clone();
-                crate::handlers::handle_delete(r, History::Undo);
-                upgrade_body_bare_placeholder(r, &entry_id);
-                sync_compose_body_if_body_element(r, &entry_id);
-                if r.current_id.last().unwrap_or(0) > 0 {
-                    let cur = r.current_id.last().unwrap_or(1);
-                    r.current_id.set_last(cur - 1);
-                }
-            }
-            Task::Delete | Task::Cut => {
-                if let Some(elem) = entry_prev {
-                    clear_sole_i_placeholder_if_body_element(r, &entry_id);
-                    insert_element_at_id(r, &entry_id, elem);
-                    r.current_id = entry_id.clone();
-                    // Keep compose.draft.body in sync when undoing a body-element delete.
-                    // Body elements are at depth >= 3 (provider / body-Obj / element).
-                    sync_compose_body_if_body_element(r, &entry_id);
-                }
-            }
-            Task::Input | Task::Paste => {
-                if let Some(elem) = entry_prev {
-                    replace_element_at_id(r, &entry_id, elem);
-                    r.current_id = entry_id;
-                }
-            }
-            Task::FsCreate => {
-                let undo_elem = r.undo_history[entry_idx].new_element.clone();
-                if let Some(elem) = undo_elem {
-                    let name = match &elem {
-                        sicompass_sdk::ffon::FfonElement::Str(s) => s.clone(),
-                        sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.clone(),
-                    };
-                    // Navigate back to the level where the item was created.
-                    // In the Rust filebrowser, navigation into a directory does NOT
-                    // increase current_id.depth — ffon[0] is replaced in-place and
-                    // depth stays at 2. So we can't use the C-style depth comparison.
-                    // Instead: for a directory, check if the provider's current path
-                    // ends with the directory name (meaning we navigated into it).
-                    let is_dir = matches!(elem, sicompass_sdk::ffon::FfonElement::Obj(_));
-                    if is_dir {
-                        let cur_path = crate::provider::current_path(r).to_owned();
-                        let tail = format!("/{}", name);
-                        if cur_path.ends_with(&tail) || cur_path == name {
-                            crate::provider::pop_path(r);
-                        }
-                    }
-                    // Also handle the rare case where C-style depth nesting did occur
-                    // (e.g. non-filebrowser providers that do increase depth).
-                    while r.current_id.depth() > entry_id.depth() && r.current_id.depth() > 1 {
-                        crate::provider::pop_path(r);
-                        r.current_id.pop();
-                    }
-                    r.current_id = entry_id.clone();
-                    crate::provider::delete_item_by_name(r, &name);
-                    crate::provider::refresh_current_directory(r);
-                    // If the directory is now empty, insert a placeholder so the
-                    // list is never blank — mirrors what update_ffon does for Task::Delete.
-                    let parent_len = get_parent_len(&r.ffon, &entry_id);
-                    if parent_len == 0 {
-                        insert_at(&mut r.ffon, &entry_id, 0,
-                            sicompass_sdk::ffon::FfonElement::new_str("<input></input>"));
-                        r.current_id.set_last(0);
-                    } else if let Some(idx) = r.current_id.last() {
-                        if idx >= parent_len {
-                            r.current_id.set_last(parent_len - 1);
-                        }
-                    }
-                }
-            }
-            Task::FsNavigate => {
-                // Undo navigation: restore path_before, set current_id to pre-nav id.
-                if let Some(prev_elem) = entry_prev {
-                    let path_before = elem_key_str(&prev_elem);
-                    let provider_idx = entry_id.get(0).unwrap_or(0);
-                    let mut restore_id = sicompass_sdk::ffon::IdArray::new();
-                    restore_id.push(provider_idx);
-                    r.current_id = restore_id.clone();
-                    crate::provider::set_provider_path(r, &path_before);
-                    crate::provider::refresh_current_directory(r);
-                    // cursor: use last component of entry_id as the item index at that level
-                    let item_idx = r.undo_history[entry_idx].id.get(1).unwrap_or(0);
-                    restore_id.push(item_idx);
-                    r.current_id = restore_id;
-                }
-            }
-            Task::FsRename => {
-                // Undo rename: call commit_edit in reverse (new→old), restore prev element.
-                if let (Some(prev_elem), Some(new_elem)) = (entry_prev, entry_new_for_undo) {
-                    let old_str = elem_key_str(&new_elem); // current name on disk
-                    let new_str = elem_key_str(&prev_elem); // name to restore
-                    r.current_id = entry_id.clone();
-                    crate::provider::commit_edit(r, &old_str, &new_str);
-                    replace_element_at_id(r, &entry_id, prev_elem);
-                    crate::provider::refresh_current_directory(r);
-                    r.current_id = entry_id;
-                }
-            }
-            Task::FsPaste => {
-                // Undo paste: delete the pasted file by name.
-                if let Some(new_elem) = entry_new_for_undo {
-                    let name = sicompass_sdk::tags::strip_display(&elem_key_str(&new_elem)).to_owned();
-                    r.current_id = entry_id.clone();
-                    crate::provider::delete_item_by_name(r, &name);
-                    crate::provider::refresh_current_directory(r);
-                    let parent_len = get_parent_len(&r.ffon, &entry_id);
-                    if parent_len == 0 {
-                        insert_at(&mut r.ffon, &entry_id, 0,
-                            sicompass_sdk::ffon::FfonElement::new_str("<input></input>"));
-                        r.current_id.set_last(0);
-                    } else if let Some(idx) = r.current_id.last() {
-                        if idx >= parent_len {
-                            r.current_id.set_last(parent_len - 1);
-                        }
-                    }
-                }
-            }
-            Task::ProviderCommand => {
-                // Dispatch undo to the originating provider (entry_id[0]).
-                // We do NOT go through crate::provider::handle_command because that
-                // wrapper routes by renderer.current_id[0] — the active provider —
-                // which may differ from the originator after the user navigated away.
-                let provider_idx = entry_id.get(0).unwrap_or(0);
-                if let Some(desc) = deserialize_provider_descriptor(entry_new_for_undo.as_ref()) {
-                    let mut error = String::new();
-                    let pname = r.providers.get(provider_idx)
-                        .map(|p| p.display_name().to_owned());
-                    if let Some(p) = r.providers.get_mut(provider_idx) {
-                        p.undo_command(&desc, &mut error);
-                    }
-                    if !error.is_empty() {
-                        r.error_message = error;
-                    } else if r.current_id.get(0) == Some(provider_idx) {
-                        crate::provider::refresh_current_directory(r);
-                    } else {
-                        r.error_message = format!("undid {} on {}",
-                            desc.command,
-                            pname.as_deref().unwrap_or("provider"));
-                    }
-                }
-            }
-            _ => {}
-        }
-    } else if history == History::Redo {
-        if r.undo_position == 0 {
-            r.error_message = "Nothing to redo".to_owned();
-            return;
-        }
-
-        let entry_idx = r.undo_history.len() - r.undo_position;
-        r.undo_position -= 1;
-        let entry_id = r.undo_history[entry_idx].id.clone();
-        let entry_task = r.undo_history[entry_idx].task;
-        let entry_prev_for_redo = r.undo_history[entry_idx].prev_element.clone();
-        let entry_new = r.undo_history[entry_idx].new_element.clone();
-
-        match entry_task {
-            Task::Append | Task::AppendAppend | Task::Insert | Task::InsertInsert => {
-                if let Some(elem) = entry_new {
-                    clear_sole_i_placeholder_if_body_element(r, &entry_id);
-                    insert_element_at_id(r, &entry_id, elem);
-                    r.current_id = entry_id.clone();
-                    sync_compose_body_if_body_element(r, &entry_id);
-                }
-            }
-            Task::Delete | Task::Cut => {
-                r.current_id = entry_id.clone();
-                crate::handlers::handle_delete(r, History::Redo);
-                upgrade_body_bare_placeholder(r, &entry_id);
-                // Keep compose.draft.body in sync when redoing a body-element delete.
-                sync_compose_body_if_body_element(r, &entry_id);
-                let count = get_parent_len(&r.ffon, &entry_id);
-                if let Some(idx) = r.current_id.last() {
-                    if idx >= count && count > 0 {
-                        r.current_id.set_last(count - 1);
-                    }
-                }
-            }
-            Task::Input | Task::Paste => {
-                if let Some(elem) = entry_new {
-                    replace_element_at_id(r, &entry_id, elem);
-                    r.current_id = entry_id;
-                }
-            }
-            Task::FsCreate => {
-                if let Some(elem) = entry_new {
-                    let name = match &elem {
-                        sicompass_sdk::ffon::FfonElement::Str(s) => s.clone(),
-                        sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.clone(),
-                    };
-                    let is_dir = matches!(elem, sicompass_sdk::ffon::FfonElement::Obj(_));
-                    r.current_id = entry_id.clone();
-                    if is_dir {
-                        crate::provider::create_directory(r, &name);
-                        // Mirror navigate_right_raw for filebrowser: push_path THEN refresh,
-                        // keep current_id at depth 2 (don't increase depth).
-                        crate::provider::push_path(r, &name);
-                        crate::provider::refresh_current_directory(r);
-                        let provider_idx = r.current_id.get(0).unwrap_or(0);
-                        // Insert placeholder if the new directory is empty
-                        if let Some(root) = r.ffon.get_mut(provider_idx) {
-                            if let Some(obj) = root.as_obj_mut() {
-                                if obj.children.is_empty() {
-                                    obj.children.push(sicompass_sdk::ffon::FfonElement::new_str("<input></input>"));
-                                }
-                            }
-                        }
-                        let mut new_id = sicompass_sdk::ffon::IdArray::new();
-                        new_id.push(provider_idx);
-                        new_id.push(0);
-                        r.current_id = new_id;
-                    } else {
-                        crate::provider::create_file(r, &name);
-                        crate::provider::refresh_current_directory(r);
-                    }
-                }
-            }
-            Task::FsNavigate => {
-                // Redo navigation: restore path_after, go back to depth-2 index 0.
-                if let Some(new_elem) = entry_new {
-                    let path_after = elem_key_str(&new_elem);
-                    let provider_idx = entry_id.get(0).unwrap_or(0);
-                    let mut new_id = sicompass_sdk::ffon::IdArray::new();
-                    new_id.push(provider_idx);
-                    r.current_id = new_id;
-                    crate::provider::set_provider_path(r, &path_after);
-                    crate::provider::refresh_current_directory(r);
-                    let mut nav_id = sicompass_sdk::ffon::IdArray::new();
-                    nav_id.push(provider_idx);
-                    nav_id.push(0);
-                    r.current_id = nav_id;
-                }
-            }
-            Task::FsRename => {
-                // Redo rename: call commit_edit forward (old→new), restore new element.
-                if let (Some(prev_elem), Some(new_elem)) = (entry_prev_for_redo, entry_new) {
-                    let old_str = elem_key_str(&prev_elem); // current name on disk
-                    let new_str = elem_key_str(&new_elem);  // name to restore
-                    r.current_id = entry_id.clone();
-                    crate::provider::commit_edit(r, &old_str, &new_str);
-                    replace_element_at_id(r, &entry_id, new_elem);
-                    crate::provider::refresh_current_directory(r);
-                    r.current_id = entry_id;
-                }
-            }
-            Task::FsPaste => {
-                // Redo paste: re-copy from src_path (stored in prev_element) to current dir.
-                // prev_element holds the source path as a Str; new_element holds the dest element.
-                if let (Some(src_elem), Some(dest_elem)) = (entry_prev_for_redo, entry_new) {
-                    let src_path = match &src_elem { sicompass_sdk::ffon::FfonElement::Str(s) => s.clone(), sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.clone() };
-                    let dest_name = sicompass_sdk::tags::strip_display(&elem_key_str(&dest_elem)).to_owned();
-                    let slash = src_path.rfind('/').unwrap_or(0);
-                    let src_dir = &src_path[..slash];
-                    let src_name = &src_path[slash + 1..];
-                    r.current_id = entry_id.clone();
-                    let dest_dir = crate::provider::current_path(r).to_owned();
-                    crate::provider::copy_item(r, src_dir, src_name, &dest_dir, &dest_name);
-                    crate::provider::refresh_current_directory(r);
-                    r.current_id = entry_id;
-                }
-            }
-            Task::ProviderCommand => {
-                // Dispatch redo to the originating provider (entry_id[0]). Same routing
-                // rationale as the undo arm: bypass the active-provider wrapper.
-                let provider_idx = entry_id.get(0).unwrap_or(0);
-                if let Some(desc) = deserialize_provider_descriptor(entry_new.as_ref()) {
-                    let mut error = String::new();
-                    let pname = r.providers.get(provider_idx)
-                        .map(|p| p.display_name().to_owned());
-                    if let Some(p) = r.providers.get_mut(provider_idx) {
-                        p.redo_command(&desc, &mut error);
-                    }
-                    if !error.is_empty() {
-                        r.error_message = error;
-                    } else if r.current_id.get(0) == Some(provider_idx) {
-                        crate::provider::refresh_current_directory(r);
-                    } else {
-                        r.error_message = format!("redid {} on {}",
-                            desc.command,
-                            pname.as_deref().unwrap_or("provider"));
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    list::create_list_current_layer(r);
-    r.list_index = r.current_id.last().unwrap_or(0);
-    r.scroll_offset = r.list_index as i32;
-}
 
 // ---------------------------------------------------------------------------
 // Unified Timeline dispatcher (new model)
@@ -742,6 +370,11 @@ pub fn handle_history_action(r: &mut AppRenderer, history: History) {
 /// both stacks coexist; this function is dormant until `use_unified_timeline`
 /// flips to `true`.
 pub fn record_entry(r: &mut AppRenderer, entry: TimelineEntry) {
+    if r.in_history_action {
+        // Side-effect emission during undo/redo — discard so the original
+        // entry remains the next redo target.
+        return;
+    }
     let tl = r.active_timeline_mut();
 
     // Truncate the redo branch on a new action. The truncation itself implies
@@ -773,6 +406,10 @@ pub fn record_entry(r: &mut AppRenderer, entry: TimelineEntry) {
             ..
         } = &entry
         {
+            // Coalesce same-provider Navigates only when no path change is
+            // happening: an idle scroll (same path before/after, or both `None`)
+            // collapses into one entry, but a Right-press that descends into a
+            // subdirectory (path changes) is always its own undo step.
             let new_has_path = to_path.is_some();
             let can_coalesce = matches!(
                 tl.entries.last(),
@@ -780,7 +417,9 @@ pub fn record_entry(r: &mut AppRenderer, entry: TimelineEntry) {
                     provider_idx: tail_pidx,
                     to_path: tail_tp,
                     ..
-                }) if tail_pidx == provider_idx && tail_tp.is_some() == new_has_path
+                }) if tail_pidx == provider_idx
+                    && tail_tp.is_some() == new_has_path
+                    && tail_tp.as_ref() == to_path.as_ref()
             );
             if can_coalesce {
                 if let Some(TimelineEntry::Navigate {
@@ -883,11 +522,22 @@ pub fn walk_back(r: &mut AppRenderer) {
         tl.entries[idx].clone()
     };
 
+    r.in_history_action = true;
     apply_undo(r, &entry);
+    discard_provider_emissions(r);
+    r.in_history_action = false;
 
     list::create_list_current_layer(r);
     r.list_index = r.current_id.last().unwrap_or(0);
     r.scroll_offset = r.list_index as i32;
+}
+
+/// Drain (and throw away) any TimelineEntry that providers emitted as a side
+/// effect of `walk_back` / `walk_forward`.
+fn discard_provider_emissions(r: &mut AppRenderer) {
+    for p in r.providers.iter_mut() {
+        let _ = p.take_timeline_entries();
+    }
 }
 
 /// Apply one redo step to the active tab's timeline.
@@ -911,7 +561,10 @@ pub fn walk_forward(r: &mut AppRenderer) {
         tl.entries[idx].clone()
     };
 
+    r.in_history_action = true;
     apply_redo(r, &entry);
+    discard_provider_emissions(r);
+    r.in_history_action = false;
 
     list::create_list_current_layer(r);
     r.list_index = r.current_id.last().unwrap_or(0);
@@ -921,13 +574,21 @@ pub fn walk_forward(r: &mut AppRenderer) {
 fn apply_undo(r: &mut AppRenderer, entry: &TimelineEntry) {
     match entry {
         TimelineEntry::Navigate {
+            provider_idx,
             from_id, from_path, ..
         } => {
-            r.current_id = from_id.clone();
             if let Some(path) = from_path {
+                // Refresh-on-navigate providers (filebrowser, email): reset
+                // cursor to the provider root before switching paths so the
+                // re-fetch lands on the correct content, then put the cursor
+                // back where it was at the moment of navigation.
+                let mut root_id = IdArray::new();
+                root_id.push(*provider_idx);
+                r.current_id = root_id;
                 crate::provider::set_provider_path(r, path);
                 crate::provider::refresh_current_directory(r);
             }
+            r.current_id = from_id.clone();
         }
         TimelineEntry::TextChunk { id, before, .. } => {
             replace_element_at_id(r, id, before.clone());
@@ -999,13 +660,17 @@ fn apply_undo(r: &mut AppRenderer, entry: &TimelineEntry) {
 fn apply_redo(r: &mut AppRenderer, entry: &TimelineEntry) {
     match entry {
         TimelineEntry::Navigate {
+            provider_idx,
             to_id, to_path, ..
         } => {
-            r.current_id = to_id.clone();
             if let Some(path) = to_path {
+                let mut root_id = IdArray::new();
+                root_id.push(*provider_idx);
+                r.current_id = root_id;
                 crate::provider::set_provider_path(r, path);
                 crate::provider::refresh_current_directory(r);
             }
+            r.current_id = to_id.clone();
         }
         TimelineEntry::TextChunk { id, after, .. } => {
             replace_element_at_id(r, id, after.clone());
@@ -1269,27 +934,6 @@ fn dispatch_provider_redo(r: &mut AppRenderer, provider_idx: usize, entry: &Time
 // ---------------------------------------------------------------------------
 // Helpers — FFON mutation primitives
 // ---------------------------------------------------------------------------
-
-/// Reconstruct a `ProviderUndoDescriptor` from the serialized `FfonElement::Obj`
-/// stored in `UndoEntry::new_element` for `Task::ProviderCommand` entries.
-///
-/// Layout: `Obj { key: command, children: [payload_elem, Str(label)] }`.
-fn deserialize_provider_descriptor(elem: Option<&FfonElement>) -> Option<ProviderUndoDescriptor> {
-    let obj = match elem? {
-        FfonElement::Obj(o) => o,
-        _ => return None,
-    };
-    let payload = obj.children.first()?.clone();
-    let label = match obj.children.get(1) {
-        Some(FfonElement::Str(s)) => s.clone(),
-        _ => String::new(),
-    };
-    Some(ProviderUndoDescriptor {
-        command: obj.key.clone(),
-        payload,
-        label,
-    })
-}
 
 /// Extract the key/string from an FfonElement (used by FsRename/FsPaste undo/redo).
 fn elem_key_str(elem: &sicompass_sdk::ffon::FfonElement) -> String {
@@ -1657,8 +1301,12 @@ mod tests {
         r.coordinate = Coordinate::Insert;
         r.input_buffer = "after".to_owned();
         update_state(&mut r, Task::Input, History::None);
-        assert_eq!(r.undo_history.len(), 1);
-        assert_eq!(r.undo_history[0].task, Task::Input);
+        let tl = r.active_timeline();
+        assert_eq!(tl.entries.len(), 1);
+        assert!(matches!(
+            tl.entries[0],
+            TimelineEntry::TextChunk { .. }
+        ));
     }
 
     // --- is_line_key (additional) ---
@@ -1695,56 +1343,23 @@ mod tests {
         assert_eq!(strip_trailing_colon(""), "");
     }
 
-    // --- update_history ---
+    // --- record_entry ---
 
     #[test]
-    fn update_history_skips_non_none_history() {
+    fn record_entry_pushes_text_chunk() {
         let mut r = AppRenderer::new();
-        let id = IdArray::new();
-        update_history(&mut r, Task::Input, &id, None, None, History::Undo);
-        assert_eq!(r.undo_history.len(), 0);
-    }
-
-    #[test]
-    fn update_history_skips_navigation_tasks() {
-        let mut r = AppRenderer::new();
-        let id = IdArray::new();
-        update_history(&mut r, Task::ArrowUp, &id, None, None, History::None);
-        update_history(&mut r, Task::ArrowDown, &id, None, None, History::None);
-        assert_eq!(r.undo_history.len(), 0);
-    }
-
-    #[test]
-    fn update_history_adds_entry() {
-        let mut r = AppRenderer::new();
-        let mut id = IdArray::new();
-        id.push(0);
-        id.push(2);
-        let prev = FfonElement::new_str("old");
-        let new = FfonElement::new_str("new");
-        update_history(&mut r, Task::Input, &id, Some(prev), Some(new), History::None);
-        assert_eq!(r.undo_history.len(), 1);
-        assert_eq!(r.undo_history[0].task, Task::Input);
-    }
-
-    #[test]
-    fn update_history_multiple_entries() {
-        let mut r = AppRenderer::new();
-        let id = IdArray::new();
-        for _ in 0..5 {
-            update_history(&mut r, Task::Input, &id, None, None, History::None);
-        }
-        assert_eq!(r.undo_history.len(), 5);
-    }
-
-    #[test]
-    fn update_history_null_elements_stored() {
-        let mut r = AppRenderer::new();
-        let id = IdArray::new();
-        update_history(&mut r, Task::Delete, &id, None, None, History::None);
-        assert_eq!(r.undo_history.len(), 1);
-        assert!(r.undo_history[0].prev_element.is_none());
-        assert!(r.undo_history[0].new_element.is_none());
+        let entry = TimelineEntry::TextChunk {
+            id: {
+                let mut id = IdArray::new();
+                id.push(0);
+                id
+            },
+            before: FfonElement::Str("a".into()),
+            after: FfonElement::Str("ab".into()),
+            chunk_seq: 0,
+        };
+        record_entry(&mut r, entry);
+        assert_eq!(r.active_timeline().entries.len(), 1);
     }
 
     // --- update_ids (additional boundary cases) ---

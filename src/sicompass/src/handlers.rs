@@ -106,9 +106,26 @@ pub fn handle_down(r: &mut AppRenderer) {
     }
 }
 
-/// Push an `FsOp` entry onto the active tab's timeline. Dual-write helper
-/// used during the undo/redo refactor — emits TimelineEntry alongside the
-/// legacy Task::FsCreate / Task::FsRename / Task::FsPaste stack.
+/// Pop the last timeline entry if it is a `Structural` Insert/Append for a
+/// transient placeholder that the caller is about to replace with a
+/// higher-level `FsOp::Create` entry. Without this, every create flow leaves
+/// two undo steps (the placeholder + the create) which would require two
+/// ctrl-Z presses to fully reverse.
+fn pop_last_placeholder_structural(r: &mut AppRenderer) {
+    let tl = r.active_timeline_mut();
+    if matches!(
+        tl.entries.last(),
+        Some(sicompass_sdk::timeline::TimelineEntry::Structural {
+            op: sicompass_sdk::timeline::StructuralOp::Insert
+                | sicompass_sdk::timeline::StructuralOp::Append,
+            ..
+        })
+    ) {
+        tl.entries.pop();
+    }
+}
+
+/// Push an `FsOp` entry onto the active tab's timeline.
 fn record_fs_op(
     r: &mut AppRenderer,
     id: sicompass_sdk::ffon::IdArray,
@@ -350,24 +367,10 @@ pub fn handle_right(r: &mut AppRenderer) {
     let pre_nav_id = item_id.clone();
     r.current_id = item_id;
     if navigate_right_raw(r) {
-        if is_fb {
-            if let Some(pb) = path_before.clone() {
-                let path_after = crate::provider::current_path(r).to_owned();
-                if path_after != pb {
-                    // id stored = pre-nav id (so undo knows where cursor was)
-                    crate::state::update_history(
-                        r, Task::FsNavigate, &pre_nav_id,
-                        Some(FfonElement::new_str(pb)),
-                        Some(FfonElement::new_str(path_after)),
-                        History::None,
-                    );
-                }
-            }
-        }
         list::create_list_current_layer(r);
         r.sync_current_id_from_list();
         r.caret.reset(sdl_ticks());
-        // Dual-write the new TimelineEntry::Navigate alongside the legacy stack.
+        // Emit a TimelineEntry::Navigate for the unified undo stack.
         let provider_idx = r.current_id.get(0).unwrap_or(0);
         let entry = sicompass_sdk::timeline::TimelineEntry::Navigate {
             provider_idx,
@@ -563,24 +566,12 @@ pub fn handle_left(r: &mut AppRenderer) {
     let path_before = if is_fb { Some(crate::provider::current_path(r).to_owned()) } else { None };
     let pre_nav_id = r.current_id.clone();
     if navigate_left_raw(r) {
-        if is_fb {
-            if let Some(pb) = path_before.clone() {
-                let path_after = crate::provider::current_path(r).to_owned();
-                if path_after != pb {
-                    crate::state::update_history(
-                        r, Task::FsNavigate, &pre_nav_id,
-                        Some(FfonElement::new_str(pb)),
-                        Some(FfonElement::new_str(path_after)),
-                        History::None,
-                    );
-                }
-            }
-        }
+        let _ = is_fb;
         r.scroll_offset = 0;
         list::create_list_current_layer(r);
         r.sync_current_id_from_list();
         r.caret.reset(sdl_ticks());
-        // Dual-write the new TimelineEntry::Navigate alongside the legacy stack.
+        // Emit a TimelineEntry::Navigate for the unified undo stack.
         let provider_idx = r.current_id.get(0).unwrap_or(0);
         let entry = sicompass_sdk::timeline::TimelineEntry::Navigate {
             provider_idx,
@@ -1138,8 +1129,13 @@ pub fn handle_enter_general(r: &mut AppRenderer) {
                             root_obj.children = new_children;
                         }
                         if let Some(p) = r.providers.get_mut(src_idx) { p.set_current_path("/"); }
-                        r.undo_history.clear();
-                        r.undo_position = 0;
+                        for tl in r.tab_timelines.iter_mut() {
+                            tl.entries.clear();
+                            tl.position = 0;
+                            tl.last_text_id = None;
+                            tl.last_text_edit_at = None;
+                            tl.coalesce_break = false;
+                        }
                         r.current_save_path = full_path.clone();
                         r.error_message = format!("Loaded from {full_path}");
                         true
@@ -1610,7 +1606,12 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                             })
                         };
                         if let Some((cid, elem)) = entry {
-                            crate::state::update_history(r, crate::app_state::Task::Insert, &cid, None, Some(elem), crate::app_state::History::None);
+                            let tl_entry = sicompass_sdk::timeline::TimelineEntry::Structural {
+                                id: cid,
+                                op: sicompass_sdk::timeline::StructuralOp::Insert,
+                                payload: sicompass_sdk::timeline::StructuralPayload::Inserted(elem),
+                            };
+                            crate::state::record_entry(r, tl_entry);
                         }
                     }
                 } else {
@@ -1673,7 +1674,12 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                             })
                         };
                         if let Some((cid, elem)) = entry {
-                            crate::state::update_history(r, crate::app_state::Task::Insert, &cid, None, Some(elem), crate::app_state::History::None);
+                            let tl_entry = sicompass_sdk::timeline::TimelineEntry::Structural {
+                                id: cid,
+                                op: sicompass_sdk::timeline::StructuralOp::Insert,
+                                payload: sicompass_sdk::timeline::StructuralPayload::Inserted(elem),
+                            };
+                            crate::state::record_entry(r, tl_entry);
                         }
                     }
                 } else {
@@ -1823,10 +1829,8 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
             return; // stay in insert mode
         }
 
-        // Discard the placeholder Insert/Append undo entry (replaced by FsCreate below)
-        if r.undo_history.last().map(|e| matches!(e.task, Task::Insert | Task::InsertInsert | Task::Append | Task::AppendAppend)).unwrap_or(false) {
-            r.undo_history.pop();
-        }
+        // Discard the placeholder Structural::Insert/Append entry (subsumed by FsOp::Create below)
+        pop_last_placeholder_structural(r);
 
         // Record FsCreate undo entry (Str = file, Obj = directory)
         let undo_elem = if is_dir {
@@ -1834,10 +1838,6 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
         } else {
             FfonElement::new_str(item_name.clone())
         };
-        crate::state::update_history(
-            r, Task::FsCreate, &undo_id,
-            None, Some(undo_elem.clone()), History::None,
-        );
         record_fs_op(r, undo_id.clone(), sicompass_sdk::timeline::FsOpKind::Create, None, Some(undo_elem));
 
         r.prefixed_insert_mode = false;
@@ -1874,11 +1874,8 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
     if old_content.is_empty() && r.input_prefix.is_empty() && is_obj && !new_content.is_empty() {
         let undo_id = r.current_id.clone();
         if crate::provider::create_directory(r, &new_content) {
-            if r.undo_history.last().map(|e| matches!(e.task, Task::Insert | Task::InsertInsert | Task::Append | Task::AppendAppend)).unwrap_or(false) {
-                r.undo_history.pop();
-            }
+            pop_last_placeholder_structural(r);
             let dir_elem = FfonElement::new_obj(&new_content);
-            crate::state::update_history(r, Task::FsCreate, &undo_id, None, Some(dir_elem.clone()), History::None);
             record_fs_op(r, undo_id.clone(), sicompass_sdk::timeline::FsOpKind::Create, None, Some(dir_elem));
             r.placeholder_cancel = None;
             crate::provider::refresh_current_directory(r);
@@ -1912,11 +1909,8 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
     if old_content.is_empty() && r.input_prefix.is_empty() && !is_obj && !new_content.is_empty() {
         let undo_id = r.current_id.clone();
         if crate::provider::create_file(r, &new_content) {
-            if r.undo_history.last().map(|e| matches!(e.task, Task::Insert | Task::InsertInsert | Task::Append | Task::AppendAppend)).unwrap_or(false) {
-                r.undo_history.pop();
-            }
+            pop_last_placeholder_structural(r);
             let file_elem = FfonElement::new_str(new_content.clone());
-            crate::state::update_history(r, Task::FsCreate, &undo_id, None, Some(file_elem.clone()), History::None);
             record_fs_op(r, undo_id.clone(), sicompass_sdk::timeline::FsOpKind::Create, None, Some(file_elem));
             crate::provider::refresh_current_directory(r);
             list::create_list_current_layer(r);
@@ -2052,7 +2046,6 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
             .and_then(|arr| arr.get(new_idx))
             .cloned();
         if let (Some(prev), Some(new)) = (prev_elem_for_rename.clone(), new_elem_for_rename) {
-            crate::state::update_history(r, Task::FsRename, &rename_id, Some(prev.clone()), Some(new.clone()), History::None);
             record_fs_op(
                 r,
                 rename_id.clone(),
@@ -2093,7 +2086,6 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                 .and_then(|arr| arr.get(new_idx))
                 .cloned();
             if let (Some(prev), Some(new)) = (prev_elem_for_rename, new_elem_for_undo) {
-                crate::state::update_history(r, Task::FsRename, &rename_id, Some(prev.clone()), Some(new.clone()), History::None);
                 record_fs_op(
                     r,
                     rename_id.clone(),
@@ -2210,21 +2202,13 @@ fn parse_creation_prefix(input: &str) -> (bool, bool, String) {
 
 /// Undo the last edit action.
 pub fn handle_undo(r: &mut AppRenderer) {
-    if r.use_unified_timeline {
-        crate::state::walk_back(r);
-    } else {
-        crate::state::handle_history_action(r, History::Undo);
-    }
+    crate::state::walk_back(r);
     r.needs_redraw = true;
 }
 
 /// Redo the last undone action.
 pub fn handle_redo(r: &mut AppRenderer) {
-    if r.use_unified_timeline {
-        crate::state::walk_forward(r);
-    } else {
-        crate::state::handle_history_action(r, History::Redo);
-    }
+    crate::state::walk_forward(r);
     r.needs_redraw = true;
 }
 
@@ -2820,8 +2804,6 @@ pub fn handle_file_paste(r: &mut AppRenderer) {
                 // prev_element = source path (for redo), new_element = dest element (for undo delete)
                 let mut record_id = paste_id.clone();
                 record_id.set_last(i);
-                crate::state::update_history(r, Task::FsPaste, &record_id,
-                    Some(src_path_elem.clone()), Some(dest_elem.clone()), History::None);
                 record_fs_op(
                     r,
                     record_id.clone(),
@@ -2845,7 +2827,7 @@ pub fn handle_ctrl_a(r: &mut AppRenderer, history: crate::app_state::History) {
     let now = sdl_ticks();
     if now.saturating_sub(r.last_keypress_time) <= DELTA_MS {
         r.last_keypress_time = 0;
-        crate::state::handle_history_action(r, History::Undo);
+        crate::state::walk_back(r);
         crate::state::update_state(r, Task::AppendAppend, History::None);
     } else {
         crate::state::update_state(r, Task::Append, history);
@@ -2863,7 +2845,7 @@ pub fn handle_ctrl_i(r: &mut AppRenderer, history: crate::app_state::History) {
     let now = sdl_ticks();
     if now.saturating_sub(r.last_keypress_time) <= DELTA_MS {
         r.last_keypress_time = 0;
-        crate::state::handle_history_action(r, History::Undo);
+        crate::state::walk_back(r);
         crate::state::update_state(r, Task::InsertInsert, History::None);
     } else {
         crate::state::update_state(r, Task::Insert, history);
@@ -3047,9 +3029,14 @@ pub fn handle_load_provider_config(r: &mut AppRenderer, path: &str) {
             if let Some(p) = r.providers.get_mut(idx) {
                 p.set_current_path("/");
             }
-            // Clear undo history
-            r.undo_history.clear();
-            r.undo_position = 0;
+            // Clear undo history across all tabs
+            for tl in r.tab_timelines.iter_mut() {
+                tl.entries.clear();
+                tl.position = 0;
+                tl.last_text_id = None;
+                tl.last_text_edit_at = None;
+                tl.coalesce_break = false;
+            }
 
             r.current_save_path = path.to_owned();
             list::create_list_current_layer(r);
@@ -6915,12 +6902,15 @@ mod tests {
         let mut r = AppRenderer::new();
         r.ffon = vec![root];
         r.current_id = { let mut id = IdArray::new(); id.push(0); id };
-        r.undo_position = 3;
+        // Pretend the user has done some work — undo cursor is mid-history.
+        r.active_timeline_mut().position = 3;
 
         handle_load_provider_config(&mut r, &path);
 
         assert_eq!(r.current_save_path, path);
-        assert_eq!(r.undo_position, 0);
+        // Loading a config clears the per-tab timelines.
+        assert_eq!(r.active_timeline().position, 0);
+        assert_eq!(r.active_timeline().entries.len(), 0);
         assert!(r.error_message.contains(&path));
     }
 

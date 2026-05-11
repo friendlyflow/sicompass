@@ -164,11 +164,6 @@ pub enum Task {
     Cut,
     Copy,
     Paste,
-    FsCreate,
-    FsRename,
-    FsPaste,
-    FsNavigate,
-    ProviderCommand,
 }
 
 impl Task {
@@ -188,11 +183,6 @@ impl Task {
             Task::Cut => "cut",
             Task::Copy => "copy",
             Task::Paste => "paste",
-            Task::FsCreate => "fs create",
-            Task::FsRename => "fs rename",
-            Task::FsPaste => "fs paste",
-            Task::FsNavigate => "fs navigate",
-            Task::ProviderCommand => "provider command",
         }
     }
 }
@@ -234,22 +224,11 @@ pub struct RenderListItem {
     pub nav_path: Option<String>,
 }
 
-/// An undo history entry.
-#[derive(Debug, Clone)]
-pub struct UndoEntry {
-    pub id: IdArray,
-    pub task: Task,
-    pub prev_element: Option<FfonElement>,
-    pub new_element: Option<FfonElement>,
-}
-
 // ---------------------------------------------------------------------------
 // Timeline (unified undo/redo, per-tab)
 // ---------------------------------------------------------------------------
 
-/// Per-tab undo/redo timeline. Replaces the app-global `undo_history` +
-/// `undo_position` pair once migration is complete. During migration both
-/// coexist (the legacy stack runs the show until the gating flag flips).
+/// Per-tab undo/redo timeline.
 ///
 /// Coalescing rules live in `state::record_entry`:
 /// - `TimelineEntry::TextChunk` entries on the same `id` within
@@ -384,10 +363,6 @@ pub struct AppRenderer {
     /// Restored on Escape so search navigation doesn't permanently move the cursor.
     pub search_origin_id: IdArray,
 
-    // ---- Undo history ------------------------------------------------------
-    pub undo_history: Vec<UndoEntry>,
-    pub undo_position: usize,
-
     // ---- Caret (cursor blink) ----------------------------------------------
     pub caret: crate::caret::CaretState,
 
@@ -488,13 +463,11 @@ pub struct AppRenderer {
     /// timeline that ctrl-Z / ctrl-Shift-Z operate on.
     pub tab_timelines: Vec<Timeline>,
 
-    // ---- Undo/redo migration gate ------------------------------------------
-    /// While migrating from the legacy `undo_history` to the unified
-    /// `Timeline`, both stacks coexist. When `false` (default), the legacy
-    /// `update_history` / `handle_history_action` runs the show. When `true`,
-    /// `record_entry` / `walk_back` / `walk_forward` take over. Flipped in
-    /// step 11 of the migration plan.
-    pub use_unified_timeline: bool,
+    /// Set by `walk_back` / `walk_forward` while applying an undo/redo so
+    /// `record_entry` can ignore side-effect emissions (e.g. a Create undo
+    /// invokes `delete_item_by_name`, which would otherwise enqueue a fresh
+    /// Delete entry and become the next redo target).
+    pub in_history_action: bool,
 }
 
 /// One tab's saved state.
@@ -563,8 +536,6 @@ impl AppRenderer {
             last_keypress_time: 0,
             search_string: String::new(),
             search_origin_id: IdArray::new(),
-            undo_history: Vec::new(),
-            undo_position: 0,
             caret: crate::caret::CaretState::new(),
             clipboard: None,
             file_clipboard_path: String::new(),
@@ -602,7 +573,7 @@ impl AppRenderer {
             }],
             active_tab: 0,
             tab_timelines: vec![Timeline::new()],
-            use_unified_timeline: false,
+            in_history_action: false,
         }
     }
 

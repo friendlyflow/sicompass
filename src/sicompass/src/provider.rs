@@ -360,8 +360,7 @@ pub fn execute_command(
     ok
 }
 
-/// After a provider command completes successfully, drain any pending undo
-/// descriptor from that provider and push it onto the undo stack.
+/// Compatibility wrapper that just drains the provider's timeline entries.
 ///
 /// `provider_idx` is the originator's index — always use the provider that ran
 /// the command, not `renderer.current_id.get(0)`, which may differ after a
@@ -370,36 +369,6 @@ pub(crate) fn push_provider_descriptor_if_present(
     renderer: &mut AppRenderer,
     provider_idx: usize,
 ) {
-    let desc = match renderer.providers.get_mut(provider_idx) {
-        Some(p) => p.take_last_undo_descriptor(),
-        None => return,
-    };
-    if let Some(desc) = desc {
-        let serialized = sicompass_sdk::ffon::FfonElement::Obj(
-            sicompass_sdk::ffon::FfonObject {
-                key: desc.command,
-                children: vec![
-                    desc.payload,
-                    sicompass_sdk::ffon::FfonElement::Str(desc.label),
-                ],
-            }
-        );
-        let mut originator_id = sicompass_sdk::ffon::IdArray::new();
-        originator_id.push(provider_idx);
-        crate::state::update_history(
-            renderer,
-            crate::app_state::Task::ProviderCommand,
-            &originator_id,
-            None,
-            Some(serialized),
-            crate::app_state::History::None,
-        );
-    }
-
-    // Unified-timeline dual-write: drain any TimelineEntry the provider has
-    // accumulated since the last call and push each through `record_entry`.
-    // Providers leave the `id` and `provider_idx` fields to be patched here,
-    // since they don't have access to the renderer's `current_id`.
     push_provider_entries_if_present(renderer, provider_idx);
 }
 

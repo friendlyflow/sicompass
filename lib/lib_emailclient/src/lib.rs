@@ -57,7 +57,7 @@ use sicompass_sdk::placeholders::{
     new_obj_with_i_placeholder, seed_i_placeholders, I_PLACEHOLDER,
 };
 use sicompass_sdk::platform;
-use sicompass_sdk::provider::{Provider, ProviderUndoDescriptor};
+use sicompass_sdk::provider::Provider;
 use sicompass_sdk::timeline::{ImapOpKind, TimelineEntry};
 
 use idle::IdleController;
@@ -449,10 +449,6 @@ pub struct EmailClientProvider {
     // Pending error message to surface via take_error.
     error_message: Option<String>,
 
-    // Pending undo descriptor for the last completed undoable command.
-    // Drained by the app dispatcher after each handle_command/execute_command call.
-    last_undo_descriptor: Option<ProviderUndoDescriptor>,
-
     // Unified-timeline emission queue. Each undoable IMAP command pushes a
     // typed `ImapOp` here, drained by the app via `take_timeline_entries`.
     pending_timeline_entries: Vec<TimelineEntry>,
@@ -499,7 +495,6 @@ impl EmailClientProvider {
             token_refresh_inflight: Arc::new(AtomicBool::new(false)),
             token_refresh_result: Arc::new(Mutex::new(None)),
             error_message: None,
-            last_undo_descriptor: None,
             pending_timeline_entries: Vec::new(),
             active_login: None,
             config_path_override: None,
@@ -687,95 +682,6 @@ impl EmailClientProvider {
         }
     }
 
-    fn apply_provider_command(
-        &mut self,
-        descriptor: &ProviderUndoDescriptor,
-        is_undo: bool,
-        error: &mut String,
-    ) {
-        let imap = match self.imap.as_mut() {
-            Some(i) => i,
-            None => { *error = "not connected".to_owned(); return; }
-        };
-        let json: serde_json::Value = serde_json::from_str(descriptor.payload_str())
-            .unwrap_or(serde_json::Value::Null);
-
-        match descriptor.command.as_str() {
-            "delete-trash" | "archive" | "move" => {
-                // For undo: move back from destination to source.
-                // For redo: move from source to destination.
-                let dest_field = match descriptor.command.as_str() {
-                    "delete-trash" => "trash",
-                    "archive" => "archive",
-                    _ => "dest",
-                };
-                let (search_in, move_to) = if is_undo {
-                    (json[dest_field].as_str().unwrap_or(""),
-                     json["src"].as_str().unwrap_or(""))
-                } else {
-                    (json["src"].as_str().unwrap_or(""),
-                     json[dest_field].as_str().unwrap_or(""))
-                };
-                let msg_id = json["msg_id"].as_str().unwrap_or("");
-                match imap.fetch_message_by_message_id(search_in, msg_id) {
-                    Ok(Some(msg)) => {
-                        if let Err(e) = imap.move_message(search_in, msg.uid, move_to) {
-                            *error = format!("{} {}: {e}", if is_undo { "undo" } else { "redo" }, descriptor.command);
-                        }
-                    }
-                    Ok(None) => {
-                        *error = format!(
-                            "{} {}: message no longer in {}",
-                            if is_undo { "undo" } else { "redo" },
-                            descriptor.command,
-                            search_in,
-                        );
-                    }
-                    Err(e) => {
-                        *error = format!("{} {}: {e}", if is_undo { "undo" } else { "redo" }, descriptor.command);
-                    }
-                }
-                self.envelope_cache = None;
-                self.message_cache.clear();
-            }
-            "mark-read" | "mark-unread" => {
-                let folder = json["folder"].as_str().unwrap_or("");
-                let uid = json["uid"].as_u64().unwrap_or(0) as u32;
-                let prev_seen = json["prev_seen"].as_bool().unwrap_or(false);
-                // Undo restores prev_seen; redo negates it.
-                let target_seen = if is_undo { prev_seen } else { !prev_seen };
-                let (add, remove): (&[&str], &[&str]) =
-                    if target_seen { (&["\\Seen"], &[]) } else { (&[], &["\\Seen"]) };
-                if let Err(e) = imap.set_flags(folder, uid, add, remove) {
-                    *error = format!("{} {}: {e}", if is_undo { "undo" } else { "redo" }, descriptor.command);
-                } else {
-                    if let Some(h) = self.message_cache.iter_mut().find(|h| h.uid == uid) {
-                        h.seen = target_seen;
-                    }
-                    self.envelope_cache = None;
-                }
-            }
-            "star" | "unstar" => {
-                let folder = json["folder"].as_str().unwrap_or("");
-                let uid = json["uid"].as_u64().unwrap_or(0) as u32;
-                let prev_flagged = json["prev_flagged"].as_bool().unwrap_or(false);
-                let target_flagged = if is_undo { prev_flagged } else { !prev_flagged };
-                let (add, remove): (&[&str], &[&str]) =
-                    if target_flagged { (&["\\Flagged"], &[]) } else { (&[], &["\\Flagged"]) };
-                if let Err(e) = imap.set_flags(folder, uid, add, remove) {
-                    *error = format!("{} {}: {e}", if is_undo { "undo" } else { "redo" }, descriptor.command);
-                } else {
-                    if let Some(h) = self.message_cache.iter_mut().find(|h| h.uid == uid) {
-                        h.flagged = target_flagged;
-                    }
-                    self.envelope_cache = None;
-                }
-            }
-            _ => {
-                *error = format!("unknown undoable command: {}", descriptor.command);
-            }
-        }
-    }
 
     /// Return the (real_folder, uid) for the message identified by `elem_key`.
     ///
@@ -2464,18 +2370,6 @@ impl Provider for EmailClientProvider {
         self.error_message.take()
     }
 
-    fn take_last_undo_descriptor(&mut self) -> Option<ProviderUndoDescriptor> {
-        self.last_undo_descriptor.take()
-    }
-
-    fn undo_command(&mut self, descriptor: &ProviderUndoDescriptor, error: &mut String) {
-        self.apply_provider_command(descriptor, true, error);
-    }
-
-    fn redo_command(&mut self, descriptor: &ProviderUndoDescriptor, error: &mut String) {
-        self.apply_provider_command(descriptor, false, error);
-    }
-
     fn take_timeline_entries(&mut self) -> Vec<TimelineEntry> {
         std::mem::take(&mut self.pending_timeline_entries)
     }
@@ -2657,15 +2551,6 @@ impl Provider for EmailClientProvider {
         self.envelope_cache = None;
         self.message_cache.retain(|h| h.uid != uid);
         if !msg_id.is_empty() {
-            self.last_undo_descriptor = Some(ProviderUndoDescriptor::new(
-                "move",
-                FfonElement::new_str(serde_json::json!({
-                    "msg_id": msg_id.clone(),
-                    "src": from.clone(),
-                    "dest": dest.clone(),
-                }).to_string()),
-                "move email",
-            ));
             self.push_imap_op(ImapOpKind::Move {
                 msg_id: msg_id.clone(),
                 src_folder: from.to_owned(),
@@ -2751,25 +2636,6 @@ impl Provider for EmailClientProvider {
                         }
                     }
                     self.envelope_cache = None;
-                    // Stash undo descriptor.
-                    let payload = if cmd == "star" || cmd == "unstar" {
-                        serde_json::json!({
-                            "folder": real_folder,
-                            "uid": uid,
-                            "prev_flagged": prev_flagged,
-                        }).to_string()
-                    } else {
-                        serde_json::json!({
-                            "folder": real_folder,
-                            "uid": uid,
-                            "prev_seen": prev_seen,
-                        }).to_string()
-                    };
-                    self.last_undo_descriptor = Some(ProviderUndoDescriptor::new(
-                        cmd,
-                        FfonElement::new_str(payload),
-                        cmd.replace('-', " "),
-                    ));
                     match cmd {
                         "mark-read" => self.push_imap_op(ImapOpKind::SetSeen {
                             msg_uid: uid,
@@ -2823,15 +2689,6 @@ impl Provider for EmailClientProvider {
                                 }
                             }
                             if !msg_id.is_empty() {
-                                self.last_undo_descriptor = Some(ProviderUndoDescriptor::new(
-                                    "delete-trash",
-                                    FfonElement::new_str(serde_json::json!({
-                                        "msg_id": msg_id.clone(),
-                                        "src": real_folder.clone(),
-                                        "trash": t.clone(),
-                                    }).to_string()),
-                                    "delete email",
-                                ));
                                 self.push_imap_op(ImapOpKind::Trash {
                                     msg_id: msg_id.clone(),
                                     src_folder: real_folder.clone(),
@@ -2885,15 +2742,6 @@ impl Provider for EmailClientProvider {
                             self.envelope_cache = None;
                             self.message_cache.retain(|h| h.uid != uid);
                             if !msg_id.is_empty() {
-                                self.last_undo_descriptor = Some(ProviderUndoDescriptor::new(
-                                    "archive",
-                                    FfonElement::new_str(serde_json::json!({
-                                        "msg_id": msg_id.clone(),
-                                        "src": real_folder.clone(),
-                                        "archive": dest.clone(),
-                                    }).to_string()),
-                                    "archive email",
-                                ));
                                 self.push_imap_op(ImapOpKind::Archive {
                                     msg_id: msg_id.clone(),
                                     src_folder: real_folder.clone(),

@@ -7,34 +7,6 @@ use std::path::Path;
 // Supporting types
 // ---------------------------------------------------------------------------
 
-/// Opaque descriptor that lets a provider record enough state to reverse a
-/// just-completed command. The app dispatcher drains this after every
-/// `handle_command` / `execute_command` call and pushes it onto the undo stack.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ProviderUndoDescriptor {
-    /// Short token identifying the operation, e.g. `"delete-trash"`, `"mark-read"`.
-    pub command: String,
-    /// Command-specific payload. Providers typically store a JSON blob here as
-    /// `FfonElement::Str(json)`.
-    pub payload: FfonElement,
-    /// User-facing label shown in status / error messages, e.g. `"delete email"`.
-    pub label: String,
-}
-
-impl ProviderUndoDescriptor {
-    pub fn new(command: impl Into<String>, payload: FfonElement, label: impl Into<String>) -> Self {
-        Self { command: command.into(), payload, label: label.into() }
-    }
-
-    /// Convenience: return the payload string if it is an `FfonElement::Str`.
-    pub fn payload_str(&self) -> &str {
-        match &self.payload {
-            FfonElement::Str(s) => s.as_str(),
-            _ => "",
-        }
-    }
-}
-
 /// An item in a command's selection list (e.g. applications for "open with").
 #[derive(Debug, Clone, PartialEq)]
 pub struct ListItem {
@@ -130,27 +102,7 @@ pub trait Provider: Send + 'static {
     fn command_list_items(&self, _cmd: &str) -> Vec<ListItem> { vec![] }
     fn execute_command(&mut self, _cmd: &str, _selection: &str) -> bool { false }
 
-    // ---- Optional: provider-command undo/redo ---------------------------------
-
-    /// Pop the descriptor for the most recently completed undoable command, or
-    /// `None` if the last command was not undoable. The app dispatcher calls
-    /// this once after every `handle_command` / `execute_command` invocation
-    /// and pushes an undo entry when `Some` is returned.
-    fn take_last_undo_descriptor(&mut self) -> Option<ProviderUndoDescriptor> { None }
-
-    /// Reverse the operation described by `descriptor`. Sets `error` on failure.
-    fn undo_command(&mut self, _descriptor: &ProviderUndoDescriptor, _error: &mut String) {}
-
-    /// Re-apply the operation described by `descriptor`. Sets `error` on failure.
-    fn redo_command(&mut self, _descriptor: &ProviderUndoDescriptor, _error: &mut String) {}
-
     // ---- Optional: unified timeline undo/redo ------------------------------
-    //
-    // The new model that will eventually replace the legacy
-    // `take_last_undo_descriptor` / `undo_command` / `redo_command` trio.
-    // During migration, providers may implement either or both; the app
-    // dispatcher prefers timeline entries when present and falls back to the
-    // legacy descriptor.
 
     /// Drain timeline entries emitted since the last poll. A single command
     /// may emit zero, one, or several entries. The app dispatcher calls this
