@@ -315,11 +315,33 @@ mod tests {
 ///
 /// Delegates to [`crate::shortcuts::dispatch_key`] which iterates the central
 /// SHORTCUTS table — one source of truth for both dispatch and hint display.
+///
+/// After dispatch, refresh the active tab's snapshot from the live navigation
+/// state so the tab band and persisted config follow root-level program changes
+/// and within-program navigation — not just explicit tab operations. Persistence
+/// is skipped when the handler itself changed `active_tab` / `tabs.len()` (tab
+/// switch/new/close handlers already call `persist_tabs` via `after_tab_change`).
 pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) -> bool {
     tracing::debug!(
         ?keycode, ?keymod,
         mode = r.coordinate.as_str(),
         "dispatch_key"
     );
-    crate::shortcuts::dispatch_key(r, keycode, keymod)
+
+    let prior_active = r.active_tab;
+    let prior_len = r.tabs.len();
+
+    let result = crate::shortcuts::dispatch_key(r, keycode, keymod);
+
+    let new_snap = crate::app_state::TabSnapshot::capture(r);
+    let snap_changed = r.tabs.get(r.active_tab).map_or(false, |s| s != &new_snap);
+    if let Some(slot) = r.tabs.get_mut(r.active_tab) {
+        *slot = new_snap;
+    }
+    let tab_structure_changed = r.active_tab != prior_active || r.tabs.len() != prior_len;
+    if snap_changed && !tab_structure_changed {
+        crate::handlers::persist_tabs(r);
+    }
+
+    result
 }

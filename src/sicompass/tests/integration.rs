@@ -28,6 +28,7 @@ fn ensure_builtins() {
 struct Harness {
     pub renderer: AppRenderer,
     pub tmp: TempDir,
+    pub settings_tmp: TempDir,
 }
 
 impl Harness {
@@ -37,6 +38,7 @@ impl Harness {
     fn new() -> Self {
         ensure_builtins();
         let tmp = TempDir::new().expect("failed to create temp dir");
+        let settings_tmp = TempDir::new().expect("failed to create settings temp dir");
         let root = tmp.path();
 
         std::fs::write(root.join("alpha.txt"), "test content").unwrap();
@@ -58,19 +60,21 @@ impl Harness {
             renderer.ffon[0] = root_elem;
         }
 
-        // Settings (isolated to temp dir — never touches real config)
+        // Settings (isolated to a *separate* temp dir so per-keystroke tab
+        // persistence does not pollute the filebrowser's listing of `tmp`).
         let mut settings = sicompass_sdk::create_provider_by_name("settings").unwrap();
-        settings.set_config_path(tmp.path().join("settings.json"));
+        settings.set_config_path(settings_tmp.path().join("settings.json"));
         register(&mut renderer, settings);
 
         sicompass::list::create_list_current_layer(&mut renderer);
 
-        Harness { renderer, tmp }
+        Harness { renderer, tmp, settings_tmp }
     }
 
     fn new_with_webbrowser() -> Self {
         ensure_builtins();
         let tmp = TempDir::new().expect("failed to create temp dir");
+        let settings_tmp = TempDir::new().expect("failed to create settings temp dir");
         let root = tmp.path();
         std::fs::write(root.join("alpha.txt"), "test content").unwrap();
 
@@ -89,14 +93,14 @@ impl Harness {
 
         register(&mut renderer, sicompass_sdk::create_provider_by_name("webbrowser").unwrap());
 
-        // Settings (isolated to temp dir — never touches real config)
+        // Settings (isolated to a separate temp dir — see Harness::new).
         let mut settings = sicompass_sdk::create_provider_by_name("settings").unwrap();
-        settings.set_config_path(tmp.path().join("settings.json"));
+        settings.set_config_path(settings_tmp.path().join("settings.json"));
         register(&mut renderer, settings);
 
         sicompass::list::create_list_current_layer(&mut renderer);
 
-        Harness { renderer, tmp }
+        Harness { renderer, tmp, settings_tmp }
     }
 
     fn r(&mut self) -> &mut AppRenderer {
@@ -110,6 +114,12 @@ impl Harness {
 
     fn tmp_path(&self) -> &Path {
         self.tmp.path()
+    }
+
+    /// Path to the directory holding settings.json (kept separate from
+    /// `tmp_path()` to avoid polluting the filebrowser listing).
+    fn settings_path(&self) -> std::path::PathBuf {
+        self.settings_tmp.path().join("settings.json")
     }
 }
 
@@ -1412,7 +1422,8 @@ fn create_file_on_placeholder_replaces_in_place() {
     assert_eq!(renderer.current_id.last(), Some(0));
 
     // Execute "create file" command from command mode
-    let mut h = Harness { renderer, tmp };
+    let settings_tmp = TempDir::new().unwrap();
+    let mut h = Harness { renderer, tmp, settings_tmp };
     execute_provider_command(&mut h, "create file");
     let renderer = h.r();
 
@@ -1517,7 +1528,8 @@ fn ctrl_a_after_prefixed_creation_no_panic() {
     let root = tmp.path().to_path_buf();
     std::fs::create_dir(root.join("testdir")).unwrap();
 
-    let mut h = Harness { renderer: AppRenderer::new(), tmp };
+    let settings_tmp = TempDir::new().unwrap();
+    let mut h = Harness { renderer: AppRenderer::new(), tmp, settings_tmp };
     register(h.r(), sicompass_sdk::create_provider_by_name("filebrowser").unwrap());
     h.renderer.providers[0].set_current_path(root.to_str().unwrap());
     {
@@ -5764,9 +5776,12 @@ fn ctrl_t_creates_new_tab_and_activates_it() {
 #[test]
 fn ctrl_w_with_one_tab_is_noop() {
     let mut h = Harness::new();
-    let before = h.renderer.tabs.clone();
+    let before_len = h.renderer.tabs.len();
     press_ctrl(h.r(), Keycode::W);
-    assert_eq!(h.renderer.tabs, before);
+    // The meaningful invariant: Ctrl+W with one tab does not change the tab
+    // structure. (The active tab's snapshot is always refreshed from live state
+    // by dispatch_key, so direct equality of `tabs` is not the right check.)
+    assert_eq!(h.renderer.tabs.len(), before_len);
     assert_eq!(h.renderer.active_tab, 0);
 }
 
@@ -5900,7 +5915,7 @@ fn tabs_persist_to_settings_provider() {
     press_ctrl(h.r(), Keycode::T);
 
     // The settings provider was created with config_path set to tmp/settings.json.
-    let cfg = h.tmp_path().join("settings.json");
+    let cfg = h.settings_path();
     let data = std::fs::read_to_string(&cfg).expect("settings.json should exist after a tab op");
     let json: serde_json::Value = serde_json::from_str(&data).unwrap();
     let sicompass_section = json.get("sicompass")
@@ -5930,7 +5945,7 @@ fn load_tabs_state_restores_persisted_layout() {
     // Re-parse the on-disk settings using the same JSON shape the production
     // loader expects (`load_tabs_state`), then assert the round-trip preserves
     // both `current_id` and `provider_path`.
-    let cfg = h.tmp_path().join("settings.json");
+    let cfg = h.settings_path();
     let data = std::fs::read_to_string(&cfg).expect("settings.json should exist");
     let json: serde_json::Value = serde_json::from_str(&data).unwrap();
     let sec = json.get("sicompass").and_then(|v| v.as_object()).unwrap();
@@ -6009,6 +6024,70 @@ fn tab_switch_restores_provider_path_after_other_tab_navigates() {
     let labels: Vec<String> = h.renderer.total_list.iter().map(|i| i.label.clone()).collect();
     let any_nested = labels.iter().any(|l| sicompass_sdk::tags::strip_display(l).contains("nested.txt"));
     assert!(any_nested, "tab 1 listing must contain nested.txt after restore, got {labels:?}");
+}
+
+/// Regression: navigating between programs at root (depth 1) must update the
+/// active tab's snapshot so the tab band label and persisted config follow.
+/// Before the fix, `tabs[active_tab]` was only refreshed on explicit tab ops.
+#[test]
+fn root_navigation_updates_active_tab_snapshot() {
+    let mut h = Harness::new();
+    let start = h.renderer.current_id.get(0).unwrap_or(0);
+    assert_eq!(h.renderer.tabs[0].current_id.get(0), Some(start));
+
+    press_down(h.r());
+    let after = h.renderer.current_id.get(0).unwrap_or(0);
+    assert_ne!(after, start, "Down at root must move between providers");
+
+    assert_eq!(
+        h.renderer.tabs[h.renderer.active_tab].current_id, h.renderer.current_id,
+        "active tab snapshot must track current_id after root navigation"
+    );
+}
+
+/// Regression: entering a program from root (Right at depth 1) must update
+/// the active tab's snapshot — both `current_id` and `provider_path`.
+#[test]
+fn entering_program_from_root_updates_active_tab_snapshot() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb_idx);
+
+    press_right(h.r());
+    assert!(h.renderer.current_id.depth() >= 2,
+        "Right from root should push into the provider");
+
+    let snap_current_id = h.renderer.tabs[h.renderer.active_tab].current_id.clone();
+    let snap_provider_path = h.renderer.tabs[h.renderer.active_tab].provider_path.clone();
+    assert_eq!(snap_current_id, h.renderer.current_id);
+    let live_path = sicompass::provider::current_path(h.r()).to_owned();
+    assert_eq!(snap_provider_path, live_path,
+        "active tab snapshot must capture provider path after entering");
+}
+
+/// Root navigation persists to settings.json so `config` follows on restart.
+#[test]
+fn root_navigation_persists_to_settings() {
+    let mut h = Harness::new();
+    press_down(h.r());
+    let expected_first_id = h.renderer.current_id.get(0).unwrap_or(0);
+
+    let cfg = h.settings_path();
+    let data = std::fs::read_to_string(&cfg)
+        .expect("settings.json should exist after root navigation");
+    let json: serde_json::Value = serde_json::from_str(&data).unwrap();
+    let tabs_str = json.get("sicompass")
+        .and_then(|v| v.as_object())
+        .and_then(|s| s.get("tabs"))
+        .and_then(|v| v.as_str())
+        .expect("tabs key should be persisted after navigation");
+    let arr = serde_json::from_str::<serde_json::Value>(tabs_str).unwrap();
+    let first_id_arr = arr.as_array().unwrap()[0]
+        .as_object().unwrap()
+        .get("id").unwrap()
+        .as_array().unwrap();
+    assert_eq!(first_id_arr[0].as_u64().unwrap() as usize, expected_first_id,
+        "persisted tab's first index must match post-navigation provider");
 }
 
 // ---------------------------------------------------------------------------

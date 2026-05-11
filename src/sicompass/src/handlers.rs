@@ -4435,7 +4435,7 @@ fn insert_ffon_element(r: &mut AppRenderer, insert_idx: usize, elem: sicompass_s
 ///
 /// Stores the tab list as a JSON-encoded string so each tab can carry both
 /// its `current_id` indices and the provider path to restore on next launch.
-fn persist_tabs(r: &mut AppRenderer) {
+pub(crate) fn persist_tabs(r: &mut AppRenderer) {
     let arr: Vec<serde_json::Value> = r.tabs.iter().map(|t| {
         let ids: Vec<serde_json::Value> = t.current_id.as_slice().iter()
             .map(|&n| serde_json::Value::from(n as u64))
