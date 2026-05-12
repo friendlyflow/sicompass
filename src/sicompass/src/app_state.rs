@@ -635,6 +635,16 @@ impl AppRenderer {
         // `current_id.last()` into `list_index` (see view.rs after a tick)
         // would leave focus on a non-existent row.
         let mut current_id = snap.current_id;
+        // Pop trailing indices while the path no longer resolves through the
+        // rebuilt FFON tree — handles providers whose tree shrinks at any
+        // depth after restart, e.g. the webbrowser, which does not persist
+        // its loaded page so a cursor saved inside the previous page tree
+        // must collapse back onto the URL bar.
+        while current_id.depth() > 0
+            && sicompass_sdk::ffon::get_ffon_at_id(&self.ffon, &current_id).is_none()
+        {
+            current_id.pop();
+        }
         if let Some(parent_slice) =
             sicompass_sdk::ffon::get_ffon_at_id(&self.ffon, &current_id)
         {

@@ -6058,6 +6058,95 @@ fn load_active_tab_clamps_stale_cursor_past_end() {
     );
 }
 
+/// Regression: the webbrowser provider does not persist its loaded page, so
+/// after a restart a saved `current_id` that was deep inside the previous
+/// page tree no longer resolves at intermediate levels — the URL bar at
+/// `[wb_idx, 0]` is a `Str`, not an `Obj`, so the walk fails before reaching
+/// the last index. Without popping stale levels, focus would render past
+/// the end of the rebuilt tree. After the fix, the cursor collapses back to
+/// the URL bar (`[wb_idx, 0]`) and `list_index == 0`.
+#[test]
+fn load_active_tab_pops_stale_levels_for_webbrowser() {
+    let mut h = Harness::new_with_webbrowser();
+    let wb_idx = h.provider_idx("webbrowser").expect("webbrowser registered");
+
+    // The webbrowser provider with no loaded page exposes a single `Str`
+    // URL-bar child — confirm that's the post-restart shape.
+    let children_len = match &h.renderer.ffon[wb_idx] {
+        FfonElement::Obj(o) => o.children.len(),
+        _ => 0,
+    };
+    assert_eq!(children_len, 1, "fresh webbrowser should expose just the URL bar");
+
+    // Forge a snapshot whose cursor is buried inside a page tree that no
+    // longer exists: `[wb_idx, 0, 3, 1]` — `[wb_idx, 0]` is a `Str` so the
+    // walk fails at depth 1.
+    let mut id = sicompass_sdk::ffon::IdArray::new();
+    id.push(wb_idx);
+    id.push(0);
+    id.push(3);
+    id.push(1);
+    h.renderer.tabs[0] = sicompass::app_state::TabSnapshot {
+        current_id: id,
+        provider_path: "/".to_owned(),
+    };
+    h.renderer.active_tab = 0;
+    h.renderer.load_active_tab();
+
+    assert_eq!(
+        h.renderer.current_id.depth(),
+        2,
+        "stale page indices should be popped back to [wb_idx, 0]"
+    );
+    assert_eq!(h.renderer.current_id.get(0), Some(wb_idx));
+    assert_eq!(h.renderer.current_id.get(1), Some(0));
+    assert_eq!(
+        h.renderer.list_index, 0,
+        "list_index must land on the URL bar"
+    );
+}
+
+/// Counterpart to the webbrowser pop test: when the saved `current_id`
+/// fully resolves through the rebuilt FFON tree, the loader must leave it
+/// unchanged. Guards against an overly aggressive pop loop that would
+/// truncate valid deep cursors.
+#[test]
+fn load_active_tab_preserves_valid_deep_cursor() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+
+    // Stamp a hand-built nested tree onto the file browser slot so we can
+    // exercise a depth-3 cursor without depending on lazy-fetch behavior.
+    // `set_current_path("/")` keeps the provider's snapshot path stable so
+    // the rebuild branch in `load_active_tab` (which only fires when
+    // `current_path()` differs from `snap.provider_path`) is skipped — the
+    // hand-built FFON survives the call.
+    h.renderer.providers[fb_idx].set_current_path("/");
+    let mut root = FfonElement::new_obj("file browser");
+    let mut mid = FfonElement::new_obj("mid");
+    mid.as_obj_mut().unwrap().push(FfonElement::new_str("leaf-a"));
+    mid.as_obj_mut().unwrap().push(FfonElement::new_str("leaf-b"));
+    root.as_obj_mut().unwrap().push(mid);
+    h.renderer.ffon[fb_idx] = root;
+
+    let mut id = sicompass_sdk::ffon::IdArray::new();
+    id.push(fb_idx);
+    id.push(0);
+    id.push(1);
+    h.renderer.tabs[0] = sicompass::app_state::TabSnapshot {
+        current_id: id.clone(),
+        provider_path: "/".to_owned(),
+    };
+    h.renderer.active_tab = 0;
+    h.renderer.load_active_tab();
+
+    assert_eq!(
+        h.renderer.current_id, id,
+        "valid depth-3 cursor must survive load_active_tab unchanged"
+    );
+    assert_eq!(h.renderer.list_index, 1);
+}
+
 /// Regression test for the bug the user reported: navigating Left in tab A
 /// rebuilds the file browser's FFON tree, leaving tab B's saved indices
 /// pointing at the wrong content. With per-tab provider_path snapshots,
