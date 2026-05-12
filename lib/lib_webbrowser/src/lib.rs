@@ -26,7 +26,32 @@ use sicompass_sdk::ffon::{FfonElement, FormMap, FormNodeKind};
 use sicompass_sdk::provider::Provider;
 use sicompass_sdk::ffon::{html_to_ffon, html_to_ffon_with_forms, html_submit_selector};
 #[cfg(test)] use sicompass_sdk::ffon::html_resolve_href;
+use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
+#[cfg(target_os = "windows")]
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
+
+// ---------------------------------------------------------------------------
+// Test stub: skip Chrome launches entirely.
+//
+// Set via `_set_test_no_launch(true)` from integration tests (which can't use
+// `#[cfg(test)]` across crate boundaries).  When enabled, `load_url` returns
+// a placeholder FFON page immediately and `submit_form_windows` rejects with
+// an error — both without ever invoking `launch_browser`.
+// ---------------------------------------------------------------------------
+
+static TEST_NO_LAUNCH: AtomicBool = AtomicBool::new(false);
+
+#[doc(hidden)]
+pub fn _set_test_no_launch(enabled: bool) {
+    TEST_NO_LAUNCH.store(enabled, std::sync::atomic::Ordering::Release);
+}
+
+#[inline]
+fn test_no_launch() -> bool {
+    TEST_NO_LAUNCH.load(std::sync::atomic::Ordering::Acquire)
+}
 
 // ---------------------------------------------------------------------------
 // Cached page
@@ -40,8 +65,14 @@ struct CachedPage {
 
 // ---------------------------------------------------------------------------
 // Live page session — kept alive for form interaction
+//
+// Non-Windows only.  On Windows the screen reader (NVDA / Narrator) would
+// traverse the off-screen Chrome window via UI Automation; instead we launch
+// a fresh Chrome for every page load and form submit, and keep cookies on
+// disk in the persistent profile dir (`%TEMP%/sicompass-chrome`).
 // ---------------------------------------------------------------------------
 
+#[cfg(not(target_os = "windows"))]
 struct LivePageSession {
     session: BrowserSession,
     page: chromiumoxide::Page,
@@ -59,9 +90,23 @@ pub struct WebbrowserProvider {
     path_cache: String, // "/" or "/seg0/seg1/…", rebuilt on every push/pop
     cached_page: Option<CachedPage>,
     form_map: FormMap,
+    #[cfg(not(target_os = "windows"))]
     live: Option<LivePageSession>,
     // Background thread delivers refreshed content here after form submission.
     ready_content: Arc<Mutex<Option<(Vec<FfonElement>, FormMap)>>>,
+    // Typed form values, replayed into a fresh Chrome at submit time.  Source
+    // of truth for what the user has filled in between page-load and submit.
+    // Cleared on URL navigation and after a successful submit-response render.
+    form_field_values: HashMap<String, String>,
+    // Errors surfaced by the submit thread (drift detection, launch failures,
+    // network errors).  Drained by `take_error`; `Arc<Mutex>` because the
+    // submit thread writes into it from a `std::thread::spawn` background.
+    pending_error: Arc<Mutex<Option<String>>>,
+    // Windows only: single-flight guard preventing a second submit press from
+    // racing the first (each submit cold-launches its own Chrome, so two in
+    // parallel would contend on the singleton profile dir).
+    #[cfg(target_os = "windows")]
+    submit_in_flight: Arc<AtomicBool>,
 }
 
 impl WebbrowserProvider {
@@ -72,8 +117,13 @@ impl WebbrowserProvider {
             path_cache: "/".to_owned(),
             cached_page: None,
             form_map: FormMap::new(),
+            #[cfg(not(target_os = "windows"))]
             live: None,
             ready_content: Arc::new(Mutex::new(None)),
+            form_field_values: HashMap::new(),
+            pending_error: Arc::new(Mutex::new(None)),
+            #[cfg(target_os = "windows")]
+            submit_in_flight: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -85,26 +135,53 @@ impl WebbrowserProvider {
         };
     }
 
-    /// Navigate to `url` using the persistent live session (or create one first).
+    /// Navigate to `url`.
+    ///
+    /// On non-Windows, reuses the persistent live session (or creates one
+    /// first).  On Windows, cold-launches Chrome, fetches the HTML, and closes
+    /// Chrome again so the off-screen window is never present in the screen
+    /// reader's UI Automation tree while the user reads / fills the page.
+    /// Cookies and localStorage survive in the fixed `%TEMP%/sicompass-chrome`
+    /// profile dir.
     fn load_url(&mut self, url: &str) {
-        // Ensure we have a live session.
-        if self.live.is_none() {
-            match chromium_runtime().block_on(init_live_session()) {
-                Ok(live) => self.live = Some(live),
-                Err(e) => {
-                    self.cached_page = Some(CachedPage {
-                        url: url.to_owned(),
-                        elements: vec![FfonElement::new_str(format!("Error launching browser: {e}"))],
-                    });
-                    self.current_url = url.to_owned();
-                    return;
-                }
-            }
+        // URL is changing: any form values typed for the previous page are stale.
+        self.form_field_values.clear();
+
+        // Test stub: skip Chrome entirely, set a placeholder page.
+        if test_no_launch() {
+            self.cached_page = Some(CachedPage {
+                url: url.to_owned(),
+                elements: vec![FfonElement::new_str(format!("<test-no-launch>{url}</test-no-launch>"))],
+            });
+            self.form_map = FormMap::new();
+            self.current_url = url.to_owned();
+            return;
         }
 
-        // Clone the page handle so we can navigate without holding &self.live.
-        let page = self.live.as_ref().unwrap().page.clone();
-        let result = chromium_runtime().block_on(navigate_and_get_html(&page, url));
+        #[cfg(target_os = "windows")]
+        let result = chromium_runtime().block_on(fetch_html_once(url));
+
+        #[cfg(not(target_os = "windows"))]
+        let result = {
+            // Ensure we have a live session.
+            if self.live.is_none() {
+                match chromium_runtime().block_on(init_live_session()) {
+                    Ok(live) => self.live = Some(live),
+                    Err(e) => {
+                        self.cached_page = Some(CachedPage {
+                            url: url.to_owned(),
+                            elements: vec![FfonElement::new_str(format!("Error launching browser: {e}"))],
+                        });
+                        self.current_url = url.to_owned();
+                        return;
+                    }
+                }
+            }
+
+            // Clone the page handle so we can navigate without holding &self.live.
+            let page = self.live.as_ref().unwrap().page.clone();
+            chromium_runtime().block_on(navigate_and_get_html(&page, url))
+        };
 
         match result {
             Ok(html) => {
@@ -113,8 +190,11 @@ impl WebbrowserProvider {
                 self.form_map = form_map;
             }
             Err(e) => {
-                // Drop the session so the next attempt starts fresh.
-                self.live = None;
+                #[cfg(not(target_os = "windows"))]
+                {
+                    // Drop the session so the next attempt starts fresh.
+                    self.live = None;
+                }
                 self.cached_page = Some(CachedPage {
                     url: url.to_owned(),
                     elements: vec![FfonElement::new_str(format!("Error loading {url}: {e}"))],
@@ -136,8 +216,59 @@ impl WebbrowserProvider {
         patch_form_field_in_tree(&mut page.elements, form_name, &prefix, &replacement);
     }
 
+    /// Windows submit path: cold-launch Chrome on a background thread,
+    /// navigate to the current URL, refill every typed value, click submit,
+    /// fetch the response page, and close Chrome again.
+    ///
+    /// Cookies persist via the fixed `%TEMP%/sicompass-chrome` profile dir,
+    /// so login sessions survive across the close-then-reopen cycle.
+    /// Cold-launch + navigate + settle adds ~5–10 s of latency between the
+    /// submit press and the response page rendering — accepted for the
+    /// accessibility gain of no Chrome window in the UIA tree during fill.
+    #[cfg(target_os = "windows")]
+    fn submit_form_windows(&mut self, form_n: usize) {
+        // Test stub: never launch Chrome from tests.
+        if test_no_launch() {
+            set_error(&self.pending_error, "test-no-launch: submit skipped".to_owned());
+            return;
+        }
+
+        // Single-flight: a second submit press while one is in flight would
+        // contend on the singleton profile dir's SingletonLock.
+        if self.submit_in_flight.swap(true, Ordering::AcqRel) {
+            set_error(
+                &self.pending_error,
+                "Submit already in progress; please wait for the response.".to_owned(),
+            );
+            return;
+        }
+
+        let url = self.current_url.clone();
+        let stored_values = self.form_field_values.clone();
+        let ready = Arc::clone(&self.ready_content);
+        let error_slot = Arc::clone(&self.pending_error);
+        let in_flight = Arc::clone(&self.submit_in_flight);
+
+        std::thread::spawn(move || {
+            // Drop guard: clear `in_flight` on every exit path, including panic.
+            struct ClearOnDrop(Arc<AtomicBool>);
+            impl Drop for ClearOnDrop {
+                fn drop(&mut self) { self.0.store(false, Ordering::Release); }
+            }
+            let _guard = ClearOnDrop(in_flight);
+
+            chromium_runtime().block_on(submit_form_windows_async(
+                url, form_n, stored_values, ready, error_slot,
+            ));
+        });
+    }
+
     /// Fill a form field via CDP. Called from `commit_edit` when the path
     /// resolves to a known form-map entry.
+    ///
+    /// Non-Windows only.  On Windows there is no persistent Chrome page to
+    /// fill into; typed values are replayed in the submit thread.
+    #[cfg(not(target_os = "windows"))]
     fn cdp_fill_field(&self, form_key: &str, value: &str) -> bool {
         let Some(node) = self.form_map.get(form_key) else { return false; };
         let Some(live) = &self.live else { return false; };
@@ -194,21 +325,28 @@ impl Provider for WebbrowserProvider {
         // Check if the current path points to a form field.
         if let Some(form_key) = extract_form_key(&self.path_cache) {
             if self.form_map.contains_key(&form_key) {
-                // Fill Chrome as a side effect. Then persist the value in cached_page
-                // so that any future re-fetch returns it. Return false so the app does
-                // NOT call refresh_current_directory — that would re-invoke fetch() and
-                // overwrite the value the app's unconditional local-FFON update already
-                // wrote into r.ffon (handlers.rs, "Update FFON element regardless of
-                // commit result").
-                self.cdp_fill_field(&form_key, new_content);
+                // Record the typed value so it can be replayed at submit time.
+                // (On Windows there is no live Chrome to fill into; on other
+                // platforms we still fill the live DOM AND remember the value
+                // so the two stay in sync if the user resubmits after a tick.)
+                self.form_field_values.insert(form_key.clone(), new_content.to_owned());
+                // Non-Windows: fill the live Chrome DOM as a side effect.
+                #[cfg(not(target_os = "windows"))]
+                {
+                    self.cdp_fill_field(&form_key, new_content);
+                }
+                // Persist the value in cached_page so that any future re-fetch
+                // returns it.  Return false so the app does NOT call
+                // refresh_current_directory — that would re-invoke fetch() and
+                // overwrite the value the app's unconditional local-FFON update
+                // already wrote into r.ffon (handlers.rs, "Update FFON element
+                // regardless of commit result").
                 self.patch_cached_form_field(&form_key, new_content);
                 return false;
             }
         }
         // Otherwise treat as URL navigation.
-        let url = new_content.trim().to_owned();
-        if url.is_empty() { return false; }
-        let full_url = if url.contains("://") { url } else { format!("https://{url}") };
+        let Some(full_url) = normalize_url_input(new_content) else { return false; };
         self.load_url(&full_url);
         true
     }
@@ -237,45 +375,53 @@ impl Provider for WebbrowserProvider {
         let Some(form_n_str) = function_name.strip_prefix("submit:form_") else { return; };
         let form_n: usize = form_n_str.parse().unwrap_or(0);
 
-        let selector = self.form_map.iter()
-            .find(|(key, node)| {
-                key.starts_with(&format!("form_{form_n}/"))
-                    && matches!(node.kind, FormNodeKind::Submit)
-            })
-            .map(|(_, node)| node.css_selector.clone())
-            .unwrap_or_else(|| html_submit_selector(form_n, "", ""));
+        #[cfg(target_os = "windows")]
+        {
+            self.submit_form_windows(form_n);
+        }
 
-        let Some(live) = &self.live else { return; };
-        let page = live.page.clone();
-        let ready = Arc::clone(&self.ready_content);
-        let url = self.current_url.clone();
+        #[cfg(not(target_os = "windows"))]
+        {
+            let selector = self.form_map.iter()
+                .find(|(key, node)| {
+                    key.starts_with(&format!("form_{form_n}/"))
+                        && matches!(node.kind, FormNodeKind::Submit)
+                })
+                .map(|(_, node)| node.css_selector.clone())
+                .unwrap_or_else(|| html_submit_selector(form_n, "", ""));
 
-        std::thread::spawn(move || {
-            let js = format!(
-                "(() => {{ const el = document.querySelector({}); \
-                 if (el) {{ el.click(); return true; }} \
-                 const f = document.querySelector('form:nth-of-type({form_n})'); \
-                 if (f) {{ f.submit(); return true; }} return false; }})()",
-                js_quote(&selector)
-            );
-            chromium_runtime().block_on(async move {
-                let _ = tokio::time::timeout(
-                    tokio::time::Duration::from_secs(5),
-                    page.evaluate(js),
-                ).await;
-                // Wait for navigation to settle after click.
-                tokio::time::sleep(tokio::time::Duration::from_millis(2500)).await;
-                if let Ok(Ok(html)) = tokio::time::timeout(
-                    tokio::time::Duration::from_secs(10),
-                    page.content(),
-                ).await {
-                    let (elements, form_map) = html_to_ffon_with_forms(&html, &url);
-                    if let Ok(mut guard) = ready.lock() {
-                        *guard = Some((elements, form_map));
+            let Some(live) = &self.live else { return; };
+            let page = live.page.clone();
+            let ready = Arc::clone(&self.ready_content);
+            let url = self.current_url.clone();
+
+            std::thread::spawn(move || {
+                let js = format!(
+                    "(() => {{ const el = document.querySelector({}); \
+                     if (el) {{ el.click(); return true; }} \
+                     const f = document.querySelector('form:nth-of-type({form_n})'); \
+                     if (f) {{ f.submit(); return true; }} return false; }})()",
+                    js_quote(&selector)
+                );
+                chromium_runtime().block_on(async move {
+                    let _ = tokio::time::timeout(
+                        tokio::time::Duration::from_secs(5),
+                        page.evaluate(js),
+                    ).await;
+                    // Wait for navigation to settle after click.
+                    tokio::time::sleep(tokio::time::Duration::from_millis(2500)).await;
+                    if let Ok(Ok(html)) = tokio::time::timeout(
+                        tokio::time::Duration::from_secs(10),
+                        page.content(),
+                    ).await {
+                        let (elements, form_map) = html_to_ffon_with_forms(&html, &url);
+                        if let Ok(mut guard) = ready.lock() {
+                            *guard = Some((elements, form_map));
+                        }
                     }
-                }
+                });
             });
-        });
+        }
     }
 
     fn tick(&mut self) -> bool {
@@ -283,23 +429,34 @@ impl Provider for WebbrowserProvider {
         if let Some((elements, form_map)) = content {
             self.cached_page = Some(CachedPage { url: self.current_url.clone(), elements });
             self.form_map = form_map;
+            // Submit-response page is now showing: old typed values no longer
+            // apply to any field on this page.  Clear them so a subsequent
+            // submit on a new form starts from a clean slate.
+            self.form_field_values.clear();
             return true;
         }
         false
     }
 
-    fn take_error(&mut self) -> Option<String> { None }
+    fn take_error(&mut self) -> Option<String> {
+        self.pending_error.lock().ok().and_then(|mut g| g.take())
+    }
 
     fn cleanup(&mut self) {
-        // Close Chrome cleanly — same pattern as fetch_html_inner.
-        if let Some(live) = self.live.take() {
-            use chromiumoxide::cdp::browser_protocol::browser::CloseParams;
-            let _ = chromium_runtime().block_on(async {
-                tokio::time::timeout(
-                    tokio::time::Duration::from_millis(500),
-                    live.session.browser.execute(CloseParams::default()),
-                ).await
-            });
+        // Non-Windows: close the persistent Chrome session cleanly.
+        // Windows: no persistent session — any in-flight submit thread owns
+        // its own session and will close it on its own.
+        #[cfg(not(target_os = "windows"))]
+        {
+            if let Some(live) = self.live.take() {
+                use chromiumoxide::cdp::browser_protocol::browser::CloseParams;
+                let _ = chromium_runtime().block_on(async {
+                    tokio::time::timeout(
+                        tokio::time::Duration::from_millis(500),
+                        live.session.browser.execute(CloseParams::default()),
+                    ).await
+                });
+            }
         }
     }
 
@@ -317,6 +474,9 @@ impl Provider for WebbrowserProvider {
         if cmd == "refresh" {
             let url = self.current_url.clone();
             if !url.is_empty() {
+                // load_url clears form_field_values, so refresh wipes any
+                // typed-but-not-yet-submitted form values.  Intentional —
+                // refresh means "start over from the server's current state".
                 self.cached_page = None;
                 self.load_url(&url);
             }
@@ -405,12 +565,60 @@ fn patch_form_field_in_tree(
     false
 }
 
+/// Normalise a user-typed URL bar entry: trim, reject empty, prepend
+/// `https://` if no scheme is present.  Pure helper extracted so it can be
+/// tested without launching Chrome.
+fn normalize_url_input(input: &str) -> Option<String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() { return None; }
+    if trimmed.contains("://") {
+        Some(trimmed.to_owned())
+    } else {
+        Some(format!("https://{trimmed}"))
+    }
+}
+
+/// Compare typed form values against a freshly-fetched form map.  Used by the
+/// Windows submit path to detect whether the form structure has changed since
+/// the user started filling it (e.g. a hidden CSRF input was renamed on reload).
+///
+/// Returns `Err(missing_keys)` listing every stored key that has no entry in
+/// `fresh`.  An empty `stored` always succeeds.
+pub(crate) fn check_form_drift(
+    stored: &HashMap<String, String>,
+    fresh: &FormMap,
+) -> Result<(), Vec<String>> {
+    let mut missing: Vec<String> = stored
+        .keys()
+        .filter(|k| !fresh.contains_key(k.as_str()))
+        .cloned()
+        .collect();
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        missing.sort();
+        Err(missing)
+    }
+}
+
+/// Store an error string into a shared error slot.  Quiet on poisoned mutex —
+/// the slot is best-effort communication to the UI's `take_error` poller.
+pub(crate) fn set_error(slot: &Arc<Mutex<Option<String>>>, msg: String) {
+    if let Ok(mut g) = slot.lock() {
+        *g = Some(msg);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Async helpers for the persistent live session
 // ---------------------------------------------------------------------------
 
 /// Initialise a long-lived Chrome session: launch the browser, open a blank
 /// tab, and inject the stealth script so it applies to every page load.
+///
+/// Non-Windows only.  Windows uses `fetch_html_once` for each page load so the
+/// off-screen Chrome window is never present while the user reads the page.
+#[cfg(not(target_os = "windows"))]
 async fn init_live_session() -> Result<LivePageSession, String> {
     let t = tokio::time::Duration::from_secs;
     let session = launch_browser().await?;
@@ -478,6 +686,237 @@ async fn navigate_and_get_html(page: &chromiumoxide::Page, url: &str) -> Result<
         ));
     }
     Ok(html)
+}
+
+// ---------------------------------------------------------------------------
+// Windows close-after-load: per-call launch+fetch+close helpers
+//
+// On Windows the persistent off-screen Chrome window would be announced by
+// screen readers (NVDA / Narrator) via the UI Automation tree.  Instead we
+// launch a fresh Chrome for every page load and every form submit, then
+// close it again.  Cookies and localStorage survive via the fixed profile
+// dir (`%TEMP%/sicompass-chrome`).
+// ---------------------------------------------------------------------------
+
+/// Launch a fresh Chrome, open a tab, inject stealth, navigate to `url`,
+/// fetch HTML, and close Chrome.  Used by `load_url` on Windows.
+#[cfg(target_os = "windows")]
+async fn fetch_html_once(url: &str) -> Result<String, String> {
+    let t = tokio::time::Duration::from_secs;
+    let session = launch_browser().await?;
+
+    let result: Result<String, String> = async {
+        let page = tokio::time::timeout(t(15), session.browser.new_page("about:blank"))
+            .await
+            .map_err(|_| "Chrome took >15 s to open a tab".to_owned())?
+            .map_err(|e| format!("failed to open tab: {e}"))?;
+
+        tokio::time::timeout(
+            t(10),
+            page.execute(AddScriptToEvaluateOnNewDocumentParams::new(STEALTH_SCRIPT)),
+        )
+        .await
+        .map_err(|_| "stealth script injection timed out".to_owned())?
+        .map_err(|e| format!("stealth script injection failed: {e}"))?;
+
+        navigate_and_get_html(&page, url).await
+    }
+    .await;
+
+    close_browser(&session).await;
+    result
+}
+
+/// Send `Browser.close` so Chrome exits cleanly (WebSocket close handshake
+/// completes) before the `BrowserSession` is dropped.  Mirrors the pattern in
+/// `fetch_html_inner`.
+#[cfg(target_os = "windows")]
+async fn close_browser(session: &BrowserSession) {
+    use chromiumoxide::cdp::browser_protocol::browser::CloseParams;
+    let _ = tokio::time::timeout(
+        tokio::time::Duration::from_millis(500),
+        session.browser.execute(CloseParams::default()),
+    )
+    .await;
+}
+
+/// Poll `page.url()` until it stays the same for `settle` (or `total` elapses).
+/// Used after clicking submit to give the post-submit navigation time to land.
+///
+/// More reliable than a fixed-duration sleep because real navigations can
+/// arrive 200 ms or 4 s after the click depending on server roundtrip and
+/// client-side redirects.
+#[cfg(target_os = "windows")]
+async fn await_navigation_stable(
+    page: &chromiumoxide::Page,
+    total: tokio::time::Duration,
+    settle: tokio::time::Duration,
+) {
+    let poll = tokio::time::Duration::from_millis(200);
+    let deadline = tokio::time::Instant::now() + total;
+    let mut last_url = String::new();
+    let mut stable_since: Option<tokio::time::Instant> = None;
+    loop {
+        tokio::time::sleep(poll).await;
+        let url = tokio::time::timeout(
+            tokio::time::Duration::from_secs(3),
+            page.url(),
+        )
+        .await
+        .ok()
+        .and_then(|r| r.ok())
+        .flatten()
+        .unwrap_or_default();
+
+        if url != last_url {
+            last_url = url;
+            stable_since = Some(tokio::time::Instant::now());
+        } else if let Some(start) = stable_since {
+            if start.elapsed() >= settle {
+                return;
+            }
+        } else {
+            stable_since = Some(tokio::time::Instant::now());
+        }
+
+        if tokio::time::Instant::now() >= deadline {
+            return;
+        }
+    }
+}
+
+/// Top-level driver for the Windows submit thread.  Launches Chrome, runs the
+/// fill+submit+fetch flow, surfaces success or error through the shared slots,
+/// and closes Chrome on every exit path.
+#[cfg(target_os = "windows")]
+async fn submit_form_windows_async(
+    url: String,
+    form_n: usize,
+    stored_values: HashMap<String, String>,
+    ready: Arc<Mutex<Option<(Vec<FfonElement>, FormMap)>>>,
+    error_slot: Arc<Mutex<Option<String>>>,
+) {
+    let session = match launch_browser().await {
+        Ok(s) => s,
+        Err(e) => {
+            set_error(&error_slot, format!("Could not launch Chrome for submit: {e}"));
+            return;
+        }
+    };
+
+    let result = submit_form_windows_inner(&session, &url, form_n, &stored_values).await;
+    match result {
+        Ok((elements, form_map)) => {
+            if let Ok(mut guard) = ready.lock() {
+                *guard = Some((elements, form_map));
+            }
+        }
+        Err(e) => set_error(&error_slot, e),
+    }
+    close_browser(&session).await;
+}
+
+/// Inner submit flow: open a tab, navigate to `url`, drift-check the form,
+/// refill every stored value, click submit, await navigation, fetch the
+/// response page, and return its parsed FFON + new form map.
+///
+/// All errors are returned as `Err(String)` for the caller to push into
+/// `pending_error`.
+#[cfg(target_os = "windows")]
+async fn submit_form_windows_inner(
+    session: &BrowserSession,
+    url: &str,
+    form_n: usize,
+    stored_values: &HashMap<String, String>,
+) -> Result<(Vec<FfonElement>, FormMap), String> {
+    let t = tokio::time::Duration::from_secs;
+
+    let page = tokio::time::timeout(t(15), session.browser.new_page("about:blank"))
+        .await
+        .map_err(|_| "Chrome took >15 s to open a tab".to_owned())?
+        .map_err(|e| format!("failed to open tab: {e}"))?;
+
+    tokio::time::timeout(
+        t(10),
+        page.execute(AddScriptToEvaluateOnNewDocumentParams::new(STEALTH_SCRIPT)),
+    )
+    .await
+    .map_err(|_| "stealth script injection timed out".to_owned())?
+    .map_err(|e| format!("stealth script injection failed: {e}"))?;
+
+    // Re-navigate to the form URL.  Cookies from the profile dir come along.
+    let html = navigate_and_get_html(&page, url)
+        .await
+        .map_err(|e| format!("Failed to reopen {url} for submit: {e}"))?;
+
+    // Parse the fresh form so we can detect drift and look up the up-to-date
+    // submit selector (form structure may have changed since the user typed).
+    let (_fresh_elements, fresh_form_map) = html_to_ffon_with_forms(&html, url);
+
+    if let Err(missing) = check_form_drift(stored_values, &fresh_form_map) {
+        return Err(format!(
+            "Form changed since you started filling it: missing field(s) {}. \
+             Refresh the page and try again.",
+            missing.join(", ")
+        ));
+    }
+
+    // Refill every stored value via CDP.
+    for (form_key, value) in stored_values {
+        let Some(node) = fresh_form_map.get(form_key.as_str()) else {
+            // Drift check already passed; this branch only hits if the map
+            // changed under us between check and fill (impossible here).
+            continue;
+        };
+        let js = build_fill_js(&node.css_selector, value);
+        tokio::time::timeout(t(5), page.evaluate(js))
+            .await
+            .map_err(|_| format!("Timed out filling field {form_key}"))?
+            .map_err(|e| format!("Failed to fill field {form_key}: {e}"))?;
+    }
+
+    // Locate the submit selector in the fresh form map; fall back to the
+    // generic `form:nth-of-type(N)` submit if the button isn't in the map.
+    let selector = fresh_form_map
+        .iter()
+        .find(|(key, node)| {
+            key.starts_with(&format!("form_{form_n}/"))
+                && matches!(node.kind, FormNodeKind::Submit)
+        })
+        .map(|(_, node)| node.css_selector.clone())
+        .unwrap_or_else(|| html_submit_selector(form_n, "", ""));
+
+    let click_js = format!(
+        "(() => {{ const el = document.querySelector({}); \
+         if (el) {{ el.click(); return true; }} \
+         const f = document.querySelector('form:nth-of-type({form_n})'); \
+         if (f) {{ f.submit(); return true; }} return false; }})()",
+        js_quote(&selector)
+    );
+    let _ = tokio::time::timeout(t(5), page.evaluate(click_js)).await;
+
+    // Give the post-submit navigation time to land.
+    await_navigation_stable(
+        &page,
+        tokio::time::Duration::from_secs(10),
+        tokio::time::Duration::from_millis(750),
+    )
+    .await;
+
+    // Fetch the response page.
+    let response_html = tokio::time::timeout(t(15), page.content())
+        .await
+        .map_err(|_| "timed out waiting for response page (15 s)".to_owned())?
+        .map_err(|e| format!("failed to get response content: {e}"))?;
+
+    let response_url = tokio::time::timeout(t(5), page.url())
+        .await
+        .ok()
+        .and_then(|r| r.ok())
+        .flatten()
+        .unwrap_or_else(|| url.to_owned());
+
+    Ok(html_to_ffon_with_forms(&response_html, &response_url))
 }
 
 // ---------------------------------------------------------------------------
@@ -1008,6 +1447,9 @@ fn is_cf_blocked_html(html: &str) -> bool {
 /// Fetch a URL via Chromium, parse the HTML, and return as FFON elements.
 /// Used by the main app's `fetch_url_to_elements` bridge.
 pub fn fetch_url_to_ffon(url: &str) -> Vec<FfonElement> {
+    if test_no_launch() {
+        return vec![FfonElement::new_str(format!("<test-no-launch>{url}</test-no-launch>"))];
+    }
     match fetch_html_chromium(url) {
         Ok(html) => html_to_ffon(&html, url),
         Err(e) => vec![FfonElement::new_str(format!("Error loading {url}: {e}"))],
@@ -1606,14 +2048,37 @@ mod tests {
     }
 
     #[test]
-    fn test_commit_edit_prepends_https() {
-        let mut p = WebbrowserProvider::new();
-        // commit_edit triggers fetch — use a URL that won't resolve in tests
-        // We just test the URL normalization logic directly via current_url
-        // by patching: simulate commit fail gracefully
-        let _ = p.commit_edit("https://", "example.com");
-        // After commit (whether fetch succeeds or fails), current_url is set
-        assert_eq!(p.current_url, "https://example.com");
+    fn normalize_url_input_prepends_https_when_no_scheme() {
+        assert_eq!(
+            normalize_url_input("example.com"),
+            Some("https://example.com".to_owned()),
+        );
+    }
+
+    #[test]
+    fn normalize_url_input_preserves_existing_scheme() {
+        assert_eq!(
+            normalize_url_input("http://example.com"),
+            Some("http://example.com".to_owned()),
+        );
+        assert_eq!(
+            normalize_url_input("https://example.com"),
+            Some("https://example.com".to_owned()),
+        );
+    }
+
+    #[test]
+    fn normalize_url_input_trims_whitespace() {
+        assert_eq!(
+            normalize_url_input("   example.com  "),
+            Some("https://example.com".to_owned()),
+        );
+    }
+
+    #[test]
+    fn normalize_url_input_returns_none_for_empty() {
+        assert_eq!(normalize_url_input(""), None);
+        assert_eq!(normalize_url_input("   "), None);
     }
 
     #[test]
@@ -2069,6 +2534,111 @@ mod tests {
         let child = p.cached_page.as_ref().unwrap().elements[0]
             .as_obj().unwrap().children[0].as_str().unwrap();
         assert_eq!(child, "q: <input>hello</input>", "cached_page not patched");
+    }
+
+    // ---- Drift detection (Windows close-after-load path) ----
+
+    fn fresh_map(keys: &[&str]) -> FormMap {
+        use sicompass_sdk::ffon::{FormNode, FormNodeKind};
+        let mut map = FormMap::new();
+        for k in keys {
+            map.insert((*k).to_owned(), FormNode {
+                css_selector: format!("#{k}"),
+                kind: FormNodeKind::TextInput,
+            });
+        }
+        map
+    }
+
+    fn stored_map(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect()
+    }
+
+    #[test]
+    fn drift_check_all_present_returns_ok() {
+        let stored = stored_map(&[("form_1/email", "a@b"), ("form_1/name", "Nico")]);
+        let fresh = fresh_map(&["form_1/email", "form_1/name", "form_1/submit"]);
+        assert!(check_form_drift(&stored, &fresh).is_ok());
+    }
+
+    #[test]
+    fn drift_check_missing_field_returns_err_with_missing_keys() {
+        let stored = stored_map(&[("form_1/email", "a@b"), ("form_1/csrf", "x")]);
+        let fresh = fresh_map(&["form_1/email"]);
+        let err = check_form_drift(&stored, &fresh).expect_err("should detect drift");
+        assert_eq!(err, vec!["form_1/csrf".to_owned()]);
+    }
+
+    #[test]
+    fn drift_check_empty_stored_returns_ok() {
+        let stored = HashMap::new();
+        let fresh = fresh_map(&["form_1/anything"]);
+        assert!(check_form_drift(&stored, &fresh).is_ok());
+    }
+
+    #[test]
+    fn drift_check_empty_fresh_with_stored_returns_err_for_all() {
+        let stored = stored_map(&[("form_1/a", "1"), ("form_1/b", "2")]);
+        let fresh = FormMap::new();
+        let err = check_form_drift(&stored, &fresh).expect_err("should detect drift");
+        assert_eq!(err, vec!["form_1/a".to_owned(), "form_1/b".to_owned()]);
+    }
+
+    // ---- form_field_values map ----
+
+    #[test]
+    fn commit_edit_records_typed_value_in_form_field_values() {
+        use sicompass_sdk::ffon::{FormNode, FormNodeKind};
+        let mut p = WebbrowserProvider::new();
+        p.form_map.insert("form_1/email".into(), FormNode {
+            css_selector: "#email".into(),
+            kind: FormNodeKind::TextInput,
+        });
+        // Build cached_page so patch_cached_form_field has something to update.
+        let mut form = FfonElement::new_obj("form_1");
+        form.as_obj_mut().unwrap().push(FfonElement::new_str("email: <input></input>"));
+        p.cached_page = Some(CachedPage { url: "https://x".into(), elements: vec![form] });
+
+        p.push_path("https://x");
+        p.push_path("form_1");
+        p.push_path("email");
+        p.commit_edit("", "user@example.com");
+
+        assert_eq!(
+            p.form_field_values.get("form_1/email").map(|s| s.as_str()),
+            Some("user@example.com"),
+        );
+    }
+
+    // ---- take_error draining ----
+
+    #[test]
+    fn take_error_drains_pending_error_once() {
+        use sicompass_sdk::provider::Provider;
+        let mut p = WebbrowserProvider::new();
+        set_error(&p.pending_error, "boom".to_owned());
+        assert_eq!(p.take_error(), Some("boom".to_owned()));
+        assert_eq!(p.take_error(), None, "second drain returns None");
+    }
+
+    // ---- Windows single-flight submit guard ----
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn single_flight_rejects_second_submit() {
+        use sicompass_sdk::provider::Provider;
+        use std::sync::atomic::Ordering;
+        let mut p = WebbrowserProvider::new();
+        // Simulate an in-flight submit so the next press takes the early-return path.
+        p.submit_in_flight.store(true, Ordering::SeqCst);
+        p.current_url = "https://example.com".to_owned();
+        p.on_button_press("submit:form_1");
+
+        let err = p.take_error().expect("pending_error should carry single-flight message");
+        assert!(
+            err.contains("already in progress"),
+            "unexpected error message: {err}",
+        );
     }
 
     // Run with: cargo test -p sicompass-webbrowser -- --ignored

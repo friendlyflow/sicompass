@@ -73,6 +73,10 @@ impl Harness {
 
     fn new_with_webbrowser() -> Self {
         ensure_builtins();
+        // Stub out real Chrome launches: every webbrowser test in this binary
+        // only checks app-side behavior (URL bar mode, FFON updates, link
+        // navigation) and never wants to spawn a real browser process.
+        sicompass_webbrowser::_set_test_no_launch(true);
         let tmp = TempDir::new().expect("failed to create temp dir");
         let settings_tmp = TempDir::new().expect("failed to create settings temp dir");
         let root = tmp.path();
