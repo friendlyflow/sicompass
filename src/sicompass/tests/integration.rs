@@ -6017,6 +6017,39 @@ fn load_tabs_state_restores_persisted_layout() {
     assert_eq!(parsed_active, expected_active);
 }
 
+/// Regression: `load_tabs_state` replaces `r.tabs` with the persisted layout
+/// but the constructor only seeds a single `Timeline`. Without resizing
+/// `tab_timelines` to match, the first arrow press (which records a
+/// `Navigate` entry via `active_timeline_mut()`) panics with
+/// "index out of bounds: the len is 1 but the index is 1" whenever the
+/// persisted `activeTab` is non-zero.
+#[test]
+fn apply_tabs_section_keeps_tab_timelines_parallel_to_tabs() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+
+    let tabs_json = format!(
+        r#"[{{"id":[{fb}],"path":"/"}},{{"id":[{fb}],"path":"/"}},{{"id":[{fb}],"path":"/"}}]"#,
+        fb = fb_idx,
+    );
+    let mut sec = serde_json::Map::new();
+    sec.insert("tabs".to_owned(), serde_json::Value::String(tabs_json));
+    sec.insert("activeTab".to_owned(), serde_json::Value::String("2".to_owned()));
+
+    sicompass::programs::apply_tabs_section(h.r(), &sec);
+
+    assert_eq!(h.renderer.tabs.len(), 3, "all three persisted tabs should load");
+    assert_eq!(
+        h.renderer.tab_timelines.len(),
+        h.renderer.tabs.len(),
+        "tab_timelines must stay parallel to tabs after load",
+    );
+    assert_eq!(h.renderer.active_tab, 2, "saved active tab should be restored");
+
+    // Would have panicked before the fix: active_tab=2 indexed a 1-element vec.
+    let _ = h.renderer.active_timeline_mut();
+}
+
 /// Regression: after restart, a tab snapshot may reference a cursor index
 /// past the end of the provider's current FFON tree — terminal scrollback,
 /// chat backlog and similar ephemeral content shrink across sessions. The

@@ -420,12 +420,22 @@ pub fn read_maximized() -> bool {
 /// (e.g. the program was disabled) are dropped; if everything is filtered out,
 /// the existing default is preserved.
 pub fn load_tabs_state(r: &mut crate::app_state::AppRenderer) {
-    use sicompass_sdk::ffon::IdArray;
-    use crate::app_state::TabSnapshot;
     let Some(path) = sicompass_sdk::platform::main_config_path() else { return };
     let Ok(data) = std::fs::read_to_string(&path) else { return };
     let Ok(root) = serde_json::from_str::<serde_json::Value>(&data) else { return };
     let Some(sec) = root.get("sicompass").and_then(|v| v.as_object()) else { return };
+    apply_tabs_section(r, sec);
+}
+
+/// Apply the parsed `sicompass` settings section to `r`. Split out from
+/// [`load_tabs_state`] so tests can exercise the reconciliation logic without
+/// depending on the global config path.
+pub fn apply_tabs_section(
+    r: &mut crate::app_state::AppRenderer,
+    sec: &serde_json::Map<String, serde_json::Value>,
+) {
+    use sicompass_sdk::ffon::IdArray;
+    use crate::app_state::TabSnapshot;
 
     let provider_count = r.providers.len();
 
@@ -452,6 +462,13 @@ pub fn load_tabs_state(r: &mut crate::app_state::AppRenderer) {
             }
         }
     }
+
+    // Keep `tab_timelines` parallel to `tabs`. The constructor seeds a single
+    // empty Timeline; if the persisted layout has more tabs we must extend so
+    // the invariant `tab_timelines.len() == tabs.len()` holds before any
+    // `active_timeline_mut()` call (e.g. the first arrow press, which records
+    // a Navigate entry).
+    r.tab_timelines.resize_with(r.tabs.len(), crate::app_state::Timeline::new);
 
     if let Some(active_str) = sec.get("activeTab").and_then(|v| v.as_str()) {
         if let Ok(n) = active_str.parse::<usize>() {
