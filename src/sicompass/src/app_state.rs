@@ -627,7 +627,24 @@ impl AppRenderer {
             }
         }
 
-        self.current_id = snap.current_id;
+        // Clamp the cursor position to the actual children count at the
+        // restored path. Providers with ephemeral content (terminal
+        // scrollback, chat backlog) often have fewer elements after restart
+        // than when last saved, so a stale `current_id.last()` would point
+        // past the end. Without this clamp, downstream code that propagates
+        // `current_id.last()` into `list_index` (see view.rs after a tick)
+        // would leave focus on a non-existent row.
+        let mut current_id = snap.current_id;
+        if let Some(parent_slice) =
+            sicompass_sdk::ffon::get_ffon_at_id(&self.ffon, &current_id)
+        {
+            let last_idx = current_id.last().unwrap_or(0);
+            let max_idx = parent_slice.len().saturating_sub(1);
+            if last_idx > max_idx {
+                current_id.set_last(max_idx);
+            }
+        }
+        self.current_id = current_id;
         self.list_index = self.current_id.last().unwrap_or(0);
     }
 

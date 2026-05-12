@@ -6013,6 +6013,47 @@ fn load_tabs_state_restores_persisted_layout() {
     assert_eq!(parsed_active, expected_active);
 }
 
+/// Regression: after restart, a tab snapshot may reference a cursor index
+/// past the end of the provider's current FFON tree — terminal scrollback,
+/// chat backlog and similar ephemeral content shrink across sessions. The
+/// loader must clamp so `list_index` lands on a real row instead of leaving
+/// the focus rendered off-screen.
+#[test]
+fn load_active_tab_clamps_stale_cursor_past_end() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+
+    let provider_path = h.renderer.providers[fb_idx].current_path().to_owned();
+    let children_len = match &h.renderer.ffon[fb_idx] {
+        FfonElement::Obj(o) => o.children.len(),
+        _ => 0,
+    };
+    assert!(children_len >= 1, "harness should produce at least one child");
+
+    // Forge a snapshot whose cursor sits well past the actual children.
+    let mut id = sicompass_sdk::ffon::IdArray::new();
+    id.push(fb_idx);
+    id.push(children_len + 100);
+    h.renderer.tabs[0] = sicompass::app_state::TabSnapshot {
+        current_id: id,
+        provider_path,
+    };
+    h.renderer.active_tab = 0;
+    h.renderer.load_active_tab();
+
+    let last = h.renderer.current_id.last().unwrap_or(0);
+    assert!(
+        last < children_len,
+        "current_id.last() = {} should be clamped to < children_len {}",
+        last,
+        children_len
+    );
+    assert_eq!(
+        h.renderer.list_index, last,
+        "list_index must mirror the clamped cursor"
+    );
+}
+
 /// Regression test for the bug the user reported: navigating Left in tab A
 /// rebuilds the file browser's FFON tree, leaving tab B's saved indices
 /// pointing at the wrong content. With per-tab provider_path snapshots,
