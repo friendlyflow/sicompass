@@ -691,12 +691,16 @@ fn logical_normalize(p: &Path) -> PathBuf {
 /// Uses `Path::strip_prefix` so the comparison works with both `/` and `\\`
 /// separators rather than relying on a hard-coded `/`.
 fn collapse_home(cwd: &str) -> String {
-    let Some(home) = platform::home_dir() else { return cwd.to_owned(); };
+    collapse_home_with(cwd, platform::home_dir().as_deref())
+}
+
+fn collapse_home_with(cwd: &str, home: Option<&Path>) -> String {
+    let Some(home) = home else { return cwd.to_owned(); };
     let cwd_path = std::path::Path::new(cwd);
     if cwd_path == home {
         return "~".to_owned();
     }
-    if let Ok(rest) = cwd_path.strip_prefix(&home) {
+    if let Ok(rest) = cwd_path.strip_prefix(home) {
         let rest_str = rest.to_string_lossy();
         // Re-emit with forward slashes — the prompt is always shell-style.
         let normalized = rest_str.replace('\\', "/");
@@ -1122,23 +1126,23 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn collapse_home_replaces_leading_home_with_tilde() {
-        std::env::set_var("HOME", "/home/nico");
-        assert_eq!(collapse_home("/home/nico"), "~");
-        assert_eq!(collapse_home("/home/nico/projects"), "~/projects");
-        assert_eq!(collapse_home("/home/nicolae"), "/home/nicolae"); // not a prefix match
-        assert_eq!(collapse_home("/tmp"), "/tmp");
+        let home = Path::new("/home/nico");
+        assert_eq!(collapse_home_with("/home/nico", Some(home)), "~");
+        assert_eq!(collapse_home_with("/home/nico/projects", Some(home)), "~/projects");
+        assert_eq!(collapse_home_with("/home/nicolae", Some(home)), "/home/nicolae"); // not a prefix match
+        assert_eq!(collapse_home_with("/tmp", Some(home)), "/tmp");
     }
 
     #[cfg(windows)]
     #[test]
     fn collapse_home_replaces_leading_userprofile_with_tilde() {
-        std::env::set_var("USERPROFILE", "C:\\Users\\nico");
-        assert_eq!(collapse_home("C:\\Users\\nico"), "~");
+        let home = Path::new("C:\\Users\\nico");
+        assert_eq!(collapse_home_with("C:\\Users\\nico", Some(home)), "~");
         // Backslash-separated subpath gets re-emitted with `/`.
-        assert_eq!(collapse_home("C:\\Users\\nico\\projects"), "~/projects");
+        assert_eq!(collapse_home_with("C:\\Users\\nico\\projects", Some(home)), "~/projects");
         // Sibling dir that just shares a prefix must NOT collapse.
-        assert_eq!(collapse_home("C:\\Users\\nicolae"), "C:\\Users\\nicolae");
-        assert_eq!(collapse_home("C:\\Temp"), "C:\\Temp");
+        assert_eq!(collapse_home_with("C:\\Users\\nicolae", Some(home)), "C:\\Users\\nicolae");
+        assert_eq!(collapse_home_with("C:\\Temp", Some(home)), "C:\\Temp");
     }
 
     // ---- `cd` parser tests --------------------------------------------

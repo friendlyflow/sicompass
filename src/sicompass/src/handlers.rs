@@ -1106,8 +1106,10 @@ pub fn handle_enter_general(r: &mut AppRenderer) {
             }
 
             let cur_path = crate::provider::current_path(r).to_owned();
-            let sep = if cur_path.ends_with('/') { "" } else { "/" };
-            let full_path = format!("{cur_path}{sep}{fname}");
+            let full_path = std::path::Path::new(&cur_path)
+                .join(&fname)
+                .to_string_lossy()
+                .into_owned();
 
             let src_idx = r.save_as_source_root_idx;
             let return_id = r.save_as_return_id.clone();
@@ -1736,12 +1738,15 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
         let mut dest_name = format!("{base}.json");
         let mut n = 0u32;
         loop {
-            let full = format!("{save_dir}/{dest_name}");
-            if !std::path::Path::new(&full).exists() { break; }
+            let full = std::path::Path::new(&save_dir).join(&dest_name);
+            if !full.exists() { break; }
             n += 1;
             dest_name = format!("{base} (copy {n}).json");
         }
-        let dest_full = format!("{save_dir}/{dest_name}");
+        let dest_full = std::path::Path::new(&save_dir)
+            .join(&dest_name)
+            .to_string_lossy()
+            .into_owned();
 
         // Save source provider FFON children to file (matching C: saves children, not root wrapper)
         let src_idx = r.save_as_source_root_idx;
@@ -6638,8 +6643,8 @@ mod tests {
         r.providers.push(Box::new(FbProv));
         // Navigate to provider 1 (source)
         r.current_id = { let mut id = IdArray::new(); id.push(1); id.push(0); id };
-        // Set save_folder_path to /tmp (guaranteed to exist)
-        r.save_folder_path = "/tmp".to_owned();
+        // Set save_folder_path to the platform temp dir (guaranteed to exist)
+        r.save_folder_path = std::env::temp_dir().to_string_lossy().into_owned();
 
         handle_save_as_provider_config(&mut r);
 
@@ -6661,10 +6666,12 @@ mod tests {
 
     #[test]
     fn resolve_save_folder_absolute_path_unchanged() {
+        let abs = std::env::temp_dir().join("custom_save_dir");
+        let abs_str = abs.to_string_lossy().into_owned();
         let mut r = AppRenderer::new();
-        r.save_folder_path = "/custom/save/dir".to_owned();
+        r.save_folder_path = abs_str.clone();
         let result = resolve_save_folder(&r);
-        assert_eq!(result, "/custom/save/dir");
+        assert_eq!(result, abs_str);
     }
 
     #[test]
