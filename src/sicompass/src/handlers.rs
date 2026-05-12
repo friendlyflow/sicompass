@@ -3278,7 +3278,11 @@ pub fn handle_home(r: &mut AppRenderer) {
             }
             r.last_keypress_time = now;
             list::create_list_current_layer(r);
-            r.scroll_offset = r.list_index as i32;
+            // Show the list from the top so all items above the cursor remain
+            // visible. The renderer snaps forward only if the cursor would
+            // otherwise be off-screen, so this stays correct for very long
+            // lists too.
+            r.scroll_offset = 0;
             r.needs_redraw = true;
         }
         _ => {

@@ -7255,3 +7255,38 @@ fn unified_undo_reverts_file_deletion_with_snapshot() {
     assert!(target.exists(), "ctrl-Z restored the file");
     assert_eq!(std::fs::read(&target).unwrap(), b"test content");
 }
+
+/// Regression: double-tap Home from inside a provider must show the root
+/// list from the top, not scroll the originating provider to the top of the
+/// viewport (which hid every program above it). The previous behavior set
+/// `scroll_offset = list_index`, so Home-Home from a provider at index N
+/// pinned N as the first visible row.
+#[test]
+fn double_tap_home_from_deep_nav_shows_root_from_top() {
+    let mut h = Harness::new();
+    let settings_idx = h.provider_idx("settings").unwrap();
+    assert!(settings_idx > 0, "settings should not be the first provider");
+
+    // Descend into a non-first provider so we have depth > 1 and a non-zero
+    // alphabetical position for the originating provider.
+    navigate_to_provider(h.r(), settings_idx);
+    press_right(h.r());
+    assert!(h.renderer.current_id.depth() > 1, "should be inside the provider");
+
+    // Double-tap Home — two presses well within DELTA_MS (400ms).
+    press(h.r(), Keycode::Home);
+    press(h.r(), Keycode::Home);
+
+    assert_eq!(h.renderer.current_id.depth(), 1, "should be back at root");
+    assert_eq!(
+        h.renderer.current_id.get(0),
+        Some(settings_idx),
+        "cursor should land on the originating provider",
+    );
+    assert_eq!(
+        h.renderer.scroll_offset, 0,
+        "root list should be scrolled to the top so all programs above the \
+         originating provider remain visible (was {} = list_index before the fix)",
+        h.renderer.scroll_offset,
+    );
+}
