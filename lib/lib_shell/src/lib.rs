@@ -127,10 +127,20 @@ impl Shell {
         self.writer.flush()
     }
 
-    /// Send `s` followed by `\n`.
+    /// Send `s` followed by an Enter keystroke (`\r\n` on Windows, `\n` on
+    /// Unix). On Windows, cmd.exe under ConPTY treats a bare `\n` as a
+    /// continuation character, not a line submission — only `\r` triggers
+    /// Enter. Unix shells in cooked mode are happy with `\n`.
     pub fn write_line(&mut self, s: &str) -> std::io::Result<()> {
         self.write_input(s.as_bytes())?;
-        self.write_input(b"\n")
+        #[cfg(windows)]
+        {
+            self.write_input(b"\r\n")
+        }
+        #[cfg(not(windows))]
+        {
+            self.write_input(b"\n")
+        }
     }
 
     /// Drain whatever output the background reader has buffered. Non-blocking.
@@ -276,26 +286,33 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn spawn_cmd_echo_observes_output() {
+        // The submitted command must not contain the marker string itself,
+        // or cmd's typing-echo alone would satisfy the assertion even when
+        // Enter was never registered. We use `echo MARKER` so the marker
+        // appears in output only if the command actually executed.
         let cfg = ShellConfig {
             program: "cmd.exe".to_owned(),
             ..Default::default()
         };
         let mut shell = Shell::spawn(cfg).expect("spawn cmd.exe");
-        shell
-            .write_line("echo sicompass-shell-test")
-            .expect("write");
+        shell.write_line("echo SICOMPASS_OK").expect("write");
 
         let mut acc: Vec<u8> = Vec::new();
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline {
             acc.extend(shell.drain_output());
-            if String::from_utf8_lossy(&acc).contains("sicompass-shell-test") {
+            // The marker must appear at least twice: once as cmd's
+            // typing-echo of the submitted line, and once as the actual
+            // output of `echo`. A single occurrence means Enter was never
+            // registered and the command never ran.
+            let text = String::from_utf8_lossy(&acc);
+            if text.matches("SICOMPASS_OK").count() >= 2 {
                 return;
             }
             thread::sleep(Duration::from_millis(20));
         }
         panic!(
-            "did not observe echoed marker; got: {:?}",
+            "did not observe executed marker; got: {:?}",
             String::from_utf8_lossy(&acc)
         );
     }

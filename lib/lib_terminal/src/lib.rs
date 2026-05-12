@@ -20,7 +20,7 @@
 mod altscreen_detect;
 mod emulator;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use altscreen_detect::{AltScreenDetector, AltScreenEvent};
 use emulator::{encode_dashboard_key, Emulator};
@@ -384,6 +384,14 @@ impl Provider for TerminalProvider {
         // Snapshot the prompt at submit time — past entries should display
         // the cwd they were run in, even after the user runs `cd` afterwards.
         let prompt = self.current_prompt();
+        // Track `cd` locally so the prompt's cwd updates on Windows/macOS,
+        // where there's no cheap-and-portable way to read the child's live
+        // working directory. Linux already covers this via `/proc/<pid>/cwd`
+        // in `shell_cwd()`; the local update there is a harmless fallback.
+        let base = PathBuf::from(self.shell_cwd());
+        if let Some(new_cwd) = parse_cd(new, &base) {
+            self.cwd = Some(new_cwd);
+        }
         self.entries.push(Entry {
             prompt,
             input: new.to_owned(),
@@ -599,6 +607,84 @@ fn expand_home(value: &str) -> PathBuf {
         }
     }
     PathBuf::from(value)
+}
+
+/// If `line` is a `cd` command, return the working directory it would set,
+/// resolved against `base`. Returns `None` for non-cd commands.
+///
+/// Handles: `cd` (→ home), `cd path`, `cd "quoted path"`, tilde expansion,
+/// and on Windows the `/d` flag (`cd /d C:\foo`). Relative paths join with
+/// `base`; `.`/`..` collapse without filesystem access so a non-existent
+/// target still updates the displayed prompt (matching what the shell will
+/// then complain about).
+fn parse_cd(line: &str, base: &Path) -> Option<PathBuf> {
+    let trimmed = line.trim();
+    // Match "cd" as a whole word — reject "cdrom", "cda", etc.
+    let after_cd = if trimmed.len() >= 2 && trimmed[..2].eq_ignore_ascii_case("cd") {
+        &trimmed[2..]
+    } else {
+        return None;
+    };
+    if !after_cd.is_empty() && !after_cd.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let mut rest = after_cd.trim_start();
+
+    #[cfg(windows)]
+    {
+        // `cd /d C:\foo` — strip the /d flag if present.
+        if rest.len() >= 2 && rest[..2].eq_ignore_ascii_case("/d") {
+            let after_flag = &rest[2..];
+            if after_flag.is_empty() || after_flag.starts_with(char::is_whitespace) {
+                rest = after_flag.trim_start();
+            }
+        }
+    }
+
+    if rest.is_empty() {
+        return platform::home_dir();
+    }
+
+    let unquoted = strip_surrounding_quotes(rest);
+    let expanded = expand_home(unquoted);
+    let candidate = if expanded.is_absolute() {
+        expanded
+    } else {
+        base.join(expanded)
+    };
+    Some(logical_normalize(&candidate))
+}
+
+/// Strip a single pair of matching surrounding quotes (single or double).
+fn strip_surrounding_quotes(s: &str) -> &str {
+    let bytes = s.as_bytes();
+    if bytes.len() >= 2
+        && ((bytes[0] == b'"' && bytes[bytes.len() - 1] == b'"')
+            || (bytes[0] == b'\'' && bytes[bytes.len() - 1] == b'\''))
+    {
+        &s[1..s.len() - 1]
+    } else {
+        s
+    }
+}
+
+/// Collapse `.` and `..` components without touching the filesystem. Used so
+/// the prompt's cwd updates immediately even for paths that don't yet exist.
+fn logical_normalize(p: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for c in p.components() {
+        match c {
+            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
+                out.push(c.as_os_str());
+            }
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+        }
+    }
+    out
 }
 
 /// Replace a leading `$HOME` in `cwd` with `~` for shell-style display.
@@ -1053,6 +1139,107 @@ mod tests {
         // Sibling dir that just shares a prefix must NOT collapse.
         assert_eq!(collapse_home("C:\\Users\\nicolae"), "C:\\Users\\nicolae");
         assert_eq!(collapse_home("C:\\Temp"), "C:\\Temp");
+    }
+
+    // ---- `cd` parser tests --------------------------------------------
+
+    #[test]
+    fn parse_cd_returns_none_for_non_cd_commands() {
+        let base = Path::new("/tmp");
+        assert_eq!(parse_cd("ls", base), None);
+        assert_eq!(parse_cd("echo cd", base), None);
+        // Word-boundary check: "cdrom" is not a cd command.
+        assert_eq!(parse_cd("cdrom", base), None);
+        assert_eq!(parse_cd("cda /tmp", base), None);
+    }
+
+    #[test]
+    fn parse_cd_absolute_path_replaces_base() {
+        #[cfg(unix)]
+        {
+            let got = parse_cd("cd /var/log", Path::new("/tmp")).unwrap();
+            assert_eq!(got, PathBuf::from("/var/log"));
+        }
+        #[cfg(windows)]
+        {
+            let got = parse_cd("cd C:\\Windows", Path::new("C:\\tmp")).unwrap();
+            assert_eq!(got, PathBuf::from("C:\\Windows"));
+        }
+    }
+
+    #[test]
+    fn parse_cd_relative_joins_with_base() {
+        #[cfg(unix)]
+        {
+            let got = parse_cd("cd projects", Path::new("/home/nico")).unwrap();
+            assert_eq!(got, PathBuf::from("/home/nico/projects"));
+        }
+        #[cfg(windows)]
+        {
+            let got = parse_cd("cd projects", Path::new("C:\\Users\\nico")).unwrap();
+            assert_eq!(got, PathBuf::from("C:\\Users\\nico\\projects"));
+        }
+    }
+
+    #[test]
+    fn parse_cd_dotdot_pops_one_component() {
+        #[cfg(unix)]
+        {
+            let got = parse_cd("cd ..", Path::new("/home/nico/projects")).unwrap();
+            assert_eq!(got, PathBuf::from("/home/nico"));
+        }
+        #[cfg(windows)]
+        {
+            let got = parse_cd("cd ..", Path::new("C:\\Users\\nico\\projects")).unwrap();
+            assert_eq!(got, PathBuf::from("C:\\Users\\nico"));
+        }
+    }
+
+    #[test]
+    fn parse_cd_strips_surrounding_double_quotes() {
+        #[cfg(unix)]
+        {
+            let got = parse_cd("cd \"my projects\"", Path::new("/tmp")).unwrap();
+            assert_eq!(got, PathBuf::from("/tmp/my projects"));
+        }
+        #[cfg(windows)]
+        {
+            let got = parse_cd("cd \"My Projects\"", Path::new("C:\\tmp")).unwrap();
+            assert_eq!(got, PathBuf::from("C:\\tmp\\My Projects"));
+        }
+    }
+
+    #[test]
+    fn parse_cd_no_argument_returns_home() {
+        let got = parse_cd("cd", Path::new("/tmp"));
+        // Skip if HOME/USERPROFILE not set in test env.
+        if let Some(home) = platform::home_dir() {
+            assert_eq!(got, Some(home));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn parse_cd_strips_slash_d_flag() {
+        let got = parse_cd("cd /d D:\\data", Path::new("C:\\Users\\nico")).unwrap();
+        assert_eq!(got, PathBuf::from("D:\\data"));
+        // Case-insensitive.
+        let got = parse_cd("CD /D D:\\data", Path::new("C:\\Users\\nico")).unwrap();
+        assert_eq!(got, PathBuf::from("D:\\data"));
+    }
+
+    #[test]
+    fn parse_cd_is_case_insensitive_on_command_word() {
+        #[cfg(unix)]
+        {
+            let got = parse_cd("CD /tmp", Path::new("/")).unwrap();
+            assert_eq!(got, PathBuf::from("/tmp"));
+        }
+        #[cfg(windows)]
+        {
+            let got = parse_cd("CD C:\\Windows", Path::new("C:\\")).unwrap();
+            assert_eq!(got, PathBuf::from("C:\\Windows"));
+        }
     }
 
     // ---- Phase 2b interactive-dashboard tests --------------------------
