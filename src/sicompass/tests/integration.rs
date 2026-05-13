@@ -7848,7 +7848,7 @@ fn timeline_entry_label_collapses_identical_paths() {
     // (sibling motion doesn't change the path). The timeline view must show a
     // single path instead of "X → X", so the user sees the path they're at
     // rather than the same string repeated.
-    use sicompass::list::timeline_entry_label;
+    use sicompass::list::{timeline_entry_label, TimelineProviderInfo};
     use sicompass_sdk::ffon::IdArray;
     let mut from_id = IdArray::new();
     from_id.push(0);
@@ -7864,7 +7864,11 @@ fn timeline_entry_label_collapses_identical_paths() {
         to_path: Some("/home/nico".to_owned()),
         kind: sicompass_sdk::timeline::NavKind::ArrowDown,
     };
-    let s = timeline_entry_label(&entry, &["editor".to_owned()]);
+    let providers = vec![TimelineProviderInfo {
+        display_name: "editor".to_owned(),
+        path_is_filesystem: true,
+    }];
+    let s = timeline_entry_label(&entry, &providers);
     assert!(s.contains("/home/nico"), "label must contain the path: {s}");
     assert!(
         !s.contains("\u{2192}"),

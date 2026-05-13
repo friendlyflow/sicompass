@@ -396,10 +396,13 @@ fn build_timeline_list(renderer: &mut AppRenderer) {
         (tl.entries.clone(), tl.position)
     };
 
-    let provider_names: Vec<String> = renderer
+    let providers: Vec<TimelineProviderInfo> = renderer
         .providers
         .iter()
-        .map(|p| p.display_name().to_owned())
+        .map(|p| TimelineProviderInfo {
+            display_name: p.display_name().to_owned(),
+            path_is_filesystem: p.path_is_filesystem(),
+        })
         .collect();
 
     if entries.is_empty() {
@@ -434,7 +437,7 @@ fn build_timeline_list(renderer: &mut AppRenderer) {
         } else {
             "  "
         };
-        let label = format!("{}{}", prefix, timeline_entry_label(entry, &provider_names));
+        let label = format!("{}{}", prefix, timeline_entry_label(entry, &providers));
         let mut id = IdArray::new();
         id.push(i);
         items.push(RenderListItem {
@@ -447,13 +450,45 @@ fn build_timeline_list(renderer: &mut AppRenderer) {
     renderer.total_list = items;
 }
 
+/// Per-provider context passed to `timeline_entry_label` so it can pick the
+/// right path rendering. `display_name` is the fallback label when a Navigate
+/// entry has no path (depth-1 origin/destination outside any provider).
+/// `path_is_filesystem` toggles slash-separated paths (filebrowser, editor)
+/// vs breadcrumb (`section › item`) for synthetic provider paths.
+#[derive(Clone, Debug)]
+pub struct TimelineProviderInfo {
+    pub display_name: String,
+    pub path_is_filesystem: bool,
+}
+
+/// Render a non-filesystem provider path as a breadcrumb. Strips the leading
+/// `/` and replaces remaining slashes with `\u{203A}` (›) so the user reads
+/// "Available programs: › Email" instead of "/Available programs:/Email".
+/// Filesystem paths are passed through verbatim.
+fn render_nav_path(path: &str, is_fs: bool, fallback: &str) -> String {
+    if is_fs {
+        return path.to_owned();
+    }
+    let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    if segments.is_empty() {
+        // Path is "/" or empty — at provider root, so fall back to the
+        // display_name so the entry still identifies the provider.
+        fallback.to_owned()
+    } else {
+        segments.join(" \u{203A} ")
+    }
+}
+
 /// One-line, human-readable summary of a `TimelineEntry` for the Z-key
 /// timeline view. Keep it short — the row is rendered as a flat list item.
-/// `provider_names` is indexed by `provider_idx` and used as a fallback when
-/// a Navigate entry has no path (i.e. the cursor was at depth 1, outside any
-/// provider's path zone) — the display name lets the user recognize the
-/// origin/destination instead of seeing `?`.
-pub fn timeline_entry_label(entry: &TimelineEntry, provider_names: &[String]) -> String {
+/// `providers` is indexed by `provider_idx`; its `display_name` is the
+/// fallback when a Navigate entry has no path (cursor at depth 1, outside
+/// any provider's path zone), and `path_is_filesystem` drives slash vs
+/// breadcrumb rendering.
+pub fn timeline_entry_label(
+    entry: &TimelineEntry,
+    providers: &[TimelineProviderInfo],
+) -> String {
     match entry {
         TimelineEntry::Navigate {
             kind,
@@ -463,20 +498,26 @@ pub fn timeline_entry_label(entry: &TimelineEntry, provider_names: &[String]) ->
             to_path,
             ..
         } => {
-            let provider_label = |id: &sicompass_sdk::ffon::IdArray| -> String {
-                id.get(0)
-                    .and_then(|i| provider_names.get(i))
-                    .cloned()
-                    .unwrap_or_else(|| "?".to_owned())
+            let info_for = |id: &sicompass_sdk::ffon::IdArray| -> Option<&TimelineProviderInfo> {
+                id.get(0).and_then(|i| providers.get(i))
             };
-            let from = match from_path {
-                Some(p) => p.clone(),
-                None => provider_label(from_id),
+            let render = |id: &sicompass_sdk::ffon::IdArray, path: &Option<String>| -> String {
+                let info = info_for(id);
+                let fallback = info
+                    .map(|p| p.display_name.as_str())
+                    .unwrap_or("?")
+                    .to_owned();
+                match path {
+                    Some(p) => render_nav_path(
+                        p,
+                        info.map(|i| i.path_is_filesystem).unwrap_or(false),
+                        &fallback,
+                    ),
+                    None => fallback,
+                }
             };
-            let to = match to_path {
-                Some(p) => p.clone(),
-                None => provider_label(to_id),
-            };
+            let from = render(from_id, from_path);
+            let to = render(to_id, to_path);
             // Up/Down doesn't change the provider path, so from_path == to_path
             // for sibling motion inside a provider. Collapse to a single path so
             // the timeline view doesn't repeat the same string with an arrow.
@@ -962,7 +1003,9 @@ mod tests {
             "expected ▶ prefix on HEAD row, got: {:?}",
             r.total_list[0].label
         );
-        assert!(r.total_list[0].label.contains("/b") && r.total_list[0].label.contains("/c"));
+        // Provider info is empty here, so the renderer falls back to the
+        // breadcrumb path; "/b" and "/c" surface as bare "b" and "c".
+        assert!(r.total_list[0].label.contains('b') && r.total_list[0].label.contains('c'));
         // Second row = older (entries[0]) → no marker prefix
         assert!(
             r.total_list[1].label.starts_with("  "),
@@ -1005,6 +1048,13 @@ mod tests {
         assert!(s.contains("radio-toggle"));
     }
 
+    fn provider_info(name: &str, fs: bool) -> TimelineProviderInfo {
+        TimelineProviderInfo {
+            display_name: name.to_owned(),
+            path_is_filesystem: fs,
+        }
+    }
+
     #[test]
     fn timeline_entry_label_navigate_falls_back_to_provider_name_when_path_none() {
         let from_id = {
@@ -1025,10 +1075,74 @@ mod tests {
             to_path: None,
             kind: sicompass_sdk::timeline::NavKind::ArrowDown,
         };
-        let names = vec!["File Browser".to_owned(), "Email Client".to_owned()];
-        let s = timeline_entry_label(&entry, &names);
+        let providers = vec![
+            provider_info("File Browser", true),
+            provider_info("Email Client", false),
+        ];
+        let s = timeline_entry_label(&entry, &providers);
         assert!(s.contains("File Browser"), "expected origin provider name in {:?}", s);
         assert!(s.contains("Email Client"), "expected destination provider name in {:?}", s);
         assert!(!s.contains("?"), "no `?` when provider names are available: {:?}", s);
+    }
+
+    #[test]
+    fn timeline_entry_label_filesystem_path_keeps_slashes() {
+        let mut id = sicompass_sdk::ffon::IdArray::new();
+        id.push(0);
+        let entry = TimelineEntry::Navigate {
+            provider_idx: 0,
+            from_id: id.clone(),
+            to_id: id,
+            from_path: Some("/home/nico".to_owned()),
+            to_path: Some("/home/nico/Documents".to_owned()),
+            kind: sicompass_sdk::timeline::NavKind::ArrowRight,
+        };
+        let providers = vec![provider_info("file browser", true)];
+        let s = timeline_entry_label(&entry, &providers);
+        assert!(s.contains("/home/nico"), "fs paths render verbatim: {s}");
+        assert!(s.contains("/home/nico/Documents"), "fs paths keep slashes: {s}");
+        assert!(!s.contains("\u{203A}"), "no breadcrumb separator for fs paths: {s}");
+    }
+
+    #[test]
+    fn timeline_entry_label_non_filesystem_path_uses_breadcrumb() {
+        let mut id = sicompass_sdk::ffon::IdArray::new();
+        id.push(0);
+        let entry = TimelineEntry::Navigate {
+            provider_idx: 0,
+            from_id: id.clone(),
+            to_id: id,
+            from_path: Some("/Available programs:".to_owned()),
+            to_path: Some("/Available programs:/Email".to_owned()),
+            kind: sicompass_sdk::timeline::NavKind::ArrowRight,
+        };
+        let providers = vec![provider_info("settings", false)];
+        let s = timeline_entry_label(&entry, &providers);
+        // No leading slashes, no `/section/item` separator — replaced with `›`.
+        assert!(!s.contains("/Available"), "non-fs paths must drop leading slash: {s}");
+        assert!(!s.contains(":/Email"), "non-fs paths must replace `/` with breadcrumb: {s}");
+        assert!(s.contains("Available programs:"), "breadcrumb keeps segment text: {s}");
+        assert!(s.contains("Email"), "breadcrumb keeps tail segment: {s}");
+        assert!(s.contains("\u{203A}"), "non-fs descent uses `\u{203A}` separator: {s}");
+    }
+
+    #[test]
+    fn timeline_entry_label_non_filesystem_root_falls_back_to_display_name() {
+        // current_path="/" (provider root) on a non-fs provider must read as
+        // the display_name, not an empty / slash-only string.
+        let mut id = sicompass_sdk::ffon::IdArray::new();
+        id.push(0);
+        let entry = TimelineEntry::Navigate {
+            provider_idx: 0,
+            from_id: id.clone(),
+            to_id: id,
+            from_path: Some("/".to_owned()),
+            to_path: Some("/".to_owned()),
+            kind: sicompass_sdk::timeline::NavKind::ArrowDown,
+        };
+        let providers = vec![provider_info("settings", false)];
+        let s = timeline_entry_label(&entry, &providers);
+        assert!(s.contains("settings"), "root non-fs path falls back to display_name: {s}");
+        assert!(!s.contains('/'), "root non-fs path must not render a bare slash: {s}");
     }
 }

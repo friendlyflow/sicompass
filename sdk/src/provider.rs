@@ -291,6 +291,14 @@ pub trait Provider: Send + 'static {
     /// in-memory user edits (e.g. script/form-builder providers).
     fn refresh_on_navigate(&self) -> bool { false }
 
+    /// Returns `true` when `current_path()` is a real filesystem path
+    /// (slash-separated directory segments). Drives how the timeline view
+    /// renders navigation entries: filesystem paths are shown verbatim
+    /// (`/home/nico/foo`), other providers' paths are split on `/` and
+    /// rendered as a breadcrumb so the user doesn't see synthetic slashes
+    /// in front of section names. Defaults to `false`.
+    fn path_is_filesystem(&self) -> bool { false }
+
     /// If `true`, `refresh_current_directory` always uses `display_name()` as
     /// the provider root Obj's key, regardless of the current path depth.
     /// Default `false` preserves the existing path-segment breadcrumb label

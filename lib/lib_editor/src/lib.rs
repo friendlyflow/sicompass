@@ -478,6 +478,8 @@ impl Provider for EditorProvider {
 
     fn refresh_on_navigate(&self) -> bool { true }
 
+    fn path_is_filesystem(&self) -> bool { true }
+
     fn needs_refresh(&self) -> bool {
         self.refresh_pending
     }
