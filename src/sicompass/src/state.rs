@@ -528,7 +528,7 @@ pub fn walk_back(r: &mut AppRenderer) {
 
     list::create_list_current_layer(r);
     r.list_index = r.current_id.last().unwrap_or(0);
-    r.scroll_offset = r.list_index as i32;
+    r.scroll_offset = 0;
 }
 
 /// Drain (and throw away) any TimelineEntry that providers emitted as a side
@@ -567,7 +567,7 @@ pub fn walk_forward(r: &mut AppRenderer) {
 
     list::create_list_current_layer(r);
     r.list_index = r.current_id.last().unwrap_or(0);
-    r.scroll_offset = r.list_index as i32;
+    r.scroll_offset = 0;
 }
 
 fn apply_undo(r: &mut AppRenderer, entry: &TimelineEntry) {

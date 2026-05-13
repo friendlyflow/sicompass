@@ -8448,6 +8448,14 @@ fn unified_undo_after_leaving_radio_group_keeps_list_visible() {
     let mut expected2 = sicompass_sdk::ffon::IdArray::new();
     for p in [0, 0, 0, 0, 0] { expected2.push(p); }
     assert_eq!(r.current_id, expected2, "second undo lands cursor on the now-checked option");
+
+    // A third Ctrl-Z (if there's a prior Navigate for entering the radio)
+    // would walk back further; what matters here is that walk_back never
+    // forces scroll_offset to list_index — every Ctrl-Z should leave the
+    // view scrolled to the top (scroll_offset == 0), so a high list_index
+    // (e.g. a radio that lives at position 2 in its parent section) does
+    // not push the list view off the top.
+    assert_eq!(r.scroll_offset, 0, "walk_back must not force a scroll based on list_index");
 }
 
 #[test]
