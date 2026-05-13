@@ -163,13 +163,11 @@ fn record_navigation_if_moved(
     // Path tracking applies only *inside* a provider (depth >= 2). Up/Down
     // doesn't change depth, so this single gate covers both origin and
     // destination — at depth 1 (root provider list) we leave both paths as
-    // None to avoid bogus `path → same path` entries in the timeline view.
-    let has_path = r.current_id.depth() >= 2
-        && r.providers
-            .get(provider_idx)
-            .map(|p| p.refresh_on_navigate())
-            .unwrap_or(false);
-    let (from_path, to_path) = if has_path {
+    // None and let `timeline_entry_label` fall back to the provider's
+    // display_name. Inside a provider every plugin can report a path
+    // (default `current_path()` is "/" — providers that track navigation
+    // override it), so the gate no longer hinges on `refresh_on_navigate`.
+    let (from_path, to_path) = if r.current_id.depth() >= 2 {
         let path = crate::provider::current_path(r).to_owned();
         (Some(path.clone()), Some(path))
     } else {
@@ -203,14 +201,9 @@ fn record_search_exit_navigation(
     // to_path follows the same depth gate as callers apply to from_path:
     // path tracking only matters *inside* a provider (depth >= 2). Without
     // this gate, a Tab+Enter at depth=1 on the same provider would yield
-    // from_path=None vs to_path=Some(fb_path), falsely tripping the
+    // from_path=None vs to_path=Some(provider_path), falsely tripping the
     // "anything changed" branch and recording a phantom Navigate.
-    let dest_tracks_path = r.current_id.depth() >= 2
-        && r.providers
-            .get(provider_idx)
-            .map(|p| p.refresh_on_navigate())
-            .unwrap_or(false);
-    let to_path = if dest_tracks_path {
+    let to_path = if r.current_id.depth() >= 2 {
         Some(crate::provider::current_path(r).to_owned())
     } else {
         None
@@ -411,14 +404,13 @@ pub fn handle_right(r: &mut AppRenderer) {
         Some(id) => id,
         None => return,
     };
-    // Only record filebrowser navigation (path-based); non-filebrowser navigation
-    // is purely in-memory FFON traversal and needs no undo entry.
-    let is_fb = active_provider_is_filebrowser(r);
-    let pre_nav_id = item_id.clone();
     // Path tracking only applies *inside* a provider (depth >= 2). At depth 1
     // the cursor is on a provider entry in the root list, so from_path stays
-    // None to avoid bogus `/ → /` entries in the timeline view.
-    let path_before = if is_fb && pre_nav_id.depth() >= 2 {
+    // None to avoid bogus `/ → /` entries in the timeline view. Every plugin
+    // reports a meaningful `current_path()` once you're inside it, so we no
+    // longer restrict path tracking to the filebrowser.
+    let pre_nav_id = item_id.clone();
+    let path_before = if pre_nav_id.depth() >= 2 {
         Some(crate::provider::current_path(r).to_owned())
     } else {
         None
@@ -433,21 +425,17 @@ pub fn handle_right(r: &mut AppRenderer) {
         // Gate to_path on destination depth too: after navigate_right_raw,
         // the cursor may sit at depth >= 2 even when origin was at depth 1,
         // so the descent into the provider is reflected as `None → /<path>`.
-        let dest_tracks_path = r.current_id.depth() >= 2
-            && r.providers
-                .get(provider_idx)
-                .map(|p| p.refresh_on_navigate())
-                .unwrap_or(false);
+        let to_path = if r.current_id.depth() >= 2 {
+            Some(crate::provider::current_path(r).to_owned())
+        } else {
+            None
+        };
         let entry = sicompass_sdk::timeline::TimelineEntry::Navigate {
             provider_idx,
             from_id: pre_nav_id,
             to_id: r.current_id.clone(),
             from_path: path_before.clone(),
-            to_path: if dest_tracks_path {
-                Some(crate::provider::current_path(r).to_owned())
-            } else {
-                None
-            },
+            to_path,
             kind: sicompass_sdk::timeline::NavKind::ArrowRight,
         };
         crate::state::record_entry(r, entry);
@@ -628,17 +616,16 @@ pub fn navigate_left_raw(r: &mut AppRenderer) -> bool {
 
 /// Navigate out to the parent level (Left key).
 pub fn handle_left(r: &mut AppRenderer) {
-    let is_fb = active_provider_is_filebrowser(r);
     let pre_nav_id = r.current_id.clone();
     // Gate from_path on origin depth: at depth 1 (provider list) there is no
-    // meaningful path to track.
-    let path_before = if is_fb && pre_nav_id.depth() >= 2 {
+    // meaningful path to track. Every plugin reports its `current_path()`
+    // once we're inside it, so this is no longer filebrowser-specific.
+    let path_before = if pre_nav_id.depth() >= 2 {
         Some(crate::provider::current_path(r).to_owned())
     } else {
         None
     };
     if navigate_left_raw(r) {
-        let _ = is_fb;
         r.scroll_offset = 0;
         list::create_list_current_layer(r);
         r.sync_current_id_from_list();
@@ -647,21 +634,17 @@ pub fn handle_left(r: &mut AppRenderer) {
         let provider_idx = r.current_id.get(0).unwrap_or(0);
         // Gate to_path on destination depth: handle_left can pop back to
         // depth 1, where the cursor leaves the provider's path zone.
-        let dest_tracks_path = r.current_id.depth() >= 2
-            && r.providers
-                .get(provider_idx)
-                .map(|p| p.refresh_on_navigate())
-                .unwrap_or(false);
+        let to_path = if r.current_id.depth() >= 2 {
+            Some(crate::provider::current_path(r).to_owned())
+        } else {
+            None
+        };
         let entry = sicompass_sdk::timeline::TimelineEntry::Navigate {
             provider_idx,
             from_id: pre_nav_id,
             to_id: r.current_id.clone(),
             from_path: path_before.clone(),
-            to_path: if dest_tracks_path {
-                Some(crate::provider::current_path(r).to_owned())
-            } else {
-                None
-            },
+            to_path,
             kind: sicompass_sdk::timeline::NavKind::ArrowLeft,
         };
         crate::state::record_entry(r, entry);

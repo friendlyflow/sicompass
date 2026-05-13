@@ -453,7 +453,7 @@ fn build_timeline_list(renderer: &mut AppRenderer) {
 /// a Navigate entry has no path (i.e. the cursor was at depth 1, outside any
 /// provider's path zone) — the display name lets the user recognize the
 /// origin/destination instead of seeing `?`.
-pub(crate) fn timeline_entry_label(entry: &TimelineEntry, provider_names: &[String]) -> String {
+pub fn timeline_entry_label(entry: &TimelineEntry, provider_names: &[String]) -> String {
     match entry {
         TimelineEntry::Navigate {
             kind,
@@ -477,7 +477,14 @@ pub(crate) fn timeline_entry_label(entry: &TimelineEntry, provider_names: &[Stri
                 Some(p) => p.clone(),
                 None => provider_label(to_id),
             };
-            format!("nav {:?} {} \u{2192} {}", kind, from, to)
+            // Up/Down doesn't change the provider path, so from_path == to_path
+            // for sibling motion inside a provider. Collapse to a single path so
+            // the timeline view doesn't repeat the same string with an arrow.
+            if from == to {
+                format!("nav {:?} {}", kind, to)
+            } else {
+                format!("nav {:?} {} \u{2192} {}", kind, from, to)
+            }
         }
         TimelineEntry::TextChunk {
             id,

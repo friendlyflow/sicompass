@@ -7768,6 +7768,111 @@ fn general_down_at_root_records_navigate_with_no_paths() {
 }
 
 #[test]
+fn general_right_into_settings_records_path_not_provider_name() {
+    // Settings is a non-filebrowser, non-refresh_on_navigate provider that
+    // nonetheless tracks current_path. Right-from-root + Right-into-section
+    // must capture from_path/to_path so the timeline view shows the
+    // descent as paths (e.g. "/" → "/Available programs:") instead of
+    // falling back to the provider's display_name on both sides.
+    let mut h = Harness::new();
+    let settings_idx = h.provider_idx("settings").expect("settings provider");
+    navigate_to_provider(h.r(), settings_idx);
+    let pre_root_id = h.renderer.current_id.clone();
+    clear_timeline(h.r());
+
+    // Step 1: depth-1 → depth-2 (cursor leaves the root list, enters settings).
+    // from_path=None (depth-1 origin), to_path=Some("/") (depth-2 inside provider).
+    press_right(h.r());
+    assert_eq!(h.renderer.current_id.depth(), 2, "Right should descend into settings");
+    let path_at_settings_root = sicompass::provider::current_path(&h.renderer).to_owned();
+    {
+        let entries = &h.renderer.active_timeline().entries;
+        assert_eq!(entries.len(), 1, "Right at depth-1 must record one Navigate");
+        match &entries[0] {
+            sicompass_sdk::timeline::TimelineEntry::Navigate { from_id, from_path, to_path, .. } => {
+                assert_eq!(*from_id, pre_root_id);
+                assert_eq!(*from_path, None, "depth-1 origin must have from_path=None");
+                assert_eq!(
+                    to_path.as_deref(),
+                    Some(path_at_settings_root.as_str()),
+                    "depth-2 destination must capture settings current_path",
+                );
+            }
+            other => panic!("expected Navigate, got {:?}", other),
+        }
+    }
+
+    // Step 2: depth-2 → depth-3 inside settings. Both paths must be Some and
+    // must differ, so the timeline view shows the descent as "/" → "/<section>".
+    let pre_section_path = sicompass::provider::current_path(&h.renderer).to_owned();
+    press_right(h.r());
+    if h.renderer.current_id.depth() < 3 {
+        // Settings was empty — nothing to descend into; that's not the case
+        // exercised by this test, so bail rather than misreport coverage.
+        return;
+    }
+    let path_in_section = sicompass::provider::current_path(&h.renderer).to_owned();
+    assert_ne!(
+        path_in_section, pre_section_path,
+        "Right into a settings section must change current_path",
+    );
+    let entries = &h.renderer.active_timeline().entries;
+    // The two consecutive Right presses inside the provider coalesce into one
+    // Navigate entry; from_path is the pre-Tab settings root, to_path is the
+    // section path.
+    let last = entries.last().expect("at least one Navigate entry recorded");
+    match last {
+        sicompass_sdk::timeline::TimelineEntry::Navigate { from_path, to_path, .. } => {
+            assert!(
+                from_path.is_some(),
+                "non-filebrowser provider must capture from_path once inside it",
+            );
+            assert_eq!(
+                to_path.as_deref(),
+                Some(path_in_section.as_str()),
+                "to_path must reflect post-nav settings path",
+            );
+            assert_ne!(
+                from_path.as_deref(),
+                to_path.as_deref(),
+                "descent must surface as distinct from/to paths in the timeline",
+            );
+        }
+        other => panic!("expected Navigate, got {:?}", other),
+    }
+}
+
+#[test]
+fn timeline_entry_label_collapses_identical_paths() {
+    // Up/Down inside a provider produces a Navigate where from_path == to_path
+    // (sibling motion doesn't change the path). The timeline view must show a
+    // single path instead of "X → X", so the user sees the path they're at
+    // rather than the same string repeated.
+    use sicompass::list::timeline_entry_label;
+    use sicompass_sdk::ffon::IdArray;
+    let mut from_id = IdArray::new();
+    from_id.push(0);
+    from_id.push(2);
+    let mut to_id = IdArray::new();
+    to_id.push(0);
+    to_id.push(3);
+    let entry = sicompass_sdk::timeline::TimelineEntry::Navigate {
+        provider_idx: 0,
+        from_id,
+        to_id,
+        from_path: Some("/home/nico".to_owned()),
+        to_path: Some("/home/nico".to_owned()),
+        kind: sicompass_sdk::timeline::NavKind::ArrowDown,
+    };
+    let s = timeline_entry_label(&entry, &["editor".to_owned()]);
+    assert!(s.contains("/home/nico"), "label must contain the path: {s}");
+    assert!(
+        !s.contains("\u{2192}"),
+        "identical from/to must collapse to a single path (no arrow): {s}",
+    );
+}
+
+#[test]
 fn simple_search_enter_at_root_same_item_does_not_record() {
     // At depth=1, Tab + Enter on the same provider must NOT push a
     // phantom Navigate. Before the to_path depth gate, the entry would
