@@ -216,6 +216,12 @@ fn list_prefix_to_word(prefix: &str) -> Option<&'static str> {
         "+l"  => Some("plus l"),
         "+R"  => Some("plus R"),
         "+i"  => Some("plus i"),
+        // Timeline-view markers: HEAD is the next ctrl-Z target; redo-branch
+        // entries have already been undone. Without these mappings the prefix
+        // is silently stripped, leaving screenreader users with no way to
+        // distinguish current / undone / older entries in the history list.
+        ">"        => Some("current"),
+        "\u{00B7}" => Some("undone"),  // ·
         _     => None,
     }
 }
@@ -454,6 +460,22 @@ mod tests {
     fn label_to_speech_unknown_prefix_drops_prefix() {
         // Matches C render.c:220-221: unknown prefix → speak only the content.
         assert_eq!(label_to_speech("-z thing"), "thing");
+    }
+
+    #[test]
+    fn label_to_speech_timeline_head_arrow_says_current() {
+        assert_eq!(
+            label_to_speech("> nav ArrowRight /home/nico"),
+            "current nav ArrowRight /home/nico",
+        );
+    }
+
+    #[test]
+    fn label_to_speech_timeline_redo_branch_dot_says_undone() {
+        assert_eq!(
+            label_to_speech("\u{00B7} nav ArrowRight /home/nico"),
+            "undone nav ArrowRight /home/nico",
+        );
     }
 
     #[test]

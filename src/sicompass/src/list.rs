@@ -385,9 +385,11 @@ fn check_parent_has_radio(renderer: &AppRenderer) -> bool {
 /// Build the list for `Coordinate::TimelineView` — per-tab undo timeline.
 ///
 /// Entries are shown in reverse order (most recent on top). The entry
-/// currently at HEAD (next Ctrl+Z target) is prefixed `"\u{25B6} "`; entries
-/// in the redo branch (already undone) are prefixed `"\u{00B7} "`; older
-/// history below the cursor is unprefixed.
+/// currently at HEAD (next Ctrl+Z target) is prefixed `"> "`; entries
+/// in the redo branch (already undone) are prefixed `"\u{00B7} "` (·);
+/// older history below the cursor is unprefixed. ASCII `>` is used (vs
+/// the more decorative U+25B6 ▶) because the bundled Consolas font's
+/// rasteriser only covers codepoints 32..256.
 fn build_timeline_list(renderer: &mut AppRenderer) {
     renderer.list_index = 0;
 
@@ -431,7 +433,7 @@ fn build_timeline_list(renderer: &mut AppRenderer) {
     let mut items: Vec<RenderListItem> = Vec::with_capacity(len);
     for (i, entry) in entries.iter().enumerate().rev() {
         let prefix = if Some(i) == head_idx {
-            "\u{25B6} " // ▶
+            "> "
         } else if i >= redo_branch_start {
             "\u{00B7} " // ·
         } else {
@@ -462,9 +464,11 @@ pub struct TimelineProviderInfo {
 }
 
 /// Render a non-filesystem provider path as a breadcrumb. Strips the leading
-/// `/` and replaces remaining slashes with `\u{203A}` (›) so the user reads
-/// "Available programs: › Email" instead of "/Available programs:/Email".
-/// Filesystem paths are passed through verbatim.
+/// `/` and replaces remaining slashes with ` > ` so the user reads
+/// "Available programs: > Email" instead of "/Available programs:/Email".
+/// Filesystem paths are passed through verbatim. ASCII `>` matches the
+/// ExtendedSearch (Ctrl+F) breadcrumb and stays within the Consolas
+/// glyph range covered by the text rasteriser.
 fn render_nav_path(path: &str, is_fs: bool, fallback: &str) -> String {
     if is_fs {
         return path.to_owned();
@@ -475,7 +479,7 @@ fn render_nav_path(path: &str, is_fs: bool, fallback: &str) -> String {
         // display_name so the entry still identifies the provider.
         fallback.to_owned()
     } else {
-        segments.join(" \u{203A} ")
+        segments.join(" > ")
     }
 }
 
@@ -524,7 +528,7 @@ pub fn timeline_entry_label(
             if from == to {
                 format!("nav {:?} {}", kind, to)
             } else {
-                format!("nav {:?} {} \u{2192} {}", kind, from, to)
+                format!("nav {:?} {} > {}", kind, from, to)
             }
         }
         TimelineEntry::TextChunk {
@@ -585,7 +589,7 @@ fn fs_summary(
 ) -> String {
     match side_effect {
         FsSideEffect::RenameOnly { from, to } => {
-            format!("{} \u{2192} {}", from.display(), to.display())
+            format!("{} > {}", from.display(), to.display())
         }
         FsSideEffect::TrashedFile { original_path, .. }
         | FsSideEffect::TrashedDir { original_path, .. } => {
@@ -593,7 +597,7 @@ fn fs_summary(
         }
         FsSideEffect::None => match (before, after) {
             (Some(b), Some(a)) => format!(
-                "{} \u{2192} {}",
+                "{} > {}",
                 ffon_str_snippet(b, 30),
                 ffon_str_snippet(a, 30)
             ),
@@ -616,12 +620,12 @@ fn imap_op_summary(op: &ImapOpKind) -> String {
             msg_id,
             src_folder,
             dst_folder,
-        } => format!("Move {} {} \u{2192} {}", msg_id, src_folder, dst_folder),
+        } => format!("Move {} {} > {}", msg_id, src_folder, dst_folder),
         ImapOpKind::SetSeen { msg_uid, folder, new, .. } => {
-            format!("SetSeen uid={} {} \u{2192} {}", msg_uid, folder, new)
+            format!("SetSeen uid={} {} > {}", msg_uid, folder, new)
         }
         ImapOpKind::SetFlagged { msg_uid, folder, new, .. } => {
-            format!("SetFlagged uid={} {} \u{2192} {}", msg_uid, folder, new)
+            format!("SetFlagged uid={} {} > {}", msg_uid, folder, new)
         }
     }
 }
@@ -997,10 +1001,10 @@ mod tests {
         create_list_current_layer(&mut r);
 
         assert_eq!(r.total_list.len(), 2);
-        // First row = most recent (entries[1]) = HEAD → prefixed "▶ "
+        // First row = most recent (entries[1]) = HEAD → prefixed "> "
         assert!(
-            r.total_list[0].label.starts_with("\u{25B6} "),
-            "expected ▶ prefix on HEAD row, got: {:?}",
+            r.total_list[0].label.starts_with("> "),
+            "expected `> ` prefix on HEAD row, got: {:?}",
             r.total_list[0].label
         );
         // Provider info is empty here, so the renderer falls back to the
@@ -1032,7 +1036,7 @@ mod tests {
         // entries[1] → redo branch
         assert!(r.total_list[1].label.starts_with("\u{00B7} "));
         // entries[0] → HEAD
-        assert!(r.total_list[2].label.starts_with("\u{25B6} "));
+        assert!(r.total_list[2].label.starts_with("> "));
     }
 
     #[test]
@@ -1101,7 +1105,12 @@ mod tests {
         let s = timeline_entry_label(&entry, &providers);
         assert!(s.contains("/home/nico"), "fs paths render verbatim: {s}");
         assert!(s.contains("/home/nico/Documents"), "fs paths keep slashes: {s}");
-        assert!(!s.contains("\u{203A}"), "no breadcrumb separator for fs paths: {s}");
+        // The outer from→to join is ` > ` for every Navigate label, but the
+        // *segments inside an fs path* must NOT be breadcrumb-split.
+        assert!(
+            !s.contains("home > nico"),
+            "fs path segments must not be split by breadcrumb separator: {s}",
+        );
     }
 
     #[test]
@@ -1123,7 +1132,7 @@ mod tests {
         assert!(!s.contains(":/Email"), "non-fs paths must replace `/` with breadcrumb: {s}");
         assert!(s.contains("Available programs:"), "breadcrumb keeps segment text: {s}");
         assert!(s.contains("Email"), "breadcrumb keeps tail segment: {s}");
-        assert!(s.contains("\u{203A}"), "non-fs descent uses `\u{203A}` separator: {s}");
+        assert!(s.contains(" > "), "non-fs descent uses ` > ` separator: {s}");
     }
 
     #[test]

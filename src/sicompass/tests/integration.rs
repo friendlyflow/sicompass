@@ -7871,7 +7871,7 @@ fn timeline_entry_label_collapses_identical_paths() {
     let s = timeline_entry_label(&entry, &providers);
     assert!(s.contains("/home/nico"), "label must contain the path: {s}");
     assert!(
-        !s.contains("\u{2192}"),
+        !s.contains(" > "),
         "identical from/to must collapse to a single path (no arrow): {s}",
     );
 }
