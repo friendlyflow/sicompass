@@ -160,17 +160,68 @@ fn record_navigation_if_moved(
         return;
     }
     let provider_idx = r.current_id.get(0).unwrap_or(0);
-    let has_path = r
-        .providers
-        .get(provider_idx)
-        .map(|p| p.refresh_on_navigate())
-        .unwrap_or(false);
+    // Path tracking applies only *inside* a provider (depth >= 2). Up/Down
+    // doesn't change depth, so this single gate covers both origin and
+    // destination — at depth 1 (root provider list) we leave both paths as
+    // None to avoid bogus `path → same path` entries in the timeline view.
+    let has_path = r.current_id.depth() >= 2
+        && r.providers
+            .get(provider_idx)
+            .map(|p| p.refresh_on_navigate())
+            .unwrap_or(false);
     let (from_path, to_path) = if has_path {
         let path = crate::provider::current_path(r).to_owned();
         (Some(path.clone()), Some(path))
     } else {
         (None, None)
     };
+    let entry = sicompass_sdk::timeline::TimelineEntry::Navigate {
+        provider_idx,
+        from_id,
+        to_id: r.current_id.clone(),
+        from_path,
+        to_path,
+        kind,
+    };
+    crate::state::record_entry(r, entry);
+}
+
+/// Push a `Navigate` entry for a search-exit commit (Enter / Right-at-end /
+/// Left-at-cursor-0 inside SimpleSearch or ExtendedSearch). Unlike
+/// `record_navigation_if_moved`, `from_id` is supplied by the caller because
+/// the logical origin of a search jump is `search_origin_id`, not the
+/// renderer's current id at the moment of recording. `from_path` is captured
+/// by the caller before any path-changing operation (e.g. `navigate_to_path`)
+/// so it accurately reflects the pre-commit path.
+fn record_search_exit_navigation(
+    r: &mut AppRenderer,
+    from_id: sicompass_sdk::ffon::IdArray,
+    from_path: Option<String>,
+    kind: sicompass_sdk::timeline::NavKind,
+) {
+    let provider_idx = r.current_id.get(0).unwrap_or(0);
+    // to_path follows the same depth gate as callers apply to from_path:
+    // path tracking only matters *inside* a provider (depth >= 2). Without
+    // this gate, a Tab+Enter at depth=1 on the same provider would yield
+    // from_path=None vs to_path=Some(fb_path), falsely tripping the
+    // "anything changed" branch and recording a phantom Navigate.
+    let dest_tracks_path = r.current_id.depth() >= 2
+        && r.providers
+            .get(provider_idx)
+            .map(|p| p.refresh_on_navigate())
+            .unwrap_or(false);
+    let to_path = if dest_tracks_path {
+        Some(crate::provider::current_path(r).to_owned())
+    } else {
+        None
+    };
+    // Skip recording when neither the cursor nor the path moved. The path
+    // check is required because filebrowser descent resets `current_id` to
+    // `[provider_idx, 0]` in the new directory — numerically equal to the
+    // origin even though the user is now somewhere different.
+    if from_id == r.current_id && from_path == to_path {
+        return;
+    }
     let entry = sicompass_sdk::timeline::TimelineEntry::Navigate {
         provider_idx,
         from_id,
@@ -363,8 +414,15 @@ pub fn handle_right(r: &mut AppRenderer) {
     // Only record filebrowser navigation (path-based); non-filebrowser navigation
     // is purely in-memory FFON traversal and needs no undo entry.
     let is_fb = active_provider_is_filebrowser(r);
-    let path_before = if is_fb { Some(crate::provider::current_path(r).to_owned()) } else { None };
     let pre_nav_id = item_id.clone();
+    // Path tracking only applies *inside* a provider (depth >= 2). At depth 1
+    // the cursor is on a provider entry in the root list, so from_path stays
+    // None to avoid bogus `/ → /` entries in the timeline view.
+    let path_before = if is_fb && pre_nav_id.depth() >= 2 {
+        Some(crate::provider::current_path(r).to_owned())
+    } else {
+        None
+    };
     r.current_id = item_id;
     if navigate_right_raw(r) {
         list::create_list_current_layer(r);
@@ -372,12 +430,20 @@ pub fn handle_right(r: &mut AppRenderer) {
         r.caret.reset(sdl_ticks());
         // Emit a TimelineEntry::Navigate for the unified undo stack.
         let provider_idx = r.current_id.get(0).unwrap_or(0);
+        // Gate to_path on destination depth too: after navigate_right_raw,
+        // the cursor may sit at depth >= 2 even when origin was at depth 1,
+        // so the descent into the provider is reflected as `None → /<path>`.
+        let dest_tracks_path = r.current_id.depth() >= 2
+            && r.providers
+                .get(provider_idx)
+                .map(|p| p.refresh_on_navigate())
+                .unwrap_or(false);
         let entry = sicompass_sdk::timeline::TimelineEntry::Navigate {
             provider_idx,
             from_id: pre_nav_id,
             to_id: r.current_id.clone(),
             from_path: path_before.clone(),
-            to_path: if path_before.is_some() {
+            to_path: if dest_tracks_path {
                 Some(crate::provider::current_path(r).to_owned())
             } else {
                 None
@@ -563,8 +629,14 @@ pub fn navigate_left_raw(r: &mut AppRenderer) -> bool {
 /// Navigate out to the parent level (Left key).
 pub fn handle_left(r: &mut AppRenderer) {
     let is_fb = active_provider_is_filebrowser(r);
-    let path_before = if is_fb { Some(crate::provider::current_path(r).to_owned()) } else { None };
     let pre_nav_id = r.current_id.clone();
+    // Gate from_path on origin depth: at depth 1 (provider list) there is no
+    // meaningful path to track.
+    let path_before = if is_fb && pre_nav_id.depth() >= 2 {
+        Some(crate::provider::current_path(r).to_owned())
+    } else {
+        None
+    };
     if navigate_left_raw(r) {
         let _ = is_fb;
         r.scroll_offset = 0;
@@ -573,12 +645,19 @@ pub fn handle_left(r: &mut AppRenderer) {
         r.caret.reset(sdl_ticks());
         // Emit a TimelineEntry::Navigate for the unified undo stack.
         let provider_idx = r.current_id.get(0).unwrap_or(0);
+        // Gate to_path on destination depth: handle_left can pop back to
+        // depth 1, where the cursor leaves the provider's path zone.
+        let dest_tracks_path = r.current_id.depth() >= 2
+            && r.providers
+                .get(provider_idx)
+                .map(|p| p.refresh_on_navigate())
+                .unwrap_or(false);
         let entry = sicompass_sdk::timeline::TimelineEntry::Navigate {
             provider_idx,
             from_id: pre_nav_id,
             to_id: r.current_id.clone(),
             from_path: path_before.clone(),
-            to_path: if path_before.is_some() {
+            to_path: if dest_tracks_path {
                 Some(crate::provider::current_path(r).to_owned())
             } else {
                 None
@@ -1218,6 +1297,20 @@ pub fn handle_enter_search(r: &mut AppRenderer) {
         }
     };
 
+    let is_fb = active_provider_is_filebrowser(r);
+    let search_from_id = r.search_origin_id.clone();
+    // Path tracking only applies *inside* a provider (depth >= 2). At depth 1
+    // the cursor is on a provider entry in the root list — "outside" the
+    // provider's navigable zone — so from_path stays None even when the
+    // active provider is filebrowser. Without this gate, depth-1 → depth-2
+    // descents record `from_path == to_path == "/"` and look like a no-op
+    // in the timeline view.
+    let path_before = if is_fb && search_from_id.depth() >= 2 {
+        Some(crate::provider::current_path(r).to_owned())
+    } else {
+        None
+    };
+
     // Checkbox toggle: stay in search mode after toggling.
     {
         use sicompass_sdk::ffon::{FfonElement, get_ffon_at_id};
@@ -1260,6 +1353,12 @@ pub fn handle_enter_search(r: &mut AppRenderer) {
             r.search_string.clear();
             list::create_list_current_layer(r);
             r.list_index = r.current_id.last().unwrap_or(0);
+            record_search_exit_navigation(
+                r,
+                search_from_id,
+                path_before,
+                sicompass_sdk::timeline::NavKind::ArrowRight,
+            );
             r.needs_redraw = true;
             return;
         }
@@ -1272,6 +1371,12 @@ pub fn handle_enter_search(r: &mut AppRenderer) {
     r.search_string.clear();
     list::create_list_current_layer(r);
     r.list_index = r.current_id.last().unwrap_or(0).min(r.active_list_len().saturating_sub(1));
+    record_search_exit_navigation(
+        r,
+        search_from_id,
+        path_before,
+        sicompass_sdk::timeline::NavKind::ArrowRight,
+    );
     r.needs_redraw = true;
 
     // If a file-browser open is pending, immediately process the selected item as a
@@ -1296,6 +1401,17 @@ fn handle_enter_extended_search(r: &mut AppRenderer) {
     };
 
     let selected_id = item.id.clone();
+
+    let is_fb = active_provider_is_filebrowser(r);
+    let search_from_id = r.search_origin_id.clone();
+    // See handle_enter_search: skip path tracking when search started at
+    // depth 1 (root provider list) so the timeline entry doesn't show a
+    // bogus `/ → /` self-loop.
+    let path_before = if is_fb && search_from_id.depth() >= 2 {
+        Some(crate::provider::current_path(r).to_owned())
+    } else {
+        None
+    };
 
     // Validate ancestor radio groups along the path to the selected item.
     // Any radio group ancestor must have only string children and at most one <checked>.
@@ -1405,6 +1521,12 @@ fn handle_enter_extended_search(r: &mut AppRenderer) {
             list::create_list_current_layer(r);
             r.list_index = r.current_id.last().unwrap_or(0);
             r.scroll_offset = -1;
+            record_search_exit_navigation(
+                r,
+                search_from_id,
+                path_before,
+                sicompass_sdk::timeline::NavKind::ArrowRight,
+            );
             r.needs_redraw = true;
             return;
         }
@@ -1423,6 +1545,12 @@ fn handle_enter_extended_search(r: &mut AppRenderer) {
         list::create_list_current_layer(r);
         r.list_index = r.current_id.last().unwrap_or(0);
         r.scroll_offset = -1;
+        record_search_exit_navigation(
+            r,
+            search_from_id,
+            path_before,
+            sicompass_sdk::timeline::NavKind::ArrowRight,
+        );
         r.needs_redraw = true;
         return;
     }
@@ -1436,6 +1564,12 @@ fn handle_enter_extended_search(r: &mut AppRenderer) {
     list::create_list_current_layer(r);
     r.list_index = r.current_id.last().unwrap_or(0).min(r.active_list_len().saturating_sub(1));
     r.scroll_offset = -1;
+    record_search_exit_navigation(
+        r,
+        search_from_id,
+        path_before,
+        sicompass_sdk::timeline::NavKind::ArrowRight,
+    );
     r.needs_redraw = true;
 }
 
@@ -4365,19 +4499,31 @@ pub fn handle_search_left(r: &mut AppRenderer) {
         }
         r.caret.reset(sdl_ticks());
         r.needs_redraw = true;
-    } else if navigate_left_raw(r) {
-        if r.coordinate == Coordinate::ExtendedSearch {
-            r.input_buffer.clear();
-            r.cursor_position = 0;
-            list::create_list_extended_search(r);
-        } else {
-            r.search_string.clear();
-            r.cursor_position = 0;
-            list::create_list_current_layer(r);
+    } else {
+        let path_before = if active_provider_is_filebrowser(r)
+            { Some(crate::provider::current_path(r).to_owned()) } else { None };
+        let search_from_id = r.search_origin_id.clone();
+        if navigate_left_raw(r) {
+            if r.coordinate == Coordinate::ExtendedSearch {
+                r.input_buffer.clear();
+                r.cursor_position = 0;
+                list::create_list_extended_search(r);
+            } else {
+                r.search_string.clear();
+                r.cursor_position = 0;
+                list::create_list_current_layer(r);
+            }
+            r.list_index = r.current_id.last().unwrap_or(0)
+                .min(r.active_list_len().saturating_sub(1));
+            record_search_exit_navigation(
+                r,
+                search_from_id,
+                path_before,
+                sicompass_sdk::timeline::NavKind::ArrowLeft,
+            );
+            r.search_origin_id = r.current_id.clone();
+            r.needs_redraw = true;
         }
-        r.list_index = r.current_id.last().unwrap_or(0)
-            .min(r.active_list_len().saturating_sub(1));
-        r.needs_redraw = true;
     }
 }
 
@@ -4405,6 +4551,9 @@ pub fn handle_search_right(r: &mut AppRenderer) {
         r.caret.reset(sdl_ticks());
         r.needs_redraw = true;
     } else if r.coordinate == Coordinate::ExtendedSearch {
+        let search_from_id = r.search_origin_id.clone();
+        let path_before = if active_provider_is_filebrowser(r) && search_from_id.depth() >= 2
+            { Some(crate::provider::current_path(r).to_owned()) } else { None };
         if let Some(item) = r.current_list_item().cloned() {
             if let Some(ref nav_path) = item.nav_path {
                 let root_idx = item.id.get(0).unwrap_or(0);
@@ -4416,6 +4565,12 @@ pub fn handle_search_right(r: &mut AppRenderer) {
             if navigate_right_raw(r) {
                 r.input_buffer.clear();
                 r.cursor_position = 0;
+                record_search_exit_navigation(
+                    r,
+                    search_from_id,
+                    path_before,
+                    sicompass_sdk::timeline::NavKind::ArrowRight,
+                );
                 r.search_origin_id = r.current_id.clone();
                 list::create_list_extended_search(r);
                 r.list_index = r.current_id.last().unwrap_or(0)
@@ -4426,12 +4581,21 @@ pub fn handle_search_right(r: &mut AppRenderer) {
         }
     } else {
         // SimpleSearch at cursor end — navigate into selected item.
+        let search_from_id = r.search_origin_id.clone();
+        let path_before = if active_provider_is_filebrowser(r) && search_from_id.depth() >= 2
+            { Some(crate::provider::current_path(r).to_owned()) } else { None };
         r.search_string.clear();
         r.cursor_position = 0;
         if let Some(item_id) = r.current_list_item_id() {
             r.current_id = item_id;
         }
         if navigate_right_raw(r) {
+            record_search_exit_navigation(
+                r,
+                search_from_id,
+                path_before,
+                sicompass_sdk::timeline::NavKind::ArrowRight,
+            );
             r.search_origin_id = r.current_id.clone();
             list::create_list_current_layer(r);
             r.list_index = r.current_id.last().unwrap_or(0)

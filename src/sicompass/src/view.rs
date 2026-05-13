@@ -837,7 +837,14 @@ fn update_view(app: &mut AppState) {
         0
     } else {
         let scroll_offset = app.renderer.scroll_offset;
-        if scroll_offset < 0 {
+        // Whole-list fit: when every item visibly fits in the viewport,
+        // always anchor at index 0 — no point in honoring a non-zero
+        // scroll_offset (e.g. set by walk_back to list_index) that would
+        // hide items above the cursor.
+        let total_lines: usize = line_counts.iter().sum();
+        if total_lines <= available_lines {
+            0
+        } else if scroll_offset < 0 {
             // Sentinel -1: position list_index as last visible (renderer shows one extra item below).
             let mut lines_from_bottom = line_counts.get(list_index).copied().unwrap_or(1);
             let mut si = list_index;

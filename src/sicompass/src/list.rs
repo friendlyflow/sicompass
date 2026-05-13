@@ -396,6 +396,12 @@ fn build_timeline_list(renderer: &mut AppRenderer) {
         (tl.entries.clone(), tl.position)
     };
 
+    let provider_names: Vec<String> = renderer
+        .providers
+        .iter()
+        .map(|p| p.display_name().to_owned())
+        .collect();
+
     if entries.is_empty() {
         let mut id = IdArray::new();
         id.push(0);
@@ -428,7 +434,7 @@ fn build_timeline_list(renderer: &mut AppRenderer) {
         } else {
             "  "
         };
-        let label = format!("{}{}", prefix, timeline_entry_label(entry));
+        let label = format!("{}{}", prefix, timeline_entry_label(entry, &provider_names));
         let mut id = IdArray::new();
         id.push(i);
         items.push(RenderListItem {
@@ -443,16 +449,34 @@ fn build_timeline_list(renderer: &mut AppRenderer) {
 
 /// One-line, human-readable summary of a `TimelineEntry` for the Z-key
 /// timeline view. Keep it short — the row is rendered as a flat list item.
-pub(crate) fn timeline_entry_label(entry: &TimelineEntry) -> String {
+/// `provider_names` is indexed by `provider_idx` and used as a fallback when
+/// a Navigate entry has no path (i.e. the cursor was at depth 1, outside any
+/// provider's path zone) — the display name lets the user recognize the
+/// origin/destination instead of seeing `?`.
+pub(crate) fn timeline_entry_label(entry: &TimelineEntry, provider_names: &[String]) -> String {
     match entry {
         TimelineEntry::Navigate {
             kind,
+            from_id,
+            to_id,
             from_path,
             to_path,
             ..
         } => {
-            let from = from_path.as_deref().unwrap_or("?");
-            let to = to_path.as_deref().unwrap_or("?");
+            let provider_label = |id: &sicompass_sdk::ffon::IdArray| -> String {
+                id.get(0)
+                    .and_then(|i| provider_names.get(i))
+                    .cloned()
+                    .unwrap_or_else(|| "?".to_owned())
+            };
+            let from = match from_path {
+                Some(p) => p.clone(),
+                None => provider_label(from_id),
+            };
+            let to = match to_path {
+                Some(p) => p.clone(),
+                None => provider_label(to_id),
+            };
             format!("nav {:?} {} \u{2192} {}", kind, from, to)
         }
         TimelineEntry::TextChunk {
@@ -969,8 +993,35 @@ mod tests {
             payload: FfonElement::Str("payload".into()),
             label: "toggle theme".into(),
         };
-        let s = timeline_entry_label(&entry);
+        let s = timeline_entry_label(&entry, &[]);
         assert!(s.contains("toggle theme"));
         assert!(s.contains("radio-toggle"));
+    }
+
+    #[test]
+    fn timeline_entry_label_navigate_falls_back_to_provider_name_when_path_none() {
+        let from_id = {
+            let mut a = sicompass_sdk::ffon::IdArray::new();
+            a.push(0);
+            a
+        };
+        let to_id = {
+            let mut a = sicompass_sdk::ffon::IdArray::new();
+            a.push(1);
+            a
+        };
+        let entry = TimelineEntry::Navigate {
+            provider_idx: 1,
+            from_id,
+            to_id,
+            from_path: None,
+            to_path: None,
+            kind: sicompass_sdk::timeline::NavKind::ArrowDown,
+        };
+        let names = vec!["File Browser".to_owned(), "Email Client".to_owned()];
+        let s = timeline_entry_label(&entry, &names);
+        assert!(s.contains("File Browser"), "expected origin provider name in {:?}", s);
+        assert!(s.contains("Email Client"), "expected destination provider name in {:?}", s);
+        assert!(!s.contains("?"), "no `?` when provider names are available: {:?}", s);
     }
 }

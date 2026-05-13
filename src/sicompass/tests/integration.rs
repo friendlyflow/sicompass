@@ -7361,3 +7361,541 @@ fn extended_search_right_then_escape_stays_in_navigated_node() {
         path_before,
     );
 }
+
+// ---------------------------------------------------------------------------
+// Tests: search commits record TimelineEntry::Navigate
+// ---------------------------------------------------------------------------
+//
+// `Tab` (SimpleSearch) and `Ctrl+F` (ExtendedSearch) each support three
+// commit actions that move `current_id`: Enter, Right-at-cursor-end, and
+// Left-at-cursor-0. Each must push a Navigate entry so ctrl-Z can return
+// the user to where they were before pressing Tab/Ctrl+F. Escape and
+// intermediate up/down inside the search list must NOT record.
+
+fn clear_timeline(r: &mut AppRenderer) {
+    let tl = r.active_timeline_mut();
+    tl.entries.clear();
+    tl.position = 0;
+}
+
+#[test]
+fn simple_search_enter_records_navigate() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+
+    let pre_id = h.renderer.current_id.clone();
+    clear_timeline(h.r());
+
+    press_tab(h.r());
+    type_text(h.r(), "subdir");
+    press_enter(h.r());
+
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
+    let entries = &h.renderer.active_timeline().entries;
+    assert_eq!(entries.len(), 1, "search-Enter should record exactly one Navigate");
+    match &entries[0] {
+        sicompass_sdk::timeline::TimelineEntry::Navigate { from_id, to_id, kind, .. } => {
+            assert_eq!(*from_id, pre_id, "from_id must be the pre-Tab cursor");
+            assert_eq!(*to_id, h.renderer.current_id, "to_id must be the selected item");
+            assert_eq!(*kind, sicompass_sdk::timeline::NavKind::ArrowRight);
+        }
+        other => panic!("expected Navigate, got {:?}", other),
+    }
+
+    press_ctrl(h.r(), Keycode::Z);
+    assert_eq!(
+        h.renderer.current_id, pre_id,
+        "ctrl-Z after search-Enter must restore the pre-Tab cursor",
+    );
+}
+
+#[test]
+fn extended_search_enter_records_navigate() {
+    // ExtendedSearch walks the in-memory FFON tree at the current node. To
+    // force movement, we step down to beta.txt first and then search for
+    // "alpha" — Enter should jump back to alpha.txt at index 0.
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+    press_down(h.r()); // step off index 0 so search-Enter must move us
+
+    let pre_id = h.renderer.current_id.clone();
+    clear_timeline(h.r());
+
+    press_ctrl(h.r(), Keycode::F);
+    assert_eq!(h.renderer.coordinate, Coordinate::ExtendedSearch);
+    type_text(h.r(), "alpha");
+    press_enter(h.r());
+
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
+    let entries = &h.renderer.active_timeline().entries;
+    assert_eq!(entries.len(), 1, "ExtendedSearch Enter should record one Navigate");
+    match &entries[0] {
+        sicompass_sdk::timeline::TimelineEntry::Navigate { from_id, kind, .. } => {
+            assert_eq!(*from_id, pre_id);
+            assert_eq!(*kind, sicompass_sdk::timeline::NavKind::ArrowRight);
+        }
+        other => panic!("expected Navigate, got {:?}", other),
+    }
+
+    press_ctrl(h.r(), Keycode::Z);
+    assert_eq!(
+        h.renderer.current_id, pre_id,
+        "ctrl-Z after ExtendedSearch-Enter must restore the pre-Ctrl+F cursor",
+    );
+}
+
+#[test]
+fn simple_search_escape_does_not_record() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+
+    clear_timeline(h.r());
+
+    press_tab(h.r());
+    type_text(h.r(), "subdir");
+    press_escape(h.r());
+
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
+    assert_eq!(
+        h.renderer.active_timeline().entries.len(),
+        0,
+        "Escape from SimpleSearch must not push a Navigate entry",
+    );
+}
+
+#[test]
+fn extended_search_escape_does_not_record() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+
+    clear_timeline(h.r());
+
+    press_ctrl(h.r(), Keycode::F);
+    type_text(h.r(), "subdir");
+    press_escape(h.r());
+
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
+    assert_eq!(
+        h.renderer.active_timeline().entries.len(),
+        0,
+        "Escape from ExtendedSearch must not push a Navigate entry",
+    );
+}
+
+#[test]
+fn simple_search_right_at_end_records_navigate() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+
+    let pre_id = h.renderer.current_id.clone();
+    let pre_path = sicompass::provider::current_path(&h.renderer).to_owned();
+    clear_timeline(h.r());
+
+    press_tab(h.r());
+    type_text(h.r(), "subdir");
+    press_right(h.r());
+
+    let path_in_subdir = sicompass::provider::current_path(&h.renderer).to_owned();
+    assert!(
+        path_in_subdir.ends_with("subdir"),
+        "Right-at-end in SimpleSearch should descend into subdir, got {}",
+        path_in_subdir,
+    );
+    let entries = &h.renderer.active_timeline().entries;
+    assert_eq!(entries.len(), 1, "Right-at-end should record one Navigate");
+    match &entries[0] {
+        sicompass_sdk::timeline::TimelineEntry::Navigate { from_id, kind, to_path, .. } => {
+            assert_eq!(*from_id, pre_id);
+            assert_eq!(*kind, sicompass_sdk::timeline::NavKind::ArrowRight);
+            assert_eq!(to_path.as_deref(), Some(path_in_subdir.as_str()));
+        }
+        other => panic!("expected Navigate, got {:?}", other),
+    }
+
+    press_ctrl(h.r(), Keycode::Z);
+    assert_eq!(
+        h.renderer.current_id, pre_id,
+        "ctrl-Z after SimpleSearch right-at-end must restore the pre-Tab cursor",
+    );
+    assert_eq!(
+        sicompass::provider::current_path(&h.renderer),
+        pre_path,
+        "ctrl-Z must restore the provider path",
+    );
+}
+
+#[test]
+fn extended_search_right_at_end_records_navigate() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+
+    let pre_id = h.renderer.current_id.clone();
+    let pre_path = sicompass::provider::current_path(&h.renderer).to_owned();
+    clear_timeline(h.r());
+
+    press_ctrl(h.r(), Keycode::F);
+    type_text(h.r(), "subdir");
+    press_right(h.r());
+
+    let path_in_subdir = sicompass::provider::current_path(&h.renderer).to_owned();
+    assert!(
+        path_in_subdir.ends_with("subdir"),
+        "Right-at-end in ExtendedSearch should descend into subdir, got {}",
+        path_in_subdir,
+    );
+    let entries = &h.renderer.active_timeline().entries;
+    assert_eq!(entries.len(), 1, "Right-at-end in ExtendedSearch should record one Navigate");
+    match &entries[0] {
+        sicompass_sdk::timeline::TimelineEntry::Navigate { from_id, kind, .. } => {
+            assert_eq!(*from_id, pre_id);
+            assert_eq!(*kind, sicompass_sdk::timeline::NavKind::ArrowRight);
+        }
+        other => panic!("expected Navigate, got {:?}", other),
+    }
+
+    press_ctrl(h.r(), Keycode::Z);
+    assert_eq!(
+        h.renderer.current_id, pre_id,
+        "ctrl-Z after ExtendedSearch right-at-end must restore the pre-Ctrl+F cursor",
+    );
+    assert_eq!(
+        sicompass::provider::current_path(&h.renderer),
+        pre_path,
+    );
+}
+
+#[test]
+fn simple_search_left_at_cursor_zero_records_navigate() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r()); // descend into filebrowser root
+
+    // Descend one more level so Left-at-0 has somewhere to move out to.
+    let subdir_idx = h.renderer.total_list.iter().position(|it| it.label.contains("subdir"))
+        .expect("subdir not in listing");
+    h.renderer.list_index = subdir_idx;
+    h.renderer.current_id = h.renderer.total_list[subdir_idx].id.clone();
+    press_right(h.r());
+
+    let pre_id = h.renderer.current_id.clone();
+    let pre_path = sicompass::provider::current_path(&h.renderer).to_owned();
+    clear_timeline(h.r());
+
+    press_tab(h.r());
+    // No typing — cursor_position is 0 in the (empty) search buffer.
+    press_left(h.r());
+
+    let entries = &h.renderer.active_timeline().entries;
+    assert_eq!(entries.len(), 1, "Left-at-0 in SimpleSearch should record one Navigate");
+    match &entries[0] {
+        sicompass_sdk::timeline::TimelineEntry::Navigate { from_id, kind, .. } => {
+            assert_eq!(*from_id, pre_id);
+            assert_eq!(*kind, sicompass_sdk::timeline::NavKind::ArrowLeft);
+        }
+        other => panic!("expected Navigate, got {:?}", other),
+    }
+
+    // After Left-at-0, search_origin_id must be reset to the new cursor —
+    // otherwise the next commit in this search session would record from a
+    // stale origin.
+    assert_eq!(
+        h.renderer.search_origin_id, h.renderer.current_id,
+        "Left-at-0 must reset search_origin_id to the post-move cursor",
+    );
+
+    press_escape(h.r()); // exit the still-active search
+    press_ctrl(h.r(), Keycode::Z);
+    assert_eq!(
+        h.renderer.current_id, pre_id,
+        "ctrl-Z after Left-at-0 must restore the deeper pre-Tab cursor",
+    );
+    assert_eq!(
+        sicompass::provider::current_path(&h.renderer),
+        pre_path,
+        "ctrl-Z must restore the deeper provider path",
+    );
+}
+
+#[test]
+fn simple_search_enter_at_root_records_navigate() {
+    // At depth=1 (the root provider list), Tab + arrow-Down + Enter should
+    // record a Navigate that moves cursor from filebrowser to settings.
+    let mut h = Harness::new();
+    assert_eq!(h.renderer.current_id.depth(), 1, "must start at root");
+    let pre_id = h.renderer.current_id.clone();
+    clear_timeline(h.r());
+
+    press_tab(h.r());
+    press_down(h.r()); // move from filebrowser to settings within search
+    press_enter(h.r());
+
+    assert_ne!(h.renderer.current_id, pre_id, "Enter should have moved cursor");
+    let entries = &h.renderer.active_timeline().entries;
+    assert_eq!(
+        entries.len(),
+        1,
+        "Search-Enter at depth=1 must record exactly one Navigate (got {} entries)",
+        entries.len(),
+    );
+    match &entries[0] {
+        sicompass_sdk::timeline::TimelineEntry::Navigate { from_id, to_id, .. } => {
+            assert_eq!(*from_id, pre_id);
+            assert_eq!(*to_id, h.renderer.current_id);
+        }
+        other => panic!("expected Navigate, got {:?}", other),
+    }
+
+    press_ctrl(h.r(), Keycode::Z);
+    assert_eq!(
+        h.renderer.current_id, pre_id,
+        "ctrl-Z must restore the depth=1 cursor to filebrowser",
+    );
+}
+
+#[test]
+fn general_right_from_root_records_navigate_with_none_from_path() {
+    // General-mode Right from depth-1 (cursor on filebrowser provider entry)
+    // descending into the filebrowser. The recorded Navigate must have
+    // from_path=None (origin is outside the provider's path zone) and
+    // to_path=Some(fb_path) so the timeline view shows the descent clearly.
+    let mut h = Harness::new();
+    assert_eq!(h.renderer.current_id.depth(), 1, "must start at root");
+    let pre_id = h.renderer.current_id.clone();
+    clear_timeline(h.r());
+
+    press_right(h.r());
+
+    let entries = &h.renderer.active_timeline().entries;
+    assert_eq!(entries.len(), 1, "Right at depth-1 must record exactly one Navigate");
+    match &entries[0] {
+        sicompass_sdk::timeline::TimelineEntry::Navigate { from_id, from_path, to_path, .. } => {
+            assert_eq!(*from_id, pre_id);
+            assert_eq!(*from_path, None, "depth-1 origin must have from_path=None");
+            assert!(to_path.is_some(), "depth-2 destination in filebrowser must have to_path=Some(..)");
+        }
+        other => panic!("expected Navigate, got {:?}", other),
+    }
+
+    press_ctrl(h.r(), Keycode::Z);
+    assert_eq!(h.renderer.current_id, pre_id, "ctrl-Z must restore depth-1 cursor");
+}
+
+fn refresh_filebrowser_root(h: &mut Harness, fb_idx: usize) {
+    let children = h.renderer.providers[fb_idx].fetch();
+    let display_name = h.renderer.providers[fb_idx].display_name().to_owned();
+    let mut root_elem = FfonElement::new_obj(&display_name);
+    for child in children { root_elem.as_obj_mut().unwrap().push(child); }
+    h.renderer.ffon[fb_idx] = root_elem;
+    sicompass::list::create_list_current_layer(h.r());
+}
+
+#[test]
+fn general_left_to_root_records_navigate_with_none_to_path() {
+    // General-mode Left from depth-2 (cursor on a file inside filebrowser)
+    // back to depth-1 (provider list). The Navigate must have
+    // from_path=Some(fb_path) and to_path=None. We set the filebrowser path
+    // to "/" so a single Left actually reaches depth-1 (otherwise Left at
+    // depth-2 pops to the parent directory and stays at depth-2).
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    h.renderer.providers[fb_idx].set_current_path("/");
+    refresh_filebrowser_root(&mut h, fb_idx);
+
+    press_right(h.r()); // depth-1 → depth-2
+    assert_eq!(h.renderer.current_id.depth(), 2, "Right should descend into filebrowser");
+    let pre_id = h.renderer.current_id.clone();
+    let pre_path = sicompass::provider::current_path(&h.renderer).to_owned();
+    clear_timeline(h.r());
+
+    press_left(h.r());
+
+    assert_eq!(h.renderer.current_id.depth(), 1, "Left should pop back to root");
+    let entries = &h.renderer.active_timeline().entries;
+    assert_eq!(entries.len(), 1, "Left from depth-2 must record one Navigate");
+    match &entries[0] {
+        sicompass_sdk::timeline::TimelineEntry::Navigate { from_id, from_path, to_path, .. } => {
+            assert_eq!(*from_id, pre_id);
+            assert_eq!(from_path.as_deref(), Some(pre_path.as_str()));
+            assert_eq!(*to_path, None, "depth-1 destination must have to_path=None");
+        }
+        other => panic!("expected Navigate, got {:?}", other),
+    }
+
+    press_ctrl(h.r(), Keycode::Z);
+    assert_eq!(h.renderer.current_id, pre_id, "ctrl-Z must restore depth-2 cursor");
+    assert_eq!(
+        sicompass::provider::current_path(&h.renderer),
+        pre_path,
+        "ctrl-Z must restore the filebrowser path",
+    );
+}
+
+#[test]
+fn general_down_at_root_records_navigate_with_no_paths() {
+    // General-mode Down at depth-1 (move from filebrowser to settings) must
+    // record a Navigate with both paths None — the cursor never entered any
+    // provider's path zone.
+    let mut h = Harness::new();
+    assert_eq!(h.renderer.current_id.depth(), 1, "must start at root");
+    let pre_id = h.renderer.current_id.clone();
+    clear_timeline(h.r());
+
+    press_down(h.r()); // filebrowser → settings at depth=1
+
+    let entries = &h.renderer.active_timeline().entries;
+    assert_eq!(entries.len(), 1, "Down at depth-1 must record one Navigate");
+    match &entries[0] {
+        sicompass_sdk::timeline::TimelineEntry::Navigate { from_id, from_path, to_path, .. } => {
+            assert_eq!(*from_id, pre_id);
+            assert_eq!(*from_path, None, "depth-1 origin must have from_path=None");
+            assert_eq!(*to_path, None, "depth-1 destination must have to_path=None");
+        }
+        other => panic!("expected Navigate, got {:?}", other),
+    }
+}
+
+#[test]
+fn simple_search_enter_at_root_same_item_does_not_record() {
+    // At depth=1, Tab + Enter on the same provider must NOT push a
+    // phantom Navigate. Before the to_path depth gate, the entry would
+    // record `from_path=None` (origin gate) vs `to_path=Some(fb_path)`
+    // (destination gate), fooling the no-movement guard into firing.
+    let mut h = Harness::new();
+    assert_eq!(h.renderer.current_id.depth(), 1, "must start at root");
+    clear_timeline(h.r());
+
+    press_tab(h.r());
+    press_enter(h.r()); // no typing, no arrow — same item
+
+    assert_eq!(
+        h.renderer.active_timeline().entries.len(),
+        0,
+        "Tab+Enter on same item at depth=1 must record nothing",
+    );
+}
+
+#[test]
+fn simple_search_enter_at_root_with_typing_records_navigate() {
+    // Reproduces user-reported bug: at depth-1 (root provider list), Tab +
+    // type a query that filters to a different provider + Enter must record
+    // a Navigate so ctrl-Z returns to the pre-Tab provider.
+    let mut h = Harness::new();
+    assert_eq!(h.renderer.current_id.depth(), 1, "must start at root");
+    let pre_id = h.renderer.current_id.clone();
+    assert_eq!(pre_id.get(0), Some(0), "must start on the filebrowser provider");
+    clear_timeline(h.r());
+
+    press_tab(h.r());
+    type_text(h.r(), "set"); // filter to the settings provider
+    press_enter(h.r());
+
+    assert_ne!(
+        h.renderer.current_id, pre_id,
+        "Enter on a filtered settings match must move cursor off filebrowser",
+    );
+    let entries = &h.renderer.active_timeline().entries;
+    assert_eq!(
+        entries.len(),
+        1,
+        "Search-Enter with typing at depth=1 must record one Navigate (got {})",
+        entries.len(),
+    );
+
+    press_ctrl(h.r(), Keycode::Z);
+    assert_eq!(
+        h.renderer.current_id, pre_id,
+        "ctrl-Z must restore the pre-Tab depth=1 cursor",
+    );
+}
+
+#[test]
+fn simple_search_right_at_root_records_navigate() {
+    // At depth=1 with the filebrowser highlighted, Tab + Right-at-end should
+    // descend into the filebrowser and record one Navigate. Critically, the
+    // entry's `from_path` must be None (depth=1 is outside the provider's
+    // navigable path zone) so the timeline view doesn't show a misleading
+    // "/ → /" self-loop.
+    let mut h = Harness::new();
+    assert_eq!(h.renderer.current_id.depth(), 1, "must start at root");
+    let pre_id = h.renderer.current_id.clone();
+    let pre_path = sicompass::provider::current_path(&h.renderer).to_owned();
+    clear_timeline(h.r());
+
+    press_tab(h.r());
+    press_right(h.r()); // cursor_position is 0 = empty buf, right-at-end fires
+
+    assert_eq!(
+        h.renderer.current_id.depth(),
+        2,
+        "Right-at-end at depth=1 should descend into filebrowser",
+    );
+    let entries = &h.renderer.active_timeline().entries;
+    assert_eq!(
+        entries.len(),
+        1,
+        "Right-at-end at depth=1 must record one Navigate (got {} entries)",
+        entries.len(),
+    );
+    match &entries[0] {
+        sicompass_sdk::timeline::TimelineEntry::Navigate { from_path, to_path, .. } => {
+            assert_eq!(
+                *from_path, None,
+                "from_path must be None at depth=1 origin (avoids misleading `/ → /` view)",
+            );
+            assert!(
+                to_path.as_deref().map(|p| !p.is_empty()).unwrap_or(false),
+                "to_path must be Some(non-empty) once we're inside the filebrowser",
+            );
+        }
+        other => panic!("expected Navigate, got {:?}", other),
+    }
+
+    press_ctrl(h.r(), Keycode::Z);
+    assert_eq!(h.renderer.current_id, pre_id, "ctrl-Z must restore depth=1");
+    assert_eq!(
+        sicompass::provider::current_path(&h.renderer),
+        pre_path,
+        "ctrl-Z must restore the filebrowser path",
+    );
+}
+
+#[test]
+fn search_up_down_within_search_does_not_record() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+
+    clear_timeline(h.r());
+
+    press_tab(h.r());
+    press_down(h.r());
+    press_down(h.r());
+    press_up(h.r());
+
+    assert_eq!(
+        h.renderer.active_timeline().entries.len(),
+        0,
+        "Up/Down inside search must not push Navigate entries",
+    );
+
+    press_escape(h.r());
+    assert_eq!(
+        h.renderer.active_timeline().entries.len(),
+        0,
+        "Escape after up/down inside search must still record nothing",
+    );
+}
