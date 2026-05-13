@@ -7290,3 +7290,74 @@ fn double_tap_home_from_deep_nav_shows_root_from_top() {
         h.renderer.scroll_offset,
     );
 }
+
+#[test]
+fn simple_search_right_then_escape_stays_in_navigated_node() {
+    // Right-arrow at end-of-search descends into the highlighted node; Escape
+    // immediately after must stay there, not revert to the pre-search location.
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r()); // enter filebrowser listing
+    let path_before = sicompass::provider::current_path(&h.renderer).to_owned();
+
+    press_tab(h.r());
+    assert_eq!(h.renderer.coordinate, Coordinate::SimpleSearch);
+    type_text(h.r(), "subdir");
+
+    press_right(h.r());
+    let path_in_subdir = sicompass::provider::current_path(&h.renderer).to_owned();
+    assert!(
+        path_in_subdir.ends_with("subdir"),
+        "Right at end-of-search should descend into matched subdir, got {}",
+        path_in_subdir,
+    );
+    assert_eq!(
+        h.renderer.search_origin_id, h.renderer.current_id,
+        "search_origin_id must track the right-nav so Escape stays in the new node",
+    );
+
+    press_escape(h.r());
+    let path_after = sicompass::provider::current_path(&h.renderer).to_owned();
+    assert_eq!(
+        path_after, path_in_subdir,
+        "Escape after right-nav in SimpleSearch must keep cursor in subdir, \
+         not jump back to {}",
+        path_before,
+    );
+}
+
+#[test]
+fn extended_search_right_then_escape_stays_in_navigated_node() {
+    // Same invariant for ExtendedSearch.
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+    let path_before = sicompass::provider::current_path(&h.renderer).to_owned();
+
+    press_ctrl(h.r(), Keycode::F);
+    assert_eq!(h.renderer.coordinate, Coordinate::ExtendedSearch);
+    type_text(h.r(), "subdir");
+
+    press_right(h.r());
+    let path_in_subdir = sicompass::provider::current_path(&h.renderer).to_owned();
+    assert!(
+        path_in_subdir.ends_with("subdir"),
+        "Right at end-of-search should descend into matched subdir, got {}",
+        path_in_subdir,
+    );
+    assert_eq!(
+        h.renderer.search_origin_id, h.renderer.current_id,
+        "search_origin_id must track the right-nav in ExtendedSearch too",
+    );
+
+    press_escape(h.r());
+    let path_after = sicompass::provider::current_path(&h.renderer).to_owned();
+    assert_eq!(
+        path_after, path_in_subdir,
+        "Escape after right-nav in ExtendedSearch must keep cursor in subdir, \
+         not jump back to {}",
+        path_before,
+    );
+}

@@ -4393,6 +4393,7 @@ pub fn handle_search_right(r: &mut AppRenderer) {
             if navigate_right_raw(r) {
                 r.input_buffer.clear();
                 r.cursor_position = 0;
+                r.search_origin_id = r.current_id.clone();
                 list::create_list_extended_search(r);
                 r.list_index = r.current_id.last().unwrap_or(0)
                     .min(r.active_list_len().saturating_sub(1));
@@ -4408,6 +4409,7 @@ pub fn handle_search_right(r: &mut AppRenderer) {
             r.current_id = item_id;
         }
         if navigate_right_raw(r) {
+            r.search_origin_id = r.current_id.clone();
             list::create_list_current_layer(r);
             r.list_index = r.current_id.last().unwrap_or(0)
                 .min(r.active_list_len().saturating_sub(1));
