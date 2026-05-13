@@ -121,6 +121,7 @@ pub enum Coordinate {
     InputSearch,
     Dashboard,
     Meta,
+    TimelineView,
 }
 
 impl Coordinate {
@@ -142,6 +143,7 @@ impl Coordinate {
             Coordinate::InputSearch => "input search",
             Coordinate::Dashboard => "dashboard",
             Coordinate::Meta => "meta",
+            Coordinate::TimelineView => "timeline",
         }
     }
 }

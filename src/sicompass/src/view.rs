@@ -422,7 +422,7 @@ fn update_view(app: &mut AppState) {
     // at a fixed itemX with no prefix-column offset).
     let is_flat_list = matches!(
         app.renderer.coordinate,
-        Coordinate::Command | Coordinate::Meta
+        Coordinate::Command | Coordinate::Meta | Coordinate::TimelineView
     );
 
     // Compute indent and max prefix width before centering so the full visual

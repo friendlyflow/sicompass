@@ -33,11 +33,11 @@ pub fn handle_up(r: &mut AppRenderer) {
             r.text_scroll_offset = (r.text_scroll_offset - step).max(0);
             r.needs_redraw = true;
         }
-        Coordinate::SimpleSearch | Coordinate::Command | Coordinate::ExtendedSearch | Coordinate::Meta => {
+        Coordinate::SimpleSearch | Coordinate::Command | Coordinate::ExtendedSearch | Coordinate::Meta | Coordinate::TimelineView => {
             r.error_message.clear();
             if r.list_index > 0 {
                 r.list_index -= 1;
-                if r.coordinate != Coordinate::Command && r.coordinate != Coordinate::Meta {
+                if r.coordinate != Coordinate::Command && r.coordinate != Coordinate::Meta && r.coordinate != Coordinate::TimelineView {
                     r.sync_current_id_from_list();
                 }
                 r.speak_current_element();
@@ -78,7 +78,7 @@ pub fn handle_down(r: &mut AppRenderer) {
             r.text_scroll_offset = (r.text_scroll_offset + step).min(max_offset);
             r.needs_redraw = true;
         }
-        Coordinate::SimpleSearch | Coordinate::Command | Coordinate::ExtendedSearch | Coordinate::Meta => {
+        Coordinate::SimpleSearch | Coordinate::Command | Coordinate::ExtendedSearch | Coordinate::Meta | Coordinate::TimelineView => {
             r.error_message.clear();
             let max_index = if r.filtered_list_indices.is_empty() {
                 r.total_list.len().saturating_sub(1)
@@ -87,7 +87,7 @@ pub fn handle_down(r: &mut AppRenderer) {
             };
             if r.list_index < max_index {
                 r.list_index += 1;
-                if r.coordinate != Coordinate::Command && r.coordinate != Coordinate::Meta {
+                if r.coordinate != Coordinate::Command && r.coordinate != Coordinate::Meta && r.coordinate != Coordinate::TimelineView {
                     r.sync_current_id_from_list();
                 }
                 r.speak_current_element();
@@ -821,6 +821,19 @@ pub fn handle_meta(r: &mut AppRenderer) {
     }
     r.previous_coordinate = r.coordinate;
     r.coordinate = Coordinate::Meta;
+    r.speak_mode_change(None);
+    r.list_index = 0;
+    list::create_list_current_layer(r);
+    r.needs_redraw = true;
+}
+
+/// Open the per-tab Timeline inspection view (Z key in General).
+pub fn handle_z(r: &mut AppRenderer) {
+    if r.coordinate != Coordinate::General {
+        return;
+    }
+    r.previous_coordinate = r.coordinate;
+    r.coordinate = Coordinate::TimelineView;
     r.speak_mode_change(None);
     r.list_index = 0;
     list::create_list_current_layer(r);
@@ -2351,6 +2364,16 @@ pub fn handle_escape(r: &mut AppRenderer) {
             return;
         }
         Coordinate::Meta => {
+            r.coordinate = r.previous_coordinate;
+            r.speak_mode_change(None);
+            list::create_list_current_layer(r);
+            r.list_index = r.current_id.last().unwrap_or(0);
+            r.scroll_offset = 0;
+            r.caret.reset(sdl_ticks());
+            r.needs_redraw = true;
+            return;
+        }
+        Coordinate::TimelineView => {
             r.coordinate = r.previous_coordinate;
             r.speak_mode_change(None);
             list::create_list_current_layer(r);

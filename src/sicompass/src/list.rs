@@ -8,6 +8,9 @@ use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 use sicompass_sdk::ffon::{get_ffon_at_id, FfonElement, FfonObject, IdArray};
 use sicompass_sdk::tags;
+use sicompass_sdk::timeline::{
+    ChatOpKind, FsSideEffect, ImapOpKind, TimelineEntry,
+};
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -95,6 +98,10 @@ pub fn create_list_current_layer(renderer: &mut AppRenderer) {
         }
         Coordinate::Meta => {
             build_meta_list(renderer);
+            return;
+        }
+        Coordinate::TimelineView => {
+            build_timeline_list(renderer);
             return;
         }
         _ => {
@@ -375,6 +382,201 @@ fn check_parent_has_radio(renderer: &AppRenderer) -> bool {
 // ---------------------------------------------------------------------------
 
 /// Build the list for `Coordinate::Meta` — shortcut hints from the active provider.
+/// Build the list for `Coordinate::TimelineView` — per-tab undo timeline.
+///
+/// Entries are shown in reverse order (most recent on top). The entry
+/// currently at HEAD (next Ctrl+Z target) is prefixed `"\u{25B6} "`; entries
+/// in the redo branch (already undone) are prefixed `"\u{00B7} "`; older
+/// history below the cursor is unprefixed.
+fn build_timeline_list(renderer: &mut AppRenderer) {
+    renderer.list_index = 0;
+
+    let (entries, position) = {
+        let tl = renderer.active_timeline();
+        (tl.entries.clone(), tl.position)
+    };
+
+    if entries.is_empty() {
+        let mut id = IdArray::new();
+        id.push(0);
+        renderer.total_list = vec![RenderListItem {
+            id,
+            label: "  (no history)".to_string(),
+            data: None,
+            nav_path: None,
+        }];
+        return;
+    }
+
+    let len = entries.len();
+    // Index of the entry currently at HEAD (= next undo target). When the
+    // user has undone everything, position == len and head_idx is None.
+    let head_idx: Option<usize> = if position < len {
+        Some(len - position - 1)
+    } else {
+        None
+    };
+    // First index belonging to the redo branch (entries already undone).
+    let redo_branch_start = len - position;
+
+    let mut items: Vec<RenderListItem> = Vec::with_capacity(len);
+    for (i, entry) in entries.iter().enumerate().rev() {
+        let prefix = if Some(i) == head_idx {
+            "\u{25B6} " // ▶
+        } else if i >= redo_branch_start {
+            "\u{00B7} " // ·
+        } else {
+            "  "
+        };
+        let label = format!("{}{}", prefix, timeline_entry_label(entry));
+        let mut id = IdArray::new();
+        id.push(i);
+        items.push(RenderListItem {
+            id,
+            label,
+            data: None,
+            nav_path: None,
+        });
+    }
+    renderer.total_list = items;
+}
+
+/// One-line, human-readable summary of a `TimelineEntry` for the Z-key
+/// timeline view. Keep it short — the row is rendered as a flat list item.
+pub(crate) fn timeline_entry_label(entry: &TimelineEntry) -> String {
+    match entry {
+        TimelineEntry::Navigate {
+            kind,
+            from_path,
+            to_path,
+            ..
+        } => {
+            let from = from_path.as_deref().unwrap_or("?");
+            let to = to_path.as_deref().unwrap_or("?");
+            format!("nav {:?} {} \u{2192} {}", kind, from, to)
+        }
+        TimelineEntry::TextChunk {
+            id,
+            chunk_seq,
+            after,
+            ..
+        } => {
+            let snippet = ffon_str_snippet(after, 30);
+            format!(
+                "type #{} id={} \"{}\"",
+                chunk_seq,
+                id.to_display_string(),
+                snippet
+            )
+        }
+        TimelineEntry::Structural { id, op, .. } => {
+            format!("struct {:?} id={}", op, id.to_display_string())
+        }
+        TimelineEntry::FsOp {
+            op,
+            before,
+            after,
+            side_effect,
+            ..
+        } => {
+            let summary = fs_summary(before.as_ref(), after.as_ref(), side_effect);
+            format!("fs {:?} {}", op, summary)
+        }
+        TimelineEntry::ImapOp { op, .. } => format!("imap {}", imap_op_summary(op)),
+        TimelineEntry::ChatOp { op, .. } => format!("chat {}", chat_op_summary(op)),
+        TimelineEntry::ProviderOp { label, command, .. } => {
+            format!("{} ({})", label, command)
+        }
+    }
+}
+
+/// Extract a short snippet from an FFON element for display. Trims the
+/// type-prefix tags (e.g. `<input>`) so the user sees the text payload.
+fn ffon_str_snippet(elem: &FfonElement, max_len: usize) -> String {
+    let raw = match elem {
+        FfonElement::Str(s) => s.clone(),
+        FfonElement::Obj(o) => o.key.clone(),
+    };
+    let s = tags::extract_input(&raw).unwrap_or(raw);
+    if s.chars().count() <= max_len {
+        s
+    } else {
+        let truncated: String = s.chars().take(max_len).collect();
+        format!("{}\u{2026}", truncated)
+    }
+}
+
+fn fs_summary(
+    before: Option<&FfonElement>,
+    after: Option<&FfonElement>,
+    side_effect: &FsSideEffect,
+) -> String {
+    match side_effect {
+        FsSideEffect::RenameOnly { from, to } => {
+            format!("{} \u{2192} {}", from.display(), to.display())
+        }
+        FsSideEffect::TrashedFile { original_path, .. }
+        | FsSideEffect::TrashedDir { original_path, .. } => {
+            format!("{}", original_path.display())
+        }
+        FsSideEffect::None => match (before, after) {
+            (Some(b), Some(a)) => format!(
+                "{} \u{2192} {}",
+                ffon_str_snippet(b, 30),
+                ffon_str_snippet(a, 30)
+            ),
+            (None, Some(a)) => ffon_str_snippet(a, 60),
+            (Some(b), None) => ffon_str_snippet(b, 60),
+            (None, None) => String::new(),
+        },
+    }
+}
+
+fn imap_op_summary(op: &ImapOpKind) -> String {
+    match op {
+        ImapOpKind::Trash { msg_id, src_folder, .. } => {
+            format!("Trash {} from {}", msg_id, src_folder)
+        }
+        ImapOpKind::Archive { msg_id, src_folder, .. } => {
+            format!("Archive {} from {}", msg_id, src_folder)
+        }
+        ImapOpKind::Move {
+            msg_id,
+            src_folder,
+            dst_folder,
+        } => format!("Move {} {} \u{2192} {}", msg_id, src_folder, dst_folder),
+        ImapOpKind::SetSeen { msg_uid, folder, new, .. } => {
+            format!("SetSeen uid={} {} \u{2192} {}", msg_uid, folder, new)
+        }
+        ImapOpKind::SetFlagged { msg_uid, folder, new, .. } => {
+            format!("SetFlagged uid={} {} \u{2192} {}", msg_uid, folder, new)
+        }
+    }
+}
+
+fn chat_op_summary(op: &ChatOpKind) -> String {
+    match op {
+        ChatOpKind::LeaveRoom { room_id } => format!("LeaveRoom {}", room_id),
+        ChatOpKind::AcceptInvite { room_id } => format!("AcceptInvite {}", room_id),
+        ChatOpKind::RejectInvite { room_id } => format!("RejectInvite {}", room_id),
+        ChatOpKind::KickMember { room_id, user_id, .. } => {
+            format!("KickMember {} from {}", user_id, room_id)
+        }
+        ChatOpKind::BanMember { room_id, user_id, .. } => {
+            format!("BanMember {} from {}", user_id, room_id)
+        }
+        ChatOpKind::PostMessage { room_id, body, .. } => {
+            let snippet = if body.chars().count() <= 30 {
+                body.clone()
+            } else {
+                let s: String = body.chars().take(30).collect();
+                format!("{}\u{2026}", s)
+            };
+            format!("PostMessage {} \"{}\"", room_id, snippet)
+        }
+    }
+}
+
 fn build_meta_list(renderer: &mut AppRenderer) {
     renderer.list_index = 0;
     let hints = crate::provider::get_meta(renderer);
@@ -687,5 +889,88 @@ mod tests {
         let mut r = make_renderer_with_items(&["hello", "world"]);
         populate_list_current_layer(&mut r, "hel");
         assert_eq!(r.filtered_list_indices.len(), r.fuzzy_match_positions.len());
+    }
+
+    // -----------------------------------------------------------------------
+    // Timeline-view list builder
+    // -----------------------------------------------------------------------
+
+    fn nav_entry(from: &str, to: &str) -> TimelineEntry {
+        TimelineEntry::Navigate {
+            provider_idx: 0,
+            from_id: IdArray::new(),
+            to_id: IdArray::new(),
+            from_path: Some(from.to_string()),
+            to_path: Some(to.to_string()),
+            kind: sicompass_sdk::timeline::NavKind::ArrowDown,
+        }
+    }
+
+    #[test]
+    fn timeline_view_empty_shows_placeholder() {
+        let mut r = AppRenderer::new();
+        r.coordinate = Coordinate::TimelineView;
+        create_list_current_layer(&mut r);
+        assert_eq!(r.total_list.len(), 1);
+        assert!(r.total_list[0].label.contains("(no history)"));
+    }
+
+    #[test]
+    fn timeline_view_reverses_and_marks_head() {
+        let mut r = AppRenderer::new();
+        r.tab_timelines[0].entries.push(nav_entry("/a", "/b"));
+        r.tab_timelines[0].entries.push(nav_entry("/b", "/c"));
+        // position = 0 → HEAD is the most recent entry (entries[1])
+        r.coordinate = Coordinate::TimelineView;
+        create_list_current_layer(&mut r);
+
+        assert_eq!(r.total_list.len(), 2);
+        // First row = most recent (entries[1]) = HEAD → prefixed "▶ "
+        assert!(
+            r.total_list[0].label.starts_with("\u{25B6} "),
+            "expected ▶ prefix on HEAD row, got: {:?}",
+            r.total_list[0].label
+        );
+        assert!(r.total_list[0].label.contains("/b") && r.total_list[0].label.contains("/c"));
+        // Second row = older (entries[0]) → no marker prefix
+        assert!(
+            r.total_list[1].label.starts_with("  "),
+            "expected blank prefix on older row, got: {:?}",
+            r.total_list[1].label
+        );
+    }
+
+    #[test]
+    fn timeline_view_marks_redo_branch_after_undo() {
+        let mut r = AppRenderer::new();
+        r.tab_timelines[0].entries.push(nav_entry("/a", "/b"));
+        r.tab_timelines[0].entries.push(nav_entry("/b", "/c"));
+        r.tab_timelines[0].entries.push(nav_entry("/c", "/d"));
+        // Simulate two Ctrl+Z presses: HEAD becomes entries[0]; entries[1..3]
+        // are in the redo branch.
+        r.tab_timelines[0].position = 2;
+        r.coordinate = Coordinate::TimelineView;
+        create_list_current_layer(&mut r);
+
+        assert_eq!(r.total_list.len(), 3);
+        // Most recent (entries[2]) → redo branch
+        assert!(r.total_list[0].label.starts_with("\u{00B7} "));
+        // entries[1] → redo branch
+        assert!(r.total_list[1].label.starts_with("\u{00B7} "));
+        // entries[0] → HEAD
+        assert!(r.total_list[2].label.starts_with("\u{25B6} "));
+    }
+
+    #[test]
+    fn timeline_entry_label_provider_op_uses_label() {
+        let entry = TimelineEntry::ProviderOp {
+            provider_idx: 0,
+            command: "radio-toggle".into(),
+            payload: FfonElement::Str("payload".into()),
+            label: "toggle theme".into(),
+        };
+        let s = timeline_entry_label(&entry);
+        assert!(s.contains("toggle theme"));
+        assert!(s.contains("radio-toggle"));
     }
 }

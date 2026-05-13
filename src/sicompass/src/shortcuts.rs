@@ -54,6 +54,7 @@ const NAV_UP_DOWN: &[Coordinate] = &[
     Coordinate::Scroll,
     Coordinate::ScrollSearch,
     Coordinate::Meta,
+    Coordinate::TimelineView,
 ];
 
 // Modes where Undo/Redo are active
@@ -335,7 +336,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
                  Coordinate::Visual,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
                  Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch,
-                 Coordinate::InputSearch, Coordinate::Meta, Coordinate::Dashboard],
+                 Coordinate::InputSearch, Coordinate::Meta, Coordinate::TimelineView, Coordinate::Dashboard],
         label: "Esc    Back", is_available: not_at_root, handle: handlers::handle_escape },
     Shortcut { key: Keycode::Escape, key2: None, ctrl: false, shift: false,
         modes: &[Coordinate::General,
@@ -343,7 +344,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
                  Coordinate::Visual,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
                  Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch,
-                 Coordinate::InputSearch, Coordinate::Meta, Coordinate::Dashboard],
+                 Coordinate::InputSearch, Coordinate::Meta, Coordinate::TimelineView, Coordinate::Dashboard],
         label: "", is_available: always, handle: handlers::handle_escape },
 
     // ---- Up / K ----------------------------------------------------------
@@ -646,6 +647,12 @@ pub static SHORTCUTS: &[Shortcut] = &[
     Shortcut { key: Keycode::M, key2: None, ctrl: false, shift: false,
         modes: &[Coordinate::General],
         label: "M      Meta", is_available: always, handle: handlers::handle_meta },
+
+    // ---- Z (per-tab Timeline inspection view) ----------------------------
+    // General mode only. Ctrl+Z / Ctrl+Shift+Z (undo/redo) are bound below.
+    Shortcut { key: Keycode::Z, key2: None, ctrl: false, shift: false,
+        modes: &[Coordinate::General],
+        label: "Z      Timeline", is_available: always, handle: handlers::handle_z },
 
     // ---- Ctrl+D / Delete key → provider delete command (email message delete) ----
     // These must come before the editor/filebrowser Ctrl+D rows so they win when
