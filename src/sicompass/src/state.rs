@@ -366,9 +366,8 @@ pub fn update_ffon(r: &mut AppRenderer, line: &str, is_key: bool, task: Task, hi
 /// rules for `TextChunk` (≤500 ms idle on same id) and `Navigate` (consecutive
 /// arrow keys merge into one entry).
 ///
-/// Replaces `update_history` once the migration completes. During migration
-/// both stacks coexist; this function is dormant until `use_unified_timeline`
-/// flips to `true`.
+/// Called for every reversible action; the legacy `update_history` stack is
+/// dual-written alongside this one until the migration completes.
 pub fn record_entry(r: &mut AppRenderer, entry: TimelineEntry) {
     if r.in_history_action {
         // Side-effect emission during undo/redo — discard so the original
@@ -619,6 +618,10 @@ fn apply_undo(r: &mut AppRenderer, entry: &TimelineEntry) {
                 replace_element_at_id(r, id, before.clone());
                 r.current_id = id.clone();
             }
+            (StructuralOp::Replace, StructuralPayload::Replaced { before, .. }) => {
+                replace_element_at_id(r, id, before.clone());
+                r.current_id = id.clone();
+            }
             _ => {}
         },
         TimelineEntry::FsOp {
@@ -700,6 +703,10 @@ fn apply_redo(r: &mut AppRenderer, entry: &TimelineEntry) {
                 }
             }
             (StructuralOp::Paste, StructuralPayload::Pasted { after, .. }) => {
+                replace_element_at_id(r, id, after.clone());
+                r.current_id = id.clone();
+            }
+            (StructuralOp::Replace, StructuralPayload::Replaced { after, .. }) => {
                 replace_element_at_id(r, id, after.clone());
                 r.current_id = id.clone();
             }

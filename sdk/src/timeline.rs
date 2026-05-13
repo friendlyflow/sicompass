@@ -70,6 +70,10 @@ pub enum StructuralOp {
     Delete,
     Cut,
     Paste,
+    /// Whole-element replacement driven by a non-paste UI action (e.g. radio
+    /// toggle rewriting a group's children slice). Apply paths replace the
+    /// element at `id` with `before` / `after`.
+    Replace,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -77,6 +81,7 @@ pub enum StructuralPayload {
     Inserted(FfonElement),
     Removed(FfonElement),
     Pasted { before: FfonElement, after: FfonElement },
+    Replaced { before: FfonElement, after: FfonElement },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1118,15 +1118,20 @@ pub fn handle_enter_general(r: &mut AppRenderer) {
                 };
             }
         }
-        crate::provider::notify_checkbox_changed(r, &new_text);
+        crate::provider::notify_checkbox_changed(r, elem_clone.clone(), &new_text);
         list::create_list_current_layer(r);
         r.needs_redraw = true;
         return;
     }
 
-    // Toggle radio — add <checked> to selected, remove from siblings
+    // Toggle radio — add <checked> to selected, remove from siblings.
+    // Snapshot the radio-group parent *before* the mutation so notify_radio_changed
+    // can record a fallback Structural::Replace if the provider emits nothing.
+    let radio_parent_snapshot = snapshot_radio_parent(r);
     if toggle_radio(r) {
-        crate::provider::notify_radio_changed(r);
+        if let Some((parent_before, parent_id)) = radio_parent_snapshot {
+            crate::provider::notify_radio_changed(r, parent_before, parent_id);
+        }
         list::create_list_current_layer(r);
         r.needs_redraw = true;
         return;
@@ -1315,7 +1320,7 @@ pub fn handle_enter_search(r: &mut AppRenderer) {
                         };
                     }
                 }
-                crate::provider::notify_checkbox_changed(r, &new_text);
+                crate::provider::notify_checkbox_changed(r, elem.clone(), &new_text);
                 let saved_index = r.list_index;
                 list::create_list_current_layer(r);
                 r.list_index = saved_index;
@@ -1329,8 +1334,11 @@ pub fn handle_enter_search(r: &mut AppRenderer) {
     {
         let saved_id = r.current_id.clone();
         r.current_id = selected_id.clone();
+        let radio_parent_snapshot = snapshot_radio_parent(r);
         if toggle_radio(r) {
-            crate::provider::notify_radio_changed(r);
+            if let Some((parent_before, parent_id)) = radio_parent_snapshot {
+                crate::provider::notify_radio_changed(r, parent_before, parent_id);
+            }
             r.coordinate = r.previous_coordinate;
             r.speak_mode_change(None);
             r.search_string.clear();
@@ -1481,7 +1489,7 @@ fn handle_enter_extended_search(r: &mut AppRenderer) {
                         };
                     }
                 }
-                crate::provider::notify_checkbox_changed(r, &new_text);
+                crate::provider::notify_checkbox_changed(r, elem.clone(), &new_text);
                 let saved_index = r.list_index;
                 list::create_list_extended_search(r);
                 r.list_index = saved_index;
@@ -1495,8 +1503,11 @@ fn handle_enter_extended_search(r: &mut AppRenderer) {
     {
         let saved_id = r.current_id.clone();
         r.current_id = selected_id.clone();
+        let radio_parent_snapshot = snapshot_radio_parent(r);
         if toggle_radio(r) {
-            crate::provider::notify_radio_changed(r);
+            if let Some((parent_before, parent_id)) = radio_parent_snapshot {
+                crate::provider::notify_radio_changed(r, parent_before, parent_id);
+            }
             r.coordinate = r.previous_coordinate;
             r.speak_mode_change(None);
             r.input_buffer.clear();
@@ -1568,6 +1579,28 @@ pub fn split_nav_path(nav_path: &str) -> (&str, &str) {
 // ---------------------------------------------------------------------------
 // Checkbox / radio helpers
 // ---------------------------------------------------------------------------
+
+/// Snapshot the radio-group parent Obj at `r.current_id`'s parent slot.
+///
+/// Returns `(parent_before, parent_id)` where `parent_id` is `r.current_id`
+/// with the trailing child index popped. The element at `parent_id` (looked
+/// up via `get_ffon_at_id(&ffon, &parent_id)[parent_id.last()]`) is the
+/// radio-group Obj being snapshotted. Returns `None` if depth < 2 or the
+/// lookup fails.
+fn snapshot_radio_parent(
+    r: &AppRenderer,
+) -> Option<(sicompass_sdk::ffon::FfonElement, sicompass_sdk::ffon::IdArray)> {
+    use sicompass_sdk::ffon::get_ffon_at_id;
+    if r.current_id.depth() < 2 {
+        return None;
+    }
+    let mut parent_id = r.current_id.clone();
+    let _ = parent_id.pop();
+    let idx = parent_id.last().unwrap_or(0);
+    let before = get_ffon_at_id(&r.ffon, &parent_id)
+        .and_then(|a| a.get(idx).cloned())?;
+    Some((before, parent_id))
+}
 
 fn toggle_checkbox(elem: &sicompass_sdk::ffon::FfonElement) -> Option<String> {
     use sicompass_sdk::tags;

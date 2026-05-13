@@ -8008,3 +8008,426 @@ fn search_up_down_within_search_does_not_record() {
         "Escape after up/down inside search must still record nothing",
     );
 }
+
+// ---------------------------------------------------------------------------
+// Checkbox / radio toggle undo via Enter dispatch
+// ---------------------------------------------------------------------------
+
+/// A provider that yields a single `<checkbox>` Str element and does nothing on
+/// `on_checkbox_change` — i.e. emits no `TimelineEntry`. Exercises the FFON-
+/// fallback path in `notify_checkbox_changed`.
+struct SilentCheckboxStrProvider {
+    path: String,
+    checked: bool,
+}
+
+impl SilentCheckboxStrProvider {
+    fn new() -> Self { Self { path: "/".into(), checked: false } }
+}
+
+impl Provider for SilentCheckboxStrProvider {
+    fn name(&self) -> &str { "silent_checkbox_str" }
+    fn display_name(&self) -> &str { "Silent CB Str" }
+    fn fetch(&mut self) -> Vec<FfonElement> {
+        let tag = if self.checked { "<checkbox checked>" } else { "<checkbox>" };
+        vec![FfonElement::Str(format!("{tag}Toggle me"))]
+    }
+    fn push_path(&mut self, segment: &str) {
+        if self.path == "/" { self.path = format!("/{segment}"); }
+        else { self.path.push('/'); self.path.push_str(segment); }
+    }
+    fn pop_path(&mut self) {
+        if self.path == "/" { return; }
+        if let Some(idx) = self.path.rfind('/') {
+            self.path = if idx == 0 { "/".into() } else { self.path[..idx].to_owned() };
+        }
+    }
+    fn current_path(&self) -> &str { &self.path }
+}
+
+/// Same as `SilentCheckboxStrProvider` but the checkbox is an Obj with two
+/// children. Verifies that the `+c` (checkbox-Obj) toggle survives undo with
+/// its children intact.
+struct SilentCheckboxObjProvider {
+    path: String,
+}
+
+impl SilentCheckboxObjProvider {
+    fn new() -> Self { Self { path: "/".into() } }
+}
+
+impl Provider for SilentCheckboxObjProvider {
+    fn name(&self) -> &str { "silent_checkbox_obj" }
+    fn display_name(&self) -> &str { "Silent CB Obj" }
+    fn fetch(&mut self) -> Vec<FfonElement> {
+        let mut obj = FfonElement::new_obj("<checkbox>Section");
+        obj.as_obj_mut().unwrap().push(FfonElement::Str("child-a".into()));
+        obj.as_obj_mut().unwrap().push(FfonElement::Str("child-b".into()));
+        vec![obj]
+    }
+    fn push_path(&mut self, segment: &str) {
+        if self.path == "/" { self.path = format!("/{segment}"); }
+        else { self.path.push('/'); self.path.push_str(segment); }
+    }
+    fn pop_path(&mut self) {
+        if self.path == "/" { return; }
+        if let Some(idx) = self.path.rfind('/') {
+            self.path = if idx == 0 { "/".into() } else { self.path[..idx].to_owned() };
+        }
+    }
+    fn current_path(&self) -> &str { &self.path }
+}
+
+/// A provider that yields a `<radio>` Obj with three Str children (one
+/// initially `<checked>`). `on_radio_change` is a no-op so the FFON-fallback
+/// path in `notify_radio_changed` is exercised.
+struct SilentRadioProvider {
+    path: String,
+}
+
+impl SilentRadioProvider {
+    fn new() -> Self { Self { path: "/".into() } }
+}
+
+impl Provider for SilentRadioProvider {
+    fn name(&self) -> &str { "silent_radio" }
+    fn display_name(&self) -> &str { "Silent Radio" }
+    fn fetch(&mut self) -> Vec<FfonElement> {
+        let mut group = FfonElement::new_obj("<radio>Direction");
+        group.as_obj_mut().unwrap().push(FfonElement::Str("<checked>north".into()));
+        group.as_obj_mut().unwrap().push(FfonElement::Str("south".into()));
+        group.as_obj_mut().unwrap().push(FfonElement::Str("east".into()));
+        vec![group]
+    }
+    fn push_path(&mut self, segment: &str) {
+        if self.path == "/" { self.path = format!("/{segment}"); }
+        else { self.path.push('/'); self.path.push_str(segment); }
+    }
+    fn pop_path(&mut self) {
+        if self.path == "/" { return; }
+        if let Some(idx) = self.path.rfind('/') {
+            self.path = if idx == 0 { "/".into() } else { self.path[..idx].to_owned() };
+        }
+    }
+    fn current_path(&self) -> &str { &self.path }
+}
+
+/// Build a renderer with a single silent provider registered at index 0.
+/// Cursor positioning is left to the caller — set `current_id` directly to
+/// reach a child element without relying on key-based navigation.
+fn harness_with_silent(provider: Box<dyn Provider>) -> AppRenderer {
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register(&mut renderer, provider);
+    sicompass::list::create_list_current_layer(&mut renderer);
+    renderer
+}
+
+fn set_cursor(r: &mut AppRenderer, path: &[usize]) {
+    let mut id = sicompass_sdk::ffon::IdArray::new();
+    for p in path { id.push(*p); }
+    r.current_id = id;
+    sicompass::list::create_list_current_layer(r);
+}
+
+#[test]
+fn unified_undo_reverts_silent_checkbox_str_toggle_via_enter() {
+    use sicompass_sdk::timeline::TimelineEntry;
+
+    let mut r = harness_with_silent(Box::new(SilentCheckboxStrProvider::new()));
+    // Provider root has one child (the checkbox Str) at [0, 0].
+    set_cursor(&mut r, &[0, 0]);
+
+    let id_before = r.current_id.clone();
+    let elem_before = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &id_before)
+        .and_then(|a| a.get(id_before.last().unwrap_or(0)).cloned())
+        .expect("checkbox element present");
+    assert_eq!(
+        elem_before,
+        FfonElement::Str("<checkbox>Toggle me".into()),
+        "starts unchecked",
+    );
+
+    let before_count = r.active_timeline().entries.len();
+    press_enter(&mut r);
+
+    // FFON flipped to checked.
+    let elem_after = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &id_before)
+        .and_then(|a| a.get(id_before.last().unwrap_or(0)).cloned())
+        .expect("element still present");
+    assert_eq!(
+        elem_after,
+        FfonElement::Str("<checkbox checked>Toggle me".into()),
+        "toggled to checked",
+    );
+
+    // Exactly one new entry: a TextChunk capturing before/after.
+    let entries: Vec<_> = r.active_timeline().entries[before_count..].to_vec();
+    assert_eq!(entries.len(), 1, "atomic single entry, got {:?}", entries);
+    match &entries[0] {
+        TimelineEntry::TextChunk { id, before, after, .. } => {
+            assert_eq!(id, &id_before);
+            assert_eq!(before, &FfonElement::Str("<checkbox>Toggle me".into()));
+            assert_eq!(after, &FfonElement::Str("<checkbox checked>Toggle me".into()));
+        }
+        other => panic!("expected TextChunk, got {:?}", other),
+    }
+
+    // Ctrl-Z restores; Ctrl-Shift-Z re-applies.
+    press_ctrl(&mut r, Keycode::Z);
+    let undone = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &id_before)
+        .and_then(|a| a.get(id_before.last().unwrap_or(0)).cloned())
+        .unwrap();
+    assert_eq!(undone, FfonElement::Str("<checkbox>Toggle me".into()), "undo reverts");
+
+    press_ctrl_shift(&mut r, Keycode::Z);
+    let redone = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &id_before)
+        .and_then(|a| a.get(id_before.last().unwrap_or(0)).cloned())
+        .unwrap();
+    assert_eq!(redone, FfonElement::Str("<checkbox checked>Toggle me".into()), "redo re-applies");
+}
+
+#[test]
+fn unified_undo_reverts_silent_checkbox_obj_toggle_via_enter() {
+    use sicompass_sdk::timeline::TimelineEntry;
+
+    let mut r = harness_with_silent(Box::new(SilentCheckboxObjProvider::new()));
+    // Provider root has one child (the checkbox Obj) at [0, 0].
+    set_cursor(&mut r, &[0, 0]);
+
+    let id_before = r.current_id.clone();
+    let idx = id_before.last().unwrap_or(0);
+
+    // Pre-toggle: Obj with key "<checkbox>Section" + 2 children.
+    let elem_before = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &id_before)
+        .and_then(|a| a.get(idx).cloned())
+        .expect("Obj present");
+    match &elem_before {
+        FfonElement::Obj(o) => {
+            assert_eq!(o.key, "<checkbox>Section");
+            assert_eq!(o.children.len(), 2);
+        }
+        _ => panic!("expected Obj"),
+    }
+
+    let before_count = r.active_timeline().entries.len();
+    press_enter(&mut r);
+
+    // Post-toggle: Obj with key "<checkbox checked>Section" + same 2 children.
+    let elem_after = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &id_before)
+        .and_then(|a| a.get(idx).cloned())
+        .unwrap();
+    match &elem_after {
+        FfonElement::Obj(o) => {
+            assert_eq!(o.key, "<checkbox checked>Section");
+            assert_eq!(o.children.len(), 2, "children preserved through toggle");
+            assert_eq!(o.children[0].as_str(), Some("child-a"));
+            assert_eq!(o.children[1].as_str(), Some("child-b"));
+        }
+        _ => panic!("expected Obj"),
+    }
+
+    let entries: Vec<_> = r.active_timeline().entries[before_count..].to_vec();
+    assert_eq!(entries.len(), 1, "atomic single entry");
+    assert!(
+        matches!(entries[0], TimelineEntry::TextChunk { .. }),
+        "expected TextChunk, got {:?}",
+        entries[0],
+    );
+
+    // Undo restores both the key and children.
+    press_ctrl(&mut r, Keycode::Z);
+    let undone = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &id_before)
+        .and_then(|a| a.get(idx).cloned())
+        .unwrap();
+    match &undone {
+        FfonElement::Obj(o) => {
+            assert_eq!(o.key, "<checkbox>Section");
+            assert_eq!(o.children.len(), 2);
+        }
+        _ => panic!("expected Obj"),
+    }
+
+    // Redo re-checks while preserving children.
+    press_ctrl_shift(&mut r, Keycode::Z);
+    let redone = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &id_before)
+        .and_then(|a| a.get(idx).cloned())
+        .unwrap();
+    match &redone {
+        FfonElement::Obj(o) => {
+            assert_eq!(o.key, "<checkbox checked>Section");
+            assert_eq!(o.children.len(), 2);
+        }
+        _ => panic!("expected Obj"),
+    }
+}
+
+#[test]
+fn unified_undo_reverts_silent_radio_toggle_via_enter() {
+    use sicompass_sdk::timeline::{StructuralOp, StructuralPayload, TimelineEntry};
+
+    let mut r = harness_with_silent(Box::new(SilentRadioProvider::new()));
+    // Provider root → radio-group Obj at [0, 0] → second option ("south") at
+    // [0, 0, 1]. Place the cursor on south directly.
+    set_cursor(&mut r, &[0, 0, 1]);
+
+    let child_id = r.current_id.clone();
+    let mut parent_id = child_id.clone();
+    let _ = parent_id.pop();
+
+    // Sanity: the children currently are north(checked), south, east.
+    let pre_children: Vec<FfonElement> = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &child_id)
+        .map(|a| a.to_vec())
+        .unwrap();
+    assert_eq!(pre_children.len(), 3, "expected 3 radio options, got {:?}", pre_children);
+    assert_eq!(pre_children[0].as_str(), Some("<checked>north"));
+    assert_eq!(pre_children[1].as_str(), Some("south"));
+
+    let before_count = r.active_timeline().entries.len();
+    press_enter(&mut r);
+
+    // After: south is checked, north is bare.
+    let post_children: Vec<FfonElement> = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &child_id)
+        .map(|a| a.to_vec())
+        .unwrap();
+    assert_eq!(post_children[0].as_str(), Some("north"));
+    assert_eq!(post_children[1].as_str(), Some("<checked>south"));
+    assert_eq!(post_children[2].as_str(), Some("east"));
+
+    // Exactly one new entry: a Structural::Replace at parent_id.
+    let entries: Vec<_> = r.active_timeline().entries[before_count..].to_vec();
+    assert_eq!(entries.len(), 1, "atomic single entry, got {:?}", entries);
+    match &entries[0] {
+        TimelineEntry::Structural { id, op, payload } => {
+            assert_eq!(id, &parent_id);
+            assert_eq!(*op, StructuralOp::Replace);
+            match payload {
+                StructuralPayload::Replaced { before, after } => {
+                    // The 'before' should still show north checked.
+                    if let FfonElement::Obj(o) = before {
+                        assert_eq!(o.children[0].as_str(), Some("<checked>north"));
+                        assert_eq!(o.children[1].as_str(), Some("south"));
+                    } else { panic!("before should be Obj"); }
+                    // The 'after' should show south checked.
+                    if let FfonElement::Obj(o) = after {
+                        assert_eq!(o.children[0].as_str(), Some("north"));
+                        assert_eq!(o.children[1].as_str(), Some("<checked>south"));
+                    } else { panic!("after should be Obj"); }
+                }
+                other => panic!("expected Replaced payload, got {:?}", other),
+            }
+        }
+        other => panic!("expected Structural::Replace, got {:?}", other),
+    }
+
+    // Ctrl-Z restores north as the checked option.
+    press_ctrl(&mut r, Keycode::Z);
+    let undone_children: Vec<FfonElement> =
+        sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &child_id)
+            .map(|a| a.to_vec())
+            .unwrap();
+    assert_eq!(undone_children[0].as_str(), Some("<checked>north"));
+    assert_eq!(undone_children[1].as_str(), Some("south"));
+
+    // Ctrl-Shift-Z re-selects south.
+    press_ctrl_shift(&mut r, Keycode::Z);
+    let redone_children: Vec<FfonElement> =
+        sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &child_id)
+            .map(|a| a.to_vec())
+            .unwrap();
+    assert_eq!(redone_children[0].as_str(), Some("north"));
+    assert_eq!(redone_children[1].as_str(), Some("<checked>south"));
+}
+
+/// Build a renderer hosting a single settings provider preloaded with the
+/// requested section and a single checkbox row. The cursor is placed directly
+/// on the checkbox element — fetch() puts the built-in "sicompass" section at
+/// index 0 and the added section at index 1, so the checkbox lives at
+/// `[0, 1, 0]`.
+fn renderer_with_settings_checkbox(
+    section: &str,
+    label: &str,
+    key: &str,
+    initial: bool,
+) -> (AppRenderer, TempDir) {
+    ensure_builtins();
+    let tmp = TempDir::new().unwrap();
+    let mut settings = sicompass_settings::SettingsProvider::new_headless();
+    settings.set_config_path(tmp.path().join("settings.json"));
+    settings.add_section(section);
+    settings.add_checkbox(section, label, key, initial);
+    let mut renderer = AppRenderer::new();
+    register(&mut renderer, Box::new(settings));
+    set_cursor(&mut renderer, &[0, 1, 0]);
+    (renderer, tmp)
+}
+
+#[test]
+fn unified_undo_settings_checkbox_via_enter_records_single_provider_op() {
+    use sicompass_sdk::timeline::TimelineEntry;
+
+    let (mut r, _tmp) = renderer_with_settings_checkbox(
+        "test", "Enable feature", "test.enableFeature", false,
+    );
+
+    let before_count = r.active_timeline().entries.len();
+    press_enter(&mut r);
+
+    // Settings emits a ProviderOp; the fallback TextChunk MUST NOT also fire.
+    let entries: Vec<_> = r.active_timeline().entries[before_count..].to_vec();
+    assert_eq!(
+        entries.len(), 1,
+        "must record exactly one entry — settings provider's ProviderOp, NOT also a TextChunk fallback. got {:?}",
+        entries,
+    );
+    assert!(
+        matches!(&entries[0], TimelineEntry::ProviderOp { command, .. } if command == "settings-checkbox"),
+        "expected ProviderOp(settings-checkbox), got {:?}",
+        entries[0],
+    );
+
+    // Round-trip works through the unified timeline.
+    press_ctrl(&mut r, Keycode::Z);
+    press_ctrl_shift(&mut r, Keycode::Z);
+}
+
+/// Build a renderer hosting a single settings provider with a radio group.
+/// fetch() puts the built-in "sicompass" section at index 0 and the added
+/// "test" section at index 1; the radio group is the first child of "test"
+/// and its second option ("south") lives at `[0, 1, 0, 1]`.
+fn renderer_with_settings_radio() -> (AppRenderer, TempDir) {
+    ensure_builtins();
+    let tmp = TempDir::new().unwrap();
+    let mut settings = sicompass_settings::SettingsProvider::new_headless();
+    settings.set_config_path(tmp.path().join("settings.json"));
+    settings.add_section("test");
+    settings.add_radio("test", "Direction", "test.dir", &["north", "south"], "north");
+    let mut renderer = AppRenderer::new();
+    register(&mut renderer, Box::new(settings));
+    set_cursor(&mut renderer, &[0, 1, 0, 1]);
+    (renderer, tmp)
+}
+
+#[test]
+fn unified_undo_settings_radio_via_enter_does_not_double_record() {
+    use sicompass_sdk::timeline::TimelineEntry;
+
+    let (mut r, _tmp) = renderer_with_settings_radio();
+
+    let before_count = r.active_timeline().entries.len();
+    press_enter(&mut r);
+
+    // Settings emits a ProviderOp for the radio change; the fallback
+    // Structural::Replace MUST NOT also fire.
+    let entries: Vec<_> = r.active_timeline().entries[before_count..].to_vec();
+    assert_eq!(
+        entries.len(), 1,
+        "must record exactly one entry — settings provider's ProviderOp, NOT also a Structural::Replace fallback. got {:?}",
+        entries,
+    );
+    assert!(
+        matches!(&entries[0], TimelineEntry::ProviderOp { command, .. } if command == "settings-radio"),
+        "expected ProviderOp(settings-radio), got {:?}",
+        entries[0],
+    );
+}

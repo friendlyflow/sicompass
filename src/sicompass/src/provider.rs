@@ -375,23 +375,36 @@ pub(crate) fn push_provider_descriptor_if_present(
 /// Drain a provider's `take_timeline_entries` queue and push each entry onto
 /// the active tab's timeline. Patches `provider_idx` and the leading id
 /// component so providers can emit without knowing the renderer's state.
-pub(crate) fn push_provider_entries_if_present(
+///
+/// Returns the number of entries actually pushed; callers can use this to
+/// decide whether to record an FFON-level fallback entry (e.g. checkbox /
+/// radio toggles where the provider didn't emit anything of its own).
+pub(crate) fn drain_provider_entries(
     renderer: &mut AppRenderer,
     provider_idx: usize,
-) {
+) -> usize {
     let entries = match renderer.providers.get_mut(provider_idx) {
         Some(p) => p.take_timeline_entries(),
-        None => return,
+        None => return 0,
     };
     if entries.is_empty() {
-        return;
+        return 0;
     }
     let mut originator_id = sicompass_sdk::ffon::IdArray::new();
     originator_id.push(provider_idx);
+    let n = entries.len();
     for entry in entries {
         let patched = patch_provider_entry(entry, provider_idx, &originator_id);
         crate::state::record_entry(renderer, patched);
     }
+    n
+}
+
+pub(crate) fn push_provider_entries_if_present(
+    renderer: &mut AppRenderer,
+    provider_idx: usize,
+) {
+    let _ = drain_provider_entries(renderer, provider_idx);
 }
 
 fn patch_provider_entry(
@@ -527,8 +540,16 @@ pub fn current_element_old_content(renderer: &AppRenderer) -> String {
 ///
 /// Extracts the label and new checked state from the FFON element, then calls
 /// `on_checkbox_change` on the provider (e.g. settings saves the config).
-pub fn notify_checkbox_changed(renderer: &mut AppRenderer, new_elem_text: &str) {
+/// If the provider didn't emit any timeline entries of its own, records a
+/// fallback `TextChunk` so the FFON mutation is undoable.
+pub fn notify_checkbox_changed(
+    renderer: &mut AppRenderer,
+    before: sicompass_sdk::ffon::FfonElement,
+    new_elem_text: &str,
+) {
+    use sicompass_sdk::ffon::get_ffon_at_id;
     use sicompass_sdk::tags;
+    use sicompass_sdk::timeline::TimelineEntry;
 
     let (label, checked) = if tags::has_checkbox_checked(new_elem_text) {
         (tags::extract_checkbox_checked(new_elem_text).unwrap_or_default(), true)
@@ -541,9 +562,32 @@ pub fn notify_checkbox_changed(renderer: &mut AppRenderer, new_elem_text: &str) 
     if let Some(p) = get_active_provider(renderer) {
         p.on_checkbox_change(&label, checked);
     }
-    if let Some(pi) = renderer.current_id.get(0) {
-        push_provider_entries_if_present(renderer, pi);
+    let pi = match renderer.current_id.get(0) {
+        Some(pi) => pi,
+        None => return,
+    };
+    let drained = drain_provider_entries(renderer, pi);
+    if drained > 0 {
+        return;
     }
+
+    let after = {
+        let idx = renderer.current_id.last().unwrap_or(0);
+        match get_ffon_at_id(&renderer.ffon, &renderer.current_id)
+            .and_then(|a| a.get(idx).cloned())
+        {
+            Some(e) => e,
+            None => return,
+        }
+    };
+    let entry = TimelineEntry::TextChunk {
+        id: renderer.current_id.clone(),
+        before,
+        after,
+        chunk_seq: 0,
+    };
+    renderer.active_timeline_mut().coalesce_break = true;
+    crate::state::record_entry(renderer, entry);
 }
 
 // ---------------------------------------------------------------------------
@@ -579,19 +623,29 @@ fn clear_auth_registry() {
 ///
 /// Equivalent to `providerNotifyRadioChanged` in the C code. Extracts the
 /// selected value from the FFON tree and fires `on_radio_change` on the provider.
-pub fn notify_radio_changed(renderer: &mut AppRenderer) {
+///
+/// `parent_before` is the radio-group parent Obj snapshot taken *before* the
+/// caller mutated the children slice. `parent_id` points at the parent's slot
+/// in its own parent (i.e. `r.current_id` with the trailing child index popped).
+/// If the provider didn't emit any timeline entries of its own, records a
+/// fallback `Structural::Replace` covering the parent's full children slice
+/// so the toggle is undoable in one atomic step.
+pub fn notify_radio_changed(
+    renderer: &mut AppRenderer,
+    parent_before: sicompass_sdk::ffon::FfonElement,
+    parent_id: sicompass_sdk::ffon::IdArray,
+) {
     use sicompass_sdk::ffon::get_ffon_at_id;
     use sicompass_sdk::tags;
+    use sicompass_sdk::timeline::{StructuralOp, StructuralPayload, TimelineEntry};
 
-    // current_id points to the radio group parent. The selected child has <checked>.
-    let mut parent_id = renderer.current_id.clone();
-    let _ = parent_id.pop(); // go up one level to the radio group
-
-    // Find the radio group key (group name)
+    // Find the radio group key (group name). The element AT parent_id is the
+    // radio-group Obj; `get_ffon_at_id(&ffon, &parent_id)` returns the array
+    // containing it at index `parent_id.last()`.
     let group_key = {
+        let idx = parent_id.last().unwrap_or(0);
         let arr = get_ffon_at_id(&renderer.ffon, &parent_id);
-        let pidx = parent_id.last().unwrap_or(0);
-        arr.and_then(|a| a.get(pidx))
+        arr.and_then(|a| a.get(idx))
             .and_then(|e| e.as_obj())
             .map(|o| tags::strip_display(&o.key).to_string())
             .unwrap_or_default()
@@ -616,9 +670,36 @@ pub fn notify_radio_changed(renderer: &mut AppRenderer) {
     if let Some(p) = get_active_provider(renderer) {
         p.on_radio_change(&group_key, &selected_value);
     }
-    if let Some(pi) = renderer.current_id.get(0) {
-        push_provider_entries_if_present(renderer, pi);
+    let pi = match renderer.current_id.get(0) {
+        Some(pi) => pi,
+        None => return,
+    };
+    let drained = drain_provider_entries(renderer, pi);
+    if drained > 0 {
+        return;
     }
+
+    // Provider didn't record anything; capture the parent's post-toggle
+    // snapshot and emit a Structural::Replace at the parent id.
+    let parent_after = {
+        let idx = parent_id.last().unwrap_or(0);
+        match get_ffon_at_id(&renderer.ffon, &parent_id)
+            .and_then(|a| a.get(idx).cloned())
+        {
+            Some(e) => e,
+            None => return,
+        }
+    };
+    let entry = TimelineEntry::Structural {
+        id: parent_id,
+        op: StructuralOp::Replace,
+        payload: StructuralPayload::Replaced {
+            before: parent_before,
+            after: parent_after,
+        },
+    };
+    renderer.active_timeline_mut().coalesce_break = true;
+    crate::state::record_entry(renderer, entry);
 }
 
 /// Notify the active provider that a button was pressed.
