@@ -48,9 +48,7 @@ pub fn handle_up(r: &mut AppRenderer) {
             r.needs_redraw = true;
         }
         _ => {
-            let from_id = r.current_id.clone();
             crate::state::update_state(r, Task::ArrowUp, History::None);
-            record_navigation_if_moved(r, from_id, sicompass_sdk::timeline::NavKind::ArrowUp);
             r.needs_redraw = true;
         }
     }
@@ -98,9 +96,7 @@ pub fn handle_down(r: &mut AppRenderer) {
             // noop in insert modes
         }
         _ => {
-            let from_id = r.current_id.clone();
             crate::state::update_state(r, Task::ArrowDown, History::None);
-            record_navigation_if_moved(r, from_id, sicompass_sdk::timeline::NavKind::ArrowDown);
             r.needs_redraw = true;
         }
     }
@@ -145,48 +141,9 @@ fn record_fs_op(
     crate::state::record_entry(r, entry);
 }
 
-/// Push a `Navigate` entry onto the active tab's timeline when current_id
-/// actually moved. Captures the active provider's path when the provider
-/// supports refresh_on_navigate (filebrowser, email).
-///
-/// Dual-write helper used during the undo/redo refactor — emits TimelineEntry
-/// alongside the legacy Task::Arrow* / Task::FsNavigate stack.
-fn record_navigation_if_moved(
-    r: &mut AppRenderer,
-    from_id: sicompass_sdk::ffon::IdArray,
-    kind: sicompass_sdk::timeline::NavKind,
-) {
-    if from_id == r.current_id {
-        return;
-    }
-    let provider_idx = r.current_id.get(0).unwrap_or(0);
-    // Path tracking applies only *inside* a provider (depth >= 2). Up/Down
-    // doesn't change depth, so this single gate covers both origin and
-    // destination — at depth 1 (root provider list) we leave both paths as
-    // None and let `timeline_entry_label` fall back to the provider's
-    // display_name. Inside a provider every plugin can report a path
-    // (default `current_path()` is "/" — providers that track navigation
-    // override it), so the gate no longer hinges on `refresh_on_navigate`.
-    let (from_path, to_path) = if r.current_id.depth() >= 2 {
-        let path = crate::provider::current_path(r).to_owned();
-        (Some(path.clone()), Some(path))
-    } else {
-        (None, None)
-    };
-    let entry = sicompass_sdk::timeline::TimelineEntry::Navigate {
-        provider_idx,
-        from_id,
-        to_id: r.current_id.clone(),
-        from_path,
-        to_path,
-        kind,
-    };
-    crate::state::record_entry(r, entry);
-}
-
 /// Push a `Navigate` entry for a search-exit commit (Enter / Right-at-end /
-/// Left-at-cursor-0 inside SimpleSearch or ExtendedSearch). Unlike
-/// `record_navigation_if_moved`, `from_id` is supplied by the caller because
+/// Left-at-cursor-0 inside SimpleSearch or ExtendedSearch). `from_id` is
+/// supplied by the caller because
 /// the logical origin of a search jump is `search_origin_id`, not the
 /// renderer's current id at the moment of recording. `from_path` is captured
 /// by the caller before any path-changing operation (e.g. `navigate_to_path`)

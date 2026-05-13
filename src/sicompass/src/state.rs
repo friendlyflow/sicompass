@@ -577,15 +577,26 @@ fn apply_undo(r: &mut AppRenderer, entry: &TimelineEntry) {
             from_id, from_path, ..
         } => {
             if let Some(path) = from_path {
-                // Refresh-on-navigate providers (filebrowser, email): reset
-                // cursor to the provider root before switching paths so the
-                // re-fetch lands on the correct content, then put the cursor
-                // back where it was at the moment of navigation.
-                let mut root_id = IdArray::new();
-                root_id.push(*provider_idx);
-                r.current_id = root_id;
-                crate::provider::set_provider_path(r, path);
-                crate::provider::refresh_current_directory(r);
+                // Only refresh-on-navigate providers (filebrowser, email) need
+                // the FFON re-fetched after a path swap. For in-memory
+                // providers (tutorial, script-based) the FFON is preloaded;
+                // refreshing would call fetch() at the new path, replace the
+                // provider root with whatever that returns, and make the
+                // restored `from_id` index into the wrong tree — which makes
+                // the rendered list look empty after undo.
+                let does_refresh = r.providers
+                    .get(*provider_idx)
+                    .map(|p| p.refresh_on_navigate())
+                    .unwrap_or(false);
+                if does_refresh {
+                    let mut root_id = IdArray::new();
+                    root_id.push(*provider_idx);
+                    r.current_id = root_id;
+                    crate::provider::set_provider_path(r, path);
+                    crate::provider::refresh_current_directory(r);
+                } else {
+                    crate::provider::set_provider_path(r, path);
+                }
             }
             r.current_id = from_id.clone();
         }
@@ -620,7 +631,7 @@ fn apply_undo(r: &mut AppRenderer, entry: &TimelineEntry) {
             }
             (StructuralOp::Replace, StructuralPayload::Replaced { before, .. }) => {
                 replace_element_at_id(r, id, before.clone());
-                r.current_id = id.clone();
+                r.current_id = cursor_inside_radio(id, before);
             }
             _ => {}
         },
@@ -667,11 +678,22 @@ fn apply_redo(r: &mut AppRenderer, entry: &TimelineEntry) {
             to_id, to_path, ..
         } => {
             if let Some(path) = to_path {
-                let mut root_id = IdArray::new();
-                root_id.push(*provider_idx);
-                r.current_id = root_id;
-                crate::provider::set_provider_path(r, path);
-                crate::provider::refresh_current_directory(r);
+                // Same `refresh_on_navigate` gate as apply_undo above —
+                // in-memory providers should not lose their preloaded FFON
+                // on redo.
+                let does_refresh = r.providers
+                    .get(*provider_idx)
+                    .map(|p| p.refresh_on_navigate())
+                    .unwrap_or(false);
+                if does_refresh {
+                    let mut root_id = IdArray::new();
+                    root_id.push(*provider_idx);
+                    r.current_id = root_id;
+                    crate::provider::set_provider_path(r, path);
+                    crate::provider::refresh_current_directory(r);
+                } else {
+                    crate::provider::set_provider_path(r, path);
+                }
             }
             r.current_id = to_id.clone();
         }
@@ -708,7 +730,7 @@ fn apply_redo(r: &mut AppRenderer, entry: &TimelineEntry) {
             }
             (StructuralOp::Replace, StructuralPayload::Replaced { after, .. }) => {
                 replace_element_at_id(r, id, after.clone());
-                r.current_id = id.clone();
+                r.current_id = cursor_inside_radio(id, after);
             }
             _ => {}
         },
@@ -1076,6 +1098,28 @@ fn insert_element_at_id(r: &mut AppRenderer, id: &IdArray, elem: FfonElement) {
 fn replace_element_at_id(r: &mut AppRenderer, id: &IdArray, elem: FfonElement) {
     let idx = id.last().unwrap_or(0);
     replace_at(&mut r.ffon, id, idx, elem);
+}
+
+/// Cursor position to land on when undoing/redoing a `Structural::Replace`
+/// over a radio-group Obj. If `elem` is a `<radio>` Obj, returns `id` with
+/// the index of the now-checked child pushed — so the user sees the
+/// restored selection inside the radio children rather than being thrown
+/// up to the radio group's parent slot. For non-radio replacements, falls
+/// back to `id` itself.
+fn cursor_inside_radio(id: &IdArray, elem: &FfonElement) -> IdArray {
+    use sicompass_sdk::tags;
+    if let FfonElement::Obj(o) = elem {
+        if tags::has_radio(&o.key) {
+            if let Some(checked_idx) = o.children.iter().position(|c| {
+                c.as_str().map_or(false, |s| tags::has_checked(s))
+            }) {
+                let mut cursor = id.clone();
+                cursor.push(checked_idx);
+                return cursor;
+            }
+        }
+    }
+    id.clone()
 }
 
 // ---------------------------------------------------------------------------

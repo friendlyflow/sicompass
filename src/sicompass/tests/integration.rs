@@ -6797,47 +6797,54 @@ fn timelines_are_per_tab() {
 }
 
 #[test]
-fn arrow_down_emits_navigate_entry() {
+fn arrow_down_does_not_record_timeline_entry() {
     let mut h = Harness::new();
     let fb_idx = h.provider_idx("filebrowser").unwrap();
     navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r()); // descend so up/down has somewhere to move
     let before = h.renderer.active_timeline().entries.len();
     let pre_id = h.renderer.current_id.clone();
     press_down(h.r());
-    let after = h.renderer.active_timeline().entries.len();
-    if h.renderer.current_id == pre_id {
-        // Single-item list — Arrow Down had nothing to do; nothing recorded.
-        assert_eq!(after, before);
-        return;
-    }
-    assert_eq!(after, before + 1, "exactly one Navigate entry emitted");
-    match h.renderer.active_timeline().entries.last().unwrap() {
-        TimelineEntry::Navigate { kind, .. } => {
-            assert_eq!(*kind, NavKind::ArrowDown);
-        }
-        _ => panic!("expected Navigate"),
-    }
+    assert_ne!(h.renderer.current_id, pre_id, "cursor moved");
+    assert_eq!(
+        h.renderer.active_timeline().entries.len(),
+        before,
+        "Arrow Down must not push a timeline entry",
+    );
 }
 
 #[test]
-fn arrow_down_burst_coalesces_in_handler() {
+fn arrow_up_does_not_record_timeline_entry() {
     let mut h = Harness::new();
     let fb_idx = h.provider_idx("filebrowser").unwrap();
     navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+    press_down(h.r()); // first move down so up has somewhere to go
+    let before = h.renderer.active_timeline().entries.len();
     let pre_id = h.renderer.current_id.clone();
+    press_up(h.r());
+    assert_ne!(h.renderer.current_id, pre_id, "cursor moved");
+    assert_eq!(
+        h.renderer.active_timeline().entries.len(),
+        before,
+        "Arrow Up must not push a timeline entry",
+    );
+}
+
+#[test]
+fn arrow_up_down_burst_does_not_record_anything() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
     let before_count = h.renderer.active_timeline().entries.len();
-    for _ in 0..5 {
-        press_down(h.r());
-    }
-    let after_count = h.renderer.active_timeline().entries.len();
-    if h.renderer.current_id == pre_id {
-        // No movement happened — nothing to assert.
-        assert_eq!(after_count, before_count);
-        return;
-    }
-    // Whatever movement occurred, all 5 down-arrows collapse to a single
-    // Navigate entry — burst coalescing.
-    assert_eq!(after_count, before_count + 1, "burst coalesced");
+    for _ in 0..5 { press_down(h.r()); }
+    for _ in 0..3 { press_up(h.r()); }
+    assert_eq!(
+        h.renderer.active_timeline().entries.len(),
+        before_count,
+        "burst of up/down arrows must record nothing",
+    );
 }
 
 #[test]
@@ -7744,10 +7751,10 @@ fn general_left_to_root_records_navigate_with_none_to_path() {
 }
 
 #[test]
-fn general_down_at_root_records_navigate_with_no_paths() {
+fn general_down_at_root_records_nothing() {
     // General-mode Down at depth-1 (move from filebrowser to settings) must
-    // record a Navigate with both paths None — the cursor never entered any
-    // provider's path zone.
+    // not push anything to the timeline — Arrow Up/Down navigation is not
+    // tracked in undo history.
     let mut h = Harness::new();
     assert_eq!(h.renderer.current_id.depth(), 1, "must start at root");
     let pre_id = h.renderer.current_id.clone();
@@ -7755,16 +7762,12 @@ fn general_down_at_root_records_navigate_with_no_paths() {
 
     press_down(h.r()); // filebrowser → settings at depth=1
 
-    let entries = &h.renderer.active_timeline().entries;
-    assert_eq!(entries.len(), 1, "Down at depth-1 must record one Navigate");
-    match &entries[0] {
-        sicompass_sdk::timeline::TimelineEntry::Navigate { from_id, from_path, to_path, .. } => {
-            assert_eq!(*from_id, pre_id);
-            assert_eq!(*from_path, None, "depth-1 origin must have from_path=None");
-            assert_eq!(*to_path, None, "depth-1 destination must have to_path=None");
-        }
-        other => panic!("expected Navigate, got {:?}", other),
-    }
+    assert_ne!(h.renderer.current_id, pre_id, "cursor moved");
+    assert_eq!(
+        h.renderer.active_timeline().entries.len(),
+        0,
+        "Arrow Down must record nothing on the timeline",
+    );
 }
 
 #[test]
@@ -8078,6 +8081,43 @@ impl Provider for SilentCheckboxObjProvider {
     fn current_path(&self) -> &str { &self.path }
 }
 
+/// A provider that yields a `<radio>` Obj nested inside two `Obj` sections, so
+/// the radio group lives at depth 3 (options at depth 4) — mirroring the
+/// sales-demo structure where radios sit under nested Obj sections.
+struct DeepSilentRadioProvider {
+    path: String,
+}
+
+impl DeepSilentRadioProvider {
+    fn new() -> Self { Self { path: "/".into() } }
+}
+
+impl Provider for DeepSilentRadioProvider {
+    fn name(&self) -> &str { "deep_silent_radio" }
+    fn display_name(&self) -> &str { "Deep Silent Radio" }
+    fn fetch(&mut self) -> Vec<FfonElement> {
+        let mut section = FfonElement::new_obj("Section A");
+        let mut inner = FfonElement::new_obj("Inner B");
+        let mut group = FfonElement::new_obj("<radio>Mode");
+        group.as_obj_mut().unwrap().push(FfonElement::Str("<checked>auto".into()));
+        group.as_obj_mut().unwrap().push(FfonElement::Str("manual".into()));
+        inner.as_obj_mut().unwrap().push(group);
+        section.as_obj_mut().unwrap().push(inner);
+        vec![section]
+    }
+    fn push_path(&mut self, segment: &str) {
+        if self.path == "/" { self.path = format!("/{segment}"); }
+        else { self.path.push('/'); self.path.push_str(segment); }
+    }
+    fn pop_path(&mut self) {
+        if self.path == "/" { return; }
+        if let Some(idx) = self.path.rfind('/') {
+            self.path = if idx == 0 { "/".into() } else { self.path[..idx].to_owned() };
+        }
+    }
+    fn current_path(&self) -> &str { &self.path }
+}
+
 /// A provider that yields a `<radio>` Obj with three Str children (one
 /// initially `<checked>`). `on_radio_change` is a no-op so the FFON-fallback
 /// path in `notify_radio_changed` is exercised.
@@ -8320,7 +8360,8 @@ fn unified_undo_reverts_silent_radio_toggle_via_enter() {
         other => panic!("expected Structural::Replace, got {:?}", other),
     }
 
-    // Ctrl-Z restores north as the checked option.
+    // Ctrl-Z restores north as the checked option, and the cursor lands
+    // *inside* the radio children on the now-checked option (north at idx 0).
     press_ctrl(&mut r, Keycode::Z);
     let undone_children: Vec<FfonElement> =
         sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &child_id)
@@ -8328,8 +8369,22 @@ fn unified_undo_reverts_silent_radio_toggle_via_enter() {
             .unwrap();
     assert_eq!(undone_children[0].as_str(), Some("<checked>north"));
     assert_eq!(undone_children[1].as_str(), Some("south"));
+    let mut north_id = parent_id.clone();
+    north_id.push(0);
+    assert_eq!(
+        r.current_id, north_id,
+        "undo must land cursor on the now-checked option (north), not the radio-group parent",
+    );
+    // The rendered list must show the three radio options (the user reported
+    // an empty list after undo — guard against regressions).
+    assert_eq!(
+        r.total_list.len(),
+        3,
+        "after undo the rendered list must show the three radio options, got {:?}",
+        r.total_list.iter().map(|i| i.label.clone()).collect::<Vec<_>>(),
+    );
 
-    // Ctrl-Shift-Z re-selects south.
+    // Ctrl-Shift-Z re-selects south, and the cursor follows it back.
     press_ctrl_shift(&mut r, Keycode::Z);
     let redone_children: Vec<FfonElement> =
         sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &child_id)
@@ -8337,6 +8392,110 @@ fn unified_undo_reverts_silent_radio_toggle_via_enter() {
             .unwrap();
     assert_eq!(redone_children[0].as_str(), Some("north"));
     assert_eq!(redone_children[1].as_str(), Some("<checked>south"));
+    let mut south_id = parent_id.clone();
+    south_id.push(1);
+    assert_eq!(
+        r.current_id, south_id,
+        "redo must land cursor on the newly-checked option (south)",
+    );
+}
+
+#[test]
+fn unified_undo_after_leaving_radio_group_keeps_list_visible() {
+    // Reproduces user's bug report: cursor on a radio option, Enter to toggle,
+    // Left (exit children), Ctrl-Z. Two timeline entries are recorded
+    // (Structural::Replace for the toggle, Navigate for the Left). Ctrl-Z
+    // undoes the most recent — the Navigate — bringing the cursor back inside
+    // the radio children. For in-memory providers (refresh_on_navigate=false)
+    // the FFON must NOT be re-fetched by Navigate undo; otherwise the
+    // restored cursor index points into a reshaped tree and the list
+    // renders empty.
+    use sicompass_sdk::timeline::TimelineEntry;
+
+    let mut r = harness_with_silent(Box::new(DeepSilentRadioProvider::new()));
+    // Position on the second option ("manual"), simulating having pressed
+    // Right/Down to navigate into the radio children.
+    set_cursor(&mut r, &[0, 0, 0, 0, 1]);
+
+    press_enter(&mut r); // toggle records Structural::Replace
+    press_left(&mut r); // exit children records Navigate
+    assert_eq!(r.current_id.depth(), 4, "Left moved cursor up to the radio group");
+
+    // Ctrl-Z undoes the most-recent entry — Navigate-Left — restoring the
+    // cursor inside the radio children. The toggle remains applied. The
+    // rendered list must still show the radio options.
+    press_ctrl(&mut r, Keycode::Z);
+    let mut expected = sicompass_sdk::ffon::IdArray::new();
+    for p in [0, 0, 0, 0, 1] { expected.push(p); }
+    assert_eq!(r.current_id, expected, "Navigate undo restored cursor to where Left started");
+    assert_eq!(
+        r.total_list.len(),
+        2,
+        "rendered list must still show the two radio options after Navigate undo; got {:?}",
+        r.total_list.iter().map(|i| i.label.clone()).collect::<Vec<_>>(),
+    );
+    let labels: Vec<String> = r.total_list.iter().map(|i| i.label.clone()).collect();
+    assert!(labels.iter().any(|l| l.contains("auto")), "list must show 'auto', got {:?}", labels);
+    assert!(labels.iter().any(|l| l.contains("manual")), "list must show 'manual', got {:?}", labels);
+
+    // A second Ctrl-Z reverts the radio toggle and lands the cursor on the
+    // now-checked option (auto, index 0) inside the children.
+    press_ctrl(&mut r, Keycode::Z);
+    match r.active_timeline().entries.first().unwrap() {
+        TimelineEntry::Structural { .. } => {}
+        other => panic!("expected Structural entry at the bottom of the stack, got {:?}", other),
+    }
+    let mut expected2 = sicompass_sdk::ffon::IdArray::new();
+    for p in [0, 0, 0, 0, 0] { expected2.push(p); }
+    assert_eq!(r.current_id, expected2, "second undo lands cursor on the now-checked option");
+}
+
+#[test]
+fn unified_undo_reverts_deep_radio_toggle_shows_list() {
+    use sicompass_sdk::timeline::{StructuralOp, StructuralPayload, TimelineEntry};
+
+    let mut r = harness_with_silent(Box::new(DeepSilentRadioProvider::new()));
+    // provider → Section A → Inner B → radio group → "manual" option
+    // Path: [0, 0, 0, 0, 1] — depth 5.
+    set_cursor(&mut r, &[0, 0, 0, 0, 1]);
+
+    let initial_id = r.current_id.clone();
+    assert_eq!(initial_id.depth(), 5);
+
+    press_enter(&mut r);
+
+    // After Enter, FFON now has "manual" checked. Verify timeline entry shape.
+    let entry = r.active_timeline().entries.last().cloned().unwrap();
+    match &entry {
+        TimelineEntry::Structural { id, op: StructuralOp::Replace, payload: StructuralPayload::Replaced { .. } } => {
+            // id must be the radio group's slot: [0, 0, 0, 0] (depth 4).
+            assert_eq!(id.depth(), 4, "Replace id should be the radio group at depth 4");
+        }
+        other => panic!("expected Structural::Replace, got {:?}", other),
+    }
+
+    // Ctrl-Z must restore the original selection AND show the radio options
+    // in the rendered list, with the cursor on the now-checked option.
+    press_ctrl(&mut r, Keycode::Z);
+    let mut expected_cursor = sicompass_sdk::ffon::IdArray::new();
+    for p in [0, 0, 0, 0, 0] { expected_cursor.push(p); }
+    assert_eq!(
+        r.current_id, expected_cursor,
+        "undo must land cursor at the now-checked option inside the radio children",
+    );
+    assert_eq!(
+        r.total_list.len(),
+        2,
+        "rendered list must show the two radio options after undo at depth 5; got {:?}",
+        r.total_list.iter().map(|i| i.label.clone()).collect::<Vec<_>>(),
+    );
+
+    // Ctrl-Shift-Z brings us back to "manual" checked, cursor on manual.
+    press_ctrl_shift(&mut r, Keycode::Z);
+    let mut after_cursor = sicompass_sdk::ffon::IdArray::new();
+    for p in [0, 0, 0, 0, 1] { after_cursor.push(p); }
+    assert_eq!(r.current_id, after_cursor);
+    assert_eq!(r.total_list.len(), 2);
 }
 
 /// Build a renderer hosting a single settings provider preloaded with the
