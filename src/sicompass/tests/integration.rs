@@ -8772,3 +8772,123 @@ fn tutorial_input_enter_keeps_typed_text_and_chunks() {
     );
     assert!(renderer.insert_session.is_none(), "session must be cleared after Enter");
 }
+
+// ---------------------------------------------------------------------------
+// I_PLACEHOLDER commit undo: typing on an `i <input></input>` placeholder
+// resolves to Str (`-name` / plain) or Obj (`+name` / `name:`) at Enter time
+// via the placeholder branch of handle_enter_insert. The placeholder branch
+// skips per-keystroke FFON mutation (begin_insert_session bails out), so the
+// commit itself must record a Structural::Replace entry — otherwise ctrl-Z
+// has no idea the placeholder was ever replaced.
+// ---------------------------------------------------------------------------
+
+/// Helper: build a renderer holding the tutorial provider with a parent Obj
+/// whose first child is the I_PLACEHOLDER. Cursor positioned on the placeholder.
+fn tutorial_placeholder_renderer() -> AppRenderer {
+    ensure_builtins();
+    use sicompass_sdk::ffon::{FfonObject, IdArray};
+    use sicompass_sdk::placeholders::I_PLACEHOLDER;
+
+    let mut renderer = AppRenderer::new();
+    let mut provider = sicompass_sdk::create_provider_by_name("tutorial").unwrap();
+    provider.init();
+    let display_name = provider.display_name().to_owned();
+    // Root: provider Obj → "+i input example <input></input>" Obj → [I_PLACEHOLDER]
+    let parent = FfonElement::Obj(FfonObject {
+        key: "+i input example <input></input>".to_owned(),
+        children: vec![FfonElement::Str(I_PLACEHOLDER.to_owned())],
+    });
+    let mut root = FfonElement::new_obj(&display_name);
+    root.as_obj_mut().unwrap().push(parent);
+    renderer.ffon.push(root);
+    renderer.providers.push(provider);
+
+    // Cursor on the I_PLACEHOLDER child.
+    renderer.current_id = {
+        let mut id = IdArray::new();
+        id.push(0); // provider
+        id.push(0); // parent Obj
+        id.push(0); // I_PLACEHOLDER
+        id
+    };
+    sicompass::list::create_list_current_layer(&mut renderer);
+    renderer
+}
+
+/// Typing a plain name (no prefix) on the I_PLACEHOLDER resolves to a Str at
+/// Enter. ctrl-Z must restore the I_PLACEHOLDER element.
+#[test]
+fn tutorial_placeholder_str_commit_undo_restores_i_placeholder() {
+    use sicompass_sdk::placeholders::I_PLACEHOLDER;
+
+    let mut renderer = tutorial_placeholder_renderer();
+
+    press(&mut renderer, Keycode::I);
+    assert!(renderer.placeholder_insert_mode,
+        "press i on I_PLACEHOLDER must enter placeholder_insert_mode");
+    type_text(&mut renderer, "hello");
+    press_enter(&mut renderer);
+
+    // Element should now be Str("<input>hello</input>").
+    let parent = renderer.ffon[0].as_obj().unwrap().children[0].as_obj().unwrap();
+    let child = &parent.children[0];
+    assert!(
+        matches!(child, FfonElement::Str(s) if s == "<input>hello</input>"),
+        "after Enter the placeholder must be replaced by <input>hello</input>, got: {child:?}"
+    );
+
+    // ctrl-Z must restore the I_PLACEHOLDER.
+    sicompass::state::walk_back(&mut renderer);
+    let parent = renderer.ffon[0].as_obj().unwrap().children[0].as_obj().unwrap();
+    let child = &parent.children[0];
+    assert!(
+        matches!(child, FfonElement::Str(s) if s == I_PLACEHOLDER),
+        "ctrl-Z must restore the I_PLACEHOLDER, got: {child:?}"
+    );
+
+    // ctrl-Shift-Z must re-apply the Str.
+    sicompass::state::walk_forward(&mut renderer);
+    let parent = renderer.ffon[0].as_obj().unwrap().children[0].as_obj().unwrap();
+    let child = &parent.children[0];
+    assert!(
+        matches!(child, FfonElement::Str(s) if s == "<input>hello</input>"),
+        "redo must restore the typed Str, got: {child:?}"
+    );
+}
+
+/// Typing `+name` on the I_PLACEHOLDER resolves to an Obj at Enter. ctrl-Z
+/// must restore the I_PLACEHOLDER element.
+#[test]
+fn tutorial_placeholder_obj_commit_undo_restores_i_placeholder() {
+    use sicompass_sdk::placeholders::I_PLACEHOLDER;
+
+    let mut renderer = tutorial_placeholder_renderer();
+
+    press(&mut renderer, Keycode::I);
+    type_text(&mut renderer, "+hello");
+    press_enter(&mut renderer);
+
+    // Element should now be Obj { key: "hello", children: [Str("")] }.
+    let parent = renderer.ffon[0].as_obj().unwrap().children[0].as_obj().unwrap();
+    let child = &parent.children[0];
+    let obj = child.as_obj().expect("after +hello the placeholder must become an Obj");
+    assert_eq!(obj.key, "hello", "Obj key must be the typed name");
+
+    // ctrl-Z must restore the I_PLACEHOLDER.
+    sicompass::state::walk_back(&mut renderer);
+    let parent = renderer.ffon[0].as_obj().unwrap().children[0].as_obj().unwrap();
+    let child = &parent.children[0];
+    assert!(
+        matches!(child, FfonElement::Str(s) if s == I_PLACEHOLDER),
+        "ctrl-Z must restore the I_PLACEHOLDER, got: {child:?}"
+    );
+
+    // ctrl-Shift-Z must re-apply the Obj.
+    sicompass::state::walk_forward(&mut renderer);
+    let parent = renderer.ffon[0].as_obj().unwrap().children[0].as_obj().unwrap();
+    let child = &parent.children[0];
+    assert!(
+        child.as_obj().map_or(false, |o| o.key == "hello"),
+        "redo must restore the typed Obj, got: {child:?}"
+    );
+}

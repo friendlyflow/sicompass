@@ -1755,11 +1755,23 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                     }
                 } else {
                     // No provider — update the FFON element in-place with <input> wrapping.
+                    // Record a Structural::Replace so ctrl-Z restores the I_PLACEHOLDER.
                     let idx = r.current_id.last().unwrap_or(0);
+                    let before = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)
+                        .and_then(|a| a.get(idx).cloned());
+                    let after = FfonElement::new_str(format!("<input>{name}</input>"));
                     if let Some(arr) = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id) {
                         if let Some(e) = arr.get_mut(idx) {
-                            *e = FfonElement::new_str(format!("<input>{name}</input>"));
+                            *e = after.clone();
                         }
+                    }
+                    if let Some(before) = before {
+                        let entry = sicompass_sdk::timeline::TimelineEntry::Structural {
+                            id: r.current_id.clone(),
+                            op: sicompass_sdk::timeline::StructuralOp::Replace,
+                            payload: sicompass_sdk::timeline::StructuralPayload::Replaced { before, after },
+                        };
+                        crate::state::record_entry(r, entry);
                     }
                 }
                 list::create_list_current_layer(r);
@@ -1823,13 +1835,27 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                     }
                 } else {
                     // No provider — mutate the FFON element directly.
+                    // Record a Structural::Replace so ctrl-Z restores the I_PLACEHOLDER.
                     let idx = r.current_id.last().unwrap_or(0);
+                    let before = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)
+                        .and_then(|a| a.get(idx).cloned());
+                    let after = {
+                        let mut obj = FfonElement::new_obj(&key);
+                        obj.as_obj_mut().unwrap().push(FfonElement::new_str(String::new()));
+                        obj
+                    };
                     if let Some(arr) = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id) {
                         if let Some(e) = arr.get_mut(idx) {
-                            let mut obj = FfonElement::new_obj(&key);
-                            obj.as_obj_mut().unwrap().push(FfonElement::new_str(String::new()));
-                            *e = obj;
+                            *e = after.clone();
                         }
+                    }
+                    if let Some(before) = before {
+                        let entry = sicompass_sdk::timeline::TimelineEntry::Structural {
+                            id: r.current_id.clone(),
+                            op: sicompass_sdk::timeline::StructuralOp::Replace,
+                            payload: sicompass_sdk::timeline::StructuralPayload::Replaced { before, after },
+                        };
+                        crate::state::record_entry(r, entry);
                     }
                 }
                 list::create_list_current_layer(r);
