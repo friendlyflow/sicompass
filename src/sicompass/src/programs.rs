@@ -389,9 +389,10 @@ fn migrate_programs_to_load(path: &Path) {
         sc.remove("programsToLoad");
     }
 
-    // Write back
+    // Write back atomically so a concurrent sicompass instance never reads a
+    // truncated settings.json (which it would then rebuild from an empty map).
     if let Ok(json) = serde_json::to_string_pretty(&root) {
-        let _ = std::fs::write(path, json);
+        let _ = sicompass_sdk::platform::atomic_write(path, &json);
     }
 }
 

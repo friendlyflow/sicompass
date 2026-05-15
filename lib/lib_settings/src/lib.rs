@@ -319,7 +319,27 @@ impl SettingsProvider {
         let mut root = Map::new();
         root.insert(section_name, Value::Object(section_map));
         if let Ok(json) = serde_json::to_string_pretty(&Value::Object(root)) {
-            let _ = std::fs::write(path, json);
+            let _ = platform::atomic_write(path, &json);
+        }
+    }
+
+    /// Load the settings root object for an in-place key write.
+    ///
+    /// Returns `Some(map)` when the file is absent (a fresh empty root — the
+    /// legitimate first-write case) or parses cleanly as a JSON object.
+    /// Returns `None` when the file exists but cannot be read or does not
+    /// parse as an object. In that state another process is likely mid-write
+    /// (a partial file parses as garbage), so the caller must abort rather
+    /// than rebuild the file from an empty map — doing so would drop every
+    /// section it is not currently touching.
+    fn load_root_for_write(path: &Path) -> Option<Map<String, Value>> {
+        match std::fs::read_to_string(path) {
+            Ok(s) => match serde_json::from_str::<Value>(&s) {
+                Ok(Value::Object(m)) => Some(m),
+                _ => None,
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(Map::new()),
+            Err(_) => None,
         }
     }
 
@@ -327,17 +347,23 @@ impl SettingsProvider {
     fn write_key_string(&self, section: &str, key: &str, value: &str) {
         let Some(path) = self.config_path() else { return };
         if let Some(parent) = path.parent() { platform::make_dirs(parent); }
-        let mut root: Map<String, Value> = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-            .and_then(|v| if let Value::Object(m) = v { Some(m) } else { None })
-            .unwrap_or_default();
+        // Abort rather than clobber: if the file exists but won't parse,
+        // another process is likely mid-write — rebuilding from an empty map
+        // here would drop every other section.
+        let Some(mut root) = Self::load_root_for_write(&path) else {
+            eprintln!(
+                "sicompass: {} is unreadable or corrupt — setting not saved, \
+                 file left intact for recovery",
+                path.display()
+            );
+            return;
+        };
         let sec = root.entry(section.to_owned()).or_insert_with(|| Value::Object(Map::new()));
         if let Value::Object(m) = sec {
             m.insert(key.to_owned(), Value::String(value.to_owned()));
         }
         if let Ok(json) = serde_json::to_string_pretty(&Value::Object(root)) {
-            let _ = std::fs::write(&path, json);
+            let _ = platform::atomic_write(&path, &json);
         }
     }
 
@@ -345,17 +371,22 @@ impl SettingsProvider {
     fn write_key_bool(&self, section: &str, key: &str, value: bool) {
         let Some(path) = self.config_path() else { return };
         if let Some(parent) = path.parent() { platform::make_dirs(parent); }
-        let mut root: Map<String, Value> = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-            .and_then(|v| if let Value::Object(m) = v { Some(m) } else { None })
-            .unwrap_or_default();
+        // See `write_key_string` — abort on an unparseable file to avoid
+        // clobbering a settings file another process is mid-write on.
+        let Some(mut root) = Self::load_root_for_write(&path) else {
+            eprintln!(
+                "sicompass: {} is unreadable or corrupt — setting not saved, \
+                 file left intact for recovery",
+                path.display()
+            );
+            return;
+        };
         let sec = root.entry(section.to_owned()).or_insert_with(|| Value::Object(Map::new()));
         if let Value::Object(m) = sec {
             m.insert(key.to_owned(), Value::Bool(value));
         }
         if let Ok(json) = serde_json::to_string_pretty(&Value::Object(root)) {
-            let _ = std::fs::write(&path, json);
+            let _ = platform::atomic_write(&path, &json);
         }
     }
 
@@ -1174,6 +1205,42 @@ mod tests {
 
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("untouched"));
+        assert!(content.contains("light"));
+    }
+
+    #[test]
+    fn write_key_aborts_on_unparseable_file_instead_of_clobbering() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+
+        // Simulate a settings file caught mid-write by another process: a
+        // truncated, unparseable fragment. The old read-modify-write fell back
+        // to an empty map here and collapsed the file to a single key,
+        // dropping every other section.
+        let partial = r#"{"editor": {"editorPath": "/home/nico/Dro"#;
+        std::fs::write(&path, partial).unwrap();
+
+        let mut p = SettingsProvider::new_headless().with_config_path(path.clone());
+        p.on_radio_change("color scheme", "light");
+
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            after, partial,
+            "an unparseable settings file must be left untouched, not \
+             clobbered with a one-key file"
+        );
+    }
+
+    #[test]
+    fn write_key_still_creates_file_when_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        // No file on disk — a write must still seed it (the legitimate
+        // first-write case must not be mistaken for corruption).
+        let mut p = SettingsProvider::new_headless().with_config_path(path.clone());
+        p.on_radio_change("color scheme", "light");
+
+        let content = std::fs::read_to_string(&path).expect("file must be created");
         assert!(content.contains("light"));
     }
 

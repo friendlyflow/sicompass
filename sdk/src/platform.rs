@@ -140,6 +140,38 @@ pub fn make_dirs(path: &std::path::Path) {
     let _ = std::fs::create_dir_all(path);
 }
 
+/// Atomically write `contents` to `path`: write a sibling temp file, then
+/// `rename` it onto `path`. `rename` is atomic and replaces the destination on
+/// both Unix and Windows, so a concurrent reader observes either the old file
+/// or the new one in full — never a truncated or half-written file. This is
+/// what `std::fs::write` cannot guarantee: it truncates the target first, so a
+/// reader (or a second process doing a read-modify-write) can catch it empty.
+///
+/// The temp file lives in the target's own directory so the rename stays on
+/// one filesystem, and its name embeds the process id so two processes writing
+/// the same target do not collide on the scratch file. Returns `false`,
+/// leaving any existing file untouched, if the path lacks a parent/filename or
+/// any step fails.
+pub fn atomic_write(path: &std::path::Path, contents: &str) -> bool {
+    let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
+        return false;
+    };
+    let tmp = dir.join(format!(
+        ".{}.tmp.{}",
+        name.to_string_lossy(),
+        std::process::id()
+    ));
+    if std::fs::write(&tmp, contents).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+        return false;
+    }
+    if std::fs::rename(&tmp, path).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+        return false;
+    }
+    true
+}
+
 /// Returns `"/"` on Unix, `"\\"` on Windows.
 pub fn path_separator() -> &'static str {
     #[cfg(target_os = "windows")]
@@ -564,6 +596,30 @@ mod tests {
         let nested = tmp.path().join("a").join("b").join("c");
         make_dirs(&nested);
         assert!(nested.exists());
+    }
+
+    #[test]
+    fn test_atomic_write_creates_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("settings.json");
+        assert!(atomic_write(&path, "{\"a\":1}"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"a\":1}");
+    }
+
+    #[test]
+    fn test_atomic_write_replaces_existing_and_leaves_no_temp() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("settings.json");
+        std::fs::write(&path, "old contents").unwrap();
+        assert!(atomic_write(&path, "new contents"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new contents");
+        // The scratch file must not survive a successful write.
+        let leftover: Vec<_> = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".tmp."))
+            .collect();
+        assert!(leftover.is_empty(), "temp file left behind: {leftover:?}");
     }
 }
 
