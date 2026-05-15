@@ -1108,7 +1108,7 @@ fn update_view(app: &mut AppState) {
                 render_with_highlights(fr, rr, content, content_x, item_y, scale, ascender, line_height as f32, p.text, p.scroll_search, &content_positions);
                 let _ = available_w;
             }
-        } else if let Some(ref path) = item_data {
+        } else if let Some(path) = item_data {
             let (prefix_text, suffix_text, has_prefix) = split_image_label(label, path);
             let (prefix_lines, img_h_precomp) = image_layouts[i]
                 .as_ref()
@@ -1599,7 +1599,7 @@ fn render_scroll_search_full(
             // Always find the first match whose line is in/after the viewport top.
             // Never short-circuit via clamped — it may not be the first visible match.
             all_matches.iter().enumerate()
-                .find(|(_, &(_, _, _, vy))| vy + line_height > viewport_top)
+                .find(|&(_, &(_, _, _, vy))| vy + line_height > viewport_top)
                 .map(|(mi, _)| mi)
                 .unwrap_or(0)
         } else {

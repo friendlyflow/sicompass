@@ -546,10 +546,10 @@ fn patch_form_field_in_tree(
     replacement: &str,
 ) -> bool {
     for elem in elems.iter_mut() {
-        let FfonElement::Obj(ref mut obj) = elem else { continue };
+        let FfonElement::Obj(obj) = elem else { continue };
         if obj.key == form_name || obj.key.ends_with(form_name) {
             for child in obj.children.iter_mut() {
-                if let FfonElement::Str(ref mut s) = child {
+                if let FfonElement::Str(s) = child {
                     if s.starts_with(prefix) {
                         *s = replacement.to_owned();
                         return true;

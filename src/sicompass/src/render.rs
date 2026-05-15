@@ -17,7 +17,7 @@ pub(crate) unsafe fn find_memory_type(
     physical_device: vk::PhysicalDevice,
     type_filter: u32,
     properties: vk::MemoryPropertyFlags,
-) -> Option<u32> {
+) -> Option<u32> { unsafe {
     let props = instance.get_physical_device_memory_properties(physical_device);
     for i in 0..props.memory_type_count {
         if (type_filter & (1 << i)) != 0
@@ -27,7 +27,7 @@ pub(crate) unsafe fn find_memory_type(
         }
     }
     None
-}
+}}
 
 pub(crate) unsafe fn create_buffer(
     device: &ash::Device,
@@ -36,7 +36,7 @@ pub(crate) unsafe fn create_buffer(
     size: vk::DeviceSize,
     usage: vk::BufferUsageFlags,
     properties: vk::MemoryPropertyFlags,
-) -> Result<(vk::Buffer, vk::DeviceMemory), SiError> {
+) -> Result<(vk::Buffer, vk::DeviceMemory), SiError> { unsafe {
     let buf_info = vk::BufferCreateInfo::default()
         .size(size)
         .usage(usage)
@@ -51,7 +51,7 @@ pub(crate) unsafe fn create_buffer(
     let memory = device.allocate_memory(&alloc, None)?;
     device.bind_buffer_memory(buffer, memory, 0)?;
     Ok((buffer, memory))
-}
+}}
 
 pub(crate) unsafe fn create_image_helper(
     device: &ash::Device,
@@ -63,7 +63,7 @@ pub(crate) unsafe fn create_image_helper(
     tiling: vk::ImageTiling,
     usage: vk::ImageUsageFlags,
     properties: vk::MemoryPropertyFlags,
-) -> Result<(vk::Image, vk::DeviceMemory), SiError> {
+) -> Result<(vk::Image, vk::DeviceMemory), SiError> { unsafe {
     let img_info = vk::ImageCreateInfo::default()
         .image_type(vk::ImageType::TYPE_2D)
         .extent(vk::Extent3D { width, height, depth: 1 })
@@ -85,12 +85,12 @@ pub(crate) unsafe fn create_image_helper(
     let memory = device.allocate_memory(&alloc, None)?;
     device.bind_image_memory(image, memory, 0)?;
     Ok((image, memory))
-}
+}}
 
 unsafe fn begin_single_time_commands(
     device: &ash::Device,
     command_pool: vk::CommandPool,
-) -> vk::CommandBuffer {
+) -> vk::CommandBuffer { unsafe {
     let alloc = vk::CommandBufferAllocateInfo::default()
         .command_pool(command_pool)
         .level(vk::CommandBufferLevel::PRIMARY)
@@ -100,21 +100,21 @@ unsafe fn begin_single_time_commands(
         .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
     device.begin_command_buffer(cb, &begin).unwrap();
     cb
-}
+}}
 
 unsafe fn end_single_time_commands(
     device: &ash::Device,
     command_pool: vk::CommandPool,
     cb: vk::CommandBuffer,
     queue: vk::Queue,
-) {
+) { unsafe {
     device.end_command_buffer(cb).unwrap();
     let cbs = [cb];
     let submit = vk::SubmitInfo::default().command_buffers(&cbs);
     device.queue_submit(queue, &[submit], vk::Fence::null()).unwrap();
     device.queue_wait_idle(queue).unwrap();
     device.free_command_buffers(command_pool, &cbs);
-}
+}}
 
 pub(crate) unsafe fn transition_image_layout(
     device: &ash::Device,
@@ -123,7 +123,7 @@ pub(crate) unsafe fn transition_image_layout(
     image: vk::Image,
     old_layout: vk::ImageLayout,
     new_layout: vk::ImageLayout,
-) {
+) { unsafe {
     let cb = begin_single_time_commands(device, command_pool);
 
     let (src_access, dst_access, src_stage, dst_stage) = match (old_layout, new_layout) {
@@ -164,7 +164,7 @@ pub(crate) unsafe fn transition_image_layout(
     );
 
     end_single_time_commands(device, command_pool, cb, queue);
-}
+}}
 
 pub(crate) unsafe fn copy_buffer_to_image(
     device: &ash::Device,
@@ -174,7 +174,7 @@ pub(crate) unsafe fn copy_buffer_to_image(
     image: vk::Image,
     width: u32,
     height: u32,
-) {
+) { unsafe {
     let cb = begin_single_time_commands(device, command_pool);
     let region = vk::BufferImageCopy::default()
         .image_subresource(
@@ -189,12 +189,12 @@ pub(crate) unsafe fn copy_buffer_to_image(
         cb, buffer, image, vk::ImageLayout::TRANSFER_DST_OPTIMAL, &[region],
     );
     end_single_time_commands(device, command_pool, cb, queue);
-}
+}}
 
 pub(crate) unsafe fn create_shader_module(
     device: &ash::Device,
     code: &[u8],
-) -> Result<vk::ShaderModule, SiError> {
+) -> Result<vk::ShaderModule, SiError> { unsafe {
     // SPIR-V words must be 4-byte aligned
     let code_u32: Vec<u32> = code
         .chunks(4)
@@ -206,7 +206,7 @@ pub(crate) unsafe fn create_shader_module(
         .collect();
     let info = vk::ShaderModuleCreateInfo::default().code(&code_u32);
     Ok(device.create_shader_module(&info, None)?)
-}
+}}
 
 // ---------------------------------------------------------------------------
 // Validation layers
@@ -267,7 +267,7 @@ unsafe fn find_queue_families(
     surface_loader: &ash::khr::surface::Instance,
     physical_device: vk::PhysicalDevice,
     surface: vk::SurfaceKHR,
-) -> Option<QueueFamilies> {
+) -> Option<QueueFamilies> { unsafe {
     let props = instance.get_physical_device_queue_family_properties(physical_device);
     let mut graphics = None;
     let mut present = None;
@@ -289,7 +289,7 @@ unsafe fn find_queue_families(
         graphics: graphics?,
         present: present?,
     })
-}
+}}
 
 // ---------------------------------------------------------------------------
 // Swap-chain helpers
@@ -305,7 +305,7 @@ unsafe fn query_swapchain_support(
     surface_loader: &ash::khr::surface::Instance,
     physical_device: vk::PhysicalDevice,
     surface: vk::SurfaceKHR,
-) -> Result<SwapchainSupport, vk::Result> {
+) -> Result<SwapchainSupport, vk::Result> { unsafe {
     let capabilities = surface_loader
         .get_physical_device_surface_capabilities(physical_device, surface)?;
     let formats = surface_loader
@@ -313,7 +313,7 @@ unsafe fn query_swapchain_support(
     let present_modes = surface_loader
         .get_physical_device_surface_present_modes(physical_device, surface)?;
     Ok(SwapchainSupport { capabilities, formats, present_modes })
-}
+}}
 
 fn choose_surface_format(formats: &[vk::SurfaceFormatKHR]) -> vk::SurfaceFormatKHR {
     formats
@@ -354,7 +354,7 @@ unsafe fn is_device_suitable(
     surface_loader: &ash::khr::surface::Instance,
     device: vk::PhysicalDevice,
     surface: vk::SurfaceKHR,
-) -> bool {
+) -> bool { unsafe {
     // Must have graphics + present queues
     if find_queue_families(instance, surface_loader, device, surface).is_none() {
         return false;
@@ -380,7 +380,7 @@ unsafe fn is_device_suitable(
         return false;
     }
     true
-}
+}}
 
 // ---------------------------------------------------------------------------
 // Swapchain creation (also used in recreate)
@@ -404,7 +404,7 @@ unsafe fn create_swapchain(
     present_family: u32,
     window: &sdl3::video::Window,
     old_swapchain: vk::SwapchainKHR,
-) -> Result<SwapchainBundle, SiError> {
+) -> Result<SwapchainBundle, SiError> { unsafe {
     let support = query_swapchain_support(surface_loader, physical_device, surface)?;
     let fmt = choose_surface_format(&support.formats);
     let mode = choose_present_mode(&support.present_modes);
@@ -467,12 +467,12 @@ unsafe fn create_swapchain(
         extent,
         image_views,
     })
-}
+}}
 
 unsafe fn create_render_pass(
     device: &ash::Device,
     format: vk::Format,
-) -> Result<vk::RenderPass, SiError> {
+) -> Result<vk::RenderPass, SiError> { unsafe {
     let attachment = vk::AttachmentDescription::default()
         .format(format)
         .samples(vk::SampleCountFlags::TYPE_1)
@@ -508,14 +508,14 @@ unsafe fn create_render_pass(
         .dependencies(&dependencies);
 
     Ok(device.create_render_pass(&rp_info, None)?)
-}
+}}
 
 unsafe fn create_framebuffers(
     device: &ash::Device,
     render_pass: vk::RenderPass,
     image_views: &[vk::ImageView],
     extent: vk::Extent2D,
-) -> Result<Vec<vk::Framebuffer>, SiError> {
+) -> Result<Vec<vk::Framebuffer>, SiError> { unsafe {
     image_views
         .iter()
         .map(|&view| {
@@ -529,7 +529,7 @@ unsafe fn create_framebuffers(
             device.create_framebuffer(&fb_info, None).map_err(SiError::from)
         })
         .collect()
-}
+}}
 
 // ---------------------------------------------------------------------------
 // Public: full app construction

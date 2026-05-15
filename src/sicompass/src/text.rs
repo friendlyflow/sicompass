@@ -96,7 +96,7 @@ impl FontRenderer {
         graphics_queue: vk::Queue,
         render_pass: vk::RenderPass,
         dpi: u32,
-    ) -> Result<Self, SiError> {
+    ) -> Result<Self, SiError> { unsafe {
         // ----------------------------------------------------------------
         // 1. Init FreeType
         // ----------------------------------------------------------------
@@ -449,12 +449,12 @@ impl FontRenderer {
             pipeline,
             vertices: Vec::with_capacity(8192),
         })
-    }
+    }}
 
     /// Free all Vulkan and FreeType resources.
     /// The caller must ensure the device is idle before calling this
     /// (e.g. `device.device_wait_idle().unwrap()`).
-    pub unsafe fn destroy(&self, device: &ash::Device) {
+    pub unsafe fn destroy(&self, device: &ash::Device) { unsafe {
         device.destroy_pipeline(self.pipeline, None);
         device.destroy_pipeline_layout(self.pipeline_layout, None);
         device.destroy_descriptor_pool(self.descriptor_pool, None);
@@ -467,7 +467,7 @@ impl FontRenderer {
         device.free_memory(self.font_atlas_memory, None);
         ft::FT_Done_Face(self.ft_face);
         ft::FT_Done_FreeType(self.ft_library);
-    }
+    }}
 
     // ---- Frame helpers -----------------------------------------------------
 
@@ -521,7 +521,7 @@ impl FontRenderer {
         cb: vk::CommandBuffer,
         frame: usize,
         extent: vk::Extent2D,
-    ) {
+    ) { unsafe {
         if self.vertices.is_empty() { return; }
 
         // Upload to GPU vertex buffer
@@ -554,7 +554,7 @@ impl FontRenderer {
         let offs = [0u64];
         device.cmd_bind_vertex_buffers(cb, 0, &bufs, &offs);
         device.cmd_draw(cb, self.vertices.len() as u32, 1, 0, 0);
-    }
+    }}
 
     // ---- Font metric helpers (mirrors C text.c) ----------------------------
 
@@ -761,7 +761,7 @@ impl FontRenderer {
 
     // ---- Cleanup -----------------------------------------------------------
 
-    pub unsafe fn cleanup(&self, device: &ash::Device) {
+    pub unsafe fn cleanup(&self, device: &ash::Device) { unsafe {
         device.destroy_pipeline(self.pipeline, None);
         device.destroy_pipeline_layout(self.pipeline_layout, None);
         device.destroy_descriptor_pool(self.descriptor_pool, None);
@@ -774,7 +774,7 @@ impl FontRenderer {
         device.free_memory(self.font_atlas_memory, None);
         ft::FT_Done_Face(self.ft_face);
         ft::FT_Done_FreeType(self.ft_library);
-    }
+    }}
 }
 
 #[cfg(test)]

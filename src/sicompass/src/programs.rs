@@ -180,7 +180,7 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
             let manifest = sicompass_sdk::builtin_manifests()
                 .into_iter()
                 .find(|m| m.display_name == *name || m.name == *name);
-            if let Some(ref m) = manifest {
+            if let Some(m) = &manifest {
                 inject_builtin_manifest_settings(settings.as_mut(), m);
             }
             register_provider(renderer, p);

@@ -47,7 +47,7 @@ impl RectangleRenderer {
         instance: &ash::Instance,
         physical_device: vk::PhysicalDevice,
         render_pass: vk::RenderPass,
-    ) -> Result<Self, SiError> {
+    ) -> Result<Self, SiError> { unsafe {
         // ---- Vertex buffer (host-visible, host-coherent) -------------------
         let vb_size = (std::mem::size_of::<RectVertex>() * MAX_RECT_VERTICES) as vk::DeviceSize;
         let (vertex_buffer, vertex_buffer_memory) = render::create_buffer(
@@ -176,7 +176,7 @@ impl RectangleRenderer {
             pipeline,
             vertices: Vec::with_capacity(128),
         })
-    }
+    }}
 
     // ---- Frame helpers -----------------------------------------------------
 
@@ -279,7 +279,7 @@ impl RectangleRenderer {
         device: &ash::Device,
         cb: vk::CommandBuffer,
         extent: vk::Extent2D,
-    ) {
+    ) { unsafe {
         if self.vertices.is_empty() { return; }
 
         let upload_size = (std::mem::size_of::<RectVertex>() * self.vertices.len()) as vk::DeviceSize;
@@ -302,14 +302,14 @@ impl RectangleRenderer {
         let offs = [0u64];
         device.cmd_bind_vertex_buffers(cb, 0, &bufs, &offs);
         device.cmd_draw(cb, self.vertices.len() as u32, 1, 0, 0);
-    }
+    }}
 
     // ---- Cleanup -----------------------------------------------------------
 
-    pub unsafe fn cleanup(&self, device: &ash::Device) {
+    pub unsafe fn cleanup(&self, device: &ash::Device) { unsafe {
         device.destroy_pipeline(self.pipeline, None);
         device.destroy_pipeline_layout(self.pipeline_layout, None);
         device.destroy_buffer(self.vertex_buffer, None);
         device.free_memory(self.vertex_buffer_memory, None);
-    }
+    }}
 }

@@ -75,14 +75,14 @@ impl RealImap {
         let uid_validity = mailbox.uid_validity.unwrap_or(0);
 
         if total == 0 {
-            if let Some(ref c) = cache {
+            if let &mut Some(ref c) = cache {
                 c.invalidate_folder(folder, uid_validity);
             }
             return Ok(vec![]);
         }
 
         // --- Cache logic ---
-        if let Some(ref c) = cache {
+        if let &mut Some(ref c) = cache {
             let cached_validity = c.get_uidvalidity(folder);
             if cached_validity == Some(uid_validity) {
                 let cached_count = c.cached_count(folder);
@@ -124,7 +124,7 @@ impl RealImap {
 
         headers.reverse(); // Most-recent-first.
 
-        if let Some(ref c) = cache {
+        if let &mut Some(ref c) = cache {
             c.upsert_all(folder, &headers);
         }
 

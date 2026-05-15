@@ -99,7 +99,7 @@ impl ImageRenderer {
         command_pool: vk::CommandPool,
         queue: vk::Queue,
         render_pass: vk::RenderPass,
-    ) -> Result<Self, SiError> {
+    ) -> Result<Self, SiError> { unsafe {
         // ---- Vertex buffer (host-visible, host-coherent) ----------------------
         let vb_size = (std::mem::size_of::<ImageVertex>() * MAX_IMAGE_VERTICES) as vk::DeviceSize;
         let (vertex_buffer, vertex_buffer_memory) = render::create_buffer(
@@ -261,7 +261,7 @@ impl ImageRenderer {
             vertices: Vec::with_capacity(MAX_IMAGE_VERTICES),
             current_frame: 0,
         })
-    }
+    }}
 
     // ---- Frame helpers -------------------------------------------------------
 
@@ -273,11 +273,11 @@ impl ImageRenderer {
     }
 
     /// Return `(width, height)` of the cached/loaded texture, or `None` on failure.
-    pub unsafe fn texture_size(&mut self, path: &str) -> Option<(u32, u32)> {
+    pub unsafe fn texture_size(&mut self, path: &str) -> Option<(u32, u32)> { unsafe {
         let slot = self.find_or_load(path)?;
         let tex = self.cache[slot].as_ref()?;
         Some((tex.width, tex.height))
-    }
+    }}
 
     /// Schedule a textured quad at (x, y, w, h).
     ///
@@ -288,7 +288,7 @@ impl ImageRenderer {
         &mut self,
         path: &str,
         x: f32, y: f32, width: f32, height: f32,
-    ) {
+    ) { unsafe {
         if self.draws.len() >= MAX_CACHED_IMAGES { return; }
 
         let slot = match self.find_or_load(path) {
@@ -308,7 +308,7 @@ impl ImageRenderer {
         self.vertices.push(ImageVertex { pos: [x0, y1], tex_coord: [0.0, 1.0] });
 
         self.draws.push(ImageDraw { slot, vertex_offset });
-    }
+    }}
 
     /// Upload vertices and issue one draw call per queued image.
     pub unsafe fn draw_images(
@@ -316,7 +316,7 @@ impl ImageRenderer {
         device: &ash::Device,
         cb: vk::CommandBuffer,
         extent: vk::Extent2D,
-    ) {
+    ) { unsafe {
         if self.draws.is_empty() { return; }
 
         let upload_size = (std::mem::size_of::<ImageVertex>() * self.vertices.len()) as vk::DeviceSize;
@@ -351,11 +351,11 @@ impl ImageRenderer {
             );
             device.cmd_draw(cb, VERTS_PER_QUAD as u32, 1, draw.vertex_offset, 0);
         }
-    }
+    }}
 
     // ---- Cleanup -------------------------------------------------------------
 
-    pub unsafe fn cleanup(&mut self) {
+    pub unsafe fn cleanup(&mut self) { unsafe {
         for slot in self.cache.iter_mut() {
             if let Some(tex) = slot.take() {
                 self.device.destroy_sampler(tex.sampler, None);
@@ -370,12 +370,12 @@ impl ImageRenderer {
         self.device.destroy_descriptor_set_layout(self.descriptor_set_layout, None);
         self.device.destroy_buffer(self.vertex_buffer, None);
         self.device.free_memory(self.vertex_buffer_memory, None);
-    }
+    }}
 
     // ---- Internal helpers ----------------------------------------------------
 
     /// Return the cache slot index for `path`, loading the texture if needed.
-    unsafe fn find_or_load(&mut self, path: &str) -> Option<usize> {
+    unsafe fn find_or_load(&mut self, path: &str) -> Option<usize> { unsafe {
         // Check if already cached
         for (i, slot) in self.cache.iter_mut().enumerate() {
             if let Some(tex) = slot {
@@ -420,7 +420,7 @@ impl ImageRenderer {
                 None
             }
         }
-    }
+    }}
 
     /// Choose the slot to evict: prefer empty slots, then pick the LRU.
     fn find_evict_slot(&self) -> usize {
@@ -428,7 +428,7 @@ impl ImageRenderer {
     }
 
     /// Decode an image file and upload it to a new `VkImage`.
-    unsafe fn load_texture(&self, path: &str) -> Result<CachedTexture, SiError> {
+    unsafe fn load_texture(&self, path: &str) -> Result<CachedTexture, SiError> { unsafe {
         // Decode via the `image` crate (supports PNG, JPEG, WebP, …)
         let dyn_img = img_crate::open(path)
             .map_err(|e| SiError::Other(format!("image decode: {e}")))?;
@@ -522,7 +522,7 @@ impl ImageRenderer {
             height,
             last_used_frame: self.current_frame,
         })
-    }
+    }}
 }
 
 // ---------------------------------------------------------------------------

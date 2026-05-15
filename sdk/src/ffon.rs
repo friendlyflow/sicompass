@@ -731,7 +731,7 @@ impl<'a> HtmlParseCtx<'a> {
                 FfonElement::Str(s) => s.insert_str(0, &prefix),
             }
         }
-        if let Some((_, ref mut h)) = self.stack.last_mut() {
+        if let Some((_, h)) = self.stack.last_mut() {
             h.as_obj_mut().unwrap().push(elem);
         } else {
             self.root.push(elem);
@@ -741,7 +741,7 @@ impl<'a> HtmlParseCtx<'a> {
     fn pop_until_level(&mut self, level: u8) {
         while self.stack.last().map_or(false, |(l, _)| *l >= level) {
             let (_, entry) = self.stack.pop().unwrap();
-            if let Some((_, ref mut parent)) = self.stack.last_mut() {
+            if let Some((_, parent)) = self.stack.last_mut() {
                 parent.as_obj_mut().unwrap().push(entry);
             } else {
                 self.root.push(entry);
@@ -751,7 +751,7 @@ impl<'a> HtmlParseCtx<'a> {
 
     fn finalize_with_forms(mut self) -> (Vec<FfonElement>, Vec<(String, FormNode)>) {
         while let Some((_, entry)) = self.stack.pop() {
-            if let Some((_, ref mut parent)) = self.stack.last_mut() {
+            if let Some((_, parent)) = self.stack.last_mut() {
                 parent.as_obj_mut().unwrap().push(entry);
             } else {
                 self.root.push(entry);

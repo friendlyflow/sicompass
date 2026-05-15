@@ -781,7 +781,7 @@ impl Provider for ChatClientProvider {
         };
 
         macro_rules! load_str {
-            ($key:literal, $field:expr) => {
+            ($key:literal, $field:expr_2021) => {
                 if let Some(v) = section.get($key).and_then(|v| v.as_str()) {
                     if !v.is_empty() {
                         $field = v.to_owned();

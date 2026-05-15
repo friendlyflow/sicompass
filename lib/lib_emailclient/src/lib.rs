@@ -2031,7 +2031,7 @@ impl Provider for EmailClientProvider {
         let Some(section) = root.get("email client").and_then(|v| v.as_object()) else { return };
 
         macro_rules! load_str {
-            ($key:literal, $field:expr) => {
+            ($key:literal, $field:expr_2021) => {
                 if let Some(v) = section.get($key).and_then(|v| v.as_str()) {
                     $field = v.to_owned();
                 }
