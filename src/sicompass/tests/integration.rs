@@ -8923,6 +8923,51 @@ fn tutorial_placeholder_obj_commit_undo_restores_i_placeholder() {
     );
 }
 
+/// Editing an Obj's `<input>` tag (e.g. the `+i input example <input></input>`
+/// tutorial entry) and pressing Enter must keep the Obj's existing children
+/// intact — right-arrow afterwards still navigates into the I_PLACEHOLDER
+/// child. Regression for handle_enter_insert calling `FfonElement::new_obj`
+/// which wipes children, losing the I_PLACEHOLDER and breaking right-arrow.
+#[test]
+fn editing_obj_input_preserves_children() {
+    use sicompass_sdk::placeholders::I_PLACEHOLDER;
+
+    let mut renderer = tutorial_placeholder_renderer();
+    // tutorial_placeholder_renderer placed the cursor on the I_PLACEHOLDER child;
+    // step back up to the parent `+i input example <input></input>` Obj.
+    press_left(&mut renderer);
+
+    // Sanity: the parent is the Obj we want to edit, with one I_PLACEHOLDER child.
+    let parent = &renderer.ffon[0].as_obj().unwrap().children[0];
+    assert!(
+        parent.as_obj().map_or(false, |o| o.key.contains("+i input example") && o.children.len() == 1),
+        "parent must be the +i input example Obj with one I_PLACEHOLDER child, got: {parent:?}"
+    );
+
+    // Enter insert mode on the parent, type into its <input>, commit.
+    press(&mut renderer, Keycode::I);
+    type_text(&mut renderer, "edited");
+    press_enter(&mut renderer);
+
+    // Children must survive the commit.
+    let parent = renderer.ffon[0].as_obj().unwrap().children[0].as_obj()
+        .expect("parent must still be an Obj after commit");
+    assert!(
+        parent.key.contains("<input>edited</input>"),
+        "parent key must reflect the typed content, got: {:?}", parent.key
+    );
+    assert_eq!(
+        parent.children.len(), 1,
+        "parent must still have exactly one child (the I_PLACEHOLDER), got {}",
+        parent.children.len()
+    );
+    assert!(
+        matches!(&parent.children[0], FfonElement::Str(s) if s == I_PLACEHOLDER),
+        "the surviving child must be the I_PLACEHOLDER, got: {:?}",
+        parent.children[0]
+    );
+}
+
 /// Typing on the I_PLACEHOLDER with an idle gap >500ms produces two
 /// TextChunks via per-keystroke FFON mutation. The commit rewrites the tail
 /// chunk's `after` to the final Obj — ctrl-Z then steps through each typing

@@ -2189,15 +2189,23 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
         format!("{prefix}<input>{new_content}</input>{suffix}")
     };
 
-    // Update FFON element regardless of commit result (provider may not implement commit_edit)
+    // Update FFON element regardless of commit result (provider may not implement commit_edit).
+    // For Obj elements, rewrite the key in place so existing children survive — using
+    // FfonElement::new_obj here would wipe them, breaking right-arrow navigation into
+    // children of edited containers (e.g. an `+i input example <input></input>` Obj
+    // whose only child is an I_PLACEHOLDER).
     let idx = r.current_id.last().unwrap_or(0);
     if let Some(arr) = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id) {
         if let Some(elem) = arr.get_mut(idx) {
-            *elem = if is_obj {
-                FfonElement::new_obj(new_elem_text)
+            if is_obj {
+                if let FfonElement::Obj(o) = elem {
+                    o.key = new_elem_text;
+                } else {
+                    *elem = FfonElement::new_obj(new_elem_text);
+                }
             } else {
-                FfonElement::new_str(new_elem_text)
-            };
+                *elem = FfonElement::new_str(new_elem_text);
+            }
         }
     }
 
