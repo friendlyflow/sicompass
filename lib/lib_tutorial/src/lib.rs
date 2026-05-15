@@ -486,7 +486,13 @@ fn get_children_at_path<'a>(
     let (head, rest) = (&path_parts[0], &path_parts[1..]);
     for node in nodes {
         if let Node::Branch { key, children } = node {
-            if *key == *head {
+            // Path segments are the *stripped* display text of an Obj key (see
+            // `navigate_right_raw`, which pushes `tags::strip_display(&o.key)`).
+            // A Branch key may carry tags — e.g. "+i input example <input></input>"
+            // — so compare against the stripped key, not the raw one. Otherwise
+            // such a path fails to resolve on tab-switch / restart and the
+            // restored cursor collapses out of the Obj.
+            if sicompass_sdk::tags::strip_display(key) == **head {
                 return get_children_at_path(children, rest);
             }
         }
@@ -739,6 +745,27 @@ mod tests {
             e.as_str().map_or(false, |s| s.contains("<image>"))
         });
         assert!(has_image);
+    }
+
+    #[test]
+    fn test_input_example_path_round_trips() {
+        // Navigating Right into the "+i input example <input></input>" Obj
+        // pushes the *stripped* display key as the path segment. Restoring
+        // that path (on tab-switch / app restart) must still resolve to the
+        // Obj's I_PLACEHOLDER child, otherwise the saved cursor collapses out
+        // of the Obj after a close/reopen cycle.
+        let stripped =
+            sicompass_sdk::tags::strip_display("+i input example <input></input>");
+        let mut p = provider();
+        p.push_path("Interactive Elements");
+        p.push_path(&stripped);
+        let elems = p.fetch();
+        assert_eq!(elems.len(), 1, "expected the I_PLACEHOLDER child to resolve");
+        assert!(
+            elems[0].as_str().map_or(false, |s| s == I_PLACEHOLDER),
+            "child should be the I_PLACEHOLDER leaf, got: {:?}",
+            elems[0]
+        );
     }
 
     // Pop path
