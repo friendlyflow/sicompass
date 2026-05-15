@@ -8695,6 +8695,53 @@ fn unified_undo_settings_radio_via_enter_does_not_double_record() {
     );
 }
 
+/// Committing a settings text input must not corrupt the tree. The settings
+/// provider's `fetch()` returns its whole section tree (not the current
+/// sub-level), so `refresh_current_directory` must rebuild the provider root —
+/// grafting that whole-tree fetch onto the section in view would nest every
+/// section inside one section and derail navigation.
+#[test]
+fn settings_text_input_commit_keeps_section_intact() {
+    ensure_builtins();
+    let tmp = TempDir::new().unwrap();
+    let mut settings = sicompass_settings::SettingsProvider::new_headless();
+    settings.set_config_path(tmp.path().join("settings.json"));
+    settings.add_section("test");
+    settings.add_text("test", "Host", "test.host", "");
+    let mut r = AppRenderer::new();
+    register(&mut r, Box::new(settings));
+    // fetch() → [sicompass(0), test(1)]; the text input is test's first child.
+    set_cursor(&mut r, &[0, 1, 0]);
+
+    // Edit the text input: enter Insert, type a value, commit with Enter.
+    press(&mut r, Keycode::I);
+    assert_eq!(r.coordinate, Coordinate::Insert, "press i must enter Insert on the text setting");
+    type_text(&mut r, "example.com");
+    press_enter(&mut r);
+
+    // The "test" section must still hold exactly its own text entry — not the
+    // whole settings tree (sicompass + test) nested inside it.
+    let sec_obj = r.ffon[0].as_obj().unwrap().children[1]
+        .as_obj().expect("test section must stay an Obj");
+    assert_eq!(
+        sec_obj.children.len(), 1,
+        "section must keep exactly its one text entry, not a nested tree; got {:?}",
+        sec_obj.children,
+    );
+    assert!(
+        matches!(&sec_obj.children[0], FfonElement::Str(s) if s.contains("example.com") && s.contains("<input>")),
+        "section child must be the committed text input; got {:?}", sec_obj.children[0],
+    );
+
+    // current_id must still resolve to that text input after the commit.
+    let cur = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)
+        .and_then(|a| a.get(r.current_id.last().unwrap_or(0)));
+    assert!(
+        matches!(cur, Some(FfonElement::Str(s)) if s.contains("<input>")),
+        "current_id must still point at the text input after commit; got {:?}", cur,
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Per-keystroke `<input>` editing: FFON mutates as the user types and
 // TextChunks are recorded with TEXT_CHUNK_IDLE_MS merging, so ctrl-Z reverts

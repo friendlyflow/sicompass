@@ -94,13 +94,23 @@ pub fn refresh_current_directory(renderer: &mut AppRenderer) {
         ));
     }
 
-    if renderer.current_id.depth() >= 2 {
+    // The settings provider's `fetch()` returns its whole navigable tree (the
+    // sections), not the children of the current sub-path — its in-memory tree
+    // is canonical and pre-built. Grafting that whole-tree fetch onto a deep
+    // container (a settings section) would nest the entire tree inside one
+    // section and derail navigation, so it must always rebuild the provider
+    // root. Path-scoped providers (filebrowser, …) fetch only the current
+    // level and graft it in place.
+    let whole_tree = renderer.providers[idx].name() == "settings";
+
+    if renderer.current_id.depth() >= 2 && !whole_tree {
         // Replace the children vec backing the current list, in place.
         if let Some(slice) = get_ffon_at_id_mut(&mut renderer.ffon, &renderer.current_id) {
             *slice = children;
         }
     } else {
-        // At the provider-selection root — rebuild the provider root Obj.
+        // At the provider-selection root, or a whole-tree provider — rebuild
+        // the provider root Obj.
         let root_key = renderer.providers[idx].display_name().to_owned();
         let mut root = FfonElement::new_obj(&root_key);
         for child in children {
