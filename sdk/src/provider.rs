@@ -284,13 +284,6 @@ pub trait Provider: Send + 'static {
     /// If true, always re-fetch on navigation (no caching).
     fn no_cache(&self) -> bool { false }
 
-    /// Returns `true` for providers whose backing store is authoritative and
-    /// must be re-read on every navigation step (e.g. the local filesystem).
-    /// Returns `false` for providers where `renderer.ffon` is the canonical
-    /// store between explicit user actions — refreshing on nav would destroy
-    /// in-memory user edits (e.g. script/form-builder providers).
-    fn refresh_on_navigate(&self) -> bool { false }
-
     /// Returns `true` when `current_path()` is a real filesystem path
     /// (slash-separated directory segments). Drives how the timeline view
     /// renders navigation entries: filesystem paths are shown verbatim
@@ -612,12 +605,6 @@ mod tests {
     fn test_provider_no_cache_default_false() {
         let p = SimpleProvider::new("t");
         assert!(!p.no_cache());
-    }
-
-    #[test]
-    fn test_provider_refresh_on_navigate_default_false() {
-        let p = SimpleProvider::new("t");
-        assert!(!p.refresh_on_navigate());
     }
 
     #[test]

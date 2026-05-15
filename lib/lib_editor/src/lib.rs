@@ -476,8 +476,6 @@ impl Provider for EditorProvider {
 
     fn has_editor_semantics(&self) -> bool { true }
 
-    fn refresh_on_navigate(&self) -> bool { true }
-
     fn path_is_filesystem(&self) -> bool { true }
 
     fn needs_refresh(&self) -> bool {

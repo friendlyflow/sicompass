@@ -573,30 +573,13 @@ pub fn walk_forward(r: &mut AppRenderer) {
 fn apply_undo(r: &mut AppRenderer, entry: &TimelineEntry) {
     match entry {
         TimelineEntry::Navigate {
-            provider_idx,
             from_id, from_path, ..
         } => {
+            // Navigation is uniformly in-memory: the FFON tree stays in
+            // `r.ffon` at full depth, so undo just restores the provider path
+            // and cursor — no re-fetch.
             if let Some(path) = from_path {
-                // Only refresh-on-navigate providers (filebrowser, email) need
-                // the FFON re-fetched after a path swap. For in-memory
-                // providers (tutorial, script-based) the FFON is preloaded;
-                // refreshing would call fetch() at the new path, replace the
-                // provider root with whatever that returns, and make the
-                // restored `from_id` index into the wrong tree — which makes
-                // the rendered list look empty after undo.
-                let does_refresh = r.providers
-                    .get(*provider_idx)
-                    .map(|p| p.refresh_on_navigate())
-                    .unwrap_or(false);
-                if does_refresh {
-                    let mut root_id = IdArray::new();
-                    root_id.push(*provider_idx);
-                    r.current_id = root_id;
-                    crate::provider::set_provider_path(r, path);
-                    crate::provider::refresh_current_directory(r);
-                } else {
-                    crate::provider::set_provider_path(r, path);
-                }
+                crate::provider::set_provider_path(r, path);
             }
             r.current_id = from_id.clone();
         }
@@ -674,26 +657,11 @@ fn apply_undo(r: &mut AppRenderer, entry: &TimelineEntry) {
 fn apply_redo(r: &mut AppRenderer, entry: &TimelineEntry) {
     match entry {
         TimelineEntry::Navigate {
-            provider_idx,
             to_id, to_path, ..
         } => {
+            // In-memory navigation (see `apply_undo`) — restore path + cursor.
             if let Some(path) = to_path {
-                // Same `refresh_on_navigate` gate as apply_undo above —
-                // in-memory providers should not lose their preloaded FFON
-                // on redo.
-                let does_refresh = r.providers
-                    .get(*provider_idx)
-                    .map(|p| p.refresh_on_navigate())
-                    .unwrap_or(false);
-                if does_refresh {
-                    let mut root_id = IdArray::new();
-                    root_id.push(*provider_idx);
-                    r.current_id = root_id;
-                    crate::provider::set_provider_path(r, path);
-                    crate::provider::refresh_current_directory(r);
-                } else {
-                    crate::provider::set_provider_path(r, path);
-                }
+                crate::provider::set_provider_path(r, path);
             }
             r.current_id = to_id.clone();
         }
@@ -1181,7 +1149,7 @@ fn upgrade_body_bare_placeholder(r: &mut AppRenderer, id: &sicompass_sdk::ffon::
 /// Notify the active provider that body children changed after a FFON-level delete/insert.
 ///
 /// Only acts when `id` is at depth >= 3 (provider / body-Obj / element), which is the
-/// depth used by body elements when `refresh_on_navigate` is false for compose paths.
+/// depth used by email compose body elements.
 pub fn sync_compose_body_if_body_element(r: &mut AppRenderer, id: &sicompass_sdk::ffon::IdArray) {
     if id.depth() < 3 {
         return;

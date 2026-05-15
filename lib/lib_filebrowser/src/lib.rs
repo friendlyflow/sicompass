@@ -208,8 +208,6 @@ impl Provider for FilebrowserProvider {
 
     fn needs_refresh(&self) -> bool { false }
 
-    fn refresh_on_navigate(&self) -> bool { true }
-
     fn path_is_filesystem(&self) -> bool { true }
 
     fn on_setting_change(&mut self, key: &str, value: &str) {

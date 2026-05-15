@@ -462,10 +462,6 @@ impl Provider for TerminalProvider {
         }
     }
 
-    fn refresh_on_navigate(&self) -> bool {
-        false
-    }
-
     // ---- Interactive dashboard (Phase 2b) -------------------------------
 
     fn dashboard_kind(&self) -> DashboardKind {
@@ -827,12 +823,6 @@ mod tests {
         let p = TerminalProvider::new();
         assert_eq!(p.name(), "terminal");
         assert_eq!(p.display_name(), "terminal");
-    }
-
-    #[test]
-    fn refresh_on_navigate_is_false() {
-        let p = TerminalProvider::new();
-        assert!(!p.refresh_on_navigate());
     }
 
     #[test]

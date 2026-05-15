@@ -2016,17 +2016,6 @@ impl Provider for EmailClientProvider {
         self.needs_refresh_flag.load(Ordering::Relaxed)
     }
 
-    fn refresh_on_navigate(&self) -> bool {
-        // Don't re-fetch on every navigation step inside a compose form — the form
-        // is built once and maintained as live FFON so undo/redo of body edits persists
-        // across navigation.  Regular folder/message navigation still refreshes.
-        let in_compose = self.current_path
-            .trim_start_matches('/')
-            .split('/')
-            .any(|s| matches!(s, "compose" | "reply" | "reply all" | "forward"));
-        !in_compose
-    }
-
     fn clear_needs_refresh(&mut self) {
         self.needs_refresh_flag.store(false, Ordering::Relaxed);
         // Invalidate envelope cache so next fetch re-queries.

@@ -67,38 +67,45 @@ pub fn set_provider_path(renderer: &mut AppRenderer, path: &str) {
 // Refresh / re-fetch
 // ---------------------------------------------------------------------------
 
-/// Re-fetch from the active provider and replace its root FfonElement in `ffon`.
+/// Explicitly re-fetch the active provider and graft the result onto the
+/// container Obj currently in view (the level whose children form the visible
+/// list). Used by F5 / `needs_refresh`.
 ///
-/// Used for `no_cache` providers (e.g. file browser) that need to re-read
-/// the underlying data source on every navigation step.
+/// The navigation tree is held in `r.ffon` at full depth, so this replaces
+/// only the current level — ancestor Objs (and their keys) stay intact, and a
+/// deep `current_id` keeps resolving.
 pub fn refresh_current_directory(renderer: &mut AppRenderer) {
+    use sicompass_sdk::ffon::FfonElement;
+
     let idx = match renderer.current_id.get(0) {
         Some(i) => i,
         None => return,
     };
-    if idx >= renderer.providers.len() { return; }
+    if idx >= renderer.providers.len() || idx >= renderer.ffon.len() { return; }
 
-    let children = renderer.providers[idx].fetch();
+    let mut children = renderer.providers[idx].fetch();
     if let Some(err) = renderer.providers[idx].take_error() {
         renderer.error_message = err;
     }
-    let cur_path = renderer.providers[idx].current_path().to_owned();
-    let root_key = if renderer.providers[idx].stable_root_key() {
-        renderer.providers[idx].display_name().to_owned()
-    } else if cur_path == "/" {
-        renderer.providers[idx].display_name().to_owned()
-    } else {
-        std::path::Path::new(&cur_path)
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| renderer.providers[idx].display_name().to_owned())
-    };
-
-    let mut root = sicompass_sdk::ffon::FfonElement::new_obj(&root_key);
-    for child in children {
-        root.as_obj_mut().unwrap().push(child);
+    // Empty container → seed the `i` insert placeholder, matching navigate-right.
+    if children.is_empty() {
+        children.push(FfonElement::Str(
+            sicompass_sdk::placeholders::I_PLACEHOLDER.to_owned(),
+        ));
     }
-    if idx < renderer.ffon.len() {
+
+    if renderer.current_id.depth() >= 2 {
+        // Replace the children vec backing the current list, in place.
+        if let Some(slice) = get_ffon_at_id_mut(&mut renderer.ffon, &renderer.current_id) {
+            *slice = children;
+        }
+    } else {
+        // At the provider-selection root — rebuild the provider root Obj.
+        let root_key = renderer.providers[idx].display_name().to_owned();
+        let mut root = FfonElement::new_obj(&root_key);
+        for child in children {
+            root.as_obj_mut().unwrap().push(child);
+        }
         renderer.ffon[idx] = root;
     }
 }
@@ -134,15 +141,20 @@ pub fn refresh_subtree_parent(renderer: &mut AppRenderer) -> bool {
     parent_id.pop(); // drop the child index; parent_id now points at the parent Obj
     let parent_obj_idx = parent_id.last().unwrap_or(0);
 
+    // Only report success when the graft actually lands on a parent Obj.
+    // At depth 1 the parent id is empty and resolves to no Obj — the caller
+    // must then fall back to `refresh_current_directory`.
+    let mut grafted = false;
     if let Some(arr) = crate::state::navigate_to_slice_pub(&mut renderer.ffon, &parent_id) {
         if let Some(sicompass_sdk::ffon::FfonElement::Obj(obj)) = arr.get_mut(parent_obj_idx) {
             obj.children = children;
             if let Some(key) = new_key {
                 obj.key = key;
             }
+            grafted = true;
         }
     }
-    true
+    grafted
 }
 
 /// If the active provider exposes a `"refresh"` command, dispatch it.

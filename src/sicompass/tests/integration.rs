@@ -246,7 +246,7 @@ fn enter_provider_and_navigate_back() {
 }
 
 #[test]
-fn filebrowser_left_in_subdir_stays_at_depth_2() {
+fn filebrowser_left_in_subdir_pops_one_level() {
     let mut h = Harness::new();
     let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
@@ -260,15 +260,15 @@ fn filebrowser_left_in_subdir_stays_at_depth_2() {
     press_down(h.r());
     press_down(h.r());
 
-    // Enter subdir — lazy fetch, push_path called
+    // Enter subdir — descends one level (deep in-memory model).
     press_right(h.r());
-    assert_eq!(h.renderer.current_id.depth(), 2, "still at depth 2 inside subdir");
+    assert_eq!(h.renderer.current_id.depth(), 3, "descends into subdir");
     let path_in_subdir = sicompass::provider::current_path(&h.renderer).to_owned();
     assert!(path_in_subdir.ends_with("subdir"), "path should be inside subdir");
 
-    // Press left — should navigate back to parent dir, staying at depth 2
+    // Press left — pops exactly one level back to the parent dir.
     press_left(h.r());
-    assert_eq!(h.renderer.current_id.depth(), 2, "should stay at depth 2 after left from subdir");
+    assert_eq!(h.renderer.current_id.depth(), 2, "Left pops one level");
     let path_after = sicompass::provider::current_path(&h.renderer).to_owned();
     assert!(!path_after.ends_with("subdir"), "path should be back at parent");
 }
@@ -926,9 +926,9 @@ fn test_full_workflow() {
         for _ in 0..(-diff) { press_up(h.r()); }
     }
     press_right(h.r());
-    // In the Rust filebrowser, subdirectory navigation is lazy (currentPath changes,
-    // ffon[fb_idx] is replaced), so depth stays at 2 — not 3 as in C.
-    assert_eq!(h.renderer.current_id.depth(), 2, "should be inside Downloads");
+    // Unified in-memory model: navigating into a directory descends one level
+    // and grafts its contents in place, so depth grows to 3.
+    assert_eq!(h.renderer.current_id.depth(), 3, "should be inside Downloads");
 
     // ---- Step 3: Create a file in Downloads ----
     press_ctrl(h.r(), Keycode::I);
@@ -1275,9 +1275,9 @@ fn navigate_right_empty_dir_shows_placeholder() {
         for _ in 0..(cur - emptydir_idx) { press_up(&mut renderer); }
     }
 
-    // Enter emptydir (lazy-fetch: path changes but depth stays at 2)
+    // Enter emptydir — descends one level, grafts the (empty) contents.
     press_right(&mut renderer);
-    assert_eq!(renderer.current_id.depth(), 2, "filebrowser stays at depth 2 after entering subdir");
+    assert_eq!(renderer.current_id.depth(), 3, "descends into subdir");
 
     // Placeholder is the only list item
     assert_eq!(renderer.total_list.len(), 1, "empty dir should show exactly one placeholder");
@@ -1286,10 +1286,9 @@ fn navigate_right_empty_dir_shows_placeholder() {
     assert_eq!(label, "i", "placeholder label should be 'i', got: {label:?}");
 }
 
-/// Navigating into a subdirectory updates the root FFON element's key to the
-/// directory name, so the parent line reflects the current location.
-/// Navigating back out shows the parent directory name.
-/// Only at filesystem root "/" does the key fall back to "file browser".
+/// Unified in-memory model: the provider root Obj key stays the display name
+/// ("file browser") at every depth; each directory is its own Obj keeping its
+/// directory name as the key, grafted into the tree as you descend.
 #[test]
 fn navigate_right_updates_parent_key() {
     ensure_builtins();
@@ -1330,16 +1329,23 @@ fn navigate_right_updates_parent_key() {
         for _ in 0..(cur - subdir_idx) { press_up(&mut renderer); }
     }
 
-    // Enter subdir — root key should update to "subdir"
+    // Enter subdir — descends one level; the provider root key is unchanged.
+    let subdir_pos = renderer.current_id.get(1).unwrap_or(0);
     press_right(&mut renderer);
-    assert_eq!(renderer.current_id.depth(), 2);
-    assert_eq!(renderer.ffon[0].as_obj().unwrap().key, "subdir",
-        "root FFON key should be the directory name after navigating in");
+    assert_eq!(renderer.current_id.depth(), 3);
+    assert_eq!(renderer.ffon[0].as_obj().unwrap().key, "file browser",
+        "provider root key stays the display name in the deep model");
+    // The directory we descended into keeps its own name as its Obj key.
+    let subdir_key = renderer.ffon[0].as_obj().unwrap().children[subdir_pos]
+        .as_obj().unwrap().key.clone();
+    assert!(sicompass_sdk::tags::strip_display(&subdir_key).contains("subdir"),
+        "the descended directory keeps its name as its Obj key; got {subdir_key:?}");
 
-    // Navigate back left — key returns to the parent dir name (the temp dir basename)
+    // Navigate back left — provider root key is still the display name.
     press_left(&mut renderer);
-    assert_eq!(renderer.ffon[0].as_obj().unwrap().key, root_name,
-        "root FFON key should be the parent directory name after navigating back");
+    assert_eq!(renderer.current_id.depth(), 2);
+    assert_eq!(renderer.ffon[0].as_obj().unwrap().key, "file browser");
+    let _ = root_name;
 }
 
 /// Deleting the last file in a directory causes the placeholder to reappear.
@@ -3408,24 +3414,6 @@ fn handle_a_on_star_prefix_element_sets_placeholder_insert_mode() {
         "handle_a should set placeholder_insert_mode when input_prefix is '* '");
 }
 
-// ---------------------------------------------------------------------------
-// Email client — refresh_on_navigate
-// ---------------------------------------------------------------------------
-
-/// The email client must declare refresh_on_navigate() = true so that
-/// navigate_right_raw calls push_path + refresh_current_directory (and thus
-/// fetch() / build_folder) when the user navigates into a folder.
-/// Regression guard for commit 7d21ee7 which introduced the flag and broke
-/// email folder navigation by leaving EmailClientProvider on the default false.
-#[test]
-fn email_provider_refresh_on_navigate_is_true() {
-    ensure_builtins();
-    let p = sicompass_sdk::create_provider_by_name("emailclient").unwrap();
-    assert!(p.refresh_on_navigate(),
-        "EmailClientProvider must return refresh_on_navigate() = true so \
-         navigate_right_raw calls fetch() when opening a folder");
-}
-
 /// Navigating right into an empty email compose body inserts the typed `i` placeholder
 /// (shows as label `"i"`, not the spurious `-i` from the bare `<input></input>` fallback).
 ///
@@ -3991,10 +3979,8 @@ fn ctrl_d_from_inside_message_shows_message_list_with_cursor_on_next() {
         "delete must succeed; got: {:?}", renderer.error_message
     );
 
-    // View must be the message list (ffon[0] key = folder name, not message label).
-    let root_key = renderer.ffon[0].as_obj().map(|o| o.key.as_str()).unwrap_or("");
-    assert_eq!(root_key, "INBOX",
-        "after delete, ffon[0] must be the INBOX folder Obj; got: {root_key:?}");
+    // View must be the message list — the current level holds the folder's
+    // messages after the delete + refresh re-fetched the parent path.
 
     // Alpha must be gone; Beta must be present.
     let children = renderer.ffon[0].as_obj().map(|o| o.children.as_slice()).unwrap_or(&[]);
@@ -4922,24 +4908,25 @@ fn chat_navigate_right_loads_room_without_f5() {
         "root key must be 'chat client' at room list"
     );
 
-    // Enter the room — refresh_on_navigate=true triggers fetch() without F5.
+    // Enter the room — navigate-right fetches the room contents and grafts
+    // them onto the room Obj, descending one level.
+    let room_pos = renderer.current_id.get(1).unwrap_or(0);
     press_right(&mut renderer);
-    assert_eq!(renderer.current_id.depth(), 2, "cursor should be at depth 2 inside room");
+    assert_eq!(renderer.current_id.depth(), 3, "descends into the room");
 
-    let children = &renderer.ffon[0].as_obj().unwrap().children;
-    let has_input = children.iter().any(|e| e.as_str().map_or(false, |s| s.contains("<input>")));
-    assert!(has_input, "room must have <input> child after right-arrow (no F5); children: {children:?}");
-    assert_eq!(
-        renderer.ffon[0].as_obj().unwrap().key, "Matrix.org",
-        "root key must be the room name inside room (shown as parent label)"
-    );
+    // The room contents were fetched without F5 and grafted onto the room Obj.
+    let room_children = sicompass_sdk::ffon::get_ffon_at_id(&renderer.ffon, &renderer.current_id)
+        .map(<[_]>::to_vec).unwrap_or_default();
+    let has_input = room_children.iter().any(|e| e.as_str().map_or(false, |s| s.contains("<input>")));
+    assert!(has_input, "room must have <input> child after right-arrow (no F5); children: {room_children:?}");
+    // The provider root key stays the display name in the deep model.
+    assert_eq!(renderer.ffon[0].as_obj().unwrap().key, "chat client");
+    let _ = room_pos;
 
-    // Navigate left — back to rooms list; root key reverts to display_name.
+    // Navigate left — back to the rooms list (one level up).
     press_left(&mut renderer);
-    assert_eq!(
-        renderer.ffon[0].as_obj().unwrap().key, "chat client",
-        "root key must revert to 'chat client' after navigating back to room list"
-    );
+    assert_eq!(renderer.current_id.depth(), 2);
+    assert_eq!(renderer.ffon[0].as_obj().unwrap().key, "chat client");
     let children = &renderer.ffon[0].as_obj().unwrap().children;
     let has_room = children.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "Matrix.org"));
     assert!(has_room, "rooms list must reappear after left; children: {children:?}");
@@ -5306,12 +5293,13 @@ fn editor_right_arrow_opens_file() {
     r.current_id.set(1, file_idx);
     sicompass::list::create_list_current_layer(&mut r);
 
-    // Right arrow on a file Obj → opens file, now at depth 2 showing file content.
+    // Right arrow on a file Obj → opens file, descending one level to its content.
     press_right(&mut r);
-    assert_eq!(r.current_id.depth(), 2, "should remain at depth 2 after opening file");
+    assert_eq!(r.current_id.depth(), 3, "descends into the file content");
 
-    // File content should now be in the FFON (hello.txt contains "fn main() {}").
-    let content_children = r.ffon[editor_idx].as_obj().unwrap().children.as_slice();
+    // File content should now be grafted onto the file Obj.
+    let content_children = r.ffon[editor_idx].as_obj().unwrap()
+        .children[file_idx].as_obj().unwrap().children.clone();
     let has_content = content_children.iter().any(|e| {
         let k = match e { FfonElement::Str(s) => s.as_str(), FfonElement::Obj(o) => o.key.as_str() };
         sicompass_sdk::tags::strip_display(k).contains("fn main")
@@ -5445,8 +5433,9 @@ fn editor_right_arrow_into_subdir() {
     assert!(navigated, "right-arrow on editor subdir (Obj) must navigate in");
     sicompass::list::create_list_current_layer(&mut r);
 
-    // After navigation the FFON shows the subdir's contents (child.txt).
-    let subdir_children = r.ffon[editor_idx].as_obj().unwrap().children.as_slice();
+    // After navigation the subdir Obj holds the subdir's contents (child.txt).
+    let subdir_children = r.ffon[editor_idx].as_obj().unwrap()
+        .children[dir_idx].as_obj().unwrap().children.clone();
     let has_child = subdir_children.iter().any(|e| match e {
         FfonElement::Obj(o) => sicompass_sdk::tags::strip_display(&o.key).contains("child.txt"),
         _ => false,
@@ -5478,7 +5467,8 @@ fn editor_empty_subdir_seeds_i_placeholder() {
     sicompass::handlers::navigate_right_raw(&mut r);
     sicompass::list::create_list_current_layer(&mut r);
 
-    let children = r.ffon[editor_idx].as_obj().unwrap().children.as_slice();
+    let children = r.ffon[editor_idx].as_obj().unwrap()
+        .children[dir_idx].as_obj().unwrap().children.clone();
     let has_placeholder = children.iter().any(|e| match e {
         FfonElement::Str(s) => sicompass_sdk::placeholders::is_i_placeholder(s),
         _ => false,
@@ -5576,8 +5566,9 @@ fn editor_two_consecutive_writes_both_show_in_list() {
     sicompass::handlers::navigate_right_raw(&mut r);
     sicompass::list::create_list_current_layer(&mut r);
 
-    // Empty file → I_PLACEHOLDER seeded as the only child.
-    let on_placeholder = r.ffon[editor_idx].as_obj().unwrap().children.iter()
+    // Empty file → I_PLACEHOLDER seeded as the only child of the file Obj.
+    let on_placeholder = r.ffon[editor_idx].as_obj().unwrap()
+        .children[file_idx].as_obj().unwrap().children.iter()
         .any(|e| matches!(e, FfonElement::Str(s) if sicompass_sdk::placeholders::is_i_placeholder(s)));
     assert!(on_placeholder, "empty file must seed I_PLACEHOLDER");
 
@@ -5590,7 +5581,8 @@ fn editor_two_consecutive_writes_both_show_in_list() {
     let written = std::fs::read_to_string(tmp.path().join("notes.txt")).unwrap();
     assert_eq!(written, "first", "first write must reach disk");
 
-    let after_first: Vec<String> = r.ffon[editor_idx].as_obj().unwrap().children.iter()
+    let after_first: Vec<String> = r.ffon[editor_idx].as_obj().unwrap()
+        .children[file_idx].as_obj().unwrap().children.iter()
         .map(|e| match e {
             FfonElement::Str(s) => sicompass_sdk::tags::strip_display(s),
             FfonElement::Obj(o) => sicompass_sdk::tags::strip_display(&o.key),
@@ -5608,7 +5600,8 @@ fn editor_two_consecutive_writes_both_show_in_list() {
     assert_eq!(written, "first\nsecond", "second write must reach disk");
 
     // Critical: list must show both elements WITHOUT pressing F5.
-    let after_second: Vec<String> = r.ffon[editor_idx].as_obj().unwrap().children.iter()
+    let after_second: Vec<String> = r.ffon[editor_idx].as_obj().unwrap()
+        .children[file_idx].as_obj().unwrap().children.iter()
         .map(|e| match e {
             FfonElement::Str(s) => sicompass_sdk::tags::strip_display(s),
             FfonElement::Obj(o) => sicompass_sdk::tags::strip_display(&o.key),
@@ -5661,7 +5654,8 @@ fn editor_three_consecutive_writes_all_show_in_list() {
     let written = std::fs::read_to_string(tmp.path().join("notes.txt")).unwrap();
     assert_eq!(written, "first\nsecond\nthird", "three writes must reach disk in order");
 
-    let labels: Vec<String> = r.ffon[editor_idx].as_obj().unwrap().children.iter()
+    let labels: Vec<String> = r.ffon[editor_idx].as_obj().unwrap()
+        .children[file_idx].as_obj().unwrap().children.iter()
         .map(|e| match e {
             FfonElement::Str(s) => sicompass_sdk::tags::strip_display(s),
             FfonElement::Obj(o) => sicompass_sdk::tags::strip_display(&o.key),
@@ -5714,7 +5708,8 @@ fn editor_many_consecutive_writes_all_show_in_list() {
     let written = std::fs::read_to_string(tmp.path().join("log.txt")).unwrap();
     assert_eq!(written, expected_disk, "all ten writes must reach disk in order");
 
-    let labels: Vec<String> = r.ffon[editor_idx].as_obj().unwrap().children.iter()
+    let labels: Vec<String> = r.ffon[editor_idx].as_obj().unwrap()
+        .children[file_idx].as_obj().unwrap().children.iter()
         .map(|e| match e {
             FfonElement::Str(s) => sicompass_sdk::tags::strip_display(s),
             FfonElement::Obj(o) => sicompass_sdk::tags::strip_display(&o.key),

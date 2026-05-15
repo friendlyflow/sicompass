@@ -411,7 +411,6 @@ pub struct AppRenderer {
     // ---- Flags -------------------------------------------------------------
     pub needs_redraw: bool,
     pub input_down: bool,
-    pub prefixed_insert_mode: bool,
     /// True when the current Insert session is for a `*` placeholder —
     /// the typed text is interpreted by `parse_placeholder_prefix` at commit time
     /// to resolve to either a `Str` or an `Obj`.
@@ -580,7 +579,6 @@ impl AppRenderer {
             file_clipboard_is_cut: false,
             needs_redraw: true,
             input_down: false,
-            prefixed_insert_mode: false,
             placeholder_insert_mode: false,
             window_height: WINDOW_HEIGHT as i32,
             cached_line_height: 20,
@@ -643,25 +641,19 @@ impl AppRenderer {
     pub fn load_active_tab(&mut self) {
         let snap = self.tabs[self.active_tab].clone();
 
-        // Restore the saved provider's internal path and re-fetch its FFON tree
-        // so saved indices in `current_id` index into the right content.
+        // Rebuild the saved provider's FFON tree at full depth so a deep
+        // `current_id` still resolves into it (see `deep_rebuild_provider_tree`).
         if let Some(provider_idx) = snap.current_id.get(0) {
-            if provider_idx < self.providers.len() && !snap.provider_path.is_empty() {
-                let provider = &mut self.providers[provider_idx];
-                if provider.current_path() != snap.provider_path {
-                    provider.set_current_path(&snap.provider_path);
-                    let children = provider.fetch();
-                    let display_name = provider.display_name().to_owned();
-                    let mut root_elem = sicompass_sdk::ffon::FfonElement::new_obj(&display_name);
-                    for child in children {
-                        if let Some(obj) = root_elem.as_obj_mut() {
-                            obj.push(child);
-                        }
-                    }
-                    if provider_idx < self.ffon.len() {
-                        self.ffon[provider_idx] = root_elem;
-                    }
-                }
+            if provider_idx < self.providers.len()
+                && provider_idx < self.ffon.len()
+                && !snap.provider_path.is_empty()
+                && self.providers[provider_idx].current_path() != snap.provider_path
+            {
+                self.deep_rebuild_provider_tree(
+                    provider_idx,
+                    &snap.provider_path,
+                    snap.current_id.depth(),
+                );
             }
         }
 
@@ -694,6 +686,89 @@ impl AppRenderer {
         }
         self.current_id = current_id;
         self.list_index = self.current_id.last().unwrap_or(0);
+    }
+
+    /// Rebuild a provider's FFON tree at full depth so a saved deep `current_id`
+    /// resolves after a tab switch / app restart.
+    ///
+    /// Navigation is uniformly in-memory: each `Right` grafts a fetched level
+    /// onto the Obj it descends into. Re-fetching only the deepest path would
+    /// collapse every ancestor and clamp a deep `current_id` back to depth 2.
+    ///
+    /// `cursor_depth` (the saved `current_id` depth) tells us how many path
+    /// segments were *navigated* — `current_id` depth 2 sits at the provider
+    /// root, and each level beyond that is one navigated segment. The tree root
+    /// is the path prefix above those navigated segments: this matters for the
+    /// file browser, whose `current_path` is an absolute path rooted wherever
+    /// the session started, not `"/"`. We fetch the root at that prefix and
+    /// then graft each navigated segment's children onto the matching Obj
+    /// (matched by the stripped display text of the key). If a segment cannot
+    /// be matched the descent stops there; the `load_active_tab` clamp then
+    /// trims `current_id` to the depth that was rebuilt.
+    fn deep_rebuild_provider_tree(&mut self, provider_idx: usize, path: &str, cursor_depth: usize) {
+        use sicompass_sdk::ffon::FfonElement;
+        use sicompass_sdk::tags::strip_display;
+
+        let all_segments: Vec<String> = path
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect();
+
+        // Split `path` into the tree-root prefix and the navigated tail.
+        let navigated = cursor_depth.saturating_sub(2).min(all_segments.len());
+        let split = all_segments.len() - navigated;
+        let root_prefix = {
+            let joined = all_segments[..split].join("/");
+            if joined.is_empty() { "/".to_owned() } else { format!("/{joined}") }
+        };
+        let segments = &all_segments[split..];
+
+        let display_name = self.providers[provider_idx].display_name().to_owned();
+
+        // Fetch the children at the root prefix and at each navigated segment.
+        let mut levels: Vec<Vec<FfonElement>> = Vec::with_capacity(segments.len() + 1);
+        self.providers[provider_idx].set_current_path(&root_prefix);
+        levels.push(self.providers[provider_idx].fetch());
+
+        let mut indices: Vec<usize> = Vec::with_capacity(segments.len());
+        let mut prefix = root_prefix.clone();
+        for seg in segments {
+            let found = levels.last().unwrap().iter().position(|e| {
+                matches!(e, FfonElement::Obj(o) if strip_display(&o.key) == *seg)
+            });
+            let idx = match found {
+                Some(i) => i,
+                None => break, // can't descend further — graft what matched
+            };
+            indices.push(idx);
+            if !prefix.ends_with('/') {
+                prefix.push('/');
+            }
+            prefix.push_str(seg);
+            self.providers[provider_idx].set_current_path(&prefix);
+            levels.push(self.providers[provider_idx].fetch());
+        }
+
+        // Graft each fetched child level onto its parent Obj, deepest first.
+        for k in (0..indices.len()).rev() {
+            let child_level = levels.pop().unwrap();
+            if let FfonElement::Obj(o) = &mut levels[k][indices[k]] {
+                o.children = child_level;
+            }
+        }
+        let root_children = levels.pop().unwrap_or_default();
+
+        let mut root = FfonElement::new_obj(&display_name);
+        if let Some(obj) = root.as_obj_mut() {
+            for c in root_children {
+                obj.push(c);
+            }
+        }
+        self.ffon[provider_idx] = root;
+
+        // Live provider path = the full restored path, matching the deep cursor.
+        self.providers[provider_idx].set_current_path(path);
     }
 
     /// Set the screen-reader announcement to "tab N/M: <label>". Toggles the

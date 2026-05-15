@@ -757,9 +757,6 @@ impl Provider for ChatClientProvider {
     fn display_name(&self) -> &str {
         "chat client"
     }
-    fn refresh_on_navigate(&self) -> bool {
-        true
-    }
     fn stable_root_key(&self) -> bool {
         false
     }

@@ -141,6 +141,47 @@ fn record_fs_op(
     crate::state::record_entry(r, entry);
 }
 
+/// Disk layer for the unified placeholder-commit flow.
+///
+/// When a placeholder commit lands on a filesystem provider (file browser /
+/// editor — `path_is_filesystem()`), the provider's `commit_edit` has already
+/// created the file/dir on disk. Replace the transient placeholder `Structural`
+/// timeline entry with a single `FsOp::Create`, then move the cursor onto the
+/// freshly created item by name (filesystem providers do not keep a persistent
+/// `I_PLACEHOLDER` after a non-empty directory is re-fetched).
+///
+/// Returns `true` when the active provider is filesystem-backed (the caller
+/// then skips the in-memory repositioning); `false` otherwise.
+fn record_placeholder_fs_create(
+    r: &mut AppRenderer,
+    undo_id: sicompass_sdk::ffon::IdArray,
+    name: &str,
+    undo_elem: FfonElement,
+) -> bool {
+    let is_fs = r.current_id.get(0)
+        .and_then(|i| r.providers.get(i))
+        .map(|p| p.path_is_filesystem())
+        .unwrap_or(false);
+    if !is_fs {
+        return false;
+    }
+    pop_last_placeholder_structural(r);
+    record_fs_op(r, undo_id, sicompass_sdk::timeline::FsOpKind::Create, None, Some(undo_elem));
+    list::create_list_current_layer(r);
+    // Labels render as "{prefix} {content}" (e.g. "-i file.txt"); match the
+    // content after the first space.
+    let target = name;
+    if let Some(i) = r.total_list.iter().position(|item| {
+        item.label.split_once(' ').map(|(_, c)| c).unwrap_or(&item.label) == target
+    }) {
+        if let Some(id) = r.total_list.get(i).map(|it| it.id.clone()) {
+            r.current_id = id;
+            r.list_index = i;
+        }
+    }
+    true
+}
+
 /// Push a `Navigate` entry for a search-exit commit (Enter / Right-at-end /
 /// Left-at-cursor-0 inside SimpleSearch or ExtendedSearch). `from_id` is
 /// supplied by the caller because
@@ -286,51 +327,42 @@ pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
         new_id.push(0);
         r.current_id = new_id;
     } else {
-        let provider_idx = item_id.get(0).unwrap_or(0);
-        let does_refresh_on_nav = r.providers.get(provider_idx)
-            .map(|p| p.refresh_on_navigate())
-            .unwrap_or(false);
-
-        if does_refresh_on_nav {
-            // Lazy-fetch provider (filebrowser): push path, re-fetch, stay at depth 2.
+        // No children loaded yet. Fetch this Obj's level from the provider and
+        // graft it onto the Obj in place, then descend one level. For
+        // filesystem/server-backed providers the `fetch()` is the directory or
+        // room read — the disk layer riding on top of the in-memory model.
+        // In-memory providers whose children are pre-attached take the
+        // `has_children` branch above and never reach here. Grafting onto the
+        // target Obj (never rebuilding the provider root) keeps user-added
+        // sibling nodes intact.
+        if item_id.depth() >= 2 {
             crate::provider::push_path(r, &segment);
-            crate::provider::refresh_current_directory(r);
-            // If the directory/container is empty, insert the `i` placeholder so
-            // the user can create children by typing (renders as "i", not "-i").
-            if let Some(root) = r.ffon.get_mut(provider_idx) {
-                if let Some(obj) = root.as_obj_mut() {
-                    if obj.children.is_empty() {
-                        obj.children.push(FfonElement::Str(I_PLACEHOLDER.to_owned()));
-                    }
-                }
-            }
-            let mut new_id = IdArray::new();
-            new_id.push(provider_idx);
-            new_id.push(0);
-            r.current_id = new_id;
-        } else {
-            // In-memory provider (script/form-builder): treat empty-children Obj the same as
-            // has_children — push path and descend without refreshing. This preserves
-            // in-memory user-added nodes at arbitrary nesting depth.
-            if item_id.depth() >= 2 {
-                crate::provider::push_path(r, &segment);
-            }
-            // For email compose body: seed I_PLACEHOLDER if navigating into an empty Obj
-            // so the user always has an insertion point (mirrors the lazy-fetch branch above).
-            if crate::provider::is_in_email_compose_body(r) {
-                let last_idx = item_id.last().unwrap_or(0);
-                if let Some(siblings) = crate::provider::get_ffon_at_id_mut(&mut r.ffon, &item_id) {
-                    if let Some(FfonElement::Obj(obj)) = siblings.get_mut(last_idx) {
-                        if obj.children.is_empty() {
-                            obj.children.push(FfonElement::Str(I_PLACEHOLDER.to_owned()));
-                        }
-                    }
-                }
-            }
-            let mut new_id = item_id;
-            new_id.push(0);
-            r.current_id = new_id;
         }
+        let provider_idx = item_id.get(0).unwrap_or(0);
+        let mut children = match r.providers.get_mut(provider_idx) {
+            Some(p) => {
+                let c = p.fetch();
+                if let Some(err) = p.take_error() {
+                    r.error_message = err;
+                }
+                c
+            }
+            None => Vec::new(),
+        };
+        // Empty container → seed the `i` insert placeholder so the user can
+        // create children by typing (renders as "i", not "-i").
+        if children.is_empty() {
+            children.push(FfonElement::Str(I_PLACEHOLDER.to_owned()));
+        }
+        let last_idx = item_id.last().unwrap_or(0);
+        if let Some(siblings) = crate::provider::get_ffon_at_id_mut(&mut r.ffon, &item_id) {
+            if let Some(FfonElement::Obj(obj)) = siblings.get_mut(last_idx) {
+                obj.children = children;
+            }
+        }
+        let mut new_id = item_id;
+        new_id.push(0);
+        r.current_id = new_id;
     }
 
 
@@ -407,8 +439,8 @@ pub fn navigate_left_raw(r: &mut AppRenderer) -> bool {
         return false; // already at root
     }
 
-    // Check if the parent element has a <link> or is "meta" — skip popPath for those
-    // (mirrors C's providerNavigateLeft: parentIsLink / parentIsMeta checks)
+    // Check if the parent element has a <link> or is "meta" — skip pop_path for
+    // those (mirrors C's providerNavigateLeft: parentIsLink / parentIsMeta).
     let (parent_is_link, parent_is_meta) = {
         let mut parent_id = r.current_id.clone();
         parent_id.pop();
@@ -421,152 +453,13 @@ pub fn navigate_left_raw(r: &mut AppRenderer) -> bool {
         }
     };
 
-    // For providers that track a path (filebrowser, email client): if pop_path
-    // moves us to a parent directory/folder, stay at depth 2 and re-fetch instead
-    // of falling back to the root provider list.  We capture path_before whenever
-    // the provider implements pop_path — if the path is unchanged (no-op pop_path
-    // as in script/form-builder providers), path_changed stays false and we fall
-    // through to the simple current_id.pop(), preserving in-memory nodes.
-    let path_before = if r.current_id.depth() == 2 && !parent_is_link && !parent_is_meta {
-        Some(crate::provider::current_path(r).to_owned())
-    } else {
-        None
-    };
-
-    // Also capture the pre-pop path for depths > 2.  Used below to restore the
-    // cursor position when a stale provider path (from undo/redo cursor mismatch)
-    // causes pop_path to skip past compose and land at "/" unexpectedly.
-    let path_before_any_depth = if !parent_is_link && !parent_is_meta {
-        crate::provider::current_path(r).to_owned()
-    } else {
-        String::new()
-    };
-
+    // Unified in-memory navigation: the tree is held in `r.ffon` at full depth,
+    // so Left is simply pop the provider path one segment and pop `current_id`
+    // one level. No re-fetch — the parent level is already in memory.
     if !parent_is_link && !parent_is_meta {
         crate::provider::pop_path(r);
     }
-
-    // If the new path still has refresh_on_navigate=false (e.g. cursor/path mismatch
-    // from undo/redo left path at "/compose/Body:[...]" while cursor was at depth 2),
-    // keep popping until we reach a path that wants re-fetching or pop_path becomes
-    // a no-op.  We remember the first intermediate path's last segment so the cursor
-    // can land on the correct entry in the re-fetched parent list (e.g. "compose").
-    let folder_name_override: Option<String> = if path_before.is_some() {
-        let provider_idx = r.current_id.get(0).unwrap_or(usize::MAX);
-        let mut override_name: Option<String> = None;
-        for _ in 0..8 {
-            let does_refresh = r.providers
-                .get(provider_idx)
-                .map(|p| p.refresh_on_navigate())
-                .unwrap_or(true);
-            if does_refresh {
-                break;
-            }
-            let cur = crate::provider::current_path(r).to_owned();
-            if override_name.is_none() {
-                override_name = std::path::Path::new(&cur)
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .or_else(|| Some(cur.clone()));
-            }
-            crate::provider::pop_path(r);
-            if crate::provider::current_path(r) == cur {
-                break; // pop_path was a no-op — don't loop forever
-            }
-        }
-        override_name
-    } else {
-        None
-    };
-
-    let (path_changed, folder_name) = match path_before {
-        Some(before) => {
-            let changed = before != crate::provider::current_path(r);
-            let name = folder_name_override.or_else(|| {
-                std::path::Path::new(&before)
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .or_else(|| Some(before.clone())) // drive roots (e.g. "D:\") have no file_name component
-            });
-            (changed, name)
-        }
-        None => (false, None),
-    };
-
-    if path_changed {
-        // Path moved to parent dir — stay inside the provider and re-fetch.
-        crate::provider::refresh_current_directory(r);
-        // Restore cursor to the folder we just came from.
-        let target_index = folder_name
-            .and_then(|name| {
-                let provider_idx = r.current_id.get(0)?;
-                let children = r.ffon.get(provider_idx)?.as_obj()?.children.as_slice();
-                children.iter().position(|child| match child {
-                    sicompass_sdk::ffon::FfonElement::Obj(obj) => tags::strip_display(&obj.key) == name,
-                    _ => false,
-                })
-            })
-            .unwrap_or(0);
-        r.current_id.set(1, target_index);
-    } else {
-        r.current_id.pop();
-
-        // Stale-key correction: undo/redo can leave the cursor at depth > 2
-        // while the provider path is one level shallower than expected (e.g.
-        // cursor at body depth 3 but path="/compose" instead of
-        // "/compose/Body:[...]"). pop_path then jumps from "/compose" → "/"
-        // without triggering a re-fetch, leaving ffon[provider].key="compose"
-        // while path="/". The next Left from depth 2 would reach depth 1 with
-        // a stale key in the root list. Detect and correct this here.
-        if r.current_id.depth() == 2 {
-            let provider_idx = r.current_id.get(0).unwrap_or(usize::MAX);
-            let needs_refetch = r.providers.get(provider_idx)
-                .map(|p| {
-                    if !p.refresh_on_navigate() {
-                        return false; // path is still in a no-refresh zone, fine
-                    }
-                    // refresh_on_navigate=true means we're at a "root-like" path.
-                    // If the FFON key doesn't match what this path should produce,
-                    // the entry is stale.
-                    let cur = p.current_path();
-                    let expected_key = if cur == "/" {
-                        p.display_name()
-                    } else {
-                        std::path::Path::new(cur)
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or(p.display_name())
-                    };
-                    r.ffon.get(provider_idx)
-                        .and_then(|f| f.as_obj())
-                        .map(|obj| sicompass_sdk::tags::strip_display(&obj.key) != expected_key)
-                        .unwrap_or(false)
-                })
-                .unwrap_or(false);
-
-            if needs_refetch {
-                crate::provider::refresh_current_directory(r);
-                // Place cursor on the folder we came from (last segment of the
-                // path that was popped away, captured before the initial pop).
-                let stale_folder = std::path::Path::new(&path_before_any_depth)
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .or_else(|| Some(path_before_any_depth.clone()));
-                let target_index = stale_folder
-                    .and_then(|name| {
-                        let children = r.ffon.get(provider_idx)?.as_obj()?.children.as_slice();
-                        children.iter().position(|child| match child {
-                            sicompass_sdk::ffon::FfonElement::Obj(obj) => {
-                                sicompass_sdk::tags::strip_display(&obj.key) == name
-                            }
-                            _ => false,
-                        })
-                    })
-                    .unwrap_or(0);
-                r.current_id.set(1, target_index);
-            }
-        }
-    }
+    r.current_id.pop();
 
     true
 }
@@ -1714,6 +1607,7 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
             PlaceholderKind::Str(name) => {
                 r.placeholder_insert_mode = false;
                 r.placeholder_cancel = None;
+                let undo_id = r.current_id.clone();
                 let committed = crate::provider::commit_edit(r, &old_content, &name);
                 if committed {
                     // Prefer a sub-tree refresh (updates only the parent Obj's children)
@@ -1722,6 +1616,13 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                     if !crate::provider::refresh_subtree_parent(r) {
                         crate::provider::refresh_current_directory(r);
                     }
+                    // Disk layer: on a filesystem provider, `commit_edit` created
+                    // the file on disk — record an `FsOp::Create` and move onto it.
+                    if record_placeholder_fs_create(
+                        r, undo_id, &name, FfonElement::new_str(name.clone()),
+                    ) {
+                        // handled by the filesystem path
+                    } else {
                     // After refresh the `*` placeholder may have shifted position — repoint.
                     let new_star_idx = {
                         let arr = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id);
@@ -1752,6 +1653,7 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                             };
                             crate::state::record_entry(r, tl_entry);
                         }
+                    }
                     }
                 } else {
                     // No provider — update the FFON element in-place with <input> wrapping.
@@ -1785,11 +1687,19 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                 r.placeholder_insert_mode = false;
                 r.placeholder_cancel = None;
                 // Passes `key:` — the trailing colon signals Obj creation to `update_body_leaf`.
+                let undo_id = r.current_id.clone();
                 let committed = crate::provider::commit_edit(r, &old_content, &format!("{key}:"));
                 if committed {
                     if !crate::provider::refresh_subtree_parent(r) {
                         crate::provider::refresh_current_directory(r);
                     }
+                    // Disk layer: on a filesystem provider, `commit_edit` created
+                    // the directory on disk — record an `FsOp::Create`.
+                    if record_placeholder_fs_create(
+                        r, undo_id, &key, FfonElement::new_obj(&key),
+                    ) {
+                        // handled by the filesystem path
+                    } else {
                     let new_star_idx = {
                         let arr = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id);
                         arr.and_then(|a| a.iter().position(|e| matches!(e, FfonElement::Str(s) if is_i_placeholder(s))))
@@ -1827,6 +1737,7 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                             };
                             crate::state::record_entry(r, tl_entry);
                         }
+                    }
                     }
                 } else {
                     // No provider — mutate the FFON element directly. Rewrite the
@@ -1955,72 +1866,6 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                 r.error_message = format!("Failed to save: {e}");
             }
         }
-        r.needs_redraw = true;
-        return;
-    }
-
-    // Prefix-based creation (Ctrl+I / Ctrl+A in filebrowser)
-    if old_content.is_empty() && r.prefixed_insert_mode {
-        let (is_file, is_dir, item_name) = parse_creation_prefix(&new_content);
-
-        if (!is_file && !is_dir) || item_name.is_empty() {
-            r.error_message = "Enter a name: plain or '- name' for file, '+ name' or 'name:' for folder".to_owned();
-            r.needs_redraw = true;
-            return; // stay in insert mode
-        }
-
-        let undo_id = r.current_id.clone();
-        let success = if is_file {
-            crate::provider::create_file(r, &item_name)
-        } else {
-            crate::provider::create_directory(r, &item_name)
-        };
-
-        if !success {
-            if r.error_message.is_empty() {
-                r.error_message = "Failed to create item".to_owned();
-            }
-            r.needs_redraw = true;
-            return; // stay in insert mode
-        }
-
-        // Discard the placeholder Structural::Insert/Append entry (subsumed by FsOp::Create below)
-        pop_last_placeholder_structural(r);
-
-        // Record FsCreate undo entry (Str = file, Obj = directory)
-        let undo_elem = if is_dir {
-            FfonElement::new_obj(&item_name)
-        } else {
-            FfonElement::new_str(item_name.clone())
-        };
-        record_fs_op(r, undo_id.clone(), sicompass_sdk::timeline::FsOpKind::Create, None, Some(undo_elem));
-
-        r.prefixed_insert_mode = false;
-        r.placeholder_cancel = None;
-        crate::provider::refresh_current_directory(r);
-        list::create_list_current_layer(r);
-        // Move cursor to the newly created item by name (list may have re-sorted).
-        // Labels have the form "{prefix} {content}" (e.g. "-i newfile.txt"),
-        // so compare the content after the first space.
-        {
-            let name = item_name.as_str();
-            let found_idx = r.total_list.iter().position(|item| {
-                let content = item.label.split_once(' ').map(|(_, c)| c).unwrap_or(&item.label);
-                content == name
-            });
-            if let Some(i) = found_idx {
-                if let Some(id) = r.total_list.get(i).map(|it| it.id.clone()) {
-                    r.current_id = id;
-                    r.list_index = i;
-                }
-            }
-        }
-
-        let prev = r.previous_coordinate;
-        r.coordinate = prev;
-        r.previous_coordinate = prev;
-        r.input_buffer.clear();
-        r.cursor_position = 0;
         r.needs_redraw = true;
         return;
     }
@@ -2353,23 +2198,6 @@ fn parse_placeholder_prefix(input: &str) -> PlaceholderKind {
     PlaceholderKind::Str(t.to_owned())
 }
 
-/// Parse "- name" (file) or "+ name" (directory) creation prefixes.
-/// Returns (is_file, is_dir, name_without_prefix).
-fn parse_creation_prefix(input: &str) -> (bool, bool, String) {
-    match parse_placeholder_prefix(input) {
-        PlaceholderKind::Str(name) => (true, false, name),
-        PlaceholderKind::Obj(name) => (false, true, name),
-        // No prefix / only whitespace / lone '+' or '-': empty name → caller checks item_name.is_empty()
-        PlaceholderKind::Empty => {
-            // Preserve original behaviour for the lone-prefix cases (e.g. "+" alone → is_dir true but empty name)
-            let t = input.trim();
-            if t.starts_with('+') { (false, true, String::new()) }
-            else if t.starts_with('-') { (true, false, String::new()) }
-            else { (false, false, String::new()) }
-        }
-    }
-}
-
 /// Undo the last edit action.
 pub fn handle_undo(r: &mut AppRenderer) {
     crate::state::walk_back(r);
@@ -2415,7 +2243,6 @@ fn try_cancel_inserted_placeholder(r: &mut AppRenderer, target_general: Coordina
     }
     r.current_id = cancel.return_id;
     r.placeholder_insert_mode = false;
-    r.prefixed_insert_mode = false;
     r.coordinate = target_general;
     r.previous_coordinate = target_general;
     r.input_buffer.clear();
@@ -2478,7 +2305,6 @@ pub fn handle_escape(r: &mut AppRenderer) {
             if try_cancel_inserted_placeholder(r, Coordinate::General) { return; }
             // Discard the input buffer (Esc cancels) and return to General.
             r.placeholder_insert_mode = false;
-            r.prefixed_insert_mode = false;
             r.input_buffer.clear();
             r.cursor_position = 0;
             r.coordinate = Coordinate::General;
@@ -3141,7 +2967,6 @@ pub fn handle_save_as_provider_config(r: &mut AppRenderer) {
     list::create_list_current_layer(r);
     r.list_index = 0;
     r.scroll_offset = 0;
-    r.prefixed_insert_mode = false;
 
     // Immediately enter insert mode
     handle_i(r);
@@ -3928,13 +3753,14 @@ pub fn handle_editor_ctrl_a(r: &mut AppRenderer) {
 }
 
 /// Insert a file/folder placeholder in the editor directory view.
-/// Enters Insert with `prefixed_insert_mode = true` ("+name"/"−name" syntax).
+/// Enters Insert on the typed `i` placeholder — the unified insert flow; the
+/// editor's `commit_edit` performs the on-disk file/dir creation.
 fn insert_editor_dir_placeholder(r: &mut AppRenderer, insert_idx: usize) {
     use sicompass_sdk::ffon::FfonElement;
     use crate::app_state::PlaceholderCancel;
 
     let depth = r.current_id.depth();
-    let placeholder = FfonElement::Str("<input></input>".to_owned());
+    let placeholder = FfonElement::Str(I_PLACEHOLDER.to_owned());
     let return_id = r.current_id.clone();
 
     if depth == 1 {
@@ -3960,7 +3786,7 @@ fn insert_editor_dir_placeholder(r: &mut AppRenderer, insert_idx: usize) {
         replaced_element: None,
         return_id,
     });
-    r.prefixed_insert_mode = true;
+    r.placeholder_insert_mode = true;
     list::create_list_current_layer(r);
     r.list_index = insert_idx;
     r.scroll_offset = 0;
@@ -4034,7 +3860,6 @@ fn insert_editor_file_line(r: &mut AppRenderer, after: bool) {
         replaced_element: None,
         return_id,
     });
-    r.prefixed_insert_mode = false;
     list::create_list_current_layer(r);
     r.list_index = insert_ffon_idx;
     r.scroll_offset = 0;
@@ -4458,7 +4283,6 @@ fn insert_placeholder_typed(r: &mut AppRenderer, insert_idx: usize) {
         return_id,
     });
     r.placeholder_insert_mode = true;
-    r.prefixed_insert_mode = false;
     list::create_list_current_layer(r);
     r.list_index = insert_idx;
     r.scroll_offset = 0;
@@ -4522,14 +4346,11 @@ fn insert_general_placeholder(r: &mut AppRenderer, insert_idx: usize) {
         return;
     }
 
-    // Fallback: simple <input></input> placeholder + enter insert mode.
-    let placeholder = FfonElement::Str("<input></input>".to_owned());
-
-    // Check provider before mutation (borrow checker)
-    let is_filebrowser = r.current_id.get(0)
-        .and_then(|idx| r.providers.get(idx))
-        .map(|p| p.name() == "filebrowser")
-        .unwrap_or(false);
+    // Fallback: seed the typed `i` placeholder + enter insert mode. Uniform
+    // for every provider — the on-disk file/dir creation happens inside the
+    // filesystem providers' `commit_edit`, layered on top of this in-memory
+    // placeholder flow.
+    let placeholder = FfonElement::Str(I_PLACEHOLDER.to_owned());
 
     // Stash current_id before mutating — used to restore on Escape.
     let return_id = r.current_id.clone();
@@ -4557,7 +4378,7 @@ fn insert_general_placeholder(r: &mut AppRenderer, insert_idx: usize) {
         replaced_element: None,
         return_id,
     });
-    r.prefixed_insert_mode = is_filebrowser;
+    r.placeholder_insert_mode = true;
     list::create_list_current_layer(r);
     r.list_index = insert_idx;
     r.scroll_offset = 0;
@@ -5141,244 +4962,6 @@ mod tests {
         r.scroll_offset = 99; // simulate stale scroll from deep navigation
         handle_left(&mut r); // go back → depth 2
         assert_eq!(r.scroll_offset, 0, "scroll_offset must be reset on Left");
-    }
-
-    #[test]
-    fn left_from_path_provider_at_depth2_stays_depth2_and_refetches() {
-        // Regression: providers that return refresh_on_navigate=false for certain
-        // sub-paths (e.g. email client in compose mode) must still re-fetch when
-        // Left is pressed at depth 2, because pop_path moves to a parent path.
-        // Previously the does_refresh_on_nav guard prevented path_before capture,
-        // causing current_id to pop to depth 1 (root list).
-        use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
-        use sicompass_sdk::provider::Provider;
-
-        use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
-        let fetch_count = Arc::new(AtomicUsize::new(0));
-        struct PathProv { path: String, fetch_count: Arc<AtomicUsize> }
-        impl Provider for PathProv {
-            fn name(&self) -> &str { "pathprov" }
-            fn display_name(&self) -> &str { "pathprov" }
-            fn fetch(&mut self) -> Vec<FfonElement> {
-                self.fetch_count.fetch_add(1, Ordering::Relaxed);
-                vec![
-                    FfonElement::new_str("item-a"),
-                    FfonElement::new_str("item-b"),
-                ]
-            }
-            fn current_path(&self) -> &str { &self.path }
-            fn set_current_path(&mut self, p: &str) { self.path = p.to_owned(); }
-            fn push_path(&mut self, seg: &str) {
-                let base = self.path.trim_end_matches('/');
-                self.path = if base.is_empty() { format!("/{seg}") } else { format!("{base}/{seg}") };
-            }
-            fn pop_path(&mut self) {
-                if let Some(slash) = self.path.rfind('/') {
-                    self.path = if slash == 0 { "/".to_owned() } else { self.path[..slash].to_owned() };
-                }
-            }
-            // Simulate email-like: return false when inside a "compose" sub-path
-            fn refresh_on_navigate(&self) -> bool { !self.path.contains("compose") }
-        }
-
-        // Provider has folder list; "compose" is one of its children.
-        let compose_obj = FfonElement::Obj(FfonObject {
-            key: "compose".to_owned(),
-            children: vec![FfonElement::new_str("From: me")],
-        });
-        let root_obj = FfonElement::Obj(FfonObject {
-            key: "pathprov".to_owned(),
-            children: vec![FfonElement::new_str("INBOX"), compose_obj],
-        });
-        let mut r = AppRenderer::new();
-        r.ffon = vec![root_obj];
-        let prov = Box::new(PathProv { path: "/compose".to_owned(), fetch_count: Arc::clone(&fetch_count) });
-        r.providers.push(prov);
-        // Simulate being inside the compose form at depth 2
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
-        crate::list::create_list_current_layer(&mut r);
-
-        let fetches_before = fetch_count.load(Ordering::Relaxed);
-
-        handle_left(&mut r);
-
-        // Must stay at depth 2 (not pop to depth 1 / root provider list).
-        assert_eq!(r.current_id.depth(), 2,
-            "Left from compose depth-2 must stay at depth 2, not root");
-
-        // Path must have been popped back to parent.
-        let path_after = r.providers[0].current_path().to_owned();
-        assert!(!path_after.contains("compose"),
-            "path should no longer be in compose after Left: {path_after}");
-
-        // Provider must have been re-fetched to show the folder list.
-        let fetches_after = fetch_count.load(Ordering::Relaxed);
-        assert!(fetches_after > fetches_before, "provider should have been re-fetched");
-    }
-
-    #[test]
-    fn left_from_path_provider_depth2_with_stale_deep_path_skips_to_folder_list() {
-        // Regression: after undo/redo moves cursor from depth 3 to depth 2 without
-        // adjusting the provider path, the path may still be at a deeper sub-path
-        // (e.g. "/compose/Body: [ffon]").  Left must keep popping until reaching a
-        // path where refresh_on_navigate=true, rather than re-fetching compose.
-        use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
-        use sicompass_sdk::provider::Provider;
-        use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
-
-        let fetch_count = Arc::new(AtomicUsize::new(0));
-        let fetched_at_path = Arc::new(std::sync::Mutex::new(String::new()));
-
-        struct PathProv2 {
-            path: String,
-            fetch_count: Arc<AtomicUsize>,
-            fetched_at: Arc<std::sync::Mutex<String>>,
-        }
-        impl Provider for PathProv2 {
-            fn name(&self) -> &str { "pathprov2" }
-            fn display_name(&self) -> &str { "pathprov2" }
-            fn fetch(&mut self) -> Vec<FfonElement> {
-                self.fetch_count.fetch_add(1, Ordering::Relaxed);
-                *self.fetched_at.lock().unwrap() = self.path.clone();
-                // Root folder list contains "compose" as a child
-                vec![
-                    FfonElement::new_str("INBOX"),
-                    FfonElement::Obj(FfonObject { key: "compose".to_owned(), children: vec![] }),
-                ]
-            }
-            fn current_path(&self) -> &str { &self.path }
-            fn set_current_path(&mut self, p: &str) { self.path = p.to_owned(); }
-            fn push_path(&mut self, seg: &str) {
-                let base = self.path.trim_end_matches('/');
-                self.path = if base.is_empty() { format!("/{seg}") } else { format!("{base}/{seg}") };
-            }
-            fn pop_path(&mut self) {
-                if let Some(slash) = self.path.rfind('/') {
-                    self.path = if slash == 0 { "/".to_owned() } else { self.path[..slash].to_owned() };
-                }
-            }
-            fn refresh_on_navigate(&self) -> bool { !self.path.contains("compose") }
-        }
-
-        let root_obj = FfonElement::Obj(FfonObject {
-            key: "pathprov2".to_owned(),
-            children: vec![
-                FfonElement::new_str("INBOX"),
-                FfonElement::Obj(FfonObject { key: "compose".to_owned(), children: vec![] }),
-            ],
-        });
-        let mut r = AppRenderer::new();
-        r.ffon = vec![root_obj];
-        let prov = Box::new(PathProv2 {
-            path: "/compose/Body: [ffon]".to_owned(), // stale deep path from undo/redo
-            fetch_count: Arc::clone(&fetch_count),
-            fetched_at: Arc::clone(&fetched_at_path),
-        });
-        r.providers.push(prov);
-        // Cursor is at depth 2 (mismatch: path has 3 segments)
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
-        crate::list::create_list_current_layer(&mut r);
-
-        let fetches_before = fetch_count.load(Ordering::Relaxed);
-        handle_left(&mut r);
-
-        // Must stay at depth 2 (not pop to depth 1).
-        assert_eq!(r.current_id.depth(), 2,
-            "Left with stale deep path must stay at depth 2, not root");
-
-        // The provider must have been re-fetched at the root path "/".
-        let fetches_after = fetch_count.load(Ordering::Relaxed);
-        assert!(fetches_after > fetches_before, "provider should have been re-fetched");
-        let fetched_path = fetched_at_path.lock().unwrap().clone();
-        assert_eq!(fetched_path, "/",
-            "must re-fetch at '/' (folder list), not at compose path; got {fetched_path:?}");
-
-        // Cursor must land on the "compose" entry in the folder list.
-        let cursor_idx = r.current_id.last().unwrap_or(0);
-        assert_eq!(cursor_idx, 1,
-            "cursor should point to 'compose' entry (index 1); got {cursor_idx}");
-    }
-
-    #[test]
-    fn left_from_depth3_with_stale_compose_path_corrects_root_key() {
-        // Regression: undo/redo can place cursor at depth 3 while the provider
-        // path is "/compose" (not "/compose/Body: [...]") because the body was
-        // not re-navigated in the current compose session.  Pressing Left pops
-        // pop_path("/compose")→"/" silently (path_before=None at depth 3).
-        // Without correction the root FFON key stays "compose" and the user
-        // sees "compose" instead of the provider name in the root list.
-        use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
-        use sicompass_sdk::provider::Provider;
-        use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
-
-        let fetch_count = Arc::new(AtomicUsize::new(0));
-        struct PathProv3 {
-            path: String,
-            fetch_count: Arc<AtomicUsize>,
-        }
-        impl Provider for PathProv3 {
-            fn name(&self) -> &str { "pathprov3" }
-            fn display_name(&self) -> &str { "pathprov3" }
-            fn fetch(&mut self) -> Vec<FfonElement> {
-                self.fetch_count.fetch_add(1, Ordering::Relaxed);
-                vec![
-                    FfonElement::Obj(FfonObject { key: "INBOX".to_owned(), children: vec![] }),
-                    FfonElement::Obj(FfonObject { key: "compose".to_owned(), children: vec![] }),
-                ]
-            }
-            fn current_path(&self) -> &str { &self.path }
-            fn set_current_path(&mut self, p: &str) { self.path = p.to_owned(); }
-            fn push_path(&mut self, seg: &str) {
-                let base = self.path.trim_end_matches('/');
-                self.path = if base.is_empty() { format!("/{seg}") } else { format!("{base}/{seg}") };
-            }
-            fn pop_path(&mut self) {
-                if let Some(slash) = self.path.rfind('/') {
-                    self.path = if slash == 0 { "/".to_owned() } else { self.path[..slash].to_owned() };
-                }
-            }
-            fn refresh_on_navigate(&self) -> bool { !self.path.contains("compose") }
-        }
-
-        // Start with FFON in the "compose" state — stale key from a prior entry.
-        let stale_root = FfonElement::Obj(FfonObject {
-            key: "compose".to_owned(), // stale: should be "pathprov3"
-            children: vec![
-                FfonElement::new_str("From: me"),
-                FfonElement::new_str("Body: text"),
-            ],
-        });
-        let mut r = AppRenderer::new();
-        r.ffon = vec![stale_root];
-        let prov = Box::new(PathProv3 {
-            path: "/compose".to_owned(), // path mismatches depth: cursor is at depth 3
-            fetch_count: Arc::clone(&fetch_count),
-        });
-        r.providers.push(prov);
-        // Cursor at depth 3 (body element) but path only has 1 segment ("/compose")
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id.push(0); id };
-        crate::list::create_list_current_layer(&mut r);
-
-        let fetches_before = fetch_count.load(Ordering::Relaxed);
-        handle_left(&mut r); // depth 3 → depth 2, pop_path→"/"
-
-        // Must be at depth 2 (not depth 1).
-        assert_eq!(r.current_id.depth(), 2,
-            "Left from depth 3 stale-path must land at depth 2, not root");
-
-        // The stale FFON key must have been corrected — re-fetch should have fired.
-        let fetches_after = fetch_count.load(Ordering::Relaxed);
-        assert!(fetches_after > fetches_before, "provider should have been re-fetched to fix stale key");
-
-        // After re-fetch the root key must be "pathprov3" (the display_name).
-        let key = r.ffon[0].as_obj().map(|o| o.key.as_str()).unwrap_or("");
-        assert_eq!(key, "pathprov3",
-            "root FFON key must be display_name after stale-key correction; got {key:?}");
-
-        // Cursor must land on "compose" (last segment of pre-pop path "/compose").
-        let cursor = r.current_id.last().unwrap_or(usize::MAX);
-        assert_eq!(cursor, 1,
-            "cursor should point to 'compose' entry (index 1); got {cursor}");
     }
 
     #[test]
