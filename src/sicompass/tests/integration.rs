@@ -8816,7 +8816,9 @@ fn tutorial_placeholder_renderer() -> AppRenderer {
 }
 
 /// Typing a plain name (no prefix) on the I_PLACEHOLDER resolves to a Str at
-/// Enter. ctrl-Z must restore the I_PLACEHOLDER element.
+/// Enter. The commit rewrites the typing chunk's `after` to the final Str
+/// instead of recording a separate entry — one undo step lands on the
+/// I_PLACEHOLDER, no intermediate "i <input>...</input>" preview state.
 #[test]
 fn tutorial_placeholder_str_commit_undo_restores_i_placeholder() {
     use sicompass_sdk::placeholders::I_PLACEHOLDER;
@@ -8826,6 +8828,7 @@ fn tutorial_placeholder_str_commit_undo_restores_i_placeholder() {
     press(&mut renderer, Keycode::I);
     assert!(renderer.placeholder_insert_mode,
         "press i on I_PLACEHOLDER must enter placeholder_insert_mode");
+    let baseline = renderer.active_timeline().entries.len();
     type_text(&mut renderer, "hello");
     press_enter(&mut renderer);
 
@@ -8837,7 +8840,20 @@ fn tutorial_placeholder_str_commit_undo_restores_i_placeholder() {
         "after Enter the placeholder must be replaced by <input>hello</input>, got: {child:?}"
     );
 
-    // ctrl-Z must restore the I_PLACEHOLDER.
+    // Single-burst typing + commit must produce exactly one timeline entry —
+    // no Structural::Replace alongside the rewritten TextChunk.
+    let recorded = renderer.active_timeline().entries.len() - baseline;
+    assert_eq!(
+        recorded, 1,
+        "single-burst placeholder commit must produce one TextChunk, no Structural::Replace, got {recorded}"
+    );
+    let tail = renderer.active_timeline().entries.last().unwrap();
+    assert!(
+        matches!(tail, TimelineEntry::TextChunk { after: FfonElement::Str(s), .. } if s == "<input>hello</input>"),
+        "tail chunk's `after` must be rewritten to the final Str, got: {tail:?}"
+    );
+
+    // ctrl-Z must restore the I_PLACEHOLDER in one step.
     sicompass::state::walk_back(&mut renderer);
     let parent = renderer.ffon[0].as_obj().unwrap().children[0].as_obj().unwrap();
     let child = &parent.children[0];
@@ -8846,7 +8862,7 @@ fn tutorial_placeholder_str_commit_undo_restores_i_placeholder() {
         "ctrl-Z must restore the I_PLACEHOLDER, got: {child:?}"
     );
 
-    // ctrl-Shift-Z must re-apply the Str.
+    // ctrl-Shift-Z must restore the typed Str.
     sicompass::state::walk_forward(&mut renderer);
     let parent = renderer.ffon[0].as_obj().unwrap().children[0].as_obj().unwrap();
     let child = &parent.children[0];
@@ -8856,8 +8872,9 @@ fn tutorial_placeholder_str_commit_undo_restores_i_placeholder() {
     );
 }
 
-/// Typing `+name` on the I_PLACEHOLDER resolves to an Obj at Enter. ctrl-Z
-/// must restore the I_PLACEHOLDER element.
+/// Typing `+name` on the I_PLACEHOLDER resolves to an Obj at Enter. The
+/// commit rewrites the typing chunk's `after` to the final Obj — one undo
+/// step lands on the I_PLACEHOLDER, no separate Structural::Replace.
 #[test]
 fn tutorial_placeholder_obj_commit_undo_restores_i_placeholder() {
     use sicompass_sdk::placeholders::I_PLACEHOLDER;
@@ -8865,6 +8882,7 @@ fn tutorial_placeholder_obj_commit_undo_restores_i_placeholder() {
     let mut renderer = tutorial_placeholder_renderer();
 
     press(&mut renderer, Keycode::I);
+    let baseline = renderer.active_timeline().entries.len();
     type_text(&mut renderer, "+hello");
     press_enter(&mut renderer);
 
@@ -8874,7 +8892,19 @@ fn tutorial_placeholder_obj_commit_undo_restores_i_placeholder() {
     let obj = child.as_obj().expect("after +hello the placeholder must become an Obj");
     assert_eq!(obj.key, "hello", "Obj key must be the typed name");
 
-    // ctrl-Z must restore the I_PLACEHOLDER.
+    // One timeline entry — no Structural::Replace.
+    let recorded = renderer.active_timeline().entries.len() - baseline;
+    assert_eq!(
+        recorded, 1,
+        "single-burst placeholder commit must produce one TextChunk, no Structural::Replace, got {recorded}"
+    );
+    let tail = renderer.active_timeline().entries.last().unwrap();
+    assert!(
+        matches!(tail, TimelineEntry::TextChunk { after, .. } if after.as_obj().map_or(false, |o| o.key == "hello")),
+        "tail chunk's `after` must be rewritten to the final Obj, got: {tail:?}"
+    );
+
+    // ctrl-Z must restore the I_PLACEHOLDER in one step.
     sicompass::state::walk_back(&mut renderer);
     let parent = renderer.ffon[0].as_obj().unwrap().children[0].as_obj().unwrap();
     let child = &parent.children[0];
@@ -8883,12 +8913,72 @@ fn tutorial_placeholder_obj_commit_undo_restores_i_placeholder() {
         "ctrl-Z must restore the I_PLACEHOLDER, got: {child:?}"
     );
 
-    // ctrl-Shift-Z must re-apply the Obj.
+    // ctrl-Shift-Z must restore the typed Obj.
     sicompass::state::walk_forward(&mut renderer);
     let parent = renderer.ffon[0].as_obj().unwrap().children[0].as_obj().unwrap();
     let child = &parent.children[0];
     assert!(
         child.as_obj().map_or(false, |o| o.key == "hello"),
         "redo must restore the typed Obj, got: {child:?}"
+    );
+}
+
+/// Typing on the I_PLACEHOLDER with an idle gap >500ms produces two
+/// TextChunks via per-keystroke FFON mutation. The commit rewrites the tail
+/// chunk's `after` to the final Obj — ctrl-Z then steps through each typing
+/// burst back to the I_PLACEHOLDER, with no Structural::Replace in the chain.
+#[test]
+fn tutorial_placeholder_typing_pause_splits_chunks() {
+    use sicompass_sdk::placeholders::I_PLACEHOLDER;
+
+    let mut renderer = tutorial_placeholder_renderer();
+
+    press(&mut renderer, Keycode::I);
+    let baseline = renderer.active_timeline().entries.len();
+
+    type_text(&mut renderer, "+he");
+    std::thread::sleep(std::time::Duration::from_millis(550));
+    type_text(&mut renderer, "llo");
+
+    // Two typing bursts → two TextChunks.
+    let after_typing = renderer.active_timeline().entries.len() - baseline;
+    assert_eq!(
+        after_typing, 2,
+        "two typing bursts must produce two TextChunks during placeholder typing, got {after_typing}"
+    );
+
+    press_enter(&mut renderer);
+
+    // Enter does NOT add a Structural::Replace — total stays at 2 entries.
+    let after_enter = renderer.active_timeline().entries.len() - baseline;
+    assert_eq!(
+        after_enter, 2,
+        "placeholder commit must NOT add a Structural::Replace; tail TextChunk gets its `after` rewritten in place. got {after_enter}"
+    );
+
+    // Final state: Obj { key: "hello" }.
+    let parent = renderer.ffon[0].as_obj().unwrap().children[0].as_obj().unwrap();
+    assert!(parent.children[0].as_obj().map_or(false, |o| o.key == "hello"));
+
+    // Tail chunk's `after` was rewritten to the Obj.
+    let tail = renderer.active_timeline().entries.last().unwrap();
+    assert!(
+        matches!(tail, TimelineEntry::TextChunk { after, .. } if after.as_obj().map_or(false, |o| o.key == "hello")),
+        "tail chunk's `after` must be the final Obj, got: {tail:?}"
+    );
+
+    // Walk back twice: 2nd-burst → 1st-burst → I_PLACEHOLDER.
+    sicompass::state::walk_back(&mut renderer); // undo 2nd burst (from Obj)
+    let child = &renderer.ffon[0].as_obj().unwrap().children[0].as_obj().unwrap().children[0];
+    assert!(
+        matches!(child, FfonElement::Str(s) if s.contains("+he") && !s.contains("+hello")),
+        "first ctrl-Z must restore the 1st-burst end state, got: {child:?}"
+    );
+
+    sicompass::state::walk_back(&mut renderer); // undo 1st burst
+    let child = &renderer.ffon[0].as_obj().unwrap().children[0].as_obj().unwrap().children[0];
+    assert!(
+        matches!(child, FfonElement::Str(s) if s == I_PLACEHOLDER),
+        "second ctrl-Z must restore the I_PLACEHOLDER, got: {child:?}"
     );
 }

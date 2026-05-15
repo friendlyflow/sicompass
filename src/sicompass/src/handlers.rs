@@ -1755,24 +1755,19 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                     }
                 } else {
                     // No provider — update the FFON element in-place with <input> wrapping.
-                    // Record a Structural::Replace so ctrl-Z restores the I_PLACEHOLDER.
+                    // The per-keystroke session already recorded TextChunks tracking the
+                    // I_PLACEHOLDER → typed-preview transitions; rewrite the tail chunk's
+                    // `after` to point at the final committed Str so ctrl-Z lands on the
+                    // previous typing burst (or I_PLACEHOLDER if there were no pauses),
+                    // not on the unhelpful "i <input>name</input>" preview.
                     let idx = r.current_id.last().unwrap_or(0);
-                    let before = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)
-                        .and_then(|a| a.get(idx).cloned());
                     let after = FfonElement::new_str(format!("<input>{name}</input>"));
                     if let Some(arr) = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id) {
                         if let Some(e) = arr.get_mut(idx) {
                             *e = after.clone();
                         }
                     }
-                    if let Some(before) = before {
-                        let entry = sicompass_sdk::timeline::TimelineEntry::Structural {
-                            id: r.current_id.clone(),
-                            op: sicompass_sdk::timeline::StructuralOp::Replace,
-                            payload: sicompass_sdk::timeline::StructuralPayload::Replaced { before, after },
-                        };
-                        crate::state::record_entry(r, entry);
-                    }
+                    rewrite_last_text_chunk_after(r, &after);
                 }
                 list::create_list_current_layer(r);
                 let prev = r.previous_coordinate;
@@ -1834,11 +1829,10 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                         }
                     }
                 } else {
-                    // No provider — mutate the FFON element directly.
-                    // Record a Structural::Replace so ctrl-Z restores the I_PLACEHOLDER.
+                    // No provider — mutate the FFON element directly. Rewrite the
+                    // tail TextChunk's `after` to point at the final committed Obj
+                    // (see the PlaceholderKind::Str arm above for the rationale).
                     let idx = r.current_id.last().unwrap_or(0);
-                    let before = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)
-                        .and_then(|a| a.get(idx).cloned());
                     let after = {
                         let mut obj = FfonElement::new_obj(&key);
                         obj.as_obj_mut().unwrap().push(FfonElement::new_str(String::new()));
@@ -1849,14 +1843,7 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                             *e = after.clone();
                         }
                     }
-                    if let Some(before) = before {
-                        let entry = sicompass_sdk::timeline::TimelineEntry::Structural {
-                            id: r.current_id.clone(),
-                            op: sicompass_sdk::timeline::StructuralOp::Replace,
-                            payload: sicompass_sdk::timeline::StructuralPayload::Replaced { before, after },
-                        };
-                        crate::state::record_entry(r, entry);
-                    }
+                    rewrite_last_text_chunk_after(r, &after);
                 }
                 list::create_list_current_layer(r);
                 let prev = r.previous_coordinate;
@@ -3316,21 +3303,19 @@ fn populate_input_buffer(r: &mut AppRenderer) {
 
 /// Capture FFON snapshot + timeline position at insert-mode entry so each
 /// keystroke can mutate the FFON element directly and record a TextChunk via
-/// `state::record_entry`. Skips:
-/// - non-`<input>` elements (commit goes through a different path),
-/// - `*` placeholder mode (commit resolves the typed prefix to Str/Obj),
-/// - the `i <input></input>` permanent-placeholder marker.
+/// `state::record_entry`. Skips non-`<input>` elements (their commit goes
+/// through a different path). Placeholder mode (`i <input></input>`) is
+/// included: typing into the placeholder mutates the FFON live (visually
+/// "i <input>typed</input>"), and the Enter-time placeholder branch then
+/// records a Structural::Replace turning the buffered preview into a Str/Obj.
 ///
-/// Called from `handle_i` / `handle_a` after `populate_input_buffer` so that
+/// Called from `handle_i` / `handle_a` after `populate_input_buffer` so
 /// `input_prefix` / `input_suffix` reflect the current element.
 pub(crate) fn begin_insert_session(r: &mut AppRenderer) {
     use sicompass_sdk::ffon::{FfonElement, get_ffon_at_id};
     use sicompass_sdk::tags;
     use crate::app_state::InsertSession;
 
-    if r.placeholder_insert_mode {
-        return;
-    }
     let idx = r.current_id.last().unwrap_or(0);
     let elem = match get_ffon_at_id(&r.ffon, &r.current_id).and_then(|a| a.get(idx)) {
         Some(e) => e.clone(),
@@ -3377,9 +3362,17 @@ pub(crate) fn apply_insert_session_chunk(r: &mut AppRenderer) {
         None => return,
     };
 
+    // In I_PLACEHOLDER mode the prefix is "i " — strip it during typing so
+    // intermediate FFON states (and the chunks recorded for them) render as a
+    // plain `<input>typed</input>` rather than `i <input>typed</input>`,
+    // which would look like an in-progress placeholder marker on undo/redo
+    // navigation. The original "i " lives on in `session.original_element` and
+    // the very first chunk's `before` (the I_PLACEHOLDER itself), so Escape
+    // and the final undo step still restore the marker.
+    let effective_prefix: &str = if r.placeholder_insert_mode { "" } else { &r.input_prefix };
     let new_key = format!(
         "{}<input>{}</input>{}",
-        r.input_prefix, r.input_buffer, r.input_suffix
+        effective_prefix, r.input_buffer, r.input_suffix
     );
     let after = match &before {
         FfonElement::Str(_) => FfonElement::new_str(new_key),
@@ -3409,6 +3402,24 @@ pub(crate) fn apply_insert_session_chunk(r: &mut AppRenderer) {
             chunk_seq: 0,
         },
     );
+}
+
+/// Rewrite the tail TextChunk's `after` field to `final_state`. Called from
+/// the I_PLACEHOLDER commit paths so the per-keystroke chunk recorded during
+/// typing ends at the final committed Str/Obj instead of the
+/// "i <input>name</input>" preview — ctrl-Z then jumps from the committed
+/// element straight back to the previous typing burst (or to the
+/// I_PLACEHOLDER if there were no pauses), with no extra Structural::Replace
+/// entry cluttering the timeline. No-op if the tail isn't a TextChunk.
+pub(crate) fn rewrite_last_text_chunk_after(
+    r: &mut AppRenderer,
+    final_state: &sicompass_sdk::ffon::FfonElement,
+) {
+    use sicompass_sdk::timeline::TimelineEntry;
+    let tl = r.active_timeline_mut();
+    if let Some(TimelineEntry::TextChunk { after, .. }) = tl.entries.last_mut() {
+        *after = final_state.clone();
+    }
 }
 
 /// Discard the active insert session: restore the FFON snapshot taken at
