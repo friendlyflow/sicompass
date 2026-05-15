@@ -1560,6 +1560,9 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
     // that funnel through `handle_escape` won't revert the FFON — Escape
     // means cancel, Enter means commit.
     let session = r.insert_session.take();
+    // Timeline index of the first per-keystroke TextChunk for this edit — used
+    // to retarget those chunks once a provider commit shifts the element.
+    let session_start = session.as_ref().map(|s| s.timeline_position_at_start);
 
     // Get current element's raw key/value. When a session is active, prefer
     // the session's original snapshot so downstream reads (`old_content`,
@@ -1631,10 +1634,15 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                     if let Some(star_idx) = new_star_idx {
                         r.current_id.set_last(star_idx);
                     }
-                    // Record undo entry for compose-body Str insertions.
+                    // Retarget the per-keystroke TextChunks onto the committed
+                    // Str. The I_PLACEHOLDER seeded for this edit collapses away
+                    // when the body Obj is re-fetched, so the keystroke ids are
+                    // stale; the chunk whose `before` is the I_PLACEHOLDER then
+                    // carries insert/delete undo semantics (see the TextChunk
+                    // arms in `state::apply_undo`) — no separate Structural.
                     if crate::provider::is_in_email_compose_body(r) {
                         let target = format!("<input>{name}</input>");
-                        let entry = {
+                        let found = {
                             let arr = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id);
                             arr.and_then(|a| {
                                 a.iter().rposition(|e| matches!(e, FfonElement::Str(s) if *s == target))
@@ -1645,13 +1653,8 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                                     })
                             })
                         };
-                        if let Some((cid, elem)) = entry {
-                            let tl_entry = sicompass_sdk::timeline::TimelineEntry::Structural {
-                                id: cid,
-                                op: sicompass_sdk::timeline::StructuralOp::Insert,
-                                payload: sicompass_sdk::timeline::StructuralPayload::Inserted(elem),
-                            };
-                            crate::state::record_entry(r, tl_entry);
+                        if let (Some((cid, elem)), Some(start)) = (found, session_start) {
+                            retarget_insert_session_chunks(r, start, &cid, &elem);
                         }
                     }
                     }
@@ -1707,10 +1710,11 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                     if let Some(star_idx) = new_star_idx {
                         r.current_id.set_last(star_idx);
                     }
-                    // Record undo entry for compose-body Obj insertions.
+                    // Retarget the per-keystroke TextChunks onto the committed
+                    // Obj (see the PlaceholderKind::Str arm above).
                     if crate::provider::is_in_email_compose_body(r) {
                         let key_trimmed = key.trim().to_owned();
-                        let entry = {
+                        let found = {
                             let arr = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id);
                             arr.and_then(|a| {
                                 a.iter().rposition(|e| {
@@ -1729,13 +1733,8 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                                 })
                             })
                         };
-                        if let Some((cid, elem)) = entry {
-                            let tl_entry = sicompass_sdk::timeline::TimelineEntry::Structural {
-                                id: cid,
-                                op: sicompass_sdk::timeline::StructuralOp::Insert,
-                                payload: sicompass_sdk::timeline::StructuralPayload::Inserted(elem),
-                            };
-                            crate::state::record_entry(r, tl_entry);
+                        if let (Some((cid, elem)), Some(start)) = (found, session_start) {
+                            retarget_insert_session_chunks(r, start, &cid, &elem);
                         }
                     }
                     }
@@ -3252,6 +3251,33 @@ pub(crate) fn rewrite_last_text_chunk_after(
     let tl = r.active_timeline_mut();
     if let Some(TimelineEntry::TextChunk { after, .. }) = tl.entries.last_mut() {
         *after = final_state.clone();
+    }
+}
+
+/// Retarget the per-keystroke TextChunks of the just-finished insert session
+/// (timeline entries at or after `session_start`) onto `committed_id`, and
+/// point the tail chunk's `after` at `committed`. `commit_edit` plus the
+/// sub-tree refresh can shift the edited element's index — the transient
+/// I_PLACEHOLDER seeded for the edit collapses away when the body Obj is
+/// re-fetched — leaving the keystroke ids stale. After retargeting, the
+/// I_PLACEHOLDER-origin chunk drives insert/delete undo in
+/// `state::apply_undo`/`apply_redo` without a separate Structural entry.
+fn retarget_insert_session_chunks(
+    r: &mut AppRenderer,
+    session_start: usize,
+    committed_id: &sicompass_sdk::ffon::IdArray,
+    committed: &sicompass_sdk::ffon::FfonElement,
+) {
+    use sicompass_sdk::timeline::TimelineEntry;
+    let tl = r.active_timeline_mut();
+    let end = tl.entries.len();
+    for i in session_start..end {
+        if let Some(TimelineEntry::TextChunk { id, after, .. }) = tl.entries.get_mut(i) {
+            *id = committed_id.clone();
+            if i + 1 == end {
+                *after = committed.clone();
+            }
+        }
     }
 }
 

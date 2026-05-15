@@ -584,9 +584,25 @@ fn apply_undo(r: &mut AppRenderer, entry: &TimelineEntry) {
             r.current_id = from_id.clone();
         }
         TimelineEntry::TextChunk { id, before, .. } => {
-            replace_element_at_id(r, id, before.clone());
-            r.current_id = id.clone();
-            sync_compose_body_if_body_element(r, id);
+            if text_chunk_is_compose_insertion(r, id, before) {
+                // First chunk of a fresh compose-body insertion: the typed
+                // element did not exist before this edit, so undo removes it
+                // — reverting it to a bare I_PLACEHOLDER would strand an empty
+                // slot in a populated body. Mirrors the Structural::Insert
+                // undo arm below.
+                r.current_id = id.clone();
+                crate::handlers::handle_delete(r, History::Undo);
+                upgrade_body_bare_placeholder(r, id);
+                sync_compose_body_if_body_element(r, id);
+                if r.current_id.last().unwrap_or(0) > 0 {
+                    let cur = r.current_id.last().unwrap_or(1);
+                    r.current_id.set_last(cur - 1);
+                }
+            } else {
+                replace_element_at_id(r, id, before.clone());
+                r.current_id = id.clone();
+                sync_compose_body_if_body_element(r, id);
+            }
         }
         TimelineEntry::Structural { id, op, payload } => match (op, payload) {
             (StructuralOp::Append | StructuralOp::Insert, _) => {
@@ -665,10 +681,18 @@ fn apply_redo(r: &mut AppRenderer, entry: &TimelineEntry) {
             }
             r.current_id = to_id.clone();
         }
-        TimelineEntry::TextChunk { id, after, .. } => {
-            replace_element_at_id(r, id, after.clone());
-            r.current_id = id.clone();
-            sync_compose_body_if_body_element(r, id);
+        TimelineEntry::TextChunk { id, before, after, .. } => {
+            if text_chunk_is_compose_insertion(r, id, before) {
+                // Re-apply the compose-body insertion (see the undo arm).
+                clear_sole_i_placeholder_if_body_element(r, id);
+                insert_element_at_id(r, id, after.clone());
+                r.current_id = id.clone();
+                sync_compose_body_if_body_element(r, id);
+            } else {
+                replace_element_at_id(r, id, after.clone());
+                r.current_id = id.clone();
+                sync_compose_body_if_body_element(r, id);
+            }
         }
         TimelineEntry::Structural { id, op, payload } => match (op, payload) {
             (
@@ -1109,6 +1133,58 @@ fn get_current_line(r: &AppRenderer) -> (String, bool) {
         Some(FfonElement::Obj(obj)) => (obj.key.clone(), true),
         None => (String::new(), false),
     }
+}
+
+/// True when `id` addresses an element directly inside an email-compose
+/// `Body:` Obj.
+///
+/// An I_PLACEHOLDER-origin `TextChunk` gets insert/delete undo semantics only
+/// here, where the placeholder is a transient slot (seeded when the body is
+/// empty, or appended by Ctrl+A). Elsewhere — notably the tutorial's permanent
+/// `+i input example` placeholder — the same chunk shape is a plain in-place
+/// edit and must keep its revert-in-place undo.
+fn id_in_email_compose_body(r: &AppRenderer, id: &IdArray) -> bool {
+    if id.depth() < 3 {
+        return false;
+    }
+    let provider_idx = match id.get(0) {
+        Some(i) => i,
+        None => return false,
+    };
+    let is_email = r
+        .providers
+        .get(provider_idx)
+        .map(|p| p.name() == "emailclient")
+        .unwrap_or(false);
+    if !is_email {
+        return false;
+    }
+    // The element's container Obj is the body — `id` minus its last index.
+    let mut body_obj_id = id.clone();
+    body_obj_id.pop();
+    let body_idx = body_obj_id.last().unwrap_or(0);
+    sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &body_obj_id)
+        .and_then(|arr| arr.get(body_idx))
+        .and_then(|e| e.as_obj())
+        .map(|o| {
+            let key = sicompass_sdk::tags::extract_input(&o.key)
+                .unwrap_or_else(|| o.key.clone());
+            key.trim_start().starts_with("Body:")
+        })
+        .unwrap_or(false)
+}
+
+/// True when a `TextChunk` is the first chunk of a fresh compose-body
+/// insertion: its `before` is the I_PLACEHOLDER and `id` sits in an email
+/// compose body. Such a chunk is undone by removing the element (not by
+/// reverting it to the placeholder).
+fn text_chunk_is_compose_insertion(
+    r: &AppRenderer,
+    id: &IdArray,
+    before: &FfonElement,
+) -> bool {
+    matches!(before, FfonElement::Str(s) if *s == sicompass_sdk::placeholders::I_PLACEHOLDER)
+        && id_in_email_compose_body(r, id)
 }
 
 /// Before re-inserting a real element into a body that currently holds only `I_PLACEHOLDER`,

@@ -4450,6 +4450,57 @@ fn compose_body_insert_undo_redo_syncs_draft_body() {
     );
 }
 
+/// A compose-body insertion is recorded purely as per-keystroke TextChunks —
+/// no redundant Structural::Insert alongside them. Single-burst typing collapses
+/// to one entry, which the I_PLACEHOLDER-origin TextChunk undo arm reverses.
+#[test]
+fn compose_body_insert_records_only_text_chunks() {
+    ensure_builtins();
+    use sicompass_emailclient::EmailClientProvider;
+    use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
+    use sicompass_sdk::timeline::TimelineEntry;
+
+    let mut renderer = AppRenderer::new();
+    let mut p = EmailClientProvider::new();
+    p.set_current_path("compose/Body: [text]");
+    p.commit_edit("", "line1");
+
+    let body_obj = FfonElement::Obj(FfonObject {
+        key: "Body: [text]".to_owned(),
+        children: vec![FfonElement::new_str("<input>line1</input>".to_owned())],
+    });
+    let compose_root = FfonElement::Obj(FfonObject {
+        key: "compose".to_owned(),
+        children: vec![body_obj],
+    });
+    renderer.ffon.push(compose_root);
+    renderer.providers.push(Box::new(p));
+
+    renderer.current_id = {
+        let mut id = IdArray::new();
+        id.push(0); id.push(0); id.push(0);
+        id
+    };
+    renderer.coordinate = Coordinate::General;
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    let baseline = renderer.active_timeline().entries.len();
+    press_ctrl(&mut renderer, Keycode::A);
+    type_text(&mut renderer, "line2");
+    press_enter(&mut renderer);
+
+    let recorded: Vec<&TimelineEntry> =
+        renderer.active_timeline().entries[baseline..].iter().collect();
+    assert!(
+        recorded.iter().all(|e| matches!(e, TimelineEntry::TextChunk { .. })),
+        "compose-body insertion must record only TextChunks (no Structural), got: {recorded:?}"
+    );
+    assert_eq!(
+        recorded.len(), 1,
+        "single-burst typing must collapse to one TextChunk, got {}", recorded.len()
+    );
+}
+
 /// Inserting into an initially-empty compose body (I_PLACEHOLDER case) via Ctrl+A → type
 /// → Enter must be undoable, restoring the I_PLACEHOLDER and keeping draft.body in sync.
 #[test]
