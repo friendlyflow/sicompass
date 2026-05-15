@@ -624,7 +624,7 @@ fn parse_cd(line: &str, base: &Path) -> Option<PathBuf> {
     if !after_cd.is_empty() && !after_cd.starts_with(char::is_whitespace) {
         return None;
     }
-    let mut rest = after_cd.trim_start();
+    let rest = after_cd.trim_start();
 
     #[cfg(windows)]
     {

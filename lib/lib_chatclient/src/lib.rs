@@ -2828,7 +2828,6 @@ mod tests {
             cache.invites.insert(
                 "!inv:server".to_owned(),
                 sync::InviteState {
-                    room_id: "!inv:server".to_owned(),
                     display_name: "Party".to_owned(),
                     inviter: "@alice:server".to_owned(),
                 },
@@ -2863,7 +2862,6 @@ mod tests {
             cache.invites.insert(
                 "!inv:s".to_owned(),
                 sync::InviteState {
-                    room_id: "!inv:s".to_owned(),
                     display_name: "Aaa".to_owned(),
                     inviter: String::new(),
                 },
@@ -3149,7 +3147,6 @@ mod tests {
             cache.invites.insert(
                 "!inv:x".to_owned(),
                 sync::InviteState {
-                    room_id: "!inv:x".to_owned(),
                     display_name: "Party".to_owned(),
                     inviter: "@a:s".to_owned(),
                 },

@@ -584,6 +584,10 @@ fn normalize_url_input(input: &str) -> Option<String> {
 ///
 /// Returns `Err(missing_keys)` listing every stored key that has no entry in
 /// `fresh`.  An empty `stored` always succeeds.
+//
+// Currently exercised only by tests: the Windows submit path it supports is
+// not yet wired up.
+#[allow(dead_code)]
 pub(crate) fn check_form_drift(
     stored: &HashMap<String, String>,
     fresh: &FormMap,
@@ -603,6 +607,9 @@ pub(crate) fn check_form_drift(
 
 /// Store an error string into a shared error slot.  Quiet on poisoned mutex —
 /// the slot is best-effort communication to the UI's `take_error` poller.
+//
+// Currently exercised only by tests — see `check_form_drift` above.
+#[allow(dead_code)]
 pub(crate) fn set_error(slot: &Arc<Mutex<Option<String>>>, msg: String) {
     if let Ok(mut g) = slot.lock() {
         *g = Some(msg);

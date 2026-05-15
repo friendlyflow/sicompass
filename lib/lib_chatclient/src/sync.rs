@@ -61,7 +61,6 @@ pub struct RoomState {
 
 #[derive(Debug, Clone)]
 pub struct InviteState {
-    pub room_id: String,
     pub display_name: String,
     pub inviter: String,
 }
@@ -157,7 +156,7 @@ pub fn parse_sync_response(json: serde_json::Value, cache: &mut SyncCache) -> bo
             if !cache.invites.contains_key(room_id) {
                 cache.invites.insert(
                     room_id.clone(),
-                    InviteState { room_id: room_id.clone(), display_name, inviter },
+                    InviteState { display_name, inviter },
                 );
                 changed = true;
             }
@@ -564,6 +563,7 @@ impl SyncController {
         }
     }
 
+    #[cfg(test)]
     pub fn is_running(&self) -> bool {
         self.running.load(Ordering::Relaxed)
     }
@@ -1003,7 +1003,6 @@ mod tests {
         cache.invites.insert(
             "!inv:server".to_owned(),
             InviteState {
-                room_id: "!inv:server".to_owned(),
                 display_name: "Party".to_owned(),
                 inviter: "@alice:server".to_owned(),
             },

@@ -54,7 +54,7 @@ struct FfonObjectC {
 
 /// Mirror of C's `FfonElement`.
 #[repr(C)]
-struct FfonElementC {
+pub struct FfonElementC {
     element_type: u32,
     // union { char *string; FfonObject *object; } data
     data: *mut std::ffi::c_void,
@@ -62,14 +62,14 @@ struct FfonElementC {
 
 /// Mirror of C's `ProviderListItem` (sdk/include/provider_interface.h:20-23).
 #[repr(C)]
-struct ProviderListItemC {
+pub struct ProviderListItemC {
     label: *mut c_char,
     data: *mut c_char,
 }
 
 /// Mirror of C's `SearchResultItem` (sdk/include/provider_interface.h:11-15).
 #[repr(C)]
-struct SearchResultItemC {
+pub struct SearchResultItemC {
     label: *mut c_char,
     breadcrumb: *mut c_char,
     nav_path: *mut c_char,

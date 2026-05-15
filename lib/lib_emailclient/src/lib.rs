@@ -549,14 +549,17 @@ impl EmailClientProvider {
             .collect()
     }
 
+    #[cfg(test)]
     fn at_root(&self) -> bool {
         self.path_segments().is_empty()
     }
 
+    #[cfg(test)]
     fn at_folder(&self) -> bool {
         self.path_segments().len() == 1
     }
 
+    #[cfg(test)]
     fn at_message(&self) -> bool {
         self.path_segments().len() == 2
     }
@@ -564,15 +567,6 @@ impl EmailClientProvider {
     fn at_compose(&self) -> bool {
         let segs = self.path_segments();
         segs.len() == 1 && matches!(segs[0], "compose" | "reply" | "reply all" | "forward")
-    }
-
-    fn at_history(&self) -> bool {
-        self.path_segments().last().copied() == Some("History")
-    }
-
-    /// The folder display-name at the first path segment.
-    fn folder_seg(&self) -> &str {
-        self.path_segments().first().copied().unwrap_or("")
     }
 
     /// Resolve a display-name to the real IMAP folder name.
@@ -775,10 +769,6 @@ impl EmailClientProvider {
 
     fn imap_mut(&mut self) -> Option<&mut (dyn ImapBackend + 'static)> {
         self.imap.as_deref_mut()
-    }
-
-    fn smtp_mut(&mut self) -> Option<&mut (dyn SmtpBackend + 'static)> {
-        self.smtp.as_deref_mut()
     }
 
     // ---- Login logic ---------------------------------------------------------
@@ -1003,7 +993,6 @@ impl EmailClientProvider {
         };
 
         let folder_result = imap.list_folders();
-        drop(imap);
         self.build_root_from_folder_list(folder_result)
     }
 
@@ -1848,6 +1837,10 @@ fn update_body_leaf(body: &mut MailBody, old_content: &str, new_content: &str) {
 /// - `path = [i]`: remove `elems[i]` directly.
 /// - `path = [i, rest..]`: descend into `elems[i]` (must be an `Obj`) and recurse.
 /// - `path = []`: no-op, returns `false`.
+//
+// Currently exercised only by tests: the compose body-delete path that this
+// supports (added with email undo/redo) is not yet wired into the provider.
+#[allow(dead_code)]
 fn remove_at(elems: &mut Vec<FfonElement>, path: &[usize]) -> bool {
     match path {
         [] => false,
@@ -1877,6 +1870,9 @@ fn remove_at(elems: &mut Vec<FfonElement>, path: &[usize]) -> bool {
 /// For `Ffon` bodies: walks the tree by `path` and removes the element there.
 /// For `Text`: any non-empty single-segment path clears the body.
 /// After removal, ensures the top-level element list is never left empty.
+//
+// Currently exercised only by tests — see `remove_at` above.
+#[allow(dead_code)]
 fn delete_body_element_at(body: &mut MailBody, path: &[usize]) -> bool {
     match body {
         MailBody::Ffon(elems) => {

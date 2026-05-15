@@ -21,7 +21,6 @@ mod parse;
 
 use sicompass_sdk::ffon::FfonElement;
 use sicompass_sdk::manifest::{BuiltinManifest, SettingDecl};
-use sicompass_sdk::placeholders::I_PLACEHOLDER;
 use sicompass_sdk::provider::Provider;
 use sicompass_sdk::tags;
 use sicompass_sdk::{register_builtin_manifest, register_provider_factory};
@@ -553,6 +552,7 @@ pub fn register() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sicompass_sdk::placeholders::I_PLACEHOLDER;
     use tempfile::TempDir;
 
     fn make_tmp() -> TempDir {
