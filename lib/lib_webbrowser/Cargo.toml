@@ -9,7 +9,7 @@ description = "Sicompass web browser provider"
 sicompass-sdk = { workspace = true }
 chromiumoxide = "0.9"
 futures = "0.3"
-which = "7"
+which = "8"
 tokio = { workspace = true }
 
 [dev-dependencies]

@@ -46,9 +46,7 @@ impl Emulator {
 
     /// Feed bytes from the PTY. Updates the grid in place.
     pub fn feed(&mut self, bytes: &[u8]) {
-        for &b in bytes {
-            self.parser.advance(&mut self.state, b);
-        }
+        self.parser.advance(&mut self.state, bytes);
     }
 
     /// Resize the grid. Cells that fall outside the new size are dropped;

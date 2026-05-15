@@ -44,7 +44,7 @@ serde_json = "1"
 
 # Graphics
 ash = "0.38"
-glam = "0.29"
+glam = "0.32"
 
 # Text rendering
 freetype = "0.7"
@@ -54,14 +54,14 @@ rustybuzz = "0.20"
 image = { version = "0.25", features = ["jpeg", "png", "webp"] }
 
 # Windowing + events
-sdl3 = "0.12"
+sdl3 = "0.18"
 
 # Accessibility
-accesskit = "0.16"
-accesskit_unix = "0.12"
-accesskit_windows = "0.23"
-accesskit_macos = "0.17"
-windows = { version = "0.58", features = ["Win32_Foundation"] }
+accesskit = "0.24"
+accesskit_unix = "0.21"
+accesskit_windows = "0.33"
+accesskit_macos = "0.26"
+windows = { version = "0.62", features = ["Win32_Foundation"] }
 
 # Unicode
 unicode-normalization = "0.1"
@@ -74,29 +74,31 @@ natord = "1"
 
 # Async / networking (library providers, later phases)
 tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.12", features = ["json", "blocking", "cookies"] }
+reqwest = { version = "0.13", features = ["json", "blocking", "cookies", "form"] }
 
 # Email client
 imap = { version = "2", default-features = false, features = ["tls"] }
+# Pinned to 0.10 to match the imap 2.x crate's re-exported imap-proto types;
+# imap-proto 0.16 requires imap 3.x, which has no stable release.
 imap-proto = "0.10"
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "native-tls", "builder"] }
 native-tls = "0.2"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.39", features = ["bundled"] }
 
 # HTML parsing
-scraper = "0.22"
+scraper = "0.27"
 
 # URL handling
 url = "2"
 
 # Plugin loading
-libloading = "0.8"
+libloading = "0.9"
 
 # PTY (interactive shell sessions used by sicompass-shell)
-portable-pty = "0.8"
+portable-pty = "0.9"
 
 # ANSI/VT parser (interactive terminal emulator inside sicompass-terminal)
-vte = "0.13"
+vte = "0.15"
 
 # Logging
 tracing = "0.1"
@@ -110,7 +112,7 @@ libc = "0.2"
 winres = "0.1"
 
 # Test dependencies
-mockall = "0.13"
+mockall = "0.14"
 tempfile = "3"
 wiremock = "0.6"
 

@@ -15,7 +15,7 @@
 //!   technology is actually listening (zero overhead otherwise).
 
 use crate::app_state::AppRenderer;
-use accesskit::{Live, NodeBuilder, NodeId, Role, Tree, TreeUpdate};
+use accesskit::{Live, Node, NodeId, Role, Tree, TreeId, TreeUpdate};
 
 // ---------------------------------------------------------------------------
 // Node-ID convention
@@ -275,22 +275,22 @@ fn build_tree(renderer: &AppRenderer) -> TreeUpdate {
         };
         label_to_speech(&renderer.total_list[raw_idx].label)
     };
-    let mut elem = NodeBuilder::new(Role::ListItem);
-    elem.set_name(Box::<str>::from(element_label.as_str()));
-    nodes.push((ELEMENT_ID, elem.build()));
+    let mut elem = Node::new(Role::ListItem);
+    elem.set_label(Box::<str>::from(element_label.as_str()));
+    nodes.push((ELEMENT_ID, elem));
 
     // ---- Announcement live-region node (always present) --------------------
     let ann_text = renderer.pending_announcement.as_deref().unwrap_or("");
-    let mut ann = NodeBuilder::new(Role::ListItem);
-    ann.set_name(Box::<str>::from(ann_text));
+    let mut ann = Node::new(Role::ListItem);
+    ann.set_label(Box::<str>::from(ann_text));
     ann.set_live(Live::Polite);
-    nodes.push((ANNOUNCEMENT_ID, ann.build()));
+    nodes.push((ANNOUNCEMENT_ID, ann));
 
     // ---- Root window node --------------------------------------------------
-    let mut root_builder = NodeBuilder::new(Role::Window);
-    root_builder.set_name(Box::<str>::from("sicompass"));
+    let mut root_builder = Node::new(Role::Window);
+    root_builder.set_label(Box::<str>::from("sicompass"));
     root_builder.set_children(vec![ELEMENT_ID, ANNOUNCEMENT_ID]);
-    nodes.insert(0, (ROOT_ID, root_builder.build()));
+    nodes.insert(0, (ROOT_ID, root_builder));
 
     let focus = if renderer.total_list.is_empty() {
         ROOT_ID
@@ -301,6 +301,7 @@ fn build_tree(renderer: &AppRenderer) -> TreeUpdate {
     TreeUpdate {
         nodes,
         tree: Some(Tree::new(ROOT_ID)),
+        tree_id: TreeId::ROOT,
         focus,
     }
 }
@@ -406,7 +407,7 @@ mod tests {
         let tree = build_tree(&r);
         // Focus always lands on ELEMENT_ID; the label reflects the selected item.
         assert_eq!(tree.focus, ELEMENT_ID);
-        assert_eq!(tree.nodes[1].1.name().as_deref(), Some("c"));
+        assert_eq!(tree.nodes[1].1.label().as_deref(), Some("c"));
     }
 
     #[test]
@@ -415,7 +416,7 @@ mod tests {
         r.list_index = 99; // out of bounds
         let tree = build_tree(&r);
         assert_eq!(tree.focus, ELEMENT_ID);
-        assert_eq!(tree.nodes[1].1.name().as_deref(), Some("only"));
+        assert_eq!(tree.nodes[1].1.label().as_deref(), Some("only"));
     }
 
     #[test]
@@ -483,12 +484,12 @@ mod tests {
         // First item (index 0)
         let r = make_renderer_with_list(&["-i newfile.txt", "+l dir"]);
         let tree = build_tree(&r);
-        assert_eq!(tree.nodes[1].1.name().as_deref(), Some("minus i newfile.txt"));
+        assert_eq!(tree.nodes[1].1.label().as_deref(), Some("minus i newfile.txt"));
         // Second item (index 1)
         let mut r2 = make_renderer_with_list(&["-i newfile.txt", "+l dir"]);
         r2.list_index = 1;
         let tree2 = build_tree(&r2);
-        assert_eq!(tree2.nodes[1].1.name().as_deref(), Some("plus l dir"));
+        assert_eq!(tree2.nodes[1].1.label().as_deref(), Some("plus l dir"));
     }
 
     #[test]
@@ -496,19 +497,19 @@ mod tests {
         // First item (index 0)
         let r = make_renderer_with_list(&["Files", "Tutorial"]);
         let tree = build_tree(&r);
-        assert_eq!(tree.nodes[1].1.name().as_deref(), Some("Files"));
+        assert_eq!(tree.nodes[1].1.label().as_deref(), Some("Files"));
         // Second item (index 1)
         let mut r2 = make_renderer_with_list(&["Files", "Tutorial"]);
         r2.list_index = 1;
         let tree2 = build_tree(&r2);
-        assert_eq!(tree2.nodes[1].1.name().as_deref(), Some("Tutorial"));
+        assert_eq!(tree2.nodes[1].1.label().as_deref(), Some("Tutorial"));
     }
 
     #[test]
     fn build_tree_root_name_is_sicompass() {
         let r = AppRenderer::new();
         let tree = build_tree(&r);
-        assert_eq!(tree.nodes[0].1.name().as_deref(), Some("sicompass"));
+        assert_eq!(tree.nodes[0].1.label().as_deref(), Some("sicompass"));
     }
 
     #[test]
@@ -530,7 +531,7 @@ mod tests {
         let ann = tree.nodes.iter().find(|(id, _)| *id == ANNOUNCEMENT_ID);
         assert!(ann.is_some(), "announcement node should always be present");
         let (_, node) = ann.unwrap();
-        assert_eq!(node.name().unwrap(), "search");
+        assert_eq!(node.label().unwrap(), "search");
         assert_eq!(node.live(), Some(accesskit::Live::Polite));
     }
 
@@ -542,7 +543,7 @@ mod tests {
         let ann = tree.nodes.iter().find(|(id, _)| *id == ANNOUNCEMENT_ID);
         assert!(ann.is_some(), "announcement node should always be present");
         let (_, node) = ann.unwrap();
-        assert_eq!(node.name().unwrap_or(""), "");
+        assert_eq!(node.label().unwrap_or(""), "");
         assert_eq!(node.live(), Some(accesskit::Live::Polite));
     }
 

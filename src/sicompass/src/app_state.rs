@@ -958,8 +958,11 @@ impl AppState {
         let mut state = render::build_app()?;
 
         // Compute effective DPI: OS display scale × user font_scale override.
-        let display_id = state.window.display_index().unwrap_or(1) as u32;
-        let content_scale = state.window.display_content_scale(display_id);
+        let content_scale = state
+            .window
+            .get_display()
+            .and_then(|d| d.get_content_scale())
+            .unwrap_or(1.0);
         let font_scale = crate::programs::read_font_scale();
         let effective_dpi = (96.0_f32 * content_scale * font_scale)
             .round()

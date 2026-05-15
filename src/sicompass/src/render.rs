@@ -538,8 +538,8 @@ unsafe fn create_framebuffers(
 /// Build the complete `AppState`.  Called by `AppState::new()`.
 pub fn build_app() -> Result<AppState, SiError> {
     // ---- SDL init -----------------------------------------------------------
-    let sdl = sdl3::init().map_err(SiError::Sdl)?;
-    let video = sdl.video().map_err(SiError::Sdl)?;
+    let sdl = sdl3::init().map_err(|e| SiError::Sdl(e.to_string()))?;
+    let video = sdl.video().map_err(|e| SiError::Sdl(e.to_string()))?;
 
     let mut wb = video.window(WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT);
     wb.vulkan().resizable().hidden();
@@ -549,12 +549,10 @@ pub fn build_app() -> Result<AppState, SiError> {
     // Enable high-pixel-density backbuffer so SDL honours the OS display
     // scale (e.g. 150% on Windows) and SDL_GetDisplayContentScale returns the
     // real factor rather than always 1.0.
-    let flags = wb.window_flags()
-        | sdl3::sys::video::SDL_WINDOW_HIGH_PIXEL_DENSITY as u32;
-    wb.set_window_flags(flags);
+    wb.high_pixel_density();
     let mut window = wb.build().map_err(|e| SiError::Sdl(e.to_string()))?;
 
-    let event_pump = sdl.event_pump().map_err(SiError::Sdl)?;
+    let event_pump = sdl.event_pump().map_err(|e| SiError::Sdl(e.to_string()))?;
 
     // ---- ash Entry (loads libvulkan.so / vulkan-1.dll) ----------------------
     let entry = unsafe { ash::Entry::load()? };
@@ -571,7 +569,7 @@ pub fn build_app() -> Result<AppState, SiError> {
     // SDL3 required Vulkan instance extensions
     let sdl_exts = window
         .vulkan_instance_extensions()
-        .map_err(SiError::Sdl)?;
+        .map_err(|e| SiError::Sdl(e.to_string()))?;
     let mut ext_names_raw: Vec<*const i8> = sdl_exts
         .iter()
         .map(|s| CString::new(s.as_str()).unwrap().into_raw() as *const i8)
@@ -633,7 +631,7 @@ pub fn build_app() -> Result<AppState, SiError> {
         let sdl_instance = raw_handle as usize as sdl_vk::VkInstance;
         let sdl_surface = window
             .vulkan_create_surface(sdl_instance)
-            .map_err(SiError::Sdl)?;
+            .map_err(|e| SiError::Sdl(e.to_string()))?;
         // sdl_surface is *mut __VkSurfaceKHR; ash stores SurfaceKHR as u64.
         vk::SurfaceKHR::from_raw(sdl_surface as usize as u64)
     };
