@@ -788,6 +788,7 @@ pub fn handle_i(r: &mut AppRenderer) {
     if r.input_prefix.trim() == "i" {
         r.placeholder_insert_mode = true;
     }
+    begin_insert_session(r);
     let ctx = (!r.input_buffer.is_empty()).then(|| r.input_buffer.clone());
     r.speak_mode_change(ctx);
     r.cursor_position = 0;
@@ -812,6 +813,7 @@ pub fn handle_a(r: &mut AppRenderer) {
     if r.input_prefix.trim() == "i" {
         r.placeholder_insert_mode = true;
     }
+    begin_insert_session(r);
     let ctx = (!r.input_buffer.is_empty()).then(|| r.input_buffer.clone());
     r.speak_mode_change(ctx);
     r.cursor_position = r.input_buffer.len();
@@ -1659,8 +1661,23 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
     use sicompass_sdk::ffon::{FfonElement, get_ffon_at_id};
     use sicompass_sdk::tags;
 
-    // Get current element's raw key/value
-    let (elem_text, is_obj) = {
+    // Consume the per-keystroke insert session: the FFON is already in its
+    // committed state (mutated during typing) and the typing TextChunks are
+    // already in the timeline. Clearing here means the failure paths below
+    // that funnel through `handle_escape` won't revert the FFON — Escape
+    // means cancel, Enter means commit.
+    let session = r.insert_session.take();
+
+    // Get current element's raw key/value. When a session is active, prefer
+    // the session's original snapshot so downstream reads (`old_content`,
+    // `prev_elem_for_rename`) see the genuine pre-typing state instead of
+    // the live FFON, which was mutated keystroke-by-keystroke.
+    let (elem_text, is_obj) = if let Some(s) = &session {
+        match &s.original_element {
+            FfonElement::Str(s) => (s.clone(), false),
+            FfonElement::Obj(o) => (o.key.clone(), true),
+        }
+    } else {
         let arr = match get_ffon_at_id(&r.ffon, &r.current_id) {
             Some(a) => a,
             None => { handle_escape(r); return; }
@@ -2130,10 +2147,17 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
 
     let rename_id = r.current_id.clone();
     let prev_elem_for_rename = if track_undo {
-        let idx = rename_id.last().unwrap_or(0);
-        sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &rename_id)
-            .and_then(|arr| arr.get(idx))
-            .cloned()
+        // Prefer the session snapshot when present — the live FFON has been
+        // mutated to the typed state, so reading it here would yield
+        // before == after and break FsRename undo.
+        if let Some(s) = &session {
+            Some(s.original_element.clone())
+        } else {
+            let idx = rename_id.last().unwrap_or(0);
+            sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &rename_id)
+                .and_then(|arr| arr.get(idx))
+                .cloned()
+        }
     } else {
         None
     };
@@ -2389,6 +2413,10 @@ pub fn handle_escape(r: &mut AppRenderer) {
     clear_selection(r);
     match r.coordinate {
         Coordinate::Insert => {
+            // Discard any per-keystroke `<input>` edit session: restore the
+            // FFON snapshot and drop the TextChunks recorded during typing.
+            // No-op when there's no active session.
+            cancel_insert_session(r);
             // Cancel file-browser save-as: remove placeholder and return to source provider
             if r.pending_file_browser_save_as {
                 use sicompass_sdk::ffon::FfonElement;
@@ -2595,6 +2623,7 @@ pub fn handle_input(r: &mut AppRenderer, text: &str) {
             r.input_buffer.insert_str(pos, text);
             r.cursor_position = pos + text.len();
             r.caret.reset(sdl_ticks());
+            apply_insert_session_chunk(r);
             r.needs_redraw = true;
         }
         Coordinate::ScrollSearch => {
@@ -2640,7 +2669,7 @@ pub fn handle_backspace(r: &mut AppRenderer) {
             }
         }
         Coordinate::Command | Coordinate::Insert | Coordinate::ScrollSearch | Coordinate::ExtendedSearch => {
-            if has_selection(r) {
+            let buffer_changed = if has_selection(r) {
                 delete_selection(r);
                 r.caret.reset(sdl_ticks());
                 maybe_update_search(r);
@@ -2648,6 +2677,7 @@ pub fn handle_backspace(r: &mut AppRenderer) {
                     r.speak_current_element();
                 }
                 r.needs_redraw = true;
+                true
             } else if r.cursor_position > 0 {
                 // Find the char boundary before cursor
                 let before = &r.input_buffer[..r.cursor_position];
@@ -2662,6 +2692,12 @@ pub fn handle_backspace(r: &mut AppRenderer) {
                     r.speak_current_element();
                 }
                 r.needs_redraw = true;
+                true
+            } else {
+                false
+            };
+            if buffer_changed {
+                apply_insert_session_chunk(r);
             }
         }
         _ => {}
@@ -3246,6 +3282,132 @@ fn populate_input_buffer(r: &mut AppRenderer) {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// InsertSession helpers (per-keystroke FFON mutation + TextChunk recording)
+// ---------------------------------------------------------------------------
+
+/// Capture FFON snapshot + timeline position at insert-mode entry so each
+/// keystroke can mutate the FFON element directly and record a TextChunk via
+/// `state::record_entry`. Skips:
+/// - non-`<input>` elements (commit goes through a different path),
+/// - `*` placeholder mode (commit resolves the typed prefix to Str/Obj),
+/// - the `i <input></input>` permanent-placeholder marker.
+///
+/// Called from `handle_i` / `handle_a` after `populate_input_buffer` so that
+/// `input_prefix` / `input_suffix` reflect the current element.
+pub(crate) fn begin_insert_session(r: &mut AppRenderer) {
+    use sicompass_sdk::ffon::{FfonElement, get_ffon_at_id};
+    use sicompass_sdk::tags;
+    use crate::app_state::InsertSession;
+
+    if r.placeholder_insert_mode {
+        return;
+    }
+    let idx = r.current_id.last().unwrap_or(0);
+    let elem = match get_ffon_at_id(&r.ffon, &r.current_id).and_then(|a| a.get(idx)) {
+        Some(e) => e.clone(),
+        None => return,
+    };
+    let key: &str = match &elem {
+        FfonElement::Str(s) => s,
+        FfonElement::Obj(o) => &o.key,
+    };
+    if !tags::has_input(key) {
+        return;
+    }
+    r.insert_session = Some(InsertSession {
+        original_element: elem,
+        original_id: r.current_id.clone(),
+        timeline_position_at_start: r.active_timeline().entries.len(),
+    });
+}
+
+/// Apply the current `input_buffer` to the FFON element being edited and
+/// record a TextChunk. Called from every buffer-mutating handler in Insert
+/// mode (typing, backspace, delete, paste, …). No-op if there's no active
+/// session, the FFON element is missing, or the synthesized state matches
+/// what's already there. The TextChunk merge logic in `state::record_entry`
+/// (`TEXT_CHUNK_IDLE_MS`) collapses consecutive calls within 500 ms into one
+/// entry — an idle gap splits typing into separate undoable chunks.
+pub(crate) fn apply_insert_session_chunk(r: &mut AppRenderer) {
+    use sicompass_sdk::ffon::FfonElement;
+    use sicompass_sdk::timeline::TimelineEntry;
+
+    let session_id = match r.insert_session.as_ref() {
+        Some(s) => s.original_id.clone(),
+        None => return,
+    };
+    let idx = session_id.last().unwrap_or(0);
+
+    // Read the current FFON element — this is `before` for the new chunk
+    // (TextChunk merge keeps the existing tail's `before` and updates only
+    // `after`, so passing the live state on every keystroke is correct).
+    let before = match crate::state::navigate_to_slice_pub(&mut r.ffon, &session_id)
+        .and_then(|arr| arr.get(idx).cloned())
+    {
+        Some(e) => e,
+        None => return,
+    };
+
+    let new_key = format!(
+        "{}<input>{}</input>{}",
+        r.input_prefix, r.input_buffer, r.input_suffix
+    );
+    let after = match &before {
+        FfonElement::Str(_) => FfonElement::new_str(new_key),
+        FfonElement::Obj(o) => {
+            let mut new_obj = o.clone();
+            new_obj.key = new_key;
+            FfonElement::Obj(new_obj)
+        }
+    };
+    if before == after {
+        return;
+    }
+
+    // Mutate FFON in place.
+    if let Some(arr) = crate::state::navigate_to_slice_pub(&mut r.ffon, &session_id) {
+        if let Some(elem) = arr.get_mut(idx) {
+            *elem = after.clone();
+        }
+    }
+
+    crate::state::record_entry(
+        r,
+        TimelineEntry::TextChunk {
+            id: session_id,
+            before,
+            after,
+            chunk_seq: 0,
+        },
+    );
+}
+
+/// Discard the active insert session: restore the FFON snapshot taken at
+/// insert-mode entry and truncate the timeline back to its pre-session length.
+/// Called from `handle_escape` (cancel) so per-keystroke TextChunks recorded
+/// during the abandoned edit don't survive into undo history.
+pub(crate) fn cancel_insert_session(r: &mut AppRenderer) {
+    let session = match r.insert_session.take() {
+        Some(s) => s,
+        None => return,
+    };
+    let idx = session.original_id.last().unwrap_or(0);
+    if let Some(arr) = crate::state::navigate_to_slice_pub(&mut r.ffon, &session.original_id) {
+        if let Some(elem) = arr.get_mut(idx) {
+            *elem = session.original_element;
+        }
+    }
+    // Truncate timeline back to pre-session length and clear merge state.
+    let tl = r.active_timeline_mut();
+    let target_len = session.timeline_position_at_start.min(tl.entries.len());
+    tl.entries.truncate(target_len);
+    tl.position = 0;
+    tl.last_text_id = None;
+    tl.last_text_edit_at = None;
+    tl.coalesce_break = true;
 }
 
 // ---------------------------------------------------------------------------

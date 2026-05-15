@@ -8598,3 +8598,177 @@ fn unified_undo_settings_radio_via_enter_does_not_double_record() {
         entries[0],
     );
 }
+
+// ---------------------------------------------------------------------------
+// Per-keystroke `<input>` editing: FFON mutates as the user types and
+// TextChunks are recorded with TEXT_CHUNK_IDLE_MS merging, so ctrl-Z reverts
+// one typing-burst at a time (not the entire edit session).
+// ---------------------------------------------------------------------------
+
+/// Helper: build a minimal renderer with the tutorial provider and a single
+/// `<input>` leaf, position the cursor on it, and enter Insert mode.
+/// Returns the renderer ready for typing.
+fn tutorial_input_renderer(initial: &str) -> AppRenderer {
+    ensure_builtins();
+    use sicompass_sdk::ffon::IdArray;
+
+    let mut renderer = AppRenderer::new();
+    let mut provider = sicompass_sdk::create_provider_by_name("tutorial").unwrap();
+    provider.init();
+    let display_name = provider.display_name().to_owned();
+    let mut root = FfonElement::new_obj(&display_name);
+    root.as_obj_mut().unwrap().push(FfonElement::Str(
+        format!("<input>{initial}</input>"),
+    ));
+    renderer.ffon.push(root);
+    renderer.providers.push(provider);
+
+    renderer.current_id = {
+        let mut id = IdArray::new();
+        id.push(0); // tutorial provider
+        id.push(0); // <input> leaf
+        id
+    };
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    // Enter insert mode via handle_i so begin_insert_session captures state.
+    press(&mut renderer, Keycode::I);
+    renderer
+}
+
+/// Type-into-`<input>` with a typing pause: typing "er" + idle gap + typing
+/// "er" + Enter must split into two TextChunks. ctrl-Z then reverts only the
+/// second "er", and a second ctrl-Z reverts the first.
+#[test]
+fn tutorial_input_pause_splits_chunks_so_undo_steps_through_typing() {
+    let mut renderer = tutorial_input_renderer("hello world");
+    let baseline = renderer.active_timeline().entries.len();
+
+    // Move cursor to end so typing appends.
+    renderer.cursor_position = renderer.input_buffer.len();
+    type_text(&mut renderer, "er");
+    // Idle past TEXT_CHUNK_IDLE_MS = 500 ms so the next keystroke starts a new chunk.
+    std::thread::sleep(std::time::Duration::from_millis(550));
+    type_text(&mut renderer, "er");
+
+    // After typing (before Enter), the timeline should already hold two
+    // TextChunks — one per typing burst.
+    let recorded_during_typing = renderer.active_timeline().entries.len() - baseline;
+    assert_eq!(
+        recorded_during_typing, 2,
+        "two typing bursts separated by a >500ms idle gap must record two TextChunks, got {recorded_during_typing}"
+    );
+
+    press_enter(&mut renderer);
+    assert_eq!(renderer.coordinate, Coordinate::General, "Enter must exit insert mode");
+
+    // Confirm both chunks are still TextChunks with the right after-states.
+    let entries: Vec<_> = renderer.active_timeline().entries[baseline..baseline + 2].to_vec();
+    let after_strs: Vec<String> = entries.iter().map(|e| match e {
+        TimelineEntry::TextChunk { after: FfonElement::Str(s), .. } => s.clone(),
+        other => panic!("expected TextChunk(Str), got {:?}", other),
+    }).collect();
+    assert!(after_strs[0].contains("hello worlder"), "first chunk after = {:?}", after_strs[0]);
+    assert!(after_strs[1].contains("hello worlderer"), "second chunk after = {:?}", after_strs[1]);
+
+    // ctrl-Z: revert the most-recent chunk → FFON should be back to "hello worlder".
+    sicompass::state::walk_back(&mut renderer);
+    let elem = &renderer.ffon[0].as_obj().unwrap().children[0];
+    let key = elem.as_str().unwrap();
+    assert!(
+        key.contains("hello worlder") && !key.contains("hello worlderer"),
+        "first ctrl-Z should restore to 'hello worlder', got: {key:?}"
+    );
+
+    // ctrl-Z again: revert the first chunk → FFON should be back to "hello world".
+    sicompass::state::walk_back(&mut renderer);
+    let elem = &renderer.ffon[0].as_obj().unwrap().children[0];
+    let key = elem.as_str().unwrap();
+    assert!(
+        key.contains("hello world") && !key.contains("hello worlder"),
+        "second ctrl-Z should restore to 'hello world', got: {key:?}"
+    );
+}
+
+/// Typing within TEXT_CHUNK_IDLE_MS must coalesce into a single TextChunk —
+/// no per-keystroke entries flooding the timeline.
+#[test]
+fn tutorial_input_typing_within_idle_window_merges_to_one_chunk() {
+    let mut renderer = tutorial_input_renderer("hi");
+    let baseline = renderer.active_timeline().entries.len();
+    renderer.cursor_position = renderer.input_buffer.len();
+
+    // Five back-to-back keystrokes — well under the idle window.
+    for ch in ["a", "b", "c", "d", "e"] {
+        type_text(&mut renderer, ch);
+    }
+
+    let recorded = renderer.active_timeline().entries.len() - baseline;
+    assert_eq!(
+        recorded, 1,
+        "five keystrokes within TEXT_CHUNK_IDLE_MS must merge into one TextChunk, got {recorded}"
+    );
+    match renderer.active_timeline().entries.last().unwrap() {
+        TimelineEntry::TextChunk { after: FfonElement::Str(s), .. } => {
+            assert!(s.contains("hiabcde"), "merged after should reflect final buffer, got: {s:?}");
+        }
+        other => panic!("expected TextChunk(Str), got {:?}", other),
+    }
+}
+
+/// Escape during typing must restore the FFON snapshot AND drop the
+/// per-keystroke TextChunks from the timeline — the cancelled edit must not
+/// leak into undo history.
+#[test]
+fn tutorial_input_escape_reverts_ffon_and_drops_chunks() {
+    let mut renderer = tutorial_input_renderer("hello");
+    let baseline = renderer.active_timeline().entries.len();
+    renderer.cursor_position = renderer.input_buffer.len();
+
+    type_text(&mut renderer, "world");
+    // Confirm typing recorded something AND mutated FFON.
+    assert!(renderer.active_timeline().entries.len() > baseline,
+        "typing must record TextChunks");
+    let elem = &renderer.ffon[0].as_obj().unwrap().children[0];
+    assert!(elem.as_str().unwrap().contains("helloworld"),
+        "FFON must reflect in-progress edit, got: {:?}", elem);
+
+    press_escape(&mut renderer);
+    assert_eq!(renderer.coordinate, Coordinate::General, "Escape must exit insert mode");
+
+    // FFON restored to the snapshot.
+    let elem = &renderer.ffon[0].as_obj().unwrap().children[0];
+    let key = elem.as_str().unwrap();
+    assert!(
+        key.contains("<input>hello</input>") && !key.contains("world"),
+        "Escape must restore the pre-edit FFON snapshot, got: {key:?}"
+    );
+    // Timeline truncated back to baseline.
+    assert_eq!(
+        renderer.active_timeline().entries.len(), baseline,
+        "Escape must drop all per-keystroke TextChunks recorded during the abandoned session"
+    );
+    assert!(renderer.insert_session.is_none(), "session must be cleared after Escape");
+}
+
+/// Enter after typing keeps both the typed text AND the per-keystroke
+/// TextChunks — the session is consumed (not reverted) on commit.
+#[test]
+fn tutorial_input_enter_keeps_typed_text_and_chunks() {
+    let mut renderer = tutorial_input_renderer("hi");
+    let baseline = renderer.active_timeline().entries.len();
+    renderer.cursor_position = renderer.input_buffer.len();
+
+    type_text(&mut renderer, "ya");
+    press_enter(&mut renderer);
+
+    assert_eq!(renderer.coordinate, Coordinate::General, "Enter must exit insert mode");
+    let elem = &renderer.ffon[0].as_obj().unwrap().children[0];
+    assert!(elem.as_str().unwrap().contains("hiya"),
+        "typed text must remain after Enter, got: {:?}", elem);
+    assert!(
+        renderer.active_timeline().entries.len() > baseline,
+        "TextChunks from typing must remain in the timeline after Enter"
+    );
+    assert!(renderer.insert_session.is_none(), "session must be cleared after Enter");
+}

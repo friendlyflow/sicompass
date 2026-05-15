@@ -283,6 +283,37 @@ pub struct PlaceholderCancel {
 }
 
 // ---------------------------------------------------------------------------
+// InsertSession
+// ---------------------------------------------------------------------------
+
+/// State captured when entering insert mode on an `<input>` tag, used to
+/// drive per-keystroke FFON mutation + TextChunk recording during typing.
+///
+/// Each buffer-mutating handler in Insert mode (handle_input, handle_backspace,
+/// handle_delete_in_insert, paste, etc.) calls `apply_insert_session_chunk` to:
+/// 1. Rewrite the current FFON element's key to wrap `input_buffer` in
+///    `<input>...</input>` (preserving prefix/suffix).
+/// 2. Record a TextChunk timeline entry. The merge logic in
+///    `state::record_entry` (TEXT_CHUNK_IDLE_MS) collapses consecutive
+///    keystrokes within 500 ms into a single entry; an idle gap > 500 ms
+///    starts a fresh chunk so ctrl-Z reverts one typing-burst at a time.
+///
+/// `handle_escape` restores `original_element` and truncates the timeline
+/// back to `timeline_position_at_start`, fully discarding the edit session.
+#[derive(Debug, Clone)]
+pub struct InsertSession {
+    /// FFON element snapshot taken at insert-mode entry, before any
+    /// per-keystroke mutation. Restored on Escape.
+    pub original_element: FfonElement,
+    /// FFON id of the element being edited.
+    pub original_id: IdArray,
+    /// `active_timeline().entries.len()` at insert-mode entry. On Escape,
+    /// the timeline is truncated back to this length to drop per-keystroke
+    /// TextChunks recorded during the abandoned edit.
+    pub timeline_position_at_start: usize,
+}
+
+// ---------------------------------------------------------------------------
 // AppRenderer
 // ---------------------------------------------------------------------------
 
@@ -331,6 +362,10 @@ pub struct AppRenderer {
     pub input_prefix: String,
     /// Non-editable text displayed after the input widget.
     pub input_suffix: String,
+
+    /// Active per-keystroke edit session on an `<input>` tag (see
+    /// [`InsertSession`]). `Some` from insert-mode entry until Enter or Escape.
+    pub insert_session: Option<InsertSession>,
 
     // ---- Scroll state ------------------------------------------------------
     pub scroll_offset: i32,
@@ -525,6 +560,7 @@ impl AppRenderer {
             selection_anchor: None,
             input_prefix: String::new(),
             input_suffix: String::new(),
+            insert_session: None,
             scroll_offset: 0,
             text_scroll_offset: 0,
             text_scroll_total_height: 0,
