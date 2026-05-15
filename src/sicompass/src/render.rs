@@ -550,7 +550,7 @@ pub fn build_app() -> Result<AppState, SiError> {
     // scale (e.g. 150% on Windows) and SDL_GetDisplayContentScale returns the
     // real factor rather than always 1.0.
     wb.high_pixel_density();
-    let mut window = wb.build().map_err(|e| SiError::Sdl(e.to_string()))?;
+    let window = wb.build().map_err(|e| SiError::Sdl(e.to_string()))?;
 
     let event_pump = sdl.event_pump().map_err(|e| SiError::Sdl(e.to_string()))?;
 
@@ -592,16 +592,9 @@ pub fn build_app() -> Result<AppState, SiError> {
 
     let instance = unsafe { entry.create_instance(&instance_info, None)? };
 
-    // Free the CString pointers we allocated for SDL extensions
-    // Safety: we created these above with into_raw()
-    unsafe {
-        for ptr in &ext_names_raw {
-            // Skip the debug_utils name (static) and SDL names (from CString::into_raw)
-            // We only allocated CStrings for SDL extensions, not the debug utils name
-        }
-    }
-    // Actually: drop is handled correctly because we used into_raw() which leaks —
-    // for a long-lived app this is negligible; fix with a proper owned Vec<CString> if needed.
+    // The SDL extension-name CStrings were created above with into_raw() and
+    // are intentionally leaked. For a long-lived app this is negligible; fix
+    // with a proper owned Vec<CString> if needed.
 
     // ---- Debug messenger (debug builds only) --------------------------------
     #[cfg(debug_assertions)]

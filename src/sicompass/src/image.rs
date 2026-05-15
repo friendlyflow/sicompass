@@ -40,7 +40,7 @@ struct ImageVertex {
 // Cache entry
 // ---------------------------------------------------------------------------
 
-struct CachedTexture {
+pub(crate) struct CachedTexture {
     image: vk::Image,
     memory: vk::DeviceMemory,
     view: vk::ImageView,

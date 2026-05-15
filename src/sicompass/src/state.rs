@@ -262,7 +262,7 @@ pub fn update_ffon(r: &mut AppRenderer, line: &str, is_key: bool, task: Task, hi
 
         if matches!(task, Task::Delete | Task::Cut) {
             // Remove element at prev_idx
-            let removed = remove_at(&mut r.ffon, &prev_id, prev_idx);
+            let _removed = remove_at(&mut r.ffon, &prev_id, prev_idx);
             let new_len = get_parent_len(&r.ffon, &prev_id);
             if depth != 1 && new_len == 0 {
                 // Insert empty string if this was the only child
