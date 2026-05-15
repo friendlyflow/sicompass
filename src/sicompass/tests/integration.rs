@@ -5139,6 +5139,56 @@ fn email_compose_cc_bcc_fields_appear_and_commit() {
     );
 }
 
+/// Committing a compose header field (To) must leave the cursor on that field
+/// — not snap it forward onto an empty Cc/Bcc/Subject `<input></input>`. The
+/// trailing-input snap is for re-emitted prompts (terminal/chat) only; the
+/// blank header fields added alongside Cc/Bcc/attachments are real form fields.
+#[test]
+fn email_compose_commit_to_field_keeps_cursor_on_to() {
+    ensure_builtins();
+    use sicompass_emailclient::EmailClientProvider;
+    use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
+
+    let mut renderer = AppRenderer::new();
+    let mut p = EmailClientProvider::new();
+    p.push_path("compose");
+    let items = p.fetch();
+    let to_idx = items
+        .iter()
+        .position(|e| e.as_str().map_or(false, |s| s.starts_with("To:")))
+        .expect("compose view must have a To: field");
+
+    renderer.ffon.push(FfonElement::Obj(FfonObject {
+        key: "email".to_owned(),
+        children: items,
+    }));
+    renderer.providers.push(Box::new(p));
+
+    renderer.current_id = {
+        let mut id = IdArray::new();
+        id.push(0);
+        id.push(to_idx);
+        id
+    };
+    renderer.coordinate = Coordinate::General;
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    // Enter insert on the To field, type an address, commit with Enter.
+    press(&mut renderer, Keycode::I);
+    assert_eq!(
+        renderer.coordinate, Coordinate::Insert,
+        "press i must enter Insert on the To field"
+    );
+    type_text(&mut renderer, "alice@example.com");
+    press_enter(&mut renderer);
+
+    assert_eq!(
+        renderer.current_id.last(), Some(to_idx),
+        "cursor must stay on the To field after commit, not jump to an empty \
+         Cc/Bcc/Subject field; got id {:?}", renderer.current_id
+    );
+}
+
 /// "mark read" must clear the local unread count immediately (even if the
 /// receipt HTTP call fails). The badge disappears from the room list after the
 /// command runs.

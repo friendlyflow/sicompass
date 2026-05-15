@@ -2149,11 +2149,20 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
 /// If the slice at `current_id` ends with an `<input></input>` placeholder
 /// (matched by suffix to allow a prompt prefix), move `current_id` onto it and
 /// arm the bottom-anchor scroll sentinel. Returns `true` if the snap fired.
+///
+/// Only the *last* element qualifies — a re-emitted command/compose prompt
+/// (terminal, chat). An empty `<input></input>` sitting mid-list — e.g. a
+/// blank Cc/Bcc/Subject field, or the Attachments slot, in the email compose
+/// view — is a real form field, not a prompt, and must not steal the cursor
+/// away from the field the user just committed.
 fn snap_to_trailing_input(r: &mut AppRenderer) -> bool {
     let idx = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)
-        .and_then(|arr| arr.iter().rposition(|e| matches!(
-            e, FfonElement::Str(s) if s.ends_with("<input></input>")
-        )));
+        .and_then(|arr| match arr.last() {
+            Some(FfonElement::Str(s)) if s.ends_with("<input></input>") => {
+                Some(arr.len() - 1)
+            }
+            _ => None,
+        });
     if let Some(idx) = idx {
         r.current_id.set_last(idx);
         r.scroll_offset = -1;
