@@ -1,4 +1,5 @@
 use sicompass_sdk::ffon::FfonElement;
+use sicompass_sdk::placeholders::I_PLACEHOLDER;
 use sicompass_sdk::provider::Provider;
 use std::path::Path;
 
@@ -311,6 +312,9 @@ static SECTIONS: &[Node] = &[
             ]},
             Leaf("Text inputs let you edit a value inline. Press i or a on the item below to start editing:"),
             Leaf("Edit this text --> <input>hello world</input> <-- press i or a"),
+            Branch { key: "+i input example <input></input>", children: &[
+                Leaf(I_PLACEHOLDER),
+            ]},
             Branch { key: "<radio>Pick a color", children: &[
                 Leaf("<checked>blue"),
                 Leaf("green"),
