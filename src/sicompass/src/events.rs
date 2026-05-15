@@ -345,3 +345,35 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
 
     result
 }
+
+/// Tick every provider once — draining their async/background work (terminal
+/// shell output, IMAP IDLE, OAuth) — and collect any dashboard requests.
+///
+/// Returns `(active_tick_update, dashboard_requests)`.
+///
+/// `active_tick_update` is `true` only when the **active** provider (the one
+/// at `current_id[0]`) reported a change. A background provider must NOT set
+/// it: an enabled-but-unfocused terminal polls its shell and ticks `true`
+/// every frame, and using that to refresh the *active* provider's view (via
+/// `refresh_current_directory` + `create_list_current_layer`) corrupts
+/// navigation in whatever the user is actually looking at — e.g. the settings
+/// list while toggling program checkboxes. Every provider is still ticked
+/// (the `p.tick()` side effects always run); only the refresh signal is
+/// scoped to the active provider.
+pub fn run_provider_ticks(
+    r: &mut AppRenderer,
+) -> (bool, Vec<(usize, sicompass_sdk::DashboardRequest)>) {
+    use sicompass_sdk::Provider;
+    let active_root = r.current_id.get(0);
+    let mut active_tick_update = false;
+    let mut dashboard_requests: Vec<(usize, sicompass_sdk::DashboardRequest)> = Vec::new();
+    for (i, p) in r.providers.iter_mut().enumerate() {
+        if p.tick() && Some(i) == active_root {
+            active_tick_update = true;
+        }
+        if let Some(req) = p.take_dashboard_request() {
+            dashboard_requests.push((i, req));
+        }
+    }
+    (active_tick_update, dashboard_requests)
+}

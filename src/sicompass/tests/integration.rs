@@ -9123,3 +9123,57 @@ fn tutorial_placeholder_typing_pause_splits_chunks() {
         "second ctrl-Z must restore the I_PLACEHOLDER, got: {child:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Background-provider tick isolation
+// ---------------------------------------------------------------------------
+
+/// A provider whose `tick()` always reports an update — stands in for an
+/// enabled-but-unfocused terminal polling its shell every frame.
+struct AlwaysTickProvider;
+impl Provider for AlwaysTickProvider {
+    fn name(&self) -> &str { "alwaystick" }
+    fn fetch(&mut self) -> Vec<FfonElement> { vec![FfonElement::new_str("x")] }
+    fn tick(&mut self) -> bool { true }
+}
+
+/// A provider whose `tick()` never reports an update.
+struct QuietProvider;
+impl Provider for QuietProvider {
+    fn name(&self) -> &str { "quiet" }
+    fn fetch(&mut self) -> Vec<FfonElement> { vec![FfonElement::new_str("x")] }
+}
+
+/// `run_provider_ticks` must report `active_tick_update` only for the *active*
+/// provider. A background provider ticking — e.g. an enabled terminal polling
+/// its shell while the user is in the settings list — must NOT signal a
+/// refresh of the active provider's view (that refresh corrupts navigation in
+/// whatever the user is actually looking at).
+#[test]
+fn background_provider_tick_does_not_signal_active_refresh() {
+    use sicompass_sdk::ffon::IdArray;
+
+    let mut r = AppRenderer::new();
+    // index 0 = background ticker (stand-in for the terminal),
+    // index 1 = the quiet provider the user is focused on.
+    r.providers.push(Box::new(AlwaysTickProvider));
+    r.providers.push(Box::new(QuietProvider));
+    r.ffon.push(FfonElement::new_obj("alwaystick"));
+    r.ffon.push(FfonElement::new_obj("quiet"));
+
+    // Cursor on provider 1: provider 0 ticking is a *background* update.
+    r.current_id = { let mut id = IdArray::new(); id.push(1); id };
+    let (active_update, _) = sicompass::events::run_provider_ticks(&mut r);
+    assert!(
+        !active_update,
+        "a background provider's tick must not signal an active-view refresh"
+    );
+
+    // Cursor on provider 0: its tick is now an active update.
+    r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+    let (active_update, _) = sicompass::events::run_provider_ticks(&mut r);
+    assert!(
+        active_update,
+        "the active provider's tick must signal a refresh"
+    );
+}

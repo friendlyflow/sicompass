@@ -189,16 +189,12 @@ pub fn main_loop(app: &mut AppState) {
         }
 
         // ---- Let providers drive background state (e.g. async OAuth login) --
-        let mut any_tick_update = false;
-        let mut dashboard_requests: Vec<(usize, sicompass_sdk::DashboardRequest)> = Vec::new();
-        for (i, p) in app.renderer.providers.iter_mut().enumerate() {
-            if p.tick() {
-                any_tick_update = true;
-            }
-            if let Some(req) = p.take_dashboard_request() {
-                dashboard_requests.push((i, req));
-            }
-        }
+        // `active_tick_update` is scoped to the *active* provider: a background
+        // provider (e.g. an enabled-but-unfocused terminal polling its shell)
+        // ticks every frame, and refreshing the active view on its behalf
+        // corrupts navigation in whatever the user is looking at.
+        let (active_tick_update, dashboard_requests) =
+            crate::events::run_provider_ticks(&mut app.renderer);
         // Honor only requests from the *active* provider — never yank the user
         // out of one tab into another tab's dashboard.
         for (i, req) in dashboard_requests {
@@ -236,7 +232,7 @@ pub fn main_loop(app: &mut AppState) {
         } else {
             app._video.text_input().stop(&app.window);
         }
-        if any_tick_update {
+        if active_tick_update {
             // Clear any stale status, then let providers re-assert their error.
             app.renderer.error_message.clear();
             for p in app.renderer.providers.iter_mut() {
