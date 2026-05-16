@@ -19,90 +19,9 @@ use sicompass_sdk::ffon::FfonElement;
 use sicompass_sdk::placeholders::new_obj_with_i_placeholder;
 use sicompass_sdk::provider::{ListItem, Provider, SearchResultItem};
 use sicompass_sdk::tags;
-use sicompass_sdk::timeline::{FsOpKind, FsSideEffect, TimelineEntry, TrashedTree};
+use sicompass_sdk::timeline::{FsOpKind, FsSideEffect, TimelineEntry};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
-
-/// Skip building a `TrashedTree` snapshot above this size — the OS trash
-/// becomes the source of truth for restoration. If the trash no longer has
-/// the file at undo time, the undo reports an error.
-pub const TRASH_SNAPSHOT_LIMIT_BYTES: u64 = 4 * 1024 * 1024;
-
-fn snapshot_dir_capped(root: &Path, budget: &mut u64) -> Option<TrashedTree> {
-    let mut children: Vec<(String, TrashedTree)> = Vec::new();
-    let entries = std::fs::read_dir(root).ok()?;
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let path = entry.path();
-        let meta = match entry.metadata() {
-            Ok(m) => m,
-            Err(_) => return None,
-        };
-        if meta.is_dir() {
-            let sub = snapshot_dir_capped(&path, budget)?;
-            children.push((name, sub));
-        } else {
-            let size = meta.len();
-            if size > *budget {
-                return None;
-            }
-            *budget -= size;
-            let bytes = std::fs::read(&path).ok()?;
-            children.push((name, TrashedTree::File(bytes)));
-        }
-    }
-    Some(TrashedTree::Dir(children))
-}
-
-fn restore_trashed_tree(root: &Path, tree: &TrashedTree) -> std::io::Result<()> {
-    match tree {
-        TrashedTree::File(bytes) => {
-            if let Some(parent) = root.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(root, bytes)
-        }
-        TrashedTree::Dir(children) => {
-            std::fs::create_dir_all(root)?;
-            for (name, child) in children {
-                restore_trashed_tree(&root.join(name), child)?;
-            }
-            Ok(())
-        }
-    }
-}
-
-/// Best-effort restore of `original` from the OS trash. Used by undo of an
-/// oversized (`RenameOnly`) delete, which has no in-app content snapshot to
-/// write back. Picks the most recently trashed item whose original location
-/// matches `original`. `Err` carries a human-readable reason for the caller
-/// to surface alongside the manual-restore hint.
-#[cfg(any(
-    target_os = "windows",
-    all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android"))
-))]
-fn restore_from_os_trash(original: &Path) -> Result<(), String> {
-    if original.exists() {
-        return Err("the original path is already occupied".to_owned());
-    }
-    let items = trash::os_limited::list().map_err(|e| e.to_string())?;
-    // A path may have been deleted more than once; restore the newest.
-    let item = items
-        .into_iter()
-        .filter(|it| it.original_path() == original)
-        .max_by_key(|it| it.time_deleted)
-        .ok_or_else(|| "no matching item found in the OS trash".to_owned())?;
-    trash::os_limited::restore_all([item]).map_err(|e| e.to_string())
-}
-
-/// Platforms without `trash::os_limited` (macOS) cannot restore programmatically.
-#[cfg(not(any(
-    target_os = "windows",
-    all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android"))
-)))]
-fn restore_from_os_trash(_original: &Path) -> Result<(), String> {
-    Err("automatic OS-trash restore is unsupported on this platform".to_owned())
-}
 
 // ---------------------------------------------------------------------------
 // Sort mode
@@ -278,44 +197,9 @@ impl Provider for FilebrowserProvider {
         let full = self.current_path.join(&name_clean);
 
         // Snapshot the target before deletion so an undo can restore even if
-        // the OS trash has been emptied. Skip the snapshot for directories
-        // larger than `TRASH_SNAPSHOT_LIMIT_BYTES`: undo of those relies on
-        // `trash::restore` (best-effort) and falls back to an error.
-        let meta = std::fs::metadata(&full).ok();
-        let side_effect = if let Some(meta) = meta.as_ref() {
-            if meta.is_dir() {
-                let mut budget = TRASH_SNAPSHOT_LIMIT_BYTES;
-                if let Some(tree) = snapshot_dir_capped(&full, &mut budget) {
-                    FsSideEffect::TrashedDir {
-                        original_path: full.clone(),
-                        content_tree: tree,
-                    }
-                } else {
-                    // Oversized — fall back to rename-only path metadata.
-                    FsSideEffect::RenameOnly {
-                        from: full.clone(),
-                        to: full.clone(),
-                    }
-                }
-            } else {
-                match std::fs::read(&full) {
-                    Ok(bytes) if (bytes.len() as u64) <= TRASH_SNAPSHOT_LIMIT_BYTES => {
-                        FsSideEffect::TrashedFile {
-                            original_path: full.clone(),
-                            content_snapshot: bytes,
-                        }
-                    }
-                    _ => FsSideEffect::RenameOnly {
-                        from: full.clone(),
-                        to: full.clone(),
-                    },
-                }
-            }
-        } else {
-            FsSideEffect::None
-        };
-
-        let is_dir = meta.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+        // the OS trash has been emptied (see `sicompass_sdk::fs_trash`).
+        let is_dir = std::fs::metadata(&full).map(|m| m.is_dir()).unwrap_or(false);
+        let side_effect = sicompass_sdk::fs_trash::snapshot_for_delete(&full);
         if trash::delete(&full).is_ok() {
             let before_elem = if is_dir {
                 FfonElement::new_obj(&name_clean)
@@ -348,35 +232,7 @@ impl Provider for FilebrowserProvider {
         if !matches!(op, FsOpKind::Delete) {
             return;
         }
-        match side_effect {
-            FsSideEffect::TrashedFile { original_path, content_snapshot } => {
-                if let Some(parent) = original_path.parent() {
-                    let _ = std::fs::create_dir_all(parent);
-                }
-                if let Err(e) = std::fs::write(original_path, content_snapshot) {
-                    *error = format!("undo delete: write failed: {e}");
-                }
-            }
-            FsSideEffect::TrashedDir { original_path, content_tree } => {
-                if let Err(e) = restore_trashed_tree(original_path, content_tree) {
-                    *error = format!("undo delete: dir restore failed: {e}");
-                }
-            }
-            FsSideEffect::RenameOnly { from, .. } => {
-                // Snapshot was oversized — there is no in-app copy to write
-                // back. Best-effort: ask the OS trash to restore the item.
-                // If that is unavailable or fails, point the user at the
-                // manual restore path.
-                if let Err(reason) = restore_from_os_trash(from) {
-                    *error = format!(
-                        "undo delete: could not auto-restore {} ({reason}); \
-                         please restore it from the OS trash",
-                        from.display()
-                    );
-                }
-            }
-            FsSideEffect::None => {}
-        }
+        sicompass_sdk::fs_trash::restore_side_effect(side_effect, error);
     }
 
     fn redo(&mut self, entry: &TimelineEntry, error: &mut String) {
@@ -778,6 +634,7 @@ fn cleanup_clipboard_cache() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sicompass_sdk::fs_trash::TRASH_SNAPSHOT_LIMIT_BYTES;
     use sicompass_sdk::tags;
     use tempfile::TempDir;
 

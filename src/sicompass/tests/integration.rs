@@ -9539,3 +9539,105 @@ fn redo_of_filebrowser_delete_removes_disk_and_ffon() {
         h.renderer.total_list.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
     );
 }
+
+// ---------------------------------------------------------------------------
+// Text editor — deletion undo/redo
+// ---------------------------------------------------------------------------
+
+/// Build a renderer with a single text-editor provider rooted at `root`.
+/// Skips `init()` so the test does not pick up a real `textEditorPath` from
+/// the machine's config.
+fn setup_texteditor(root: &Path) -> AppRenderer {
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    let mut te = sicompass_sdk::create_provider_by_name("texteditor")
+        .expect("texteditor factory registered");
+    te.on_setting_change("textEditorPath", root.to_str().unwrap());
+    let children = te.fetch();
+    let display_name = te.display_name().to_owned();
+    let mut root_elem = FfonElement::new_obj(&display_name);
+    for child in children {
+        root_elem.as_obj_mut().unwrap().push(child);
+    }
+    renderer.ffon.push(root_elem);
+    renderer.providers.push(te);
+    sicompass::list::create_list_current_layer(&mut renderer);
+    renderer
+}
+
+/// Move the list cursor onto the first entry whose label contains `needle`.
+fn cursor_to_label(r: &mut AppRenderer, needle: &str) {
+    let idx = r.total_list.iter()
+        .position(|it| it.label.contains(needle))
+        .unwrap_or_else(|| panic!("entry {needle:?} not in list"));
+    let cur = r.list_index;
+    if idx > cur {
+        for _ in 0..(idx - cur) { press_down(r); }
+    } else {
+        for _ in 0..(cur - idx) { press_up(r); }
+    }
+}
+
+#[test]
+fn texteditor_file_deletion_is_undoable() {
+    let tmp = TempDir::new().unwrap();
+    let target = tmp.path().join("doomed.txt");
+    std::fs::write(&target, "important content").unwrap();
+
+    let mut renderer = setup_texteditor(tmp.path());
+    press_right(&mut renderer); // into the text-editor listing
+    cursor_to_label(&mut renderer, "doomed.txt");
+
+    press_ctrl(&mut renderer, Keycode::D);
+    assert!(!target.exists(), "ctrl-D moved the file to trash");
+
+    press_ctrl(&mut renderer, Keycode::Z);
+    assert!(target.exists(), "ctrl-Z restored the deleted file");
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "important content");
+    assert!(
+        renderer.total_list.iter().any(|i| i.label.contains("doomed.txt")),
+        "undo restores doomed.txt in the list"
+    );
+
+    press_ctrl_shift(&mut renderer, Keycode::Z);
+    assert!(!target.exists(), "ctrl-shift-Z re-deleted the file from disk");
+    assert!(
+        !renderer.total_list.iter().any(|i| i.label.contains("doomed.txt")),
+        "redo also removes doomed.txt from the list, got {:?}",
+        renderer.total_list.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn texteditor_line_deletion_is_undoable() {
+    let tmp = TempDir::new().unwrap();
+    let file = tmp.path().join("sample.txt");
+    std::fs::write(&file, "alpha\nbeta\ngamma").unwrap();
+
+    let mut renderer = setup_texteditor(tmp.path());
+    press_right(&mut renderer); // into the text-editor listing
+    cursor_to_label(&mut renderer, "sample.txt");
+    press_right(&mut renderer); // open the file — lines become the list
+    cursor_to_label(&mut renderer, "beta");
+
+    press_ctrl(&mut renderer, Keycode::D);
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "alpha\ngamma",
+        "ctrl-D deleted the beta line"
+    );
+
+    press_ctrl(&mut renderer, Keycode::Z);
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "alpha\nbeta\ngamma",
+        "ctrl-Z restored the deleted line"
+    );
+
+    press_ctrl_shift(&mut renderer, Keycode::Z);
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "alpha\ngamma",
+        "ctrl-shift-Z re-deleted the line"
+    );
+}

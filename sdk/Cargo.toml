@@ -12,6 +12,7 @@ unicode-normalization = { workspace = true }
 scraper = { workspace = true }
 url = { workspace = true }
 libloading = { workspace = true }
+trash = "5"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 xdg = "3"

@@ -3665,6 +3665,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "trash",
  "unicode-normalization",
  "url",
  "winreg 0.56.0",

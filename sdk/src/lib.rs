@@ -1,5 +1,6 @@
 pub mod dashboard;
 pub mod ffon;
+pub mod fs_trash;
 pub mod manifest;
 pub mod placeholders;
 pub mod platform;
@@ -14,6 +15,10 @@ pub use dashboard::{
     DashboardRequest,
 };
 pub use ffon::{FfonElement, FfonObject, IdArray};
+pub use fs_trash::{
+    restore_from_os_trash, restore_side_effect, restore_trashed_tree, snapshot_for_delete,
+    TRASH_SNAPSHOT_LIMIT_BYTES,
+};
 pub use manifest::{
     builtin_manifests, register_builtin_manifest, BuiltinManifest, SettingDecl, SettingKind,
 };

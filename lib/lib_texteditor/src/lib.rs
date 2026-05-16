@@ -23,6 +23,7 @@ use sicompass_sdk::ffon::FfonElement;
 use sicompass_sdk::manifest::{BuiltinManifest, SettingDecl};
 use sicompass_sdk::provider::Provider;
 use sicompass_sdk::tags;
+use sicompass_sdk::timeline::{FsOpKind, FsSideEffect, TimelineEntry};
 use sicompass_sdk::{register_builtin_manifest, register_provider_factory};
 use std::path::{Path, PathBuf};
 
@@ -50,6 +51,10 @@ pub struct TextEditorProvider {
     loaded_path: Option<PathBuf>,
     /// Whether the source file ended with a newline (restored on every flush).
     trailing_newline: bool,
+    /// Unified-timeline emission queue, drained by the app after each action.
+    /// Populated by `delete_item` (in-file line deletes and file/folder
+    /// trashing) so deletions land on the undo timeline.
+    pending_timeline_entries: Vec<TimelineEntry>,
 }
 
 impl TextEditorProvider {
@@ -67,6 +72,17 @@ impl TextEditorProvider {
             cached_ffon: Vec::new(),
             loaded_path: None,
             trailing_newline: false,
+            pending_timeline_entries: Vec::new(),
+        }
+    }
+
+    /// Reload the open file when the cached `source_lines` no longer correspond
+    /// to `current_fs_path` — e.g. an undo runs after navigation cleared the
+    /// cache. Without this, a delete-line undo would splice into an empty
+    /// `source_lines` and flush a truncated file.
+    fn ensure_file_loaded(&mut self) {
+        if self.loaded_path.as_deref() != Some(self.current_fs_path.as_path()) {
+            self.load_file();
         }
     }
 
@@ -257,6 +273,7 @@ impl Provider for TextEditorProvider {
         self.loaded_path = None;
         self.source_lines.clear();
         self.cached_ffon.clear();
+        self.pending_timeline_entries.clear();
         self.sync_path_str();
     }
 
@@ -428,11 +445,29 @@ impl Provider for TextEditorProvider {
         // In-file: delete the indicated source line.
         let inner = tags::extract_input(name).unwrap_or_else(|| name.to_owned());
         if let Some((line_idx, _)) = tags::extract_src(&inner) {
-            if line_idx < self.source_lines.len() {
-                self.source_lines.remove(line_idx);
-                return self.flush_source_lines();
+            if line_idx >= self.source_lines.len() {
+                return false;
             }
-            return false;
+            // Capture the verbatim line (indentation included) so undo can
+            // restore it exactly. The recorded `<src=N>` prefix encodes the
+            // index; the rest is the raw line text.
+            let verbatim = self.source_lines[line_idx].clone();
+            self.source_lines.remove(line_idx);
+            if !self.flush_source_lines() {
+                return false;
+            }
+            let payload = FfonElement::new_str(format!(
+                "{}{}",
+                tags::format_src(line_idx),
+                verbatim,
+            ));
+            self.pending_timeline_entries.push(TimelineEntry::ProviderOp {
+                provider_idx: 0, // patched by app
+                command: "texteditor.delete_line".to_owned(),
+                payload,
+                label: format!("delete line {}", line_idx + 1),
+            });
+            return true;
         }
 
         // Directory view: move file/folder to OS trash.
@@ -440,7 +475,86 @@ impl Provider for TextEditorProvider {
         let clean = clean.trim_end_matches('/').trim_end_matches('\\');
         if clean.is_empty() { return false; }
         let full = self.current_fs_path.join(clean);
-        trash::delete(&full).is_ok()
+        // Snapshot before trashing so an undo can restore even if the OS trash
+        // is later emptied (see `sicompass_sdk::fs_trash`).
+        let is_dir = std::fs::metadata(&full).map(|m| m.is_dir()).unwrap_or(false);
+        let side_effect = sicompass_sdk::fs_trash::snapshot_for_delete(&full);
+        if trash::delete(&full).is_err() {
+            return false;
+        }
+        let before_elem = if is_dir {
+            FfonElement::new_obj(clean)
+        } else {
+            FfonElement::new_str(clean)
+        };
+        self.pending_timeline_entries.push(TimelineEntry::FsOp {
+            provider_idx: 0, // patched by app
+            id: sicompass_sdk::ffon::IdArray::new(),
+            op: FsOpKind::Delete,
+            before: Some(before_elem),
+            after: None,
+            side_effect,
+        });
+        true
+    }
+
+    fn take_timeline_entries(&mut self) -> Vec<TimelineEntry> {
+        std::mem::take(&mut self.pending_timeline_entries)
+    }
+
+    fn undo(&mut self, entry: &TimelineEntry, error: &mut String) {
+        match entry {
+            TimelineEntry::FsOp { op: FsOpKind::Delete, side_effect, .. } => {
+                sicompass_sdk::fs_trash::restore_side_effect(side_effect, error);
+            }
+            TimelineEntry::ProviderOp { command, payload, .. }
+                if command == "texteditor.delete_line" =>
+            {
+                if let Some((idx, verbatim)) = decode_delete_line(payload) {
+                    self.ensure_file_loaded();
+                    let clamp = idx.min(self.source_lines.len());
+                    self.source_lines.splice(clamp..clamp, [verbatim]);
+                    if !self.flush_source_lines() {
+                        *error = "undo delete line: failed to write file".to_owned();
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn redo(&mut self, entry: &TimelineEntry, error: &mut String) {
+        match entry {
+            TimelineEntry::FsOp { op: FsOpKind::Delete, side_effect, .. } => {
+                // Re-trash at the absolute original path recorded in the side
+                // effect; the cursor may have moved since the delete.
+                let path: Option<&Path> = match side_effect {
+                    FsSideEffect::TrashedFile { original_path, .. }
+                    | FsSideEffect::TrashedDir { original_path, .. } => Some(original_path),
+                    FsSideEffect::RenameOnly { from, .. } => Some(from),
+                    FsSideEffect::None => None,
+                };
+                if let Some(path) = path {
+                    if let Err(e) = trash::delete(path) {
+                        *error = format!("redo delete: trash failed: {e}");
+                    }
+                }
+            }
+            TimelineEntry::ProviderOp { command, payload, .. }
+                if command == "texteditor.delete_line" =>
+            {
+                if let Some((idx, _)) = decode_delete_line(payload) {
+                    self.ensure_file_loaded();
+                    if idx < self.source_lines.len() {
+                        self.source_lines.remove(idx);
+                        if !self.flush_source_lines() {
+                            *error = "redo delete line: failed to write file".to_owned();
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
     // ---- Commands ----------------------------------------------------------
@@ -508,6 +622,18 @@ impl Provider for TextEditorProvider {
 fn leading_whitespace(s: &str) -> &str {
     let end = s.find(|c: char| !c.is_whitespace()).unwrap_or(0);
     &s[..end]
+}
+
+/// Decode a `texteditor.delete_line` timeline payload into its
+/// `(line_index, verbatim_text)` pair. The payload key is `<src=N>text`,
+/// optionally wrapped in `<input>…</input>`.
+fn decode_delete_line(payload: &FfonElement) -> Option<(usize, String)> {
+    let key = match payload {
+        FfonElement::Str(s) => s.as_str(),
+        FfonElement::Obj(o) => o.key.as_str(),
+    };
+    let inner = tags::extract_input(key).unwrap_or_else(|| key.to_owned());
+    tags::extract_src(&inner).map(|(idx, text)| (idx, text.to_owned()))
 }
 
 /// Split `text` on `\n` into one source line per piece, prepending `indent`
@@ -581,6 +707,7 @@ mod tests {
             cached_ffon: vec![],
             loaded_path: None,
             trailing_newline: false,
+            pending_timeline_entries: vec![],
         };
         let items = p.fetch();
         assert_eq!(items.len(), 1);
@@ -1100,5 +1227,209 @@ mod tests {
 
         let written = std::fs::read_to_string(&file).unwrap();
         assert_eq!(written, "alpha\n\ngamma\n");
+    }
+
+    // ---- delete timeline emission + undo/redo -------------------------------
+
+    #[test]
+    fn delete_item_emits_fsop_with_file_snapshot() {
+        let tmp = make_tmp();
+        std::fs::write(tmp.path().join("doomed.txt"), b"important content").unwrap();
+        let mut p = make_text_editor(&tmp);
+
+        assert!(p.delete_item("<input>doomed.txt</input>"));
+        assert!(!tmp.path().join("doomed.txt").exists());
+
+        let entries = p.take_timeline_entries();
+        assert_eq!(entries.len(), 1);
+        match &entries[0] {
+            TimelineEntry::FsOp { op, side_effect, before, .. } => {
+                assert_eq!(*op, FsOpKind::Delete);
+                assert!(matches!(before, Some(FfonElement::Str(_))));
+                match side_effect {
+                    FsSideEffect::TrashedFile { content_snapshot, .. } => {
+                        assert_eq!(content_snapshot, b"important content");
+                    }
+                    other => panic!("expected TrashedFile, got {other:?}"),
+                }
+            }
+            other => panic!("expected FsOp, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn delete_item_emits_fsop_with_dir_snapshot() {
+        let tmp = make_tmp();
+        let dir = tmp.path().join("doomed_dir");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("inner.txt"), b"nested").unwrap();
+        let mut p = make_text_editor(&tmp);
+
+        assert!(p.delete_item("<input>doomed_dir</input>"));
+        assert!(!dir.exists());
+
+        let entries = p.take_timeline_entries();
+        assert_eq!(entries.len(), 1);
+        match &entries[0] {
+            TimelineEntry::FsOp { op, side_effect, before, .. } => {
+                assert_eq!(*op, FsOpKind::Delete);
+                assert!(matches!(before, Some(FfonElement::Obj(_))));
+                assert!(matches!(side_effect, FsSideEffect::TrashedDir { .. }));
+            }
+            other => panic!("expected FsOp, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn undo_fsop_delete_restores_file() {
+        let tmp = make_tmp();
+        let target = tmp.path().join("doomed.txt");
+        std::fs::write(&target, b"restore me").unwrap();
+        let mut p = make_text_editor(&tmp);
+
+        assert!(p.delete_item("<input>doomed.txt</input>"));
+        assert!(!target.exists());
+
+        let entries = p.take_timeline_entries();
+        let mut err = String::new();
+        p.undo(&entries[0], &mut err);
+        assert!(err.is_empty(), "undo error: {err}");
+        assert_eq!(std::fs::read(&target).unwrap(), b"restore me");
+    }
+
+    #[test]
+    fn undo_fsop_delete_restores_directory_tree() {
+        let tmp = make_tmp();
+        let dir = tmp.path().join("a");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("inner.txt"), b"nested").unwrap();
+        let sub = dir.join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("deep.txt"), b"deeper").unwrap();
+        let mut p = make_text_editor(&tmp);
+
+        assert!(p.delete_item("<input>a</input>"));
+        assert!(!dir.exists());
+
+        let entries = p.take_timeline_entries();
+        let mut err = String::new();
+        p.undo(&entries[0], &mut err);
+        assert!(err.is_empty(), "undo error: {err}");
+        assert!(dir.is_dir());
+        assert_eq!(std::fs::read(dir.join("inner.txt")).unwrap(), b"nested");
+        assert_eq!(std::fs::read(sub.join("deep.txt")).unwrap(), b"deeper");
+    }
+
+    #[test]
+    fn redo_fsop_delete_removes_file_again() {
+        let tmp = make_tmp();
+        let target = tmp.path().join("doomed.txt");
+        std::fs::write(&target, b"x").unwrap();
+        let mut p = make_text_editor(&tmp);
+
+        assert!(p.delete_item("<input>doomed.txt</input>"));
+        let entries = p.take_timeline_entries();
+        let mut err = String::new();
+        p.undo(&entries[0], &mut err);
+        assert!(target.exists());
+        p.redo(&entries[0], &mut err);
+        assert!(err.is_empty(), "redo error: {err}");
+        assert!(!target.exists(), "redo deletes the file again");
+    }
+
+    #[test]
+    fn delete_item_line_emits_provider_op() {
+        let tmp = make_tmp();
+        let file = tmp.path().join("sample.txt");
+        std::fs::write(&file, "alpha\nbeta\ngamma").unwrap();
+        let mut p = make_text_editor(&tmp);
+        p.push_path("sample.txt");
+        p.fetch(); // prime source_lines
+
+        let name = format!("<input>{}beta</input>", tags::format_src(1));
+        assert!(p.delete_item(&name));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\ngamma");
+
+        let entries = p.take_timeline_entries();
+        assert_eq!(entries.len(), 1);
+        match &entries[0] {
+            TimelineEntry::ProviderOp { command, .. } => {
+                assert_eq!(command, "texteditor.delete_line");
+            }
+            other => panic!("expected ProviderOp, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn undo_line_delete_restores_line_verbatim() {
+        // The deleted line carries indentation — undo must restore it exactly,
+        // without routing through commit_edit (which re-applies indent).
+        let tmp = make_tmp();
+        let file = tmp.path().join("py.py");
+        std::fs::write(&file, "def foo():\n    pass\n    return 1\n").unwrap();
+        let mut p = make_text_editor(&tmp);
+        p.push_path("py.py");
+        p.fetch();
+
+        // Delete line 1 ("    pass").
+        let name = format!("<input>{}pass</input>", tags::format_src(1));
+        assert!(p.delete_item(&name));
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            "def foo():\n    return 1\n"
+        );
+
+        let entries = p.take_timeline_entries();
+        let mut err = String::new();
+        p.undo(&entries[0], &mut err);
+        assert!(err.is_empty(), "undo error: {err}");
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            "def foo():\n    pass\n    return 1\n"
+        );
+    }
+
+    #[test]
+    fn redo_line_delete_removes_line_again() {
+        let tmp = make_tmp();
+        let file = tmp.path().join("sample.txt");
+        std::fs::write(&file, "alpha\nbeta\ngamma").unwrap();
+        let mut p = make_text_editor(&tmp);
+        p.push_path("sample.txt");
+        p.fetch();
+
+        let name = format!("<input>{}beta</input>", tags::format_src(1));
+        assert!(p.delete_item(&name));
+        let entries = p.take_timeline_entries();
+        let mut err = String::new();
+        p.undo(&entries[0], &mut err);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\nbeta\ngamma");
+        p.redo(&entries[0], &mut err);
+        assert!(err.is_empty(), "redo error: {err}");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\ngamma");
+    }
+
+    #[test]
+    fn line_delete_undo_redo_round_trip() {
+        let tmp = make_tmp();
+        let file = tmp.path().join("sample.txt");
+        std::fs::write(&file, "a\nb\nc").unwrap();
+        let mut p = make_text_editor(&tmp);
+        p.push_path("sample.txt");
+        p.fetch();
+
+        let name = format!("<input>{}b</input>", tags::format_src(1));
+        assert!(p.delete_item(&name));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "a\nc");
+
+        let entries = p.take_timeline_entries();
+        let mut err = String::new();
+        p.undo(&entries[0], &mut err);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "a\nb\nc");
+        p.redo(&entries[0], &mut err);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "a\nc");
+        p.undo(&entries[0], &mut err);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "a\nb\nc");
+        assert!(err.is_empty(), "undo/redo error: {err}");
     }
 }
