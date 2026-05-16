@@ -582,6 +582,7 @@ fn apply_undo(r: &mut AppRenderer, entry: &TimelineEntry) {
                 crate::provider::set_provider_path(r, path);
             }
             r.current_id = from_id.clone();
+            ensure_nav_layer_populated(r);
         }
         TimelineEntry::TextChunk { id, before, .. } => {
             if text_chunk_is_compose_insertion(r, id, before) {
@@ -680,6 +681,7 @@ fn apply_redo(r: &mut AppRenderer, entry: &TimelineEntry) {
                 crate::provider::set_provider_path(r, path);
             }
             r.current_id = to_id.clone();
+            ensure_nav_layer_populated(r);
         }
         TimelineEntry::TextChunk { id, before, after, .. } => {
             if text_chunk_is_compose_insertion(r, id, before) {
@@ -952,6 +954,35 @@ fn populate_recreated_dir(r: &mut AppRenderer, name: &str) {
         if let Some(FfonElement::Obj(obj)) = slice.get_mut(idx) {
             obj.children = kids;
         }
+    }
+}
+
+/// After a `Navigate` undo/redo restores the cursor, the FFON subtree it
+/// landed in may have been collapsed back to a lazy (empty-children) folder by
+/// an intervening `refresh_current_directory` — e.g. creating a file in a
+/// sibling directory rebuilds the parent listing. The `Navigate` arm only
+/// restores the path and cursor (in-memory model, no re-fetch), so the user
+/// would land *positionally* inside the child folder but see a blank list.
+/// Re-fetch only when the restored layer is genuinely empty, so populated
+/// subtrees (and any in-memory edits they hold) are left untouched.
+fn ensure_nav_layer_populated(r: &mut AppRenderer) {
+    if r.current_id.depth() < 2 {
+        return;
+    }
+    let is_fs = r
+        .current_id
+        .get(0)
+        .and_then(|i| r.providers.get(i))
+        .map(|p| p.path_is_filesystem())
+        .unwrap_or(false);
+    if !is_fs {
+        return;
+    }
+    let empty = navigate_to_slice(&r.ffon, &r.current_id)
+        .map(|s| s.is_empty())
+        .unwrap_or(false);
+    if empty {
+        crate::provider::refresh_current_directory(r);
     }
 }
 

@@ -9441,3 +9441,67 @@ fn background_provider_tick_does_not_signal_active_refresh() {
         "the active provider's tick must signal a refresh"
     );
 }
+
+/// Regression: navigating right into a folder must reset the viewport to the
+/// top. A stale scroll_offset carried from a long, scrolled parent listing
+/// used to leave a shorter child list scrolled out of view, rendering blank.
+#[test]
+fn navigate_right_into_folder_resets_scroll_offset() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r()); // into the filebrowser root listing
+    let subdir_idx = h.renderer.total_list.iter()
+        .position(|it| it.label.contains("subdir"))
+        .expect("subdir in listing");
+    h.renderer.list_index = subdir_idx;
+    h.renderer.current_id = h.renderer.total_list[subdir_idx].id.clone();
+    // Simulate having scrolled far down in the parent listing.
+    h.renderer.scroll_offset = 99;
+    press_right(h.r()); // descend into subdir
+    assert_eq!(
+        h.renderer.scroll_offset, 0,
+        "navigating into a folder must reset scroll_offset so the child list is visible"
+    );
+    assert!(
+        !h.renderer.total_list.is_empty(),
+        "child list should be populated"
+    );
+}
+
+/// Regression: undoing a `Navigate` back into a child folder must show the
+/// child's contents. An intervening `refresh_current_directory` (here: creating
+/// a file in a sibling directory) collapses the child's in-memory subtree back
+/// to a lazy empty folder; the Navigate undo only restored the cursor, leaving
+/// a blank list. Undo must re-fetch the collapsed layer.
+#[test]
+fn undo_navigate_into_child_repopulates_collapsed_subtree() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r()); // into fb root
+    // descend into subdir (grafts subdir.children = [nested.txt])
+    let si = h.renderer.total_list.iter()
+        .position(|i| i.label.contains("subdir")).unwrap();
+    h.renderer.list_index = si;
+    h.renderer.current_id = h.renderer.total_list[si].id.clone();
+    press_right(h.r());
+    assert!(h.renderer.total_list.iter().any(|i| i.label.contains("nested.txt")));
+    // back out, then create a file at root — this refreshes the root listing
+    // and collapses subdir's in-memory subtree to an empty lazy folder.
+    press_left(h.r());
+    press_ctrl(h.r(), Keycode::I);
+    type_text(h.r(), "- zz.txt");
+    press_enter(h.r());
+    // undo the create, then undo the navigate-out.
+    state_mod::walk_back(h.r());
+    state_mod::walk_back(h.r());
+    // cursor is back inside subdir AND its contents are visible again.
+    assert_eq!(h.renderer.current_id.depth(), 3, "cursor lands inside subdir");
+    assert!(
+        h.renderer.total_list.iter().any(|i| i.label.contains("nested.txt")),
+        "undo of the navigate must repopulate subdir, got {:?}",
+        h.renderer.total_list.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
+    );
+    std::fs::remove_file(h.tmp.path().join("zz.txt")).ok();
+}

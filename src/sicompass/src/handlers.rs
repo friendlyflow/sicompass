@@ -424,6 +424,11 @@ pub fn handle_right(r: &mut AppRenderer) {
     };
     r.current_id = item_id;
     if navigate_right_raw(r) {
+        // Reset the viewport to the top of the child listing — mirrors
+        // `handle_left`. Without this, a scrolled-down position carried over
+        // from a long parent folder leaves a shorter child list scrolled
+        // entirely out of view, rendering as a blank list.
+        r.scroll_offset = 0;
         list::create_list_current_layer(r);
         r.sync_current_id_from_list();
         r.caret.reset(sdl_ticks());
