@@ -9713,3 +9713,67 @@ fn texteditor_line_edit_is_undoable() {
         "ctrl-shift-Z re-applied the line edit"
     );
 }
+
+#[test]
+fn texteditor_first_line_of_new_file_is_undoable() {
+    let tmp = TempDir::new().unwrap();
+    let mut renderer = setup_texteditor(tmp.path());
+    press_right(&mut renderer); // into the (empty) text-editor listing
+    // Create a file.
+    press_ctrl(&mut renderer, Keycode::A);
+    type_text(&mut renderer, "ffff");
+    press_enter(&mut renderer);
+    cursor_to_label(&mut renderer, "ffff");
+    press_right(&mut renderer); // open the empty file
+    // Write its first line.
+    press(&mut renderer, Keycode::I);
+    type_text(&mut renderer, "line 1");
+    press_enter(&mut renderer);
+    let file = tmp.path().join("ffff");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "line 1");
+
+    press_ctrl(&mut renderer, Keycode::Z);
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(), "",
+        "ctrl-Z must remove the first line written into a new file"
+    );
+
+    press_ctrl_shift(&mut renderer, Keycode::Z);
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(), "line 1",
+        "ctrl-shift-Z must restore the first line"
+    );
+}
+
+#[test]
+fn texteditor_create_edit_undo_redo_roundtrip() {
+    // Mirrors: create dir, create file inside it, write three lines, delete
+    // one. Undoing everything must leave nothing on disk; redoing everything
+    // must restore the file content exactly (regression: the first line of a
+    // new file used to be recorded as a file creation and lost on redo).
+    let tmp = TempDir::new().unwrap();
+    let ffff = tmp.path().join("eeee/ffff");
+    let mut r = setup_texteditor(tmp.path());
+    press_right(&mut r);
+    press_ctrl(&mut r, Keycode::A); type_text(&mut r, "eeee:"); press_enter(&mut r);
+    cursor_to_label(&mut r, "eeee");
+    press_right(&mut r);
+    press_ctrl(&mut r, Keycode::A); type_text(&mut r, "ffff"); press_enter(&mut r);
+    cursor_to_label(&mut r, "ffff");
+    press_right(&mut r);
+    press(&mut r, Keycode::I); type_text(&mut r, "line 1"); press_enter(&mut r);
+    press_ctrl(&mut r, Keycode::A); type_text(&mut r, "line 2"); press_enter(&mut r);
+    press_ctrl(&mut r, Keycode::A); type_text(&mut r, "line 3"); press_enter(&mut r);
+    press_up(&mut r);
+    press_ctrl(&mut r, Keycode::D); // delete "line 2"
+    assert_eq!(std::fs::read_to_string(&ffff).unwrap(), "line 1\nline 3");
+
+    for _ in 0..16 { press_ctrl(&mut r, Keycode::Z); }
+    assert!(!ffff.exists(), "after full undo, the file must be gone from disk");
+
+    for _ in 0..16 { press_ctrl_shift(&mut r, Keycode::Z); }
+    assert_eq!(
+        std::fs::read_to_string(&ffff).unwrap(), "line 1\nline 3",
+        "after full redo, the file content must be restored exactly"
+    );
+}

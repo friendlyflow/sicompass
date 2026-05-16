@@ -86,6 +86,26 @@ impl TextEditorProvider {
         }
     }
 
+    /// Queue an `insert_lines` timeline entry for `lines` spliced in at
+    /// source-line index `clamp`. Shared by the in-file insert (`<srcins=N>`)
+    /// and the empty-file first-write paths of `commit_edit`. The `<src=N>`
+    /// payload prefix records the position; the rest is the inserted lines
+    /// joined by `\n`, so undo can remove exactly them and redo splice back.
+    fn push_insert_lines_entry(&mut self, clamp: usize, lines: &[String]) {
+        let payload_text =
+            format!("{}{}", tags::format_src(clamp), lines.join("\n"));
+        self.pending_timeline_entries.push(TimelineEntry::ProviderOp {
+            provider_idx: 0, // patched by app
+            command: "texteditor.insert_lines".to_owned(),
+            payload: FfonElement::new_str(payload_text),
+            label: if lines.len() == 1 {
+                format!("insert line {}", clamp + 1)
+            } else {
+                format!("insert {} lines at {}", lines.len(), clamp + 1)
+            },
+        });
+    }
+
     fn sync_path_str(&mut self) {
         let base = self.current_fs_path.to_str().unwrap_or("/");
         self.current_path_str = if self.ffon_sub_path.is_empty() {
@@ -392,30 +412,11 @@ impl Provider for TextEditorProvider {
             };
             let new_lines = build_indented_lines(&new_text, &indent);
             let clamp = insert_idx.min(self.source_lines.len());
-            // Encode the inserted lines (verbatim, indentation included) so
-            // undo can remove exactly them and redo can splice them back. The
-            // `<src=N>` prefix records the insert position; the rest is the
-            // inserted lines joined by `\n`.
-            let payload_text = format!(
-                "{}{}",
-                tags::format_src(clamp),
-                new_lines.join("\n"),
-            );
-            let count = new_lines.len();
-            self.source_lines.splice(clamp..clamp, new_lines);
+            self.source_lines.splice(clamp..clamp, new_lines.iter().cloned());
             if !self.flush_source_lines() {
                 return false;
             }
-            self.pending_timeline_entries.push(TimelineEntry::ProviderOp {
-                provider_idx: 0, // patched by app
-                command: "texteditor.insert_lines".to_owned(),
-                payload: FfonElement::new_str(payload_text),
-                label: if count == 1 {
-                    format!("insert line {}", clamp + 1)
-                } else {
-                    format!("insert {count} lines at {}", clamp + 1)
-                },
-            });
+            self.push_insert_lines_entry(clamp, &new_lines);
             return true;
         }
 
@@ -431,8 +432,14 @@ impl Provider for TextEditorProvider {
             }
             let new_lines = build_indented_lines(&new_text, "");
             let pos = self.source_lines.len();
-            self.source_lines.splice(pos..pos, new_lines);
-            return self.flush_source_lines();
+            self.source_lines.splice(pos..pos, new_lines.iter().cloned());
+            if !self.flush_source_lines() {
+                return false;
+            }
+            // The first write into an empty file is a line insert, not a file
+            // creation — record it as such so undo/redo restore the content.
+            self.push_insert_lines_entry(pos, &new_lines);
+            return true;
         }
 
         // ── Case 3: directory create (old is empty = new item from placeholder) ─
@@ -1596,5 +1603,49 @@ mod tests {
         p.redo(&entries[0], &mut err);
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\n\ngamma\n");
         assert!(err.is_empty(), "undo/redo error: {err}");
+    }
+
+    #[test]
+    fn commit_edit_first_line_of_empty_file_emits_provider_op() {
+        // The first write into an empty file is a line insert, not a file
+        // creation — it must emit an `insert_lines` entry.
+        let tmp = make_tmp();
+        let file = tmp.path().join("new.txt");
+        std::fs::write(&file, "").unwrap();
+        let mut p = make_text_editor(&tmp);
+        p.push_path("new.txt");
+        p.fetch();
+
+        assert!(p.commit_edit("", "hello"));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "hello");
+
+        let entries = p.take_timeline_entries();
+        assert_eq!(entries.len(), 1);
+        match &entries[0] {
+            TimelineEntry::ProviderOp { command, .. } => {
+                assert_eq!(command, "texteditor.insert_lines");
+            }
+            other => panic!("expected ProviderOp, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn first_line_write_undo_redo() {
+        let tmp = make_tmp();
+        let file = tmp.path().join("new.txt");
+        std::fs::write(&file, "").unwrap();
+        let mut p = make_text_editor(&tmp);
+        p.push_path("new.txt");
+        p.fetch();
+
+        assert!(p.commit_edit("", "hello"));
+        let entries = p.take_timeline_entries();
+        let mut err = String::new();
+        p.undo(&entries[0], &mut err);
+        assert!(err.is_empty(), "undo error: {err}");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "");
+        p.redo(&entries[0], &mut err);
+        assert!(err.is_empty(), "redo error: {err}");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "hello");
     }
 }

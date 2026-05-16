@@ -185,19 +185,27 @@ fn record_placeholder_fs_create(
     collapse_typed_name_chunks(r, session_start);
     pop_last_placeholder_structural(r);
     record_fs_op(r, undo_id, sicompass_sdk::timeline::FsOpKind::Create, None, Some(undo_elem));
+    reposition_after_placeholder_commit(r, name);
+    true
+}
+
+/// Rebuild the current list and move the cursor onto the item just committed
+/// from a placeholder, located by name. Used after a placeholder commit whose
+/// undo step is already recorded — either by `record_placeholder_fs_create`
+/// (an `FsOp::Create`) or by the provider itself (e.g. the text editor's
+/// first-line write into an empty file, which emits its own `ProviderOp`).
+fn reposition_after_placeholder_commit(r: &mut AppRenderer, name: &str) {
     list::create_list_current_layer(r);
     // Labels render as "{prefix} {content}" (e.g. "-i file.txt"); match the
     // content after the first space.
-    let target = name;
     if let Some(i) = r.total_list.iter().position(|item| {
-        item.label.split_once(' ').map(|(_, c)| c).unwrap_or(&item.label) == target
+        item.label.split_once(' ').map(|(_, c)| c).unwrap_or(&item.label) == name
     }) {
         if let Some(id) = r.total_list.get(i).map(|it| it.id.clone()) {
             r.current_id = id;
             r.list_index = i;
         }
     }
-    true
 }
 
 /// Push a `Navigate` entry for a search-exit commit (Enter / Right-at-end /
@@ -1634,7 +1642,14 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                 r.placeholder_insert_mode = false;
                 r.placeholder_cancel = None;
                 let undo_id = r.current_id.clone();
+                let tl_before = r.active_timeline().entries.len();
                 let committed = crate::provider::commit_edit(r, &old_content, &name);
+                // When the provider recorded its own timeline entry during the
+                // commit (e.g. the text editor writing the first line of an
+                // empty file — a content edit, not a file creation), that entry
+                // owns the undo step; the app must not also record an
+                // `FsOp::Create` for it.
+                let provider_recorded = r.active_timeline().entries.len() > tl_before;
                 if committed {
                     // Prefer a sub-tree refresh (updates only the parent Obj's children)
                     // because `refresh_current_directory` rebuilds the entire provider root
@@ -1644,7 +1659,9 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                     }
                     // Disk layer: on a filesystem provider, `commit_edit` created
                     // the file on disk — record an `FsOp::Create` and move onto it.
-                    if record_placeholder_fs_create(
+                    if provider_recorded {
+                        reposition_after_placeholder_commit(r, &name);
+                    } else if record_placeholder_fs_create(
                         r, undo_id, &name, FfonElement::new_str(name.clone()), session_start,
                     ) {
                         // handled by the filesystem path
@@ -1714,14 +1731,21 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                 r.placeholder_cancel = None;
                 // Passes `key:` — the trailing colon signals Obj creation to `update_body_leaf`.
                 let undo_id = r.current_id.clone();
+                let tl_before = r.active_timeline().entries.len();
                 let committed = crate::provider::commit_edit(r, &old_content, &format!("{key}:"));
+                // See the `PlaceholderKind::Str` arm: a provider-recorded entry
+                // (e.g. a `header:` typed as the first line of an empty file)
+                // owns the undo step, so skip the `FsOp::Create`.
+                let provider_recorded = r.active_timeline().entries.len() > tl_before;
                 if committed {
                     if !crate::provider::refresh_subtree_parent(r) {
                         crate::provider::refresh_current_directory(r);
                     }
                     // Disk layer: on a filesystem provider, `commit_edit` created
                     // the directory on disk — record an `FsOp::Create`.
-                    if record_placeholder_fs_create(
+                    if provider_recorded {
+                        reposition_after_placeholder_commit(r, &key);
+                    } else if record_placeholder_fs_create(
                         r, undo_id, &key, FfonElement::new_obj(&key), session_start,
                     ) {
                         // handled by the filesystem path
