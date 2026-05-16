@@ -392,8 +392,31 @@ impl Provider for TextEditorProvider {
             };
             let new_lines = build_indented_lines(&new_text, &indent);
             let clamp = insert_idx.min(self.source_lines.len());
+            // Encode the inserted lines (verbatim, indentation included) so
+            // undo can remove exactly them and redo can splice them back. The
+            // `<src=N>` prefix records the insert position; the rest is the
+            // inserted lines joined by `\n`.
+            let payload_text = format!(
+                "{}{}",
+                tags::format_src(clamp),
+                new_lines.join("\n"),
+            );
+            let count = new_lines.len();
             self.source_lines.splice(clamp..clamp, new_lines);
-            return self.flush_source_lines();
+            if !self.flush_source_lines() {
+                return false;
+            }
+            self.pending_timeline_entries.push(TimelineEntry::ProviderOp {
+                provider_idx: 0, // patched by app
+                command: "texteditor.insert_lines".to_owned(),
+                payload: FfonElement::new_str(payload_text),
+                label: if count == 1 {
+                    format!("insert line {}", clamp + 1)
+                } else {
+                    format!("insert {count} lines at {}", clamp + 1)
+                },
+            });
+            return true;
         }
 
         // ── Case 2b: in-file I_PLACEHOLDER ──────────────────────────────────
@@ -510,12 +533,27 @@ impl Provider for TextEditorProvider {
             TimelineEntry::ProviderOp { command, payload, .. }
                 if command == "texteditor.delete_line" =>
             {
-                if let Some((idx, verbatim)) = decode_delete_line(payload) {
+                if let Some((idx, verbatim)) = decode_line_payload(payload) {
                     self.ensure_file_loaded();
                     let clamp = idx.min(self.source_lines.len());
                     self.source_lines.splice(clamp..clamp, [verbatim]);
                     if !self.flush_source_lines() {
                         *error = "undo delete line: failed to write file".to_owned();
+                    }
+                }
+            }
+            TimelineEntry::ProviderOp { command, payload, .. }
+                if command == "texteditor.insert_lines" =>
+            {
+                // Undo a line insert: remove the inserted lines back off disk.
+                if let Some((idx, joined)) = decode_line_payload(payload) {
+                    let count = joined.split('\n').count();
+                    self.ensure_file_loaded();
+                    let start = idx.min(self.source_lines.len());
+                    let end = (start + count).min(self.source_lines.len());
+                    self.source_lines.drain(start..end);
+                    if !self.flush_source_lines() {
+                        *error = "undo insert line: failed to write file".to_owned();
                     }
                 }
             }
@@ -543,13 +581,28 @@ impl Provider for TextEditorProvider {
             TimelineEntry::ProviderOp { command, payload, .. }
                 if command == "texteditor.delete_line" =>
             {
-                if let Some((idx, _)) = decode_delete_line(payload) {
+                if let Some((idx, _)) = decode_line_payload(payload) {
                     self.ensure_file_loaded();
                     if idx < self.source_lines.len() {
                         self.source_lines.remove(idx);
                         if !self.flush_source_lines() {
                             *error = "redo delete line: failed to write file".to_owned();
                         }
+                    }
+                }
+            }
+            TimelineEntry::ProviderOp { command, payload, .. }
+                if command == "texteditor.insert_lines" =>
+            {
+                // Redo a line insert: splice the recorded lines back in.
+                if let Some((idx, joined)) = decode_line_payload(payload) {
+                    self.ensure_file_loaded();
+                    let lines: Vec<String> =
+                        joined.split('\n').map(str::to_owned).collect();
+                    let clamp = idx.min(self.source_lines.len());
+                    self.source_lines.splice(clamp..clamp, lines);
+                    if !self.flush_source_lines() {
+                        *error = "redo insert line: failed to write file".to_owned();
                     }
                 }
             }
@@ -624,10 +677,11 @@ fn leading_whitespace(s: &str) -> &str {
     &s[..end]
 }
 
-/// Decode a `texteditor.delete_line` timeline payload into its
-/// `(line_index, verbatim_text)` pair. The payload key is `<src=N>text`,
-/// optionally wrapped in `<input>…</input>`.
-fn decode_delete_line(payload: &FfonElement) -> Option<(usize, String)> {
+/// Decode a `texteditor.delete_line` / `texteditor.insert_lines` timeline
+/// payload into its `(line_index, text)` pair. The payload key is `<src=N>text`,
+/// optionally wrapped in `<input>…</input>`. For an insert the `text` is the
+/// inserted lines joined by `\n`; for a delete it is the single removed line.
+fn decode_line_payload(payload: &FfonElement) -> Option<(usize, String)> {
     let key = match payload {
         FfonElement::Str(s) => s.as_str(),
         FfonElement::Obj(o) => o.key.as_str(),
@@ -1430,6 +1484,117 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "a\nc");
         p.undo(&entries[0], &mut err);
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "a\nb\nc");
+        assert!(err.is_empty(), "undo/redo error: {err}");
+    }
+
+    // ---- line-insert timeline emission + undo/redo --------------------------
+
+    #[test]
+    fn commit_edit_insert_emits_provider_op() {
+        let tmp = make_tmp();
+        let file = tmp.path().join("sample.txt");
+        std::fs::write(&file, "alpha\ngamma").unwrap();
+        let mut p = make_text_editor(&tmp);
+        p.push_path("sample.txt");
+        p.fetch();
+
+        let old = format!("<input>{}</input>", tags::format_src_insert(1));
+        assert!(p.commit_edit(&old, "beta"));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\nbeta\ngamma");
+
+        let entries = p.take_timeline_entries();
+        assert_eq!(entries.len(), 1);
+        match &entries[0] {
+            TimelineEntry::ProviderOp { command, .. } => {
+                assert_eq!(command, "texteditor.insert_lines");
+            }
+            other => panic!("expected ProviderOp, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn undo_line_insert_removes_line() {
+        let tmp = make_tmp();
+        let file = tmp.path().join("sample.txt");
+        std::fs::write(&file, "alpha\ngamma").unwrap();
+        let mut p = make_text_editor(&tmp);
+        p.push_path("sample.txt");
+        p.fetch();
+
+        let old = format!("<input>{}</input>", tags::format_src_insert(1));
+        assert!(p.commit_edit(&old, "beta"));
+        let entries = p.take_timeline_entries();
+        let mut err = String::new();
+        p.undo(&entries[0], &mut err);
+        assert!(err.is_empty(), "undo error: {err}");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\ngamma");
+    }
+
+    #[test]
+    fn redo_line_insert_re_adds_line() {
+        let tmp = make_tmp();
+        let file = tmp.path().join("sample.txt");
+        std::fs::write(&file, "alpha\ngamma").unwrap();
+        let mut p = make_text_editor(&tmp);
+        p.push_path("sample.txt");
+        p.fetch();
+
+        let old = format!("<input>{}</input>", tags::format_src_insert(1));
+        assert!(p.commit_edit(&old, "beta"));
+        let entries = p.take_timeline_entries();
+        let mut err = String::new();
+        p.undo(&entries[0], &mut err);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\ngamma");
+        p.redo(&entries[0], &mut err);
+        assert!(err.is_empty(), "redo error: {err}");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\nbeta\ngamma");
+    }
+
+    #[test]
+    fn line_insert_undo_redo_multiline() {
+        // A multi-line insert (Ctrl+Enter input with embedded `\n`) must undo
+        // and redo as one atomic step covering every inserted line.
+        let tmp = make_tmp();
+        let file = tmp.path().join("sample.txt");
+        std::fs::write(&file, "alpha\ngamma").unwrap();
+        let mut p = make_text_editor(&tmp);
+        p.push_path("sample.txt");
+        p.fetch();
+
+        let old = format!("<input>{}</input>", tags::format_src_insert(1));
+        assert!(p.commit_edit(&old, "b1\nb2"));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\nb1\nb2\ngamma");
+
+        let entries = p.take_timeline_entries();
+        let mut err = String::new();
+        p.undo(&entries[0], &mut err);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\ngamma");
+        p.redo(&entries[0], &mut err);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\nb1\nb2\ngamma");
+        assert!(err.is_empty(), "undo/redo error: {err}");
+    }
+
+    #[test]
+    fn insert_blank_line_undo_redo() {
+        // Ctrl+I then Enter with no text inserts one blank line; undo/redo must
+        // treat the empty payload as exactly one line.
+        let tmp = make_tmp();
+        let file = tmp.path().join("sample.txt");
+        std::fs::write(&file, "alpha\ngamma\n").unwrap();
+        let mut p = make_text_editor(&tmp);
+        p.push_path("sample.txt");
+        p.fetch();
+
+        let old = format!("<input>{}</input>", tags::format_src_insert(1));
+        assert!(p.commit_edit(&old, ""));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\n\ngamma\n");
+
+        let entries = p.take_timeline_entries();
+        let mut err = String::new();
+        p.undo(&entries[0], &mut err);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\ngamma\n");
+        p.redo(&entries[0], &mut err);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\n\ngamma\n");
         assert!(err.is_empty(), "undo/redo error: {err}");
     }
 }

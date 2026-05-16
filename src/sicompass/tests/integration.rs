@@ -9641,3 +9641,75 @@ fn texteditor_line_deletion_is_undoable() {
         "ctrl-shift-Z re-deleted the line"
     );
 }
+
+#[test]
+fn texteditor_line_insertion_is_undoable() {
+    let tmp = TempDir::new().unwrap();
+    let file = tmp.path().join("sample.txt");
+    std::fs::write(&file, "alpha\ngamma").unwrap();
+
+    let mut renderer = setup_texteditor(tmp.path());
+    press_right(&mut renderer); // into the text-editor listing
+    cursor_to_label(&mut renderer, "sample.txt");
+    press_right(&mut renderer); // open the file — lines become the list
+    cursor_to_label(&mut renderer, "gamma");
+
+    // Ctrl+I seeds an insert placeholder before the gamma line; type + Enter
+    // commits the new line.
+    press_ctrl(&mut renderer, Keycode::I);
+    type_text(&mut renderer, "beta");
+    press_enter(&mut renderer);
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "alpha\nbeta\ngamma",
+        "Ctrl+I + Enter inserted the beta line"
+    );
+
+    press_ctrl(&mut renderer, Keycode::Z);
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "alpha\ngamma",
+        "ctrl-Z removed the inserted line"
+    );
+
+    press_ctrl_shift(&mut renderer, Keycode::Z);
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "alpha\nbeta\ngamma",
+        "ctrl-shift-Z re-inserted the line"
+    );
+}
+
+#[test]
+fn texteditor_line_edit_is_undoable() {
+    let tmp = TempDir::new().unwrap();
+    let file = tmp.path().join("sample.txt");
+    std::fs::write(&file, "alpha\nbeta\ngamma").unwrap();
+
+    let mut renderer = setup_texteditor(tmp.path());
+    press_right(&mut renderer); // into the text-editor listing
+    cursor_to_label(&mut renderer, "sample.txt");
+    press_right(&mut renderer); // open the file — lines become the list
+    cursor_to_label(&mut renderer, "beta");
+
+    // Enter insert mode on the beta line and append to its content.
+    press(&mut renderer, Keycode::I);
+    type_text(&mut renderer, "X");
+    press_enter(&mut renderer);
+    let after_edit = std::fs::read_to_string(&file).unwrap();
+    assert_ne!(after_edit, "alpha\nbeta\ngamma", "editing the line changed the file");
+
+    press_ctrl(&mut renderer, Keycode::Z);
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "alpha\nbeta\ngamma",
+        "ctrl-Z restored the original line content"
+    );
+
+    press_ctrl_shift(&mut renderer, Keycode::Z);
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        after_edit,
+        "ctrl-shift-Z re-applied the line edit"
+    );
+}
