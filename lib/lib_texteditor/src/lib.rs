@@ -507,16 +507,15 @@ impl Provider for TextEditorProvider {
         let full = self.current_fs_path.join(clean);
         // Snapshot before trashing so an undo can restore even if the OS trash
         // is later emptied (see `sicompass_sdk::fs_trash`).
-        let is_dir = std::fs::metadata(&full).map(|m| m.is_dir()).unwrap_or(false);
         let side_effect = sicompass_sdk::fs_trash::snapshot_for_delete(&full);
         if trash::delete(&full).is_err() {
             return false;
         }
-        let before_elem = if is_dir {
-            FfonElement::new_obj(clean)
-        } else {
-            FfonElement::new_str(clean)
-        };
+        // The text editor lists *both* files and directories as navigable
+        // `Obj`s (see `list_directory`), so an undo must reinsert the entry as
+        // an `Obj`. A bare `Str` would be unnavigable, and a later descent
+        // into it would resolve to nothing — a blank list.
+        let before_elem = FfonElement::new_obj(clean);
         self.pending_timeline_entries.push(TimelineEntry::FsOp {
             provider_idx: 0, // patched by app
             id: sicompass_sdk::ffon::IdArray::new(),
@@ -1306,7 +1305,9 @@ mod tests {
         match &entries[0] {
             TimelineEntry::FsOp { op, side_effect, before, .. } => {
                 assert_eq!(*op, FsOpKind::Delete);
-                assert!(matches!(before, Some(FfonElement::Str(_))));
+                // The text editor lists files as navigable `Obj`s, so the
+                // restore element must be an `Obj` (not a bare `Str`).
+                assert!(matches!(before, Some(FfonElement::Obj(_))));
                 match side_effect {
                     FsSideEffect::TrashedFile { content_snapshot, .. } => {
                         assert_eq!(content_snapshot, b"important content");

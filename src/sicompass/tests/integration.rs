@@ -9777,3 +9777,49 @@ fn texteditor_create_edit_undo_redo_roundtrip() {
         "after full redo, the file content must be restored exactly"
     );
 }
+
+#[test]
+fn texteditor_undo_into_restored_file_shows_content() {
+    // Create folder/file, write + delete a line, delete the file, delete the
+    // folder — then undo it all. Whenever undo lands the cursor inside a
+    // filesystem layer the list must not be blank (regression: a deleted file
+    // was restored as an unnavigable Str, so a later descent into it resolved
+    // to nothing and rendered an empty list).
+    let tmp = TempDir::new().unwrap();
+    let mut r = setup_texteditor(tmp.path());
+    press_right(&mut r); // into the editor listing
+    press_ctrl(&mut r, Keycode::A); type_text(&mut r, "aaa:"); press_enter(&mut r);
+    press_right(&mut r); // into aaa
+    press_ctrl(&mut r, Keycode::A); type_text(&mut r, "bbbb"); press_enter(&mut r);
+    press_right(&mut r); // into bbbb (empty file)
+    press(&mut r, Keycode::I); type_text(&mut r, "l1"); press_enter(&mut r);
+    press_ctrl(&mut r, Keycode::A); type_text(&mut r, "l2"); press_enter(&mut r);
+    press_ctrl(&mut r, Keycode::D); // delete the l2 line
+    press_left(&mut r); // out to aaa
+    press_ctrl(&mut r, Keycode::D); // delete file bbbb
+    press_left(&mut r); // out to the editor root
+    press_ctrl(&mut r, Keycode::D); // delete folder aaa
+
+    let mut saw_inside_bbbb = false;
+    for i in 0..24 {
+        press_ctrl(&mut r, Keycode::Z);
+        if r.current_id.depth() >= 2 {
+            assert!(
+                !r.total_list.is_empty(),
+                "undo step {i}: list went blank at id={:?}",
+                r.current_id,
+            );
+        }
+        // depth 4 == cursor inside bbbb's contents
+        if r.current_id.depth() == 4 {
+            saw_inside_bbbb = true;
+            assert!(
+                r.total_list.iter().any(|it| it.label.contains("l1"))
+                    || r.total_list.iter().any(|it| it.label == "i"),
+                "inside restored file, expected its line(s) or the empty placeholder, got {:?}",
+                r.total_list.iter().map(|it| it.label.clone()).collect::<Vec<_>>(),
+            );
+        }
+    }
+    assert!(saw_inside_bbbb, "undo never landed back inside the file");
+}

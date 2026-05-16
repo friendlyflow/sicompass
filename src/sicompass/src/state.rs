@@ -523,6 +523,7 @@ pub fn walk_back(r: &mut AppRenderer) {
 
     r.in_history_action = true;
     apply_undo(r, &entry);
+    ensure_nav_layer_populated(r);
     discard_provider_emissions(r);
     r.in_history_action = false;
 
@@ -562,6 +563,7 @@ pub fn walk_forward(r: &mut AppRenderer) {
 
     r.in_history_action = true;
     apply_redo(r, &entry);
+    ensure_nav_layer_populated(r);
     discard_provider_emissions(r);
     r.in_history_action = false;
 
@@ -582,7 +584,8 @@ fn apply_undo(r: &mut AppRenderer, entry: &TimelineEntry) {
                 crate::provider::set_provider_path(r, path);
             }
             r.current_id = from_id.clone();
-            ensure_nav_layer_populated(r);
+            // The empty-layer re-fetch runs once in `walk_back`, after the
+            // entry is applied — see `ensure_nav_layer_populated`.
         }
         TimelineEntry::TextChunk { id, before, .. } => {
             if text_chunk_is_compose_insertion(r, id, before) {
@@ -681,7 +684,7 @@ fn apply_redo(r: &mut AppRenderer, entry: &TimelineEntry) {
                 crate::provider::set_provider_path(r, path);
             }
             r.current_id = to_id.clone();
-            ensure_nav_layer_populated(r);
+            // Empty-layer re-fetch runs once in `walk_forward` (see `apply_undo`).
         }
         TimelineEntry::TextChunk { id, before, after, .. } => {
             if text_chunk_is_compose_insertion(r, id, before) {
@@ -972,14 +975,19 @@ fn populate_recreated_dir(r: &mut AppRenderer, name: &str) {
     }
 }
 
-/// After a `Navigate` undo/redo restores the cursor, the FFON subtree it
-/// landed in may have been collapsed back to a lazy (empty-children) folder by
-/// an intervening `refresh_current_directory` — e.g. creating a file in a
-/// sibling directory rebuilds the parent listing. The `Navigate` arm only
-/// restores the path and cursor (in-memory model, no re-fetch), so the user
-/// would land *positionally* inside the child folder but see a blank list.
-/// Re-fetch only when the restored layer is genuinely empty, so populated
-/// subtrees (and any in-memory edits they hold) are left untouched.
+/// After an undo/redo restores the cursor, the FFON layer it landed in may not
+/// be displayable: collapsed back to a lazy empty-children node by an
+/// intervening `refresh_current_directory`, or never populated because a
+/// restored element (e.g. a file/folder reinserted by an `FsOp::Delete` undo)
+/// carries no children. Either way the user would land *positionally* inside a
+/// folder/file but see a blank list.
+///
+/// Re-fetch the active provider for that layer when it is empty — or fails to
+/// resolve at all — so the listing reappears. Populated subtrees (and any
+/// in-memory edits they hold) are left untouched.
+///
+/// Called once per `walk_back` / `walk_forward` step, so it covers cursor
+/// landings from every entry kind, not just `Navigate`.
 fn ensure_nav_layer_populated(r: &mut AppRenderer) {
     if r.current_id.depth() < 2 {
         return;
@@ -993,10 +1001,11 @@ fn ensure_nav_layer_populated(r: &mut AppRenderer) {
     if !is_fs {
         return;
     }
-    let empty = navigate_to_slice(&r.ffon, &r.current_id)
+    // An unresolved path counts as needing a refresh just like an empty one.
+    let needs_fetch = navigate_to_slice(&r.ffon, &r.current_id)
         .map(|s| s.is_empty())
-        .unwrap_or(false);
-    if empty {
+        .unwrap_or(true);
+    if needs_fetch {
         crate::provider::refresh_current_directory(r);
     }
 }
