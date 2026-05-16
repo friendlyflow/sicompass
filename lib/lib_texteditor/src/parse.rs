@@ -276,7 +276,7 @@ mod tests {
     #[test]
     fn parse_file_emits_blank_line_as_str() {
         // Blank lines must survive parsing as empty Str elements so they show
-        // up in the editor list.
+        // up in the text editor list.
         let elements = parse_file("a\n\nb");
         assert_eq!(elements.len(), 3);
         assert_eq!(strip_src(elements[0].as_str().unwrap()), "a");

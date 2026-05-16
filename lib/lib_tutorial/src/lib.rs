@@ -120,7 +120,6 @@ static SECTIONS: &[Node] = &[
                 key: "Modes",
                 children: &[
                     Leaf("Sicompass has several modes that change what your keyboard inputs do. You always start in operator mode."),
-                    Leaf("Space: toggle between operator mode and editor mode. Operator mode is for navigating; editor mode enables additional editing shortcuts."),
                     Leaf(": (colon): enter command mode. Type a command name and press Enter to execute it. Commands are context-sensitive, each provider can offer its own commands."),
                     Leaf("Tab: enter simple search mode. Start typing to filter items in the current list. Only items matching your search will be shown."),
                     Leaf("S: switch to scroll mode. Use Up/Down to scroll through a long text body without moving the selection."),
@@ -135,7 +134,6 @@ static SECTIONS: &[Node] = &[
             Leaf("Sicompass has built-in screen reader support powered by AccessKit. If you use a screen reader, Sicompass works with it out of the box — no configuration needed."),
             Leaf("Screen reader support is available on all platforms: Linux (AT-SPI), macOS (VoiceOver), and Windows (Narrator, NVDA, JAWS)."),
             Leaf("When you navigate up, down, or into items, the current element is automatically announced by your screen reader."),
-            Leaf("Mode changes are also announced. For example, switching to insert mode announces 'editor insert', entering search announces 'search', and returning to normal navigation announces 'operator mode'."),
             Leaf("Screen reader support activates automatically when a screen reader is detected. There is nothing to enable or configure."),
         ],
     },
@@ -216,8 +214,8 @@ static SECTIONS: &[Node] = &[
                 Leaf("Copy with Ctrl+C and paste with Ctrl+V to duplicate files and directories."),
                 Leaf("The file browser supports all the standard modes: search (Tab) to filter files, extended search (Ctrl+F) to find files recursively in subdirectories."),
             ]},
-            Branch { key: "Editor", children: &[
-                Leaf("The editor turns the filesystem and the contents of files into a single navigable tree. Directories and files are listed like in the file browser, but pressing Right on a file opens its contents as FFON nodes you can navigate into."),
+            Branch { key: "Text Editor", children: &[
+                Leaf("The text editor turns the filesystem and the contents of files into a single navigable tree. Directories and files are listed like in the file browser, but pressing Right on a file opens its contents as FFON nodes you can navigate into."),
                 Leaf("Parsing is language-aware: source files, JSON, and plain text all expand into their natural structure (sections, blocks, lines). Empty-body headers collapse into a single line for cleaner navigation."),
                 Leaf("File lines are editable inline. Press i or a on a line to edit it, then Enter to commit. Multi-line edits are supported. The cursor coordinate is restored after each commit so consecutive Ctrl+A inserts keep working."),
                 Leaf("Create new files and directories inline via the i placeholder, the same way as in the file browser. Inside a file, the same affordances let you add or remove content lines."),

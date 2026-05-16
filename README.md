@@ -30,7 +30,7 @@ Built for users who prefer or require keyboard-driven interaction, Sicompass off
 Sicompass comes with several providers out of the box, each turning a different data source into the same keyboard-navigable tree:
 
 - **File Browser** — Navigate your filesystem as a navigable tree with inline rename, copy, paste, and delete (delete-undo restores from a content snapshot when the OS trash is empty)
-- **Editor** — Browse the filesystem and open files as language-aware FFON trees, with inline line editing and create/delete/rename
+- **Text Editor** — Browse the filesystem and open files as language-aware FFON trees, with inline line editing and create/delete/rename
 - **Email** — IMAP/SMTP client with Google OAuth, Cc/Bcc, attachments, drafts, flag/move/delete (typed `ImapOp` undo by Message-ID so the operation survives folder moves), threaded history, and FFON-bodied messages
 - **Chat** — Matrix client with public and private rooms, invites, member management (leave/kick/ban are undoable), encrypted messages, unread badges, and a background sync thread
 - **Web Browser** — Browse the web with HTML-to-FFON conversion; fill and submit forms via the Chrome DevTools Protocol; cookie-consent banners are auto-accepted

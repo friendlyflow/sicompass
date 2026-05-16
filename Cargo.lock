@@ -3583,7 +3583,6 @@ name = "sicompass-builtins"
 version = "0.1.0"
 dependencies = [
  "sicompass-chatclient",
- "sicompass-editor",
  "sicompass-emailclient",
  "sicompass-filebrowser",
  "sicompass-remote",
@@ -3591,6 +3590,7 @@ dependencies = [
  "sicompass-sdk",
  "sicompass-settings",
  "sicompass-terminal",
+ "sicompass-text-editor",
  "sicompass-tutorial",
  "sicompass-webbrowser",
 ]
@@ -3606,16 +3606,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "wiremock",
-]
-
-[[package]]
-name = "sicompass-editor"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "sicompass-sdk",
- "tempfile",
- "trash",
 ]
 
 [[package]]
@@ -3706,6 +3696,16 @@ dependencies = [
  "sicompass-shell",
  "tempfile",
  "vte",
+]
+
+[[package]]
+name = "sicompass-text-editor"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "sicompass-sdk",
+ "tempfile",
+ "trash",
 ]
 
 [[package]]

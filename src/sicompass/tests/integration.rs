@@ -5223,11 +5223,11 @@ fn chat_mark_read_clears_local_unread_count() {
 }
 
 // ---------------------------------------------------------------------------
-// Editor provider
+// Text editor provider
 // ---------------------------------------------------------------------------
 
 #[test]
-fn editor_provider_lists_directory_and_parses_file() {
+fn text_editor_provider_lists_directory_and_parses_file() {
     ensure_builtins();
     let tmp = TempDir::new().expect("tempdir");
     let root = tmp.path();
@@ -5240,9 +5240,9 @@ fn editor_provider_lists_directory_and_parses_file() {
     ).unwrap();
     std::fs::create_dir(root.join("subdir")).unwrap();
 
-    let mut editor = sicompass_sdk::create_provider_by_name("editor")
+    let mut editor = sicompass_sdk::create_provider_by_name("texteditor")
         .expect("editor factory must be registered");
-    editor.on_setting_change("editorPath", root.to_str().unwrap());
+    editor.on_setting_change("textEditorPath", root.to_str().unwrap());
 
     // Directory listing contains all three entries.
     let items = editor.fetch();
@@ -5286,12 +5286,12 @@ fn editor_provider_lists_directory_and_parses_file() {
 }
 
 // ---------------------------------------------------------------------------
-// has_editor_semantics / editor coordinate tests
+// has_editor_semantics / text editor coordinate tests
 // ---------------------------------------------------------------------------
 
-/// Build an AppRenderer with filebrowser (idx 0) + editor (idx 1).
-/// The editor is rooted at `tmp` which contains one .txt file.
-fn harness_with_editor() -> (AppRenderer, TempDir) {
+/// Build an AppRenderer with filebrowser (idx 0) + text editor (idx 1).
+/// The text editor is rooted at `tmp` which contains one .txt file.
+fn harness_with_text_editor() -> (AppRenderer, TempDir) {
     ensure_builtins();
     let tmp = TempDir::new().expect("tempdir");
     let root = tmp.path();
@@ -5311,8 +5311,8 @@ fn harness_with_editor() -> (AppRenderer, TempDir) {
     }
 
     // Editor at tmp — set path before fetching so init doesn't clobber it.
-    let mut editor = sicompass_sdk::create_provider_by_name("editor").unwrap();
-    editor.on_setting_change("editorPath", root.to_str().unwrap());
+    let mut editor = sicompass_sdk::create_provider_by_name("texteditor").unwrap();
+    editor.on_setting_change("textEditorPath", root.to_str().unwrap());
     let children = editor.fetch();
     let dn = editor.display_name().to_owned();
     let mut root_elem = FfonElement::new_obj(&dn);
@@ -5325,9 +5325,9 @@ fn harness_with_editor() -> (AppRenderer, TempDir) {
 }
 
 #[test]
-fn entering_editor_provider_keeps_general() {
-    let (mut r, _tmp) = harness_with_editor();
-    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+fn entering_text_editor_provider_keeps_general() {
+    let (mut r, _tmp) = harness_with_text_editor();
+    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
     navigate_to_provider(&mut r, editor_idx);
     assert_eq!(r.coordinate, Coordinate::General, "before entry: General");
 
@@ -5337,9 +5337,9 @@ fn entering_editor_provider_keeps_general() {
 }
 
 #[test]
-fn inside_editor_i_yields_insert() {
-    let (mut r, _tmp) = harness_with_editor();
-    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+fn inside_text_editor_i_yields_insert() {
+    let (mut r, _tmp) = harness_with_text_editor();
+    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
     navigate_to_provider(&mut r, editor_idx);
     press_right(&mut r); // enters editor → General
     assert_eq!(r.coordinate, Coordinate::General);
@@ -5350,7 +5350,7 @@ fn inside_editor_i_yields_insert() {
 }
 
 #[test]
-fn editor_directory_entries_are_obj() {
+fn text_editor_directory_entries_are_obj() {
     // Both files and directories are Obj — going right on either enters its
     // contents (file body or subdir listing), so both render with `+i`.
     ensure_builtins();
@@ -5358,8 +5358,8 @@ fn editor_directory_entries_are_obj() {
     std::fs::write(tmp.path().join("readme.md"), "hello").unwrap();
     std::fs::create_dir(tmp.path().join("subdir")).unwrap();
 
-    let mut ed = sicompass_sdk::create_provider_by_name("editor").unwrap();
-    ed.on_setting_change("editorPath", tmp.path().to_str().unwrap());
+    let mut ed = sicompass_sdk::create_provider_by_name("texteditor").unwrap();
+    ed.on_setting_change("textEditorPath", tmp.path().to_str().unwrap());
     let items = ed.fetch();
 
     let file_entry = items.iter().find(|e| {
@@ -5376,10 +5376,10 @@ fn editor_directory_entries_are_obj() {
 }
 
 #[test]
-fn editor_right_arrow_opens_file() {
+fn text_editor_right_arrow_opens_file() {
     // Pressing right on a file Obj entry should open the file content.
-    let (mut r, tmp) = harness_with_editor();
-    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+    let (mut r, tmp) = harness_with_text_editor();
+    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
     navigate_to_provider(&mut r, editor_idx);
     press_right(&mut r); // enter editor directory → General at depth 2
 
@@ -5418,9 +5418,9 @@ fn editor_right_arrow_opens_file() {
 }
 
 #[test]
-fn leaving_editor_provider_keeps_general() {
-    let (mut r, _tmp) = harness_with_editor();
-    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+fn leaving_text_editor_provider_keeps_general() {
+    let (mut r, _tmp) = harness_with_text_editor();
+    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
     navigate_to_provider(&mut r, editor_idx);
     press_right(&mut r); // enter → General
     assert_eq!(r.coordinate, Coordinate::General);
@@ -5432,7 +5432,7 @@ fn leaving_editor_provider_keeps_general() {
 
 #[test]
 fn entering_filebrowser_keeps_general() {
-    let (mut r, _tmp) = harness_with_editor();
+    let (mut r, _tmp) = harness_with_text_editor();
     // Start at filebrowser (idx 0)
     navigate_to_provider(&mut r, 0);
     press_right(&mut r);
@@ -5441,11 +5441,11 @@ fn entering_filebrowser_keeps_general() {
 }
 
 #[test]
-fn entering_editor_does_not_clobber_non_general_coordinate() {
-    let (mut r, _tmp) = harness_with_editor();
+fn entering_text_editor_does_not_clobber_non_general_coordinate() {
+    let (mut r, _tmp) = harness_with_text_editor();
     // Simulate a non-General coordinate (e.g. user is in a search overlay).
     r.coordinate = Coordinate::Insert;
-    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
     // Directly invoke navigate_right_raw so the key-dispatch routing for Insert mode
     // doesn't interfere — we're testing the guard inside navigate_right_raw itself.
     while r.current_id.depth() > 1 { r.current_id.pop(); }
@@ -5463,9 +5463,9 @@ fn entering_editor_does_not_clobber_non_general_coordinate() {
 /// to General (not General) because that's what was active before
 /// the insert was initiated.
 #[test]
-fn editor_ctrl_i_create_file_restores_general() {
-    let (mut r, tmp) = harness_with_editor();
-    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+fn text_editor_ctrl_i_create_file_restores_general() {
+    let (mut r, tmp) = harness_with_text_editor();
+    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
     navigate_to_provider(&mut r, editor_idx);
     press_right(&mut r); // enter editor directory → General
     assert_eq!(r.coordinate, Coordinate::General, "should be General after entering editor");
@@ -5486,9 +5486,9 @@ fn editor_ctrl_i_create_file_restores_general() {
 /// After creating a directory via Ctrl+I in the editor (using '+' prefix),
 /// the coordinate must return to General.
 #[test]
-fn editor_ctrl_i_create_dir_restores_general() {
-    let (mut r, tmp) = harness_with_editor();
-    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+fn text_editor_ctrl_i_create_dir_restores_general() {
+    let (mut r, tmp) = harness_with_text_editor();
+    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
     navigate_to_provider(&mut r, editor_idx);
     press_right(&mut r); // enter editor directory → General
     assert_eq!(r.coordinate, Coordinate::General);
@@ -5507,12 +5507,12 @@ fn editor_ctrl_i_create_dir_restores_general() {
 /// Navigating into a subdirectory (Obj with no FFON children) works and refreshes contents.
 /// An empty subdirectory seeds an I_PLACEHOLDER so the user has a creation affordance.
 #[test]
-fn editor_right_arrow_into_subdir() {
-    let (mut r, tmp) = harness_with_editor();
+fn text_editor_right_arrow_into_subdir() {
+    let (mut r, tmp) = harness_with_text_editor();
     std::fs::create_dir(tmp.path().join("subdir")).unwrap();
     std::fs::write(tmp.path().join("subdir/child.txt"), "").unwrap();
 
-    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
     navigate_to_provider(&mut r, editor_idx);
     press_right(&mut r); // enter editor root dir listing
 
@@ -5546,11 +5546,11 @@ fn editor_right_arrow_into_subdir() {
 
 /// Navigating into an empty subdirectory seeds an I_PLACEHOLDER for creation.
 #[test]
-fn editor_empty_subdir_seeds_i_placeholder() {
-    let (mut r, tmp) = harness_with_editor();
+fn text_editor_empty_subdir_seeds_i_placeholder() {
+    let (mut r, tmp) = harness_with_text_editor();
     std::fs::create_dir(tmp.path().join("empty_dir")).unwrap();
 
-    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
     navigate_to_provider(&mut r, editor_idx);
     press_right(&mut r);
     press((&mut r), Keycode::F5); // refresh to pick up empty_dir
@@ -5581,11 +5581,11 @@ fn editor_empty_subdir_seeds_i_placeholder() {
 /// name (no prefix), and pressing Enter creates a file on disk and returns to
 /// General.
 #[test]
-fn editor_i_on_placeholder_creates_file() {
-    let (mut r, tmp) = harness_with_editor();
+fn text_editor_i_on_placeholder_creates_file() {
+    let (mut r, tmp) = harness_with_text_editor();
     std::fs::create_dir(tmp.path().join("mydir")).unwrap();
 
-    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
     navigate_to_provider(&mut r, editor_idx);
     press_right(&mut r);
     press(&mut r, Keycode::F5);
@@ -5617,11 +5617,11 @@ fn editor_i_on_placeholder_creates_file() {
 
 /// Typing `+name` on the I_PLACEHOLDER creates a directory.
 #[test]
-fn editor_i_on_placeholder_creates_dir_with_plus_prefix() {
-    let (mut r, tmp) = harness_with_editor();
+fn text_editor_i_on_placeholder_creates_dir_with_plus_prefix() {
+    let (mut r, tmp) = harness_with_text_editor();
     std::fs::create_dir(tmp.path().join("mydir2")).unwrap();
 
-    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
     navigate_to_provider(&mut r, editor_idx);
     press_right(&mut r);
     press(&mut r, Keycode::F5);
@@ -5646,11 +5646,11 @@ fn editor_i_on_placeholder_creates_dir_with_plus_prefix() {
 /// → Enter writes the file. Then Ctrl+A on the new line → type "second" →
 /// Enter must show the second line in the list immediately (no F5 needed).
 #[test]
-fn editor_two_consecutive_writes_both_show_in_list() {
-    let (mut r, tmp) = harness_with_editor();
+fn text_editor_two_consecutive_writes_both_show_in_list() {
+    let (mut r, tmp) = harness_with_text_editor();
     std::fs::write(tmp.path().join("notes.txt"), "").unwrap();
 
-    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
     navigate_to_provider(&mut r, editor_idx);
     press_right(&mut r); // enter editor dir
     press(&mut r, Keycode::F5); // pick up notes.txt
@@ -5717,11 +5717,11 @@ fn editor_two_consecutive_writes_both_show_in_list() {
 /// Three consecutive Ctrl+A inserts must all land in the file and the FFON
 /// list, without the focus jumping or any intermediate line vanishing.
 #[test]
-fn editor_three_consecutive_writes_all_show_in_list() {
-    let (mut r, tmp) = harness_with_editor();
+fn text_editor_three_consecutive_writes_all_show_in_list() {
+    let (mut r, tmp) = harness_with_text_editor();
     std::fs::write(tmp.path().join("notes.txt"), "").unwrap();
 
-    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
     navigate_to_provider(&mut r, editor_idx);
     press_right(&mut r);
     press(&mut r, Keycode::F5);
@@ -5771,11 +5771,11 @@ fn editor_three_consecutive_writes_all_show_in_list() {
 /// The user's "must work infinitely" requirement: ten consecutive Ctrl+A
 /// inserts in an editor file view must all land in the file and the FFON list.
 #[test]
-fn editor_many_consecutive_writes_all_show_in_list() {
-    let (mut r, tmp) = harness_with_editor();
+fn text_editor_many_consecutive_writes_all_show_in_list() {
+    let (mut r, tmp) = harness_with_text_editor();
     std::fs::write(tmp.path().join("log.txt"), "").unwrap();
 
-    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
     navigate_to_provider(&mut r, editor_idx);
     press_right(&mut r);
     press(&mut r, Keycode::F5);
@@ -5822,11 +5822,11 @@ fn editor_many_consecutive_writes_all_show_in_list() {
 
 /// Typing `name:` on the I_PLACEHOLDER creates a directory (colon suffix).
 #[test]
-fn editor_i_on_placeholder_creates_dir_with_colon_suffix() {
-    let (mut r, tmp) = harness_with_editor();
+fn text_editor_i_on_placeholder_creates_dir_with_colon_suffix() {
+    let (mut r, tmp) = harness_with_text_editor();
     std::fs::create_dir(tmp.path().join("mydir3")).unwrap();
 
-    let editor_idx = r.providers.iter().position(|p| p.name() == "editor").unwrap();
+    let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
     navigate_to_provider(&mut r, editor_idx);
     press_right(&mut r);
     press(&mut r, Keycode::F5);
@@ -7964,7 +7964,7 @@ fn timeline_entry_label_collapses_identical_paths() {
         kind: sicompass_sdk::timeline::NavKind::ArrowDown,
     };
     let providers = vec![TimelineProviderInfo {
-        display_name: "editor".to_owned(),
+        display_name: "text editor".to_owned(),
         path_is_filesystem: true,
     }];
     let s = timeline_entry_label(&entry, &providers);

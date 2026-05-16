@@ -1217,7 +1217,7 @@ mod tests {
         // truncated, unparseable fragment. The old read-modify-write fell back
         // to an empty map here and collapsed the file to a single key,
         // dropping every other section.
-        let partial = r#"{"editor": {"editorPath": "/home/nico/Dro"#;
+        let partial = r#"{"text editor": {"textEditorPath": "/home/nico/Dro"#;
         std::fs::write(&path, partial).unwrap();
 
         let mut p = SettingsProvider::new_headless().with_config_path(path.clone());

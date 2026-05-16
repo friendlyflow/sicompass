@@ -113,9 +113,10 @@ fn rebuild_settings_ffon(renderer: &mut AppRenderer) {
 /// settings provider is live.  Pass it to [`apply_pending_settings`] to
 /// process those events against `AppRenderer`.
 pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
-    // Run one-time migration of obsolete programsToLoad config key.
+    // Run one-time migrations of obsolete config keys.
     if let Some(path) = sicompass_sdk::platform::main_config_path() {
         migrate_programs_to_load(&path);
+        migrate_editor_to_text_editor(&path);
     }
 
     let queue: SettingsQueue = Arc::new(Mutex::new(Vec::new()));
@@ -391,6 +392,60 @@ fn migrate_programs_to_load(path: &Path) {
 
     // Write back atomically so a concurrent sicompass instance never reads a
     // truncated settings.json (which it would then rebuild from an empty map).
+    if let Ok(json) = serde_json::to_string_pretty(&root) {
+        let _ = sicompass_sdk::platform::atomic_write(path, &json);
+    }
+}
+
+/// Migrate the renamed "editor" plugin to "text editor".
+///
+/// Renames the top-level `"editor"` settings section to `"text editor"` (and
+/// its inner `"editorPath"` key to `"textEditorPath"`), and the
+/// `Available programs:.enable_editor` toggle to `enable_text editor`. Runs
+/// once at startup; if no old keys are present the function is a no-op.
+fn migrate_editor_to_text_editor(path: &Path) {
+    let Ok(data) = std::fs::read_to_string(path) else { return; };
+    let Ok(mut root) = serde_json::from_str::<serde_json::Value>(&data) else { return; };
+    let Some(obj) = root.as_object_mut() else { return; };
+
+    let mut changed = false;
+
+    // Move the "editor" section → "text editor", renaming "editorPath" inside.
+    if let Some(mut section) = obj.remove("editor") {
+        if let Some(sec) = section.as_object_mut() {
+            if let Some(v) = sec.remove("editorPath") {
+                sec.entry("textEditorPath").or_insert(v);
+            }
+        }
+        // Merge into an existing "text editor" section rather than clobbering.
+        match obj.get_mut("text editor").and_then(|v| v.as_object_mut()) {
+            Some(existing) => {
+                if let Some(sec) = section.as_object() {
+                    for (k, v) in sec {
+                        existing.entry(k.clone()).or_insert(v.clone());
+                    }
+                }
+            }
+            None => {
+                obj.insert("text editor".to_owned(), section);
+            }
+        }
+        changed = true;
+    }
+
+    // Rename the "Available programs:" enable toggle.
+    if let Some(available) = obj.get_mut("Available programs:").and_then(|v| v.as_object_mut()) {
+        if let Some(v) = available.remove("enable_editor") {
+            available.entry("enable_text editor".to_owned()).or_insert(v);
+            changed = true;
+        }
+    }
+
+    if !changed {
+        return;
+    }
+
+    // Write back atomically (see migrate_programs_to_load).
     if let Ok(json) = serde_json::to_string_pretty(&root) {
         let _ = sicompass_sdk::platform::atomic_write(path, &json);
     }
@@ -1187,6 +1242,49 @@ mod tests {
         assert!(!data.contains("Available programs:"));
     }
 
+    // --- migrate_editor_to_text_editor ---
+
+    #[test]
+    fn migrate_editor_to_text_editor_renames_section_and_toggle() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, r#"{
+            "editor": { "editorPath": "/home/nico/Dropbox" },
+            "Available programs:": { "enable_editor": true }
+        }"#).unwrap();
+
+        migrate_editor_to_text_editor(&path);
+
+        let data = std::fs::read_to_string(&path).unwrap();
+        let root: serde_json::Value = serde_json::from_str(&data).unwrap();
+
+        // Old keys are gone.
+        assert!(root.get("editor").is_none());
+        assert!(root["Available programs:"].get("enable_editor").is_none());
+        // New keys present with carried-over values.
+        assert_eq!(
+            root["text editor"]["textEditorPath"].as_str(),
+            Some("/home/nico/Dropbox")
+        );
+        assert_eq!(
+            root["Available programs:"]["enable_text editor"].as_bool(),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn migrate_editor_to_text_editor_no_old_keys_is_noop() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let original = r#"{"sicompass":{"colorScheme":"dark"}}"#;
+        std::fs::write(&path, original).unwrap();
+
+        migrate_editor_to_text_editor(&path);
+
+        let data = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(data, original, "file must be left byte-identical");
+    }
+
     // --- enable_provider with user plugin cache ---
 
     fn make_test_manifest(name: &str) -> PluginManifest {
@@ -1310,22 +1408,22 @@ mod tests {
     }
 
     #[test]
-    fn hot_enable_editor_registers_settings() {
-        let ffon = settings_ffon_after_enable("editor");
-        let children = section_children(&ffon, "editor")
-            .expect("editor section should be present after hot-enable");
+    fn hot_enable_text_editor_registers_settings() {
+        let ffon = settings_ffon_after_enable("text editor");
+        let children = section_children(&ffon, "text editor")
+            .expect("text editor section should be present after hot-enable");
         assert!(
             !children.iter().any(|e| e.as_str() == Some("no settings")),
-            "editor section should not show 'no settings'"
+            "text editor section should not show 'no settings'"
         );
         let inputs: Vec<_> = children.iter()
             .filter_map(|e| e.as_str())
             .filter(|s| s.contains("<input>"))
             .collect();
-        assert_eq!(inputs.len(), 1, "expected 1 text setting (editor path), got {}: {:?}", inputs.len(), inputs);
+        assert_eq!(inputs.len(), 1, "expected 1 text setting (text editor path), got {}: {:?}", inputs.len(), inputs);
         assert!(
-            inputs[0].contains("editor path"),
-            "the single input should be 'editor path', got: {}", inputs[0]
+            inputs[0].contains("text editor path"),
+            "the single input should be 'text editor path', got: {}", inputs[0]
         );
     }
 }

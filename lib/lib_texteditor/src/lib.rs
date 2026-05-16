@@ -1,8 +1,8 @@
-//! Editor provider — file-rooted code/text editor.
+//! Text editor provider — file-rooted code/text editor.
 //!
 //! Implements the [`Provider`] trait as a normal plugin.
 //! The provider navigates a filesystem tree rooted at the user-configurable
-//! `editorPath` setting and, when the user enters a file, parses its content
+//! `textEditorPath` setting and, when the user enters a file, parses its content
 //! into a FFON element tree using the rules in [`parse`]:
 //!
 //! - Lines separated by `\n` are siblings.
@@ -14,7 +14,7 @@
 //! edits back to exact lines on disk without a lossy round-trip through the
 //! parser.
 //!
-//! When no `editorPath` is configured the provider defaults to the user's
+//! When no `textEditorPath` is configured the provider defaults to the user's
 //! home directory.
 
 mod parse;
@@ -27,17 +27,17 @@ use sicompass_sdk::{register_builtin_manifest, register_provider_factory};
 use std::path::{Path, PathBuf};
 
 // ---------------------------------------------------------------------------
-// EditorProvider
+// TextEditorProvider
 // ---------------------------------------------------------------------------
 
-pub struct EditorProvider {
+pub struct TextEditorProvider {
     /// The root path shown when navigating to the editor.
-    editor_path: String,
-    /// Current filesystem position (rooted at `editor_path`).
+    text_editor_path: String,
+    /// Current filesystem position (rooted at `text_editor_path`).
     current_fs_path: PathBuf,
     /// Path within a file's parsed FFON tree (non-empty when inside a file).
     ffon_sub_path: Vec<String>,
-    /// Set to `true` when `editor_path` changes so the app re-fetches the FFON.
+    /// Set to `true` when `text_editor_path` changes so the app re-fetches the FFON.
     refresh_pending: bool,
     /// Combined path returned by `current_path()`.
     current_path_str: String,
@@ -52,13 +52,13 @@ pub struct EditorProvider {
     trailing_newline: bool,
 }
 
-impl EditorProvider {
+impl TextEditorProvider {
     pub fn new() -> Self {
-        let editor_path = home_dir();
-        let current_fs_path = PathBuf::from(&editor_path);
-        let current_path_str = editor_path.clone();
-        EditorProvider {
-            editor_path,
+        let text_editor_path = home_dir();
+        let current_fs_path = PathBuf::from(&text_editor_path);
+        let current_path_str = text_editor_path.clone();
+        TextEditorProvider {
+            text_editor_path,
             current_fs_path,
             ffon_sub_path: Vec::new(),
             refresh_pending: false,
@@ -80,7 +80,7 @@ impl EditorProvider {
     }
 
     fn root_path(&self) -> PathBuf {
-        PathBuf::from(&self.editor_path)
+        PathBuf::from(&self.text_editor_path)
     }
 
     fn is_in_file_view(&self) -> bool {
@@ -223,33 +223,35 @@ fn wrap_ffon_in_input(elements: Vec<FfonElement>) -> Vec<FfonElement> {
 // Provider trait implementation
 // ---------------------------------------------------------------------------
 
-impl Default for EditorProvider {
+impl Default for TextEditorProvider {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Provider for EditorProvider {
-    fn name(&self) -> &str { "editor" }
+impl Provider for TextEditorProvider {
+    fn name(&self) -> &str { "texteditor" }
+
+    fn display_name(&self) -> &str { "text editor" }
 
     fn init(&mut self) {
-        // Read saved editorPath from config so the first fetch() shows the
+        // Read saved textEditorPath from config so the first fetch() shows the
         // correct directory rather than the home-dir default.
         if let Some(path) = sicompass_sdk::platform::main_config_path() {
             if let Ok(data) = std::fs::read_to_string(&path) {
                 if let Ok(root) = serde_json::from_str::<serde_json::Value>(&data) {
                     if let Some(val) = root
-                        .get("editor")
-                        .and_then(|s| s.get("editorPath"))
+                        .get("text editor")
+                        .and_then(|s| s.get("textEditorPath"))
                         .and_then(|v| v.as_str())
                         .filter(|s| !s.is_empty())
                     {
-                        self.editor_path = val.to_string();
+                        self.text_editor_path = val.to_string();
                     }
                 }
             }
         }
-        self.current_fs_path = PathBuf::from(&self.editor_path);
+        self.current_fs_path = PathBuf::from(&self.text_editor_path);
         self.ffon_sub_path.clear();
         self.refresh_pending = false;
         self.loaded_path = None;
@@ -259,8 +261,8 @@ impl Provider for EditorProvider {
     }
 
     fn fetch(&mut self) -> Vec<FfonElement> {
-        if self.editor_path.trim().is_empty() {
-            return vec![FfonElement::new_str("set editor path in settings")];
+        if self.text_editor_path.trim().is_empty() {
+            return vec![FfonElement::new_str("set text editor path in settings")];
         }
         if self.is_in_file_view() {
             self.fetch_file_content()
@@ -486,8 +488,8 @@ impl Provider for EditorProvider {
     }
 
     fn on_setting_change(&mut self, key: &str, value: &str) {
-        if key == "editorPath" && value != self.editor_path {
-            self.editor_path = value.to_string();
+        if key == "textEditorPath" && value != self.text_editor_path {
+            self.text_editor_path = value.to_string();
             self.current_fs_path = PathBuf::from(value);
             self.ffon_sub_path.clear();
             self.loaded_path = None;
@@ -533,14 +535,14 @@ fn home_dir() -> String {
 // SDK registration
 // ---------------------------------------------------------------------------
 
-/// Register the editor provider with the SDK factory and manifest registries.
+/// Register the text editor provider with the SDK factory and manifest registries.
 pub fn register() {
     let home = home_dir();
-    register_provider_factory("editor", || Box::new(EditorProvider::new()));
+    register_provider_factory("texteditor", || Box::new(TextEditorProvider::new()));
     register_builtin_manifest(
-        BuiltinManifest::new("editor", "editor")
+        BuiltinManifest::new("texteditor", "text editor")
             .with_settings(vec![
-                SettingDecl::text("editor", "editor path", "editorPath", &home),
+                SettingDecl::text("text editor", "text editor path", "textEditorPath", &home),
             ]),
     );
 }
@@ -559,9 +561,9 @@ mod tests {
         TempDir::new().expect("tempdir")
     }
 
-    fn make_editor(tmp: &TempDir) -> EditorProvider {
-        let mut p = EditorProvider::new();
-        p.on_setting_change("editorPath", tmp.path().to_str().unwrap());
+    fn make_text_editor(tmp: &TempDir) -> TextEditorProvider {
+        let mut p = TextEditorProvider::new();
+        p.on_setting_change("textEditorPath", tmp.path().to_str().unwrap());
         p
     }
 
@@ -569,8 +571,8 @@ mod tests {
 
     #[test]
     fn fetch_with_empty_path_returns_hint() {
-        let mut p = EditorProvider {
-            editor_path: String::new(),
+        let mut p = TextEditorProvider {
+            text_editor_path: String::new(),
             current_fs_path: PathBuf::new(),
             ffon_sub_path: vec![],
             refresh_pending: false,
@@ -582,37 +584,37 @@ mod tests {
         };
         let items = p.fetch();
         assert_eq!(items.len(), 1);
-        assert!(items[0].as_str().unwrap().contains("set editor path"));
+        assert!(items[0].as_str().unwrap().contains("set text editor path"));
     }
 
     #[test]
-    fn on_setting_change_updates_editor_path() {
-        let mut p = EditorProvider::new();
-        p.on_setting_change("editorPath", "/tmp/test");
-        assert_eq!(p.editor_path, "/tmp/test");
+    fn on_setting_change_updates_text_editor_path() {
+        let mut p = TextEditorProvider::new();
+        p.on_setting_change("textEditorPath", "/tmp/test");
+        assert_eq!(p.text_editor_path, "/tmp/test");
         assert_eq!(p.current_fs_path, PathBuf::from("/tmp/test"));
     }
 
     #[test]
     fn on_setting_change_sets_refresh_pending() {
-        let mut p = EditorProvider::new();
+        let mut p = TextEditorProvider::new();
         assert!(!p.needs_refresh());
-        p.on_setting_change("editorPath", "/tmp/newpath");
+        p.on_setting_change("textEditorPath", "/tmp/newpath");
         assert!(p.needs_refresh(), "changing the path must set refresh_pending");
     }
 
     #[test]
     fn on_setting_change_same_path_does_not_set_refresh() {
-        let mut p = EditorProvider::new();
-        let same = p.editor_path.clone();
-        p.on_setting_change("editorPath", &same);
+        let mut p = TextEditorProvider::new();
+        let same = p.text_editor_path.clone();
+        p.on_setting_change("textEditorPath", &same);
         assert!(!p.needs_refresh(), "same path must not trigger a refresh");
     }
 
     #[test]
     fn clear_needs_refresh_clears_flag() {
-        let mut p = EditorProvider::new();
-        p.on_setting_change("editorPath", "/tmp/other");
+        let mut p = TextEditorProvider::new();
+        p.on_setting_change("textEditorPath", "/tmp/other");
         assert!(p.needs_refresh());
         p.clear_needs_refresh();
         assert!(!p.needs_refresh());
@@ -620,10 +622,10 @@ mod tests {
 
     #[test]
     fn on_setting_change_ignores_other_keys() {
-        let mut p = EditorProvider::new();
-        let original = p.editor_path.clone();
+        let mut p = TextEditorProvider::new();
+        let original = p.text_editor_path.clone();
         p.on_setting_change("someOtherKey", "/etc");
-        assert_eq!(p.editor_path, original);
+        assert_eq!(p.text_editor_path, original);
         assert!(!p.needs_refresh());
     }
 
@@ -633,7 +635,7 @@ mod tests {
         let file = tmp.path().join("data.txt");
         std::fs::write(&file, "section:\n{\n  child\n}").unwrap();
 
-        let mut p = make_editor(&tmp);
+        let mut p = make_text_editor(&tmp);
         p.push_path("data.txt");
         let path_at_file = p.current_path().to_string();
 
@@ -654,7 +656,7 @@ mod tests {
         let tmp = make_tmp();
         std::fs::create_dir(tmp.path().join("inner")).unwrap();
 
-        let mut p = make_editor(&tmp);
+        let mut p = make_text_editor(&tmp);
         p.push_path("inner");
         assert!(p.current_fs_path.ends_with("inner"));
         p.pop_path();
@@ -664,7 +666,7 @@ mod tests {
     #[test]
     fn pop_path_cannot_go_above_root() {
         let tmp = make_tmp();
-        let mut p = make_editor(&tmp);
+        let mut p = make_text_editor(&tmp);
         p.pop_path();
         assert_eq!(p.current_fs_path, PathBuf::from(tmp.path()));
     }
@@ -675,7 +677,7 @@ mod tests {
         std::fs::write(tmp.path().join("hello.txt"), "hi").unwrap();
         std::fs::create_dir(tmp.path().join("subdir")).unwrap();
 
-        let mut p = make_editor(&tmp);
+        let mut p = make_text_editor(&tmp);
         let items = p.fetch();
         assert!(!items.is_empty());
         // All entries must be wrapped in <input>
@@ -703,7 +705,7 @@ mod tests {
         std::fs::write(tmp.path().join("hello.txt"), "hi").unwrap();
         std::fs::create_dir(tmp.path().join("subdir")).unwrap();
 
-        let mut p = make_editor(&tmp);
+        let mut p = make_text_editor(&tmp);
         let items = p.fetch();
 
         let mut saw_dir = false;
@@ -734,7 +736,7 @@ mod tests {
         let file = tmp.path().join("code.txt");
         std::fs::write(&file, "section:\n{\n  line1\n}\nplain").unwrap();
 
-        let mut p = make_editor(&tmp);
+        let mut p = make_text_editor(&tmp);
         p.push_path("code.txt");
         let items = p.fetch();
         assert_eq!(items.len(), 2);
@@ -759,7 +761,7 @@ mod tests {
         let file = tmp.path().join("data.txt");
         std::fs::write(&file, "section:\n{\n  child\n}").unwrap();
 
-        let mut p = make_editor(&tmp);
+        let mut p = make_text_editor(&tmp);
         p.push_path("data.txt");
         p.push_path("section:");
         let items = p.fetch();
@@ -776,8 +778,8 @@ mod tests {
     }
 
     #[test]
-    fn editor_provider_has_editor_semantics() {
-        let p = EditorProvider::new();
+    fn text_editor_provider_has_editor_semantics() {
+        let p = TextEditorProvider::new();
         assert!(p.has_editor_semantics());
     }
 
@@ -786,7 +788,7 @@ mod tests {
     #[test]
     fn create_file_creates_on_disk() {
         let tmp = make_tmp();
-        let mut p = make_editor(&tmp);
+        let mut p = make_text_editor(&tmp);
         assert!(p.create_file("new.txt"));
         assert!(tmp.path().join("new.txt").exists());
     }
@@ -794,7 +796,7 @@ mod tests {
     #[test]
     fn create_directory_creates_on_disk() {
         let tmp = make_tmp();
-        let mut p = make_editor(&tmp);
+        let mut p = make_text_editor(&tmp);
         assert!(p.create_directory("mydir"));
         assert!(tmp.path().join("mydir").is_dir());
     }
@@ -802,14 +804,14 @@ mod tests {
     #[test]
     fn create_file_rejects_empty_name() {
         let tmp = make_tmp();
-        let mut p = make_editor(&tmp);
+        let mut p = make_text_editor(&tmp);
         assert!(!p.create_file(""));
     }
 
     #[test]
     fn create_directory_rejects_empty_name() {
         let tmp = make_tmp();
-        let mut p = make_editor(&tmp);
+        let mut p = make_text_editor(&tmp);
         assert!(!p.create_directory(""));
     }
 
@@ -818,7 +820,7 @@ mod tests {
         let tmp = make_tmp();
         let file = tmp.path().join("bye.txt");
         std::fs::write(&file, "").unwrap();
-        let mut p = make_editor(&tmp);
+        let mut p = make_text_editor(&tmp);
         assert!(p.delete_item("<input>bye.txt</input>"));
         assert!(!file.exists());
     }
@@ -828,7 +830,7 @@ mod tests {
         let tmp = make_tmp();
         let file = tmp.path().join("old.txt");
         std::fs::write(&file, "").unwrap();
-        let mut p = make_editor(&tmp);
+        let mut p = make_text_editor(&tmp);
         assert!(p.commit_edit("<input>old.txt</input>", "<input>new.txt</input>"));
         assert!(!file.exists());
         assert!(tmp.path().join("new.txt").exists());
@@ -842,7 +844,7 @@ mod tests {
         let file = tmp.path().join("sample.txt");
         std::fs::write(&file, "alpha\nbeta\ngamma").unwrap();
 
-        let mut p = make_editor(&tmp);
+        let mut p = make_text_editor(&tmp);
         p.push_path("sample.txt");
         p.fetch(); // prime cache
 
@@ -861,7 +863,7 @@ mod tests {
         let file = tmp.path().join("py.py");
         std::fs::write(&file, "def foo():\n    pass\n").unwrap();
 
-        let mut p = make_editor(&tmp);
+        let mut p = make_text_editor(&tmp);
         p.push_path("py.py");
         p.fetch();
 
@@ -880,7 +882,7 @@ mod tests {
         let file = tmp.path().join("sample.txt");
         std::fs::write(&file, "alpha\ngamma").unwrap();
 
-        let mut p = make_editor(&tmp);
+        let mut p = make_text_editor(&tmp);
         p.push_path("sample.txt");
         p.fetch();
 
@@ -899,7 +901,7 @@ mod tests {
         let file = tmp.path().join("sample.txt");
         std::fs::write(&file, "alpha\nbeta\ngamma").unwrap();
 
-        let mut p = make_editor(&tmp);
+        let mut p = make_text_editor(&tmp);
         p.push_path("sample.txt");
         p.fetch();
 
@@ -919,7 +921,7 @@ mod tests {
         let file = tmp.path().join("sample.txt");
         std::fs::write(&file, "alpha\nbeta\ngamma").unwrap();
 
-        let mut p = make_editor(&tmp);
+        let mut p = make_text_editor(&tmp);
         p.push_path("sample.txt");
         p.fetch();
 
@@ -940,7 +942,7 @@ mod tests {
         let file = tmp.path().join("py.py");
         std::fs::write(&file, "def foo():\n    pass\n").unwrap();
 
-        let mut p = make_editor(&tmp);
+        let mut p = make_text_editor(&tmp);
         p.push_path("py.py");
         p.fetch();
 
@@ -963,7 +965,7 @@ mod tests {
         let file = tmp.path().join("sample.txt");
         std::fs::write(&file, "alpha\nbeta\ngamma\n").unwrap();
 
-        let mut p = make_editor(&tmp);
+        let mut p = make_text_editor(&tmp);
         p.push_path("sample.txt");
         p.fetch();
 
@@ -987,7 +989,7 @@ mod tests {
         let file = tmp.path().join("sample.txt");
         std::fs::write(&file, "alpha\ngamma\n").unwrap();
 
-        let mut p = make_editor(&tmp);
+        let mut p = make_text_editor(&tmp);
         p.push_path("sample.txt");
         p.fetch();
 
@@ -1006,7 +1008,7 @@ mod tests {
         let file = tmp.path().join("py.py");
         std::fs::write(&file, "def foo():\n    pass\n").unwrap();
 
-        let mut p = make_editor(&tmp);
+        let mut p = make_text_editor(&tmp);
         p.push_path("py.py");
         p.fetch();
 
@@ -1029,7 +1031,7 @@ mod tests {
         let file = tmp.path().join("new.txt");
         std::fs::write(&file, "").unwrap();
 
-        let mut p = make_editor(&tmp);
+        let mut p = make_text_editor(&tmp);
         p.push_path("new.txt");
         p.fetch();
 
@@ -1049,7 +1051,7 @@ mod tests {
         let file = tmp.path().join("new.txt");
         std::fs::write(&file, "").unwrap();
 
-        let mut p = make_editor(&tmp);
+        let mut p = make_text_editor(&tmp);
         p.push_path("new.txt");
         p.fetch();
 
@@ -1068,7 +1070,7 @@ mod tests {
         let file = tmp.path().join("new.txt");
         std::fs::write(&file, "").unwrap();
 
-        let mut p = make_editor(&tmp);
+        let mut p = make_text_editor(&tmp);
         p.push_path("new.txt");
         p.fetch();
 
@@ -1089,7 +1091,7 @@ mod tests {
         let file = tmp.path().join("sample.txt");
         std::fs::write(&file, "alpha\nbeta\ngamma\n").unwrap();
 
-        let mut p = make_editor(&tmp);
+        let mut p = make_text_editor(&tmp);
         p.push_path("sample.txt");
         p.fetch();
 
