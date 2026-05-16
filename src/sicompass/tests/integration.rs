@@ -9823,3 +9823,39 @@ fn texteditor_undo_into_restored_file_shows_content() {
     }
     assert!(saw_inside_bbbb, "undo never landed back inside the file");
 }
+
+#[test]
+fn texteditor_undo_of_delete_keeps_dir_file_prefix() {
+    // Undoing a file/folder deletion must restore the entry with its dir/file
+    // type intact — the rendered `+di` / `+fi` prefix is derived from the
+    // entry's `<dir>` / `<file>` tag. Regression: a restored entry showed a
+    // bare `+` because the delete recorded only the stripped name.
+    let tmp = TempDir::new().unwrap();
+    std::fs::create_dir(tmp.path().join("myfolder")).unwrap();
+    std::fs::write(tmp.path().join("myfile.txt"), "x").unwrap();
+    let mut r = setup_texteditor(tmp.path());
+    press_right(&mut r); // into the editor listing
+
+    cursor_to_label(&mut r, "myfile.txt");
+    press_ctrl(&mut r, Keycode::D); // delete the file
+    cursor_to_label(&mut r, "myfolder");
+    press_ctrl(&mut r, Keycode::D); // delete the folder
+
+    let mut checked = false;
+    for _ in 0..10 {
+        press_ctrl(&mut r, Keycode::Z);
+        let file_lbl = r.total_list.iter()
+            .find(|it| it.label.contains("myfile.txt")).map(|it| it.label.clone());
+        let dir_lbl = r.total_list.iter()
+            .find(|it| it.label.contains("myfolder")).map(|it| it.label.clone());
+        if let (Some(f), Some(d)) = (file_lbl, dir_lbl) {
+            assert!(f.starts_with("+fi"),
+                "restored file must keep its `+fi` prefix, got {f:?}");
+            assert!(d.starts_with("+di"),
+                "restored folder must keep its `+di` prefix, got {d:?}");
+            checked = true;
+            break;
+        }
+    }
+    assert!(checked, "both entries should reappear in the listing after undo");
+}

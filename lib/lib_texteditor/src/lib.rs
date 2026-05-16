@@ -511,11 +511,12 @@ impl Provider for TextEditorProvider {
         if trash::delete(&full).is_err() {
             return false;
         }
-        // The text editor lists *both* files and directories as navigable
-        // `Obj`s (see `list_directory`), so an undo must reinsert the entry as
-        // an `Obj`. A bare `Str` would be unnavigable, and a later descent
-        // into it would resolve to nothing — a blank list.
-        let before_elem = FfonElement::new_obj(clean);
+        // Reinsert with the original tagged key (`<dir>`/`<file>` + `<input>`),
+        // not the bare name: the text editor lists every entry as a navigable
+        // `Obj`, and the rendered `+di` / `+fi` prefix is derived from the
+        // `<dir>` / `<file>` tag. A bare name would be unnavigable *and* lose
+        // its dir/file prefix (rendering as a plain `+`).
+        let before_elem = FfonElement::new_obj(name);
         self.pending_timeline_entries.push(TimelineEntry::FsOp {
             provider_idx: 0, // patched by app
             id: sicompass_sdk::ffon::IdArray::new(),

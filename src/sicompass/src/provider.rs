@@ -401,9 +401,14 @@ pub(crate) fn push_provider_descriptor_if_present(
 /// Returns the number of entries actually pushed; callers can use this to
 /// decide whether to record an FFON-level fallback entry (e.g. checkbox /
 /// radio toggles where the provider didn't emit anything of its own).
+/// `before_override`, when set, replaces the `before` element of any emitted
+/// `FsOp` — the app captures the *actual* FFON element the user acted on, which
+/// is a faithful copy (correct type, tags, rendered prefix) that a provider
+/// cannot always reconstruct from a bare name. See [`delete_item`].
 pub(crate) fn drain_provider_entries(
     renderer: &mut AppRenderer,
     provider_idx: usize,
+    before_override: Option<sicompass_sdk::ffon::FfonElement>,
 ) -> usize {
     let entries = match renderer.providers.get_mut(provider_idx) {
         Some(p) => p.take_timeline_entries(),
@@ -428,7 +433,12 @@ pub(crate) fn drain_provider_entries(
     };
     let n = entries.len();
     for entry in entries {
-        let patched = patch_provider_entry(entry, provider_idx, &originator_id);
+        let patched = patch_provider_entry(
+            entry,
+            provider_idx,
+            &originator_id,
+            before_override.as_ref(),
+        );
         crate::state::record_entry(renderer, patched);
     }
     n
@@ -438,13 +448,14 @@ pub(crate) fn push_provider_entries_if_present(
     renderer: &mut AppRenderer,
     provider_idx: usize,
 ) {
-    let _ = drain_provider_entries(renderer, provider_idx);
+    let _ = drain_provider_entries(renderer, provider_idx, None);
 }
 
 fn patch_provider_entry(
     entry: sicompass_sdk::timeline::TimelineEntry,
     target_provider_idx: usize,
     target_id: &sicompass_sdk::ffon::IdArray,
+    before_override: Option<&sicompass_sdk::ffon::FfonElement>,
 ) -> sicompass_sdk::timeline::TimelineEntry {
     use sicompass_sdk::timeline::TimelineEntry;
     match entry {
@@ -492,7 +503,10 @@ fn patch_provider_entry(
                 id
             },
             op,
-            before,
+            // Prefer the app-captured element (an exact copy of what the user
+            // deleted) over the provider's reconstructed `before`, which can
+            // lose the element's type, tags, or rendered prefix.
+            before: before_override.cloned().or(before),
             after,
             side_effect,
         },
@@ -505,22 +519,26 @@ fn patch_provider_entry(
 
 /// Delete the currently selected item via the active provider.
 pub fn delete_item(renderer: &mut AppRenderer) -> bool {
-    use sicompass_sdk::ffon::get_ffon_at_id;
-    use sicompass_sdk::tags;
+    use sicompass_sdk::ffon::{get_ffon_at_id, FfonElement};
 
-    // Get the raw element key before borrowing providers mutably.
-    // Pass the raw key (not stripped) so providers that embed annotations (e.g. <src=N>)
-    // can decode them in their own delete_item implementation.
-    let name = {
+    // Capture the actual element the user is deleting, before mutating the
+    // tree. Its raw key (not stripped) is passed to the provider so providers
+    // that embed annotations (e.g. <src=N>) can decode them. The whole element
+    // is handed to `drain_provider_entries` so an undo restores an exact copy
+    // — type, tags and rendered prefix intact — rather than whatever bare
+    // `before` the provider reconstructed.
+    let deleted_elem: Option<FfonElement> = {
         let arr = get_ffon_at_id(&renderer.ffon, &renderer.current_id);
         let idx = renderer.current_id.last().unwrap_or(0);
-        arr.and_then(|a| a.get(idx))
-            .map(|e| match e {
-                sicompass_sdk::ffon::FfonElement::Str(s) => s.clone(),
-                sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.clone(),
-            })
-            .unwrap_or_default()
+        arr.and_then(|a| a.get(idx)).cloned()
     };
+    let name = deleted_elem
+        .as_ref()
+        .map(|e| match e {
+            FfonElement::Str(s) => s.clone(),
+            FfonElement::Obj(o) => o.key.clone(),
+        })
+        .unwrap_or_default();
 
     let provider_idx = match renderer.current_id.get(0) {
         Some(i) => i,
@@ -532,7 +550,7 @@ pub fn delete_item(renderer: &mut AppRenderer) -> bool {
         .unwrap_or(false);
 
     if ok {
-        push_provider_entries_if_present(renderer, provider_idx);
+        drain_provider_entries(renderer, provider_idx, deleted_elem);
         refresh_current_directory(renderer);
     }
     ok
@@ -600,7 +618,7 @@ pub fn notify_checkbox_changed(
         Some(pi) => pi,
         None => return,
     };
-    let drained = drain_provider_entries(renderer, pi);
+    let drained = drain_provider_entries(renderer, pi, None);
     if drained > 0 {
         return;
     }
@@ -708,7 +726,7 @@ pub fn notify_radio_changed(
         Some(pi) => pi,
         None => return,
     };
-    let drained = drain_provider_entries(renderer, pi);
+    let drained = drain_provider_entries(renderer, pi, None);
     if drained > 0 {
         return;
     }
