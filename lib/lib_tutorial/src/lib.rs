@@ -124,6 +124,7 @@ static SECTIONS: &[Node] = &[
                     Leaf("Tab: enter simple search mode. Start typing to filter items in the current list. Only items matching your search will be shown."),
                     Leaf("S: switch to scroll mode. Use Up/Down to scroll through a long text body without moving the selection."),
                     Leaf("Ctrl+F: enter extended search mode. This searches recursively through all children, not just the current level. Results are shown as a flat list you can jump to."),
+                    Leaf("z: open the history view — a navigable, read-only list of this tab's undo timeline. Escape leaves it. See the 'Undo and Redo' section."),
                 ],
             },
         ],
@@ -154,12 +155,14 @@ static SECTIONS: &[Node] = &[
         children: &[
             Leaf("Ctrl+Z walks back through your actions. Ctrl+Shift+Z walks forward."),
             Leaf("Each tab keeps its own history — undoing in one tab leaves the others alone."),
+            Leaf("Press z to open the history view: a navigable list of everything recorded in this tab, newest at the top. The row marked '> ' is what the next Ctrl+Z will undo; rows marked with a dot have already been undone and are what Ctrl+Shift+Z will redo. Press Escape to leave the view."),
             Branch {
                 key: "What gets recorded",
                 children: &[
-                    Leaf("Every arrow-key navigation step. Each press is its own undo step, so Ctrl+Z walks back one move at a time."),
+                    Leaf("Level-changing navigation: stepping into an item with the Right key, or back out with Left. Each step is recorded, so Ctrl+Z walks the cursor back along the route you took. Moving the selection up or down within a list is not recorded — only steps that change which list you are looking at."),
                     Leaf("Typed text. Successive characters within about half a second merge into one chunk, so each undo removes a word-sized piece rather than one letter at a time."),
                     Leaf("Structural edits: creating, inserting, deleting, cutting, and pasting elements in the FFON tree."),
+                    Leaf("Text editor edits: creating, changing, and deleting individual lines inside an open file."),
                     Leaf("Filesystem operations: creating, renaming, moving, and deleting files. Delete keeps a content snapshot up to 4 MiB so undo can restore the file even after the OS trash is emptied."),
                     Leaf("Email IMAP operations: trash, archive, move, mark-read/unread, star/unstar. The Message-ID is captured so a moved email can still be found and moved back."),
                     Leaf("Matrix chat operations: leaving a room, accepting or rejecting invites, kicking and banning members."),
@@ -178,9 +181,10 @@ static SECTIONS: &[Node] = &[
             Branch {
                 key: "Walking the path back",
                 children: &[
-                    Leaf("Because navigation is recorded, undo replays the route you actually took."),
-                    Leaf("If you create a directory, type its name and press Enter, step into it with Right, press 'a' to append a file name, press Enter, step back out with Left, create another file at the parent level, type its name, and press Enter — then twelve presses of Ctrl+Z reverse each action in order: deleting the second file, undoing its name in word-sized chunks, undoing the Left navigation, deleting the inner file, undoing its name in chunks, undoing the Right navigation, deleting the directory, and finally undoing its name in chunks."),
-                    Leaf("Ctrl+Shift+Z replays the same path forward."),
+                    Leaf("Undo retraces the route you took, not just your final edit. Because stepping in (Right) and out (Left) are recorded, Ctrl+Z walks the cursor back through the same items you visited."),
+                    Leaf("Creating a file or directory is a single undo step: the keystrokes you typed for its name collapse into that one step, so one Ctrl+Z removes the whole new item — name and all."),
+                    Leaf("Editing the text of an existing line is chunked instead: one Ctrl+Z removes roughly the last word-sized burst of typing rather than a single character."),
+                    Leaf("Ctrl+Shift+Z replays the same path forward, step for step."),
                 ],
             },
         ],
@@ -220,6 +224,7 @@ static SECTIONS: &[Node] = &[
                 Leaf("File lines are editable inline. Press i or a on a line to edit it, then Enter to commit. Multi-line edits are supported. The cursor coordinate is restored after each commit so consecutive Ctrl+A inserts keep working."),
                 Leaf("Create new files and directories inline via the i placeholder, the same way as in the file browser. Inside a file, the same affordances let you add or remove content lines."),
                 Leaf("Rename, copy, paste, and delete work the same as in the file browser."),
+                Leaf("Every change here is on the undo timeline: Ctrl+Z reverses adding, editing, or deleting a line, as well as creating, renaming, or deleting a file or folder."),
             ]},
             Branch { key: "Sales Demo", children: &[
                 Leaf("The Sales Demo is an interactive air handling unit (HVAC) product configurator. It demonstrates how Sicompass can handle complex, hierarchical data with inline editing."),

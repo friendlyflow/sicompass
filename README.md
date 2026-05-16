@@ -22,7 +22,7 @@ Built for users who prefer or require keyboard-driven interaction, Sicompass off
 - **Cross-Platform** — Shipped and tested on Ubuntu today; paths, shells, and PTY plumbing route through platform helpers (XDG / `~/Library` / `%APPDATA%`, `bash`/`zsh`/`fish`/`pwsh`/`cmd.exe`, `forkpty`/ConPTY), with packaged macOS and Windows releases planned
 - **High-Performance Rendering** — Vulkan-powered graphics with FreeType2/HarfBuzz text shaping
 - **Extensible Architecture** — Provider-based plugin system with a built-in plugin store for hot enable/disable
-- **Unified Undo/Redo** — One ctrl-Z model covering navigation (one step per arrow press), typed text (coalesced per word burst), file create/rename/delete (with content snapshot for delete restore), email IMAP ops, Matrix room ops, and settings changes — per-tab history that walks back through navigation steps so undo retraces the path the user actually took
+- **Unified Undo/Redo** — One ctrl-Z model covering level-changing navigation, typed text (coalesced per word burst), text-editor line create/edit/delete, file create/rename/delete (with a content snapshot so delete is reversible even when the OS trash is empty), email IMAP ops, Matrix room ops, and settings changes — per-tab history that retraces the route the user took, with a `z` key that opens a navigable view of that timeline
 - **Simpler UI Development** — Functionality over design means less complexity and faster development with minimal styling, design doen't need to be programmed as it's already worked out
 
 ## Built-in Providers
@@ -30,7 +30,7 @@ Built for users who prefer or require keyboard-driven interaction, Sicompass off
 Sicompass comes with several providers out of the box, each turning a different data source into the same keyboard-navigable tree:
 
 - **File Browser** — Navigate your filesystem as a navigable tree with inline rename, copy, paste, and delete (delete-undo restores from a content snapshot when the OS trash is empty)
-- **Text Editor** — Browse the filesystem and open files as language-aware FFON trees, with inline line editing and create/delete/rename
+- **Text Editor** — Browse the filesystem and open files as language-aware FFON trees, with inline line editing and create/delete/rename — every change, lines included, recorded on the unified undo timeline
 - **Email** — IMAP/SMTP client with Google OAuth, Cc/Bcc, attachments, drafts, flag/move/delete (typed `ImapOp` undo by Message-ID so the operation survives folder moves), threaded history, and FFON-bodied messages
 - **Chat** — Matrix client with public and private rooms, invites, member management (leave/kick/ban are undoable), encrypted messages, unread badges, and a background sync thread
 - **Web Browser** — Browse the web with HTML-to-FFON conversion; fill and submit forms via the Chrome DevTools Protocol; cookie-consent banners are auto-accepted
