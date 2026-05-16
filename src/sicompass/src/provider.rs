@@ -412,8 +412,20 @@ pub(crate) fn drain_provider_entries(
     if entries.is_empty() {
         return 0;
     }
-    let mut originator_id = sicompass_sdk::ffon::IdArray::new();
-    originator_id.push(provider_idx);
+    // Provider-emitted entries (e.g. the filebrowser's `FsOp::Delete`) leave
+    // their `id` empty — the provider acts by name and doesn't know the FFON
+    // path. Patch in the full navigation path of the element the user acted
+    // on (`current_id`) so undo/redo lands back in the right directory; using
+    // only `[provider_idx]` made an undo of a delete jump to the provider list
+    // ("root of sicompass") and re-create the item there. Fall back to the
+    // bare provider id when `current_id` belongs to a different provider.
+    let originator_id = if renderer.current_id.get(0) == Some(provider_idx) {
+        renderer.current_id.clone()
+    } else {
+        let mut id = sicompass_sdk::ffon::IdArray::new();
+        id.push(provider_idx);
+        id
+    };
     let n = entries.len();
     for entry in entries {
         let patched = patch_provider_entry(entry, provider_idx, &originator_id);

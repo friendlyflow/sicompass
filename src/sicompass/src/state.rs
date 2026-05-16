@@ -853,28 +853,27 @@ fn apply_fs_op_redo(
             if let Some(elem) = after {
                 let name = elem_key_str(elem);
                 let is_dir = matches!(elem, FfonElement::Obj(_));
+                // Recreate the item in its parent directory, mirroring the
+                // forward create flow and the `apply_fs_op_undo` Create arm:
+                // walk the cursor/path back to creation depth, recreate the
+                // item, refresh the parent listing, then move the cursor onto
+                // the recreated item by name. The earlier code pushed the path
+                // *into* the new directory and rebuilt the provider root from
+                // its contents — that destroyed the parent listing (and the
+                // new directory node), so a following redo of a `Navigate`
+                // into it landed on a missing FFON slice and rendered blank.
+                while r.current_id.depth() > id.depth() && r.current_id.depth() > 1 {
+                    crate::provider::pop_path(r);
+                    r.current_id.pop();
+                }
                 r.current_id = id.clone();
                 if is_dir {
                     crate::provider::create_directory(r, &name);
-                    crate::provider::push_path(r, &name);
-                    crate::provider::refresh_current_directory(r);
-                    let provider_idx = r.current_id.get(0).unwrap_or(0);
-                    if let Some(root) = r.ffon.get_mut(provider_idx) {
-                        if let Some(obj) = root.as_obj_mut() {
-                            if obj.children.is_empty() {
-                                obj.children
-                                    .push(FfonElement::new_str("<input></input>"));
-                            }
-                        }
-                    }
-                    let mut new_id = IdArray::new();
-                    new_id.push(provider_idx);
-                    new_id.push(0);
-                    r.current_id = new_id;
                 } else {
                     crate::provider::create_file(r, &name);
-                    crate::provider::refresh_current_directory(r);
                 }
+                crate::provider::refresh_current_directory(r);
+                reposition_on_recreated_item(r, &name, is_dir);
             }
         }
         FsOpKind::Rename => {
@@ -906,6 +905,52 @@ fn apply_fs_op_redo(
         FsOpKind::Delete | FsOpKind::Move => {
             // Step 6 fills these arms once lib_filebrowser emits them.
             let _ = (id, before, after);
+        }
+    }
+}
+
+/// After a redo recreates a file/directory, move the cursor onto it by name.
+/// For a directory, also fetch its children into the FFON so a subsequent redo
+/// of a `Navigate` into it finds a full-depth subtree instead of an empty slice
+/// (which `create_list_current_layer` renders as a blank list).
+fn reposition_on_recreated_item(r: &mut AppRenderer, name: &str, is_dir: bool) {
+    list::create_list_current_layer(r);
+    // Labels render as "{prefix} {content}" (e.g. "+i dir"); match the content
+    // after the first space — mirrors `record_placeholder_fs_create`.
+    if let Some(i) = r.total_list.iter().position(|item| {
+        item.label.split_once(' ').map(|(_, c)| c).unwrap_or(&item.label) == name
+    }) {
+        if let Some(id) = r.total_list.get(i).map(|it| it.id.clone()) {
+            r.current_id = id;
+        }
+    }
+    if is_dir {
+        populate_recreated_dir(r, name);
+    }
+}
+
+/// Fetch `name`'s children at the provider's sub-path and graft them into the
+/// directory Obj the cursor currently sits on. Keeps the FFON tree at full
+/// depth so in-memory `Navigate` undo/redo into the directory keeps working.
+fn populate_recreated_dir(r: &mut AppRenderer, name: &str) {
+    let provider_idx = match r.current_id.get(0) {
+        Some(i) if i < r.providers.len() => i,
+        _ => return,
+    };
+    crate::provider::push_path(r, name);
+    let mut kids = r.providers[provider_idx].fetch();
+    let _ = r.providers[provider_idx].take_error();
+    crate::provider::pop_path(r);
+    if kids.is_empty() {
+        kids.push(FfonElement::Str(
+            sicompass_sdk::placeholders::I_PLACEHOLDER.to_owned(),
+        ));
+    }
+    let dir_id = r.current_id.clone();
+    let idx = dir_id.last().unwrap_or(0);
+    if let Some(slice) = navigate_to_slice_mut(&mut r.ffon, &dir_id) {
+        if let Some(FfonElement::Obj(obj)) = slice.get_mut(idx) {
+            obj.children = kids;
         }
     }
 }

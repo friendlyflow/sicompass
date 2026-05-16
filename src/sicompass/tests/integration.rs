@@ -7081,19 +7081,21 @@ fn fscreate_directory_emits_fsop_create_obj() {
     press_ctrl(h.r(), Keycode::I);
     type_text(h.r(), "+ a_unique_test_dir");
     press_enter(h.r());
-    let after_count = h.renderer.active_timeline().entries.len();
-    assert!(after_count > before_count);
     let new_entries: Vec<_> = h.renderer.active_timeline().entries[before_count..].to_vec();
-    let fsop = new_entries
-        .iter()
-        .find(|e| matches!(e, TimelineEntry::FsOp { op: FsOpKind::Create, .. }));
-    let fsop = fsop.expect(&format!("expected FsOp::Create, got {:?}", new_entries));
-    match fsop {
+    // Creating a directory (including typing its name) must collapse into a
+    // single undo step — no leftover per-keystroke TextChunks.
+    assert_eq!(
+        new_entries.len(),
+        1,
+        "directory creation must be a single undo step, got {:?}",
+        new_entries
+    );
+    match &new_entries[0] {
         TimelineEntry::FsOp { op, after, .. } => {
             assert_eq!(*op, FsOpKind::Create);
             assert!(matches!(after, Some(FfonElement::Obj(_))), "directory = Obj");
         }
-        _ => unreachable!(),
+        other => panic!("expected FsOp::Create, got {:?}", other),
     }
     // Cleanup so tests don't pollute the temp dir
     std::fs::remove_dir_all(h.tmp.path().join("a_unique_test_dir")).ok();
@@ -7109,21 +7111,231 @@ fn fscreate_file_emits_fsop_create_str() {
     press_ctrl(h.r(), Keycode::I);
     type_text(h.r(), "- a_unique_test_file.txt");
     press_enter(h.r());
-    let after_count = h.renderer.active_timeline().entries.len();
-    assert!(after_count > before_count);
     let new_entries: Vec<_> = h.renderer.active_timeline().entries[before_count..].to_vec();
-    let fsop = new_entries
-        .iter()
-        .find(|e| matches!(e, TimelineEntry::FsOp { op: FsOpKind::Create, .. }))
-        .expect(&format!("expected FsOp::Create, got {:?}", new_entries));
-    match fsop {
+    // Creating a file (including typing its name) must collapse into a single
+    // undo step — no leftover per-keystroke TextChunks.
+    assert_eq!(
+        new_entries.len(),
+        1,
+        "file creation must be a single undo step, got {:?}",
+        new_entries
+    );
+    match &new_entries[0] {
         TimelineEntry::FsOp { op, after, .. } => {
             assert_eq!(*op, FsOpKind::Create);
             assert!(matches!(after, Some(FfonElement::Str(_))), "file = Str");
         }
-        _ => unreachable!(),
+        other => panic!("expected FsOp::Create, got {:?}", other),
     }
     std::fs::remove_file(h.tmp.path().join("a_unique_test_file.txt")).ok();
+}
+
+#[test]
+fn fscreate_file_undoes_in_one_step() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+    let before_count = h.renderer.active_timeline().entries.len();
+    press_ctrl(h.r(), Keycode::I);
+    type_text(h.r(), "- undo_one_step.txt");
+    press_enter(h.r());
+    let path = h.tmp.path().join("undo_one_step.txt");
+    assert!(path.exists(), "file should be created on disk");
+    // The whole creation is a single timeline entry...
+    let new_entries: Vec<_> = h.renderer.active_timeline().entries[before_count..].to_vec();
+    assert_eq!(
+        new_entries.len(),
+        1,
+        "creation must be a single undo step, got {:?}",
+        new_entries
+    );
+    // ...so one ctrl-Z fully reverses it.
+    state_mod::walk_back(h.r());
+    assert!(!path.exists(), "one walk_back should remove the created file");
+    std::fs::remove_file(&path).ok();
+}
+
+/// Regression: create folder, descend, create a child inside it, go back out,
+/// then undo/redo the whole sequence. A broken `FsOp::Create` redo for a
+/// directory used to rebuild the provider root from the new directory's
+/// contents — that destroyed the parent listing and the directory node, so a
+/// following redo of the descent `Navigate` landed on a missing FFON slice and
+/// rendered a blank list ("all black, no list"). Every undo and redo step must
+/// leave a non-empty, navigable list.
+fn nested_create_undo_redo_keeps_list(child_prefix: &str, child_name: &str) {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+    // Create folder F.
+    press_ctrl(h.r(), Keycode::I);
+    type_text(h.r(), "+ nested_F");
+    press_enter(h.r());
+    // Descend into F.
+    press_right(h.r());
+    // Create a child (file or folder) inside F.
+    press_ctrl(h.r(), Keycode::I);
+    type_text(h.r(), &format!("{child_prefix} {child_name}"));
+    press_enter(h.r());
+    // Go back out to the parent.
+    press_left(h.r());
+
+    let depth = h.renderer.active_timeline().entries.len();
+    // Undo every step — each must leave a non-empty list.
+    for n in 1..=depth {
+        state_mod::walk_back(h.r());
+        assert!(
+            !h.renderer.total_list.is_empty(),
+            "list went blank after walk_back {n} (current_id={:?})",
+            h.renderer.current_id
+        );
+    }
+    // Redo every step — each must leave a non-empty list.
+    for n in 1..=depth {
+        state_mod::walk_forward(h.r());
+        assert!(
+            !h.renderer.total_list.is_empty(),
+            "list went blank after walk_forward {n} (current_id={:?})",
+            h.renderer.current_id
+        );
+    }
+    std::fs::remove_dir_all(h.tmp.path().join("nested_F")).ok();
+}
+
+#[test]
+fn nested_create_file_child_undo_redo_keeps_list() {
+    nested_create_undo_redo_keeps_list("-", "nested_child.txt");
+}
+
+#[test]
+fn nested_create_folder_child_undo_redo_keeps_list() {
+    nested_create_undo_redo_keeps_list("+", "nested_childdir");
+}
+
+/// Regression: deleting a file inside a subdirectory and then undoing must
+/// recreate it *in that subdirectory* with the cursor still there. A bug in
+/// `patch_provider_entry` stamped the provider-emitted `FsOp::Delete` with the
+/// bare provider id `[provider_idx]` instead of the deleted item's full path,
+/// so undo set `current_id` to the provider list ("root of sicompass").
+#[test]
+fn undo_of_filebrowser_delete_stays_in_folder() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r()); // into the filebrowser root listing
+    // Descend into `subdir`.
+    let subdir_idx = h.renderer.total_list.iter()
+        .position(|it| it.label.contains("subdir"))
+        .expect("subdir in listing");
+    h.renderer.list_index = subdir_idx;
+    h.renderer.current_id = h.renderer.total_list[subdir_idx].id.clone();
+    press_right(h.r());
+    assert_eq!(h.renderer.current_id.depth(), 3, "cursor should be inside subdir");
+    // Select nested.txt and delete it.
+    let nested_idx = h.renderer.total_list.iter()
+        .position(|it| it.label.contains("nested.txt"))
+        .expect("nested.txt in subdir");
+    h.renderer.list_index = nested_idx;
+    h.renderer.current_id = h.renderer.total_list[nested_idx].id.clone();
+    sicompass::handlers::handle_file_delete(h.r());
+
+    let before_undo = h.renderer.active_timeline().entries.len();
+    assert!(before_undo > 0, "delete should record a timeline entry");
+
+    // Undo: the cursor must stay inside subdir (depth 3), not jump to the
+    // provider list (depth 1).
+    state_mod::walk_back(h.r());
+    assert_eq!(
+        h.renderer.current_id.get(0),
+        Some(fb_idx),
+        "undo must stay in the filebrowser"
+    );
+    assert_eq!(
+        h.renderer.current_id.depth(),
+        3,
+        "undo of a delete must stay inside subdir, not jump to the provider root (got {:?})",
+        h.renderer.current_id
+    );
+    assert!(
+        !h.renderer.total_list.is_empty(),
+        "list must be populated after undo"
+    );
+}
+
+/// Opening the Z timeline view and escaping out of it is a read-only
+/// operation: it must never touch created files on disk.
+#[test]
+fn timeline_view_open_and_escape_keeps_files() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+    for name in ["zf1.txt", "zf2.txt", "zf3.txt"] {
+        press_ctrl(h.r(), Keycode::I);
+        type_text(h.r(), &format!("- {name}"));
+        press_enter(h.r());
+    }
+    press_ctrl(h.r(), Keycode::I);
+    type_text(h.r(), "+ zfolder");
+    press_enter(h.r());
+    let files = ["zf1.txt", "zf2.txt", "zf3.txt"];
+    for p in files {
+        assert!(h.tmp.path().join(p).exists(), "{p} should be created");
+    }
+    assert!(h.tmp.path().join("zfolder").is_dir(), "zfolder should be created");
+
+    press(h.r(), Keycode::Z); // z → timeline view
+    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::TimelineView);
+    press_down(h.r()); // navigate the timeline view
+    press_down(h.r());
+    press_escape(h.r()); // escape back out
+
+    for p in files {
+        assert!(
+            h.tmp.path().join(p).exists(),
+            "{p} must still exist on disk after opening + escaping the timeline view"
+        );
+    }
+    assert!(
+        h.tmp.path().join("zfolder").is_dir(),
+        "zfolder must still exist after the timeline view"
+    );
+    for p in files {
+        std::fs::remove_file(h.tmp.path().join(p)).ok();
+    }
+    std::fs::remove_dir_all(h.tmp.path().join("zfolder")).ok();
+}
+
+/// Undo of a file creation removes the file from disk (correct un-create);
+/// redo puts it back. Verifies undo/redo disk consistency across several
+/// files so a stray undo can't silently wipe more than its own entry.
+#[test]
+fn create_files_undo_redo_disk_consistency() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r());
+    let files = ["dc1.txt", "dc2.txt", "dc3.txt"];
+    for name in files {
+        press_ctrl(h.r(), Keycode::I);
+        type_text(h.r(), &format!("- {name}"));
+        press_enter(h.r());
+    }
+    for p in files {
+        assert!(h.tmp.path().join(p).exists(), "{p} created");
+    }
+    // One undo removes exactly one file (the last created), not more.
+    state_mod::walk_back(h.r());
+    assert!(!h.tmp.path().join("dc3.txt").exists(), "undo removes dc3.txt");
+    assert!(h.tmp.path().join("dc2.txt").exists(), "undo must not touch dc2.txt");
+    assert!(h.tmp.path().join("dc1.txt").exists(), "undo must not touch dc1.txt");
+    // Redo restores it.
+    state_mod::walk_forward(h.r());
+    assert!(h.tmp.path().join("dc3.txt").exists(), "redo restores dc3.txt");
+    for p in files {
+        std::fs::remove_file(h.tmp.path().join(p)).ok();
+    }
 }
 
 #[test]
@@ -7140,25 +7352,30 @@ fn fsrename_emits_fsop_rename() {
         .unwrap();
     h.renderer.list_index = alpha_idx;
     h.renderer.current_id = h.renderer.total_list[alpha_idx].id.clone();
+    // Capture before entering insert mode so the typed TextChunks fall in range.
+    let before_count = h.renderer.active_timeline().entries.len();
     press(h.r(), Keycode::I);
     h.renderer.input_buffer.clear();
     h.renderer.cursor_position = 0;
     type_text(h.r(), "renamed_unique.txt");
-    let before_count = h.renderer.active_timeline().entries.len();
     press_enter(h.r());
     let new_entries: Vec<_> =
         h.renderer.active_timeline().entries[before_count..].to_vec();
-    let fsop = new_entries
-        .iter()
-        .find(|e| matches!(e, TimelineEntry::FsOp { op: FsOpKind::Rename, .. }))
-        .expect(&format!("expected FsOp::Rename, got {:?}", new_entries));
-    match fsop {
+    // Renaming (including typing the new name) must collapse into a single
+    // undo step — no leftover per-keystroke TextChunks.
+    assert_eq!(
+        new_entries.len(),
+        1,
+        "rename must be a single undo step, got {:?}",
+        new_entries
+    );
+    match &new_entries[0] {
         TimelineEntry::FsOp { op, before, after, .. } => {
             assert_eq!(*op, FsOpKind::Rename);
             assert!(before.is_some());
             assert!(after.is_some());
         }
-        _ => unreachable!(),
+        other => panic!("expected FsOp::Rename, got {:?}", other),
     }
 }
 

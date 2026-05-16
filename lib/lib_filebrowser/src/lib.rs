@@ -72,6 +72,38 @@ fn restore_trashed_tree(root: &Path, tree: &TrashedTree) -> std::io::Result<()> 
     }
 }
 
+/// Best-effort restore of `original` from the OS trash. Used by undo of an
+/// oversized (`RenameOnly`) delete, which has no in-app content snapshot to
+/// write back. Picks the most recently trashed item whose original location
+/// matches `original`. `Err` carries a human-readable reason for the caller
+/// to surface alongside the manual-restore hint.
+#[cfg(any(
+    target_os = "windows",
+    all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android"))
+))]
+fn restore_from_os_trash(original: &Path) -> Result<(), String> {
+    if original.exists() {
+        return Err("the original path is already occupied".to_owned());
+    }
+    let items = trash::os_limited::list().map_err(|e| e.to_string())?;
+    // A path may have been deleted more than once; restore the newest.
+    let item = items
+        .into_iter()
+        .filter(|it| it.original_path() == original)
+        .max_by_key(|it| it.time_deleted)
+        .ok_or_else(|| "no matching item found in the OS trash".to_owned())?;
+    trash::os_limited::restore_all([item]).map_err(|e| e.to_string())
+}
+
+/// Platforms without `trash::os_limited` (macOS) cannot restore programmatically.
+#[cfg(not(any(
+    target_os = "windows",
+    all(unix, not(target_os = "macos"), not(target_os = "ios"), not(target_os = "android"))
+)))]
+fn restore_from_os_trash(_original: &Path) -> Result<(), String> {
+    Err("automatic OS-trash restore is unsupported on this platform".to_owned())
+}
+
 // ---------------------------------------------------------------------------
 // Sort mode
 // ---------------------------------------------------------------------------
@@ -331,12 +363,17 @@ impl Provider for FilebrowserProvider {
                 }
             }
             FsSideEffect::RenameOnly { from, .. } => {
-                // Snapshot was oversized — try the OS trash. trash::restore
-                // is platform-dependent; if unavailable just report an error.
-                *error = format!(
-                    "undo delete: snapshot too large; please restore {} from the OS trash",
-                    from.display()
-                );
+                // Snapshot was oversized — there is no in-app copy to write
+                // back. Best-effort: ask the OS trash to restore the item.
+                // If that is unavailable or fails, point the user at the
+                // manual restore path.
+                if let Err(reason) = restore_from_os_trash(from) {
+                    *error = format!(
+                        "undo delete: could not auto-restore {} ({reason}); \
+                         please restore it from the OS trash",
+                        from.display()
+                    );
+                }
             }
             FsSideEffect::None => {}
         }
@@ -1394,6 +1431,39 @@ mod tests {
         assert!(dir.exists() && dir.is_dir());
         assert_eq!(std::fs::read(dir.join("inner.txt")).unwrap(), b"nested");
         assert_eq!(std::fs::read(sub.join("deep.txt")).unwrap(), b"deeper");
+    }
+
+    #[test]
+    fn undo_fsop_delete_restores_oversized_file_from_os_trash() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let target = tmp.path().join("huge.bin");
+        // Larger than TRASH_SNAPSHOT_LIMIT_BYTES → no in-app snapshot, so the
+        // delete records a `RenameOnly` side effect and undo must fall back to
+        // the OS trash.
+        let big = vec![7u8; (TRASH_SNAPSHOT_LIMIT_BYTES + 1024) as usize];
+        std::fs::write(&target, &big).unwrap();
+
+        let mut p = FilebrowserProvider::new();
+        p.set_current_path(tmp.path().to_str().unwrap());
+        assert!(p.delete_item("huge.bin"));
+        assert!(!target.exists(), "oversized file is gone from disk");
+
+        let entries = p.take_timeline_entries();
+        match &entries[0] {
+            TimelineEntry::FsOp { side_effect, .. } => {
+                assert!(
+                    matches!(side_effect, FsSideEffect::RenameOnly { .. }),
+                    "oversized delete must record RenameOnly, got {side_effect:?}"
+                );
+            }
+            other => panic!("expected FsOp, got {other:?}"),
+        }
+
+        let mut err = String::new();
+        p.undo(&entries[0], &mut err);
+        assert!(err.is_empty(), "undo should auto-restore from OS trash: {err}");
+        assert!(target.exists(), "oversized file restored from OS trash");
+        assert_eq!(std::fs::read(&target).unwrap(), big);
     }
 
     #[test]

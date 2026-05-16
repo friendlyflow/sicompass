@@ -121,6 +121,22 @@ fn pop_last_placeholder_structural(r: &mut AppRenderer) {
     }
 }
 
+/// Drop the per-keystroke `TextChunk` entries recorded while the user typed a
+/// file/dir name, so the following `FsOp::Create`/`Rename` is the single undo
+/// step for the whole operation. `session_start` is the timeline length
+/// captured at insert-mode entry (`InsertSession::timeline_position_at_start`).
+/// No-op when there was no insert session.
+fn collapse_typed_name_chunks(r: &mut AppRenderer, session_start: Option<usize>) {
+    let Some(start) = session_start else { return };
+    let tl = r.active_timeline_mut();
+    let cut = start.min(tl.entries.len());
+    tl.entries.truncate(cut);
+    tl.position = 0;
+    tl.last_text_id = None;
+    tl.last_text_edit_at = None;
+    tl.coalesce_break = true;
+}
+
 /// Push an `FsOp` entry onto the active tab's timeline.
 fn record_fs_op(
     r: &mut AppRenderer,
@@ -157,6 +173,7 @@ fn record_placeholder_fs_create(
     undo_id: sicompass_sdk::ffon::IdArray,
     name: &str,
     undo_elem: FfonElement,
+    session_start: Option<usize>,
 ) -> bool {
     let is_fs = r.current_id.get(0)
         .and_then(|i| r.providers.get(i))
@@ -165,6 +182,7 @@ fn record_placeholder_fs_create(
     if !is_fs {
         return false;
     }
+    collapse_typed_name_chunks(r, session_start);
     pop_last_placeholder_structural(r);
     record_fs_op(r, undo_id, sicompass_sdk::timeline::FsOpKind::Create, None, Some(undo_elem));
     list::create_list_current_layer(r);
@@ -1622,7 +1640,7 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                     // Disk layer: on a filesystem provider, `commit_edit` created
                     // the file on disk — record an `FsOp::Create` and move onto it.
                     if record_placeholder_fs_create(
-                        r, undo_id, &name, FfonElement::new_str(name.clone()),
+                        r, undo_id, &name, FfonElement::new_str(name.clone()), session_start,
                     ) {
                         // handled by the filesystem path
                     } else {
@@ -1699,7 +1717,7 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                     // Disk layer: on a filesystem provider, `commit_edit` created
                     // the directory on disk — record an `FsOp::Create`.
                     if record_placeholder_fs_create(
-                        r, undo_id, &key, FfonElement::new_obj(&key),
+                        r, undo_id, &key, FfonElement::new_obj(&key), session_start,
                     ) {
                         // handled by the filesystem path
                     } else {
@@ -1873,6 +1891,7 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
     if old_content.is_empty() && r.input_prefix.is_empty() && is_obj && !new_content.is_empty() {
         let undo_id = r.current_id.clone();
         if crate::provider::create_directory(r, &new_content) {
+            collapse_typed_name_chunks(r, session_start);
             pop_last_placeholder_structural(r);
             let dir_elem = FfonElement::new_obj(&new_content);
             record_fs_op(r, undo_id.clone(), sicompass_sdk::timeline::FsOpKind::Create, None, Some(dir_elem));
@@ -1908,6 +1927,7 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
     if old_content.is_empty() && r.input_prefix.is_empty() && !is_obj && !new_content.is_empty() {
         let undo_id = r.current_id.clone();
         if crate::provider::create_file(r, &new_content) {
+            collapse_typed_name_chunks(r, session_start);
             pop_last_placeholder_structural(r);
             let file_elem = FfonElement::new_str(new_content.clone());
             record_fs_op(r, undo_id.clone(), sicompass_sdk::timeline::FsOpKind::Create, None, Some(file_elem));
@@ -2060,6 +2080,7 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
             .and_then(|arr| arr.get(new_idx))
             .cloned();
         if let (Some(prev), Some(new)) = (prev_elem_for_rename.clone(), new_elem_for_rename) {
+            collapse_typed_name_chunks(r, session_start);
             record_fs_op(
                 r,
                 rename_id.clone(),
