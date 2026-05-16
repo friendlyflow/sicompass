@@ -905,8 +905,23 @@ fn apply_fs_op_redo(
             }
         }
         FsOpKind::Delete | FsOpKind::Move => {
-            // Step 6 fills these arms once lib_filebrowser emits them.
-            let _ = (id, before, after);
+            // `provider.redo` (dispatched before this) re-trashed the item on
+            // disk; mirror that by removing the element from the FFON tree so
+            // the in-memory listing matches. Removing by `id` is path-
+            // independent — no dependency on the provider's current path.
+            let _ = (before, after);
+            let idx = id.last().unwrap_or(0);
+            remove_at(&mut r.ffon, id, idx);
+            r.current_id = id.clone();
+            let parent_len = get_parent_len(&r.ffon, id);
+            if parent_len == 0 {
+                // Emptied the directory — seed a placeholder so the user can
+                // still type to create, mirroring the Create-undo arm.
+                insert_at(&mut r.ffon, id, 0, FfonElement::new_str("<input></input>"));
+                r.current_id.set_last(0);
+            } else if idx >= parent_len {
+                r.current_id.set_last(parent_len - 1);
+            }
         }
     }
 }

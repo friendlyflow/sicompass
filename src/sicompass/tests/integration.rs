@@ -9505,3 +9505,37 @@ fn undo_navigate_into_child_repopulates_collapsed_subtree() {
     );
     std::fs::remove_file(h.tmp.path().join("zz.txt")).ok();
 }
+
+/// Regression: redoing a file delete must remove the item from disk *and* the
+/// FFON tree. The redo arm used to be a no-op stub, so after redo the file was
+/// gone from disk but its element still showed in the list.
+#[test]
+fn redo_of_filebrowser_delete_removes_disk_and_ffon() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").unwrap();
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r()); // into fb root
+    let ai = h.renderer.total_list.iter()
+        .position(|i| i.label.contains("alpha.txt")).unwrap();
+    h.renderer.list_index = ai;
+    h.renderer.current_id = h.renderer.total_list[ai].id.clone();
+    let alpha = h.tmp.path().join("alpha.txt");
+
+    sicompass::handlers::handle_file_delete(h.r());
+    assert!(!alpha.exists(), "delete removes alpha.txt from disk");
+
+    state_mod::walk_back(h.r()); // undo -> restored
+    assert!(alpha.exists(), "undo restores alpha.txt on disk");
+    assert!(
+        h.renderer.total_list.iter().any(|i| i.label.contains("alpha.txt")),
+        "undo restores alpha.txt in the list"
+    );
+
+    state_mod::walk_forward(h.r()); // redo -> deleted again
+    assert!(!alpha.exists(), "redo deletes alpha.txt from disk again");
+    assert!(
+        !h.renderer.total_list.iter().any(|i| i.label.contains("alpha.txt")),
+        "redo must also remove alpha.txt from the list, got {:?}",
+        h.renderer.total_list.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
+    );
+}

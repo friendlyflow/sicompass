@@ -380,20 +380,26 @@ impl Provider for FilebrowserProvider {
     }
 
     fn redo(&mut self, entry: &TimelineEntry, error: &mut String) {
-        let (op, before) = match entry {
-            TimelineEntry::FsOp { op, before, .. } => (op, before),
+        let (op, side_effect) = match entry {
+            TimelineEntry::FsOp { op, side_effect, .. } => (op, side_effect),
             _ => return,
         };
         if !matches!(op, FsOpKind::Delete) {
             return;
         }
-        if let Some(elem) = before {
-            let name = match elem {
-                FfonElement::Str(s) => s.clone(),
-                FfonElement::Obj(o) => o.key.clone(),
-            };
-            let full = self.current_path.join(name.trim_end_matches('/'));
-            if let Err(e) = trash::delete(&full) {
+        // Re-trash the item at its absolute original path (recorded in the
+        // side effect when it was first deleted). Joining `current_path` with
+        // the name would be wrong — the cursor may have moved since the
+        // delete, so it could miss the file entirely or, worse, trash a
+        // same-named file in the wrong directory.
+        let path: Option<&Path> = match side_effect {
+            FsSideEffect::TrashedFile { original_path, .. }
+            | FsSideEffect::TrashedDir { original_path, .. } => Some(original_path),
+            FsSideEffect::RenameOnly { from, .. } => Some(from),
+            FsSideEffect::None => None,
+        };
+        if let Some(path) = path {
+            if let Err(e) = trash::delete(path) {
                 *error = format!("redo delete: trash failed: {e}");
             }
         }
