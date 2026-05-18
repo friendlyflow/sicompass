@@ -2484,6 +2484,9 @@ pub fn handle_escape(r: &mut AppRenderer) {
             r.coordinate = r.previous_coordinate;
             r.text_scroll_offset = 0;
             r.text_scroll_total_height = 0;
+            // Rebuild the plain current-layer list — total_list still holds the
+            // recursively-flattened scroll list otherwise.
+            list::create_list_current_layer(r);
         }
         _ => {
             // Cancel file-browser open: reset filebrowser and return to source provider

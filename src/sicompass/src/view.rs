@@ -518,7 +518,7 @@ fn update_view(app: &mut AppState) {
                 search_needs_position,
                 search_snap,
                 corpus,
-                scale, line_height, ascender, em_width, text_x, max_content_w, win_h, top_offset, &p,
+                scale, line_height, ascender, em_width, text_x, max_prefix_px, max_content_w, win_h, top_offset, &p,
             );
             app.renderer.text_scroll_total_height = result.total_height;
             app.renderer.scroll_search_match_count = result.match_count;
@@ -538,7 +538,7 @@ fn update_view(app: &mut AppState) {
                 &list_items,
                 list_index,
                 text_scroll_offset,
-                scale, line_height, ascender, em_width, text_x, max_content_w, win_h, top_offset, &p,
+                scale, line_height, ascender, em_width, text_x, max_prefix_px, max_content_w, win_h, top_offset, &p,
             );
             app.renderer.text_scroll_total_height = total_height;
             app.renderer.text_scroll_offset = resolved_offset;
@@ -1429,10 +1429,13 @@ enum ScrollSearchCorpus {
     Prefix,
 }
 
-/// Display-strip a label and return the content portion (type-prefix removed).
-fn scroll_item_content(label: &str) -> String {
-    let stripped = sicompass_sdk::tags::strip_display(label);
-    split_label(&stripped).1.to_string()
+/// Display-stripped `(list_prefix, content)` parts of a scroll-mode label.
+/// `list_prefix` is the type tag (`-`, `+`, `-c`, …) with no trailing space;
+/// `content` is the element text. Mirrors general-mode column alignment.
+fn scroll_item_parts(label: &str) -> (String, String) {
+    let display = sicompass_sdk::tags::strip_display(label);
+    let (prefix, content) = split_label(&display);
+    (prefix.trim_end().to_string(), content.to_string())
 }
 
 /// Compute per-item layout for the scroll-mode list. Shared by the plain
@@ -1461,7 +1464,7 @@ fn measure_scroll_items(
             let image_lines = ((img_h / line_height as f32).ceil() as usize).max(1);
             (Some((img_w, img_h)), image_lines)
         } else {
-            let content = scroll_item_content(label);
+            let (_, content) = scroll_item_parts(label);
             (None, fr.count_wrapped_lines(&content, scale, max_w).max(1))
         };
         let height = (prefix_lines + content_lines) as i32 * line_height;
@@ -1471,9 +1474,10 @@ fn measure_scroll_items(
     (layouts, y_accum)
 }
 
-/// Render one scroll-mode item's extended prefix line(s) and its content
-/// (wrapped text or image) into the viewport. `item_top_screen` is the screen
-/// pixel top of the item; lines outside `[clip_y, win_h)` are clipped.
+/// Render one scroll-mode item: the list prefix (`-`, `+`, …) in the left
+/// column, the extended prefix (`layer: X list: Y/Z`) on the same first line,
+/// then the element content (wrapped text or image) below — all aligned at
+/// `content_x` like general mode. Lines outside `[clip_y, win_h)` are clipped.
 #[allow(clippy::too_many_arguments)]
 fn render_scroll_item(
     fr: &mut crate::text::FontRenderer,
@@ -1486,22 +1490,27 @@ fn render_scroll_item(
     scale: f32,
     ascender: f32,
     line_height: i32,
-    text_x: f32,
-    max_w: f32,
+    prefix_x: f32,
+    content_x: f32,
+    content_w: f32,
     clip_y: f32,
     win_h: f32,
     p: &crate::app_state::ColorPalette,
 ) {
     let lh = line_height as f32;
+    let (list_prefix, content) = scroll_item_parts(label);
 
-    // Extended prefix line(s): "layer: X list: Y/Z".
+    // First row: list prefix in the left column, extended prefix at content_x.
     let prefix_text = ext_prefix.as_deref().unwrap_or("");
-    for (n, (line, _)) in fr.wrap_lines_with_offsets(prefix_text, scale, max_w).iter().enumerate() {
+    for (n, (line, _)) in fr.wrap_lines_with_offsets(prefix_text, scale, content_w).iter().enumerate() {
         let line_top = item_top_screen + n as f32 * lh;
         if line_top + lh <= clip_y { continue; }
         if line_top >= win_h { break; }
         let baseline = line_top + ascender * scale + crate::text::TEXT_PADDING;
-        fr.prepare_text_for_rendering(line, text_x, baseline, scale, p.ext_search);
+        if n == 0 && !list_prefix.is_empty() {
+            fr.prepare_text_for_rendering(&list_prefix, prefix_x, baseline, scale, p.text);
+        }
+        fr.prepare_text_for_rendering(line, content_x, baseline, scale, p.text);
     }
 
     let content_top = item_top_screen + layout.prefix_lines as f32 * lh;
@@ -1510,19 +1519,18 @@ fn render_scroll_item(
             if let Some(ir) = ir {
                 let border = 2.0_f32;
                 unsafe {
-                    ir.prepare_image(path, text_x + border, content_top + border,
+                    ir.prepare_image(path, content_x + border, content_top + border,
                                      img_w - 2.0 * border, img_h - 2.0 * border);
                 }
             }
         }
     } else {
-        let content = scroll_item_content(label);
-        for (n, (line, _)) in fr.wrap_lines_with_offsets(&content, scale, max_w).iter().enumerate() {
+        for (n, (line, _)) in fr.wrap_lines_with_offsets(&content, scale, content_w).iter().enumerate() {
             let line_top = content_top + n as f32 * lh;
             if line_top + lh <= clip_y { continue; }
             if line_top >= win_h { break; }
             let baseline = line_top + ascender * scale + crate::text::TEXT_PADDING;
-            fr.prepare_text_for_rendering(line, text_x, baseline, scale, p.text);
+            fr.prepare_text_for_rendering(line, content_x, baseline, scale, p.text);
         }
     }
 }
@@ -1543,6 +1551,7 @@ fn render_scroll_full(
     ascender: f32,
     em_width: f32,
     text_x: f32,
+    max_prefix_px: f32,
     max_content_w: f32,
     win_h: f32,
     top_offset: f32,
@@ -1552,6 +1561,8 @@ fn render_scroll_full(
     let clip_y = line_height as f32 + top_offset;
     let viewport_h = win_h - clip_y;
     let max_w = max_content_w.max(1.0);
+    // List prefix sits in a left column; content + extended prefix align here.
+    let content_x = text_x + max_prefix_px;
 
     let (layouts, total_height) =
         measure_scroll_items(fr, ir.as_deref_mut(), list_items, scale, line_height, max_w);
@@ -1571,7 +1582,8 @@ fn render_scroll_full(
         let rect_bottom = (item_top_screen + l.height as f32).min(win_h);
         if rect_bottom > rect_top {
             if let Some(rr) = rr.as_deref_mut() {
-                rr.prepare_rectangle(text_x - 4.0, rect_top, max_w + 8.0, rect_bottom - rect_top, p.selected, 5.0);
+                rr.prepare_rectangle(text_x - 4.0, rect_top, max_prefix_px + max_w + 8.0,
+                    rect_bottom - rect_top, p.selected, 5.0);
             }
         }
     }
@@ -1583,7 +1595,7 @@ fn render_scroll_full(
         if item_top_screen + l.height as f32 <= clip_y { continue; } // above viewport
         if item_top_screen >= win_h { break; }                        // below viewport
         render_scroll_item(fr, ir.as_deref_mut(), label, img_data, ext_prefix, l,
-            item_top_screen, scale, ascender, line_height, text_x, max_w, clip_y, win_h, p);
+            item_top_screen, scale, ascender, line_height, text_x, content_x, max_w, clip_y, win_h, p);
     }
 
     (total_height, scroll_offset)
@@ -1642,6 +1654,7 @@ fn render_scroll_search_full(
     ascender: f32,
     em_width: f32,
     text_x: f32,
+    max_prefix_px: f32,
     max_content_w: f32,
     win_h: f32,
     top_offset: f32,
@@ -1653,20 +1666,22 @@ fn render_scroll_search_full(
     let viewport_h = win_h - clip_y;
     let max_w = max_content_w.max(1.0);
     let lh = line_height as f32;
+    // List prefix sits in a left column; content + extended prefix align here.
+    let content_x = text_x + max_prefix_px;
 
     let (layouts, total_height) =
         measure_scroll_items(fr, ir.as_deref_mut(), list_items, scale, line_height, max_w);
 
-    // Per item: the searched text and its wrapped lines. Content matches sit in
-    // the content region (below the prefix); prefix matches at the item top.
-    // Wrap offsets are byte offsets into `search_texts`, so matching runs on the
-    // original text (not on the joined wrapped lines, which may drop spaces).
+    // Per item: the searched text and its wrapped lines. The searched text is
+    // exactly what the item renders at `content_x` — element content for the
+    // Content corpus (Ctrl-F, list prefix excluded), the extended prefix for the
+    // Prefix corpus (Tab) — so wrap offsets and highlight rects line up exactly.
     let mut search_texts: Vec<String> = Vec::with_capacity(list_items.len());
     let mut search_wraps: Vec<Vec<(String, usize)>> = Vec::with_capacity(list_items.len());
     for (label, img_data, _, _, ext_prefix) in list_items.iter() {
         let text = match corpus {
             ScrollSearchCorpus::Content => {
-                if img_data.is_some() { String::new() } else { scroll_item_content(label) }
+                if img_data.is_some() { String::new() } else { scroll_item_parts(label).1 }
             }
             ScrollSearchCorpus::Prefix => ext_prefix.clone().unwrap_or_default(),
         };
@@ -1765,7 +1780,7 @@ fn render_scroll_search_full(
                 for &(local_start, mlen, is_current) in &matches_per_line[n] {
                     let safe_start = local_start.min(line_text.len());
                     let safe_end = (local_start + mlen).min(line_text.len());
-                    let match_x = text_x + fr.measure_text_width(&line_text[..safe_start], scale);
+                    let match_x = content_x + fr.measure_text_width(&line_text[..safe_start], scale);
                     let match_w = fr.measure_text_width(&line_text[safe_start..safe_end], scale).max(2.0);
                     let color = if is_current { p.scroll_search } else { p.selected };
                     rr.prepare_rectangle(match_x, line_top, match_w, lh, color, 3.0);
@@ -1774,7 +1789,7 @@ fn render_scroll_search_full(
         }
 
         render_scroll_item(fr, ir.as_deref_mut(), label, img_data, ext_prefix, l,
-            item_top_screen, scale, ascender, line_height, text_x, max_w, clip_y, win_h, p);
+            item_top_screen, scale, ascender, line_height, text_x, content_x, max_w, clip_y, win_h, p);
     }
 
     ScrollSearchResult { total_height, match_count, current_match, current_item, scroll_offset }
