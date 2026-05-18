@@ -732,7 +732,15 @@ fn update_view(app: &mut AppState) {
             Coordinate::ExtendedSearch => ("ext search: ", app.renderer.input_buffer.as_str()),
             _ => ("search: ", app.renderer.search_string.as_str()),
         };
-        Some(format!("{}{}", prefix, text))
+        // Tab (ExtendedSearch) and Ctrl-F (SimpleSearch) append a result count,
+        // matching the `[N items]` readout shown by scroll-mode searches.
+        let count_suffix = match app.renderer.coordinate {
+            Coordinate::SimpleSearch | Coordinate::ExtendedSearch => {
+                format!(" [{} items]", list_items.len())
+            }
+            _ => String::new(),
+        };
+        Some(format!("{}{}{}", prefix, text, count_suffix))
     } else {
         None
     };
@@ -1153,6 +1161,17 @@ fn update_view(app: &mut AppState) {
                 // below, then any trailing (suffix) text under it.
                 let (prefix_text, suffix_text, _) = split_image_label(label.as_str(), path);
                 let layout = image_layouts[i].as_ref();
+                // Match positions run over the whole label; split them around
+                // the image path into the caption-prefix and caption-suffix
+                // ranges so the search term highlights in both.
+                let prefix_char_count = prefix_text.chars().count() as u32;
+                let path_char_count = path.chars().count() as u32;
+                let prefix_positions: Vec<u32> = match_pos.iter()
+                    .copied().filter(|&pp| pp < prefix_char_count).collect();
+                let suffix_positions: Vec<u32> = match_pos.iter()
+                    .filter(|&&pp| pp >= prefix_char_count + path_char_count)
+                    .map(|&pp| pp - prefix_char_count - path_char_count)
+                    .collect();
                 if let Some(fr) = app.font_renderer.as_mut() {
                     let mut label_x = text_prefix_x;
                     if let Some(breadcrumb) = item_data.as_deref().filter(|s: &&str| !s.is_empty()) {
@@ -1160,7 +1179,14 @@ fn update_view(app: &mut AppState) {
                         fr.prepare_text_for_rendering(breadcrumb, label_x, item_y, scale, p.ext_search);
                         label_x += bc_w;
                     }
-                    fr.prepare_text_for_rendering(prefix_text, label_x, item_y, scale, p.text);
+                    if prefix_positions.is_empty() {
+                        fr.prepare_text_for_rendering(prefix_text, label_x, item_y, scale, p.text);
+                    } else {
+                        let rr = app.rect_renderer.as_mut();
+                        render_with_highlights(fr, rr, prefix_text, label_x, item_y, scale,
+                            ascender, line_height as f32, p.text, p.scroll_search,
+                            &prefix_positions, None);
+                    }
                 }
                 // Image one line below the breadcrumb/prefix row.
                 let img_top_y = item_y + line_height as f32;
@@ -1176,8 +1202,17 @@ fn update_view(app: &mut AppState) {
                 if !suffix_text.is_empty() {
                     if let (Some(fr), Some(layout)) = (app.font_renderer.as_mut(), layout) {
                         let suffix_y = img_top_y + layout.image_lines as f32 * line_height as f32;
-                        fr.prepare_text_wrapped(suffix_text, text_prefix_x, suffix_y, scale,
-                                                layout.img_w.max(1.0), line_height as f32, p.text);
+                        let img_w = layout.img_w.max(1.0);
+                        if suffix_positions.is_empty() {
+                            fr.prepare_text_wrapped(suffix_text, text_prefix_x, suffix_y, scale,
+                                                    img_w, line_height as f32, p.text);
+                        } else {
+                            let rr = app.rect_renderer.as_mut();
+                            render_with_highlights(fr, rr, suffix_text, text_prefix_x, suffix_y,
+                                scale, ascender, line_height as f32, p.text, p.scroll_search,
+                                &suffix_positions,
+                                Some(WrapLayout { first_width: img_w, rest_x: text_prefix_x, rest_width: img_w }));
+                        }
                     }
                 }
             } else if let Some(fr) = app.font_renderer.as_mut() {
@@ -1213,16 +1248,33 @@ fn update_view(app: &mut AppState) {
                 .as_ref()
                 .map(|l| (l.prefix_lines, l.img_h))
                 .unwrap_or((0, 0.0));
+            // Match positions run over the whole label; the path splits them
+            // into caption-prefix and caption-suffix ranges.
+            let prefix_char_count = prefix_text.chars().count() as u32;
+            let path_char_count = path.chars().count() as u32;
 
             // Render prefix text above image (or bare "-p" when no meaningful prefix).
             // The "-p" list tag always renders at text_prefix_x; content text at content_start_x.
             let mut current_y = item_y;
             if has_prefix {
                 let (tag, content) = split_label(prefix_text);
+                // Content trails the "-p " tag — shift match positions past it.
+                let tag_char_count = tag.chars().count() as u32;
+                let content_positions: Vec<u32> = match_pos.iter()
+                    .filter(|&&pp| pp >= tag_char_count && pp < prefix_char_count)
+                    .map(|&pp| pp - tag_char_count)
+                    .collect();
                 if let Some(fr) = app.font_renderer.as_mut() {
                     fr.prepare_text_for_rendering(tag, text_prefix_x, current_y, scale, p.text);
                     if !content.is_empty() {
-                        fr.prepare_text_for_rendering(content, content_start_x, current_y, scale, p.text);
+                        if content_positions.is_empty() {
+                            fr.prepare_text_for_rendering(content, content_start_x, current_y, scale, p.text);
+                        } else {
+                            let rr = app.rect_renderer.as_mut();
+                            render_with_highlights(fr, rr, content, content_start_x, current_y,
+                                scale, ascender, line_height as f32, p.text, p.scroll_search,
+                                &content_positions, None);
+                        }
                     }
                 }
                 current_y += prefix_lines as f32 * line_height as f32;
@@ -1253,8 +1305,19 @@ fn update_view(app: &mut AppState) {
 
             // Render suffix text below image
             if !suffix_text.is_empty() {
+                let suffix_positions: Vec<u32> = match_pos.iter()
+                    .filter(|&&pp| pp >= prefix_char_count + path_char_count)
+                    .map(|&pp| pp - prefix_char_count - path_char_count)
+                    .collect();
                 if let Some(fr) = app.font_renderer.as_mut() {
-                    fr.prepare_text_for_rendering(suffix_text, content_start_x, current_y, scale, p.text);
+                    if suffix_positions.is_empty() {
+                        fr.prepare_text_for_rendering(suffix_text, content_start_x, current_y, scale, p.text);
+                    } else {
+                        let rr = app.rect_renderer.as_mut();
+                        render_with_highlights(fr, rr, suffix_text, content_start_x, current_y,
+                            scale, ascender, line_height as f32, p.text, p.scroll_search,
+                            &suffix_positions, None);
+                    }
                 }
             }
         } else if let Some(fr) = app.font_renderer.as_mut() {
