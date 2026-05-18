@@ -815,7 +815,7 @@ fn update_view(app: &mut AppState) {
     let list_index = if count > 0 { app.renderer.list_index.min(count - 1) } else { 0 };
     let line_counts: Vec<usize> = {
         let fr = match app.font_renderer.as_ref() { Some(f) => f, None => return };
-        list_items.iter().enumerate().map(|(idx, (label, img_data, _, _, _))| {
+        list_items.iter().enumerate().map(|(idx, (label, img_data, _, _, ext_prefix))| {
             if in_insert_mode && idx == list_index {
                 return insert_buf.split('\n').count().max(1);
             }
@@ -849,6 +849,20 @@ fn update_view(app: &mut AppState) {
             // Also subtract indicator_width when any item has an indicator, since text_prefix_x
             // is shifted right by that amount for ALL items (for alignment).
             let indicator_w = if list_has_indicators { indicator_width(line_height as f32, em_width) } else { 0.0 };
+            // Image result: one breadcrumb/prefix line, then the image below.
+            if let Some(path) = ext_prefix {
+                let img_w = (max_content_w - 4.0 * em_width - indicator_w).max(1.0);
+                let img_h = app.image_renderer.as_mut()
+                    .and_then(|ir| unsafe { ir.texture_size(path) })
+                    .map(|(tw, th)| if tw == 0 { img_w } else { img_w * th as f32 / tw as f32 })
+                    .unwrap_or(img_w);
+                let image_lines = ((img_h / line_height as f32).ceil() as usize).max(1);
+                let (_, suffix, _) = split_image_label(label, path);
+                let suffix_lines = if suffix.is_empty() { 0 }
+                    else { fr.count_wrapped_lines(suffix, scale, img_w) };
+                // 1 breadcrumb/prefix line + image + trailing text below it.
+                return 1 + image_lines + suffix_lines;
+            }
             let bc_w = img_data.as_deref().filter(|s| !s.is_empty())
                 .map(|bc| fr.measure_text_width(bc, scale)).unwrap_or(0.0);
             let (prefix_str, content) = split_label(label);
@@ -918,7 +932,7 @@ fn update_view(app: &mut AppState) {
         let cap = list_items.len().saturating_sub(start_index);
         let mut metrics = Vec::with_capacity(cap);
         let mut layouts: Vec<Option<ImageLayout>> = Vec::with_capacity(cap);
-        for (global_idx, (label, img_data, _, _, _)) in list_items.iter().enumerate().skip(start_index) {
+        for (global_idx, (label, img_data, _, _, ext_prefix)) in list_items.iter().enumerate().skip(start_index) {
             if y > win_h { break; }
             let (lines, img_layout) = if in_insert_mode && global_idx == list_index {
                 (insert_buf.split('\n').count().max(1), None)
@@ -958,13 +972,28 @@ fn update_view(app: &mut AppState) {
             } else {
                 // ExtendedSearch: breadcrumb + prefix precede content — reduce available width.
                 let indicator_w = if list_has_indicators { indicator_width(line_height as f32, em_width) } else { 0.0 };
-                let bc_w = img_data.as_deref().filter(|s| !s.is_empty())
-                    .map(|bc| fr.measure_text_width(bc, scale)).unwrap_or(0.0);
-                let (prefix_str, content) = split_label(label);
-                let prefix_w = fr.measure_text_width(prefix_str, scale);
-                let rest_w = (max_content_w - 4.0 * em_width - indicator_w).max(1.0);
-                let first_w = (rest_w - bc_w - prefix_w).max(1.0);
-                (fr.wrap_lines_with_offsets_hanging(content, scale, first_w, rest_w).len().max(1), None)
+                if let Some(path) = ext_prefix {
+                    // Image result: one breadcrumb/prefix line, then the image.
+                    let img_w = (max_content_w - 4.0 * em_width - indicator_w).max(1.0);
+                    let img_h = app.image_renderer.as_mut()
+                        .and_then(|ir| unsafe { ir.texture_size(path) })
+                        .map(|(tw, th)| if tw == 0 { img_w } else { img_w * th as f32 / tw as f32 })
+                        .unwrap_or(img_w);
+                    let image_lines = ((img_h / line_height as f32).ceil() as usize).max(1);
+                    let (_, suffix, _) = split_image_label(label, path);
+                    let suffix_lines = if suffix.is_empty() { 0 }
+                        else { fr.count_wrapped_lines(suffix, scale, img_w) };
+                    (1 + image_lines + suffix_lines,
+                     Some(ImageLayout { prefix_lines: 1, suffix_lines, image_lines, img_w, img_h }))
+                } else {
+                    let bc_w = img_data.as_deref().filter(|s| !s.is_empty())
+                        .map(|bc| fr.measure_text_width(bc, scale)).unwrap_or(0.0);
+                    let (prefix_str, content) = split_label(label);
+                    let prefix_w = fr.measure_text_width(prefix_str, scale);
+                    let rest_w = (max_content_w - 4.0 * em_width - indicator_w).max(1.0);
+                    let first_w = (rest_w - bc_w - prefix_w).max(1.0);
+                    (fr.wrap_lines_with_offsets_hanging(content, scale, first_w, rest_w).len().max(1), None)
+                }
             };
             let highlight_w = (max_prefix_px + item_max_w + 20.0).min(win_w - content_x - list_indent_px);
             metrics.push((y, content_start_x, lines, highlight_w));
@@ -1090,7 +1119,7 @@ fn update_view(app: &mut AppState) {
     let mut captured_elem_x: f32 = 0.0;
     let mut captured_elem_base_x: f32 = 0.0;
     let mut captured_elem_y: f32 = 0.0;
-    for (i, (label, item_data, is_selected, match_pos, _)) in list_items[start_index..].iter().take(item_metrics.len()).enumerate() {
+    for (i, (label, item_data, is_selected, match_pos, ext_prefix)) in list_items[start_index..].iter().take(item_metrics.len()).enumerate() {
         let (item_y, content_start_x, _, _) = item_metrics[i];
 
         // Draw graphical indicator (radio/checkbox) and compute x shift.
@@ -1114,11 +1143,45 @@ fn update_view(app: &mut AppState) {
         };
 
         if is_extended_search {
-            // item_data is a breadcrumb, not an image path.
-            // Render: [breadcrumb in ext_search color][prefix][content], all within 120 em column.
+            // item_data is a breadcrumb, not an image path; ext_prefix carries
+            // an image path for image elements.
             let right_edge = text_x + max_content_w;
             let (prefix_str, content) = split_label(label.as_str());
-            if let Some(fr) = app.font_renderer.as_mut() {
+            if let Some(path) = ext_prefix {
+                // Image result, laid out like general mode: breadcrumb + the
+                // image's prefix text (tag + caption) on line 1, the image
+                // below, then any trailing (suffix) text under it.
+                let (prefix_text, suffix_text, _) = split_image_label(label.as_str(), path);
+                let layout = image_layouts[i].as_ref();
+                if let Some(fr) = app.font_renderer.as_mut() {
+                    let mut label_x = text_prefix_x;
+                    if let Some(breadcrumb) = item_data.as_deref().filter(|s: &&str| !s.is_empty()) {
+                        let bc_w = fr.measure_text_width(breadcrumb, scale);
+                        fr.prepare_text_for_rendering(breadcrumb, label_x, item_y, scale, p.ext_search);
+                        label_x += bc_w;
+                    }
+                    fr.prepare_text_for_rendering(prefix_text, label_x, item_y, scale, p.text);
+                }
+                // Image one line below the breadcrumb/prefix row.
+                let img_top_y = item_y + line_height as f32;
+                if let (Some(ir), Some(layout)) = (app.image_renderer.as_mut(), layout) {
+                    let img_y = img_top_y - ascender * scale - crate::text::TEXT_PADDING;
+                    let border = 2.0_f32;
+                    unsafe {
+                        ir.prepare_image(path, text_prefix_x + border, img_y + border,
+                                         layout.img_w - 2.0 * border, layout.img_h - 2.0 * border);
+                    }
+                }
+                // Trailing text below the image.
+                if !suffix_text.is_empty() {
+                    if let (Some(fr), Some(layout)) = (app.font_renderer.as_mut(), layout) {
+                        let suffix_y = img_top_y + layout.image_lines as f32 * line_height as f32;
+                        fr.prepare_text_wrapped(suffix_text, text_prefix_x, suffix_y, scale,
+                                                layout.img_w.max(1.0), line_height as f32, p.text);
+                    }
+                }
+            } else if let Some(fr) = app.font_renderer.as_mut() {
+                // Render: [breadcrumb in ext_search color][prefix][content].
                 let mut label_x = text_prefix_x;
                 if let Some(breadcrumb) = item_data.as_deref().filter(|s: &&str| !s.is_empty()) {
                     let bc_w = fr.measure_text_width(breadcrumb, scale);

@@ -52,12 +52,18 @@ fn collect_items_recursive(
         item_id.set_last(i);
 
         let label = build_label_for_element(elem, parent_has_radio);
+        // Image elements carry their path in `ext_prefix` — the `data` slot is
+        // taken by the breadcrumb — so general-mode search can render the image.
+        let ext_prefix = match elem {
+            FfonElement::Str(s) if tags::has_image(s) => tags::extract_image(s),
+            _ => None,
+        };
         out.push(crate::app_state::RenderListItem {
             id: item_id.clone(),
             label,
             data: if breadcrumb.is_empty() { None } else { Some(breadcrumb.to_owned()) },
             nav_path: None,
-            ext_prefix: None,
+            ext_prefix,
         });
 
         // Recurse into object children
@@ -943,6 +949,22 @@ mod tests {
 
         assert_eq!(r.total_list.len(), 1);
         assert_eq!(r.total_list[0].data.as_deref(), Some("/pic.png"));
+    }
+
+    #[test]
+    fn create_list_extended_search_carries_image_path() {
+        // Image elements expose their path via `ext_prefix` (the `data` slot
+        // holds the breadcrumb) so general-mode search can render the image.
+        let mut root = FfonElement::new_obj("provider");
+        root.as_obj_mut().unwrap().push(FfonElement::new_str("plain"));
+        root.as_obj_mut().unwrap().push(FfonElement::new_str("<image>/pic.png</image>"));
+        let mut r = make_renderer_with_ffon(vec![root]);
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        create_list_extended_search(&mut r);
+
+        assert_eq!(r.total_list.len(), 2);
+        assert_eq!(r.total_list[0].ext_prefix, None);
+        assert_eq!(r.total_list[1].ext_prefix.as_deref(), Some("/pic.png"));
     }
 
     #[test]
