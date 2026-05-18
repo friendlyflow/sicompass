@@ -2582,9 +2582,11 @@ pub fn handle_input(r: &mut AppRenderer, text: &str) {
             r.needs_redraw = true;
         }
         Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch => {
+            if has_selection(r) { delete_selection(r); }
             let pos = r.cursor_position.min(r.input_buffer.len());
             r.input_buffer.insert_str(pos, text);
             r.cursor_position = pos + text.len();
+            r.caret.reset(sdl_ticks());
             r.needs_redraw = true;
         }
         Coordinate::ExtendedSearch => {
@@ -3785,6 +3787,8 @@ pub(crate) fn is_text_edit_mode(r: &AppRenderer) -> bool {
             | Coordinate::SimpleSearch
             | Coordinate::ExtendedSearch
             | Coordinate::Command
+            | Coordinate::ScrollSearch
+            | Coordinate::ScrollPrefixSearch
     )
 }
 
@@ -5820,6 +5824,35 @@ mod tests {
         assert_eq!(r.scroll_search_current_match, 1);
         handle_up(&mut r);
         assert_eq!(r.scroll_search_current_match, 0);
+    }
+
+    #[test]
+    fn scroll_search_query_supports_caret_and_selection() {
+        for mode in [Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch] {
+            let mut r = make_renderer();
+            r.coordinate = mode;
+            r.input_buffer = "abc".to_string();
+            r.cursor_position = 3;
+            // Caret moves left within the query.
+            handle_text_cursor_left(&mut r);
+            handle_text_cursor_left(&mut r);
+            assert_eq!(r.cursor_position, 1);
+            handle_text_cursor_right(&mut r);
+            assert_eq!(r.cursor_position, 2);
+            // Shift+arrow extends a selection.
+            r.selection_anchor = None;
+            handle_shift_right(&mut r);
+            assert_eq!(r.selection_anchor, Some(2));
+            assert!(has_selection(&r));
+            // Typing replaces the selection.
+            r.selection_anchor = Some(1);
+            r.cursor_position = 3;
+            handle_input(&mut r, "X");
+            assert_eq!(r.input_buffer, "aX");
+            assert_eq!(r.selection_anchor, None);
+            // Ctrl+X / Ctrl+C / Ctrl+V are enabled as text-edit operations.
+            assert!(is_text_edit_mode(&r));
+        }
     }
 
     // -----------------------------------------------------------------------

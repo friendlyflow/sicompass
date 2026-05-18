@@ -466,6 +466,11 @@ fn update_view(app: &mut AppState) {
         let text_scroll_offset = app.renderer.text_scroll_offset;
         let list_index = app.renderer.list_index;
         let search_query = app.renderer.input_buffer.clone();
+        let search_cursor = app.renderer.cursor_position;
+        let search_caret_visible = app.renderer.caret.visible;
+        let search_selection = app.renderer.selection_anchor
+            .filter(|&a| a != search_cursor)
+            .map(|a| (a.min(search_cursor), a.max(search_cursor)));
         let search_current_match = app.renderer.scroll_search_current_match;
         let search_needs_position = app.renderer.scroll_search_needs_position;
         let search_snap = app.renderer.scroll_search_snap;
@@ -524,6 +529,9 @@ fn update_view(app: &mut AppState) {
                 list_index,
                 text_scroll_offset,
                 &search_query,
+                search_cursor,
+                search_caret_visible,
+                search_selection,
                 search_current_match,
                 search_needs_position,
                 search_snap,
@@ -1648,22 +1656,38 @@ struct ScrollSearchResult {
 }
 
 /// Find all case-insensitive occurrences of `query` in `text`.
-/// Returns `(byte_offset_in_text, match_len_in_lowercased_text)` pairs.
+/// Returns `(byte_offset, match_len)` pairs — both are byte indices into the
+/// original `text` and always land on char boundaries (matching is done
+/// char-by-char on the original text, so multi-byte characters such as `—` do
+/// not produce invalid slice indices).
 fn find_matches_ci(text: &str, query: &str) -> Vec<(usize, usize)> {
     if query.is_empty() {
         return Vec::new();
     }
-    let text_lower = text.to_lowercase();
+    // Per original char: (byte offset, byte length, lowercased form).
+    let chars: Vec<(usize, usize, String)> = text
+        .char_indices()
+        .map(|(i, c)| (i, c.len_utf8(), c.to_lowercase().collect::<String>()))
+        .collect();
     let query_lower = query.to_lowercase();
-    let q_len = query_lower.len();
     let mut matches = Vec::new();
-    let mut pos = 0usize;
-    while pos + q_len <= text_lower.len() {
-        if text_lower[pos..].starts_with(&query_lower) {
-            matches.push((pos, q_len));
-            pos += 1;
-        } else {
-            pos += 1;
+    for start in 0..chars.len() {
+        let mut q = query_lower.as_str();
+        let mut ci = start;
+        let mut ok = true;
+        while !q.is_empty() {
+            match chars.get(ci) {
+                Some((_, _, lc)) => match q.strip_prefix(lc.as_str()) {
+                    Some(rest) => { q = rest; ci += 1; }
+                    None => { ok = false; break; }
+                },
+                None => { ok = false; break; }
+            }
+        }
+        if ok && ci > start {
+            let start_off = chars[start].0;
+            let end_off = chars[ci - 1].0 + chars[ci - 1].1;
+            matches.push((start_off, end_off - start_off));
         }
     }
     matches
@@ -1681,6 +1705,9 @@ fn render_scroll_search_full(
     list_index: usize,
     text_scroll_offset: i32,
     search_query: &str,
+    cursor_position: usize,
+    caret_visible: bool,
+    selection: Option<(usize, usize)>,
     search_current_match: usize,
     needs_position: bool,
     snap: bool,
@@ -1786,6 +1813,27 @@ fn render_scroll_search_full(
     };
     let search_bar = format!("{bar_label}: {search_query} [{match_count} items]");
     fr.prepare_text_for_rendering(&search_bar, text_x, search_bar_y, scale, p.text);
+
+    // Text-selection highlight + blinking caret in the search input.
+    if let Some(rr) = rr.as_deref_mut() {
+        let base_x = text_x + fr.measure_text_width(&format!("{bar_label}: "), scale);
+        let field_top = search_bar_y - ascender * scale;
+        let field_h = lh - 2.0 * crate::text::TEXT_PADDING;
+        if let Some((sel_start, sel_end)) = selection {
+            let s = sel_start.min(search_query.len());
+            let e = sel_end.min(search_query.len());
+            if e > s {
+                let sel_x = base_x + fr.measure_text_width(&search_query[..s], scale);
+                let sel_w = fr.measure_text_width(&search_query[s..e], scale);
+                rr.prepare_rectangle(sel_x, field_top, sel_w, field_h, p.scroll_search, 0.0);
+            }
+        }
+        if caret_visible {
+            let cur = cursor_position.min(search_query.len());
+            let caret_x = base_x + fr.measure_text_width(&search_query[..cur], scale);
+            rr.prepare_rectangle(caret_x, field_top, 2.0, field_h, p.text, 0.0);
+        }
+    }
 
     // Render visible items: match highlights, then prefix line + content.
     for (i, (label, img_data, _, _, ext_prefix)) in list_items.iter().enumerate() {
@@ -2185,6 +2233,24 @@ struct ImageLayout {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn find_matches_ci_basic_and_case_insensitive() {
+        assert_eq!(find_matches_ci("Hello hello", "hello"), vec![(0, 5), (6, 5)]);
+        assert_eq!(find_matches_ci("abc", "xyz"), vec![]);
+        assert_eq!(find_matches_ci("abc", ""), vec![]);
+    }
+
+    #[test]
+    fn find_matches_ci_handles_multibyte_chars() {
+        // Regression: matching must not slice inside a multi-byte char (`—`).
+        let text = "open the view — a read-only list";
+        let m = find_matches_ci(text, "read");
+        let idx = text.find("read").unwrap();
+        assert_eq!(m, vec![(idx, 4)]);
+        // A query that scans past the em-dash must not panic.
+        assert!(find_matches_ci(text, "zzz").is_empty());
+    }
 
     #[test]
     fn rgba_u32_to_f32_black() {

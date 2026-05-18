@@ -43,6 +43,8 @@ const TEXT: &[Coordinate] = &[
     Coordinate::SimpleSearch,
     Coordinate::ExtendedSearch,
     Coordinate::Command,
+    Coordinate::ScrollSearch,
+    Coordinate::ScrollPrefixSearch,
 ];
 
 // Modes where Up/Down navigate the list (not text cursor movement)
@@ -393,6 +395,9 @@ pub static SHORTCUTS: &[Shortcut] = &[
     Shortcut { key: Keycode::Right, key2: None, ctrl: false, shift: false,
         modes: &[Coordinate::Command],
         label: "Right  Cursor right", is_available: always, handle: handlers::handle_command_right },
+    Shortcut { key: Keycode::Right, key2: None, ctrl: false, shift: false,
+        modes: &[Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch],
+        label: "Right  Cursor right", is_available: always, handle: handlers::handle_text_cursor_right },
     Shortcut { key: Keycode::Right, key2: None, ctrl: false, shift: true,
         modes: TEXT,
         label: "Shift+Right Select right", is_available: always, handle: handlers::handle_shift_right },
@@ -412,6 +417,9 @@ pub static SHORTCUTS: &[Shortcut] = &[
         label: "Left   Cursor left", is_available: always, handle: handlers::handle_text_cursor_left },
     Shortcut { key: Keycode::Left, key2: None, ctrl: false, shift: false,
         modes: &[Coordinate::Command],
+        label: "Left   Cursor left", is_available: always, handle: handlers::handle_text_cursor_left },
+    Shortcut { key: Keycode::Left, key2: None, ctrl: false, shift: false,
+        modes: &[Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch],
         label: "Left   Cursor left", is_available: always, handle: handlers::handle_text_cursor_left },
     Shortcut { key: Keycode::Left, key2: None, ctrl: false, shift: true,
         modes: TEXT,
