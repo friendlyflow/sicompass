@@ -122,9 +122,9 @@ static SECTIONS: &[Node] = &[
                     Leaf("Sicompass has several modes that change what your keyboard inputs do. You always start in operator mode."),
                     Leaf(": (colon): enter command mode. Type a command name and press Enter to execute it. Commands are context-sensitive, each provider can offer its own commands."),
                     Leaf("Tab: enter simple search mode. Start typing to filter items in the current list. Only items matching your search will be shown."),
-                    Leaf("S: switch to scroll mode. It flattens the current list and all of its sublists into one continuous, scrollable reading view. Each element shows a 'layer: X list: Y/Z' header (with its list prefix) and its content - text or image - below. Up/Down scroll the view; Tab searches the headers and Ctrl+F searches the content; Enter on a highlighted element jumps to it back in operator mode."),
+                    Leaf("S: switch to scroll mode. It flattens the current list and all of its sublists into one continuous, scrollable reading view. Each element shows a 'layer: X list: Y/Z' header (with its list prefix) and its content - text or image - below. Up/Down scroll the view. Tab searches the headers and Ctrl+F searches the content. Enter on a highlighted element jumps to it back in operator mode."),
                     Leaf("Ctrl+F: enter extended search mode. This searches recursively through all children, not just the current level. Results are shown as a flat list you can jump to."),
-                    Leaf("z: open the history view — a navigable, read-only list of this tab's undo timeline. Escape leaves it. See the 'Undo and Redo' section."),
+                    Leaf("z: open the history view, a navigable, read-only list of this tab's undo timeline. Escape leaves it. See the 'Undo and Redo' section."),
                 ],
             },
         ],
@@ -132,7 +132,7 @@ static SECTIONS: &[Node] = &[
     Branch {
         key: "Accessibility",
         children: &[
-            Leaf("Sicompass has built-in screen reader support powered by AccessKit. If you use a screen reader, Sicompass works with it out of the box — no configuration needed."),
+            Leaf("Sicompass has built-in screen reader support powered by AccessKit. If you use a screen reader, Sicompass works with it out of the box, no configuration needed."),
             Leaf("Screen reader support is available on all platforms: Linux (AT-SPI), macOS (VoiceOver), and Windows (Narrator, NVDA, JAWS)."),
             Leaf("When you navigate up, down, or into items, the current element is automatically announced by your screen reader."),
             Leaf("Screen reader support activates automatically when a screen reader is detected. There is nothing to enable or configure."),
@@ -147,19 +147,19 @@ static SECTIONS: &[Node] = &[
             Leaf("While editing, type normally to change the text. Use Backspace to delete characters."),
             Leaf("Press Enter to confirm your edit and save the change."),
             Leaf("Press Escape to cancel the edit and discard your changes."),
-            Leaf("Not all items are editable, only those marked with <input> tags by the provider. The file browser makes file and directory names editable; the settings provider makes configuration values editable."),
+            Leaf("Not all items are editable, only those marked with <input> tags by the provider. The file browser makes file and directory names editable. The settings provider makes configuration values editable."),
         ],
     },
     Branch {
         key: "Undo and Redo",
         children: &[
             Leaf("Ctrl+Z walks back through your actions. Ctrl+Shift+Z walks forward."),
-            Leaf("Each tab keeps its own history — undoing in one tab leaves the others alone."),
-            Leaf("Press z to open the history view: a navigable list of everything recorded in this tab, newest at the top. The row marked '> ' is what the next Ctrl+Z will undo; rows marked with a dot have already been undone and are what Ctrl+Shift+Z will redo. Press Escape to leave the view."),
+            Leaf("Each tab keeps its own history, undoing in one tab leaves the others alone."),
+            Leaf("Press z to open the history view: a navigable list of everything recorded in this tab, newest at the top. The row marked '> ' is what the next Ctrl+Z will undo. Rows marked with a dot have already been undone and are what Ctrl+Shift+Z will redo. Press Escape to leave the view."),
             Branch {
                 key: "What gets recorded",
                 children: &[
-                    Leaf("Level-changing navigation: stepping into an item with the Right key, or back out with Left. Each step is recorded, so Ctrl+Z walks the cursor back along the route you took. Moving the selection up or down within a list is not recorded — only steps that change which list you are looking at."),
+                    Leaf("Level-changing navigation: stepping into an item with the Right key, or back out with Left. Each step is recorded, so Ctrl+Z walks the cursor back along the route you took. Moving the selection up or down within a list is not recorded, only steps that change which list you are looking at."),
                     Leaf("Typed text. Successive characters within about half a second merge into one chunk, so each undo removes a word-sized piece rather than one letter at a time."),
                     Leaf("Structural edits: creating, inserting, deleting, cutting, and pasting elements in the FFON tree."),
                     Leaf("Text editor edits: creating, changing, and deleting individual lines inside an open file."),
@@ -172,17 +172,17 @@ static SECTIONS: &[Node] = &[
             Branch {
                 key: "What cannot be undone",
                 children: &[
-                    Leaf("Terminal commands that have already been executed — only the unsubmitted input line is undoable."),
-                    Leaf("Directory deletions larger than 4 MiB if the OS trash has been emptied — undo reports an error rather than corrupting state."),
+                    Leaf("Terminal commands that have already been executed, only the unsubmitted input line is undoable."),
+                    Leaf("Directory deletions larger than 4 MiB if the OS trash has been emptied, undo reports an error rather than corrupting state."),
                     Leaf("IMAP operations where the server-side message has moved or been deleted by another client."),
-                    Leaf("Matrix posted messages can only be redacted on undo — recipients see 'message deleted' rather than the message vanishing."),
+                    Leaf("Matrix posted messages can only be redacted on undo, recipients see 'message deleted' rather than the message vanishing."),
                 ],
             },
             Branch {
                 key: "Walking the path back",
                 children: &[
                     Leaf("Undo retraces the route you took, not just your final edit. Because stepping in (Right) and out (Left) are recorded, Ctrl+Z walks the cursor back through the same items you visited."),
-                    Leaf("Creating a file or directory is a single undo step: the keystrokes you typed for its name collapse into that one step, so one Ctrl+Z removes the whole new item — name and all."),
+                    Leaf("Creating a file or directory is a single undo step: the keystrokes you typed for its name collapse into that one step, so one Ctrl+Z removes the whole new item, name and all."),
                     Leaf("Editing the text of an existing line is chunked instead: one Ctrl+Z removes roughly the last word-sized burst of typing rather than a single character."),
                     Leaf("Ctrl+Shift+Z replays the same path forward, step for step."),
                 ],
@@ -209,7 +209,7 @@ static SECTIONS: &[Node] = &[
             Leaf("Programs appear as top-level items when you navigate to the root (press Left until you can't go further)."),
             Leaf("You can configure which programs are loaded in Settings under 'Available programs'. Enable or disable them at any time, changes take effect instantly."),
             Branch { key: "File Browser", children: &[
-                Leaf("The file browser turns your filesystem into a navigable tree. Directories become sections you can enter with the Right key; files are leaf items."),
+                Leaf("The file browser turns your filesystem into a navigable tree. Directories become sections you can enter with the Right key. Files are leaf items."),
                 Leaf("Browse your filesystem by navigating up, down, and into directories. The current path is shown at the top of the screen."),
                 Leaf("Rename files and directories by pressing i (insert mode) on any item. The name becomes editable inline. Type the new name and press Enter to confirm."),
                 Leaf("Create new items inline: press Ctrl+I or Ctrl+A to enter insert mode on an empty placeholder. Type a plain name to create a file, or append : to the name to create a directory (the colon is stripped from the directory name). For example, type 'notes' to create a file, or 'projects:' to create a directory named 'projects'."),
@@ -237,7 +237,7 @@ static SECTIONS: &[Node] = &[
             Branch { key: "Web Browser", children: &[
                 Leaf("The web browser lets you browse the internet directly inside Sicompass, turning web pages into keyboard-navigable trees."),
                 Leaf("At the top level, you'll find an address bar. Press i to edit it, type a URL, and press Enter to load the page."),
-                Leaf("HTML is automatically converted into a navigable FFON tree based on the page's heading hierarchy (h1-h6). Headings become nested sections; paragraphs, lists, tables, and links are preserved as tree items."),
+                Leaf("HTML is automatically converted into a navigable FFON tree based on the page's heading hierarchy (h1-h6). Headings become nested sections. Paragraphs, lists, tables, and links are preserved as tree items."),
                 Leaf("Navigate web content the same way you navigate files or settings. Right to go deeper into a section, Left to go back."),
                 Leaf("Links on web pages can be followed by selecting them and pressing Enter, which loads the linked page."),
                 Leaf("Forms on web pages are fully interactive: text inputs become editable inline (i/a to edit, Enter to commit), checkboxes and radio groups toggle with Enter, and submit buttons activate with Enter. The browser drives the live page through the Chrome DevTools Protocol, so submissions go through the real site."),
@@ -246,11 +246,11 @@ static SECTIONS: &[Node] = &[
             ]},
             Branch { key: "Terminal", children: &[
                 Leaf("The terminal is a real interactive shell rendered as an FFON tree. Output from the shell appears as lines in the tree, and an editable <input> slot is pinned to the bottom for typing commands."),
-                Leaf("It's backed by a PTY and a vte-based emulator. On Unix the shell is taken from $SHELL (bash, zsh, fish, …) and invoked with -i so your shell rc files are loaded and your aliases work; on Windows it's taken from %ComSpec% (cmd.exe by default, PowerShell also recognised) and invoked with -NoLogo where applicable."),
-                Leaf("Each prompt is synthesized in-process so the location is always announced clearly to your screen reader: {user}@{host}:{cwd}$ on Unix, {cwd}> on Windows. On Linux the prompt updates after `cd`; on macOS and Windows it reflects the initial cwd, since live tracking would need OS-specific process introspection."),
+                Leaf("It's backed by a PTY and a vte-based emulator. On Unix the shell is taken from $SHELL (bash, zsh, fish, …) and invoked with -i so your shell rc files are loaded and your aliases work. On Windows it's taken from %ComSpec% (cmd.exe by default, PowerShell also recognised) and invoked with -NoLogo where applicable."),
+                Leaf("Each prompt is synthesized in-process so the location is always announced clearly to your screen reader: {user}@{host}:{cwd}$ on Unix, {cwd}> on Windows. On Linux the prompt updates after `cd`. On macOS and Windows it reflects the initial cwd, since live tracking would need OS-specific process introspection."),
                 Leaf("Type a command, press Enter to run it, and the output is appended above the input slot. Use the standard navigation keys to scroll back through earlier output."),
-                Leaf("The input slot remembers every command you have run. Press Right on it to open the recall history — a list of past commands, newest first. Press Enter on one to drop it into the input, ready to edit or re-run. Pressing Enter on the input slot itself runs whatever it currently holds, just like Enter in operator mode anywhere else."),
-                Leaf("When a child program switches the terminal to the alt-screen — vim, htop, less, man, and most full-screen TUIs do this — Sicompass auto-enters its interactive dashboard mode and forwards every key (including arrows, function keys, and chords) straight to the TUI. Pressing Escape from the TUI's perspective leaves the alt-screen and Sicompass drops back to the linear scrollback view."),
+                Leaf("The input slot remembers every command you have run. Press Right on it to open the recall history, a list of past commands, newest first. Press Enter on one to drop it into the input, ready to edit or re-run. Pressing Enter on the input slot itself runs whatever it currently holds, just like Enter in operator mode anywhere else."),
+                Leaf("When a child program switches the terminal to the alt-screen (vim, htop, less, man, and most full-screen TUIs do this), Sicompass auto-enters its interactive dashboard mode and forwards every key (including arrows, function keys, and chords) straight to the TUI. Pressing Escape from the TUI's perspective leaves the alt-screen and Sicompass drops back to the linear scrollback view."),
             ]},
             Branch { key: "Plugin Store", children: &[
                 Leaf("The Plugin Store lets you manage which providers are active. It appears in Settings under 'Available programs'."),
@@ -279,11 +279,11 @@ static SECTIONS: &[Node] = &[
             Branch { key: "Email Client", children: &[
                 Leaf("An IMAP/SMTP email client. Supports Google OAuth2 for seamless Gmail integration as well as plain username/password for any IMAP server."),
                 Leaf("Folders (inbox, sent, drafts, etc.) appear as a navigable tree. Inside each folder, messages are listed paginated with [read], [unread], and [star] tag prefixes. Threaded history is reconstructed via IMAP THREAD."),
-                Leaf("Press Right on a message to open it. The body is rendered as readable text — or as a navigable FFON tree if the sender included a structured FFON body part."),
+                Leaf("Press Right on a message to open it. The body is rendered as readable text, or as a navigable FFON tree if the sender included a structured FFON body part."),
                 Leaf("Compose a new message via the command menu. Reply, reply-all, and forward are available on any open message. The compose form has To, Cc, Bcc, subject, attachments, and a body that supports both plain text and nested FFON elements."),
                 Leaf("Drafts are saved automatically. Outgoing mail is queued in an outbox and retried on transient SMTP errors."),
-                Leaf("Mark messages as read, flag/star, move between folders, or delete with the Delete key (or Ctrl+D). Every operation is undoable — including compose-body insertions and deletions."),
-                Leaf("Search across messages in a folder with Tab; extended search (Ctrl+F) searches deeply across the cached envelope database."),
+                Leaf("Mark messages as read, flag/star, move between folders, or delete with the Delete key (or Ctrl+D). Every operation is undoable, including compose-body insertions and deletions."),
+                Leaf("Search across messages in a folder with Tab. Extended search (Ctrl+F) searches deeply across the cached envelope database."),
                 Leaf("Configure server URLs, credentials, or OAuth in Settings."),
             ]},
             Branch { key: "Settings", children: &[
@@ -297,7 +297,7 @@ static SECTIONS: &[Node] = &[
             ]},
         ],
     },
-    // "Interactive Elements" section — leaf nodes with tag examples.
+    // "Interactive Elements" section - leaf nodes with tag examples.
     // Asset paths (<image> and <link>) are filled in at runtime by TutorialProvider.
     Branch {
         key: "Interactive Elements",
@@ -326,15 +326,15 @@ static SECTIONS: &[Node] = &[
             ]},
             Leaf("Radio groups let you pick exactly one option from a set. Navigate into the radio group above and press Enter on an option to select it. Only one option can be selected at a time."),
             Leaf("Images can be displayed inline within the tree. The image below is loaded from a file path:"),
-            // TEXTURE_JPG placeholder — replaced by TutorialProvider::make_interactive_elements
+            // TEXTURE_JPG placeholder, replaced by TutorialProvider::make_interactive_elements
             Leaf("__TEXTURE_JPG__"),
             Leaf("__IMAGE_WITH_PREFIX_SUFFIX__"),
             Leaf("__IMAGE_SUFFIX_ONLY__"),
             Leaf("__IMAGE_PREFIX_ONLY__"),
             Leaf("Links lazy-load external JSON or FFON files as children. Navigate into the link below to load its content:"),
-            // SF_JSON placeholder — replaced at runtime
+            // SF_JSON placeholder, replaced at runtime
             Branch { key: "__LINK_WITH_PREFIX_SUFFIX__", children: &[] },
-            Leaf("Scroll mode flattens this list and every sublist into one continuous, scrollable reading view, with images laid out inline like below. Press S from operator mode to try it, then use Up/Down to scroll. Each element gets a 'layer: X list: Y/Z' header; press Tab to search those headers or Ctrl+F to search element content, and Enter to jump to a result back in operator mode:"),
+            Leaf("Scroll mode flattens this list and every sublist into one continuous, scrollable reading view, with images laid out inline like below. Press S from operator mode to try it, then use Up/Down to scroll. Each element gets a 'layer: X list: Y/Z' header. Press Tab to search those headers or Ctrl+F to search element content, and Enter to jump to a result back in operator mode:"),
             Leaf("__LOREM_IPSUM__"),
         ],
     },
@@ -390,7 +390,7 @@ static SECTIONS: &[Node] = &[
                 Leaf("5. Compile as a shared library: cc -shared -fPIC -o plugin.so plugin.c"),
                 Leaf("6. Enable your plugin in Settings under 'Available programs'."),
                 Leaf("C plugins can implement any subset of the ProviderOps functions. Only fetch is required. The more functions you implement, the richer the experience."),
-                Leaf("The C ABI is not currently shipped as a header file. The struct layout, function-pointer signatures, and required symbol name are documented inline in sdk/src/plugin_loader.rs (the ProviderOpsC struct, with each field's exact C signature in the comments) — translate that into your own provider_interface.h to compile against."),
+                Leaf("The C ABI is not currently shipped as a header file. The struct layout, function-pointer signatures, and required symbol name are documented inline in sdk/src/plugin_loader.rs (the ProviderOpsC struct, with each field's exact C signature in the comments), translate that into your own provider_interface.h to compile against."),
             ]},
             Branch { key: "Provider Types", children: &[
                 Leaf("There are three ways to create a provider, each suited to different use cases:"),
@@ -476,7 +476,7 @@ static SECTIONS: &[Node] = &[
 ];
 
 // ---------------------------------------------------------------------------
-// Navigation helper — mirrors getChildrenAtPath in tutorial.ts
+// Navigation helper - mirrors getChildrenAtPath in tutorial.ts
 // ---------------------------------------------------------------------------
 
 /// Returns the children slice for `path_parts` within `nodes`, or `None` if not found.
@@ -492,8 +492,8 @@ fn get_children_at_path<'a>(
         if let Node::Branch { key, children } = node {
             // Path segments are the *stripped* display text of an Obj key (see
             // `navigate_right_raw`, which pushes `tags::strip_display(&o.key)`).
-            // A Branch key may carry tags — e.g. "+i input example <input></input>"
-            // — so compare against the stripped key, not the raw one. Otherwise
+            // A Branch key may carry tags (e.g. "+i input example <input></input>"),
+            // so compare against the stripped key, not the raw one. Otherwise
             // such a path fails to resolve on tab-switch / restart and the
             // restored cursor collapses out of the Obj.
             if sicompass_sdk::tags::strip_display(key) == **head {
@@ -630,7 +630,7 @@ impl Provider for TutorialProvider {
 }
 
 // ---------------------------------------------------------------------------
-// Tests — port of tests/lib_tutorial/tutorial.test.ts (12 tests)
+// Tests - port of tests/lib_tutorial/tutorial.test.ts (12 tests)
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -823,7 +823,7 @@ mod tests {
             .collect();
         assert!(
             keys.iter().any(|k| *k == "Undo and Redo"),
-            "Undo and Redo section must appear at the root; got: {:?}",
+            "Undo and Redo section must appear at the root, got: {:?}",
             keys
         );
     }

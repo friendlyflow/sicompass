@@ -10,37 +10,37 @@ It does not try to look pretty, and it works very differently from web pages and
 
 ## Key Features
 
-- **Flat Interface** — No popups, dialogs, or overlays — everything is navigated inline within the tree
-- **Keyboard-First Design** — Faster and handier navigation because your hands never leave the keyboard
-- **Native Accessibility** — Built-in support for screen readers on Linux, macOS, and Windows
-- **Cross-Platform** — Shipped and tested on Ubuntu today; paths, shells, and PTY plumbing route through platform helpers (XDG / `~/Library` / `%APPDATA%`, `bash`/`zsh`/`fish`/`pwsh`/`cmd.exe`, `forkpty`/ConPTY), with packaged macOS and Windows releases planned
-- **High-Performance Rendering** — Vulkan-powered graphics with FreeType2/HarfBuzz text shaping
-- **Extensible Architecture** — Provider-based plugin system with a built-in plugin store for hot enable/disable
-- **Lower Development Cost** — Because the user-interface elements are decided beforehand, design never has to be programmed. Development is navigation-first instead of design-first, which cuts complexity and speeds up delivery
+- **Flat Interface**: No popups, dialogs, or overlays, everything is navigated inline within the tree
+- **Keyboard-First Design**: Faster and handier navigation because your hands never leave the keyboard
+- **Native Accessibility**: Built-in support for screen readers on Linux, macOS, and Windows
+- **Cross-Platform**: Shipped and tested on Ubuntu today. Paths, shells, and PTY plumbing route through platform helpers (XDG / `~/Library` / `%APPDATA%`, `bash`/`zsh`/`fish`/`pwsh`/`cmd.exe`, `forkpty`/ConPTY), with packaged macOS and Windows releases planned
+- **High-Performance Rendering**: Vulkan-powered graphics with FreeType2/HarfBuzz text shaping
+- **Extensible Architecture**: Provider-based plugin system with a built-in plugin store for hot enable/disable
+- **Lower Development Cost**: Because the user-interface elements are decided beforehand, design never has to be programmed. Development is navigation-first instead of design-first, which cuts complexity and speeds up delivery
 
 ## Built-in Providers
 
 Sicompass comes with several providers out of the box, each turning a different data source into the same keyboard-navigable tree:
 
-- **File Browser** — Navigate your filesystem as a navigable tree with inline rename, copy, paste, and delete (delete-undo restores from a content snapshot when the OS trash is empty)
-- **Text Editor** — Browse the filesystem and open files as language-aware FFON trees, with inline line editing and create/delete/rename — every change, lines included, recorded on the unified undo timeline
-- **Email** — IMAP/SMTP client with Google OAuth, Cc/Bcc, attachments, drafts, flag/move/delete (typed `ImapOp` undo by Message-ID so the operation survives folder moves), threaded history, and FFON-bodied messages
-- **Chat** — Matrix client with public and private rooms, invites, member management (leave/kick/ban are undoable), encrypted messages, unread badges, and a background sync thread
-- **Web Browser** — Browse the web with HTML-to-FFON conversion; fill and submit forms via the Chrome DevTools Protocol; cookie-consent banners are auto-accepted
-- **Terminal** — Interactive shell backed by a vte PTY with a synthesized prompt and an input slot that doubles as a browsable command-history list (arrow into it to recall and re-run past commands); auto-switches to a fullscreen interactive dashboard the moment a child program enters the alt-screen (vim, htop, less, …) and routes every key straight to the TUI; cross-platform shell selection — `$SHELL` on Unix, `%ComSpec%` on Windows — with platform-appropriate prompts
-- **Sales Demo** — Interactive HVAC equipment configurator showcasing hierarchical data navigation with inline editing and diagram view
-- **Plugin Store** — Enable and disable providers on the fly with checkbox toggles, no restart needed
-- **Settings** — Configure color scheme, display scaling, shoulder-surfing protection, loaded programs, and provider-specific options in a unified settings tree
+- **File Browser**: Navigate your filesystem as a navigable tree with inline rename, copy, paste, and delete (delete-undo restores from a content snapshot when the OS trash is empty)
+- **Text Editor**: Browse the filesystem and open files as language-aware FFON trees, with inline line editing and create/delete/rename, every change, lines included, recorded on the unified undo timeline
+- **Email**: IMAP/SMTP client with Google OAuth, Cc/Bcc, attachments, drafts, flag/move/delete (typed `ImapOp` undo by Message-ID so the operation survives folder moves), threaded history, and FFON-bodied messages
+- **Chat**: Matrix client with public and private rooms, invites, member management (leave/kick/ban are undoable), encrypted messages, unread badges, and a background sync thread
+- **Web Browser**: Browse the web with HTML-to-FFON conversion. Fill and submit forms via the Chrome DevTools Protocol. Cookie-consent banners are auto-accepted
+- **Terminal**: Interactive shell backed by a vte PTY with a synthesized prompt and an input slot that doubles as a browsable command-history list (arrow into it to recall and re-run past commands). Auto-switches to a fullscreen interactive dashboard the moment a child program enters the alt-screen (vim, htop, less, …) and routes every key straight to the TUI. Cross-platform shell selection (`$SHELL` on Unix, `%ComSpec%` on Windows) with platform-appropriate prompts
+- **Sales Demo**: Interactive HVAC equipment configurator showcasing hierarchical data navigation with inline editing and diagram view
+- **Plugin Store**: Enable and disable providers on the fly with checkbox toggles, no restart needed
+- **Settings**: Configure color scheme, display scaling, shoulder-surfing protection, loaded programs, and provider-specific options in a unified settings tree
 
 ## The Vision
 
 Sicompass is the foundation for a unified, accessible platform. Future development includes:
 
-- **Notes** — Structured note-taking with server-side sync
-- **IDE** — Code as a navigable structure, with Rust code generation
-- **Mobile Support** — Android and iOS versions
-- **Login Manager and Desktop Environment** — A fully keyboard-driven Linux session
-- **Screen Reader and Braille Display** — D-Bus in- and output on Linux that drives the users of these technologies
+- **Notes**: Structured note-taking with server-side sync
+- **IDE**: Code as a navigable structure, with Rust code generation
+- **Mobile Support**: Android and iOS versions
+- **Login Manager and Desktop Environment**: A fully keyboard-driven Linux session
+- **Screen Reader and Braille Display**: D-Bus in- and output on Linux that drives the users of these technologies
 
 The goal is to provide a comprehensive environment where functionality and accessibility come first (not design), an alternative approach that makes computing more accessible to everyone.
 

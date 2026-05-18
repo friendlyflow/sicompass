@@ -24,6 +24,12 @@ cargo test
 
 Follow standard Rust idioms. Use `#[allow(...)]` sparingly and only when justified.
 
+### Documentation prose (`README.md` and `lib/lib_tutorial`)
+
+In `README.md` and the tutorial content (`lib/lib_tutorial/src/lib.rs`), do not
+use em dashes or semicolons. Use commas instead, or split into separate
+sentences (parentheses are fine for true parentheticals).
+
 ## Testing
 
 - After implementing changes, always run relevant tests before finishing.
