@@ -12,6 +12,7 @@ members = [
     "lib/lib_sales_demo",
     "lib/lib_shell",
     "lib/lib_terminal",
+    "lib/lib_claude",
     "lib/lib_builtins",
     "src/sicompass",
 ]
@@ -36,6 +37,7 @@ sicompass-remote = { path = "lib/lib_remote" }
 sicompass-sales-demo = { path = "lib/lib_sales_demo" }
 sicompass-shell = { path = "lib/lib_shell" }
 sicompass-terminal = { path = "lib/lib_terminal" }
+sicompass-claude = { path = "lib/lib_claude" }
 sicompass-builtins = { path = "lib/lib_builtins" }
 
 # Serialization

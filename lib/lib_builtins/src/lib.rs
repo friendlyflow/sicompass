@@ -33,6 +33,7 @@ pub fn register_all() {
         sicompass_remote::register();
         sicompass_settings::register();
         sicompass_terminal::register();
+        sicompass_claude::register();
     });
 }
 
@@ -126,6 +127,35 @@ mod tests {
             "terminal manifest must include shellProgram setting; got {keys:?}");
         assert!(keys.contains(&"autoEnterDashboard"),
             "terminal manifest must include autoEnterDashboard setting; got {keys:?}");
+    }
+
+    #[test]
+    fn claude_factory_is_registered() {
+        register_all();
+        let p = sicompass_sdk::create_provider_by_name("claude");
+        assert!(p.is_some(), "claude factory should be registered");
+        assert_eq!(p.unwrap().name(), "claude");
+    }
+
+    #[test]
+    fn builtin_manifests_include_claude_opt_in_with_settings() {
+        register_all();
+        let manifests = sicompass_sdk::builtin_manifests();
+        let claude = manifests
+            .iter()
+            .find(|m| m.name == "claude")
+            .expect("claude manifest should be registered");
+        assert!(!claude.always_enabled, "claude should not be always_enabled");
+        assert!(!claude.enable_default, "claude should be opt-in (default off)");
+        let keys: Vec<&str> = claude.settings.iter().map(|s| s.key.as_str()).collect();
+        assert!(
+            keys.contains(&"claudeBinary"),
+            "claude manifest must include claudeBinary; got {keys:?}"
+        );
+        assert!(
+            keys.contains(&"claudePermissionMode"),
+            "claude manifest must include claudePermissionMode; got {keys:?}"
+        );
     }
 
     #[test]
