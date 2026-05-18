@@ -21,6 +21,7 @@ fn is_insert_mode(c: Coordinate) -> bool {
             | Coordinate::ExtendedSearch
             | Coordinate::Command
             | Coordinate::ScrollSearch
+            | Coordinate::ScrollPrefixSearch
             | Coordinate::InputSearch
             // Dashboard's interactive variant takes typed characters too;
             // without this SDL would not fire TextInput events while it owns
@@ -1609,18 +1610,8 @@ fn render_scroll_full(
         text_scroll_offset.clamp(0, max_offset)
     };
 
-    // Selection highlight rectangle around the selected item.
-    if let Some(l) = layouts.get(list_index) {
-        let item_top_screen = clip_y + (l.top - scroll_offset) as f32;
-        let rect_top = item_top_screen.max(clip_y);
-        let rect_bottom = (item_top_screen + l.height as f32).min(win_h);
-        if rect_bottom > rect_top {
-            if let Some(rr) = rr.as_deref_mut() {
-                rr.prepare_rectangle(text_x - 4.0, rect_top, max_prefix_px + max_w + 8.0,
-                    rect_bottom - rect_top, p.selected, 5.0);
-            }
-        }
-    }
+    // Plain scroll mode is a continuous reading view — no focused-element
+    // highlight (search sub-modes highlight matches instead).
 
     // Render visible items.
     for (i, (label, img_data, _, _, ext_prefix)) in list_items.iter().enumerate() {
