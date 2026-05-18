@@ -473,6 +473,15 @@ fn update_view(app: &mut AppState) {
             Coordinate::ScrollPrefixSearch => Some(ScrollSearchCorpus::Prefix),
             _ => None,
         };
+        // Content viewport = window minus tabs band + header (+ search bar in
+        // search modes). Cached so scroll handlers clamp to the exact area the
+        // renderer uses — otherwise the last line/image bottom is unreachable.
+        let scroll_clip_y = if search_corpus.is_some() {
+            line_height as f32 * 2.0 + top_offset
+        } else {
+            line_height as f32 + top_offset
+        };
+        app.renderer.text_scroll_viewport_h = (win_h - scroll_clip_y).max(0.0) as i32;
         let error_msg = app.renderer.error_message.clone();
 
         // Begin render passes
@@ -1474,13 +1483,15 @@ fn measure_scroll_items(
     (layouts, y_accum)
 }
 
-/// Render one scroll-mode item: the list prefix (`-`, `+`, …) in the left
-/// column, the extended prefix (`layer: X list: Y/Z`) on the same first line,
-/// then the element content (wrapped text or image) below — all aligned at
-/// `content_x` like general mode. Lines outside `[clip_y, win_h)` are clipped.
+/// Render one scroll-mode item: the list prefix in the left column (a graphical
+/// radio/checkbox indicator plus its `-c`/`-r` tag, or a plain `-`/`+` tag), the
+/// extended prefix (`layer: X list: Y/Z`) on the same first line, then the
+/// element content (wrapped text or image) below — all aligned at `content_x`
+/// like general mode. Lines/images outside `[clip_y, win_h)` are clipped.
 #[allow(clippy::too_many_arguments)]
 fn render_scroll_item(
     fr: &mut crate::text::FontRenderer,
+    mut rr: Option<&mut crate::rectangle::RectangleRenderer>,
     ir: Option<&mut crate::image::ImageRenderer>,
     label: &str,
     img_data: &Option<String>,
@@ -1490,6 +1501,8 @@ fn render_scroll_item(
     scale: f32,
     ascender: f32,
     line_height: i32,
+    em_width: f32,
+    list_has_indicators: bool,
     prefix_x: f32,
     content_x: f32,
     content_w: f32,
@@ -1499,6 +1512,15 @@ fn render_scroll_item(
 ) {
     let lh = line_height as f32;
     let (list_prefix, content) = scroll_item_parts(label);
+    let radio = get_radio_type(label);
+    let checkbox = get_checkbox_type(label);
+    // When any item in the list carries an indicator, every item reserves the
+    // same indicator-width gutter so the text prefixes stay aligned.
+    let text_prefix_x = if list_has_indicators {
+        prefix_x + indicator_width(lh, em_width)
+    } else {
+        prefix_x
+    };
 
     // First row: list prefix in the left column, extended prefix at content_x.
     let prefix_text = ext_prefix.as_deref().unwrap_or("");
@@ -1507,8 +1529,18 @@ fn render_scroll_item(
         if line_top + lh <= clip_y { continue; }
         if line_top >= win_h { break; }
         let baseline = line_top + ascender * scale + crate::text::TEXT_PADDING;
-        if n == 0 && !list_prefix.is_empty() {
-            fr.prepare_text_for_rendering(&list_prefix, prefix_x, baseline, scale, p.text);
+        if n == 0 {
+            // Graphical radio/checkbox indicator (matches general mode).
+            if let Some(rr) = rr.as_deref_mut() {
+                if radio != RadioType::None {
+                    render_radio_indicator(rr, &radio, prefix_x, baseline, scale, ascender, lh, em_width, p);
+                } else if checkbox != CheckboxType::None {
+                    render_checkbox_indicator(rr, &checkbox, prefix_x, baseline, scale, ascender, lh, em_width, p);
+                }
+            }
+            if !list_prefix.is_empty() {
+                fr.prepare_text_for_rendering(&list_prefix, text_prefix_x, baseline, scale, p.text);
+            }
         }
         fr.prepare_text_for_rendering(line, content_x, baseline, scale, p.text);
     }
@@ -1518,9 +1550,11 @@ fn render_scroll_item(
         if content_top + img_h > clip_y && content_top < win_h {
             if let Some(ir) = ir {
                 let border = 2.0_f32;
+                // Clip vertically so a scrolled image never bleeds over the
+                // header / tabs band (or below the window).
                 unsafe {
-                    ir.prepare_image(path, content_x + border, content_top + border,
-                                     img_w - 2.0 * border, img_h - 2.0 * border);
+                    ir.prepare_image_clipped(path, content_x + border, content_top + border,
+                                     img_w - 2.0 * border, img_h - 2.0 * border, clip_y, win_h);
                 }
             }
         }
@@ -1557,12 +1591,12 @@ fn render_scroll_full(
     top_offset: f32,
     p: &crate::app_state::ColorPalette,
 ) -> (i32, i32) {
-    let _ = em_width;
     let clip_y = line_height as f32 + top_offset;
     let viewport_h = win_h - clip_y;
     let max_w = max_content_w.max(1.0);
     // List prefix sits in a left column; content + extended prefix align here.
     let content_x = text_x + max_prefix_px;
+    let list_has_indicators = scroll_list_has_indicators(list_items);
 
     let (layouts, total_height) =
         measure_scroll_items(fr, ir.as_deref_mut(), list_items, scale, line_height, max_w);
@@ -1594,11 +1628,22 @@ fn render_scroll_full(
         let item_top_screen = clip_y + (l.top - scroll_offset) as f32;
         if item_top_screen + l.height as f32 <= clip_y { continue; } // above viewport
         if item_top_screen >= win_h { break; }                        // below viewport
-        render_scroll_item(fr, ir.as_deref_mut(), label, img_data, ext_prefix, l,
-            item_top_screen, scale, ascender, line_height, text_x, content_x, max_w, clip_y, win_h, p);
+        render_scroll_item(fr, rr.as_deref_mut(), ir.as_deref_mut(), label, img_data, ext_prefix, l,
+            item_top_screen, scale, ascender, line_height, em_width, list_has_indicators,
+            text_x, content_x, max_w, clip_y, win_h, p);
     }
 
     (total_height, scroll_offset)
+}
+
+/// True when any item in the scroll list is a radio or checkbox — then every
+/// item reserves an indicator-width gutter so prefixes stay column-aligned.
+fn scroll_list_has_indicators(
+    list_items: &[(String, Option<String>, bool, Vec<u32>, Option<String>)],
+) -> bool {
+    list_items.iter().any(|(label, _, _, _, _)| {
+        get_radio_type(label) != RadioType::None || get_checkbox_type(label) != CheckboxType::None
+    })
 }
 
 struct ScrollSearchResult {
@@ -1660,7 +1705,6 @@ fn render_scroll_search_full(
     top_offset: f32,
     p: &crate::app_state::ColorPalette,
 ) -> ScrollSearchResult {
-    let _ = em_width;
     // Tabs band + header + search bar occupy three line_heights from the top.
     let clip_y = line_height as f32 * 2.0 + top_offset;
     let viewport_h = win_h - clip_y;
@@ -1668,6 +1712,7 @@ fn render_scroll_search_full(
     let lh = line_height as f32;
     // List prefix sits in a left column; content + extended prefix align here.
     let content_x = text_x + max_prefix_px;
+    let list_has_indicators = scroll_list_has_indicators(list_items);
 
     let (layouts, total_height) =
         measure_scroll_items(fr, ir.as_deref_mut(), list_items, scale, line_height, max_w);
@@ -1788,8 +1833,9 @@ fn render_scroll_search_full(
             }
         }
 
-        render_scroll_item(fr, ir.as_deref_mut(), label, img_data, ext_prefix, l,
-            item_top_screen, scale, ascender, line_height, text_x, content_x, max_w, clip_y, win_h, p);
+        render_scroll_item(fr, rr.as_deref_mut(), ir.as_deref_mut(), label, img_data, ext_prefix, l,
+            item_top_screen, scale, ascender, line_height, em_width, list_has_indicators,
+            text_x, content_x, max_w, clip_y, win_h, p);
     }
 
     ScrollSearchResult { total_height, match_count, current_match, current_item, scroll_offset }

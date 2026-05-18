@@ -375,6 +375,10 @@ pub struct AppRenderer {
     pub scroll_offset: i32,
     pub text_scroll_offset: i32,
     pub text_scroll_total_height: i32,
+    /// Pixel height of the scroll-mode content viewport (window minus the tabs
+    /// band, header, and — in search sub-modes — the search bar). Cached by the
+    /// renderer each frame so scroll handlers clamp to the exact visible area.
+    pub text_scroll_viewport_h: i32,
     pub input_search_scroll_offset: i32,
 
     // ---- Scroll search state -----------------------------------------------
@@ -567,6 +571,7 @@ impl AppRenderer {
             scroll_offset: 0,
             text_scroll_offset: 0,
             text_scroll_total_height: 0,
+            text_scroll_viewport_h: 0,
             input_search_scroll_offset: 0,
             scroll_search_match_count: 0,
             scroll_search_current_match: 0,

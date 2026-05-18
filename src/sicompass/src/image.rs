@@ -310,6 +310,44 @@ impl ImageRenderer {
         self.draws.push(ImageDraw { slot, vertex_offset });
     }}
 
+    /// Like `prepare_image`, but clips the quad vertically to the screen range
+    /// `[clip_top, clip_bottom]`, cropping the texture (adjusting UVs) rather
+    /// than stretching it. Used by scroll mode so a scrolled image does not
+    /// bleed over the header / tabs band.
+    pub unsafe fn prepare_image_clipped(
+        &mut self,
+        path: &str,
+        x: f32, y: f32, width: f32, height: f32,
+        clip_top: f32, clip_bottom: f32,
+    ) { unsafe {
+        if self.draws.len() >= MAX_CACHED_IMAGES { return; }
+        if height <= 0.0 { return; }
+
+        let vis_top = y.max(clip_top);
+        let vis_bottom = (y + height).min(clip_bottom);
+        if vis_bottom <= vis_top { return; } // fully clipped away
+
+        let slot = match self.find_or_load(path) {
+            Some(s) => s,
+            None => return,
+        };
+
+        let vertex_offset = self.vertices.len() as u32;
+
+        // Crop UVs to the visible vertical band.
+        let v0 = ((vis_top - y) / height).clamp(0.0, 1.0);
+        let v1 = ((vis_bottom - y) / height).clamp(0.0, 1.0);
+        let (x0, y0, x1, y1) = (x, vis_top, x + width, vis_bottom);
+        self.vertices.push(ImageVertex { pos: [x0, y0], tex_coord: [0.0, v0] });
+        self.vertices.push(ImageVertex { pos: [x1, y0], tex_coord: [1.0, v0] });
+        self.vertices.push(ImageVertex { pos: [x1, y1], tex_coord: [1.0, v1] });
+        self.vertices.push(ImageVertex { pos: [x0, y0], tex_coord: [0.0, v0] });
+        self.vertices.push(ImageVertex { pos: [x1, y1], tex_coord: [1.0, v1] });
+        self.vertices.push(ImageVertex { pos: [x0, y1], tex_coord: [0.0, v1] });
+
+        self.draws.push(ImageDraw { slot, vertex_offset });
+    }}
+
     /// Upload vertices and issue one draw call per queued image.
     pub unsafe fn draw_images(
         &self,

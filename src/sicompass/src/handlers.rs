@@ -71,8 +71,7 @@ pub fn handle_down(r: &mut AppRenderer) {
         }
         Coordinate::Scroll => {
             let step = r.cached_line_height.max(1);
-            let viewport_h = r.window_height - step; // area below header
-            let max_offset = (r.text_scroll_total_height - viewport_h).max(0);
+            let max_offset = (r.text_scroll_total_height - r.text_scroll_viewport_h).max(0);
             r.text_scroll_offset = (r.text_scroll_offset + step).min(max_offset);
             r.needs_redraw = true;
         }
@@ -580,7 +579,7 @@ pub fn handle_page_up(r: &mut AppRenderer) {
             r.input_search_scroll_offset = (r.input_search_scroll_offset - page_size as i32).max(0);
         }
         Coordinate::Scroll | Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch => {
-            let viewport_h = r.window_height - line_height;
+            let viewport_h = r.text_scroll_viewport_h;
             r.text_scroll_offset = (r.text_scroll_offset - viewport_h).max(0);
         }
         Coordinate::SimpleSearch | Coordinate::Command | Coordinate::ExtendedSearch => {
@@ -629,7 +628,7 @@ pub fn handle_page_down(r: &mut AppRenderer) {
             // No upper clamp here — renderer will clamp when it knows the line count
         }
         Coordinate::Scroll | Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch => {
-            let viewport_h = r.window_height - line_height;
+            let viewport_h = r.text_scroll_viewport_h;
             let max_offset = (r.text_scroll_total_height - viewport_h).max(0);
             r.text_scroll_offset = (r.text_scroll_offset + viewport_h).min(max_offset);
         }
@@ -3598,9 +3597,7 @@ pub fn handle_home(r: &mut AppRenderer) {
 pub fn handle_end(r: &mut AppRenderer) {
     match r.coordinate {
         Coordinate::Scroll => {
-            let line_height = r.cached_line_height.max(1);
-            let viewport_h = r.window_height - line_height;
-            let max_offset = (r.text_scroll_total_height - viewport_h).max(0);
+            let max_offset = (r.text_scroll_total_height - r.text_scroll_viewport_h).max(0);
             r.text_scroll_offset = max_offset;
             r.needs_redraw = true;
         }
@@ -7116,6 +7113,8 @@ mod tests {
         let mut r = make_renderer();
         r.window_height = 40;
         r.cached_line_height = 10;
+        // Scroll content viewport = window minus the tabs band + header.
+        r.text_scroll_viewport_h = r.window_height - 2 * r.cached_line_height;
         r
     }
 
@@ -7204,10 +7203,10 @@ mod tests {
     fn page_up_scroll_decreases_offset() {
         let mut r = make_renderer_paged();
         r.coordinate = Coordinate::Scroll;
-        // viewport_h = window_height(40) - line_height(10) = 30; start above that
+        // viewport_h = window_height(40) - 2*line_height(10) = 20; start above that
         r.text_scroll_offset = 50;
         handle_page_up(&mut r);
-        assert_eq!(r.text_scroll_offset, 20); // 50 - 30
+        assert_eq!(r.text_scroll_offset, 30); // 50 - 20
         assert!(r.needs_redraw);
     }
 
@@ -7229,6 +7228,17 @@ mod tests {
         handle_page_down(&mut r);
         assert!(r.text_scroll_offset > 0);
         assert!(r.needs_redraw);
+    }
+
+    #[test]
+    fn end_in_scroll_reaches_content_bottom() {
+        // The bottom offset must use the cached content viewport (window minus
+        // tabs band + header) so the last line/image is fully reachable.
+        let mut r = make_renderer_paged(); // viewport_h = 40 - 2*10 = 20
+        r.coordinate = Coordinate::Scroll;
+        r.text_scroll_total_height = 100;
+        handle_end(&mut r);
+        assert_eq!(r.text_scroll_offset, 80); // total(100) - viewport(20)
     }
 
     #[test]
@@ -7269,6 +7279,7 @@ mod tests {
         let mut r = make_renderer();
         r.window_height = 130;
         r.cached_line_height = 10;
+        r.text_scroll_viewport_h = r.window_height - 2 * r.cached_line_height;
         r
     }
 
