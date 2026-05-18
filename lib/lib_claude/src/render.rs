@@ -349,13 +349,14 @@ pub fn build(convo: &Conversation, history: &[String], pending_input: &str) -> V
         out.push(FfonElement::new_str("claude is working…"));
     }
 
-    // --- live input slot (terminal-style +iR: <input> inside <radio>) ----
-    let mut slot = FfonElement::new_obj(format!(
-        "<radio>send to claude<input>{pending_input}</input></radio>"
-    ));
+    // --- live input slot (a `+i` Obj: an <input> whose children are the
+    // recall history as <button> Strs, newest first — Enter on a button
+    // fills the input). ---------------------------------------------------
+    let mut slot =
+        FfonElement::new_obj(format!("send to claude<input>{pending_input}</input>"));
     if let Some(obj) = slot.as_obj_mut() {
         for prompt in history.iter().rev() {
-            obj.push(FfonElement::new_str(prompt.clone()));
+            obj.push(FfonElement::new_str(format!("<button>{prompt}</button>{prompt}")));
         }
     }
     out.push(slot);
@@ -470,13 +471,13 @@ mod tests {
         assert_eq!(claude.children.len(), 2);
         // result footer
         assert!(out[3].as_str().unwrap().starts_with("result: success"));
-        // trailing input slot
+        // trailing `+i` live input slot — an <input> with no <radio> wrapper
         let slot = out.last().unwrap().as_obj().unwrap();
         assert!(slot.key.contains("<input>draft</input>"));
-        assert!(slot.key.contains("<radio>"));
-        // history newest-first
-        assert_eq!(slot.children[0].as_str(), Some("hello"));
-        assert_eq!(slot.children[1].as_str(), Some("older"));
+        assert!(!slot.key.contains("<radio>"));
+        // history newest-first, each a `<button>` Str
+        assert_eq!(slot.children[0].as_str(), Some("<button>hello</button>hello"));
+        assert_eq!(slot.children[1].as_str(), Some("<button>older</button>older"));
     }
 
     #[test]

@@ -413,12 +413,6 @@ fn build_obj_label(obj: &FfonObject) -> String {
         return format!("+fi {}", tags::strip_display(key));
     }
 
-    // +iR: Obj key with BOTH <input> and <radio> — an editable input slot that
-    // also exposes `-r` children. Must win over `+R` and `+i` below.
-    if tags::has_input(key) && tags::has_radio(key) {
-        return format!("+iR {}", tags::strip_display(key));
-    }
-
     if tags::has_checkbox_checked(key) {
         let content = tags::extract_checkbox_checked(key)
             .unwrap_or_else(|| tags::strip_display(key));
@@ -1036,32 +1030,27 @@ mod tests {
     }
 
     #[test]
-    fn ir_obj_label_emits_plus_ir() {
-        // Obj key with BOTH <input> and <radio> → `+iR`, winning over `+R`/`+i`.
+    fn live_input_slot_obj_label_emits_plus_i() {
+        // The terminal/claude live input slot is a plain `+i` Obj (an <input>
+        // with no <radio> wrapper); its prompt prefix stays in the display.
         let label = build_obj_label(&FfonObject {
-            key: "<radio>nico@host:~$ <input></input></radio>".to_owned(),
+            key: "nico@host:~$ <input></input>".to_owned(),
             children: vec![],
         });
-        assert_eq!(label, "+iR nico@host:~$ ");
+        assert_eq!(label, "+i nico@host:~$ ");
+
+        let label = build_obj_label(&FfonObject {
+            key: "p <input>ls -la</input>".to_owned(),
+            children: vec![],
+        });
+        assert_eq!(label, "+i p ls -la");
     }
 
     #[test]
-    fn ir_obj_label_keeps_input_value_in_display() {
-        let label = build_obj_label(&FfonObject {
-            key: "<radio>p <input>ls -la</input></radio>".to_owned(),
-            children: vec![],
-        });
-        assert_eq!(label, "+iR p ls -la");
-        // Must not fall through to `+R` or `+i`.
-        assert!(!label.starts_with("+R"));
-        assert!(!label.starts_with("+i "));
-    }
-
-    #[test]
-    fn ir_children_render_with_minus_r() {
-        // A plain Str child of an `+iR` Obj inherits `-r` from the parent's
-        // <radio> tag, same as a `+R` radio group.
-        assert!(build_str_label("git status", true).starts_with("-r "));
+    fn live_input_history_children_render_with_minus_b() {
+        // History children are `<button>` Strs → `-b` list prefix.
+        assert!(build_str_label("<button>git status</button>git status", false)
+            .starts_with("-b "));
     }
 
     fn make_renderer_with_items(items: &[&str]) -> AppRenderer {

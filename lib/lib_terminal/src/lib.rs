@@ -360,11 +360,11 @@ impl Provider for TerminalProvider {
     fn fetch(&mut self) -> Vec<FfonElement> {
         // Flat layout: one Str per prompt-line (`{prompt}{cmd}`) and one Str
         // per output-line, in chronological order. The trailing element is the
-        // live input slot — a `+iR` Obj: an `<input>` wrapped in `<radio>`,
-        // prefixed with the *live* prompt (recomputed every fetch so it
-        // reflects the shell's current cwd after `cd`). Its children are the
-        // recall history, newest first, so the user can browse and reuse past
-        // commands by navigating into the slot.
+        // live input slot — a `+i` Obj: an `<input>` prefixed with the *live*
+        // prompt (recomputed every fetch so it reflects the shell's current
+        // cwd after `cd`). Its children are the recall history as `<button>`
+        // Strs, newest first, so the user can browse and reuse past commands
+        // by navigating into the slot — Enter on a button fills the input.
         let live_prompt = self.current_prompt();
         let mut out: Vec<FfonElement> = Vec::new();
         for e in &self.entries {
@@ -374,15 +374,14 @@ impl Provider for TerminalProvider {
             }
         }
         self.load_command_history();
-        let key = format!(
-            "<radio>{}<input>{}</input></radio>",
-            live_prompt, self.pending_input
-        );
+        let key = format!("{}<input>{}</input>", live_prompt, self.pending_input);
         let mut slot = FfonElement::new_obj(key);
         if let Some(obj) = slot.as_obj_mut() {
             // Reversed: newest history entry on top. All entries, no dedup.
+            // Each is a `<button>` so Enter on it fills the slot's <input>.
             for cmd in self.command_history.iter().rev() {
-                obj.children.push(FfonElement::Str(cmd.clone()));
+                obj.children
+                    .push(FfonElement::Str(format!("<button>{cmd}</button>{cmd}")));
             }
         }
         out.push(slot);
@@ -423,7 +422,7 @@ impl Provider for TerminalProvider {
         });
         self.trim_scrollback();
         // The live input has been submitted — drop any history pre-fill so the
-        // next `fetch()` renders a fresh empty `+iR` slot.
+        // next `fetch()` renders a fresh empty `+i` slot.
         self.pending_input.clear();
         true
     }
@@ -991,15 +990,15 @@ mod tests {
         p.command_history_path = Some(dir.path().join("absent"));
         let elems = p.fetch();
         assert_eq!(elems.len(), 1);
-        // The trailing element is the `+iR` slot: an Obj whose key wraps an
-        // empty <input> inside <radio>, prefixed with the synthesized prompt.
+        // The trailing element is the `+i` live input slot: an Obj whose key
+        // wraps an empty <input>, prefixed with the synthesized prompt.
         let key = &elems[0].as_obj().unwrap().key;
-        assert!(key.starts_with("<radio>"), "got {key:?}");
-        assert!(key.ends_with("<input></input></radio>"), "got {key:?}");
+        assert!(!key.contains("<radio>"), "got {key:?}");
+        assert!(key.ends_with("<input></input>"), "got {key:?}");
     }
 
     #[test]
-    fn fetch_ir_children_are_reversed_history() {
+    fn fetch_live_input_children_are_reversed_history_buttons() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("history");
         std::fs::write(&path, "a\nb\nc\n").unwrap();
@@ -1009,12 +1008,19 @@ mod tests {
         let slot = elems.last().unwrap().as_obj().unwrap();
         let kids: Vec<&str> =
             slot.children.iter().filter_map(|e| e.as_str()).collect();
-        // Newest first.
-        assert_eq!(kids, vec!["c", "b", "a"]);
+        // Newest first, each a `<button>` Str.
+        assert_eq!(
+            kids,
+            vec![
+                "<button>c</button>c",
+                "<button>b</button>b",
+                "<button>a</button>a",
+            ]
+        );
     }
 
     #[test]
-    fn fetch_ir_keeps_duplicate_history_entries() {
+    fn fetch_live_input_keeps_duplicate_history_entries() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("history");
         std::fs::write(&path, "ls\nls\ncd\n").unwrap();
@@ -1025,7 +1031,14 @@ mod tests {
         let kids: Vec<&str> =
             slot.children.iter().filter_map(|e| e.as_str()).collect();
         // No de-duplication — raw chronological history, reversed.
-        assert_eq!(kids, vec!["cd", "ls", "ls"]);
+        assert_eq!(
+            kids,
+            vec![
+                "<button>cd</button>cd",
+                "<button>ls</button>ls",
+                "<button>ls</button>ls",
+            ]
+        );
     }
 
     #[test]
@@ -1294,15 +1307,15 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn fetch_uses_synthesized_prompt_for_input_slot() {
-        // No shell spawned, no entries — the trailing element is the `+iR`
-        // slot, an Obj whose key embeds the synthesized prompt.
+        // No shell spawned, no entries — the trailing element is the `+i`
+        // live input slot, an Obj whose key embeds the synthesized prompt.
         let dir = tempfile::tempdir().unwrap();
         let mut p = TerminalProvider::new();
         p.command_history_path = Some(dir.path().join("absent"));
         let elems = p.fetch();
         assert_eq!(elems.len(), 1);
         let key = &elems[0].as_obj().unwrap().key;
-        assert!(key.ends_with("$ <input></input></radio>"), "got {key:?}");
+        assert!(key.ends_with("$ <input></input>"), "got {key:?}");
         assert!(key.contains('@'), "expected user@host segment; got {key:?}");
     }
 
@@ -1316,7 +1329,7 @@ mod tests {
         let elems = p.fetch();
         assert_eq!(elems.len(), 1);
         let key = &elems[0].as_obj().unwrap().key;
-        assert!(key.ends_with("> <input></input></radio>"), "got {key:?}");
+        assert!(key.ends_with("> <input></input>"), "got {key:?}");
         assert!(!key.contains('@'), "Windows prompt should omit user@host; got {key:?}");
     }
 
@@ -1332,12 +1345,12 @@ mod tests {
             output: "ls\nfile1\nfile2\n".to_owned(),
         });
         let elems = p.fetch();
-        // Past prompt + cmd, two output lines, then the `+iR` input slot Obj.
+        // Past prompt + cmd, two output lines, then the `+i` input slot Obj.
         assert_eq!(elems.len(), 4);
         assert_eq!(elems[0].as_str(), Some("user@host:/tmp$ ls"));
         assert_eq!(elems[1].as_str(), Some("file1"));
         assert_eq!(elems[2].as_str(), Some("file2"));
-        assert!(elems[3].as_obj().unwrap().key.ends_with("$ <input></input></radio>"));
+        assert!(elems[3].as_obj().unwrap().key.ends_with("$ <input></input>"));
     }
 
     #[cfg(unix)]
@@ -1667,22 +1680,24 @@ mod tests {
 
         let elems = p.fetch();
         // Flat layout: "{PS1}echo terminal-it-test" + N output lines + a final
-        // `+iR` slot Obj. We don't pin the exact PS1 (depends on /bin/sh + the
-        // user's rc files), but the first element must end with the submitted
-        // command, the last must be the `<input>`-in-`<radio>` slot Obj, and
+        // `+i` live input slot Obj. We don't pin the exact PS1 (depends on
+        // /bin/sh + the user's rc files), but the first element must end with
+        // the submitted command, the last must be the `<input>` slot Obj, and
         // somewhere in between the echoed marker must appear.
         assert!(elems.len() >= 2);
         assert!(elems[0].as_str().map_or(false, |s| s.ends_with("echo terminal-it-test")),
             "first element should end with command; got {:?}", elems[0].as_str());
         assert!(elems.last().and_then(|e| e.as_obj())
-            .map_or(false, |o| o.key.ends_with("<input></input></radio>")),
-            "last element should be the +iR input slot; got {:?}", elems.last());
+            .map_or(false, |o| o.key.ends_with("<input></input>")),
+            "last element should be the +i input slot; got {:?}", elems.last());
         assert!(elems.iter().any(|e| e.as_str().map_or(false, |s| s.contains("terminal-it-test"))));
-        // The committed command landed in the recall history → slot children.
+        // The committed command landed in the recall history → slot children
+        // are `<button>` Strs.
         assert!(elems.last().and_then(|e| e.as_obj())
             .map_or(false, |o| o.children.iter()
-                .any(|c| c.as_str() == Some("echo terminal-it-test"))),
-            "committed command should appear as a history child");
+                .any(|c| c.as_str()
+                    == Some("<button>echo terminal-it-test</button>echo terminal-it-test"))),
+            "committed command should appear as a history button child");
     }
 
     #[test]

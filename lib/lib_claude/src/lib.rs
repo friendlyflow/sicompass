@@ -320,7 +320,9 @@ mod tests {
         // Build directly to avoid spawning a real child.
         let out = render::build(&p.convo, &p.history, &p.pending_input);
         let slot = out.last().unwrap().as_obj().unwrap();
+        // A plain `+i` slot — an <input> with no <radio> wrapper.
         assert!(slot.key.contains("<input>half-typed prompt</input>"));
+        assert!(!slot.key.contains("<radio>"));
     }
 
     #[test]

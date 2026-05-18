@@ -248,6 +248,13 @@ pub fn main_loop(app: &mut AppState) {
             // `<input></input>` slot. Streaming output (e.g. `ls` results) shifts
             // the trailing input slot's index in the rebuilt FFON; without this
             // snap, the cursor would silently drift onto an output line.
+            // The terminal/claude `+i` live input slot is an Obj; recognise it
+            // only when the active provider actually exposes such a slot.
+            let on_live_input_provider = matches!(
+                crate::provider::get_active_provider_ref(&app.renderer)
+                    .map(|p| p.name()),
+                Some("terminal") | Some("claude")
+            );
             let was_on_input = sicompass_sdk::ffon::get_ffon_at_id(
                 &app.renderer.ffon, &app.renderer.current_id,
             )
@@ -255,10 +262,9 @@ pub fn main_loop(app: &mut AppState) {
                 let idx = app.renderer.current_id.last()?;
                 match arr.get(idx)? {
                     sicompass_sdk::ffon::FfonElement::Str(s) if s.ends_with("<input></input>") => Some(()),
-                    // The terminal's `+iR` slot is an Obj (input + radio children).
                     sicompass_sdk::ffon::FfonElement::Obj(o)
-                        if sicompass_sdk::tags::has_input(&o.key)
-                            && sicompass_sdk::tags::has_radio(&o.key) => Some(()),
+                        if on_live_input_provider
+                            && sicompass_sdk::tags::has_input(&o.key) => Some(()),
                     _ => None,
                 }
             })
@@ -273,8 +279,8 @@ pub fn main_loop(app: &mut AppState) {
                     if let Some(idx) = arr.iter().rposition(|e| match e {
                         sicompass_sdk::ffon::FfonElement::Str(s) => s.ends_with("<input></input>"),
                         sicompass_sdk::ffon::FfonElement::Obj(o) =>
-                            sicompass_sdk::tags::has_input(&o.key)
-                                && sicompass_sdk::tags::has_radio(&o.key),
+                            on_live_input_provider
+                                && sicompass_sdk::tags::has_input(&o.key),
                     }) {
                         app.renderer.current_id.set_last(idx);
                         app.renderer.scroll_offset = -1;
@@ -726,8 +732,8 @@ fn update_view(app: &mut AppState) {
     );
     let insert_buf = app.renderer.input_buffer.clone();
     // `input_prefix`/`input_suffix` are kept raw (they reconstruct the FFON
-    // key on commit), but a `+iR` slot puts a dangling `<radio>` in the prefix
-    // and `</radio>` in the suffix — strip all tag tokens for display.
+    // key on commit), but an input slot puts a dangling `<input>` in the
+    // prefix and `</input>` in the suffix — strip all tag tokens for display.
     let insert_prefix = sicompass_sdk::tags::strip_tags(&app.renderer.input_prefix);
     let insert_suffix = sicompass_sdk::tags::strip_tags(&app.renderer.input_suffix);
     let insert_cursor = app.renderer.cursor_position;

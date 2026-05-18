@@ -1054,24 +1054,25 @@ pub fn handle_enter_general(r: &mut AppRenderer) {
         return;
     }
 
-    // +iR child: the focused element is a child whose parent Obj key carries
-    // BOTH <input> and <radio> (a `+iR` slot, e.g. the terminal's history
-    // input). Enter fills the parent's <input> with this child's text instead
-    // of toggling a radio `<checked>` selection.
+    // Live-input history button: the focused element is a `<button>` Str child
+    // whose parent Obj is a live input slot (terminal/claude). Enter fills the
+    // parent's <input> with that command instead of activating the button
+    // through the generic `on_button_press` path.
     if r.current_id.depth() >= 2 {
         if let FfonElement::Str(child_text) = &elem_clone {
-            let mut parent_id = r.current_id.clone();
-            let _ = parent_id.pop();
-            let parent_is_ir = get_ffon_at_id(&r.ffon, &parent_id)
-                .and_then(|a| a.get(parent_id.last().unwrap_or(0)))
-                .and_then(|e| e.as_obj())
-                .map_or(false, |o| {
-                    tags::has_input(&o.key) && tags::has_radio(&o.key)
-                });
-            if parent_is_ir {
-                let value = tags::strip_display(child_text);
-                fill_ir_input(r, &parent_id, &value);
-                return;
+            if tags::has_button(child_text) {
+                let mut parent_id = r.current_id.clone();
+                let _ = parent_id.pop();
+                let parent_key = get_ffon_at_id(&r.ffon, &parent_id)
+                    .and_then(|a| a.get(parent_id.last().unwrap_or(0)))
+                    .and_then(|e| e.as_obj())
+                    .map(|o| o.key.clone());
+                if parent_key.map_or(false, |k| is_live_input_slot(r, &k)) {
+                    let value = tags::extract_button_function_name(child_text)
+                        .unwrap_or_default();
+                    fill_live_input(r, &parent_id, &value);
+                    return;
+                }
             }
         }
     }
@@ -1122,11 +1123,12 @@ pub fn handle_enter_general(r: &mut AppRenderer) {
         return;
     }
 
-    // General-mode Enter on the `+iR` slot itself runs the command — identical
-    // to an Insert-mode commit. The <input> may be pre-filled from history, but
-    // to the provider it is always the *live* input, so commit with old="".
-    // (Right arrow, not Enter, navigates into the history children.)
-    if _is_obj_elem && tags::has_input(&elem_text) && tags::has_radio(&elem_text) {
+    // General-mode Enter on the `+i` live input slot itself runs the command —
+    // identical to an Insert-mode commit. The <input> may be pre-filled from
+    // history, but to the provider it is always the *live* input, so commit
+    // with old="". (Right arrow, not Enter, navigates into the history
+    // buttons.)
+    if _is_obj_elem && is_live_input_slot(r, &elem_text) {
         let content = tags::extract_input(&elem_text).unwrap_or_default();
         crate::provider::commit_edit(r, "", &content);
         crate::provider::refresh_current_directory(r);
@@ -1252,10 +1254,10 @@ pub fn handle_enter_search(r: &mut AppRenderer) {
         }
     };
 
-    // `+iR` interaction (terminal history input) — same as General-mode Enter.
-    // Runs before the radio-toggle branch so a `+iR` history child fills the
-    // input instead of getting a `<checked>` toggle.
-    if try_handle_ir_search_enter(r, &selected_id) {
+    // Live input slot interaction (terminal/claude history input) — same as
+    // General-mode Enter. Runs before the radio-toggle branch so a history
+    // button fills the input instead of getting a `<checked>` toggle.
+    if try_handle_live_input_search_enter(r, &selected_id) {
         return;
     }
 
@@ -1367,8 +1369,9 @@ fn handle_enter_extended_search(r: &mut AppRenderer) {
 
     let selected_id = item.id.clone();
 
-    // `+iR` interaction (terminal history input) — same as General-mode Enter.
-    if try_handle_ir_search_enter(r, &selected_id) {
+    // Live input slot interaction (terminal/claude history input) — same as
+    // General-mode Enter.
+    if try_handle_live_input_search_enter(r, &selected_id) {
         return;
     }
 
@@ -1671,10 +1674,23 @@ fn toggle_radio(r: &mut AppRenderer) -> bool {
     true
 }
 
-/// Fill a `+iR` Obj's `<input>` with `value`, move focus onto that Obj, and
-/// notify the provider so the value survives the next `tick()`-driven re-fetch.
-/// Stays in General mode (the user presses `i` to edit, or Enter to run).
-fn fill_ir_input(
+/// True when `key` is a live input slot Obj key: an `<input>` belonging to a
+/// provider that exposes a prompt-style slot with `<button>` recall history
+/// (the terminal and claude providers). Enter runs such a slot; Enter on one of
+/// its history buttons fills it. Mirrors the `is_filebrowser` provider checks
+/// elsewhere in this module.
+fn is_live_input_slot(r: &AppRenderer, key: &str) -> bool {
+    sicompass_sdk::tags::has_input(key)
+        && crate::provider::get_active_provider_ref(r)
+            .map(|p| matches!(p.name(), "terminal" | "claude"))
+            .unwrap_or(false)
+}
+
+/// Fill a live input slot Obj's `<input>` with `value`, move focus onto that
+/// Obj, and notify the provider so the value survives the next `tick()`-driven
+/// re-fetch. Stays in General mode (the user presses `i` to edit, or Enter to
+/// run).
+fn fill_live_input(
     r: &mut AppRenderer,
     parent_id: &sicompass_sdk::ffon::IdArray,
     value: &str,
@@ -1684,7 +1700,7 @@ fn fill_ir_input(
 
     let pidx = parent_id.last().unwrap_or(0);
     // Rewrite the parent Obj key's <input>...</input> in place, preserving the
-    // prompt prefix, the <radio> wrapper, and the history children.
+    // prompt prefix and the history children.
     let new_key = {
         let key = get_ffon_at_id(&r.ffon, parent_id)
             .and_then(|a| a.get(pidx))
@@ -1715,44 +1731,48 @@ fn fill_ir_input(
     if let Some(p) = crate::provider::get_active_provider(r) {
         p.set_input_value(value);
     }
-    // Move focus onto the `+iR` slot itself; stay in General mode.
+    // Move focus onto the `+i` slot itself; stay in General mode.
     r.current_id = parent_id.clone();
     list::create_list_current_layer(r);
     r.list_index = r.current_id.last().unwrap_or(0);
     r.needs_redraw = true;
 }
 
-/// If `selected_id` is a `+iR` slot or one of its history children, exit
-/// search mode, move the cursor there, and run `handle_enter_general` so the
-/// `+iR` interaction fires — Enter in Tab / Ctrl-F search then behaves exactly
-/// like Enter in General mode (fill the input from a history child, or run the
-/// command on the slot itself). Returns `true` when it handled the press.
-fn try_handle_ir_search_enter(
+/// If `selected_id` is a live input slot or one of its `<button>` history
+/// children, exit search mode, move the cursor there, and run
+/// `handle_enter_general` so the slot interaction fires — Enter in Tab / Ctrl-F
+/// search then behaves exactly like Enter in General mode (fill the input from
+/// a history button, or run the command on the slot itself). Returns `true`
+/// when it handled the press.
+fn try_handle_live_input_search_enter(
     r: &mut AppRenderer,
     selected_id: &sicompass_sdk::ffon::IdArray,
 ) -> bool {
     use sicompass_sdk::ffon::{FfonElement, get_ffon_at_id};
     use sicompass_sdk::tags;
 
-    let is_ir = |o: &sicompass_sdk::ffon::FfonObject| {
-        tags::has_input(&o.key) && tags::has_radio(&o.key)
-    };
     let elem = get_ffon_at_id(&r.ffon, selected_id)
         .and_then(|a| a.get(selected_id.last().unwrap_or(0)))
         .cloned();
-    let elem_is_ir_slot =
-        elem.as_ref().and_then(|e| e.as_obj()).map_or(false, is_ir);
-    let parent_is_ir = selected_id.depth() >= 2 && {
+    let elem_is_slot = elem
+        .as_ref()
+        .and_then(|e| e.as_obj())
+        .map_or(false, |o| is_live_input_slot(r, &o.key));
+    let parent_key = if selected_id.depth() >= 2 {
         let mut pid = selected_id.clone();
         let _ = pid.pop();
         get_ffon_at_id(&r.ffon, &pid)
             .and_then(|a| a.get(pid.last().unwrap_or(0)))
             .and_then(|e| e.as_obj())
-            .map_or(false, is_ir)
+            .map(|o| o.key.clone())
+    } else {
+        None
     };
-    let child_of_ir = parent_is_ir && matches!(elem, Some(FfonElement::Str(_)));
+    let parent_is_slot = parent_key.map_or(false, |k| is_live_input_slot(r, &k));
+    let child_of_slot = parent_is_slot
+        && matches!(&elem, Some(FfonElement::Str(s)) if tags::has_button(s));
 
-    if !elem_is_ir_slot && !child_of_ir {
+    if !elem_is_slot && !child_of_slot {
         return false;
     }
     r.current_id = selected_id.clone();
@@ -1818,13 +1838,12 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
         return;
     };
     let old_content = old_content.unwrap_or_default();
-    // The `+iR` slot (Obj key with both <radio> and <input>, e.g. the
-    // terminal's history input) may carry a value pre-filled from history, but
-    // to the provider it is always the *live* input. Commit with old="" so the
-    // terminal's `commit_edit` (which rejects a non-empty `old`) accepts it.
-    let is_ir_slot =
-        is_obj && tags::has_radio(&elem_text) && tags::has_input(&elem_text);
-    let old_content = if is_ir_slot { String::new() } else { old_content };
+    // The `+i` live input slot (terminal/claude history input) may carry a
+    // value pre-filled from history, but to the provider it is always the
+    // *live* input. Commit with old="" so the provider's `commit_edit` (which
+    // rejects a non-empty `old`) accepts it.
+    let is_live_slot = is_obj && is_live_input_slot(r, &elem_text);
+    let old_content = if is_live_slot { String::new() } else { old_content };
     let new_content = r.input_buffer.clone();
 
     // `*` placeholder mode: resolve to Str or Obj at commit time.
@@ -2337,9 +2356,10 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
         // Auto-navigate into the element if it now has children after refresh
         // (e.g. web browser URL bar gains page content after load).
         // Skip for filebrowser and editor — renaming must not navigate into the target.
-        // Skip the `+iR` slot too — its children are recall history; the cursor
-        // belongs on the fresh trailing input slot, set by `snap_to_trailing_input`.
-        if !is_filebrowser_rename && !is_editor_commit && !is_ir_slot {
+        // Skip the `+i` live input slot too — its children are recall history;
+        // the cursor belongs on the fresh trailing input slot, set by
+        // `snap_to_trailing_input`.
+        if !is_filebrowser_rename && !is_editor_commit && !is_live_slot {
             navigate_right_raw(r);
         }
 
@@ -2407,20 +2427,16 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
 /// view — is a real form field, not a prompt, and must not steal the cursor
 /// away from the field the user just committed.
 fn snap_to_trailing_input(r: &mut AppRenderer) -> bool {
-    let idx = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)
-        .and_then(|arr| match arr.last() {
-            Some(FfonElement::Str(s)) if s.ends_with("<input></input>") => {
-                Some(arr.len() - 1)
-            }
-            // The `+iR` slot (terminal history input) is an Obj, not a Str.
-            Some(FfonElement::Obj(o))
-                if sicompass_sdk::tags::has_input(&o.key)
-                    && sicompass_sdk::tags::has_radio(&o.key) =>
-            {
-                Some(arr.len() - 1)
-            }
-            _ => None,
-        });
+    // Clone the trailing element first so the `r.ffon` borrow is released
+    // before the `is_live_input_slot` provider lookup re-borrows `r`.
+    let trailing = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)
+        .and_then(|arr| arr.last().map(|e| (arr.len() - 1, e.clone())));
+    let idx = match trailing {
+        Some((i, FfonElement::Str(s))) if s.ends_with("<input></input>") => Some(i),
+        // The `+i` live input slot (terminal/claude history input) is an Obj.
+        Some((i, FfonElement::Obj(o))) if is_live_input_slot(r, &o.key) => Some(i),
+        _ => None,
+    };
     if let Some(idx) = idx {
         r.current_id.set_last(idx);
         r.scroll_offset = -1;

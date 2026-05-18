@@ -6612,13 +6612,14 @@ fn ctrl_c_in_interactive_dashboard_does_not_exit() {
 }
 
 // ---------------------------------------------------------------------------
-// `+iR` terminal history input slot
+// `+i` terminal live input slot with `<button>` history children
 // ---------------------------------------------------------------------------
 
 #[test]
-fn terminal_input_slot_renders_as_ir() {
-    // The terminal's live input line is a `+iR` Obj (input + history children),
-    // so the trailing rendered list item carries the `+iR` prefix.
+fn terminal_input_slot_renders_as_plus_i() {
+    // The terminal's live input line is a `+i` Obj (an <input> whose children
+    // are `<button>` history Strs), so the trailing rendered list item carries
+    // the `+i` prefix.
     ensure_builtins();
     let mut renderer = AppRenderer::new();
     register(&mut renderer, sicompass_sdk::create_provider_by_name("terminal").unwrap());
@@ -6627,29 +6628,31 @@ fn terminal_input_slot_renders_as_ir() {
     press_right(&mut renderer);
 
     let last = renderer.total_list.last().expect("terminal list should not be empty");
-    assert!(last.label.starts_with("+iR "),
-        "terminal input slot should render as `+iR`; got {:?}", last.label);
+    assert!(last.label.starts_with("+i "),
+        "terminal input slot should render as `+i`; got {:?}", last.label);
 }
 
 #[test]
-fn enter_on_ir_history_child_fills_input() {
-    // Enter on a history child fills the `+iR` slot's <input> with that
-    // command, moves focus onto the slot, and the value survives a re-fetch
-    // (the provider persists it as `pending_input`).
+fn enter_on_history_button_fills_input() {
+    // Enter on a `<button>` history child fills the `+i` slot's <input> with
+    // that command, moves focus onto the slot, and the value survives a
+    // re-fetch (the provider persists it as `pending_input`).
     ensure_builtins();
     let mut renderer = AppRenderer::new();
     register(&mut renderer, sicompass_sdk::create_provider_by_name("terminal").unwrap());
 
-    // Replace the `+iR` slot's children (real on-disk recall history is
-    // unpredictable here) with a single known entry at index 0.
+    // Replace the `+i` slot's children (real on-disk recall history is
+    // unpredictable here) with a single known `<button>` entry at index 0.
     {
         let term = renderer.ffon[0].as_obj_mut().unwrap();
         let slot = term.children.last_mut().unwrap().as_obj_mut()
-            .expect("trailing terminal element is the +iR Obj");
+            .expect("trailing terminal element is the +i Obj");
         slot.children.clear();
-        slot.children.push(FfonElement::new_str("git status"));
+        slot.children.push(FfonElement::new_str(
+            "<button>git status</button>git status",
+        ));
     }
-    // Focus that child: [terminal, +iR slot 0, child 0].
+    // Focus that child: [terminal, +i slot 0, child 0].
     let mut id = sicompass_sdk::ffon::IdArray::new();
     id.push(0);
     id.push(0);
@@ -6659,7 +6662,7 @@ fn enter_on_ir_history_child_fills_input() {
 
     sicompass::handlers::handle_enter_general(&mut renderer);
 
-    // Focus moved onto the `+iR` slot itself (depth 2), still General mode.
+    // Focus moved onto the `+i` slot itself (depth 2), still General mode.
     assert_eq!(renderer.current_id.depth(), 2);
     assert_eq!(renderer.coordinate, Coordinate::General);
     let slot_key = renderer.ffon[0].as_obj().unwrap()
@@ -6671,22 +6674,22 @@ fn enter_on_ir_history_child_fills_input() {
     let refetched = renderer.providers[0].fetch();
     let key = &refetched.last().unwrap().as_obj().unwrap().key;
     assert!(key.contains("<input>git status</input>"),
-        "re-fetched +iR slot should keep the filled value; got {key:?}");
+        "re-fetched +i slot should keep the filled value; got {key:?}");
 }
 
 #[test]
-fn general_enter_on_ir_slot_does_not_descend_into_history() {
-    // Enter on the `+iR` slot itself runs/commits the command — it must NOT
-    // navigate into the history children (that is what Right arrow does).
+fn general_enter_on_live_input_slot_does_not_descend_into_history() {
+    // Enter on the `+i` slot itself runs/commits the command — it must NOT
+    // navigate into the history buttons (that is what Right arrow does).
     ensure_builtins();
     let mut renderer = AppRenderer::new();
     register(&mut renderer, sicompass_sdk::create_provider_by_name("terminal").unwrap());
 
-    // Give the slot a history child so descending *would* be possible.
+    // Give the slot a history button so descending *would* be possible.
     {
         let term = renderer.ffon[0].as_obj_mut().unwrap();
         term.children.last_mut().unwrap().as_obj_mut().unwrap()
-            .children.push(FfonElement::new_str("ls"));
+            .children.push(FfonElement::new_str("<button>ls</button>ls"));
     }
     let mut id = sicompass_sdk::ffon::IdArray::new();
     id.push(0);
@@ -6697,12 +6700,12 @@ fn general_enter_on_ir_slot_does_not_descend_into_history() {
     sicompass::handlers::handle_enter_general(&mut renderer);
 
     assert_eq!(renderer.current_id.depth(), 2,
-        "General-mode Enter on the +iR slot must not descend into history");
+        "General-mode Enter on the +i slot must not descend into history");
 }
 
 #[test]
-fn search_enter_on_ir_history_child_fills_input() {
-    // Enter on a `+iR` history child while in SimpleSearch (Tab / Ctrl-F)
+fn search_enter_on_history_button_fills_input() {
+    // Enter on a `+i` history button while in SimpleSearch (Tab / Ctrl-F)
     // behaves like General-mode Enter: it fills the slot's <input>.
     ensure_builtins();
     let mut renderer = AppRenderer::new();
@@ -6711,11 +6714,11 @@ fn search_enter_on_ir_history_child_fills_input() {
     {
         let term = renderer.ffon[0].as_obj_mut().unwrap();
         let slot = term.children.last_mut().unwrap().as_obj_mut()
-            .expect("trailing terminal element is the +iR Obj");
+            .expect("trailing terminal element is the +i Obj");
         slot.children.clear();
-        slot.children.push(FfonElement::new_str("git log"));
+        slot.children.push(FfonElement::new_str("<button>git log</button>git log"));
     }
-    // Focus the history child and build its list layer.
+    // Focus the history button and build its list layer.
     let mut id = sicompass_sdk::ffon::IdArray::new();
     id.push(0);
     id.push(0);
@@ -6731,11 +6734,11 @@ fn search_enter_on_ir_history_child_fills_input() {
     press_enter(&mut renderer);
 
     assert_eq!(renderer.coordinate, Coordinate::General, "search mode should exit");
-    assert_eq!(renderer.current_id.depth(), 2, "focus moved onto the +iR slot");
+    assert_eq!(renderer.current_id.depth(), 2, "focus moved onto the +i slot");
     let slot_key = renderer.ffon[0].as_obj().unwrap()
         .children[0].as_obj().unwrap().key.clone();
     assert!(slot_key.contains("<input>git log</input>"),
-        "search Enter should fill the +iR <input>; got {slot_key:?}");
+        "search Enter should fill the +i <input>; got {slot_key:?}");
 }
 
 // ---------------------------------------------------------------------------
