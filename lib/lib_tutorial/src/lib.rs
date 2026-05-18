@@ -122,7 +122,7 @@ static SECTIONS: &[Node] = &[
                     Leaf("Sicompass has several modes that change what your keyboard inputs do. You always start in operator mode."),
                     Leaf(": (colon): enter command mode. Type a command name and press Enter to execute it. Commands are context-sensitive, each provider can offer its own commands."),
                     Leaf("Tab: enter simple search mode. Start typing to filter items in the current list. Only items matching your search will be shown."),
-                    Leaf("S: switch to scroll mode. Use Up/Down to scroll through a long text body without moving the selection."),
+                    Leaf("S: switch to scroll mode. It flattens the current list and all of its sublists into one continuous, scrollable reading view. Each element shows a 'layer: X list: Y/Z' header (with its list prefix) and its content - text or image - below. Up/Down scroll the view; Tab searches the headers and Ctrl+F searches the content; Enter on a highlighted element jumps to it back in operator mode."),
                     Leaf("Ctrl+F: enter extended search mode. This searches recursively through all children, not just the current level. Results are shown as a flat list you can jump to."),
                     Leaf("z: open the history view — a navigable, read-only list of this tab's undo timeline. Escape leaves it. See the 'Undo and Redo' section."),
                 ],
@@ -333,7 +333,7 @@ static SECTIONS: &[Node] = &[
             Leaf("Links lazy-load external JSON or FFON files as children. Navigate into the link below to load its content:"),
             // SF_JSON placeholder — replaced at runtime
             Branch { key: "__LINK_WITH_PREFIX_SUFFIX__", children: &[] },
-            Leaf("Scroll mode: when a text item is too long to fit on screen, you can scroll through it. Press Tab twice from operator mode to enter scroll mode, then use Up/Down to scroll the text below:"),
+            Leaf("Scroll mode flattens this list and every sublist into one continuous, scrollable reading view, with images laid out inline like below. Press S from operator mode to try it, then use Up/Down to scroll. Each element gets a 'layer: X list: Y/Z' header; press Tab to search those headers or Ctrl+F to search element content, and Enter to jump to a result back in operator mode:"),
             Leaf("__LOREM_IPSUM__"),
         ],
     },
