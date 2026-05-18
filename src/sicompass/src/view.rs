@@ -853,8 +853,11 @@ fn update_view(app: &mut AppState) {
                 .map(|bc| fr.measure_text_width(bc, scale)).unwrap_or(0.0);
             let (prefix_str, content) = split_label(label);
             let prefix_w = fr.measure_text_width(prefix_str, scale);
-            let available_w = (max_content_w - 4.0 * em_width - indicator_w - bc_w - prefix_w).max(1.0);
-            fr.count_wrapped_lines(content, scale, available_w)
+            // First line trails the breadcrumb + prefix; continuation lines
+            // wrap full-width (left margin → column edge) below them.
+            let rest_w = (max_content_w - 4.0 * em_width - indicator_w).max(1.0);
+            let first_w = (rest_w - bc_w - prefix_w).max(1.0);
+            fr.wrap_lines_with_offsets_hanging(content, scale, first_w, rest_w).len().max(1)
         }).collect()
     };
 
@@ -959,8 +962,9 @@ fn update_view(app: &mut AppState) {
                     .map(|bc| fr.measure_text_width(bc, scale)).unwrap_or(0.0);
                 let (prefix_str, content) = split_label(label);
                 let prefix_w = fr.measure_text_width(prefix_str, scale);
-                let available_w = (max_content_w - 4.0 * em_width - indicator_w - bc_w - prefix_w).max(1.0);
-                (fr.count_wrapped_lines(content, scale, available_w), None)
+                let rest_w = (max_content_w - 4.0 * em_width - indicator_w).max(1.0);
+                let first_w = (rest_w - bc_w - prefix_w).max(1.0);
+                (fr.wrap_lines_with_offsets_hanging(content, scale, first_w, rest_w).len().max(1), None)
             };
             let highlight_w = (max_prefix_px + item_max_w + 20.0).min(win_w - content_x - list_indent_px);
             metrics.push((y, content_start_x, lines, highlight_w));
@@ -1123,7 +1127,8 @@ fn update_view(app: &mut AppState) {
                 }
                 fr.prepare_text_for_rendering(prefix_str, label_x, item_y, scale, p.text);
                 let content_x = label_x + fr.measure_text_width(prefix_str, scale);
-                let available_w = (right_edge - content_x).max(1.0);
+                let first_w = (right_edge - content_x).max(1.0);
+                let rest_w = (right_edge - text_prefix_x).max(1.0);
                 // Adjust match positions to be relative to content (subtract prefix char count)
                 let prefix_char_count = prefix_str.chars().count() as u32;
                 let content_positions: Vec<u32> = match_pos.iter()
@@ -1131,8 +1136,13 @@ fn update_view(app: &mut AppState) {
                     .map(|&p| p - prefix_char_count)
                     .collect();
                 let rr = app.rect_renderer.as_mut();
-                render_with_highlights(fr, rr, content, content_x, item_y, scale, ascender, line_height as f32, p.text, p.scroll_search, &content_positions);
-                let _ = available_w;
+                // First content line trails the breadcrumb + prefix; wrapped
+                // continuation lines run full-width below, at the left margin.
+                render_with_highlights(
+                    fr, rr, content, content_x, item_y, scale, ascender, line_height as f32,
+                    p.text, p.scroll_search, &content_positions,
+                    Some(WrapLayout { first_width: first_w, rest_x: text_prefix_x, rest_width: rest_w }),
+                );
             }
         } else if let Some(path) = item_data {
             let (prefix_text, suffix_text, has_prefix) = split_image_label(label, path);
@@ -1270,7 +1280,7 @@ fn update_view(app: &mut AppState) {
                     fr.prepare_text_wrapped(label.as_str(), text_prefix_x, item_y, scale, max_content_w.max(1.0), line_height as f32, p.text);
                 } else {
                     let rr = app.rect_renderer.as_mut();
-                    render_with_highlights(fr, rr, label.as_str(), text_prefix_x, item_y, scale, ascender, line_height as f32, p.text, p.scroll_search, &match_pos);
+                    render_with_highlights(fr, rr, label.as_str(), text_prefix_x, item_y, scale, ascender, line_height as f32, p.text, p.scroll_search, &match_pos, None);
                 }
             } else {
                 let (prefix, content) = split_label(label.as_str());
@@ -1284,7 +1294,7 @@ fn update_view(app: &mut AppState) {
                     fr.prepare_text_wrapped(content, content_start_x, item_y, scale, max_content_w.max(1.0), line_height as f32, p.text);
                 } else {
                     let rr = app.rect_renderer.as_mut();
-                    render_with_highlights(fr, rr, content, content_start_x, item_y, scale, ascender, line_height as f32, p.text, p.scroll_search, &content_positions);
+                    render_with_highlights(fr, rr, content, content_start_x, item_y, scale, ascender, line_height as f32, p.text, p.scroll_search, &content_positions, None);
                 }
             }
         }
@@ -1973,10 +1983,22 @@ fn collect_list_items(r: &AppRenderer) -> Vec<(String, Option<String>, bool, Vec
     out
 }
 
+/// Word-wrap layout for `render_with_highlights`. The first wrapped line keeps
+/// the caller's `x` and wraps at `first_width`; continuation lines start at
+/// `rest_x` and wrap at `rest_width`. Used for general-mode (ExtendedSearch)
+/// results, where line 1 trails the breadcrumb + prefix and the remaining
+/// lines run full-width below them at the left margin.
+struct WrapLayout {
+    first_width: f32,
+    rest_x: f32,
+    rest_width: f32,
+}
+
 /// Render `text` at `(x, y)` with background highlight rectangles behind
 /// characters at `match_positions`, matching scroll-search style. Text is
 /// rendered in `text_color`; highlights use `highlight_color` as background.
 /// Newlines in `text` start a new visual row, matching `prepare_text_wrapped`.
+/// When `wrap` is `Some`, the text is also word-wrapped per the `WrapLayout`.
 fn render_with_highlights(
     fr: &mut crate::text::FontRenderer,
     mut rr: Option<&mut crate::rectangle::RectangleRenderer>,
@@ -1989,25 +2011,46 @@ fn render_with_highlights(
     text_color: u32,
     highlight_color: u32,
     match_positions: &[u32],
+    wrap: Option<WrapLayout>,
 ) {
-    // Split `text` into `\n`-separated segments: (byte_start, byte_end, char_start).
-    let mut segs: Vec<(usize, usize, u32)> = Vec::new();
-    let mut seg_byte_start = 0usize;
-    let mut seg_char_start = 0u32;
-    let mut char_count = 0u32;
-    for (bi, c) in text.char_indices() {
-        if c == '\n' {
-            segs.push((seg_byte_start, bi, seg_char_start));
-            seg_byte_start = bi + 1;
-            seg_char_start = char_count + 1;
+    // Split `text` into segments: (byte_start, byte_end, char_start).
+    // With `wrap` set the text is word-wrapped — the first line narrowed by a
+    // preceding breadcrumb/prefix, continuation lines full-width (explicit `\n`
+    // still break lines); otherwise it splits only on `\n`.
+    let segs: Vec<(usize, usize, u32)> = if let Some(w) = &wrap {
+        fr.wrap_lines_with_offsets_hanging(text, scale, w.first_width, w.rest_width)
+            .into_iter()
+            .map(|(line, byte_start)| {
+                let byte_end = byte_start + line.len();
+                let char_start = text[..byte_start].chars().count() as u32;
+                (byte_start, byte_end, char_start)
+            })
+            .collect()
+    } else {
+        let mut segs: Vec<(usize, usize, u32)> = Vec::new();
+        let mut seg_byte_start = 0usize;
+        let mut seg_char_start = 0u32;
+        let mut char_count = 0u32;
+        for (bi, c) in text.char_indices() {
+            if c == '\n' {
+                segs.push((seg_byte_start, bi, seg_char_start));
+                seg_byte_start = bi + 1;
+                seg_char_start = char_count + 1;
+            }
+            char_count += 1;
         }
-        char_count += 1;
-    }
-    segs.push((seg_byte_start, text.len(), seg_char_start));
+        segs.push((seg_byte_start, text.len(), seg_char_start));
+        segs
+    };
 
     for (n, &(byte_start, byte_end, char_start)) in segs.iter().enumerate() {
         let seg_text = &text[byte_start..byte_end];
         let seg_y = y + n as f32 * line_height;
+        // Wrapped continuation lines drop back to the left margin.
+        let seg_x = match &wrap {
+            Some(w) if n > 0 => w.rest_x,
+            _ => x,
+        };
 
         if let Some(rr) = rr.as_deref_mut() {
             let seg_chars: Vec<char> = seg_text.chars().collect();
@@ -2027,7 +2070,7 @@ fn render_with_highlights(
                             byte_off += seg_chars[i].len_utf8();
                             i += 1;
                         }
-                        let match_x = x + fr.measure_text_width(&seg_text[..start_byte], scale);
+                        let match_x = seg_x + fr.measure_text_width(&seg_text[..start_byte], scale);
                         let match_w = fr.measure_text_width(&seg_text[start_byte..byte_off], scale);
                         rr.prepare_rectangle(match_x, rect_y, match_w, line_height, highlight_color, 3.0);
                     } else {
@@ -2038,7 +2081,7 @@ fn render_with_highlights(
             }
         }
 
-        fr.prepare_text_for_rendering(seg_text, x, seg_y, scale, text_color);
+        fr.prepare_text_for_rendering(seg_text, seg_x, seg_y, scale, text_color);
     }
 }
 

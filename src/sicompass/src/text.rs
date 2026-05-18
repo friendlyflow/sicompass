@@ -612,11 +612,34 @@ impl FontRenderer {
 
     /// Word-wrap `text`, returning each line with its starting byte offset in the original text.
     pub fn wrap_lines_with_offsets(&self, text: &str, scale: f32, max_width: f32) -> Vec<(String, usize)> {
-        Self::compute_wrap_lines_with_offsets(text, scale, max_width, &self.glyphs)
+        Self::compute_wrap_lines_hanging(text, scale, max_width, max_width, &self.glyphs)
     }
 
-    /// A wrapped line with its starting byte offset in the original text.
-    fn compute_wrap_lines_with_offsets(text: &str, scale: f32, max_width: f32, glyphs: &[GlyphInfo]) -> Vec<(String, usize)> {
+    /// Word-wrap `text` with the first line wrapped at `first_width` and every
+    /// subsequent line at `rest_width` (a reverse hanging indent: a wide
+    /// content column whose first line is shortened by a preceding
+    /// breadcrumb/prefix). Returns each line with its starting byte offset.
+    pub fn wrap_lines_with_offsets_hanging(
+        &self,
+        text: &str,
+        scale: f32,
+        first_width: f32,
+        rest_width: f32,
+    ) -> Vec<(String, usize)> {
+        Self::compute_wrap_lines_hanging(text, scale, first_width, rest_width, &self.glyphs)
+    }
+
+    /// Word-wrap `text` into lines with their starting byte offsets. The first
+    /// line is wrapped at `first_width`, every subsequent line at `rest_width`
+    /// (pass the same value for both for uniform wrapping). Explicit `\n` also
+    /// break lines.
+    fn compute_wrap_lines_hanging(
+        text: &str,
+        scale: f32,
+        first_width: f32,
+        rest_width: f32,
+        glyphs: &[GlyphInfo],
+    ) -> Vec<(String, usize)> {
         if text.is_empty() {
             return vec![(String::new(), 0)];
         }
@@ -642,6 +665,9 @@ impl FontRenderer {
         while i < n {
             let b = bytes[i];
             let clen = char_len(b);
+            // The first line is narrowed by the breadcrumb/prefix; the rest
+            // use the full content width.
+            let max_width = if lines.is_empty() { first_width } else { rest_width };
 
             if b == b'\n' {
                 lines.push((text[line_start..i].to_owned(), line_start));
@@ -1049,5 +1075,26 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert_eq!(result[0], ("abc".to_string(), 0));
         assert_eq!(result[1], ("def".to_string(), 4));
+    }
+
+    // ---- wrap_lines_with_offsets_hanging ---
+
+    #[test]
+    fn wrap_hanging_first_line_narrower() {
+        let fr = make_fr_uniform(10.0);
+        // first_width = 25px fits "aa" (20px) but not "aa " (30px); the wider
+        // rest_width = 100px fits the remaining "bb cc dd" (80px) on one line.
+        let result = fr.wrap_lines_with_offsets_hanging("aa bb cc dd", 1.0, 25.0, 100.0);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], ("aa".to_string(), 0));
+        assert_eq!(result[1], ("bb cc dd".to_string(), 3));
+    }
+
+    #[test]
+    fn wrap_hanging_equal_widths_matches_uniform() {
+        let fr = make_fr_uniform(10.0);
+        let hanging = fr.wrap_lines_with_offsets_hanging("hello world", 1.0, 100.0, 100.0);
+        let uniform = fr.wrap_lines_with_offsets("hello world", 1.0, 100.0);
+        assert_eq!(hanging, uniform);
     }
 }
