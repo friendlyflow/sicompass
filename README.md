@@ -16,7 +16,7 @@ It does not try to look pretty, and it works very differently from web pages and
 - **Cross-Platform** — Shipped and tested on Ubuntu today; paths, shells, and PTY plumbing route through platform helpers (XDG / `~/Library` / `%APPDATA%`, `bash`/`zsh`/`fish`/`pwsh`/`cmd.exe`, `forkpty`/ConPTY), with packaged macOS and Windows releases planned
 - **High-Performance Rendering** — Vulkan-powered graphics with FreeType2/HarfBuzz text shaping
 - **Extensible Architecture** — Provider-based plugin system with a built-in plugin store for hot enable/disable
-- **Simpler UI Development** — Functionality over design means less complexity and faster development with minimal styling, design doen't need to be programmed as it's already worked out
+- **Lower Development Cost** — Because the user-interface elements are decided beforehand, design never has to be programmed. Development is navigation-first instead of design-first, which cuts complexity and speeds up delivery
 
 ## Built-in Providers
 
