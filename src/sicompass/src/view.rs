@@ -1792,6 +1792,31 @@ struct ScrollSearchResult {
     scroll_offset: i32,
 }
 
+/// One searchable text region within a scroll-search row. Text items and the
+/// Prefix corpus contribute a single segment per item; an image item under the
+/// Content corpus contributes two — the caption text above the image and the
+/// caption text below it — since the image splits them into separate regions.
+struct SearchSegment {
+    /// Index into `list_items` of the row this segment belongs to.
+    item_idx: usize,
+    /// The searchable text.
+    text: String,
+    /// Wrapped lines of `text`: `(line, byte_offset_into_text)`.
+    wrap: Vec<(String, usize)>,
+    /// Virtual-space (pre-scroll) pixel top of the segment's first line.
+    virtual_top: i32,
+}
+
+/// A single case-insensitive query hit located within a `SearchSegment`.
+struct ScrollMatch {
+    seg_idx: usize,
+    item_idx: usize,
+    byte_off: usize,
+    mlen: usize,
+    /// Virtual-space pixel top of the wrapped line containing the hit.
+    virtual_y: i32,
+}
+
 /// Find all case-insensitive occurrences of `query` in `text`.
 /// Returns `(byte_offset, match_len)` pairs — both are byte indices into the
 /// original `text` and always land on char boundaries (matching is done
@@ -1872,36 +1897,51 @@ fn render_scroll_search_full(
     let (layouts, total_height) =
         measure_scroll_items(fr, ir.as_deref_mut(), list_items, scale, line_height, max_w);
 
-    // Per item: the searched text and its wrapped lines. The searched text is
-    // exactly what the item renders at `content_x` — element content for the
-    // Content corpus (Ctrl-F, list prefix excluded), the extended prefix for the
-    // Prefix corpus (Tab) — so wrap offsets and highlight rects line up exactly.
-    let mut search_texts: Vec<String> = Vec::with_capacity(list_items.len());
-    let mut search_wraps: Vec<Vec<(String, usize)>> = Vec::with_capacity(list_items.len());
-    for (label, img_data, _, _, ext_prefix) in list_items.iter() {
-        let text = match corpus {
-            ScrollSearchCorpus::Content => {
-                if img_data.is_some() { String::new() } else { scroll_item_parts(label).1 }
-            }
-            ScrollSearchCorpus::Prefix => ext_prefix.clone().unwrap_or_default(),
+    // Build the searchable segments. Each segment's text is exactly what the
+    // item renders at `content_x`, so wrap offsets and highlight rects line up.
+    // Content corpus (Ctrl-F): element content for text items, or the caption
+    // text above/below the image for image items. Prefix corpus (Tab): the
+    // extended prefix. Segments are appended top-to-bottom so the resulting
+    // match list is ordered by vertical position.
+    let mut segments: Vec<SearchSegment> = Vec::with_capacity(list_items.len());
+    for (item_idx, (label, img_data, _, _, ext_prefix)) in list_items.iter().enumerate() {
+        let l = &layouts[item_idx];
+        let mut push_segment = |text: String, virtual_top: i32, fr: &crate::text::FontRenderer| {
+            let wrap = fr.wrap_lines_with_offsets(&text, scale, max_w);
+            segments.push(SearchSegment { item_idx, text, wrap, virtual_top });
         };
-        search_wraps.push(fr.wrap_lines_with_offsets(&text, scale, max_w));
-        search_texts.push(text);
+        match corpus {
+            ScrollSearchCorpus::Prefix => {
+                push_segment(ext_prefix.clone().unwrap_or_default(), l.top, fr);
+            }
+            ScrollSearchCorpus::Content => {
+                let content_top = l.top + l.prefix_lines as i32 * line_height;
+                if let (Some(path), Some(img)) = (img_data, l.img.as_ref()) {
+                    let (caption_prefix, caption_suffix) = scroll_image_caption(label, path);
+                    if !caption_prefix.is_empty() {
+                        push_segment(caption_prefix.to_string(), content_top, fr);
+                    }
+                    if !caption_suffix.is_empty() {
+                        let suffix_top = content_top
+                            + (img.caption_prefix_lines + img.image_lines) as i32 * line_height;
+                        push_segment(caption_suffix.to_string(), suffix_top, fr);
+                    }
+                } else {
+                    push_segment(scroll_item_parts(label).1, content_top, fr);
+                }
+            }
+        }
     }
 
-    // Collect all matches: (item_idx, byte_off, match_len, match_virtual_y).
-    let mut all_matches: Vec<(usize, usize, usize, i32)> = Vec::new();
-    for (item_idx, wrap) in search_wraps.iter().enumerate() {
-        let region_top = match corpus {
-            ScrollSearchCorpus::Content =>
-                layouts[item_idx].top + layouts[item_idx].prefix_lines as i32 * line_height,
-            ScrollSearchCorpus::Prefix => layouts[item_idx].top,
-        };
-        for (byte_off, mlen) in find_matches_ci(&search_texts[item_idx], search_query) {
-            let li = wrap.partition_point(|(_, off)| *off <= byte_off).saturating_sub(1);
-            let li = li.min(wrap.len().saturating_sub(1));
-            let virtual_y = region_top + li as i32 * line_height;
-            all_matches.push((item_idx, byte_off, mlen, virtual_y));
+    // Collect all matches, ordered by vertical position (segments are already
+    // ordered, and `find_matches_ci` returns hits left-to-right).
+    let mut all_matches: Vec<ScrollMatch> = Vec::new();
+    for (seg_idx, seg) in segments.iter().enumerate() {
+        for (byte_off, mlen) in find_matches_ci(&seg.text, search_query) {
+            let li = seg.wrap.partition_point(|(_, off)| *off <= byte_off).saturating_sub(1);
+            let li = li.min(seg.wrap.len().saturating_sub(1));
+            let virtual_y = seg.virtual_top + li as i32 * line_height;
+            all_matches.push(ScrollMatch { seg_idx, item_idx: seg.item_idx, byte_off, mlen, virtual_y });
         }
     }
     let match_count = all_matches.len();
@@ -1919,9 +1959,8 @@ fn render_scroll_search_full(
     } else {
         let clamped = search_current_match.min(match_count - 1);
         if needs_position {
-            all_matches.iter().enumerate()
-                .find(|&(_, &(_, _, _, vy))| vy + line_height > viewport_top)
-                .map(|(mi, _)| mi)
+            all_matches.iter()
+                .position(|m| m.virtual_y + line_height > viewport_top)
                 .unwrap_or(0)
         } else {
             clamped
@@ -1930,13 +1969,13 @@ fn render_scroll_search_full(
     let current_item = if match_count == 0 {
         list_index
     } else {
-        all_matches[current_match].0
+        all_matches[current_match].item_idx
     };
 
     // Snap the viewport only on explicit Up/Down navigation.
     let max_offset = (total_height - viewport_h as i32).max(0);
     let scroll_offset = if snap && match_count > 0 {
-        let match_item = all_matches[current_match].0;
+        let match_item = all_matches[current_match].item_idx;
         layouts.get(match_item).map(|l| l.top).unwrap_or(0).clamp(0, max_offset)
     } else {
         viewport_top.clamp(0, max_offset)
@@ -1972,42 +2011,36 @@ fn render_scroll_search_full(
         }
     }
 
-    // Render visible items: match highlights, then prefix line + content.
+    // Match highlights, drawn first so item text renders on top of them. Each
+    // match is placed from its segment's virtual top, so highlights on an image
+    // item's caption-suffix segment sit correctly below the image.
+    if let Some(rr) = rr.as_deref_mut() {
+        for (mi, m) in all_matches.iter().enumerate() {
+            let seg = &segments[m.seg_idx];
+            let li = seg.wrap.partition_point(|(_, off)| *off <= m.byte_off).saturating_sub(1);
+            let li = li.min(seg.wrap.len().saturating_sub(1));
+            let (line_text, line_byte_off) = match seg.wrap.get(li) {
+                Some((t, o)) => (t.as_str(), *o),
+                None => continue,
+            };
+            let line_top = clip_y + (m.virtual_y - scroll_offset) as f32;
+            if line_top + lh <= clip_y || line_top >= win_h { continue; }
+            let local_start = m.byte_off.saturating_sub(line_byte_off);
+            let safe_start = local_start.min(line_text.len());
+            let safe_end = (local_start + m.mlen).min(line_text.len());
+            let match_x = content_x + fr.measure_text_width(&line_text[..safe_start], scale);
+            let match_w = fr.measure_text_width(&line_text[safe_start..safe_end], scale).max(2.0);
+            let color = if mi == current_match { p.scroll_search } else { p.selected };
+            rr.prepare_rectangle(match_x, line_top, match_w, lh, color, 3.0);
+        }
+    }
+
+    // Render visible items on top of the highlights.
     for (i, (label, img_data, _, _, ext_prefix)) in list_items.iter().enumerate() {
         let l = &layouts[i];
         let item_top_screen = clip_y + (l.top - scroll_offset) as f32;
         if item_top_screen + l.height as f32 <= clip_y { continue; }
         if item_top_screen >= win_h { break; }
-
-        let wrap_lines = &search_wraps[i];
-        let region_screen_top = match corpus {
-            ScrollSearchCorpus::Content => item_top_screen + l.prefix_lines as f32 * lh,
-            ScrollSearchCorpus::Prefix => item_top_screen,
-        };
-        let mut matches_per_line: Vec<Vec<(usize, usize, bool)>> =
-            vec![Vec::new(); wrap_lines.len().max(1)];
-        for (mi, &(match_item, byte_off, mlen, _)) in all_matches.iter().enumerate() {
-            if match_item != i { continue; }
-            let li = wrap_lines.partition_point(|(_, off)| *off <= byte_off).saturating_sub(1);
-            let li = li.min(wrap_lines.len().saturating_sub(1));
-            let line_byte_off = wrap_lines.get(li).map(|(_, o)| *o).unwrap_or(0);
-            let local_start = byte_off.saturating_sub(line_byte_off);
-            matches_per_line[li].push((local_start, mlen, mi == current_match));
-        }
-        if let Some(rr) = rr.as_deref_mut() {
-            for (n, line_text) in wrap_lines.iter().map(|(t, _)| t).enumerate() {
-                let line_top = region_screen_top + n as f32 * lh;
-                if line_top + lh <= clip_y || line_top >= win_h { continue; }
-                for &(local_start, mlen, is_current) in &matches_per_line[n] {
-                    let safe_start = local_start.min(line_text.len());
-                    let safe_end = (local_start + mlen).min(line_text.len());
-                    let match_x = content_x + fr.measure_text_width(&line_text[..safe_start], scale);
-                    let match_w = fr.measure_text_width(&line_text[safe_start..safe_end], scale).max(2.0);
-                    let color = if is_current { p.scroll_search } else { p.selected };
-                    rr.prepare_rectangle(match_x, line_top, match_w, lh, color, 3.0);
-                }
-            }
-        }
 
         render_scroll_item(fr, rr.as_deref_mut(), ir.as_deref_mut(), label, img_data, ext_prefix, l,
             item_top_screen, scale, ascender, line_height, em_width, list_has_indicators,
