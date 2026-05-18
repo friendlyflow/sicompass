@@ -31,8 +31,6 @@ use sicompass_sdk::{
 };
 use sicompass_shell::{default_program, Shell, ShellConfig};
 
-const INPUT_PLACEHOLDER: &str = "<input></input>";
-
 /// One entry in the terminal scrollback: a submitted command and the bytes
 /// the shell has produced in response so far.
 #[derive(Debug, Clone)]
@@ -87,6 +85,10 @@ pub struct TerminalProvider {
     /// Counts appends since the last full file rewrite. We compact when this
     /// reaches `command_history_size`, bounding the file at ~2× the cap.
     appends_since_compact: usize,
+    /// Value to pre-fill into the live `<input>` slot on the next `fetch()`.
+    /// Set via `set_input_value()` when the user picks a history child;
+    /// cleared on a successful `commit_edit()`.
+    pending_input: String,
 
     /// `true` when `terminal.autoEnterDashboard` is enabled (default true).
     /// Gates the alt-screen detector entirely — when off, no auto enter/leave.
@@ -121,6 +123,7 @@ impl TerminalProvider {
             command_history_loaded: false,
             command_history_path: None,
             appends_since_compact: 0,
+            pending_input: String::new(),
             auto_enter_dashboard: true,
             auto_entered_dashboard: false,
             pending_dashboard_request: None,
@@ -351,8 +354,11 @@ impl Provider for TerminalProvider {
     fn fetch(&mut self) -> Vec<FfonElement> {
         // Flat layout: one Str per prompt-line (`{prompt}{cmd}`) and one Str
         // per output-line, in chronological order. The trailing element is the
-        // `<input></input>` slot, prefixed with the *live* prompt (recomputed
-        // every fetch so it reflects the shell's current cwd after `cd`).
+        // live input slot — a `+iR` Obj: an `<input>` wrapped in `<radio>`,
+        // prefixed with the *live* prompt (recomputed every fetch so it
+        // reflects the shell's current cwd after `cd`). Its children are the
+        // recall history, newest first, so the user can browse and reuse past
+        // commands by navigating into the slot.
         let live_prompt = self.current_prompt();
         let mut out: Vec<FfonElement> = Vec::new();
         for e in &self.entries {
@@ -361,7 +367,19 @@ impl Provider for TerminalProvider {
                 out.push(FfonElement::Str(line.to_owned()));
             }
         }
-        out.push(FfonElement::Str(format!("{}{}", live_prompt, INPUT_PLACEHOLDER)));
+        self.load_command_history();
+        let key = format!(
+            "<radio>{}<input>{}</input></radio>",
+            live_prompt, self.pending_input
+        );
+        let mut slot = FfonElement::new_obj(key);
+        if let Some(obj) = slot.as_obj_mut() {
+            // Reversed: newest history entry on top. All entries, no dedup.
+            for cmd in self.command_history.iter().rev() {
+                obj.children.push(FfonElement::Str(cmd.clone()));
+            }
+        }
+        out.push(slot);
         out
     }
 
@@ -398,7 +416,14 @@ impl Provider for TerminalProvider {
             output: String::new(),
         });
         self.trim_scrollback();
+        // The live input has been submitted — drop any history pre-fill so the
+        // next `fetch()` renders a fresh empty `+iR` slot.
+        self.pending_input.clear();
         true
+    }
+
+    fn set_input_value(&mut self, value: &str) {
+        self.pending_input = value.to_owned();
     }
 
     fn tick(&mut self) -> bool {
@@ -811,11 +836,57 @@ mod tests {
 
     #[test]
     fn fetch_empty_returns_input_placeholder() {
+        let dir = tempfile::tempdir().unwrap();
         let mut p = TerminalProvider::new();
+        p.command_history_path = Some(dir.path().join("absent"));
         let elems = p.fetch();
         assert_eq!(elems.len(), 1);
-        // Synthesized prompt is appended; the trailing tag must still be present.
-        assert!(elems[0].as_str().unwrap().ends_with(INPUT_PLACEHOLDER));
+        // The trailing element is the `+iR` slot: an Obj whose key wraps an
+        // empty <input> inside <radio>, prefixed with the synthesized prompt.
+        let key = &elems[0].as_obj().unwrap().key;
+        assert!(key.starts_with("<radio>"), "got {key:?}");
+        assert!(key.ends_with("<input></input></radio>"), "got {key:?}");
+    }
+
+    #[test]
+    fn fetch_ir_children_are_reversed_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history");
+        std::fs::write(&path, "a\nb\nc\n").unwrap();
+        let mut p = TerminalProvider::new();
+        p.command_history_path = Some(path);
+        let elems = p.fetch();
+        let slot = elems.last().unwrap().as_obj().unwrap();
+        let kids: Vec<&str> =
+            slot.children.iter().filter_map(|e| e.as_str()).collect();
+        // Newest first.
+        assert_eq!(kids, vec!["c", "b", "a"]);
+    }
+
+    #[test]
+    fn fetch_ir_keeps_duplicate_history_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history");
+        std::fs::write(&path, "ls\nls\ncd\n").unwrap();
+        let mut p = TerminalProvider::new();
+        p.command_history_path = Some(path);
+        let elems = p.fetch();
+        let slot = elems.last().unwrap().as_obj().unwrap();
+        let kids: Vec<&str> =
+            slot.children.iter().filter_map(|e| e.as_str()).collect();
+        // No de-duplication — raw chronological history, reversed.
+        assert_eq!(kids, vec!["cd", "ls", "ls"]);
+    }
+
+    #[test]
+    fn set_input_value_prefills_fetch_slot() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = TerminalProvider::new();
+        p.command_history_path = Some(dir.path().join("absent"));
+        p.set_input_value("git status");
+        let elems = p.fetch();
+        let key = &elems.last().unwrap().as_obj().unwrap().key;
+        assert!(key.contains("<input>git status</input>"), "got {key:?}");
     }
 
     #[test]
@@ -1073,44 +1144,50 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn fetch_uses_synthesized_prompt_for_input_slot() {
-        // No shell spawned, no entries — the trailing element should still be
-        // a synthesized "{user}@{host}:{cwd}$ <input></input>" line.
+        // No shell spawned, no entries — the trailing element is the `+iR`
+        // slot, an Obj whose key embeds the synthesized prompt.
+        let dir = tempfile::tempdir().unwrap();
         let mut p = TerminalProvider::new();
+        p.command_history_path = Some(dir.path().join("absent"));
         let elems = p.fetch();
         assert_eq!(elems.len(), 1);
-        let s = elems[0].as_str().unwrap();
-        assert!(s.ends_with("$ <input></input>"), "expected prompt suffix; got {:?}", s);
-        assert!(s.contains('@'), "expected user@host segment; got {:?}", s);
+        let key = &elems[0].as_obj().unwrap().key;
+        assert!(key.ends_with("$ <input></input></radio>"), "got {key:?}");
+        assert!(key.contains('@'), "expected user@host segment; got {key:?}");
     }
 
     #[cfg(windows)]
     #[test]
     fn fetch_uses_synthesized_prompt_for_input_slot_windows() {
         // Windows convention: `cwd> <input></input>` with no user@host.
+        let dir = tempfile::tempdir().unwrap();
         let mut p = TerminalProvider::new();
+        p.command_history_path = Some(dir.path().join("absent"));
         let elems = p.fetch();
         assert_eq!(elems.len(), 1);
-        let s = elems[0].as_str().unwrap();
-        assert!(s.ends_with("> <input></input>"), "expected prompt suffix; got {:?}", s);
-        assert!(!s.contains('@'), "Windows prompt should omit user@host; got {:?}", s);
+        let key = &elems[0].as_obj().unwrap().key;
+        assert!(key.ends_with("> <input></input></radio>"), "got {key:?}");
+        assert!(!key.contains('@'), "Windows prompt should omit user@host; got {key:?}");
     }
 
     #[cfg(unix)]
     #[test]
     fn fetch_uses_entry_prompt_for_past_commands() {
+        let dir = tempfile::tempdir().unwrap();
         let mut p = TerminalProvider::new();
+        p.command_history_path = Some(dir.path().join("absent"));
         p.entries.push(Entry {
             prompt: "user@host:/tmp$ ".to_owned(),
             input: "ls".to_owned(),
             output: "ls\nfile1\nfile2\n".to_owned(),
         });
         let elems = p.fetch();
-        // Past prompt + cmd, two output lines, then synthesized live prompt.
+        // Past prompt + cmd, two output lines, then the `+iR` input slot Obj.
         assert_eq!(elems.len(), 4);
         assert_eq!(elems[0].as_str(), Some("user@host:/tmp$ ls"));
         assert_eq!(elems[1].as_str(), Some("file1"));
         assert_eq!(elems[2].as_str(), Some("file2"));
-        assert!(elems[3].as_str().unwrap().ends_with("$ <input></input>"));
+        assert!(elems[3].as_obj().unwrap().key.ends_with("$ <input></input></radio>"));
     }
 
     #[cfg(unix)]
@@ -1425,15 +1502,34 @@ mod tests {
 
         let elems = p.fetch();
         // Flat layout: "{PS1}echo terminal-it-test" + N output lines + a final
-        // "{PS1}<input></input>" slot. We don't pin the exact PS1 (depends on
-        // /bin/sh + the user's rc files), but the first element must end with
-        // the submitted command, the last must end with the input placeholder,
-        // and somewhere in between the echoed marker must appear.
+        // `+iR` slot Obj. We don't pin the exact PS1 (depends on /bin/sh + the
+        // user's rc files), but the first element must end with the submitted
+        // command, the last must be the `<input>`-in-`<radio>` slot Obj, and
+        // somewhere in between the echoed marker must appear.
         assert!(elems.len() >= 2);
         assert!(elems[0].as_str().map_or(false, |s| s.ends_with("echo terminal-it-test")),
             "first element should end with command; got {:?}", elems[0].as_str());
-        assert!(elems.last().and_then(|e| e.as_str()).map_or(false, |s| s.ends_with(INPUT_PLACEHOLDER)),
-            "last element should end with input slot; got {:?}", elems.last().and_then(|e| e.as_str()));
+        assert!(elems.last().and_then(|e| e.as_obj())
+            .map_or(false, |o| o.key.ends_with("<input></input></radio>")),
+            "last element should be the +iR input slot; got {:?}", elems.last());
         assert!(elems.iter().any(|e| e.as_str().map_or(false, |s| s.contains("terminal-it-test"))));
+        // The committed command landed in the recall history → slot children.
+        assert!(elems.last().and_then(|e| e.as_obj())
+            .map_or(false, |o| o.children.iter()
+                .any(|c| c.as_str() == Some("echo terminal-it-test"))),
+            "committed command should appear as a history child");
+    }
+
+    #[test]
+    fn commit_edit_clears_pending_input() {
+        let mut p = TerminalProvider::new();
+        p.on_setting_change("shellProgram", "/bin/sh");
+        p.init();
+        if p.shell.is_none() {
+            return; // CI sandbox: no PTY.
+        }
+        p.set_input_value("from history");
+        assert!(p.commit_edit("", "echo done"));
+        assert!(p.pending_input.is_empty());
     }
 }

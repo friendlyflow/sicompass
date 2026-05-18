@@ -255,6 +255,10 @@ pub fn main_loop(app: &mut AppState) {
                 let idx = app.renderer.current_id.last()?;
                 match arr.get(idx)? {
                     sicompass_sdk::ffon::FfonElement::Str(s) if s.ends_with("<input></input>") => Some(()),
+                    // The terminal's `+iR` slot is an Obj (input + radio children).
+                    sicompass_sdk::ffon::FfonElement::Obj(o)
+                        if sicompass_sdk::tags::has_input(&o.key)
+                            && sicompass_sdk::tags::has_radio(&o.key) => Some(()),
                     _ => None,
                 }
             })
@@ -266,9 +270,12 @@ pub fn main_loop(app: &mut AppState) {
                 if let Some(arr) = sicompass_sdk::ffon::get_ffon_at_id(
                     &app.renderer.ffon, &app.renderer.current_id,
                 ) {
-                    if let Some(idx) = arr.iter().rposition(|e| matches!(
-                        e, sicompass_sdk::ffon::FfonElement::Str(s) if s.ends_with("<input></input>")
-                    )) {
+                    if let Some(idx) = arr.iter().rposition(|e| match e {
+                        sicompass_sdk::ffon::FfonElement::Str(s) => s.ends_with("<input></input>"),
+                        sicompass_sdk::ffon::FfonElement::Obj(o) =>
+                            sicompass_sdk::tags::has_input(&o.key)
+                                && sicompass_sdk::tags::has_radio(&o.key),
+                    }) {
                         app.renderer.current_id.set_last(idx);
                         app.renderer.scroll_offset = -1;
                     }
@@ -718,8 +725,11 @@ fn update_view(app: &mut AppState) {
         Coordinate::Insert | Coordinate::Normal | Coordinate::Visual
     );
     let insert_buf = app.renderer.input_buffer.clone();
-    let insert_prefix = app.renderer.input_prefix.clone();
-    let insert_suffix = app.renderer.input_suffix.clone();
+    // `input_prefix`/`input_suffix` are kept raw (they reconstruct the FFON
+    // key on commit), but a `+iR` slot puts a dangling `<radio>` in the prefix
+    // and `</radio>` in the suffix — strip all tag tokens for display.
+    let insert_prefix = sicompass_sdk::tags::strip_tags(&app.renderer.input_prefix);
+    let insert_suffix = sicompass_sdk::tags::strip_tags(&app.renderer.input_suffix);
     let insert_cursor = app.renderer.cursor_position;
     let insert_sel = app.renderer.selection_anchor;
     let caret_visible = app.renderer.caret.visible;

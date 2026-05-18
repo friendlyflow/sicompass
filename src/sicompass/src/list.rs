@@ -413,6 +413,12 @@ fn build_obj_label(obj: &FfonObject) -> String {
         return format!("+fi {}", tags::strip_display(key));
     }
 
+    // +iR: Obj key with BOTH <input> and <radio> — an editable input slot that
+    // also exposes `-r` children. Must win over `+R` and `+i` below.
+    if tags::has_input(key) && tags::has_radio(key) {
+        return format!("+iR {}", tags::strip_display(key));
+    }
+
     if tags::has_checkbox_checked(key) {
         let content = tags::extract_checkbox_checked(key)
             .unwrap_or_else(|| tags::strip_display(key));
@@ -1027,6 +1033,35 @@ mod tests {
         });
         assert!(label.starts_with("+ci "), "expected `+ci ` prefix, got {label:?}");
         assert!(label.contains("section"));
+    }
+
+    #[test]
+    fn ir_obj_label_emits_plus_ir() {
+        // Obj key with BOTH <input> and <radio> → `+iR`, winning over `+R`/`+i`.
+        let label = build_obj_label(&FfonObject {
+            key: "<radio>nico@host:~$ <input></input></radio>".to_owned(),
+            children: vec![],
+        });
+        assert_eq!(label, "+iR nico@host:~$ ");
+    }
+
+    #[test]
+    fn ir_obj_label_keeps_input_value_in_display() {
+        let label = build_obj_label(&FfonObject {
+            key: "<radio>p <input>ls -la</input></radio>".to_owned(),
+            children: vec![],
+        });
+        assert_eq!(label, "+iR p ls -la");
+        // Must not fall through to `+R` or `+i`.
+        assert!(!label.starts_with("+R"));
+        assert!(!label.starts_with("+i "));
+    }
+
+    #[test]
+    fn ir_children_render_with_minus_r() {
+        // A plain Str child of an `+iR` Obj inherits `-r` from the parent's
+        // <radio> tag, same as a `+R` radio group.
+        assert!(build_str_label("git status", true).starts_with("-r "));
     }
 
     fn make_renderer_with_items(items: &[&str]) -> AppRenderer {

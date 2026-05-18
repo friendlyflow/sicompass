@@ -124,6 +124,10 @@ pub trait Provider: Send + 'static {
     fn on_button_press(&mut self, _function_name: &str) {}
     fn on_checkbox_change(&mut self, _label: &str, _checked: bool) {}
 
+    /// Set the value the provider renders inside its live `<input>` slot on the
+    /// next `fetch()`. Used to fill a terminal-style input from a history pick.
+    fn set_input_value(&mut self, _value: &str) {}
+
     /// Called once per frame from the main loop. Providers use this to drive
     /// background state (e.g. polling async I/O). Return `true` if the view
     /// needs a redraw as a result.

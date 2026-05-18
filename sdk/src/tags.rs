@@ -418,12 +418,41 @@ pub fn strip_display(text: &str) -> String {
                 (after_tags_content, "")
             };
             let result = format!("{before}{content}{after}");
-            return unescape(&result);
+            // Recurse so nested / sibling tag pairs are all stripped — e.g. a
+            // `+iR` key `<radio>prompt<input>v</input></radio>` needs both the
+            // <radio> and <input> pairs removed, not just the first found.
+            return strip_display(&result);
         }
     }
 
     // No tags found — just unescape
     unescape(text)
+}
+
+/// Remove every `<...>` tag token from `text`, leaving plain display text.
+///
+/// Unlike [`strip_display`], this also drops *unmatched* tokens — a lone
+/// `</radio>` or `<radio>` with no partner — which makes it suitable for
+/// rendering a prefix/suffix slice that was split out of the middle of a
+/// tagged key (e.g. the `+iR` input slot, whose prefix carries a dangling
+/// `<radio>` and whose suffix carries a dangling `</radio>`). It does NOT
+/// interpret `<button>`/`<id>` semantics, so only use it on markup-only
+/// slices, never on a full element key.
+pub fn strip_tags(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(lt) = rest.find('<') {
+        out.push_str(&rest[..lt]);
+        match rest[lt..].find('>') {
+            Some(gt) => rest = &rest[lt + gt + 1..],
+            None => {
+                rest = &rest[lt..];
+                break;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -1177,5 +1206,26 @@ mod tests {
     #[test]
     fn test_escaped_id_not_recognized() {
         assert!(!has_id("\\<id>section\\</id>"));
+    }
+
+    #[test]
+    fn test_strip_display_strips_nested_radio_and_input() {
+        // `+iR` key: <radio> wrapping an <input>. Both pairs must be removed.
+        assert_eq!(
+            strip_display("<radio>nico@host:~$ <input></input></radio>"),
+            "nico@host:~$ ",
+        );
+        assert_eq!(
+            strip_display("<radio>p <input>ls -la</input></radio>"),
+            "p ls -la",
+        );
+    }
+
+    #[test]
+    fn test_strip_tags_removes_all_tokens_including_unmatched() {
+        assert_eq!(strip_tags("<radio>nico@host:~$ "), "nico@host:~$ ");
+        assert_eq!(strip_tags("</radio>"), "");
+        assert_eq!(strip_tags("a<input>b</input>c"), "abc");
+        assert_eq!(strip_tags("plain text"), "plain text");
     }
 }
