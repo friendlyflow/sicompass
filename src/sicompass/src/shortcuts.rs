@@ -53,6 +53,7 @@ const NAV_UP_DOWN: &[Coordinate] = &[
     Coordinate::Command,
     Coordinate::Scroll,
     Coordinate::ScrollSearch,
+    Coordinate::ScrollPrefixSearch,
     Coordinate::Meta,
     Coordinate::TimelineView,
 ];
@@ -68,6 +69,7 @@ const UNDO_MODES_ALL: &[Coordinate] = &[
     Coordinate::Command,
     Coordinate::Scroll,
     Coordinate::ScrollSearch,
+    Coordinate::ScrollPrefixSearch,
 ];
 
 // ---------------------------------------------------------------------------
@@ -335,7 +337,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
                  Coordinate::Insert, Coordinate::Normal,
                  Coordinate::Visual,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
-                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch,
+                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch,
                  Coordinate::InputSearch, Coordinate::Meta, Coordinate::TimelineView, Coordinate::Dashboard],
         label: "Esc    Back", is_available: not_at_root, handle: handlers::handle_escape },
     Shortcut { key: Keycode::Escape, key2: None, ctrl: false, shift: false,
@@ -343,7 +345,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
                  Coordinate::Insert, Coordinate::Normal,
                  Coordinate::Visual,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
-                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch,
+                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch,
                  Coordinate::InputSearch, Coordinate::Meta, Coordinate::TimelineView, Coordinate::Dashboard],
         label: "", is_available: always, handle: handlers::handle_escape },
 
@@ -420,25 +422,25 @@ pub static SHORTCUTS: &[Shortcut] = &[
     Shortcut { key: Keycode::PageUp, key2: None, ctrl: false, shift: false,
         modes: &[Coordinate::General,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
-                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch,
+                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch,
                  Coordinate::InputSearch],
         label: "PgUp   Page up", is_available: not_at_root, handle: handlers::handle_page_up },
     Shortcut { key: Keycode::PageUp, key2: None, ctrl: false, shift: false,
         modes: &[Coordinate::General,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
-                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch,
+                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch,
                  Coordinate::InputSearch],
         label: "", is_available: always, handle: handlers::handle_page_up },
     Shortcut { key: Keycode::PageDown, key2: None, ctrl: false, shift: false,
         modes: &[Coordinate::General,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
-                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch,
+                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch,
                  Coordinate::InputSearch],
         label: "PgDn   Page dn", is_available: not_at_root, handle: handlers::handle_page_down },
     Shortcut { key: Keycode::PageDown, key2: None, ctrl: false, shift: false,
         modes: &[Coordinate::General,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
-                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch,
+                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch,
                  Coordinate::InputSearch],
         label: "", is_available: always, handle: handlers::handle_page_down },
 
@@ -449,7 +451,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
                  Coordinate::Insert, Coordinate::Normal,
                  Coordinate::Visual,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
-                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch,
+                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch,
                  Coordinate::InputSearch],
         label: "Home   First", is_available: not_at_root, handle: handlers::handle_home },
     Shortcut { key: Keycode::Home, key2: None, ctrl: false, shift: false,
@@ -457,7 +459,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
                  Coordinate::Insert, Coordinate::Normal,
                  Coordinate::Visual,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
-                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch,
+                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch,
                  Coordinate::InputSearch],
         label: "", is_available: always, handle: handlers::handle_home },
     Shortcut { key: Keycode::End, key2: None, ctrl: false, shift: false,
@@ -465,7 +467,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
                  Coordinate::Insert, Coordinate::Normal,
                  Coordinate::Visual,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
-                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch,
+                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch,
                  Coordinate::InputSearch],
         label: "End    Last", is_available: not_at_root, handle: handlers::handle_end },
     Shortcut { key: Keycode::End, key2: None, ctrl: false, shift: false,
@@ -473,7 +475,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
                  Coordinate::Insert, Coordinate::Normal,
                  Coordinate::Visual,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
-                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch,
+                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch,
                  Coordinate::InputSearch],
         label: "", is_available: always, handle: handlers::handle_end },
 
@@ -501,6 +503,10 @@ pub static SHORTCUTS: &[Shortcut] = &[
     Shortcut { key: Keycode::Tab, key2: None, ctrl: false, shift: false,
         modes: &[Coordinate::Insert],
         label: "Tab    Next field", is_available: always, handle: handlers::handle_tab },
+    // Scroll mode: Tab → prefix search
+    Shortcut { key: Keycode::Tab, key2: None, ctrl: false, shift: false,
+        modes: &[Coordinate::Scroll],
+        label: "Tab    Prefix search", is_available: always, handle: handlers::handle_tab },
 
     // ---- Backspace -------------------------------------------------------
     Shortcut { key: Keycode::Backspace, key2: None, ctrl: false, shift: false,
@@ -511,7 +517,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
                  Coordinate::Insert, Coordinate::Normal,
                  Coordinate::Visual,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
-                 Coordinate::Command, Coordinate::ScrollSearch, Coordinate::InputSearch],
+                 Coordinate::Command, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch, Coordinate::InputSearch],
         label: "Bspc   Backspace", is_available: always, handle: handlers::handle_backspace },
 
     // ---- Delete (forward) ------------------------------------------------
@@ -519,7 +525,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
         modes: &[Coordinate::Insert, Coordinate::Normal,
                  Coordinate::Visual,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
-                 Coordinate::Command, Coordinate::ScrollSearch, Coordinate::InputSearch],
+                 Coordinate::Command, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch, Coordinate::InputSearch],
         label: "Del    Delete fwd", is_available: always, handle: handlers::handle_delete_forward },
 
     // ---- Return ----------------------------------------------------------
@@ -548,6 +554,10 @@ pub static SHORTCUTS: &[Shortcut] = &[
     Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
         modes: &[Coordinate::Command],
         label: "Enter  Execute", is_available: always, handle: handlers::handle_enter_command },
+    // Scroll modes: Enter → go to the highlighted element in General mode
+    Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
+        modes: &[Coordinate::Scroll, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch],
+        label: "Enter  Go to element", is_available: always, handle: handlers::handle_enter_scroll },
     // Insert modes: Ctrl+Return → newline
     Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: true, shift: false,
         modes: &[Coordinate::Insert],
@@ -762,7 +772,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
                  Coordinate::Insert, Coordinate::Normal,
                  Coordinate::Visual,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
-                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch,
+                 Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch,
                  Coordinate::InputSearch],
         label: "Ctrl+F Extended search", is_available: always,
         handle: handlers::handle_ctrl_f },

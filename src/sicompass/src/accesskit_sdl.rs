@@ -373,6 +373,7 @@ mod tests {
                 label: label.to_string(),
                 data: None,
                 nav_path: None,
+                ext_prefix: None,
             });
         }
         r
@@ -617,7 +618,7 @@ mod tests {
         let mut r = AppRenderer::new();
         r.coordinate = crate::app_state::Coordinate::Scroll;
         r.speak_mode_change(None);
-        assert_eq!(announced_text(&r).as_deref(), Some("scroll"));
+        assert_eq!(announced_text(&r).as_deref(), Some("scroll mode"));
     }
 
     #[test]

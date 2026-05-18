@@ -16,7 +16,7 @@ use sicompass_sdk::tags;
 /// Move selection up in the current list.
 pub fn handle_up(r: &mut AppRenderer) {
     match r.coordinate {
-        Coordinate::ScrollSearch => {
+        Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch => {
             if r.scroll_search_match_count > 0 {
                 if r.scroll_search_current_match > 0 {
                     r.scroll_search_current_match -= 1;
@@ -57,7 +57,7 @@ pub fn handle_up(r: &mut AppRenderer) {
 /// Move selection down in the current list.
 pub fn handle_down(r: &mut AppRenderer) {
     match r.coordinate {
-        Coordinate::ScrollSearch => {
+        Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch => {
             if r.scroll_search_match_count > 0 {
                 if r.scroll_search_current_match < r.scroll_search_match_count - 1 {
                     r.scroll_search_current_match += 1;
@@ -579,7 +579,7 @@ pub fn handle_page_up(r: &mut AppRenderer) {
         Coordinate::InputSearch => {
             r.input_search_scroll_offset = (r.input_search_scroll_offset - page_size as i32).max(0);
         }
-        Coordinate::Scroll | Coordinate::ScrollSearch => {
+        Coordinate::Scroll | Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch => {
             let viewport_h = r.window_height - line_height;
             r.text_scroll_offset = (r.text_scroll_offset - viewport_h).max(0);
         }
@@ -628,7 +628,7 @@ pub fn handle_page_down(r: &mut AppRenderer) {
             r.input_search_scroll_offset += page_size as i32;
             // No upper clamp here — renderer will clamp when it knows the line count
         }
-        Coordinate::Scroll | Coordinate::ScrollSearch => {
+        Coordinate::Scroll | Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch => {
             let viewport_h = r.window_height - line_height;
             let max_offset = (r.text_scroll_total_height - viewport_h).max(0);
             r.text_scroll_offset = (r.text_scroll_offset + viewport_h).min(max_offset);
@@ -754,8 +754,42 @@ pub fn handle_s(r: &mut AppRenderer) {
     r.previous_coordinate = r.coordinate;
     r.coordinate = Coordinate::Scroll;
     r.speak_mode_change(None);
+    // Rebuild the list as the recursive flatten of the current list + sublists.
+    list::create_list_current_layer(r);
     r.text_scroll_offset = -1; // sentinel: renderer computes initial offset (selected item at top)
     r.text_scroll_total_height = 0;
+    r.needs_redraw = true;
+}
+
+/// Enter in a scroll sub-mode — navigate to the highlighted element in General
+/// mode. The target is the item at `list_index`; the scroll search renderers
+/// keep `list_index` on the current match so this works uniformly across plain
+/// scroll mode and both search sub-modes.
+pub fn handle_enter_scroll(r: &mut AppRenderer) {
+    if !matches!(
+        r.coordinate,
+        Coordinate::Scroll | Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch
+    ) {
+        return;
+    }
+    let target = r.total_list.get(r.list_index).map(|it| it.id.clone());
+    r.coordinate = Coordinate::General;
+    r.text_scroll_offset = 0;
+    r.text_scroll_total_height = 0;
+    r.scroll_search_match_count = 0;
+    r.scroll_search_current_match = 0;
+    r.scroll_search_needs_position = false;
+    r.scroll_search_snap = false;
+    r.input_buffer.clear();
+    r.cursor_position = 0;
+    if let Some(id) = target {
+        r.current_id = id;
+    }
+    // Rebuilds the parent layer (get_ffon_at_id strips the last index) and
+    // restores list_index to the element matching current_id.last().
+    list::create_list_current_layer(r);
+    r.scroll_offset = -1;
+    r.speak_mode_change(None);
     r.needs_redraw = true;
 }
 
@@ -788,8 +822,22 @@ pub fn handle_z(r: &mut AppRenderer) {
 /// Enter Tab search mode.
 pub fn handle_tab(r: &mut AppRenderer) {
     match r.coordinate {
-        Coordinate::Scroll | Coordinate::ScrollSearch => {
-            // noop in scroll modes
+        Coordinate::Scroll => {
+            // Open the prefix-search layout: search the `layer: X list: Y/Z`
+            // extended prefixes. `previous_coordinate` is left as-is (General)
+            // so Escape walks ScrollPrefixSearch -> Scroll -> General.
+            r.coordinate = Coordinate::ScrollPrefixSearch;
+            r.speak_mode_change(None);
+            r.input_buffer.clear();
+            r.cursor_position = 0;
+            r.selection_anchor = None;
+            r.scroll_search_match_count = 0;
+            r.scroll_search_current_match = 0;
+            r.scroll_search_needs_position = true;
+            r.needs_redraw = true;
+        }
+        Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch => {
+            // noop while already in a scroll search sub-mode
         }
         Coordinate::General | Coordinate::Insert => {
             r.previous_coordinate = r.coordinate;
@@ -2427,7 +2475,7 @@ pub fn handle_escape(r: &mut AppRenderer) {
             handle_dashboard_leave(r);
             return;
         }
-        Coordinate::ScrollSearch => {
+        Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch => {
             r.coordinate = Coordinate::Scroll;
             r.scroll_search_match_count = 0;
             r.scroll_search_current_match = 0;
@@ -2531,7 +2579,7 @@ pub fn handle_input(r: &mut AppRenderer, text: &str) {
             apply_insert_session_chunk(r);
             r.needs_redraw = true;
         }
-        Coordinate::ScrollSearch => {
+        Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch => {
             let pos = r.cursor_position.min(r.input_buffer.len());
             r.input_buffer.insert_str(pos, text);
             r.cursor_position = pos + text.len();
@@ -2573,7 +2621,7 @@ pub fn handle_backspace(r: &mut AppRenderer) {
                 r.needs_redraw = true;
             }
         }
-        Coordinate::Command | Coordinate::Insert | Coordinate::ScrollSearch | Coordinate::ExtendedSearch => {
+        Coordinate::Command | Coordinate::Insert | Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch | Coordinate::ExtendedSearch => {
             let buffer_changed = if has_selection(r) {
                 delete_selection(r);
                 r.caret.reset(sdl_ticks());
@@ -4107,7 +4155,7 @@ pub fn handle_ctrl_f(r: &mut AppRenderer) {
             r.scroll_search_needs_position = true;
             r.needs_redraw = true;
         }
-        Coordinate::ScrollSearch | Coordinate::InputSearch => {
+        Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch | Coordinate::InputSearch => {
             // noop
         }
         Coordinate::Insert => {
@@ -5573,6 +5621,7 @@ mod tests {
             label: "App A".to_string(),
             data: Some("/usr/bin/a".to_string()),
             nav_path: None,
+            ext_prefix: None,
         }];
         r.list_index = 0;
 
@@ -5588,11 +5637,14 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn tab_noop_in_scroll_mode() {
+    fn tab_in_scroll_enters_prefix_search() {
         let mut r = make_renderer();
         r.coordinate = Coordinate::Scroll;
         handle_tab(&mut r);
-        assert_eq!(r.coordinate, Coordinate::Scroll);
+        assert_eq!(r.coordinate, Coordinate::ScrollPrefixSearch);
+        assert!(r.input_buffer.is_empty());
+        assert_eq!(r.cursor_position, 0);
+        assert!(r.scroll_search_needs_position);
     }
 
     #[test]
@@ -5694,6 +5746,80 @@ mod tests {
         r.coordinate = Coordinate::SimpleSearch;
         handle_s(&mut r);
         assert_eq!(r.coordinate, Coordinate::SimpleSearch);
+    }
+
+    #[test]
+    fn s_flattens_current_list_and_sublists() {
+        // make_renderer: provider > [item 0, item 1, item 2, section > [child 0]]
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::General;
+        handle_s(&mut r);
+        // Flattened: item 0, item 1, item 2, section, child 0.
+        assert_eq!(r.total_list.len(), 5);
+        assert!(r.total_list[4].label.contains("child 0"));
+    }
+
+    #[test]
+    fn escape_from_prefix_search_returns_to_scroll() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::ScrollPrefixSearch;
+        handle_escape(&mut r);
+        assert_eq!(r.coordinate, Coordinate::Scroll);
+    }
+
+    #[test]
+    fn enter_in_scroll_navigates_to_general() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::General;
+        handle_s(&mut r);
+        // Highlight the nested "child 0" element (index 4 in the flattened list).
+        let target_id = r.total_list[4].id.clone();
+        r.list_index = 4;
+        handle_enter_scroll(&mut r);
+        assert_eq!(r.coordinate, Coordinate::General);
+        assert_eq!(r.current_id, target_id);
+        // Landed inside Section, with child 0 as the only (selected) element.
+        assert_eq!(r.total_list.len(), 1);
+        assert!(r.total_list[0].label.contains("child 0"));
+    }
+
+    #[test]
+    fn enter_in_scroll_search_navigates_to_element() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::General;
+        handle_s(&mut r);
+        r.coordinate = Coordinate::ScrollSearch;
+        // The renderer keeps list_index on the current match.
+        let target_id = r.total_list[3].id.clone(); // the "section" object
+        r.list_index = 3;
+        handle_enter_scroll(&mut r);
+        assert_eq!(r.coordinate, Coordinate::General);
+        assert_eq!(r.current_id, target_id);
+    }
+
+    #[test]
+    fn enter_in_prefix_search_navigates_to_element() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::General;
+        handle_s(&mut r);
+        r.coordinate = Coordinate::ScrollPrefixSearch;
+        let target_id = r.total_list[2].id.clone(); // "item 2"
+        r.list_index = 2;
+        handle_enter_scroll(&mut r);
+        assert_eq!(r.coordinate, Coordinate::General);
+        assert_eq!(r.current_id, target_id);
+    }
+
+    #[test]
+    fn up_down_in_prefix_search_step_matches() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::ScrollPrefixSearch;
+        r.scroll_search_match_count = 3;
+        r.scroll_search_current_match = 0;
+        handle_down(&mut r);
+        assert_eq!(r.scroll_search_current_match, 1);
+        handle_up(&mut r);
+        assert_eq!(r.scroll_search_current_match, 0);
     }
 
     // -----------------------------------------------------------------------
@@ -6233,6 +6359,14 @@ mod tests {
         r.coordinate = Coordinate::ScrollSearch;
         handle_tab(&mut r);
         assert_eq!(r.coordinate, Coordinate::ScrollSearch);
+    }
+
+    #[test]
+    fn tab_noop_in_scroll_prefix_search_mode() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::ScrollPrefixSearch;
+        handle_tab(&mut r);
+        assert_eq!(r.coordinate, Coordinate::ScrollPrefixSearch);
     }
 
     #[test]

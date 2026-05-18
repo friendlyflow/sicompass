@@ -57,6 +57,7 @@ fn collect_items_recursive(
             label,
             data: if breadcrumb.is_empty() { None } else { Some(breadcrumb.to_owned()) },
             nav_path: None,
+            ext_prefix: None,
         });
 
         // Recurse into object children
@@ -72,6 +73,81 @@ fn collect_items_recursive(
                 child_id.push(0);
                 let child_parent_has_radio = sicompass_sdk::tags::has_radio(&obj.key);
                 collect_items_recursive(&obj.children, &child_id, &new_bc, child_parent_has_radio, out);
+            }
+        }
+    }
+}
+
+/// Rebuild `total_list` for `Coordinate::Scroll` (and its search sub-modes).
+///
+/// Recursively flattens the FFON tree at `current_id` into a single list of the
+/// current list plus every sublist. Each item carries an extended-prefix string
+/// `layer: X list: Y/Z` (X = absolute tree depth, Y = 1-based index in its
+/// containing sublist, Z = that sublist's length) and an image path in `data`
+/// for image elements (so scroll mode can render images).
+pub fn create_list_scroll(renderer: &mut AppRenderer) {
+    renderer.total_list.clear();
+    renderer.filtered_list_indices.clear();
+    renderer.error_message.clear();
+
+    let base_id = renderer.current_id.clone();
+    let arr = match get_ffon_at_id(&renderer.ffon, &base_id) {
+        Some(a) => a,
+        None => {
+            renderer.list_index = 0;
+            return;
+        }
+    };
+
+    let parent_has_radio = check_parent_has_radio(renderer);
+    let mut items: Vec<RenderListItem> = Vec::new();
+    collect_scroll_items_recursive(arr, &base_id, parent_has_radio, &mut items);
+
+    // Highlight the element the cursor was on when scroll mode was entered.
+    let new_index = items
+        .iter()
+        .position(|it| it.id == renderer.current_id)
+        .unwrap_or(0);
+
+    renderer.total_list = items;
+    renderer.list_index = new_index;
+}
+
+/// Recursively collect every FFON element from `arr` downward, building the
+/// extended-prefix string and image data for each.
+fn collect_scroll_items_recursive(
+    arr: &[FfonElement],
+    base_id: &IdArray,
+    parent_has_radio: bool,
+    out: &mut Vec<RenderListItem>,
+) {
+    let total = arr.len();
+    for (i, elem) in arr.iter().enumerate() {
+        let mut item_id = base_id.clone();
+        item_id.set_last(i);
+
+        let label = build_label_for_element(elem, parent_has_radio);
+        let data = match elem {
+            FfonElement::Str(s) if tags::has_image(s) => tags::extract_image(s),
+            _ => None,
+        };
+        let layer = item_id.depth().saturating_sub(1);
+        let ext_prefix = Some(format!("layer: {layer} list: {}/{total}", i + 1));
+
+        out.push(RenderListItem {
+            id: item_id.clone(),
+            label,
+            data,
+            nav_path: None,
+            ext_prefix,
+        });
+
+        if let FfonElement::Obj(obj) = elem {
+            if !obj.children.is_empty() {
+                let mut child_id = item_id.clone();
+                child_id.push(0);
+                let child_parent_has_radio = tags::has_radio(&obj.key);
+                collect_scroll_items_recursive(&obj.children, &child_id, child_parent_has_radio, out);
             }
         }
     }
@@ -102,6 +178,10 @@ pub fn create_list_current_layer(renderer: &mut AppRenderer) {
         }
         Coordinate::TimelineView => {
             build_timeline_list(renderer);
+            return;
+        }
+        Coordinate::Scroll | Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch => {
+            create_list_scroll(renderer);
             return;
         }
         _ => {
@@ -149,7 +229,7 @@ pub fn create_list_current_layer(renderer: &mut AppRenderer) {
             _ => None,
         };
 
-        items.push(RenderListItem { id: item_id, label, data, nav_path: None });
+        items.push(RenderListItem { id: item_id, label, data, nav_path: None, ext_prefix: None });
     }
 
     // Restore list_index to the item matching current_id.last()
@@ -415,6 +495,7 @@ fn build_timeline_list(renderer: &mut AppRenderer) {
             label: "  (no history)".to_string(),
             data: None,
             nav_path: None,
+            ext_prefix: None,
         }];
         return;
     }
@@ -447,6 +528,7 @@ fn build_timeline_list(renderer: &mut AppRenderer) {
             label,
             data: None,
             nav_path: None,
+            ext_prefix: None,
         });
     }
     renderer.total_list = items;
@@ -662,7 +744,7 @@ fn build_meta_list(renderer: &mut AppRenderer) {
         .map(|(i, label)| {
             let mut id = IdArray::new();
             id.push(i);
-            RenderListItem { id, label, data: None, nav_path: None }
+            RenderListItem { id, label, data: None, nav_path: None, ext_prefix: None }
         })
         .collect();
     renderer.total_list = items;
@@ -685,7 +767,7 @@ fn build_command_list(renderer: &mut AppRenderer) {
                 .map(|(i, label)| {
                     let mut id = IdArray::new();
                     id.push(i);
-                    RenderListItem { id, label, data: None, nav_path: None }
+                    RenderListItem { id, label, data: None, nav_path: None, ext_prefix: None }
                 })
                 .collect();
             renderer.total_list = items;
@@ -708,6 +790,7 @@ fn build_command_list(renderer: &mut AppRenderer) {
                         // image path and attempts to load it as a texture.
                         data: None,
                         nav_path: if li.data.is_empty() { None } else { Some(li.data) },
+                        ext_prefix: None,
                     }
                 })
                 .collect();
@@ -801,6 +884,65 @@ mod tests {
         populate_list_current_layer(&mut r, "ap");
 
         assert_eq!(r.filtered_list_indices.len(), 2); // apple, apricot
+    }
+
+    /// Build the tree used by the scroll-flatten tests:
+    /// provider > [alpha, Section > [beta, gamma], delta], cursor inside provider.
+    fn make_scroll_renderer() -> AppRenderer {
+        let mut root = FfonElement::new_obj("provider");
+        root.as_obj_mut().unwrap().push(FfonElement::new_str("alpha"));
+        let mut section = FfonElement::new_obj("Section");
+        section.as_obj_mut().unwrap().push(FfonElement::new_str("beta"));
+        section.as_obj_mut().unwrap().push(FfonElement::new_str("gamma"));
+        root.as_obj_mut().unwrap().push(section);
+        root.as_obj_mut().unwrap().push(FfonElement::new_str("delta"));
+
+        let mut r = make_renderer_with_ffon(vec![root]);
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        r.coordinate = Coordinate::Scroll;
+        r
+    }
+
+    #[test]
+    fn create_list_scroll_flattens_tree() {
+        let mut r = make_scroll_renderer();
+        create_list_scroll(&mut r);
+
+        let labels: Vec<&str> = r.total_list.iter().map(|it| it.label.as_str()).collect();
+        assert_eq!(r.total_list.len(), 5);
+        assert!(labels[0].contains("alpha"));
+        assert!(labels[1].contains("Section"));
+        assert!(labels[2].contains("beta"));
+        assert!(labels[3].contains("gamma"));
+        assert!(labels[4].contains("delta"));
+        // alpha lives in the provider layer; beta is one layer deeper (in Section).
+        assert_eq!(r.total_list[0].id.depth(), 2);
+        assert_eq!(r.total_list[2].id.depth(), 3);
+    }
+
+    #[test]
+    fn create_list_scroll_sets_ext_prefix() {
+        let mut r = make_scroll_renderer();
+        create_list_scroll(&mut r);
+
+        assert_eq!(r.total_list[0].ext_prefix.as_deref(), Some("layer: 1 list: 1/3"));
+        assert_eq!(r.total_list[1].ext_prefix.as_deref(), Some("layer: 1 list: 2/3"));
+        assert_eq!(r.total_list[2].ext_prefix.as_deref(), Some("layer: 2 list: 1/2"));
+        assert_eq!(r.total_list[3].ext_prefix.as_deref(), Some("layer: 2 list: 2/2"));
+        assert_eq!(r.total_list[4].ext_prefix.as_deref(), Some("layer: 1 list: 3/3"));
+    }
+
+    #[test]
+    fn create_list_scroll_carries_image_data() {
+        let mut root = FfonElement::new_obj("provider");
+        root.as_obj_mut().unwrap().push(FfonElement::new_str("<image>/pic.png</image>"));
+        let mut r = make_renderer_with_ffon(vec![root]);
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        r.coordinate = Coordinate::Scroll;
+        create_list_scroll(&mut r);
+
+        assert_eq!(r.total_list.len(), 1);
+        assert_eq!(r.total_list[0].data.as_deref(), Some("/pic.png"));
     }
 
     #[test]
