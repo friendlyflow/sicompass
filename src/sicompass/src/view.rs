@@ -1499,7 +1499,8 @@ fn update_view(app: &mut AppState) {
 
 /// Per-item vertical layout for scroll mode. Each item renders its extended
 /// prefix line(s) (`layer: X list: Y/Z`) followed by the element content —
-/// wrapped text for text items, a scaled image for image items.
+/// wrapped text for text items, a scaled image (with caption text above and
+/// below it) for image items.
 struct ScrollItemLayout {
     /// Virtual-space (pre-scroll) pixel top of the item.
     top: i32,
@@ -1507,10 +1508,34 @@ struct ScrollItemLayout {
     height: i32,
     /// Number of wrapped lines the extended prefix occupies.
     prefix_lines: usize,
-    /// Number of wrapped lines the text content occupies (0 for image items).
+    /// Number of wrapped lines the content occupies — text rows for text
+    /// items, or caption-prefix + image + caption-suffix rows for image items.
     content_lines: usize,
-    /// `(display_w, display_h)` for image items; `None` for text items.
-    img: Option<(f32, f32)>,
+    /// Image layout for image items; `None` for text items.
+    img: Option<ScrollImg>,
+}
+
+/// Image-item layout within a scroll-mode row: the scaled image plus the
+/// wrapped caption text rendered above (prefix) and below (suffix) it.
+struct ScrollImg {
+    /// `(display_w, display_h)` of the scaled image.
+    img_w: f32,
+    img_h: f32,
+    /// Number of line-height rows the image itself occupies.
+    image_lines: usize,
+    /// Wrapped lines of caption text rendered above the image.
+    caption_prefix_lines: usize,
+    /// Wrapped lines of caption text rendered below the image.
+    caption_suffix_lines: usize,
+}
+
+/// Display caption text wrapped around an image item's path: `(prefix, suffix)`,
+/// each trimmed. `prefix` is the text between the `-p` list tag and the path;
+/// `suffix` is the text after the path. Either may be empty.
+fn scroll_image_caption<'a>(label: &'a str, path: &str) -> (&'a str, &'a str) {
+    let (prefix_text, suffix_text, _) = split_image_label(label, path);
+    let (_, caption_prefix) = split_label(prefix_text);
+    (caption_prefix.trim(), suffix_text.trim())
 }
 
 /// Element content searched by Ctrl-F (`Content`) vs Tab (`Prefix`).
@@ -1553,7 +1578,22 @@ fn measure_scroll_items(
                 .map(|(tw, th)| if tw == 0 { img_w } else { img_w * th as f32 / tw as f32 })
                 .unwrap_or(img_w);
             let image_lines = ((img_h / line_height as f32).ceil() as usize).max(1);
-            (Some((img_w, img_h)), image_lines)
+            let (caption_prefix, caption_suffix) = scroll_image_caption(label, path);
+            let caption_prefix_lines = if caption_prefix.is_empty() {
+                0
+            } else {
+                fr.count_wrapped_lines(caption_prefix, scale, max_w).max(1)
+            };
+            let caption_suffix_lines = if caption_suffix.is_empty() {
+                0
+            } else {
+                fr.count_wrapped_lines(caption_suffix, scale, max_w).max(1)
+            };
+            let content_lines = caption_prefix_lines + image_lines + caption_suffix_lines;
+            (
+                Some(ScrollImg { img_w, img_h, image_lines, caption_prefix_lines, caption_suffix_lines }),
+                content_lines,
+            )
         } else {
             let (_, content) = scroll_item_parts(label);
             (None, fr.count_wrapped_lines(&content, scale, max_w).max(1))
@@ -1568,7 +1608,8 @@ fn measure_scroll_items(
 /// Render one scroll-mode item: the list prefix in the left column (a graphical
 /// radio/checkbox indicator plus its `-c`/`-r` tag, or a plain `-`/`+` tag), the
 /// extended prefix (`layer: X list: Y/Z`) on the same first line, then the
-/// element content (wrapped text or image) below — all aligned at `content_x`
+/// element content below — wrapped text, or an image's caption prefix text,
+/// the scaled image, and its caption suffix text — all aligned at `content_x`
 /// like general mode. Lines/images outside `[clip_y, win_h)` are clipped.
 #[allow(clippy::too_many_arguments)]
 fn render_scroll_item(
@@ -1628,16 +1669,39 @@ fn render_scroll_item(
     }
 
     let content_top = item_top_screen + layout.prefix_lines as f32 * lh;
-    if let (Some(path), Some((img_w, img_h))) = (img_data, layout.img) {
-        if content_top + img_h > clip_y && content_top < win_h {
+    if let (Some(path), Some(img)) = (img_data, layout.img.as_ref()) {
+        let (caption_prefix, caption_suffix) = scroll_image_caption(label, path);
+        // Caption text rendered above the image, at the content column.
+        if !caption_prefix.is_empty() {
+            for (n, (line, _)) in fr.wrap_lines_with_offsets(caption_prefix, scale, content_w).iter().enumerate() {
+                let line_top = content_top + n as f32 * lh;
+                if line_top + lh <= clip_y { continue; }
+                if line_top >= win_h { break; }
+                let baseline = line_top + ascender * scale + crate::text::TEXT_PADDING;
+                fr.prepare_text_for_rendering(line, content_x, baseline, scale, p.text);
+            }
+        }
+        let img_top = content_top + img.caption_prefix_lines as f32 * lh;
+        if img_top + img.img_h > clip_y && img_top < win_h {
             if let Some(ir) = ir {
                 let border = 2.0_f32;
                 // Clip vertically so a scrolled image never bleeds over the
                 // header / tabs band (or below the window).
                 unsafe {
-                    ir.prepare_image_clipped(path, content_x + border, content_top + border,
-                                     img_w - 2.0 * border, img_h - 2.0 * border, clip_y, win_h);
+                    ir.prepare_image_clipped(path, content_x + border, img_top + border,
+                                     img.img_w - 2.0 * border, img.img_h - 2.0 * border, clip_y, win_h);
                 }
+            }
+        }
+        // Caption text rendered below the image.
+        if !caption_suffix.is_empty() {
+            let suffix_top = img_top + img.image_lines as f32 * lh;
+            for (n, (line, _)) in fr.wrap_lines_with_offsets(caption_suffix, scale, content_w).iter().enumerate() {
+                let line_top = suffix_top + n as f32 * lh;
+                if line_top + lh <= clip_y { continue; }
+                if line_top >= win_h { break; }
+                let baseline = line_top + ascender * scale + crate::text::TEXT_PADDING;
+                fr.prepare_text_for_rendering(line, content_x, baseline, scale, p.text);
             }
         }
     } else {
@@ -2404,5 +2468,29 @@ mod tests {
         let (prefix, content) = split_label("+ Section name");
         assert_eq!(prefix, "+ ");
         assert_eq!(content, "Section name");
+    }
+
+    #[test]
+    fn scroll_image_caption_splits_prefix_and_suffix() {
+        let label = "-p Caption above /img/pic.png trailing words";
+        let (prefix, suffix) = scroll_image_caption(label, "/img/pic.png");
+        assert_eq!(prefix, "Caption above");
+        assert_eq!(suffix, "trailing words");
+    }
+
+    #[test]
+    fn scroll_image_caption_bare_marker_has_no_caption() {
+        let label = "-p /img/pic.png";
+        let (prefix, suffix) = scroll_image_caption(label, "/img/pic.png");
+        assert_eq!(prefix, "");
+        assert_eq!(suffix, "");
+    }
+
+    #[test]
+    fn scroll_image_caption_prefix_only() {
+        let label = "-p A photo of the harbour /img/pic.png";
+        let (prefix, suffix) = scroll_image_caption(label, "/img/pic.png");
+        assert_eq!(prefix, "A photo of the harbour");
+        assert_eq!(suffix, "");
     }
 }
