@@ -4206,7 +4206,13 @@ pub fn handle_ctrl_f(r: &mut AppRenderer) {
             r.selection_anchor = None;
             r.scroll_offset = 0;
             list::create_list_extended_search(r);
-            r.list_index = r.current_id.last().unwrap_or(0);
+            // The extended-search list is a recursive flatten of the subtree,
+            // so `current_id.last()` (an index into the immediate layer) does
+            // not address it. Select the flattened-list item whose id matches
+            // the focused element so search opens on it, not the first row.
+            r.list_index = r.total_list.iter()
+                .position(|it| it.id == r.current_id)
+                .unwrap_or(0);
             let ctx = r.current_list_item()
                 .map(|it| crate::accesskit_sdl::label_to_speech(&it.label));
             r.speak_mode_change(ctx);
@@ -6019,6 +6025,34 @@ mod tests {
         r.coordinate = Coordinate::General;
         handle_ctrl_f(&mut r);
         assert_eq!(r.search_origin_id, expected);
+    }
+
+    #[test]
+    fn ctrl_f_selects_focused_element_in_flattened_list() {
+        // provider > [ section > [child 0], item A ]. An earlier sibling
+        // (section) carries a child, so the flattened extended-search list is
+        // [section, child 0, item A] — "item A" sits at flattened index 2 even
+        // though its layer index (current_id.last()) is 1.
+        let mut root = FfonElement::new_obj("provider");
+        let mut section = FfonElement::new_obj("section");
+        section.as_obj_mut().unwrap().push(FfonElement::new_str("child 0"));
+        root.as_obj_mut().unwrap().push(section);
+        root.as_obj_mut().unwrap().push(FfonElement::new_str("item A"));
+
+        let mut r = AppRenderer::new();
+        r.ffon = vec![root];
+        // Focus "item A" — layer index 1.
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(1); id };
+        list::create_list_current_layer(&mut r);
+        r.coordinate = Coordinate::General;
+
+        handle_ctrl_f(&mut r);
+        assert_eq!(r.coordinate, Coordinate::ExtendedSearch);
+        assert_eq!(r.list_index, 2,
+            "extended search should open on the focused element's flattened index");
+        let item = r.current_list_item().expect("a list item is selected");
+        assert_eq!(item.label, "- item A",
+            "extended search should open on the focused element, not an earlier row");
     }
 
     #[test]
