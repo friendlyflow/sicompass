@@ -8,7 +8,7 @@
 use serde_json::Value;
 use sicompass_sdk::FfonElement;
 
-use crate::events::{ContentBlock, ResultEvent, StreamEvent};
+use crate::events::{ContentBlock, PartialDelta, PartialInner, ResultEvent, StreamEvent};
 
 /// A tool invocation requested by the assistant.
 #[derive(Debug, Clone)]
@@ -33,6 +33,29 @@ pub enum Turn {
     },
 }
 
+/// A live, in-progress assistant message reconstructed from `--include-partial-
+/// messages` token deltas. Superseded by the consolidated `assistant` event.
+#[derive(Debug, Default)]
+pub struct PartialAssistant {
+    /// `true` once any partial event for the current message has arrived.
+    pub active: bool,
+    /// Text accumulated from `text_delta` events across the message's blocks.
+    pub text: String,
+    /// Names of `tool_use` blocks the message has started.
+    pub tools: Vec<String>,
+}
+
+impl PartialAssistant {
+    fn clear(&mut self) {
+        *self = PartialAssistant::default();
+    }
+
+    /// Whether there is anything worth showing as a live preview.
+    fn has_content(&self) -> bool {
+        self.active && (!self.text.is_empty() || !self.tools.is_empty())
+    }
+}
+
 /// The full state of one streaming `claude` session.
 #[derive(Debug, Default)]
 pub struct Conversation {
@@ -45,6 +68,8 @@ pub struct Conversation {
     pub last_result: Option<ResultEvent>,
     /// `true` between sending a user message and receiving its `result` event.
     pub busy: bool,
+    /// Live token-level preview of the assistant message currently streaming.
+    pub partial: PartialAssistant,
 }
 
 impl Conversation {
@@ -54,6 +79,7 @@ impl Conversation {
     pub fn push_user(&mut self, text: &str) {
         self.turns.push(Turn::User { text: text.to_owned() });
         self.busy = true;
+        self.partial.clear();
     }
 
     /// Fold one stream event into the conversation state.
@@ -89,6 +115,9 @@ impl Conversation {
                 if !texts.is_empty() || !tools.is_empty() {
                     self.turns.push(Turn::Assistant { texts, tools });
                 }
+                // The consolidated event is authoritative — drop the live
+                // preview now that the real turn is recorded.
+                self.partial.clear();
             }
             StreamEvent::User(u) => {
                 // A `user` event carries tool results (and an echo of our own
@@ -109,9 +138,31 @@ impl Conversation {
                     }
                 }
             }
+            StreamEvent::Partial(p) => match p.event {
+                PartialInner::ContentBlockStart { content_block } => {
+                    self.partial.active = true;
+                    if content_block.get("type").and_then(|t| t.as_str())
+                        == Some("tool_use")
+                    {
+                        if let Some(name) =
+                            content_block.get("name").and_then(|n| n.as_str())
+                        {
+                            self.partial.tools.push(name.to_owned());
+                        }
+                    }
+                }
+                PartialInner::ContentBlockDelta { delta } => {
+                    self.partial.active = true;
+                    if let PartialDelta::TextDelta { text } = delta {
+                        self.partial.text.push_str(&text);
+                    }
+                }
+                PartialInner::Other => {}
+            },
             StreamEvent::Result(r) => {
                 self.busy = false;
                 self.last_result = Some(r);
+                self.partial.clear();
             }
             StreamEvent::Unknown => {}
         }
@@ -264,6 +315,22 @@ pub fn build(convo: &Conversation, history: &[String], pending_input: &str) -> V
         }
     }
 
+    // --- live streaming preview -----------------------------------------
+    // The in-progress assistant message, reconstructed from token deltas.
+    // Cleared the moment the consolidated `assistant` turn lands above.
+    if convo.partial.has_content() {
+        let mut obj = FfonElement::new_obj("claude: (streaming…)");
+        if let Some(o) = obj.as_obj_mut() {
+            for line in convo.partial.text.lines() {
+                o.push(FfonElement::new_str(line.to_owned()));
+            }
+            for name in &convo.partial.tools {
+                o.push(FfonElement::new_str(format!("tool: {name} (preparing…)")));
+            }
+        }
+        out.push(obj);
+    }
+
     // --- result footer ---------------------------------------------------
     if let Some(r) = &convo.last_result {
         let turns = r.num_turns.unwrap_or(0);
@@ -277,7 +344,8 @@ pub fn build(convo: &Conversation, history: &[String], pending_input: &str) -> V
     }
 
     // --- in-flight indicator --------------------------------------------
-    if convo.busy {
+    // Redundant once the streaming preview is on screen.
+    if convo.busy && !convo.partial.has_content() {
         out.push(FfonElement::new_str("claude is working…"));
     }
 
@@ -459,5 +527,95 @@ mod tests {
     #[test]
     fn content_field_default_is_empty_blocks() {
         assert!(matches!(ContentField::default(), ContentField::Blocks(b) if b.is_empty()));
+    }
+
+    // --- v2: partial / live streaming -----------------------------------
+
+    #[test]
+    fn partial_text_deltas_accumulate() {
+        let c = convo_from(&[
+            r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text"}}}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel"}}}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"lo!"}}}"#,
+        ]);
+        assert!(c.partial.active);
+        assert_eq!(c.partial.text, "Hello!");
+        assert!(c.turns.is_empty());
+    }
+
+    #[test]
+    fn partial_tool_use_start_records_name() {
+        let c = convo_from(&[
+            r#"{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tu_9","name":"Edit","input":{}}}}"#,
+        ]);
+        assert_eq!(c.partial.tools, vec!["Edit".to_owned()]);
+    }
+
+    #[test]
+    fn consolidated_assistant_event_clears_partial_preview() {
+        let c = convo_from(&[
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"par"}}}"#,
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"partial then full"}]}}"#,
+        ]);
+        assert!(!c.partial.active);
+        assert!(c.partial.text.is_empty());
+        assert_eq!(c.turns.len(), 1);
+        assert!(matches!(&c.turns[0], Turn::Assistant { .. }));
+    }
+
+    #[test]
+    fn result_event_clears_partial_preview() {
+        let c = convo_from(&[
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"x"}}}"#,
+            r#"{"type":"result","subtype":"success"}"#,
+        ]);
+        assert!(!c.partial.active);
+    }
+
+    #[test]
+    fn build_renders_streaming_preview() {
+        let c = convo_from(&[
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"thinking out loud"}}}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tu_1","name":"Bash","input":{}}}}"#,
+        ]);
+        let out = build(&c, &[], "");
+        let preview = out
+            .iter()
+            .find_map(|e| e.as_obj())
+            .filter(|o| o.key == "claude: (streaming…)")
+            .expect("streaming preview obj");
+        assert_eq!(preview.children[0].as_str(), Some("thinking out loud"));
+        assert_eq!(
+            preview.children[1].as_str(),
+            Some("tool: Bash (preparing…)")
+        );
+    }
+
+    #[test]
+    fn streaming_preview_suppresses_working_line() {
+        let mut c = Conversation::default();
+        c.push_user("q");
+        assert!(c.busy);
+        for ev in parse_lines([
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}}"#,
+        ]) {
+            c.apply(ev);
+        }
+        let out = build(&c, &[], "");
+        assert!(
+            !out.iter().any(|e| e.as_str() == Some("claude is working…")),
+            "working line should be hidden once the preview is visible"
+        );
+    }
+
+    #[test]
+    fn push_user_clears_a_stale_partial() {
+        let mut c = convo_from(&[
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"old"}}}"#,
+        ]);
+        assert!(c.partial.active);
+        c.push_user("new question");
+        assert!(!c.partial.active);
+        assert!(c.partial.text.is_empty());
     }
 }

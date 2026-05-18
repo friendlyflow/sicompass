@@ -44,6 +44,8 @@ pub struct ClaudeProvider {
     model: Option<String>,
     extra_args: Vec<String>,
     cwd: Option<PathBuf>,
+    /// Stream token-level deltas (`--include-partial-messages`).
+    include_partial: bool,
 
     // --- runtime state --------------------------------------------------
     session: Option<Session>,
@@ -74,6 +76,7 @@ impl ClaudeProvider {
             model: None,
             extra_args: Vec::new(),
             cwd: None,
+            include_partial: true,
             session: None,
             init_attempted: false,
             convo: Conversation::default(),
@@ -92,6 +95,7 @@ impl ClaudeProvider {
             extra_args: self.extra_args.clone(),
             cwd: self.cwd.clone(),
             resume,
+            include_partial: self.include_partial,
         }
     }
 
@@ -265,6 +269,9 @@ impl Provider for ClaudeProvider {
                 self.extra_args =
                     value.split_whitespace().map(str::to_owned).collect();
             }
+            "claudeStreamPartial" => {
+                self.include_partial = matches!(value, "true" | "1" | "on");
+            }
             _ => {}
         }
     }
@@ -285,6 +292,12 @@ pub fn register() {
             ),
             SettingDecl::text("claude", "model override", "claudeModel", ""),
             SettingDecl::text("claude", "extra CLI args", "claudeExtraArgs", ""),
+            SettingDecl::checkbox(
+                "claude",
+                "stream responses token-by-token",
+                "claudeStreamPartial",
+                true,
+            ),
         ]),
     );
 }
@@ -360,6 +373,11 @@ mod tests {
         assert!(p.model.is_none());
         p.on_setting_change("claudeExtraArgs", "--foo  --bar baz");
         assert_eq!(p.extra_args, vec!["--foo", "--bar", "baz"]);
+        assert!(p.include_partial, "partial streaming defaults on");
+        p.on_setting_change("claudeStreamPartial", "false");
+        assert!(!p.include_partial);
+        p.on_setting_change("claudeStreamPartial", "true");
+        assert!(p.include_partial);
         // Empty / unknown keys are ignored.
         p.on_setting_change("claudeBinary", "");
         assert_eq!(p.program, "/opt/claude");

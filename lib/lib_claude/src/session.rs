@@ -28,6 +28,8 @@ pub struct SessionConfig {
     pub cwd: Option<PathBuf>,
     /// `--resume <session_id>` — set when re-spawning after an unexpected exit.
     pub resume: Option<String>,
+    /// Add `--include-partial-messages` to stream token-level deltas.
+    pub include_partial: bool,
 }
 
 impl Default for SessionConfig {
@@ -39,6 +41,7 @@ impl Default for SessionConfig {
             extra_args: Vec::new(),
             cwd: None,
             resume: None,
+            include_partial: true,
         }
     }
 }
@@ -67,6 +70,9 @@ impl Session {
             "stream-json",
             "--verbose",
         ]);
+        if cfg.include_partial {
+            cmd.arg("--include-partial-messages");
+        }
         cmd.args(["--permission-mode", &cfg.permission_mode]);
         if let Some(model) = &cfg.model {
             if !model.is_empty() {

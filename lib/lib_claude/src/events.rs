@@ -20,9 +20,51 @@ pub enum StreamEvent {
     Assistant(AssistantEvent),
     User(UserEvent),
     Result(ResultEvent),
+    /// `{"type":"stream_event","event":{...}}` — token-level streaming deltas,
+    /// emitted only when `--include-partial-messages` is passed. The final
+    /// consolidated `assistant` line still follows and supersedes them.
+    #[serde(rename = "stream_event")]
+    Partial(PartialEvent),
     /// Any `type` we do not model (forward compatibility).
     #[serde(other)]
     Unknown,
+}
+
+/// The `stream_event` envelope around one Anthropic streaming event.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PartialEvent {
+    pub event: PartialInner,
+}
+
+/// An inner streaming event (the Anthropic Messages API streaming schema).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum PartialInner {
+    ContentBlockStart {
+        #[serde(default)]
+        content_block: Value,
+    },
+    ContentBlockDelta {
+        delta: PartialDelta,
+    },
+    /// `message_start`, `content_block_stop`, `message_delta`, `message_stop`,
+    /// and anything else — not needed for the live text preview.
+    #[serde(other)]
+    Other,
+}
+
+/// The `delta` of a `content_block_delta` event.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum PartialDelta {
+    TextDelta {
+        #[serde(default)]
+        text: String,
+    },
+    /// `input_json_delta` (partial tool input), `thinking_delta`, … — skipped
+    /// in the live preview; the consolidated event carries the final value.
+    #[serde(other)]
+    Other,
 }
 
 /// `{"type":"system","subtype":"init", ...}` — session bootstrap.
@@ -218,6 +260,49 @@ mod tests {
     }
 
     #[test]
+    fn parses_partial_text_delta() {
+        let line = r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hel"}}}"#;
+        match parse_line(line) {
+            Some(StreamEvent::Partial(p)) => match p.event {
+                PartialInner::ContentBlockDelta {
+                    delta: PartialDelta::TextDelta { text },
+                } => assert_eq!(text, "hel"),
+                other => panic!("expected text delta, got {other:?}"),
+            },
+            other => panic!("expected Partial, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_partial_content_block_start_tool_use() {
+        let line = r#"{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tu_2","name":"Bash","input":{}}}}"#;
+        match parse_line(line) {
+            Some(StreamEvent::Partial(p)) => match p.event {
+                PartialInner::ContentBlockStart { content_block } => {
+                    assert_eq!(content_block["type"], "tool_use");
+                    assert_eq!(content_block["name"], "Bash");
+                }
+                other => panic!("expected content_block_start, got {other:?}"),
+            },
+            other => panic!("expected Partial, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_partial_unknown_inner_as_other() {
+        for line in [
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{}}}"#,
+            r#"{"type":"stream_event","event":{"type":"message_stop"}}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{"}}}"#,
+        ] {
+            match parse_line(line) {
+                Some(StreamEvent::Partial(_)) => {}
+                other => panic!("expected Partial for {line}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
     fn parses_result_success() {
         let line = r#"{"type":"result","subtype":"success","result":"done","session_id":"s1","num_turns":3,"duration_ms":12400,"total_cost_usd":0.0231,"is_error":false}"#;
         match parse_line(line) {
@@ -256,7 +341,7 @@ mod tests {
 
     #[test]
     fn unknown_type_is_unknown() {
-        let line = r#"{"type":"stream_event","event":{}}"#;
+        let line = r#"{"type":"control_request","request":{"subtype":"can_use_tool"}}"#;
         assert!(matches!(parse_line(line), Some(StreamEvent::Unknown)));
     }
 
