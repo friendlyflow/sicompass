@@ -1,18 +1,12 @@
 # Silicon's Compass
 
-From around 1981 until 2026 the graphical user interface (GUI) marginally evolved while never being able to service accessibility the way many people demanded.
+From around 1981 until 2026, the way computers look and work on screen (the graphical user interface, or GUI) barely changed, and it never worked well for people who need accessibility. That changes now.
 
-Proudly I can share that that changes now, that non-inclusive era is history ...
+Sicompass is a free, open-source way to use your computer entirely from the keyboard, with no mouse needed. Under the hood, every screen you see is really just a tree of lists. Sicompass shows you that structure directly, so you move through it with the arrow keys.
 
-(Sorry for the marginal 'design' approach and not-sorry for the optimal navigation approach, which differs maximally from html and its eco-system, but those facts are its main reasons of existence.)
+You navigate everything the same way: your files, your settings, your email, and any other data. For people building software, that means less work and fewer bugs. For people using it, it means a fast, precise, and predictable experience that feels the same everywhere. It also works smoothly with screen readers on Linux, macOS, and Windows.
 
-## What is Sicompass?
-
-Sicompass is an open-source, keyboard-only interface for navigating and editing structured content. Every graphical interface is essentially a tree of lists — Sicompass makes that structure explicit and navigable entirely from the keyboard, eliminating the need for a mouse.
-
-This consistent unified interaction model means one consistent way to navigate everything: files, settings, and any data source built on top of it. For developers, it means simpler UI development with fewer bugs. For users, it means a unified, fast, precise and handy experience that works the same everywhere.
-
-Built for users who prefer or require keyboard-driven interaction, Sicompass offers intuitive keyboard navigation and seamless screen reader integration through AccessKit.
+It does not try to look pretty, and it works very differently from web pages and HTML, and those are exactly the reasons it exists.
 
 ## Key Features
 
