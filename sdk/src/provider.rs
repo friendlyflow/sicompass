@@ -246,6 +246,14 @@ pub trait Provider: Send + 'static {
     /// suppress text input on the host platform.
     fn dashboard_text(&mut self, _text: &str) {}
 
+    /// Forward a clipboard paste to the provider while it owns the interactive
+    /// dashboard. Distinct from `dashboard_text` so a terminal provider can
+    /// wrap the text in bracketed-paste markers when the child program has
+    /// enabled `?2004`. The default forwards verbatim to `dashboard_text`.
+    fn dashboard_paste(&mut self, text: &str) {
+        self.dashboard_text(text);
+    }
+
     /// Notify the provider that the cell-grid viewport has a new size.
     /// Called once on entry and again whenever the size changes (window
     /// resize, font scale change). Providers should propagate to any

@@ -3930,7 +3930,7 @@ fn sdl_set_clipboard(text: &str) {
     }
 }
 
-fn sdl_get_clipboard() -> Option<String> {
+pub(crate) fn sdl_get_clipboard() -> Option<String> {
     unsafe {
         if !sdl3::sys::clipboard::SDL_HasClipboardText() { return None; }
         let ptr = sdl3::sys::clipboard::SDL_GetClipboardText();

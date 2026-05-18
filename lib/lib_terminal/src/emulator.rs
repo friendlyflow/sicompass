@@ -11,12 +11,12 @@
 //! * SGR: reset, bold, underline, reverse, 8/16-color fg+bg, 256-color and
 //!   24-bit truecolor extensions.
 //! * DEC private modes: `?1049` (alternate screen), `?25` (cursor visibility),
-//!   `?7` (autowrap).
+//!   `?7` (autowrap), `?2004` (bracketed paste — tracked so the provider can
+//!   wrap pasted text correctly).
 //!
-//! Out of scope (Phase 2b): bracketed paste, mouse reporting, wide-char
-//! widths, GR character sets, sixel/SGR mouse, OSC titles, scrollback. The
-//! emulator's grid is always exactly `cols × rows`; nothing scrolls off into
-//! a backbuffer.
+//! Out of scope (Phase 2b): mouse reporting, wide-char widths, GR character
+//! sets, sixel/SGR mouse, OSC titles, scrollback. The emulator's grid is
+//! always exactly `cols × rows`; nothing scrolls off into a backbuffer.
 
 use sicompass_sdk::{CellAttrs, DashboardCell, DashboardFrame, DashboardKey, DashboardKeysym};
 use vte::{Params, Parser, Perform};
@@ -58,6 +58,26 @@ impl Emulator {
     /// Capture the current grid + cursor into a `DashboardFrame`.
     pub fn snapshot(&self) -> DashboardFrame {
         self.state.snapshot()
+    }
+
+    /// Whether the child program has enabled bracketed-paste mode (`?2004h`).
+    /// The provider consults this to decide whether to bracket pasted text.
+    pub fn bracketed_paste(&self) -> bool {
+        self.state.bracketed_paste
+    }
+
+    /// The primary-screen grid as text rows — trailing spaces and trailing
+    /// blank rows trimmed. Empty when the primary screen is blank. Used to
+    /// flush a finished main-screen session into the terminal scrollback.
+    pub fn primary_text(&self) -> Vec<String> {
+        self.state.primary_text()
+    }
+
+    /// Blank the primary screen and home its cursor. Called at the start of a
+    /// dashboard session so a later `primary_text()` flush captures only that
+    /// session's output, not a previous program's.
+    pub fn reset_primary(&mut self) {
+        self.state.reset_primary();
     }
 
     #[cfg(test)]
@@ -107,6 +127,10 @@ struct EmulatorState {
     cursor_visible: bool,
     autowrap: bool,
     pending_wrap: bool,
+    /// Whether the child program has enabled bracketed-paste mode (`?2004`).
+    /// Not used by the grid itself — read by the provider so it knows whether
+    /// to wrap pasted text in `ESC[200~`/`ESC[201~`.
+    bracketed_paste: bool,
     scroll_top: u16,    // inclusive, 0-indexed
     scroll_bot: u16,    // inclusive, 0-indexed
 }
@@ -125,6 +149,7 @@ impl EmulatorState {
             cursor_visible: true,
             autowrap: true,
             pending_wrap: false,
+            bracketed_paste: false,
             scroll_top: 0,
             scroll_bot: rows.saturating_sub(1),
         }
@@ -459,6 +484,32 @@ impl EmulatorState {
         self.pending_wrap = false;
     }
 
+    fn primary_text(&self) -> Vec<String> {
+        let cols = self.cols as usize;
+        let mut rows: Vec<String> = Vec::with_capacity(self.rows as usize);
+        for r in 0..self.rows as usize {
+            let mut line = String::with_capacity(cols);
+            for c in 0..cols {
+                line.push(self.primary.cells[r * cols + c].ch);
+            }
+            rows.push(line.trim_end().to_owned());
+        }
+        while rows.last().map(|s| s.is_empty()).unwrap_or(false) {
+            rows.pop();
+        }
+        rows
+    }
+
+    fn reset_primary(&mut self) {
+        let blank = blank_cell();
+        for cell in self.primary.cells.iter_mut() {
+            *cell = blank.clone();
+        }
+        self.primary.cursor_col = 0;
+        self.primary.cursor_row = 0;
+        self.primary.saved_cursor = None;
+    }
+
     fn snapshot(&self) -> DashboardFrame {
         let s = self.screen_ref();
         let mut frame = DashboardFrame {
@@ -514,6 +565,7 @@ impl Perform for EmulatorState {
                             7  => self.autowrap = on,
                             25 => self.cursor_visible = on,
                             1049 | 47 | 1047 => self.switch_screen(on),
+                            2004 => self.bracketed_paste = on,
                             _ => {}
                         }
                     }
@@ -754,6 +806,44 @@ mod tests {
     fn cell_ch(em: &Emulator, col: u16, row: u16) -> char {
         let s = em.snapshot();
         s.cell(col, row).ch
+    }
+
+    #[test]
+    fn bracketed_paste_mode_tracks_2004() {
+        let mut em = Emulator::new(10, 2);
+        assert!(!em.bracketed_paste());
+        em.feed(b"\x1b[?2004h");
+        assert!(em.bracketed_paste());
+        em.feed(b"\x1b[?2004l");
+        assert!(!em.bracketed_paste());
+    }
+
+    #[test]
+    fn primary_text_reads_grid_and_trims_blanks() {
+        let mut em = Emulator::new(20, 5);
+        em.feed(b"abc\r\ndef");
+        // Trailing spaces per row and trailing blank rows are trimmed.
+        assert_eq!(em.primary_text(), vec!["abc".to_owned(), "def".to_owned()]);
+    }
+
+    #[test]
+    fn reset_primary_blanks_the_screen() {
+        let mut em = Emulator::new(10, 3);
+        em.feed(b"stuff");
+        assert!(!em.primary_text().is_empty());
+        em.reset_primary();
+        assert!(em.primary_text().is_empty());
+        assert_eq!(em.snapshot().cursor, Some((0, 0)));
+    }
+
+    #[test]
+    fn primary_text_ignores_alt_screen_content() {
+        // Content drawn on the alternate screen must not leak into the flush.
+        let mut em = Emulator::new(20, 4);
+        em.feed(b"\x1b[?1049h");
+        em.feed(b"alt-only content");
+        em.feed(b"\x1b[?1049l");
+        assert!(em.primary_text().is_empty());
     }
 
     #[test]

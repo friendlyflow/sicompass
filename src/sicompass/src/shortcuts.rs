@@ -895,6 +895,20 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
     if r.coordinate == Coordinate::Dashboard
         && handlers::active_dashboard_is_interactive(r)
     {
+        // Ctrl+Shift+V pastes the clipboard into the dashboard program. The
+        // app reads the system clipboard here (the provider has no windowing
+        // access) and hands the text to `dashboard_paste`, which brackets it
+        // when the program has bracketed-paste mode enabled. Plain Ctrl+V
+        // keeps falling through to `dashboard_key` as the literal 0x16 byte.
+        if ctrl && shift && k == Keycode::V {
+            if let Some(text) = handlers::sdl_get_clipboard() {
+                if let Some(p) = crate::provider::get_active_provider(r) {
+                    p.dashboard_paste(&text);
+                    r.needs_redraw = true;
+                }
+            }
+            return false;
+        }
         if let Some(keysym) = sdl_keycode_to_dashboard_keysym(k) {
             let key = sicompass_sdk::DashboardKey { keysym, ctrl, shift, alt };
             if let Some(p) = crate::provider::get_active_provider(r) {
