@@ -730,16 +730,16 @@ fn parse_cd(line: &str, base: &Path) -> Option<PathBuf> {
     }
     let rest = after_cd.trim_start();
 
+    // `cd /d C:\foo` — strip the /d flag if present (Windows only).
     #[cfg(windows)]
+    let rest = if rest.len() >= 2
+        && rest[..2].eq_ignore_ascii_case("/d")
+        && (rest[2..].is_empty() || rest[2..].starts_with(char::is_whitespace))
     {
-        // `cd /d C:\foo` — strip the /d flag if present.
-        if rest.len() >= 2 && rest[..2].eq_ignore_ascii_case("/d") {
-            let after_flag = &rest[2..];
-            if after_flag.is_empty() || after_flag.starts_with(char::is_whitespace) {
-                rest = after_flag.trim_start();
-            }
-        }
-    }
+        rest[2..].trim_start()
+    } else {
+        rest
+    };
 
     if rest.is_empty() {
         return platform::home_dir();

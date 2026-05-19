@@ -995,7 +995,7 @@ mod win_hide {
     pub fn snapshot_windows() -> Vec<isize> {
         let mut hwnds: Vec<isize> = Vec::new();
         unsafe extern "system" fn callback(hwnd: isize, lparam: isize) -> i32 {
-            let vec = &mut *(lparam as *mut Vec<isize>);
+            let vec = unsafe { &mut *(lparam as *mut Vec<isize>) };
             vec.push(hwnd);
             1 // continue
         }
@@ -1009,7 +1009,7 @@ mod win_hide {
     pub fn hide_new_browser_windows(before: &[isize]) {
         let mut current: Vec<isize> = Vec::new();
         unsafe extern "system" fn callback(hwnd: isize, lparam: isize) -> i32 {
-            let vec = &mut *(lparam as *mut Vec<isize>);
+            let vec = unsafe { &mut *(lparam as *mut Vec<isize>) };
             vec.push(hwnd);
             1
         }
