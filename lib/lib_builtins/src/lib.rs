@@ -34,6 +34,7 @@ pub fn register_all() {
         sicompass_settings::register();
         sicompass_terminal::register();
         sicompass_claude::register();
+        sicompass_store::register();
     });
 }
 
@@ -155,6 +156,31 @@ mod tests {
         assert!(
             keys.contains(&"claudePermissionMode"),
             "claude manifest must include claudePermissionMode; got {keys:?}"
+        );
+    }
+
+    #[test]
+    fn store_factory_is_registered() {
+        register_all();
+        let p = sicompass_sdk::create_provider_by_name("store");
+        assert!(p.is_some(), "store factory should be registered");
+        assert_eq!(p.unwrap().name(), "store");
+    }
+
+    #[test]
+    fn builtin_manifests_include_store_with_settings() {
+        register_all();
+        let manifests = sicompass_sdk::builtin_manifests();
+        let store = manifests
+            .iter()
+            .find(|m| m.name == "store")
+            .expect("store manifest should be registered");
+        assert!(store.enable_default, "store should be enabled by default");
+        let keys: Vec<&str> = store.settings.iter().map(|s| s.key.as_str()).collect();
+        assert!(keys.contains(&"storeUrl"), "store manifest must include storeUrl; got {keys:?}");
+        assert!(
+            keys.contains(&"licenseRedeemToken"),
+            "store manifest must include licenseRedeemToken; got {keys:?}"
         );
     }
 

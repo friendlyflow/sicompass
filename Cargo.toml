@@ -13,6 +13,7 @@ members = [
     "lib/lib_shell",
     "lib/lib_terminal",
     "lib/lib_claude",
+    "lib/lib_store",
     "lib/lib_builtins",
     "src/sicompass",
 ]
@@ -38,11 +39,16 @@ sicompass-sales-demo = { path = "lib/lib_sales_demo" }
 sicompass-shell = { path = "lib/lib_shell" }
 sicompass-terminal = { path = "lib/lib_terminal" }
 sicompass-claude = { path = "lib/lib_claude" }
+sicompass-store = { path = "lib/lib_store" }
 sicompass-builtins = { path = "lib/lib_builtins" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# Cryptography (offline license-certificate verification in lib_store)
+ed25519-dalek = "2"
+base64 = "0.22"
 
 # Graphics
 ash = "0.38"
