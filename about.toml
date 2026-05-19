@@ -50,3 +50,15 @@ accepted = [
 # not trip the allowlist above.
 [private]
 ignore = true
+
+# miniz_oxide ships two MIT license files (`LICENSE` and `LICENSE-MIT.md`)
+# with identical wording but different blank-line spacing. Without this
+# clarification cargo-about picks whichever the filesystem lists first, so
+# the generated attribution file flip-flops between machines. Pin the MIT
+# file explicitly so output is reproducible everywhere.
+[miniz_oxide.clarify]
+license = "MIT"
+
+[[miniz_oxide.clarify.files]]
+path = "LICENSE-MIT.md"
+checksum = "799e9ca9d179295ef372f25d3769cdda7d25bb2668add6a6a1e22d1e4c678b8d"
