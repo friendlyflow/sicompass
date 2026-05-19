@@ -1,0 +1,28 @@
+[workspace]
+members = ["cargo:."]
+
+# Config for 'dist' (cargo-dist). Regenerate release.yml after editing with:
+#   dist generate
+[dist]
+# The preferred dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.31.0"
+# CI backend
+ci = "github"
+# Trigger the release from the GitHub web UI (Actions -> Release -> Run
+# workflow) instead of on a tag push / commit.
+dispatch-releases = true
+# Windows + macOS only. Linux is released separately by release-linux.yml.
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+# End-user installers: a curl|sh script (macOS), a PowerShell script and an
+# MSI package (Windows).
+installers = ["shell", "powershell", "msi"]
+# Build with the bundled-sdl3 feature so SDL3 is compiled from source and
+# statically linked — the release binaries are self-contained, with no system
+# SDL3 / SDL3.dll / libSDL3.dylib and nothing for the user to install.
+features = ["bundled-sdl3"]
+# Ship the third-party attribution file inside every release archive.
+include = ["THIRD-PARTY-LICENSES.html"]

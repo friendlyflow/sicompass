@@ -1,0 +1,39 @@
+name: Licenses
+
+# Verifies third-party dependency licensing:
+#   1. `cargo about generate` fails if any dependency uses a license that is
+#      not on the allowlist in about.toml — the early warning if a new
+#      dependency pulls in GPL/AGPL or anything incompatible with the
+#      proprietary arm of sicompass's dual license.
+#   2. The committed THIRD-PARTY-LICENSES.html must match freshly generated
+#      output, so the attribution file shipped in releases never goes stale.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  licenses:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-about
+        run: cargo install cargo-about --locked --features cli
+
+      - name: Generate attribution file
+        run: cargo about generate about.hbs -o THIRD-PARTY-LICENSES.html
+
+      - name: Check THIRD-PARTY-LICENSES.html is up to date
+        run: |
+          if ! git diff --exit-code THIRD-PARTY-LICENSES.html; then
+            echo "::error::THIRD-PARTY-LICENSES.html is stale. Run:"
+            echo "::error::  cargo about generate about.hbs -o THIRD-PARTY-LICENSES.html"
+            echo "::error::and commit the result."
+            exit 1
+          fi

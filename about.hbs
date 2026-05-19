@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>sicompass — Third-Party Licenses</title>
+<style>
+body { font-family: sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; }
+h1 { font-size: 1.4rem; }
+.intro { color: #444; }
+.dep { border-top: 1px solid #ccc; padding-top: 1rem; margin-top: 1rem; }
+.dep h2 { font-size: 1.05rem; margin-bottom: 0.2rem; }
+.meta { color: #666; font-size: 0.85rem; }
+pre { background: #f6f6f6; padding: 0.75rem; overflow-x: auto; font-size: 0.8rem; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>Third-Party Licenses</h1>
+<p class="intro">
+sicompass incorporates the following third-party software. Each component is
+distributed under its own license, reproduced below. This notice is provided
+to satisfy the attribution requirements of those licenses and applies to both
+the commercial and GPLv3 distributions of sicompass.
+</p>
+<p class="intro">
+Some components are licensed under the Mozilla Public License 2.0
+(<code>cssparser</code>, <code>cssparser-macros</code>, <code>dtoa-short</code>,
+<code>nucleo-matcher</code>, <code>selectors</code>). The MPL requires that the
+source of those files be made available to recipients. sicompass uses these
+crates unmodified, and their complete source is published at
+<code>https://crates.io/crates/&lt;name&gt;</code> (for example,
+<a href="https://crates.io/crates/selectors">https://crates.io/crates/selectors</a>).
+The same applies to every other component listed here. This satisfies the MPL
+source-availability requirement for both the commercial and GPLv3 distributions.
+</p>
+
+{{#each licenses}}
+<div class="dep">
+<h2>{{name}}</h2>
+<p class="meta">Used by: {{#each used_by}}{{crate.name}} {{crate.version}}{{#unless @last}}, {{/unless}}{{/each}}</p>
+<pre>{{text}}</pre>
+</div>
+{{/each}}
+
+</body>
+</html>

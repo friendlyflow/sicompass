@@ -1,9 +1,12 @@
 [package]
+publish = false  # internal crate, never published to crates.io
 name = "sicompass"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "sicompass — Vulkan/SDL3 modal UI (Rust port)"
+repository = "https://github.com/friendlyflow/sicompass"
+authors = ["Nico Verrijdt <nico@friendlyflow.com>"]
 
 [[bin]]
 name = "sicompass"
@@ -12,6 +15,25 @@ path = "src/main.rs"
 [lib]
 name = "sicompass"
 path = "src/lib.rs"
+
+# This crate is `publish = false` (never goes to crates.io), which by default
+# also hides it from cargo-dist. Opt the binary back into release builds.
+[package.metadata.dist]
+dist = true
+
+[package.metadata.wix]
+upgrade-guid = "0865D57F-AEA6-4BCA-AB03-543D1EE69091"
+path-guid = "3D255495-2455-4CAB-8782-168EF8D5E8A7"
+license = false
+eula = false
+
+[features]
+# Build SDL3 from its vendored source and link it statically, so the resulting
+# binary is self-contained (no system SDL3 / SDL3.dll / libSDL3.dylib needed).
+# Off by default — local dev builds keep linking the system SDL3. Release
+# builds enable it (see `[workspace.metadata.dist] features` in the root
+# Cargo.toml). Building from source needs `cmake` and a C compiler on PATH.
+bundled-sdl3 = ["sdl3/build-from-source-static"]
 
 [dependencies]
 sicompass-sdk = { workspace = true }

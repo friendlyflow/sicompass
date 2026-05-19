@@ -1,4 +1,5 @@
 [package]
+publish = false  # internal crate, never published to crates.io
 name = "sicompass-tutorial"
 version.workspace = true
 edition.workspace = true
