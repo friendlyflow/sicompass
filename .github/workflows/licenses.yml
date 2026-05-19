@@ -24,7 +24,10 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install cargo-about
-        run: cargo install cargo-about --locked --features cli
+        # Pinned so CI template output matches whatever generated the
+        # committed THIRD-PARTY-LICENSES.html. Bump in lockstep with a
+        # regenerated attribution file.
+        run: cargo install cargo-about --version 0.9.0 --locked --features cli
 
       - name: Generate attribution file
         run: cargo about generate about.hbs -o THIRD-PARTY-LICENSES.html
