@@ -600,7 +600,7 @@ fn is_drive_root(path: &Path) -> bool {
 #[cfg(windows)]
 fn list_drives() -> Vec<FfonElement> {
     #[link(name = "kernel32")]
-    extern "system" {
+    unsafe extern "system" {
         fn GetLogicalDrives() -> u32;
     }
     // SAFETY: GetLogicalDrives takes no arguments and has no failure mode

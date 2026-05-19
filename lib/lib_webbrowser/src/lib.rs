@@ -958,7 +958,7 @@ static CHROMIUM_RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> =
 // making it invisible to the user.  Chrome's JS runs at full speed.
 #[cfg(target_os = "windows")]
 mod win_hide {
-    extern "system" {
+    unsafe extern "system" {
         fn EnumWindows(lp_enum_func: unsafe extern "system" fn(isize, isize) -> i32, l_param: isize) -> i32;
         fn GetWindowThreadProcessId(hwnd: isize, lp_dw_process_id: *mut u32) -> u32;
         fn IsWindowVisible(hwnd: isize) -> i32;
