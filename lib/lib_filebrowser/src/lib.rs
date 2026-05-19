@@ -475,21 +475,22 @@ fn format_properties(e: &RawEntry) -> String {
     use libc::{getgrgid, getpwuid};
     use std::ffi::CStr;
 
-    // Permission string (e.g. "drwxr-xr-x")
+    // Permission string (e.g. "drwxr-xr-x"). The `libc::S_*` constants are
+    // `u16` on macOS but `u32` on Linux, so cast them to match `mode`.
     let mode = e.mode;
     let mut perm = [b'-'; 10];
-    perm[0] = if mode & libc::S_IFMT == libc::S_IFDIR { b'd' }
-              else if mode & libc::S_IFMT == libc::S_IFLNK { b'l' }
+    perm[0] = if mode & libc::S_IFMT as u32 == libc::S_IFDIR as u32 { b'd' }
+              else if mode & libc::S_IFMT as u32 == libc::S_IFLNK as u32 { b'l' }
               else { b'-' };
-    perm[1] = if mode & libc::S_IRUSR != 0 { b'r' } else { b'-' };
-    perm[2] = if mode & libc::S_IWUSR != 0 { b'w' } else { b'-' };
-    perm[3] = if mode & libc::S_IXUSR != 0 { b'x' } else { b'-' };
-    perm[4] = if mode & libc::S_IRGRP != 0 { b'r' } else { b'-' };
-    perm[5] = if mode & libc::S_IWGRP != 0 { b'w' } else { b'-' };
-    perm[6] = if mode & libc::S_IXGRP != 0 { b'x' } else { b'-' };
-    perm[7] = if mode & libc::S_IROTH != 0 { b'r' } else { b'-' };
-    perm[8] = if mode & libc::S_IWOTH != 0 { b'w' } else { b'-' };
-    perm[9] = if mode & libc::S_IXOTH != 0 { b'x' } else { b'-' };
+    perm[1] = if mode & libc::S_IRUSR as u32 != 0 { b'r' } else { b'-' };
+    perm[2] = if mode & libc::S_IWUSR as u32 != 0 { b'w' } else { b'-' };
+    perm[3] = if mode & libc::S_IXUSR as u32 != 0 { b'x' } else { b'-' };
+    perm[4] = if mode & libc::S_IRGRP as u32 != 0 { b'r' } else { b'-' };
+    perm[5] = if mode & libc::S_IWGRP as u32 != 0 { b'w' } else { b'-' };
+    perm[6] = if mode & libc::S_IXGRP as u32 != 0 { b'x' } else { b'-' };
+    perm[7] = if mode & libc::S_IROTH as u32 != 0 { b'r' } else { b'-' };
+    perm[8] = if mode & libc::S_IWOTH as u32 != 0 { b'w' } else { b'-' };
+    perm[9] = if mode & libc::S_IXOTH as u32 != 0 { b'x' } else { b'-' };
     let perm_str = std::str::from_utf8(&perm).unwrap_or("----------");
 
     // Owner and group names (fall back to numeric ids)
@@ -1345,6 +1346,33 @@ mod tests {
         p.redo(&entries[0], &mut err);
         assert!(err.is_empty(), "redo error: {err}");
         assert!(!target.exists(), "redo deletes again");
+    }
+
+    // ---- property formatting ----------------------------------------------
+
+    #[cfg(unix)]
+    #[test]
+    fn test_format_properties_permission_string() {
+        let mk = |mode: u32| RawEntry {
+            name: "x".into(),
+            mtime: SystemTime::UNIX_EPOCH,
+            is_dir: false,
+            size: 0,
+            mode,
+            nlink: 1,
+            uid: 0,
+            gid: 0,
+        };
+        // Casting the `libc::S_*` constants to `u32` must keep the bit tests
+        // correct (they are `u16` on macOS, `u32` on Linux).
+        let dir = format_properties(&mk(libc::S_IFDIR as u32 | 0o755));
+        assert!(dir.starts_with("drwxr-xr-x "), "got: {dir}");
+
+        let file = format_properties(&mk(libc::S_IFREG as u32 | 0o644));
+        assert!(file.starts_with("-rw-r--r-- "), "got: {file}");
+
+        let link = format_properties(&mk(libc::S_IFLNK as u32 | 0o777));
+        assert!(link.starts_with("lrwxrwxrwx "), "got: {link}");
     }
 }
 
