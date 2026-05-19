@@ -8,10 +8,9 @@ name: Licenses
 #   2. The committed THIRD-PARTY-LICENSES.html must match freshly generated
 #      output, so the attribution file shipped in releases never goes stale.
 
+# Manual only — run from the GitHub web UI: Actions -> Licenses -> Run
+# workflow. Not triggered on push or pull_request.
 on:
-  pull_request:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
