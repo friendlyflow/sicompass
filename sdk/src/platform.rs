@@ -490,7 +490,12 @@ pub fn ensure_bun_on_path() {
                 parts.push(existing);
             }
             if let Ok(joined) = std::env::join_paths(parts) {
-                std::env::set_var("PATH", joined);
+                // SAFETY: runs exactly once per process (guarded by `DONE`),
+                // during early startup before any worker threads that might
+                // concurrently read the environment are spawned.
+                unsafe {
+                    std::env::set_var("PATH", joined);
+                }
             }
         });
     }
