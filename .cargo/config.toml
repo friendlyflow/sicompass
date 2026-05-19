@@ -1,4 +1,13 @@
 [build]
 
+# Pin the macOS deployment target so the C dependencies (aws-lc-sys,
+# libsqlite3-sys, sdl3-sys) compile their object files for the same OS
+# version that rustc links the final binary against. Without this the
+# cc-driven C builds default to the runner's SDK (macOS 14.x) while
+# rustc links aarch64-apple-darwin at 11.0, producing thousands of
+# "built for newer macOS version" linker warnings. Ignored off macOS.
+[env]
+MACOSX_DEPLOYMENT_TARGET = { value = "11.0", force = true }
+
 [target.x86_64-pc-windows-msvc]
 runner = ["cmd", "/C", "C:\\sicompass\\.cargo\\run.bat"]
