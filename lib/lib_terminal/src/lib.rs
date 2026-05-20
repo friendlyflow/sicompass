@@ -30,7 +30,21 @@ use sicompass_sdk::{
     DashboardFrame, DashboardKey, DashboardKind, DashboardRequest, FfonElement, Provider,
     SettingDecl,
 };
+use sicompass_sdk::localize;
 use sicompass_shell::{default_program, Shell, ShellConfig};
+use std::sync::OnceLock;
+
+/// Register this crate's translation bundles with the SDK localizer.
+/// Idempotent.
+pub fn register_translations() {
+    static ONCE: OnceLock<()> = OnceLock::new();
+    ONCE.get_or_init(|| {
+        let _ = localize::register_bundle("en-US", include_str!("../locales/en-US.ftl"));
+        let _ = localize::register_bundle("nl-BE", include_str!("../locales/nl-BE.ftl"));
+        let _ = localize::register_bundle("fr-BE", include_str!("../locales/fr-BE.ftl"));
+        let _ = localize::register_bundle("de-BE", include_str!("../locales/de-BE.ftl"));
+    });
+}
 
 /// One entry in the terminal scrollback: a submitted command and the bytes
 /// the shell has produced in response so far.
@@ -345,7 +359,8 @@ impl Provider for TerminalProvider {
     }
 
     fn display_name(&self) -> String {
-        "terminal".to_owned()
+        register_translations();
+        localize::t("terminal-display-name")
     }
 
     fn init(&mut self) {

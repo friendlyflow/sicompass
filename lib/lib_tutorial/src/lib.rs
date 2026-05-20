@@ -1,7 +1,21 @@
 use sicompass_sdk::ffon::FfonElement;
+use sicompass_sdk::localize;
 use sicompass_sdk::placeholders::I_PLACEHOLDER;
 use sicompass_sdk::provider::Provider;
 use std::path::Path;
+use std::sync::OnceLock;
+
+/// Register this crate's translation bundles with the SDK localizer.
+/// Idempotent.
+pub fn register_translations() {
+    static ONCE: OnceLock<()> = OnceLock::new();
+    ONCE.get_or_init(|| {
+        let _ = localize::register_bundle("en-US", include_str!("../locales/en-US.ftl"));
+        let _ = localize::register_bundle("nl-BE", include_str!("../locales/nl-BE.ftl"));
+        let _ = localize::register_bundle("fr-BE", include_str!("../locales/fr-BE.ftl"));
+        let _ = localize::register_bundle("de-BE", include_str!("../locales/de-BE.ftl"));
+    });
+}
 
 // ---------------------------------------------------------------------------
 // Tutorial content tree
@@ -592,7 +606,8 @@ impl Provider for TutorialProvider {
     fn name(&self) -> &str { "tutorial" }
 
     fn display_name(&self) -> String {
-        "tutorial --> here you can go up, down or right".to_owned()
+        register_translations();
+        localize::t("tutorial-display-name")
     }
 
     fn fetch(&mut self) -> Vec<FfonElement> {

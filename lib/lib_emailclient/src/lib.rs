@@ -53,6 +53,20 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use sicompass_sdk::ffon::{FfonElement, FfonObject};
+use sicompass_sdk::localize;
+use std::sync::OnceLock as TranslationsOnce;
+
+/// Register this crate's translation bundles with the SDK localizer.
+/// Idempotent.
+pub fn register_translations() {
+    static ONCE: TranslationsOnce<()> = TranslationsOnce::new();
+    ONCE.get_or_init(|| {
+        let _ = localize::register_bundle("en-US", include_str!("../locales/en-US.ftl"));
+        let _ = localize::register_bundle("nl-BE", include_str!("../locales/nl-BE.ftl"));
+        let _ = localize::register_bundle("fr-BE", include_str!("../locales/fr-BE.ftl"));
+        let _ = localize::register_bundle("de-BE", include_str!("../locales/de-BE.ftl"));
+    });
+}
 use sicompass_sdk::placeholders::{
     new_obj_with_i_placeholder, seed_i_placeholders, I_PLACEHOLDER,
 };
@@ -2004,7 +2018,10 @@ impl Default for EmailClientProvider {
 
 impl Provider for EmailClientProvider {
     fn name(&self) -> &str { "emailclient" }
-    fn display_name(&self) -> String { "email client".to_owned() }
+    fn display_name(&self) -> String {
+        register_translations();
+        localize::t("emailclient-display-name")
+    }
 
     fn no_cache(&self) -> bool { true }
 

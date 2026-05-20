@@ -20,7 +20,21 @@ mod catalog;
 pub mod cert;
 
 use sicompass_sdk::ffon::FfonElement;
+use sicompass_sdk::localize;
 use sicompass_sdk::provider::Provider;
+use std::sync::OnceLock;
+
+/// Register this crate's translation bundles with the SDK localizer.
+/// Idempotent.
+pub fn register_translations() {
+    static ONCE: OnceLock<()> = OnceLock::new();
+    ONCE.get_or_init(|| {
+        let _ = localize::register_bundle("en-US", include_str!("../locales/en-US.ftl"));
+        let _ = localize::register_bundle("nl-BE", include_str!("../locales/nl-BE.ftl"));
+        let _ = localize::register_bundle("fr-BE", include_str!("../locales/fr-BE.ftl"));
+        let _ = localize::register_bundle("de-BE", include_str!("../locales/de-BE.ftl"));
+    });
+}
 
 /// Default store / license server. Overridable via the `storeUrl` setting.
 const DEFAULT_STORE_URL: &str = "https://store.sicompass.org";
@@ -117,7 +131,8 @@ impl Provider for StoreProvider {
     }
 
     fn display_name(&self) -> String {
-        "Store".to_owned()
+        register_translations();
+        localize::t("store-display-name")
     }
 
     fn fetch(&mut self) -> Vec<FfonElement> {

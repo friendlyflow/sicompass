@@ -16,10 +16,24 @@
 //! - `deep_search` is a BFS traversal (up to 50 000 results).
 
 use sicompass_sdk::ffon::FfonElement;
+use sicompass_sdk::localize;
 use sicompass_sdk::placeholders::new_obj_with_i_placeholder;
 use sicompass_sdk::provider::{ListItem, Provider, SearchResultItem};
 use sicompass_sdk::tags;
 use sicompass_sdk::timeline::{FsOpKind, FsSideEffect, TimelineEntry};
+use std::sync::OnceLock;
+
+/// Register this crate's translation bundles with the SDK localizer.
+/// Idempotent — safe to call from many entry points.
+pub fn register_translations() {
+    static ONCE: OnceLock<()> = OnceLock::new();
+    ONCE.get_or_init(|| {
+        let _ = localize::register_bundle("en-US", include_str!("../locales/en-US.ftl"));
+        let _ = localize::register_bundle("nl-BE", include_str!("../locales/nl-BE.ftl"));
+        let _ = localize::register_bundle("fr-BE", include_str!("../locales/fr-BE.ftl"));
+        let _ = localize::register_bundle("de-BE", include_str!("../locales/de-BE.ftl"));
+    });
+}
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -111,7 +125,10 @@ impl Default for FilebrowserProvider {
 
 impl Provider for FilebrowserProvider {
     fn name(&self) -> &str { "filebrowser" }
-    fn display_name(&self) -> String { "file browser".to_owned() }
+    fn display_name(&self) -> String {
+        register_translations();
+        localize::t("filebrowser-display-name")
+    }
 
     fn init(&mut self) {
         self.current_path = PathBuf::from("/");

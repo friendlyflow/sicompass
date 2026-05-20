@@ -20,10 +20,24 @@
 mod parse;
 
 use sicompass_sdk::ffon::FfonElement;
+use sicompass_sdk::localize;
 use sicompass_sdk::manifest::{BuiltinManifest, SettingDecl};
 use sicompass_sdk::provider::Provider;
 use sicompass_sdk::tags;
 use sicompass_sdk::timeline::{FsOpKind, FsSideEffect, TimelineEntry};
+use std::sync::OnceLock;
+
+/// Register this crate's translation bundles with the SDK localizer.
+/// Idempotent.
+pub fn register_translations() {
+    static ONCE: OnceLock<()> = OnceLock::new();
+    ONCE.get_or_init(|| {
+        let _ = localize::register_bundle("en-US", include_str!("../locales/en-US.ftl"));
+        let _ = localize::register_bundle("nl-BE", include_str!("../locales/nl-BE.ftl"));
+        let _ = localize::register_bundle("fr-BE", include_str!("../locales/fr-BE.ftl"));
+        let _ = localize::register_bundle("de-BE", include_str!("../locales/de-BE.ftl"));
+    });
+}
 use sicompass_sdk::{register_builtin_manifest, register_provider_factory};
 use std::path::{Path, PathBuf};
 
@@ -268,7 +282,10 @@ impl Default for TextEditorProvider {
 impl Provider for TextEditorProvider {
     fn name(&self) -> &str { "texteditor" }
 
-    fn display_name(&self) -> String { "text editor".to_owned() }
+    fn display_name(&self) -> String {
+        register_translations();
+        localize::t("texteditor-display-name")
+    }
 
     fn init(&mut self) {
         // Read saved textEditorPath from config so the first fetch() shows the

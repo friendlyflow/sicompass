@@ -41,8 +41,22 @@ mod messages;
 mod rooms;
 
 use sicompass_sdk::ffon::FfonElement;
+use sicompass_sdk::localize;
 use sicompass_sdk::provider::Provider;
 use sicompass_sdk::timeline::{ChatOpKind, TimelineEntry};
+use std::sync::OnceLock as TranslationsOnce;
+
+/// Register this crate's translation bundles with the SDK localizer.
+/// Idempotent.
+pub fn register_translations() {
+    static ONCE: TranslationsOnce<()> = TranslationsOnce::new();
+    ONCE.get_or_init(|| {
+        let _ = localize::register_bundle("en-US", include_str!("../locales/en-US.ftl"));
+        let _ = localize::register_bundle("nl-BE", include_str!("../locales/nl-BE.ftl"));
+        let _ = localize::register_bundle("fr-BE", include_str!("../locales/fr-BE.ftl"));
+        let _ = localize::register_bundle("de-BE", include_str!("../locales/de-BE.ftl"));
+    });
+}
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -755,7 +769,8 @@ impl Provider for ChatClientProvider {
         "chatclient"
     }
     fn display_name(&self) -> String {
-        "chat client".to_owned()
+        register_translations();
+        localize::t("chatclient-display-name")
     }
     fn stable_root_key(&self) -> bool {
         false
