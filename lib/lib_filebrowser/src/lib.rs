@@ -242,6 +242,7 @@ impl Provider for FilebrowserProvider {
     }
 
     fn undo(&mut self, entry: &TimelineEntry, error: &mut String) {
+        register_translations();
         let (op, side_effect) = match entry {
             TimelineEntry::FsOp { op, side_effect, .. } => (op, side_effect),
             _ => return,
@@ -253,6 +254,7 @@ impl Provider for FilebrowserProvider {
     }
 
     fn redo(&mut self, entry: &TimelineEntry, error: &mut String) {
+        register_translations();
         let (op, side_effect) = match entry {
             TimelineEntry::FsOp { op, side_effect, .. } => (op, side_effect),
             _ => return,
@@ -273,7 +275,10 @@ impl Provider for FilebrowserProvider {
         };
         if let Some(path) = path {
             if let Err(e) = trash::delete(path) {
-                *error = format!("redo delete: trash failed: {e}");
+                register_translations();
+                let mut args = localize::Args::new();
+                args.set("err", e.to_string());
+                *error = localize::t_args("filebrowser-error-redo-delete-trash-failed", &args);
             }
         }
     }
@@ -314,6 +319,7 @@ impl Provider for FilebrowserProvider {
         element_type: i32,
         error: &mut String,
     ) -> Option<FfonElement> {
+        register_translations();
         match command {
             "create directory" => {
                 Some(new_obj_with_i_placeholder("<input></input>"))
@@ -336,12 +342,14 @@ impl Provider for FilebrowserProvider {
             "open file with" => {
                 // element_type 1 = FFON_OBJECT (directory) — reject directories
                 if element_type == 1 {
-                    *error = "open with: select a file, not a directory".into();
+                    register_translations();
+                    *error = localize::t("filebrowser-error-open-with-not-file");
                     return None;
                 }
                 let filename = tags::strip_display(element_key);
                 if filename.is_empty() {
-                    *error = "open with: could not extract filename".into();
+                    register_translations();
+                    *error = localize::t("filebrowser-error-open-with-no-filename");
                     return None;
                 }
                 self.open_with_path = Some(self.current_path.join(&filename));

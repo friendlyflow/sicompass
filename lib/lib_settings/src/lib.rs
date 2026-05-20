@@ -799,6 +799,7 @@ impl Provider for SettingsProvider {
     }
 
     fn undo(&mut self, entry: &TimelineEntry, error: &mut String) {
+        register_translations();
         let payload = match entry {
             TimelineEntry::ProviderOp { command, payload, .. }
                 if command.starts_with("settings-") =>
@@ -810,7 +811,7 @@ impl Provider for SettingsProvider {
         let (section, key, prev, new, kind) = match Self::parse_provider_op_payload(payload) {
             Some(p) => p,
             None => {
-                *error = "settings: malformed undo payload".to_owned();
+                *error = localize::t("settings-error-malformed-undo-payload");
                 return;
             }
         };
@@ -858,6 +859,7 @@ impl Provider for SettingsProvider {
     }
 
     fn redo(&mut self, entry: &TimelineEntry, error: &mut String) {
+        register_translations();
         let payload = match entry {
             TimelineEntry::ProviderOp { command, payload, .. }
                 if command.starts_with("settings-") =>
@@ -869,7 +871,7 @@ impl Provider for SettingsProvider {
         let (section, key, _prev, new, kind) = match Self::parse_provider_op_payload(payload) {
             Some(p) => p,
             None => {
-                *error = "settings: malformed redo payload".to_owned();
+                *error = localize::t("settings-error-malformed-redo-payload");
                 return;
             }
         };

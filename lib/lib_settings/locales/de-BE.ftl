@@ -35,3 +35,7 @@ settings-radio-sort-order = Sortierreihenfolge
 # Sort-order options
 settings-sortOrder-option-alphanumerically = alphanumerisch
 settings-sortOrder-option-chronologically = chronologisch
+
+# Fehlermeldungen
+settings-error-malformed-undo-payload = Einstellungen: ungültige Undo-Nutzlast
+settings-error-malformed-redo-payload = Einstellungen: ungültige Redo-Nutzlast

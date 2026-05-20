@@ -35,3 +35,7 @@ settings-radio-sort-order = ordre de tri
 # Sort-order options
 settings-sortOrder-option-alphanumerically = alphanumérique
 settings-sortOrder-option-chronologically = chronologique
+
+# Messages d'erreur
+settings-error-malformed-undo-payload = paramètres : charge utile d'annulation invalide
+settings-error-malformed-redo-payload = paramètres : charge utile de répétition invalide

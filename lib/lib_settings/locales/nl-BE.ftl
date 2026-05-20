@@ -35,3 +35,7 @@ settings-radio-sort-order = sorteervolgorde
 # Sort-order options
 settings-sortOrder-option-alphanumerically = alfanumeriek
 settings-sortOrder-option-chronologically = chronologisch
+
+# Foutmeldingen
+settings-error-malformed-undo-payload = instellingen: ongeldige undo-payload
+settings-error-malformed-redo-payload = instellingen: ongeldige redo-payload

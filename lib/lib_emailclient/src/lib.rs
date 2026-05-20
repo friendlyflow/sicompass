@@ -625,7 +625,7 @@ impl EmailClientProvider {
         let imap = match self.imap.as_mut() {
             Some(i) => i,
             None => {
-                *error = "not connected".to_owned();
+                *error = localize::t("emailclient-error-not-connected");
                 return;
             }
         };
@@ -642,14 +642,23 @@ impl EmailClientProvider {
                 match imap.fetch_message_by_message_id(search_in, msg_id) {
                     Ok(Some(msg)) => {
                         if let Err(e) = imap.move_message(search_in, msg.uid, move_to) {
-                            *error = format!("{label} imap-move failed: {e}");
+                            let mut args = localize::Args::new();
+                            args.set("label", label.to_owned());
+                            args.set("err", e.to_string());
+                            *error = localize::t_args("emailclient-error-imap-move-failed", &args);
                         }
                     }
                     Ok(None) => {
-                        *error = format!("{label} imap-move: message no longer in {search_in}");
+                        let mut args = localize::Args::new();
+                        args.set("label", label.to_owned());
+                        args.set("searchin", search_in.to_owned());
+                        *error = localize::t_args("emailclient-error-imap-move-no-longer-in", &args);
                     }
                     Err(e) => {
-                        *error = format!("{label} imap-move failed: {e}");
+                        let mut args = localize::Args::new();
+                        args.set("label", label.to_owned());
+                        args.set("err", e.to_string());
+                        *error = localize::t_args("emailclient-error-imap-move-failed", &args);
                     }
                 }
                 self.envelope_cache = None;
@@ -663,7 +672,10 @@ impl EmailClientProvider {
                     (&[], &["\\Seen"])
                 };
                 if let Err(e) = imap.set_flags(folder, *msg_uid, add, remove) {
-                    *error = format!("{label} set-seen failed: {e}");
+                    let mut args = localize::Args::new();
+                    args.set("label", label.to_owned());
+                    args.set("err", e.to_string());
+                    *error = localize::t_args("emailclient-error-set-seen-failed", &args);
                 } else {
                     if let Some(h) = self.message_cache.iter_mut().find(|h| h.uid == *msg_uid) {
                         h.seen = target;
@@ -679,7 +691,10 @@ impl EmailClientProvider {
                     (&[], &["\\Flagged"])
                 };
                 if let Err(e) = imap.set_flags(folder, *msg_uid, add, remove) {
-                    *error = format!("{label} set-flagged failed: {e}");
+                    let mut args = localize::Args::new();
+                    args.set("label", label.to_owned());
+                    args.set("err", e.to_string());
+                    *error = localize::t_args("emailclient-error-set-flagged-failed", &args);
                 } else {
                     if let Some(h) = self.message_cache.iter_mut().find(|h| h.uid == *msg_uid) {
                         h.flagged = target;
@@ -2377,6 +2392,7 @@ impl Provider for EmailClientProvider {
     }
 
     fn undo(&mut self, entry: &TimelineEntry, error: &mut String) {
+        register_translations();
         let op = match entry {
             TimelineEntry::ImapOp { op, .. } => op,
             _ => return,
@@ -2385,6 +2401,7 @@ impl Provider for EmailClientProvider {
     }
 
     fn redo(&mut self, entry: &TimelineEntry, error: &mut String) {
+        register_translations();
         let op = match entry {
             TimelineEntry::ImapOp { op, .. } => op,
             _ => return,
@@ -2569,6 +2586,7 @@ impl Provider for EmailClientProvider {
         _elem_type: i32,
         error: &mut String,
     ) -> Option<FfonElement> {
+        register_translations();
         match cmd {
             "compose" => {
                 self.compose = ComposeState::default();
@@ -2624,7 +2642,10 @@ impl Provider for EmailClientProvider {
                     };
                     if let Some(ref mut imap) = self.imap {
                         if let Err(e) = imap.set_flags(&real_folder, uid, add, remove) {
-                            *error = format!("{cmd} failed: {e}");
+                            let mut args = localize::Args::new();
+                            args.set("cmd", cmd.to_owned());
+                            args.set("err", e.to_string());
+                            *error = localize::t_args("emailclient-error-command-failed", &args);
                             return None;
                         }
                     }
@@ -2665,7 +2686,9 @@ impl Provider for EmailClientProvider {
                         }),
                     }
                 } else {
-                    *error = format!("{cmd}: not viewing a message");
+                    let mut args = localize::Args::new();
+                    args.set("cmd", cmd.to_owned());
+                    *error = localize::t_args("emailclient-error-cmd-not-viewing", &args);
                 }
                 None
             }
@@ -2686,7 +2709,9 @@ impl Provider for EmailClientProvider {
                                 .unwrap_or_default();
                             if let Some(ref mut imap) = self.imap {
                                 if let Err(e) = imap.move_message(&real_folder, uid, t) {
-                                    *error = format!("delete failed: {e}");
+                                    let mut args = localize::Args::new();
+                                    args.set("err", e.to_string());
+                                    *error = localize::t_args("emailclient-error-delete-failed", &args);
                                     return None;
                                 }
                             }
@@ -2713,7 +2738,7 @@ impl Provider for EmailClientProvider {
                     self.envelope_cache = None;
                     self.message_cache.retain(|h| h.uid != uid);
                 } else {
-                    *error = "delete: not viewing a message".to_owned();
+                    *error = localize::t("emailclient-error-delete-not-viewing");
                 }
                 None
             }
@@ -2722,7 +2747,7 @@ impl Provider for EmailClientProvider {
                     let archive = self.special_folders.archive.clone();
                     match archive {
                         None => {
-                            *error = "archive: server does not advertise an \\Archive folder".to_owned();
+                            *error = localize::t("emailclient-error-archive-no-folder");
                         }
                         Some(ref dest) => {
                             // Capture Message-ID for undo before moving.
@@ -2737,7 +2762,9 @@ impl Provider for EmailClientProvider {
                                 .unwrap_or_default();
                             if let Some(ref mut imap) = self.imap {
                                 if let Err(e) = imap.move_message(&real_folder, uid, dest) {
-                                    *error = format!("archive failed: {e}");
+                                    let mut args = localize::Args::new();
+                                    args.set("err", e.to_string());
+                                    *error = localize::t_args("emailclient-error-archive-failed", &args);
                                     return None;
                                 }
                             }
@@ -2753,7 +2780,7 @@ impl Provider for EmailClientProvider {
                         }
                     }
                 } else {
-                    *error = "archive: not viewing a message".to_owned();
+                    *error = localize::t("emailclient-error-archive-not-viewing");
                 }
                 None
             }
@@ -2763,12 +2790,14 @@ impl Provider for EmailClientProvider {
                     self.pending_move_uid = Some(uid);
                     self.pending_move_folder = real_folder;
                 } else {
-                    *error = "move: not viewing a message".to_owned();
+                    *error = localize::t("emailclient-error-move-not-viewing");
                 }
                 None
             }
             _ => {
-                *error = format!("unknown command: {cmd}");
+                let mut args = localize::Args::new();
+                args.set("cmd", cmd.to_owned());
+                *error = localize::t_args("emailclient-error-unknown-command", &args);
                 None
             }
         }

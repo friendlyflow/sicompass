@@ -675,7 +675,9 @@ impl ChatClientProvider {
             PendingAction::JoinRoom => match self.do_join(text) {
                 Ok(_) => true,
                 Err(e) => {
-                    *error = format!("join failed: {e}");
+                    let mut args = localize::Args::new();
+                    args.set("err", e.to_string());
+                    *error = localize::t_args("chatclient-error-join-failed", &args);
                     false
                 }
             },
@@ -683,7 +685,9 @@ impl ChatClientProvider {
                 match self.do_create_room(text, encrypted, is_space, is_public) {
                     Ok(_) => true,
                     Err(e) => {
-                        *error = format!("create room failed: {e}");
+                        let mut args = localize::Args::new();
+                        args.set("err", e.to_string());
+                        *error = localize::t_args("chatclient-error-create-room-failed", &args);
                         false
                     }
                 }
@@ -692,7 +696,9 @@ impl ChatClientProvider {
                 match self.do_invite_user(&room_id, text) {
                     Ok(()) => true,
                     Err(e) => {
-                        *error = format!("invite failed: {e}");
+                        let mut args = localize::Args::new();
+                        args.set("err", e.to_string());
+                        *error = localize::t_args("chatclient-error-invite-failed", &args);
                         false
                     }
                 }
@@ -703,19 +709,25 @@ impl ChatClientProvider {
                     self.public_rooms_cache = lines;
                     self.current_path = "/[public]".to_owned();
                     if count == 0 {
-                        *error = format!("no public rooms found matching {:?}", text);
+                        let mut args = localize::Args::new();
+                        args.set("text", format!("{:?}", text));
+                        *error = localize::t_args("chatclient-error-no-public-rooms-matching", &args);
                     }
                     true
                 }
                 Err(e) => {
-                    *error = format!("search failed: {e}");
+                    let mut args = localize::Args::new();
+                    args.set("err", e.to_string());
+                    *error = localize::t_args("chatclient-error-search-failed", &args);
                     false
                 }
             },
             PendingAction::CreateDm => match self.do_create_dm(text) {
                 Ok(_) => true,
                 Err(e) => {
-                    *error = format!("create DM failed: {e}");
+                    let mut args = localize::Args::new();
+                    args.set("err", e.to_string());
+                    *error = localize::t_args("chatclient-error-create-dm-failed", &args);
                     false
                 }
             },
@@ -731,7 +743,9 @@ impl ChatClientProvider {
                         true
                     }
                     Err(e) => {
-                        *error = format!("kick failed: {e}");
+                        let mut args = localize::Args::new();
+                        args.set("err", e.to_string());
+                        *error = localize::t_args("chatclient-error-kick-failed", &args);
                         false
                     }
                 }
@@ -748,7 +762,9 @@ impl ChatClientProvider {
                         true
                     }
                     Err(e) => {
-                        *error = format!("ban failed: {e}");
+                        let mut args = localize::Args::new();
+                        args.set("err", e.to_string());
+                        *error = localize::t_args("chatclient-error-ban-failed", &args);
                         false
                     }
                 }
@@ -984,6 +1000,7 @@ impl Provider for ChatClientProvider {
         _elem_type: i32,
         error: &mut String,
     ) -> Option<FfonElement> {
+        register_translations();
         match cmd {
             "send message" => Some(FfonElement::new_str("<input></input>".to_owned())),
 
@@ -999,7 +1016,7 @@ impl Provider for ChatClientProvider {
                     || self.username.is_empty()
                     || self.password.is_empty()
                 {
-                    *error = "set homeserver, username, and password first".to_owned();
+                    *error = localize::t("chatclient-error-set-server-user-pass-first");
                     return None;
                 }
                 let result = self.do_login();
@@ -1011,7 +1028,9 @@ impl Provider for ChatClientProvider {
                     self.maybe_start_sync();
                     Some(FfonElement::new_str(format!("logged in as {}", result.user_id)))
                 } else {
-                    *error = format!("login failed: {}", result.error);
+                    let mut args = localize::Args::new();
+                    args.set("err", result.error.clone());
+                    *error = localize::t_args("chatclient-error-login-failed", &args);
                     None
                 }
             }
@@ -1026,7 +1045,7 @@ impl Provider for ChatClientProvider {
                     || self.username.is_empty()
                     || self.password.is_empty()
                 {
-                    *error = "set homeserver, username, and password first".to_owned();
+                    *error = localize::t("chatclient-error-set-server-user-pass-first");
                     return None;
                 }
                 let result = self.do_register();
@@ -1056,14 +1075,16 @@ impl Provider for ChatClientProvider {
                         result.next_stage,
                     )))
                 } else {
-                    *error = format!("registration failed: {}", result.error);
+                    let mut args = localize::Args::new();
+                    args.set("err", result.error.clone());
+                    *error = localize::t_args("chatclient-error-registration-failed", &args);
                     None
                 }
             }
 
             "complete registration" => {
                 if self.uia_session.is_empty() {
-                    *error = "no registration in progress".to_owned();
+                    *error = localize::t("chatclient-error-no-registration-in-progress");
                     return None;
                 }
                 let session = self.uia_session.clone();
@@ -1094,7 +1115,9 @@ impl Provider for ChatClientProvider {
                     )))
                 } else {
                     self.uia_session.clear();
-                    *error = format!("registration failed: {}", result.error);
+                    let mut args = localize::Args::new();
+                    args.set("err", result.error.clone());
+                    *error = localize::t_args("chatclient-error-registration-failed", &args);
                     None
                 }
             }
@@ -1117,7 +1140,7 @@ impl Provider for ChatClientProvider {
             }
 
             "create encrypted room" => {
-                *error = "E2EE is not yet implemented — messages in encrypted rooms will be unreadable. Use 'create private room' instead.".to_owned();
+                *error = localize::t("chatclient-error-e2ee-not-implemented");
                 None
             }
 
@@ -1135,7 +1158,7 @@ impl Provider for ChatClientProvider {
             "room info" => {
                 let segs = self.current_path_segments();
                 let Some(room_key) = segs.first().cloned() else {
-                    *error = "navigate into a room first".to_owned();
+                    *error = localize::t("chatclient-error-navigate-into-room-first");
                     return None;
                 };
                 let cache = self.cache();
@@ -1168,7 +1191,7 @@ impl Provider for ChatClientProvider {
                 match room_info {
                     Some(info) => Some(FfonElement::new_str(info)),
                     None => {
-                        *error = "room not found".to_owned();
+                        *error = localize::t("chatclient-error-room-not-found");
                         None
                     }
                 }
@@ -1177,7 +1200,7 @@ impl Provider for ChatClientProvider {
             "mark read" => {
                 let segs = self.current_path_segments();
                 let Some(room_key) = segs.first().cloned() else {
-                    *error = "navigate into a room first".to_owned();
+                    *error = localize::t("chatclient-error-navigate-into-room-first");
                     return None;
                 };
                 let (room_id, event_id_opt) = {
@@ -1185,14 +1208,14 @@ impl Provider for ChatClientProvider {
                     let room_id = match cache.display_to_id.get(&room_key).cloned() {
                         Some(id) => id,
                         None => {
-                            *error = "room not found".to_owned();
+                            *error = localize::t("chatclient-error-room-not-found");
                             return None;
                         }
                     };
                     let room = match cache.rooms.get_mut(&room_id) {
                         Some(r) => r,
                         None => {
-                            *error = "room not found".to_owned();
+                            *error = localize::t("chatclient-error-room-not-found");
                             return None;
                         }
                     };
@@ -1221,13 +1244,13 @@ impl Provider for ChatClientProvider {
             "invite user" => {
                 let segs = self.current_path_segments();
                 let Some(room_key) = segs.first().cloned() else {
-                    *error = "navigate into a room first".to_owned();
+                    *error = localize::t("chatclient-error-navigate-into-room-first");
                     return None;
                 };
                 let room_id = match self.fetch_room_id_for_path_segment(&room_key) {
                     Some(id) => id,
                     None => {
-                        *error = "room not found".to_owned();
+                        *error = localize::t("chatclient-error-room-not-found");
                         return None;
                     }
                 };
@@ -1238,20 +1261,20 @@ impl Provider for ChatClientProvider {
             "leave room" => {
                 let segs = self.current_path_segments();
                 let Some(room_key) = segs.first().cloned() else {
-                    *error = "navigate into a room first".to_owned();
+                    *error = localize::t("chatclient-error-navigate-into-room-first");
                     return None;
                 };
                 if room_key.starts_with("[space] ")
                     || room_key == "[public]"
                     || segs.len() > 1
                 {
-                    *error = "navigate into a room first".to_owned();
+                    *error = localize::t("chatclient-error-navigate-into-room-first");
                     return None;
                 }
                 let room_id = match self.fetch_room_id_for_path_segment(&room_key) {
                     Some(id) => id,
                     None => {
-                        *error = "room not found".to_owned();
+                        *error = localize::t("chatclient-error-room-not-found");
                         return None;
                     }
                 };
@@ -1264,7 +1287,9 @@ impl Provider for ChatClientProvider {
                         Some(FfonElement::new_str("left room".to_owned()))
                     }
                     Err(e) => {
-                        *error = format!("leave failed: {e}");
+                        let mut args = localize::Args::new();
+                        args.set("err", e.to_string());
+                        *error = localize::t_args("chatclient-error-leave-failed", &args);
                         None
                     }
                 }
@@ -1274,12 +1299,12 @@ impl Provider for ChatClientProvider {
                 let invite_key = if elem_key.starts_with("[invite] ") {
                     elem_key.to_owned()
                 } else {
-                    *error = "select an invite row first".to_owned();
+                    *error = localize::t("chatclient-error-select-invite-row");
                     return None;
                 };
                 let room_id = self.cache().invite_display_to_id.get(&invite_key).cloned();
                 let Some(room_id) = room_id else {
-                    *error = "invite not found".to_owned();
+                    *error = localize::t("chatclient-error-invite-not-found");
                     return None;
                 };
                 match self.do_join(&room_id) {
@@ -1290,7 +1315,9 @@ impl Provider for ChatClientProvider {
                         Some(FfonElement::new_str("accepted invite".to_owned()))
                     }
                     Err(e) => {
-                        *error = format!("accept failed: {e}");
+                        let mut args = localize::Args::new();
+                        args.set("err", e.to_string());
+                        *error = localize::t_args("chatclient-error-accept-failed", &args);
                         None
                     }
                 }
@@ -1300,16 +1327,18 @@ impl Provider for ChatClientProvider {
                 let invite_key = if elem_key.starts_with("[invite] ") {
                     elem_key.to_owned()
                 } else {
-                    *error = "select an invite row first".to_owned();
+                    *error = localize::t("chatclient-error-select-invite-row");
                     return None;
                 };
                 let room_id = self.cache().invite_display_to_id.get(&invite_key).cloned();
                 let Some(room_id) = room_id else {
-                    *error = "invite not found".to_owned();
+                    *error = localize::t("chatclient-error-invite-not-found");
                     return None;
                 };
                 if let Err(e) = self.do_leave(&room_id) {
-                    *error = format!("reject failed: {e}");
+                    let mut args = localize::Args::new();
+                    args.set("err", e.to_string());
+                    *error = localize::t_args("chatclient-error-reject-failed", &args);
                     return None;
                 }
                 let _ = self.do_forget(&room_id);
@@ -1329,7 +1358,9 @@ impl Provider for ChatClientProvider {
                     Some(FfonElement::new_str(format!("{count} public rooms")))
                 }
                 Err(e) => {
-                    *error = format!("public rooms failed: {e}");
+                    let mut args = localize::Args::new();
+                    args.set("err", e.to_string());
+                    *error = localize::t_args("chatclient-error-public-rooms-failed", &args);
                     None
                 }
             },
@@ -1340,13 +1371,13 @@ impl Provider for ChatClientProvider {
                     .find(|(d, _)| d == elem_key)
                     .map(|(_, id)| id.clone());
                 match room_id {
-                    None => { *error = "select a public room row first".to_owned(); None }
+                    None => { *error = localize::t("chatclient-error-select-public-room"); None }
                     Some(id) => match self.do_join(&id) {
                         Ok(_) => {
                             self.current_path = "/".to_owned();
                             Some(FfonElement::new_str(format!("joined {elem_key}")))
                         }
-                        Err(e) => { *error = format!("join failed: {e}"); None }
+                        Err(e) => { let mut args = localize::Args::new(); args.set("err", e.to_string()); *error = localize::t_args("chatclient-error-join-failed", &args); None }
                     }
                 }
             }
@@ -1354,7 +1385,7 @@ impl Provider for ChatClientProvider {
             "members" => {
                 let segs = self.current_path_segments();
                 let Some(room_key) = segs.first().cloned() else {
-                    *error = "navigate into a room first".to_owned();
+                    *error = localize::t("chatclient-error-navigate-into-room-first");
                     return None;
                 };
                 // Navigate into [members] sub-view.
@@ -1369,7 +1400,7 @@ impl Provider for ChatClientProvider {
                     // elem_key may be "user_id (display name)" — extract up to first space
                     let id = elem_key.split_whitespace().next().unwrap_or("").to_owned();
                     if id.is_empty() {
-                        *error = "select a member first".to_owned();
+                        *error = localize::t("chatclient-error-select-member");
                         return None;
                     }
                     id
@@ -1379,7 +1410,7 @@ impl Provider for ChatClientProvider {
                 let room_id = match self.fetch_room_id_for_path_segment(&room_key) {
                     Some(id) => id,
                     None => {
-                        *error = "room not found".to_owned();
+                        *error = localize::t("chatclient-error-room-not-found");
                         return None;
                     }
                 };
@@ -1396,7 +1427,7 @@ impl Provider for ChatClientProvider {
                 } else {
                     let id = elem_key.split_whitespace().next().unwrap_or("").to_owned();
                     if id.is_empty() {
-                        *error = "select a member first".to_owned();
+                        *error = localize::t("chatclient-error-select-member");
                         return None;
                     }
                     id
@@ -1406,7 +1437,7 @@ impl Provider for ChatClientProvider {
                 let room_id = match self.fetch_room_id_for_path_segment(&room_key) {
                     Some(id) => id,
                     None => {
-                        *error = "room not found".to_owned();
+                        *error = localize::t("chatclient-error-room-not-found");
                         return None;
                     }
                 };
@@ -1423,7 +1454,7 @@ impl Provider for ChatClientProvider {
                 } else {
                     let id = elem_key.split_whitespace().next().unwrap_or("").to_owned();
                     if id.is_empty() {
-                        *error = "select a member first".to_owned();
+                        *error = localize::t("chatclient-error-select-member");
                         return None;
                     }
                     id
@@ -1433,7 +1464,7 @@ impl Provider for ChatClientProvider {
                 let room_id = match self.fetch_room_id_for_path_segment(&room_key) {
                     Some(id) => id,
                     None => {
-                        *error = "room not found".to_owned();
+                        *error = localize::t("chatclient-error-room-not-found");
                         return None;
                     }
                 };
@@ -1441,7 +1472,9 @@ impl Provider for ChatClientProvider {
                 match self.do_unban_member(&room_id, &member_id) {
                     Ok(()) => Some(FfonElement::new_str(format!("unbanned {member_id}"))),
                     Err(e) => {
-                        *error = format!("unban failed: {e}");
+                        let mut args = localize::Args::new();
+                        args.set("err", e.to_string());
+                        *error = localize::t_args("chatclient-error-unban-failed", &args);
                         None
                     }
                 }
@@ -1450,7 +1483,7 @@ impl Provider for ChatClientProvider {
             "load earlier messages" => {
                 let segs = self.current_path_segments();
                 let Some(room_key) = segs.first().cloned() else {
-                    *error = "navigate into a room first".to_owned();
+                    *error = localize::t("chatclient-error-navigate-into-room-first");
                     return None;
                 };
                 match self.do_fetch_older_messages(&room_key) {
@@ -1477,6 +1510,7 @@ impl Provider for ChatClientProvider {
     }
 
     fn undo(&mut self, entry: &TimelineEntry, error: &mut String) {
+        register_translations();
         let op = match entry {
             TimelineEntry::ChatOp { op, .. } => op,
             _ => return,
@@ -1494,16 +1528,19 @@ impl Provider for ChatClientProvider {
             }
             ChatOpKind::PostMessage { .. } => {
                 // Redact-on-undo path is deferred — see plan step 9.
-                *error = "post-message undo not yet implemented".to_owned();
+                *error = localize::t("chatclient-error-post-message-undo-not-implemented");
                 return;
             }
         };
         if let Err(e) = result {
-            *error = format!("undo failed: {e}");
+            let mut args = localize::Args::new();
+            args.set("err", e.to_string());
+            *error = localize::t_args("chatclient-error-undo-failed", &args);
         }
     }
 
     fn redo(&mut self, entry: &TimelineEntry, error: &mut String) {
+        register_translations();
         let op = match entry {
             TimelineEntry::ChatOp { op, .. } => op,
             _ => return,
@@ -1519,12 +1556,14 @@ impl Provider for ChatClientProvider {
                 self.do_ban_member(room_id, user_id, reason.as_deref().unwrap_or(""))
             }
             ChatOpKind::PostMessage { .. } => {
-                *error = "post-message redo not yet implemented".to_owned();
+                *error = localize::t("chatclient-error-post-message-redo-not-implemented");
                 return;
             }
         };
         if let Err(e) = result {
-            *error = format!("redo failed: {e}");
+            let mut args = localize::Args::new();
+            args.set("err", e.to_string());
+            *error = localize::t_args("chatclient-error-redo-failed", &args);
         }
     }
 

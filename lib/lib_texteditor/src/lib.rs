@@ -550,6 +550,7 @@ impl Provider for TextEditorProvider {
     }
 
     fn undo(&mut self, entry: &TimelineEntry, error: &mut String) {
+        register_translations();
         match entry {
             TimelineEntry::FsOp { op: FsOpKind::Delete, side_effect, .. } => {
                 sicompass_sdk::fs_trash::restore_side_effect(side_effect, error);
@@ -562,7 +563,7 @@ impl Provider for TextEditorProvider {
                     let clamp = idx.min(self.source_lines.len());
                     self.source_lines.splice(clamp..clamp, [verbatim]);
                     if !self.flush_source_lines() {
-                        *error = "undo delete line: failed to write file".to_owned();
+                        *error = localize::t("texteditor-error-undo-delete-line-write-failed");
                     }
                 }
             }
@@ -577,7 +578,7 @@ impl Provider for TextEditorProvider {
                     let end = (start + count).min(self.source_lines.len());
                     self.source_lines.drain(start..end);
                     if !self.flush_source_lines() {
-                        *error = "undo insert line: failed to write file".to_owned();
+                        *error = localize::t("texteditor-error-undo-insert-line-write-failed");
                     }
                 }
             }
@@ -586,6 +587,7 @@ impl Provider for TextEditorProvider {
     }
 
     fn redo(&mut self, entry: &TimelineEntry, error: &mut String) {
+        register_translations();
         match entry {
             TimelineEntry::FsOp { op: FsOpKind::Delete, side_effect, .. } => {
                 // Re-trash at the absolute original path recorded in the side
@@ -598,7 +600,9 @@ impl Provider for TextEditorProvider {
                 };
                 if let Some(path) = path {
                     if let Err(e) = trash::delete(path) {
-                        *error = format!("redo delete: trash failed: {e}");
+                        let mut args = localize::Args::new();
+                        args.set("err", e.to_string());
+                        *error = localize::t_args("texteditor-error-redo-delete-trash-failed", &args);
                     }
                 }
             }
@@ -610,7 +614,7 @@ impl Provider for TextEditorProvider {
                     if idx < self.source_lines.len() {
                         self.source_lines.remove(idx);
                         if !self.flush_source_lines() {
-                            *error = "redo delete line: failed to write file".to_owned();
+                            *error = localize::t("texteditor-error-redo-delete-line-write-failed");
                         }
                     }
                 }
@@ -626,7 +630,7 @@ impl Provider for TextEditorProvider {
                     let clamp = idx.min(self.source_lines.len());
                     self.source_lines.splice(clamp..clamp, lines);
                     if !self.flush_source_lines() {
-                        *error = "redo insert line: failed to write file".to_owned();
+                        *error = localize::t("texteditor-error-redo-insert-line-write-failed");
                     }
                 }
             }

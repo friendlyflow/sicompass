@@ -40,3 +40,7 @@ settings-radio-sort-order = sort order
 # Sort-order options
 settings-sortOrder-option-alphanumerically = alphanumerically
 settings-sortOrder-option-chronologically = chronologically
+
+# Error messages
+settings-error-malformed-undo-payload = settings: malformed undo payload
+settings-error-malformed-redo-payload = settings: malformed redo payload
