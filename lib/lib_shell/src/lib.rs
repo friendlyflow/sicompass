@@ -43,7 +43,11 @@ impl Default for ShellConfig {
 /// reader thread has buffered since the previous call.
 pub struct Shell {
     master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
+    /// Wrapped in `Arc<Mutex<…>>` so the background reader thread can also
+    /// write — required to auto-respond to DSR cursor-position queries
+    /// (`ESC[6n`) on Windows, where cmd.exe under ConPTY blocks until the
+    /// host replies.
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
     output: Arc<Mutex<Vec<u8>>>,
 }
@@ -92,20 +96,56 @@ impl Shell {
         drop(pair.slave);
 
         let mut reader = pair.master.try_clone_reader().map_err(io_err)?;
-        let writer = pair.master.take_writer().map_err(io_err)?;
+        let writer: Arc<Mutex<Box<dyn Write + Send>>> =
+            Arc::new(Mutex::new(pair.master.take_writer().map_err(io_err)?));
 
         let output = Arc::new(Mutex::new(Vec::<u8>::new()));
         {
             let output = Arc::clone(&output);
+            let writer = Arc::clone(&writer);
             thread::spawn(move || {
                 let mut buf = [0u8; 4096];
+                // Tail of the previous read kept in case a control sequence
+                // straddles a buffer boundary. `ESC[6n` is 4 bytes — keep
+                // up to 3 bytes around for the next scan.
+                let mut tail: Vec<u8> = Vec::with_capacity(4);
                 loop {
                     match reader.read(&mut buf) {
                         Ok(0) => break,
                         Ok(n) => {
+                            let chunk = &buf[..n];
                             if let Ok(mut o) = output.lock() {
-                                o.extend_from_slice(&buf[..n]);
+                                o.extend_from_slice(chunk);
                             }
+                            // Scan tail+chunk for ESC[6n; respond once per
+                            // occurrence with a fixed `ESC[1;1R`. Real
+                            // emulators report the actual cursor position,
+                            // but cmd.exe only needs *some* valid reply to
+                            // unblock its prompt.
+                            let mut scan: Vec<u8> = Vec::with_capacity(tail.len() + n);
+                            scan.extend_from_slice(&tail);
+                            scan.extend_from_slice(chunk);
+                            let mut hits = 0usize;
+                            let mut i = 0usize;
+                            while i + 4 <= scan.len() {
+                                if &scan[i..i + 4] == b"\x1b[6n" {
+                                    hits += 1;
+                                    i += 4;
+                                } else {
+                                    i += 1;
+                                }
+                            }
+                            if hits > 0 {
+                                if let Ok(mut w) = writer.lock() {
+                                    for _ in 0..hits {
+                                        let _ = w.write_all(b"\x1b[1;1R");
+                                    }
+                                    let _ = w.flush();
+                                }
+                            }
+                            tail.clear();
+                            let keep = scan.len().min(3);
+                            tail.extend_from_slice(&scan[scan.len() - keep..]);
                         }
                         Err(_) => break,
                     }
@@ -123,8 +163,9 @@ impl Shell {
 
     /// Send raw bytes to the child's stdin (PTY master).
     pub fn write_input(&mut self, bytes: &[u8]) -> std::io::Result<()> {
-        self.writer.write_all(bytes)?;
-        self.writer.flush()
+        let mut w = self.writer.lock().expect("shell writer mutex poisoned");
+        w.write_all(bytes)?;
+        w.flush()
     }
 
     /// Send `s` followed by an Enter keystroke (`\r\n` on Windows, `\n` on
