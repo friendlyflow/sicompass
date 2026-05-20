@@ -119,6 +119,16 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
         migrate_editor_to_text_editor(&path);
     }
 
+    // Set the active locale BEFORE any provider is constructed, so every
+    // first `display_name()` / `fetch()` already resolves in the user's
+    // chosen language — no English flash on startup. We bypass the settings
+    // provider (not built yet) and read straight from settings.json.
+    if let Some(path) = sicompass_sdk::platform::main_config_path() {
+        if let Some(lang) = read_language_from_config(&path) {
+            sicompass_sdk::localize::set_locale(&lang);
+        }
+    }
+
     let queue: SettingsQueue = Arc::new(Mutex::new(Vec::new()));
     let queue_clone = Arc::clone(&queue);
 
@@ -362,6 +372,28 @@ fn is_plugin_enabled_in_config(name: &str) -> bool {
 }
 
 /// Migrate obsolete `sicompass.programsToLoad` array to individual
+/// Read `sicompass.language` from settings.json. Returns `Some(lang)` only
+/// when the value is one of the locales the language radio actually offers,
+/// so a typo / stale value can't lock the UI to a missing bundle. Called
+/// during startup before any provider is constructed, so the active locale
+/// is set in time for the first `display_name()` / `fetch()` of every
+/// provider — no English flash on launch.
+fn read_language_from_config(path: &Path) -> Option<String> {
+    const ALLOWED: &[&str] = &["en-US", "nl-BE", "fr-BE", "de-BE"];
+    let data = std::fs::read_to_string(path).ok()?;
+    let root: serde_json::Value = serde_json::from_str(&data).ok()?;
+    let lang = root
+        .get("sicompass")
+        .and_then(|v| v.as_object())
+        .and_then(|sc| sc.get("language"))
+        .and_then(|v| v.as_str())?;
+    if ALLOWED.contains(&lang) {
+        Some(lang.to_owned())
+    } else {
+        None
+    }
+}
+
 /// `Available programs:.enable_<name> = true` entries.
 ///
 /// Mirrors `programs.c:422-448`. Runs once at startup; if the key is absent
@@ -959,6 +991,45 @@ mod tests {
     use sicompass_sdk::ffon::FfonElement;
     use sicompass_sdk::provider::Provider;
     use std::io::Write;
+
+    fn write_config(json: &str) -> tempfile::NamedTempFile {
+        let f = tempfile::NamedTempFile::new().expect("temp file");
+        std::fs::write(f.path(), json).expect("write");
+        f
+    }
+
+    #[test]
+    fn read_language_returns_allowed_locale() {
+        let f = write_config(r#"{"sicompass":{"language":"nl-BE"}}"#);
+        assert_eq!(read_language_from_config(f.path()), Some("nl-BE".to_owned()));
+    }
+
+    #[test]
+    fn read_language_ignores_unknown_locale() {
+        // Typo / stale value must NOT propagate to set_locale — otherwise the
+        // UI would lock to a bundle that doesn't exist.
+        let f = write_config(r#"{"sicompass":{"language":"klingon"}}"#);
+        assert_eq!(read_language_from_config(f.path()), None);
+    }
+
+    #[test]
+    fn read_language_returns_none_when_missing() {
+        let f = write_config(r#"{"sicompass":{"colorScheme":"dark"}}"#);
+        assert_eq!(read_language_from_config(f.path()), None);
+    }
+
+    #[test]
+    fn read_language_returns_none_when_file_absent() {
+        let missing = std::env::temp_dir().join("sicompass-no-such-file-xyz.json");
+        let _ = std::fs::remove_file(&missing);
+        assert_eq!(read_language_from_config(&missing), None);
+    }
+
+    #[test]
+    fn read_language_returns_none_when_malformed() {
+        let f = write_config("{not json");
+        assert_eq!(read_language_from_config(f.path()), None);
+    }
 
     struct MockProv { name: String }
     impl MockProv { fn new(n: &str) -> Self { MockProv { name: n.to_owned() } } }
