@@ -101,390 +101,374 @@ fn lorem_ipsum() -> &'static str {
 // Asset paths (TEXTURE_JPG, SF_JSON) are substituted at runtime via TutorialProvider.
 
 static SECTIONS: &[Node] = &[
-    Branch {
-        key: "Welcome --> here you can go up, down, right or left",
+    Branch { key: "tutorial-branch-001",
         children: &[
-            Leaf("Welcome to Sicompass, a keyboard-driven interface for browsing and managing structured data."),
-            Leaf("Every graphical interface is essentially a tree of lists. Sicompass makes that structure explicit and navigable entirely from the keyboard, eliminating the need for a mouse."),
-            Leaf("This means one consistent way to navigate everything: files, documents, settings, web pages, and any data source built on top of it."),
-            Leaf("Each top-level item you see at the root is a program (also called a provider). Providers plug into the same unified interface, so once you learn to navigate one, you can navigate them all."),
-            Leaf("This tutorial is itself a provider. Everything you learn here, you're practicing right now by navigating through it."),
-            Leaf("Use the Right arrow key to dive into any section, and Left to come back. Let's get started!"),
+            Leaf("tutorial-leaf-001"),
+            Leaf("tutorial-leaf-002"),
+            Leaf("tutorial-leaf-003"),
+            Leaf("tutorial-leaf-004"),
+            Leaf("tutorial-leaf-005"),
+            Leaf("tutorial-leaf-006"),
         ],
     },
-    Branch {
-        key: "Navigation",
+    Branch { key: "tutorial-branch-002",
         children: &[
-            Leaf("Navigation in Sicompass works like a file manager: you move through a tree of items using the arrow keys. Every provider, whether it's a file browser, web browser, or this tutorial, uses the same navigation model."),
-            Branch {
-                key: "Moving Around",
+            Leaf("tutorial-leaf-007"),
+            Branch { key: "tutorial-branch-003",
                 children: &[
-                    Leaf("PgUp/PgDown: move the selection by one visual/hearable/feelable line, so images and multi-line items aren't skipped over"),
-                    Leaf("Up key: move the selection up in the current list"),
-                    Leaf("Down key: move the selection down in the current list"),
-                    Leaf("Right key: go into the selected item (descend into its children)"),
-                    Leaf("Left key: go back to the parent level (ascend one level up)"),
-                    Leaf("Enter: confirm or activate the selected item (e.g. toggle a checkbox, open a link)"),
-                    Leaf("Escape: exit the current mode and return to operator mode (e.g. cancel a search, close a prompt)"),
-                    Leaf("F5: refresh the active provider's data (re-fetch the current view from disk, network, or whatever the provider is backed by)"),
-                    Leaf("These six keys are all you need to navigate any content in Sicompass. The tree can be arbitrarily deep. Just keep pressing Right to go deeper, and Left to come back."),
+                    Leaf("tutorial-leaf-008"),
+                    Leaf("tutorial-leaf-009"),
+                    Leaf("tutorial-leaf-010"),
+                    Leaf("tutorial-leaf-011"),
+                    Leaf("tutorial-leaf-012"),
+                    Leaf("tutorial-leaf-013"),
+                    Leaf("tutorial-leaf-014"),
+                    Leaf("tutorial-leaf-015"),
+                    Leaf("tutorial-leaf-016"),
                 ],
             },
-            Branch {
-                key: "Modes",
+            Branch { key: "tutorial-branch-004",
                 children: &[
-                    Leaf("Sicompass has several modes that change what your keyboard inputs do. You always start in operator mode."),
-                    Leaf(": (colon): enter command mode. Type a command name and press Enter to execute it. Commands are context-sensitive, each provider can offer its own commands."),
-                    Leaf("Tab: enter simple search mode. Start typing to filter items in the current list. Only items matching your search will be shown."),
-                    Leaf("S: switch to scroll mode. It flattens the current list and all of its sublists into one continuous, scrollable reading view. Each element shows a 'layer: X list: Y/Z' header (with its list prefix) and its content - text or image - below. Up/Down scroll the view. Tab searches the headers and Ctrl+F searches the content. Enter on a highlighted element jumps to it back in operator mode."),
-                    Leaf("Ctrl+F: enter extended search mode. This searches recursively through all children, not just the current level. Results are shown as a flat list you can jump to."),
-                    Leaf("z: open the history view, a navigable, read-only list of this tab's undo timeline. Escape leaves it. See the 'Undo and Redo' section."),
+                    Leaf("tutorial-leaf-017"),
+                    Leaf("tutorial-leaf-018"),
+                    Leaf("tutorial-leaf-019"),
+                    Leaf("tutorial-leaf-020"),
+                    Leaf("tutorial-leaf-021"),
+                    Leaf("tutorial-leaf-022"),
                 ],
             },
         ],
     },
-    Branch {
-        key: "Accessibility",
+    Branch { key: "tutorial-branch-005",
         children: &[
-            Leaf("Sicompass has built-in screen reader support powered by AccessKit. If you use a screen reader, Sicompass works with it out of the box, no configuration needed."),
-            Leaf("Screen reader support is available on all platforms: Linux (AT-SPI), macOS (VoiceOver), and Windows (Narrator, NVDA, JAWS)."),
-            Leaf("When you navigate up, down, or into items, the current element is automatically announced by your screen reader."),
-            Leaf("Screen reader support activates automatically when a screen reader is detected. There is nothing to enable or configure."),
+            Leaf("tutorial-leaf-023"),
+            Leaf("tutorial-leaf-024"),
+            Leaf("tutorial-leaf-025"),
+            Leaf("tutorial-leaf-026"),
         ],
     },
-    Branch {
-        key: "Editing",
+    Branch { key: "tutorial-branch-006",
         children: &[
-            Leaf("Some items in Sicompass are editable. You can tell because they contain an <input> tag. For example, file names in the file browser or setting values can be edited inline."),
-            Leaf("Press i to enter insert mode. Your cursor is placed at the beginning of the editable text, and you can type to replace or modify it."),
-            Leaf("Press a to enter append mode. Your cursor is placed at the end of the editable text, so you can add to what's already there."),
-            Leaf("While editing, type normally to change the text. Use Backspace to delete characters."),
-            Leaf("Press Enter to confirm your edit and save the change."),
-            Leaf("Press Escape to cancel the edit and discard your changes."),
-            Leaf("Not all items are editable, only those marked with <input> tags by the provider. The file browser makes file and directory names editable. The settings provider makes configuration values editable."),
+            Leaf("tutorial-leaf-027"),
+            Leaf("tutorial-leaf-028"),
+            Leaf("tutorial-leaf-029"),
+            Leaf("tutorial-leaf-030"),
+            Leaf("tutorial-leaf-031"),
+            Leaf("tutorial-leaf-032"),
+            Leaf("tutorial-leaf-033"),
         ],
     },
-    Branch {
-        key: "Undo and Redo",
+    Branch { key: "tutorial-branch-007",
         children: &[
-            Leaf("Ctrl+Z walks back through your actions. Ctrl+Shift+Z walks forward."),
-            Leaf("Each tab keeps its own history, undoing in one tab leaves the others alone."),
-            Leaf("Press z to open the history view: a navigable list of everything recorded in this tab, newest at the top. The row marked '> ' is what the next Ctrl+Z will undo. Rows marked with a dot have already been undone and are what Ctrl+Shift+Z will redo. Press Escape to leave the view."),
-            Branch {
-                key: "What gets recorded",
+            Leaf("tutorial-leaf-034"),
+            Leaf("tutorial-leaf-035"),
+            Leaf("tutorial-leaf-036"),
+            Branch { key: "tutorial-branch-008",
                 children: &[
-                    Leaf("Level-changing navigation: stepping into an item with the Right key, or back out with Left. Each step is recorded, so Ctrl+Z walks the cursor back along the route you took. Moving the selection up or down within a list is not recorded, only steps that change which list you are looking at."),
-                    Leaf("Typed text. Successive characters within about half a second merge into one chunk, so each undo removes a word-sized piece rather than one letter at a time."),
-                    Leaf("Structural edits: creating, inserting, deleting, cutting, and pasting elements in the FFON tree."),
-                    Leaf("Text editor edits: creating, changing, and deleting individual lines inside an open file."),
-                    Leaf("Filesystem operations: creating, renaming, moving, and deleting files. Delete keeps a content snapshot up to 4 MiB so undo can restore the file even after the OS trash is emptied."),
-                    Leaf("Email IMAP operations: trash, archive, move, mark-read/unread, star/unstar. The Message-ID is captured so a moved email can still be found and moved back."),
-                    Leaf("Matrix chat operations: leaving a room, accepting or rejecting invites, kicking and banning members."),
-                    Leaf("Settings changes: text fields, radio buttons, and checkboxes write the old value into the timeline before applying the new one."),
+                    Leaf("tutorial-leaf-037"),
+                    Leaf("tutorial-leaf-038"),
+                    Leaf("tutorial-leaf-039"),
+                    Leaf("tutorial-leaf-040"),
+                    Leaf("tutorial-leaf-041"),
+                    Leaf("tutorial-leaf-042"),
+                    Leaf("tutorial-leaf-043"),
+                    Leaf("tutorial-leaf-044"),
                 ],
             },
-            Branch {
-                key: "What cannot be undone",
+            Branch { key: "tutorial-branch-009",
                 children: &[
-                    Leaf("Terminal commands that have already been executed, only the unsubmitted input line is undoable."),
-                    Leaf("Directory deletions larger than 4 MiB if the OS trash has been emptied, undo reports an error rather than corrupting state."),
-                    Leaf("IMAP operations where the server-side message has moved or been deleted by another client."),
-                    Leaf("Matrix posted messages can only be redacted on undo, recipients see 'message deleted' rather than the message vanishing."),
+                    Leaf("tutorial-leaf-045"),
+                    Leaf("tutorial-leaf-046"),
+                    Leaf("tutorial-leaf-047"),
+                    Leaf("tutorial-leaf-048"),
                 ],
             },
-            Branch {
-                key: "Walking the path back",
+            Branch { key: "tutorial-branch-010",
                 children: &[
-                    Leaf("Undo retraces the route you took, not just your final edit. Because stepping in (Right) and out (Left) are recorded, Ctrl+Z walks the cursor back through the same items you visited."),
-                    Leaf("Creating a file or directory is a single undo step: the keystrokes you typed for its name collapse into that one step, so one Ctrl+Z removes the whole new item, name and all."),
-                    Leaf("Editing the text of an existing line is chunked instead: one Ctrl+Z removes roughly the last word-sized burst of typing rather than a single character."),
-                    Leaf("Ctrl+Shift+Z replays the same path forward, step for step."),
+                    Leaf("tutorial-leaf-049"),
+                    Leaf("tutorial-leaf-050"),
+                    Leaf("tutorial-leaf-051"),
+                    Leaf("tutorial-leaf-052"),
                 ],
             },
         ],
     },
-    Branch {
-        key: "Commands",
+    Branch { key: "tutorial-branch-011",
         children: &[
-            Leaf("Commands let you perform actions beyond simple navigation and editing. Each provider can define its own set of commands."),
-            Leaf("Press : (colon) to enter command mode. A command prompt appears at the bottom of the screen."),
-            Leaf("Start typing the command name. Matching commands will appear as suggestions. Press Enter to select one."),
-            Leaf("Some commands take additional input. For example, 'create file' in the file browser will prompt you for a filename."),
-            Leaf("Common file browser commands:"),
-            Leaf(":create file - create a new file in the current directory"),
-            Leaf(":create directory - create a new directory in the current directory"),
-            Leaf("Providers can define any commands they want. Check each provider's command list by pressing : and browsing the suggestions."),
+            Leaf("tutorial-leaf-053"),
+            Leaf("tutorial-leaf-054"),
+            Leaf("tutorial-leaf-055"),
+            Leaf("tutorial-leaf-056"),
+            Leaf("tutorial-leaf-057"),
+            Leaf("tutorial-leaf-058"),
+            Leaf("tutorial-leaf-059"),
+            Leaf("tutorial-leaf-060"),
         ],
     },
-    Branch {
-        key: "Programs",
+    Branch { key: "tutorial-branch-012",
         children: &[
-            Leaf("Programs (also called providers) are the building blocks of Sicompass. Each program turns a different data source into the same navigable tree structure."),
-            Leaf("Programs appear as top-level items when you navigate to the root (press Left until you can't go further)."),
-            Leaf("You can configure which programs are loaded in Settings under 'Available programs'. Enable or disable them at any time, changes take effect instantly."),
-            Branch { key: "File Browser", children: &[
-                Leaf("The file browser turns your filesystem into a navigable tree. Directories become sections you can enter with the Right key. Files are leaf items."),
-                Leaf("Browse your filesystem by navigating up, down, and into directories. The current path is shown at the top of the screen."),
-                Leaf("Rename files and directories by pressing i (insert mode) on any item. The name becomes editable inline. Type the new name and press Enter to confirm."),
-                Leaf("Create new items inline: press Ctrl+I or Ctrl+A to enter insert mode on an empty placeholder. Type a plain name to create a file, or append : to the name to create a directory (the colon is stripped from the directory name). For example, type 'notes' to create a file, or 'projects:' to create a directory named 'projects'."),
-                Leaf("You can also create items via commands: press : and type 'create file' or 'create directory'."),
-                Leaf("Delete items by pressing the Delete key on a selected item. Directories are deleted recursively if non-empty."),
-                Leaf("Copy with Ctrl+C and paste with Ctrl+V to duplicate files and directories."),
-                Leaf("The file browser supports all the standard modes: search (Tab) to filter files, extended search (Ctrl+F) to find files recursively in subdirectories."),
+            Leaf("tutorial-leaf-061"),
+            Leaf("tutorial-leaf-062"),
+            Leaf("tutorial-leaf-063"),
+            Branch { key: "tutorial-branch-013", children: &[
+                Leaf("tutorial-leaf-064"),
+                Leaf("tutorial-leaf-065"),
+                Leaf("tutorial-leaf-066"),
+                Leaf("tutorial-leaf-067"),
+                Leaf("tutorial-leaf-068"),
+                Leaf("tutorial-leaf-069"),
+                Leaf("tutorial-leaf-070"),
+                Leaf("tutorial-leaf-071"),
             ]},
-            Branch { key: "Text Editor", children: &[
-                Leaf("The text editor turns the filesystem and the contents of files into a single navigable tree. Directories and files are listed like in the file browser, but pressing Right on a file opens its contents as FFON nodes you can navigate into."),
-                Leaf("Parsing is language-aware: source files, JSON, and plain text all expand into their natural structure (sections, blocks, lines). Empty-body headers collapse into a single line for cleaner navigation."),
-                Leaf("File lines are editable inline. Press i or a on a line to edit it, then Enter to commit. Multi-line edits are supported. The cursor coordinate is restored after each commit so consecutive Ctrl+A inserts keep working."),
-                Leaf("Create new files and directories inline via the i placeholder, the same way as in the file browser. Inside a file, the same affordances let you add or remove content lines."),
-                Leaf("Rename, copy, paste, and delete work the same as in the file browser."),
-                Leaf("Every change here is on the undo timeline: Ctrl+Z reverses adding, editing, or deleting a line, as well as creating, renaming, or deleting a file or folder."),
+            Branch { key: "tutorial-branch-014", children: &[
+                Leaf("tutorial-leaf-072"),
+                Leaf("tutorial-leaf-073"),
+                Leaf("tutorial-leaf-074"),
+                Leaf("tutorial-leaf-075"),
+                Leaf("tutorial-leaf-076"),
+                Leaf("tutorial-leaf-077"),
             ]},
-            Branch { key: "Sales Demo", children: &[
-                Leaf("The Sales Demo is an interactive air handling unit (HVAC) product configurator. It demonstrates how Sicompass can handle complex, hierarchical data with inline editing."),
-                Leaf("Navigate supply air and return air sections to explore components like filters, coils, fans, and recovery wheels."),
-                Leaf("Each component has editable parameters (temperatures, pressures, dimensions, and more) that you can modify inline."),
-                Leaf("Optional components (chillers, fan coil units) can be added via 'Add element:' sections. These use the <one-opt> and <many-opt> element types."),
-                Leaf("Press 'd' at the root level to view a technical unit diagram as a fullscreen image. This showcases the dashboardImagePath provider feature."),
-                Leaf("This provider is a good reference for building data-heavy configurators on top of Sicompass."),
+            Branch { key: "tutorial-branch-015", children: &[
+                Leaf("tutorial-leaf-078"),
+                Leaf("tutorial-leaf-079"),
+                Leaf("tutorial-leaf-080"),
+                Leaf("tutorial-leaf-081"),
+                Leaf("tutorial-leaf-082"),
+                Leaf("tutorial-leaf-083"),
             ]},
-            Branch { key: "Web Browser", children: &[
-                Leaf("The web browser lets you browse the internet directly inside Sicompass, turning web pages into keyboard-navigable trees."),
-                Leaf("At the top level, you'll find an address bar. Press i to edit it, type a URL, and press Enter to load the page."),
-                Leaf("HTML is automatically converted into a navigable FFON tree based on the page's heading hierarchy (h1-h6). Headings become nested sections. Paragraphs, lists, tables, and links are preserved as tree items."),
-                Leaf("Navigate web content the same way you navigate files or settings. Right to go deeper into a section, Left to go back."),
-                Leaf("Links on web pages can be followed by selecting them and pressing Enter, which loads the linked page."),
-                Leaf("Forms on web pages are fully interactive: text inputs become editable inline (i/a to edit, Enter to commit), checkboxes and radio groups toggle with Enter, and submit buttons activate with Enter. The browser drives the live page through the Chrome DevTools Protocol, so submissions go through the real site."),
-                Leaf("Cookie-consent banners are auto-accepted on page load. The browser scans for common CMP selectors and accept-button keywords in multiple languages, including iframes, so you don't have to dismiss them manually."),
-                Leaf("This demonstrates how any structured content, even the web, can be unified into the same navigation model."),
+            Branch { key: "tutorial-branch-016", children: &[
+                Leaf("tutorial-leaf-084"),
+                Leaf("tutorial-leaf-085"),
+                Leaf("tutorial-leaf-086"),
+                Leaf("tutorial-leaf-087"),
+                Leaf("tutorial-leaf-088"),
+                Leaf("tutorial-leaf-089"),
+                Leaf("tutorial-leaf-090"),
+                Leaf("tutorial-leaf-091"),
             ]},
-            Branch { key: "Terminal", children: &[
-                Leaf("The terminal is a real interactive shell rendered as an FFON tree. Output from the shell appears as lines in the tree, and an editable <input> slot is pinned to the bottom for typing commands."),
-                Leaf("It's backed by a PTY and a vte-based emulator. On Unix the shell is taken from $SHELL (bash, zsh, fish, …) and invoked with -i so your shell rc files are loaded and your aliases work. On Windows it's taken from %ComSpec% (cmd.exe by default, PowerShell also recognised) and invoked with -NoLogo where applicable."),
-                Leaf("Each prompt is synthesized in-process so the location is always announced clearly to your screen reader: {user}@{host}:{cwd}$ on Unix, {cwd}> on Windows. On Linux the prompt updates after `cd`. On macOS and Windows it reflects the initial cwd, since live tracking would need OS-specific process introspection."),
-                Leaf("Type a command, press Enter to run it, and the output is appended above the input slot. Use the standard navigation keys to scroll back through earlier output."),
-                Leaf("The input slot remembers every command you have run. Press Right on it to open the recall history, a list of past commands, newest first. Press Enter on one to drop it into the input, ready to edit or re-run. Pressing Enter on the input slot itself runs whatever it currently holds, just like Enter in operator mode anywhere else."),
-                Leaf("When a child program switches the terminal to the alt-screen (vim, htop, less, man, and most full-screen TUIs do this), Sicompass auto-enters its interactive dashboard mode and forwards every key (including arrows, function keys, and chords) straight to the TUI. Pressing Escape from the TUI's perspective leaves the alt-screen and Sicompass drops back to the linear scrollback view."),
+            Branch { key: "tutorial-branch-017", children: &[
+                Leaf("tutorial-leaf-092"),
+                Leaf("tutorial-leaf-093"),
+                Leaf("tutorial-leaf-094"),
+                Leaf("tutorial-leaf-095"),
+                Leaf("tutorial-leaf-096"),
+                Leaf("tutorial-leaf-097"),
             ]},
-            Branch { key: "Plugin Store", children: &[
-                Leaf("The Plugin Store lets you manage which providers are active. It appears in Settings under 'Available programs'."),
-                Leaf("Each provider is shown as a checkbox. Check it to enable the provider, uncheck it to disable it."),
-                Leaf("Changes take effect immediately. Providers are hot-loaded or unloaded without restarting the app."),
-                Leaf("Both built-in providers and user-installed plugins appear here. Plugins installed in ~/.config/sicompass/plugins/ are automatically discovered."),
-                Leaf("This is the easiest way to customize your Sicompass setup. Enable only the programs you use."),
+            Branch { key: "tutorial-branch-018", children: &[
+                Leaf("tutorial-leaf-098"),
+                Leaf("tutorial-leaf-099"),
+                Leaf("tutorial-leaf-100"),
+                Leaf("tutorial-leaf-101"),
+                Leaf("tutorial-leaf-102"),
             ]},
-            Branch { key: "Remote Services", children: &[
-                Leaf("Sicompass can connect to remote FFON providers served over HTTP, extending the interface beyond your local machine."),
-                Leaf("Configure a remoteUrl and optional apiKey in Settings to connect to a remote service."),
-                Leaf("Remote content is lazily fetched as you navigate. Only the data you actually view is downloaded, keeping things fast even with large datasets."),
-                Leaf("Providers can use the included TypeScript server SDK to build FFON services with optional Stripe or LemonSqueezy billing integration."),
-                Leaf("This enables SaaS-style products where the entire user interface is delivered through Sicompass's navigable tree."),
+            Branch { key: "tutorial-branch-019", children: &[
+                Leaf("tutorial-leaf-103"),
+                Leaf("tutorial-leaf-104"),
+                Leaf("tutorial-leaf-105"),
+                Leaf("tutorial-leaf-106"),
+                Leaf("tutorial-leaf-107"),
             ]},
-            Branch { key: "Chat Client", children: &[
-                Leaf("A Matrix protocol chat client for real-time messaging inside Sicompass."),
-                Leaf("On first launch, an inline login form appears at the root. Fill in homeserver URL, username, and password, then press the login button. New accounts can register from the same form. Errors are surfaced inline at the top of the form."),
-                Leaf("Once logged in, your rooms appear as a navigable tree with unread badges next to room names. Spaces and pending invites are listed alongside regular rooms."),
-                Leaf("Press Right on a room to open it. Messages appear as a list, with encrypted messages decrypted in place. Entering a room marks it as read."),
-                Leaf("Type a message inline and press Enter to send. The same i/a editing keys apply."),
-                Leaf("Public rooms can be searched and joined. Private rooms can be created, and members can be invited or removed via commands."),
-                Leaf("A background /sync thread keeps room state and unread counts up to date without blocking navigation."),
-                Leaf("Configure homeserver URL and credentials in Settings, or sign in via the inline login form."),
+            Branch { key: "tutorial-branch-020", children: &[
+                Leaf("tutorial-leaf-108"),
+                Leaf("tutorial-leaf-109"),
+                Leaf("tutorial-leaf-110"),
+                Leaf("tutorial-leaf-111"),
+                Leaf("tutorial-leaf-112"),
+                Leaf("tutorial-leaf-113"),
+                Leaf("tutorial-leaf-114"),
+                Leaf("tutorial-leaf-115"),
             ]},
-            Branch { key: "Email Client", children: &[
-                Leaf("An IMAP/SMTP email client. Supports Google OAuth2 for seamless Gmail integration as well as plain username/password for any IMAP server."),
-                Leaf("Folders (inbox, sent, drafts, etc.) appear as a navigable tree. Inside each folder, messages are listed paginated with [read], [unread], and [star] tag prefixes. Threaded history is reconstructed via IMAP THREAD."),
-                Leaf("Press Right on a message to open it. The body is rendered as readable text, or as a navigable FFON tree if the sender included a structured FFON body part."),
-                Leaf("Compose a new message via the command menu. Reply, reply-all, and forward are available on any open message. The compose form has To, Cc, Bcc, subject, attachments, and a body that supports both plain text and nested FFON elements."),
-                Leaf("Drafts are saved automatically. Outgoing mail is queued in an outbox and retried on transient SMTP errors."),
-                Leaf("Mark messages as read, flag/star, move between folders, or delete with the Delete key (or Ctrl+D). Every operation is undoable, including compose-body insertions and deletions."),
-                Leaf("Search across messages in a folder with Tab. Extended search (Ctrl+F) searches deeply across the cached envelope database."),
-                Leaf("Configure server URLs, credentials, or OAuth in Settings."),
+            Branch { key: "tutorial-branch-021", children: &[
+                Leaf("tutorial-leaf-116"),
+                Leaf("tutorial-leaf-117"),
+                Leaf("tutorial-leaf-118"),
+                Leaf("tutorial-leaf-119"),
+                Leaf("tutorial-leaf-120"),
+                Leaf("tutorial-leaf-121"),
+                Leaf("tutorial-leaf-122"),
+                Leaf("tutorial-leaf-123"),
             ]},
-            Branch { key: "Settings", children: &[
-                Leaf("The settings provider is always loaded as the last item in the root. It's where you configure Sicompass itself and all loaded providers."),
-                Leaf("Settings are organized by namespace. 'sicompass' for global settings, and each provider can have its own section."),
-                Leaf("Color scheme (dark/light) is configured here as a radio group. Changes take effect immediately."),
-                Leaf("Display scaling can be set in steps from 100% to 250%, so the same interface stays comfortable on high-DPI screens and at distance."),
-                Leaf("Shoulder-surfing protection: a checkbox that blanks the screen on demand. The screen reader keeps working, but the visual content is hidden from people nearby."),
-                Leaf("The 'Available programs' section is where you enable and disable providers (see Plugin Store above)."),
-                Leaf("All settings are stored in ~/.config/sicompass/settings.json. You can edit this file directly if you prefer."),
+            Branch { key: "tutorial-branch-022", children: &[
+                Leaf("tutorial-leaf-124"),
+                Leaf("tutorial-leaf-125"),
+                Leaf("tutorial-leaf-126"),
+                Leaf("tutorial-leaf-127"),
+                Leaf("tutorial-leaf-128"),
+                Leaf("tutorial-leaf-129"),
+                Leaf("tutorial-leaf-130"),
             ]},
         ],
     },
     // "Interactive Elements" section - leaf nodes with tag examples.
     // Asset paths (<image> and <link>) are filled in at runtime by TutorialProvider.
-    Branch {
-        key: "Interactive Elements",
+    Branch { key: "tutorial-branch-023",
         children: &[
-            Leaf("This section is a hands-on playground for all the interactive element types that Sicompass supports. Try each one as you go!"),
-            Leaf("Checkboxes are boolean toggles. Press Enter on a checkbox to toggle it on or off."),
-            Leaf("<checkbox checked>Try toggling this checkbox (it starts checked)"),
-            Leaf("<checkbox>And this unchecked one"),
-            Branch { key: "<checkbox checked>Navigable checkbox (go inside with Right key)", children: &[
-                Leaf("This is an object checkbox. It can be toggled AND navigated into."),
-                Leaf("Press Enter to toggle the checkbox state, or press the Right key to view these children."),
-                Leaf("Object checkboxes are useful when you want a feature toggle that also has sub-settings. For example, enabling a provider while also configuring its options."),
+            Leaf("tutorial-leaf-131"),
+            Leaf("tutorial-leaf-132"),
+            Leaf("tutorial-leaf-133"),
+            Leaf("tutorial-leaf-134"),
+            Branch { key: "tutorial-branch-024", children: &[
+                Leaf("tutorial-leaf-135"),
+                Leaf("tutorial-leaf-136"),
+                Leaf("tutorial-leaf-137"),
             ]},
-            Branch { key: "<checkbox>Another navigable checkbox (unchecked)", children: &[
-                Leaf("Object checkboxes work the same whether checked or unchecked. The checkbox state and the children are independent."),
+            Branch { key: "tutorial-branch-025", children: &[
+                Leaf("tutorial-leaf-138"),
             ]},
-            Leaf("Text inputs let you edit a value inline. Press i or a on the item below to start editing:"),
-            Leaf("Edit this text --> <input>hello world</input> <-- press i or a"),
-            Branch { key: "+i input example <input></input>", children: &[
+            Leaf("tutorial-leaf-139"),
+            Leaf("tutorial-leaf-140"),
+            Branch { key: "tutorial-branch-026", children: &[
                 Leaf(I_PLACEHOLDER),
             ]},
-            Branch { key: "<radio>Pick a color", children: &[
-                Leaf("<checked>blue"),
-                Leaf("green"),
-                Leaf("red"),
+            Branch { key: "tutorial-branch-027", children: &[
+                Leaf("tutorial-leaf-141"),
+                Leaf("tutorial-leaf-142"),
+                Leaf("tutorial-leaf-143"),
             ]},
-            Leaf("Radio groups let you pick exactly one option from a set. Navigate into the radio group above and press Enter on an option to select it. Only one option can be selected at a time."),
-            Leaf("Images can be displayed inline within the tree. The image below is loaded from a file path:"),
+            Leaf("tutorial-leaf-144"),
+            Leaf("tutorial-leaf-145"),
             // TEXTURE_JPG placeholder, replaced by TutorialProvider::make_interactive_elements
-            Leaf("__TEXTURE_JPG__"),
-            Leaf("__IMAGE_WITH_PREFIX_SUFFIX__"),
-            Leaf("__IMAGE_SUFFIX_ONLY__"),
-            Leaf("__IMAGE_PREFIX_ONLY__"),
-            Leaf("Links lazy-load external JSON or FFON files as children. Navigate into the link below to load its content:"),
+            Leaf("tutorial-leaf-146"),
+            Leaf("tutorial-leaf-147"),
+            Leaf("tutorial-leaf-148"),
+            Leaf("tutorial-leaf-149"),
+            Leaf("tutorial-leaf-150"),
             // SF_JSON placeholder, replaced at runtime
-            Branch { key: "__LINK_WITH_PREFIX_SUFFIX__", children: &[] },
-            Leaf("Scroll mode flattens this list and every sublist into one continuous, scrollable reading view, with images laid out inline like below. Press S from operator mode to try it, then use Up/Down to scroll. Each element gets a 'layer: X list: Y/Z' header. Press Tab to search those headers or Ctrl+F to search element content, and Enter to jump to a result back in operator mode:"),
-            Leaf("__LOREM_IPSUM__"),
+            Branch { key: "tutorial-branch-028", children: &[] },
+            Leaf("tutorial-leaf-151"),
+            Leaf("tutorial-leaf-152"),
         ],
     },
-    Branch {
-        key: "Configuration",
+    Branch { key: "tutorial-branch-029",
         children: &[
-            Leaf("Sicompass stores all configuration in a single file: ~/.config/sicompass/settings.json. This file is organized by namespace, each provider can have its own section."),
-            Branch { key: "Save and Load", children: &[
-                Leaf("Some providers support saving and loading configuration files. This is useful for product configurators or any provider that manages persistent state."),
-                Leaf("Ctrl+S: save the active provider's data to its default config file."),
-                Leaf("Ctrl+Shift+S: save as, choose a custom filename for the saved configuration."),
-                Leaf("Ctrl+O: open/load a saved configuration file."),
-                Leaf("These shortcuts only work if the active provider has enabled config file support. Plugins enable this by adding \"supportsConfigFiles\": true to their plugin.json manifest."),
+            Leaf("tutorial-leaf-153"),
+            Branch { key: "tutorial-branch-030", children: &[
+                Leaf("tutorial-leaf-154"),
+                Leaf("tutorial-leaf-155"),
+                Leaf("tutorial-leaf-156"),
+                Leaf("tutorial-leaf-157"),
+                Leaf("tutorial-leaf-158"),
             ]},
-            Branch { key: "Settings File", children: &[
-                Leaf("The main settings file at ~/.config/sicompass/settings.json uses a namespaced JSON format."),
-                Leaf("Example structure: { \"sicompass\": { \"colorScheme\": \"dark\", \"programsToLoad\": [...] }, \"file browser\": { \"sortOrder\": \"name\" } }"),
-                Leaf("The \"sicompass\" namespace contains global settings like color scheme and which programs to load."),
-                Leaf("Each provider adds its own namespace for provider-specific settings."),
-                Leaf("You can edit this file directly, but changes require a restart to take effect. Using the Settings provider inside Sicompass applies changes immediately."),
+            Branch { key: "tutorial-branch-031", children: &[
+                Leaf("tutorial-leaf-159"),
+                Leaf("tutorial-leaf-160"),
+                Leaf("tutorial-leaf-161"),
+                Leaf("tutorial-leaf-162"),
+                Leaf("tutorial-leaf-163"),
             ]},
-            Branch { key: "Plugin Configuration", children: &[
-                Leaf("User plugins are installed in ~/.config/sicompass/plugins/<plugin-name>/."),
-                Leaf("Each plugin has a plugin.json manifest that defines its name, display name, entry point, and capabilities."),
-                Leaf("Plugins appear automatically in the Plugin Store once installed. Enable them there to load them."),
-                Leaf("The programsToLoad array in settings.json controls the load order of all providers, including plugins."),
-            ]},
-        ],
-    },
-    Branch {
-        key: "Development",
-        children: &[
-            Leaf("Sicompass has an extensible plugin architecture. You can build your own providers in TypeScript or C to add new data sources and functionality."),
-            Leaf("Plugins generate simple JSON arrays that Sicompass renders as navigable trees. This means any programming language that can output JSON to stdout can be used to build a plugin."),
-            Branch { key: "Creating a TypeScript Plugin", children: &[
-                Leaf("TypeScript plugins are the easiest way to extend Sicompass. They're simple scripts that receive a path as a command-line argument and output a JSON array to stdout."),
-                Leaf("1. Create a folder: ~/.config/sicompass/plugins/my-plugin/"),
-                Leaf("2. Create a plugin.json manifest:"),
-                Leaf("   { \"name\": \"my-plugin\", \"displayName\": \"My Plugin\", \"entry\": \"plugin.ts\" }"),
-                Leaf("3. Write plugin.ts: read the path from process.argv[2], compute the children for that path, and output a JSON array to stdout."),
-                Leaf("4. In the output JSON, strings become leaf items and objects become navigable sections. For example: [\"leaf item\", {\"Section Name\": [\"child 1\", \"child 2\"]}]"),
-                Leaf("5. Enable your plugin in Settings under 'Available programs'. It will appear in the Plugin Store automatically."),
-                Leaf("Optional: add \"supportsConfigFiles\": true to plugin.json to enable Ctrl+S/O save/load functionality."),
-                Leaf("See lib/lib_sales_demo/ in this repo for a working script provider you can use as a reference."),
-            ]},
-            Branch { key: "Creating a C Plugin", children: &[
-                Leaf("C plugins are compiled shared libraries that implement the ProviderOps vtable. They offer maximum performance and full access to the Sicompass API."),
-                Leaf("1. Create a folder: ~/.config/sicompass/plugins/my-c-plugin/"),
-                Leaf("2. Create a plugin.json manifest:"),
-                Leaf("   { \"name\": \"my-c-plugin\", \"displayName\": \"My C Plugin\", \"type\": \"native\", \"entry\": \"plugin.so\" }"),
-                Leaf("3. Write a C source file that exports: const ProviderOps* sicompass_plugin_init(void)"),
-                Leaf("4. Return a pointer to a static ProviderOps struct. At minimum, you must set the name, displayName, and fetch function pointers."),
-                Leaf("5. Compile as a shared library: cc -shared -fPIC -o plugin.so plugin.c"),
-                Leaf("6. Enable your plugin in Settings under 'Available programs'."),
-                Leaf("C plugins can implement any subset of the ProviderOps functions. Only fetch is required. The more functions you implement, the richer the experience."),
-                Leaf("The C ABI is not currently shipped as a header file. The struct layout, function-pointer signatures, and required symbol name are documented inline in sdk/src/plugin_loader.rs (the ProviderOpsC struct, with each field's exact C signature in the comments), translate that into your own provider_interface.h to compile against."),
-            ]},
-            Branch { key: "Provider Types", children: &[
-                Leaf("There are three ways to create a provider, each suited to different use cases:"),
-                Leaf("C Provider (ProviderOps): implement a ProviderOps struct and call providerCreate(ops). Best for high-performance providers that need direct memory access."),
-                Leaf("Script Provider: write a TypeScript (or any language) script that outputs JSON. Loaded via scriptProviderCreate(name, displayName, scriptPath). Best for rapid development and prototyping."),
-                Leaf("Factory Provider: register a creation function with providerFactoryRegister(name, createFn), then instantiate providers by name. Best for providers that need dynamic instantiation."),
-            ]},
-            Branch { key: "ProviderOps Functions", children: &[
-                Leaf("The ProviderOps struct defines the full set of functions a provider can implement. Only 'fetch' is required, all others are optional."),
-                Branch { key: "Data", children: &[
-                    Leaf("fetch(path): return an array of FFON elements for the given path. This is the only required function. It defines what content your provider shows."),
-                    Leaf("commitEdit(path, newValue): save an inline edit. Called when the user edits an <input> element and presses Enter. For example, renaming a file or changing a setting value."),
-                    Leaf("dashboardImagePath(path): return a path to an image that will be shown fullscreen when the user presses 'd'. Used by the Sales Demo for technical diagrams."),
-                    Leaf("supportsConfigFiles: when true, enables Ctrl+S/Shift+S/O for save/load. Set this in plugin.json: \"supportsConfigFiles\": true."),
-                ]},
-                Branch { key: "Lifecycle", children: &[
-                    Leaf("init(): called once at startup before any other operations. Use this to initialize state, open connections, or load cached data."),
-                    Leaf("cleanup(): called at shutdown to free resources. Close file handles, save state, and release memory here."),
-                    Leaf("loadConfig(filePath): load persistent configuration from the given file path. Called when the user presses Ctrl+O."),
-                    Leaf("saveConfig(filePath): save persistent configuration to the given file path. Called when the user presses Ctrl+S."),
-                ]},
-                Branch { key: "Navigation", children: &[
-                    Leaf("pushPath(segment): append a segment to the current path. Called when the user presses Right to go deeper into the tree."),
-                    Leaf("popPath(): remove the last segment from the current path. Called when the user presses Left to go back up."),
-                    Leaf("getCurrentPath(): return the current path as a string. Used by the app to display the current location."),
-                    Leaf("setCurrentPath(path): jump directly to an absolute path. Used after extended search to teleport the user to a result deep in the tree."),
-                ]},
-                Branch { key: "File Operations", children: &[
-                    Leaf("createDirectory(path, name): create a new directory at the given path. Triggered by the ':create directory' command."),
-                    Leaf("createFile(path, name): create a new file at the given path. Triggered by the ':create file' command."),
-                    Leaf("deleteItem(path): delete a file or directory at the given path. Directories are deleted recursively if non-empty."),
-                    Leaf("copyItem(source, destination): copy a file or directory from source to destination. Used by Ctrl+C/Ctrl+V."),
-                ]},
-                Branch { key: "Commands", children: &[
-                    Leaf("getCommands(): return a list of command names this provider supports. These appear when the user presses : (colon)."),
-                    Leaf("handleCommand(name): prepare or validate a command. Optionally return a UI element (like a text input) for gathering additional input from the user."),
-                    Leaf("getCommandListItems(name): return a list of selectable options for a command. Shown as a navigable list the user can pick from."),
-                    Leaf("executeCommand(name, option): execute the command with the user's selected option. This is where the actual work happens."),
-                ]},
-                Branch { key: "Events", children: &[
-                    Leaf("onRadioChange(groupKey, selectedValue): called when the user changes a radio group selection. Use this to react to configuration changes in real time."),
-                    Leaf("onButtonPress(functionName): called when the user activates a <button> element. The functionName matches the value in the button tag."),
-                    Leaf("createElement(parentPath, templateKey): create a new FFON element for 'Add element:' sections (<one-opt> and <many-opt> elements)."),
-                ]},
-                Branch { key: "Search", children: &[
-                    Leaf("collectDeepSearchItems(): return all searchable items for extended search (Ctrl+F). This lets you provide a custom index of searchable content."),
-                    Leaf("If not implemented, the system falls back to traversing the FFON tree automatically, which works well for most providers."),
-                ]},
-            ]},
-            Branch { key: "Element Tags", children: &[
-                Leaf("Element tags are special markers in string content that tell Sicompass to render interactive elements instead of plain text."),
-                Leaf("Use \\< and \\> to escape angle brackets when you want to display them as literal text."),
-                Leaf("\\<input>content\\</input> - make the content editable inline. The user can press i or a to edit it."),
-                Leaf("\\<radio>group name - mark a parent object as a radio group. Its children become mutually exclusive options."),
-                Leaf("\\<checked>option - mark a radio option as the currently selected one."),
-                Leaf("\\<checkbox>label - render an unchecked boolean toggle. Press Enter to check it."),
-                Leaf("\\<checkbox checked>label - render a checked boolean toggle. Press Enter to uncheck it."),
-                Leaf("\\<link>path/to/file.json\\</link> - lazy-load an external JSON or FFON file as children when the user navigates into this item."),
-                Leaf("\\<image>path/to/image.jpg\\</image> - display an image inline within the tree."),
-                Leaf("\\<button>functionName\\</button>Display Text - render a clickable button. When activated, calls onButtonPress with the function name."),
-                Leaf("\\<many-opt>\\</many-opt>key - a repeatable creation button. The user can add multiple instances. Each instance can be deleted later."),
-                Leaf("\\<one-opt>\\</one-opt>key - a single-use creation button. After creation, the button is replaced by the created element."),
-                Leaf("All tags support prefix and suffix text: 'Label: \\<input>value\\</input> (hint)' renders 'Label: ' before and ' (hint)' after the interactive element."),
-                Leaf("This works for input, link, image, and button tags."),
-                Leaf("All elements support \\\\n for multiline content. Continuation lines automatically inherit the prefix formatting."),
+            Branch { key: "tutorial-branch-032", children: &[
+                Leaf("tutorial-leaf-164"),
+                Leaf("tutorial-leaf-165"),
+                Leaf("tutorial-leaf-166"),
+                Leaf("tutorial-leaf-167"),
             ]},
         ],
     },
-    Branch {
-        key: "Next Steps",
+    Branch { key: "tutorial-branch-033",
         children: &[
-            Leaf("Sicompass is actively growing. Here is what's on the roadmap:"),
-            Leaf("Notebook - structured note-taking with server-side sync, turning your notes into a navigable tree."),
-            Leaf("IDE - code as a navigable structure. Browse functions, classes, and modules as a tree with C code generation."),
-            Leaf("Terminal - a terminal emulator integrated as a provider, so you never need to leave Sicompass."),
-            Leaf("Blog - publish structured content with optional paid access, viewable in both Sicompass and web browsers."),
-            Leaf("Mobile - Android and iOS versions, bringing the same keyboard-driven (and touch-adapted) experience to mobile devices."),
-            Leaf("Contributions are welcome! Whether it's code, plugins, documentation, or feedback, every contribution helps make computing more accessible."),
-            Leaf("Join the community on Discord to connect with other users and developers."),
-            Leaf("Happy navigating!"),
+            Leaf("tutorial-leaf-168"),
+            Leaf("tutorial-leaf-169"),
+            Branch { key: "tutorial-branch-034", children: &[
+                Leaf("tutorial-leaf-170"),
+                Leaf("tutorial-leaf-171"),
+                Leaf("tutorial-leaf-172"),
+                Leaf("tutorial-leaf-173"),
+                Leaf("tutorial-leaf-174"),
+                Leaf("tutorial-leaf-175"),
+                Leaf("tutorial-leaf-176"),
+                Leaf("tutorial-leaf-177"),
+                Leaf("tutorial-leaf-178"),
+            ]},
+            Branch { key: "tutorial-branch-035", children: &[
+                Leaf("tutorial-leaf-179"),
+                Leaf("tutorial-leaf-180"),
+                Leaf("tutorial-leaf-181"),
+                Leaf("tutorial-leaf-182"),
+                Leaf("tutorial-leaf-183"),
+                Leaf("tutorial-leaf-184"),
+                Leaf("tutorial-leaf-185"),
+                Leaf("tutorial-leaf-186"),
+                Leaf("tutorial-leaf-187"),
+                Leaf("tutorial-leaf-188"),
+            ]},
+            Branch { key: "tutorial-branch-036", children: &[
+                Leaf("tutorial-leaf-189"),
+                Leaf("tutorial-leaf-190"),
+                Leaf("tutorial-leaf-191"),
+                Leaf("tutorial-leaf-192"),
+            ]},
+            Branch { key: "tutorial-branch-037", children: &[
+                Leaf("tutorial-leaf-193"),
+                Branch { key: "tutorial-branch-038", children: &[
+                    Leaf("tutorial-leaf-194"),
+                    Leaf("tutorial-leaf-195"),
+                    Leaf("tutorial-leaf-196"),
+                    Leaf("tutorial-leaf-197"),
+                ]},
+                Branch { key: "tutorial-branch-039", children: &[
+                    Leaf("tutorial-leaf-198"),
+                    Leaf("tutorial-leaf-199"),
+                    Leaf("tutorial-leaf-200"),
+                    Leaf("tutorial-leaf-201"),
+                ]},
+                Branch { key: "tutorial-branch-040", children: &[
+                    Leaf("tutorial-leaf-202"),
+                    Leaf("tutorial-leaf-203"),
+                    Leaf("tutorial-leaf-204"),
+                    Leaf("tutorial-leaf-205"),
+                ]},
+                Branch { key: "tutorial-branch-041", children: &[
+                    Leaf("tutorial-leaf-206"),
+                    Leaf("tutorial-leaf-207"),
+                    Leaf("tutorial-leaf-208"),
+                    Leaf("tutorial-leaf-209"),
+                ]},
+                Branch { key: "tutorial-branch-042", children: &[
+                    Leaf("tutorial-leaf-210"),
+                    Leaf("tutorial-leaf-211"),
+                    Leaf("tutorial-leaf-212"),
+                    Leaf("tutorial-leaf-213"),
+                ]},
+                Branch { key: "tutorial-branch-043", children: &[
+                    Leaf("tutorial-leaf-214"),
+                    Leaf("tutorial-leaf-215"),
+                    Leaf("tutorial-leaf-216"),
+                ]},
+                Branch { key: "tutorial-branch-044", children: &[
+                    Leaf("tutorial-leaf-217"),
+                    Leaf("tutorial-leaf-218"),
+                ]},
+            ]},
+            Branch { key: "tutorial-branch-045", children: &[
+                Leaf("tutorial-leaf-219"),
+                Leaf("tutorial-leaf-220"),
+                Leaf("tutorial-leaf-221"),
+                Leaf("tutorial-leaf-222"),
+                Leaf("tutorial-leaf-223"),
+                Leaf("tutorial-leaf-224"),
+                Leaf("tutorial-leaf-225"),
+                Leaf("tutorial-leaf-226"),
+                Leaf("tutorial-leaf-227"),
+                Leaf("tutorial-leaf-228"),
+                Leaf("tutorial-leaf-229"),
+                Leaf("tutorial-leaf-230"),
+                Leaf("tutorial-leaf-231"),
+                Leaf("tutorial-leaf-232"),
+                Leaf("tutorial-leaf-233"),
+            ]},
+        ],
+    },
+    Branch { key: "tutorial-branch-046",
+        children: &[
+            Leaf("tutorial-leaf-234"),
+            Leaf("tutorial-leaf-235"),
+            Leaf("tutorial-leaf-236"),
+            Leaf("tutorial-leaf-237"),
+            Leaf("tutorial-leaf-238"),
+            Leaf("tutorial-leaf-239"),
+            Leaf("tutorial-leaf-240"),
+            Leaf("tutorial-leaf-241"),
+            Leaf("tutorial-leaf-242"),
         ],
     },
 ];
@@ -506,11 +490,13 @@ fn get_children_at_path<'a>(
         if let Node::Branch { key, children } = node {
             // Path segments are the *stripped* display text of an Obj key (see
             // `navigate_right_raw`, which pushes `tags::strip_display(&o.key)`).
-            // A Branch key may carry tags (e.g. "+i input example <input></input>"),
-            // so compare against the stripped key, not the raw one. Otherwise
-            // such a path fails to resolve on tab-switch / restart and the
-            // restored cursor collapses out of the Obj.
-            if sicompass_sdk::tags::strip_display(key) == **head {
+            // After i18n migration, `key` is a Fluent message ID like
+            // `tutorial-branch-023`; we must translate it through the same
+            // chain `node_to_ffon` uses to render the Obj key, then strip
+            // display tags. Otherwise the path that the app records on
+            // navigation can never resolve back to the branch.
+            let translated = translate_node_string(key);
+            if sicompass_sdk::tags::strip_display(&translated) == **head {
                 return get_children_at_path(children, rest);
             }
         }
@@ -524,9 +510,17 @@ fn get_children_at_path<'a>(
 
 fn node_to_ffon(node: &Node, texture_jpg: &str, ffon_json: &str) -> FfonElement {
     match node {
-        Node::Leaf(s) => FfonElement::Str(apply_asset_placeholders(s, texture_jpg, ffon_json)),
+        Node::Leaf(s) => {
+            // Resolve the translation key first, then run asset-placeholder
+            // substitution on the resolved value. Asset sentinels like
+            // `__TEXTURE_JPG__` live in the FTL value (or in non-key
+            // literals such as `I_PLACEHOLDER`), so this order is required.
+            let translated = translate_node_string(s);
+            FfonElement::Str(apply_asset_placeholders(&translated, texture_jpg, ffon_json))
+        }
         Node::Branch { key, children } => {
-            let resolved_key = apply_asset_placeholders(key, texture_jpg, ffon_json);
+            let translated = translate_node_string(key);
+            let resolved_key = apply_asset_placeholders(&translated, texture_jpg, ffon_json);
             let mut obj = FfonElement::new_obj(resolved_key);
             for child in *children {
                 obj.as_obj_mut()
@@ -535,6 +529,29 @@ fn node_to_ffon(node: &Node, texture_jpg: &str, ffon_json: &str) -> FfonElement 
             }
             obj
         }
+    }
+}
+
+/// Resolve a SECTIONS node string through the localizer. Strings that look
+/// like Fluent message IDs (alphanumeric + hyphens, no whitespace or other
+/// special chars) are routed through `t()`; everything else (the
+/// `I_PLACEHOLDER` literal that the tutorial uses for an inline input slot)
+/// is returned as-is.
+fn translate_node_string(s: &str) -> String {
+    register_translations();
+    let looks_like_key = !s.is_empty()
+        && s.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    if !looks_like_key {
+        return s.to_owned();
+    }
+    let resolved = localize::t(s);
+    if resolved == s {
+        // Unknown key — leave the literal in place so a missed entry shows
+        // up loudly rather than silently.
+        s.to_owned()
+    } else {
+        resolved
     }
 }
 
