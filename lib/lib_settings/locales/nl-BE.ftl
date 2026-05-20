@@ -16,7 +16,7 @@ settings-language-option-de-BE = Deutsch (Belgien)
 # Section display names. "sicompass" is the product name and stays in all
 # locales.
 settings-section-sicompass = sicompass
-settings-section-available-programs = Beschikbare programma's:
+settings-section-available-programs = Beschikbare programma's en Winkel (sponsoring, cloud, cloud + commerciële licentie en ondersteuning):
 settings-section-file-browser = bestandsverkenner
 settings-section-web-browser = webbrowser
 settings-section-email-client = e-mailclient
@@ -27,6 +27,8 @@ settings-section-store = Winkel
 settings-section-tutorial = handleiding
 
 # Setting labels
+settings-label-store-url = URL winkelserver
+settings-label-license-redeem-token = Licentie-inwisseltoken
 settings-checkbox-maximized = gemaximaliseerd
 settings-checkbox-shoulder-surfing-protection = schermbescherming (blanco scherm)
 settings-radio-font-scale = tekstgrootte

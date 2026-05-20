@@ -30,12 +30,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// certificate until replaced. To set up a real key: in the `server/` repo run
 /// `cargo run --bin keygen`, paste the printed public key here, and put the
 /// printed private key in the server's `.env` as `SICOMPASS_SIGNING_KEY`.
-pub const LICENSE_PUBLIC_KEY_B64: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+pub(crate) const LICENSE_PUBLIC_KEY_B64: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
 /// The signed portion of a certificate. Field order is the signing order —
 /// it must stay identical to the server's `Payload`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Payload {
+pub(crate) struct Payload {
     /// Always `"sicompass"`. Guards against a certificate minted for a
     /// different product being accepted here.
     pub product: String,
@@ -59,7 +59,7 @@ pub struct Payload {
 
 /// A full certificate: the signed [`Payload`] plus its detached signature.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Certificate {
+pub(crate) struct Certificate {
     pub payload: Payload,
     /// base64 of the 64-byte Ed25519 signature over [`signing_message`].
     pub signature: String,
@@ -67,7 +67,7 @@ pub struct Certificate {
 
 /// Outcome of verifying a certificate. Display-only — never a feature gate.
 #[derive(Debug, Clone, PartialEq)]
-pub enum LicenseStatus {
+pub(crate) enum LicenseStatus {
     /// No certificate file present.
     None,
     /// Valid signature, not yet expired.
@@ -79,8 +79,8 @@ pub enum LicenseStatus {
 }
 
 impl LicenseStatus {
-    /// One-line summary rendered at the top of the store provider.
-    pub fn summary_line(&self) -> String {
+    /// One-line summary rendered at the top of the store sub-node.
+    pub(crate) fn summary_line(&self) -> String {
         match self {
             LicenseStatus::None => {
                 "Commercial license: none. sicompass is free under GPLv3.".to_owned()
@@ -102,7 +102,7 @@ impl LicenseStatus {
 ///
 /// `serde_json` serializes struct fields in declaration order, so this is
 /// deterministic given a fixed [`Payload`] definition.
-pub fn signing_message(payload: &Payload) -> Vec<u8> {
+pub(crate) fn signing_message(payload: &Payload) -> Vec<u8> {
     serde_json::to_vec(payload).expect("Payload always serializes")
 }
 
@@ -115,7 +115,7 @@ fn now_unix() -> i64 {
 
 /// Verify `cert` against an explicit base64 public key. The public entry point
 /// [`verify`] calls this with [`LICENSE_PUBLIC_KEY_B64`]; tests pass their own.
-pub fn verify_against(cert: &Certificate, public_key_b64: &str) -> LicenseStatus {
+pub(crate) fn verify_against(cert: &Certificate, public_key_b64: &str) -> LicenseStatus {
     let key_bytes = match STANDARD.decode(public_key_b64) {
         Ok(b) => b,
         Err(_) => return LicenseStatus::Invalid("public key is not valid base64".to_owned()),
@@ -166,23 +166,23 @@ pub fn verify_against(cert: &Certificate, public_key_b64: &str) -> LicenseStatus
 }
 
 /// Verify a certificate against the embedded production public key.
-pub fn verify(cert: &Certificate) -> LicenseStatus {
+pub(crate) fn verify(cert: &Certificate) -> LicenseStatus {
     verify_against(cert, LICENSE_PUBLIC_KEY_B64)
 }
 
 /// On-disk location of the saved certificate.
-pub fn cert_path() -> Option<PathBuf> {
+pub(crate) fn cert_path() -> Option<PathBuf> {
     sicompass_sdk::platform::provider_config_path("store-license")
 }
 
 /// Load and parse the certificate from `path` (no verification).
-pub fn load_from(path: &Path) -> Option<Certificate> {
+pub(crate) fn load_from(path: &Path) -> Option<Certificate> {
     let text = std::fs::read_to_string(path).ok()?;
     serde_json::from_str(&text).ok()
 }
 
 /// Persist a certificate to `path`, atomically. Returns `false` on failure.
-pub fn save_to(path: &Path, cert: &Certificate) -> bool {
+pub(crate) fn save_to(path: &Path, cert: &Certificate) -> bool {
     if let Some(dir) = path.parent() {
         sicompass_sdk::platform::make_dirs(dir);
     }
@@ -193,12 +193,12 @@ pub fn save_to(path: &Path, cert: &Certificate) -> bool {
 }
 
 /// Load the saved certificate from the standard location, if present.
-pub fn load() -> Option<Certificate> {
+pub(crate) fn load() -> Option<Certificate> {
     load_from(&cert_path()?)
 }
 
 /// Save a certificate to the standard location.
-pub fn save(cert: &Certificate) -> bool {
+pub(crate) fn save(cert: &Certificate) -> bool {
     match cert_path() {
         Some(p) => save_to(&p, cert),
         None => false,

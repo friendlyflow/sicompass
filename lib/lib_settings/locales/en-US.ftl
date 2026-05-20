@@ -19,7 +19,7 @@ settings-language-option-de-BE = Deutsch (Belgien)
 # settings.json) stays language-neutral; these entries only translate the
 # displayed FFON Obj key when navigating into a section.
 settings-section-sicompass = sicompass
-settings-section-available-programs = Available programs:
+settings-section-available-programs = Available programs and Store (sponsoring, cloud, cloud + proprietary license, and support):
 settings-section-file-browser = file browser
 settings-section-web-browser = web browser
 settings-section-email-client = email client
@@ -32,6 +32,8 @@ settings-section-tutorial = tutorial
 # Setting labels (checkbox / radio / text). Storage keys (config_key) stay
 # language-neutral; lib_settings reverse-maps the displayed label back to
 # the stored entry when the user toggles a setting.
+settings-label-store-url = Store server URL
+settings-label-license-redeem-token = License redeem token
 settings-checkbox-maximized = maximized
 settings-checkbox-shoulder-surfing-protection = shoulder-surfing protection (blank screen)
 settings-radio-font-scale = font scale

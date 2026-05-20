@@ -7,6 +7,8 @@ use sicompass_sdk::timeline::TimelineEntry;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+mod store;
+
 /// Register this crate's translation bundles with the SDK localizer.
 /// Idempotent — safe to call from `main()` and from individual tests.
 pub fn register_translations() {
@@ -78,6 +80,13 @@ pub struct SettingsProvider {
     /// here. The `id` field is left as the empty `IdArray` — the app
     /// patches in the current_id when it drains.
     pending_timeline_entries: Vec<TimelineEntry>,
+    /// Store sub-node state (former `lib_store::StoreProvider` fields,
+    /// now owned by SettingsProvider since the store renders as a fixed
+    /// child of the "Available programs:" priority section).
+    store_url: String,
+    license_redeem_token: String,
+    cached_catalog: Option<Vec<FfonElement>>,
+    store_error: Option<String>,
 }
 
 impl SettingsProvider {
@@ -94,6 +103,10 @@ impl SettingsProvider {
             apply_fn: Some(Box::new(apply_fn)),
             config_path_override: None,
             pending_timeline_entries: Vec::new(),
+            store_url: store::DEFAULT_STORE_URL.to_owned(),
+            license_redeem_token: String::new(),
+            cached_catalog: None,
+            store_error: None,
         }
     }
 
@@ -111,6 +124,10 @@ impl SettingsProvider {
             apply_fn: None,
             config_path_override: None,
             pending_timeline_entries: Vec::new(),
+            store_url: store::DEFAULT_STORE_URL.to_owned(),
+            license_redeem_token: String::new(),
+            cached_catalog: None,
+            store_error: None,
         }
     }
 
@@ -317,6 +334,18 @@ impl SettingsProvider {
                 }
             }
         }
+
+        // Store sub-node fields. The "Store" bucket in settings.json is shared
+        // with old installs where the BuiltinManifest injection path wrote it,
+        // so the key names are unchanged.
+        if let Some(Value::Object(sec)) = root.get("Store") {
+            if let Some(Value::String(v)) = sec.get("storeUrl") {
+                self.store_url = v.clone();
+            }
+            if let Some(Value::String(v)) = sec.get("licenseRedeemToken") {
+                self.license_redeem_token = v.clone();
+            }
+        }
     }
 
     // On first run (settings.json absent), write a seed file containing only the
@@ -459,9 +488,108 @@ impl SettingsProvider {
         if label == key { name.to_owned() } else { label }
     }
 
-    fn populate_section(&self, section_name: &str) -> FfonElement {
+    /// Build the always-top Store Obj for the "Available programs:" section.
+    ///
+    /// Contents: license-status line, the cached server-hosted catalog, the
+    /// checkout link, and the two text inputs that drive Store behavior.
+    /// License verification is offline and display-only.
+    fn build_store_subnode(&mut self) -> FfonElement {
+        let mut store_obj = FfonElement::new_obj(localize::t("settings-section-store"));
+        let so = store_obj.as_obj_mut().unwrap();
+
+        // 1. License status line.
+        let status = store::cert::load()
+            .map(|c| store::cert::verify(&c))
+            .unwrap_or(store::cert::LicenseStatus::None);
+        so.push(FfonElement::new_str(status.summary_line()));
+
+        // 2. Server-hosted catalog (cached after the first fetch).
+        if self.cached_catalog.is_none() {
+            self.cached_catalog = Some(store::catalog::fetch_catalog(&self.store_url));
+        }
+        if let Some(items) = &self.cached_catalog {
+            for e in items {
+                so.push(e.clone());
+            }
+        }
+
+        // 3. Checkout link.
+        let base = self.store_url.trim_end_matches('/');
+        so.push(FfonElement::new_obj(format!(
+            "<link>{base}/checkout?item=commercial-license</link>\
+             Buy or manage your commercial license"
+        )));
+
+        // 4. Store text inputs.
+        so.push(FfonElement::Str(format!(
+            "{}: <input>{}</input>",
+            localize::t("settings-label-store-url"),
+            self.store_url
+        )));
+        so.push(FfonElement::Str(format!(
+            "{}: <input>{}</input>",
+            localize::t("settings-label-license-redeem-token"),
+            self.license_redeem_token
+        )));
+
+        store_obj
+    }
+
+    /// Handle an edit committed inside the Store sub-node. `input_label` is
+    /// the displayed label of the field being edited (either translated or the
+    /// raw English fallback).
+    fn commit_store_input(&mut self, input_label: &str, value: &str) -> bool {
+        let url_label = localize::t("settings-label-store-url");
+        let token_label = localize::t("settings-label-license-redeem-token");
+
+        if input_label == url_label || input_label == "Store server URL" {
+            if self.store_url != value {
+                let prev = self.store_url.clone();
+                self.store_url = value.to_owned();
+                self.cached_catalog = None;
+                self.write_key_string("Store", "storeUrl", value);
+                self.fire_apply("storeUrl", value);
+                self.push_settings_op(
+                    "settings-text", "Store", "storeUrl",
+                    &prev, value, "text", "edit store URL",
+                );
+            }
+            return true;
+        }
+
+        if input_label == token_label || input_label == "License redeem token" {
+            let token = value.trim();
+            if !token.is_empty() {
+                if let Err(msg) = store::redeem_license(&self.store_url, token) {
+                    self.store_error = Some(msg);
+                }
+            }
+            if self.license_redeem_token != value {
+                let prev = self.license_redeem_token.clone();
+                self.license_redeem_token = value.to_owned();
+                self.write_key_string("Store", "licenseRedeemToken", value);
+                self.fire_apply("licenseRedeemToken", value);
+                self.push_settings_op(
+                    "settings-text", "Store", "licenseRedeemToken",
+                    &prev, value, "text", "edit license redeem token",
+                );
+            }
+            return true;
+        }
+
+        false
+    }
+
+    fn populate_section(&mut self, section_name: &str) -> FfonElement {
         let mut obj = FfonElement::new_obj(Self::localize_section_name(section_name));
         let o = obj.as_obj_mut().unwrap();
+
+        // Always-top Store sub-node inside the "Available programs:" section.
+        // Rendered before the program checkboxes regardless of alphabetical
+        // ordering.
+        if section_name == "Available programs:" {
+            o.push(self.build_store_subnode());
+        }
 
         // Checkboxes (sorted alphabetically by displayed label, so the order
         // matches what the user reads on screen — even when labels are
@@ -650,6 +778,21 @@ impl Provider for SettingsProvider {
     fn commit_edit(&mut self, _old: &str, new_content: &str) -> bool {
         // Path format: /<section>/<label>
         let path = self.current_path.clone();
+
+        // Store sub-node text inputs sit one level deeper than ordinary
+        // text entries: /Available programs:/<Store label>/<input label>.
+        // Route them directly so commit lookup doesn't have to deal with
+        // 3-segment paths in the generic match below.
+        if let Some(rest) = path.strip_prefix("/Available programs:/") {
+            let store_label = localize::t("settings-section-store");
+            let prefixed = format!("{store_label}/");
+            let nested = rest.strip_prefix(prefixed.as_str())
+                .or_else(|| rest.strip_prefix("Store/"));
+            if let Some(input_label) = nested {
+                return self.commit_store_input(input_label, new_content);
+            }
+        }
+
         let parts: Vec<&str> = path.trim_start_matches('/').splitn(2, '/').collect();
         if parts.len() < 2 { return false; }
         let (section, label) = (parts[0], parts[1]);
@@ -796,6 +939,10 @@ impl Provider for SettingsProvider {
 
     fn take_timeline_entries(&mut self) -> Vec<TimelineEntry> {
         std::mem::take(&mut self.pending_timeline_entries)
+    }
+
+    fn take_error(&mut self) -> Option<String> {
+        self.store_error.take()
     }
 
     fn undo(&mut self, entry: &TimelineEntry, error: &mut String) {
@@ -1131,19 +1278,31 @@ mod tests {
 
         sicompass_sdk::localize::set_locale("en-US");
         assert_eq!(SettingsProvider::localize_section_name("file browser"), "file browser");
-        assert_eq!(SettingsProvider::localize_section_name("Available programs:"), "Available programs:");
+        assert_eq!(
+            SettingsProvider::localize_section_name("Available programs:"),
+            "Available programs and Store (sponsoring, cloud, cloud + proprietary license, and support):"
+        );
 
         sicompass_sdk::localize::set_locale("nl-BE");
         assert_eq!(SettingsProvider::localize_section_name("file browser"), "bestandsverkenner");
-        assert_eq!(SettingsProvider::localize_section_name("Available programs:"), "Beschikbare programma's:");
+        assert_eq!(
+            SettingsProvider::localize_section_name("Available programs:"),
+            "Beschikbare programma's en Winkel (sponsoring, cloud, cloud + commerciële licentie en ondersteuning):"
+        );
 
         sicompass_sdk::localize::set_locale("fr-BE");
         assert_eq!(SettingsProvider::localize_section_name("file browser"), "navigateur de fichiers");
-        assert_eq!(SettingsProvider::localize_section_name("Available programs:"), "Programmes disponibles :");
+        assert_eq!(
+            SettingsProvider::localize_section_name("Available programs:"),
+            "Programmes disponibles et Magasin (sponsoring, cloud, cloud + licence propriétaire, et support) :"
+        );
 
         sicompass_sdk::localize::set_locale("de-BE");
         assert_eq!(SettingsProvider::localize_section_name("file browser"), "Dateimanager");
-        assert_eq!(SettingsProvider::localize_section_name("Available programs:"), "Verfügbare Programme:");
+        assert_eq!(
+            SettingsProvider::localize_section_name("Available programs:"),
+            "Verfügbare Programme und Geschäft (Sponsoring, Cloud, Cloud + proprietäre Lizenz und Support):"
+        );
 
         // Unknown section name falls back to its literal.
         sicompass_sdk::localize::set_locale("nl-BE");
@@ -1868,12 +2027,15 @@ mod tests {
         p.add_text("email client", "label", "key", "val");
         p.add_text("web browser", "label", "key", "val");
         let items = p.fetch();
-        // Expected order: sicompass, Available programs:, chat client, email client, tutorial, web browser
+        // Expected order: sicompass, <localized Available programs:>, chat client, email client, tutorial, web browser.
+        // The priority section's displayed key depends on the active locale,
+        // so resolve it dynamically rather than asserting a literal.
+        let priority_key = SettingsProvider::localize_section_name("Available programs:");
         let keys: Vec<&str> = items.iter()
             .filter_map(|e| e.as_obj().map(|o| o.key.as_str()))
             .collect();
         assert_eq!(keys[0], "sicompass");
-        assert_eq!(keys[1], "Available programs:");
+        assert_eq!(keys[1], priority_key.as_str());
         assert_eq!(keys[2], "chat client");
         assert_eq!(keys[3], "email client");
         assert_eq!(keys[4], "tutorial");
@@ -1974,6 +2136,140 @@ mod tests {
             e.as_obj().map(|o| o.key == "My Priority").unwrap_or(false)
         });
         assert!(has_section, "priority section should appear in fetch output");
+    }
+
+    // ----- Store sub-node integration tests (ported from former lib_store) ---
+
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn start_mock_server() -> (tokio::runtime::Runtime, MockServer) {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let server = rt.block_on(MockServer::start());
+        (rt, server)
+    }
+
+    fn mount(rt: &tokio::runtime::Runtime, server: &MockServer, m: Mock) {
+        rt.block_on(m.mount(server));
+    }
+
+    /// Find the Store sub-node inside the priority section of a freshly
+    /// fetched settings tree.
+    fn store_subnode(items: &[FfonElement]) -> &FfonElement {
+        let priority_key = SettingsProvider::localize_section_name("Available programs:");
+        let store_key = sicompass_sdk::localize::t("settings-section-store");
+        let section = items
+            .iter()
+            .find(|e| e.as_obj().map(|o| o.key == priority_key).unwrap_or(false))
+            .expect("Available programs section should be present");
+        section
+            .as_obj()
+            .unwrap()
+            .children
+            .iter()
+            .find(|c| c.as_obj().map(|o| o.key == store_key).unwrap_or(false))
+            .expect("Store sub-node should be the first child")
+    }
+
+    #[test]
+    fn store_subnode_is_first_child_of_priority_section() {
+        let mut p = SettingsProvider::new_headless().with_config_path(test_config_path());
+        p.add_priority_section("Available programs:");
+        p.add_checkbox("Available programs:", "tutorial", "enable_tutorial", true);
+
+        let items = p.fetch();
+        let priority_key = SettingsProvider::localize_section_name("Available programs:");
+        let section = items
+            .iter()
+            .find(|e| e.as_obj().map(|o| o.key == priority_key).unwrap_or(false))
+            .expect("priority section");
+        let first = &section.as_obj().unwrap().children[0];
+        let store_key = sicompass_sdk::localize::t("settings-section-store");
+        assert_eq!(first.as_obj().unwrap().key, store_key,
+            "Store must be the always-top first child");
+    }
+
+    #[test]
+    fn store_url_change_invalidates_catalog_cache() {
+        let mut p = SettingsProvider::new_headless().with_config_path(test_config_path());
+        p.cached_catalog = Some(vec![FfonElement::new_str("stale")]);
+        let ok = p.commit_store_input("Store server URL", "https://new.example");
+        assert!(ok, "commit_store_input should accept the URL label");
+        assert!(p.cached_catalog.is_none());
+        assert_eq!(p.store_url, "https://new.example");
+    }
+
+    #[test]
+    fn store_subnode_shows_status_catalog_and_checkout() {
+        let (rt, server) = start_mock_server();
+        mount(
+            &rt,
+            &server,
+            Mock::given(method("GET")).and(path("/root")).respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!([{ "Themes": [] }])),
+            ),
+        );
+
+        let mut p = SettingsProvider::new_headless().with_config_path(test_config_path());
+        p.add_priority_section("Available programs:");
+        p.commit_store_input("Store server URL", &server.uri());
+
+        let items = p.fetch();
+        let store = store_subnode(&items);
+        let children = &store.as_obj().unwrap().children;
+
+        // status line + catalog entry + checkout + two text inputs = >=5
+        assert!(children.len() >= 5, "got: {children:?}");
+        assert!(children[0].is_str(), "first child should be the license-status line");
+        assert!(
+            children.iter().any(|e| e
+                .as_obj()
+                .map(|o| o.key.contains("Themes") && o.key.contains("<link>"))
+                .unwrap_or(false)),
+            "catalog entry should be link-wrapped, got: {children:?}"
+        );
+        assert!(
+            children.iter().any(|e| e
+                .as_obj()
+                .map(|o| o.key.contains("checkout") && o.key.contains("<link>"))
+                .unwrap_or(false)),
+            "checkout link must be present, got: {children:?}"
+        );
+    }
+
+    #[test]
+    fn redeem_rejects_invalid_certificate() {
+        use sicompass_sdk::provider::Provider;
+        let (rt, server) = start_mock_server();
+        // Syntactically valid certificate; the placeholder public key rejects
+        // the signature.
+        mount(
+            &rt,
+            &server,
+            Mock::given(method("GET")).and(path("/license/tok123")).respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "payload": {
+                        "product": "sicompass",
+                        "license_id": "id",
+                        "licensee": "Test",
+                        "scope": "commercial",
+                        "issued_at": 1_700_000_000_i64,
+                        "expires_at": 1_900_000_000_i64,
+                        "version_coverage": "*",
+                        "payment_provider": "polar"
+                    },
+                    "signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+                })),
+            ),
+        );
+
+        let mut p = SettingsProvider::new_headless().with_config_path(test_config_path());
+        p.commit_store_input("Store server URL", &server.uri());
+        p.commit_store_input("License redeem token", "tok123");
+        let err = p.take_error();
+        assert!(err.is_some(), "an unverifiable certificate should set an error");
+        assert!(err.unwrap().contains("rejected"));
     }
 }
 

@@ -16,9 +16,9 @@ use std::time::Duration;
 /// Fetch the store catalog from `{store_url}/root`.
 ///
 /// On any error returns a single explanatory string element, so the store
-/// provider still renders (with its license status and checkout link) even
+/// sub-node still renders (with its license status and checkout link) even
 /// when the server is unreachable or not yet deployed.
-pub fn fetch_catalog(store_url: &str) -> Vec<FfonElement> {
+pub(crate) fn fetch_catalog(store_url: &str) -> Vec<FfonElement> {
     if store_url.is_empty() {
         return vec![FfonElement::new_str("Store catalog: no store URL configured")];
     }

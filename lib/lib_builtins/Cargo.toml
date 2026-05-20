@@ -19,4 +19,3 @@ sicompass-sales-demo = { workspace = true }
 sicompass-settings = { workspace = true }
 sicompass-terminal = { workspace = true }
 sicompass-claude = { workspace = true }
-sicompass-store = { workspace = true }

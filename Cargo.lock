@@ -3859,7 +3859,6 @@ dependencies = [
  "sicompass-sales-demo",
  "sicompass-sdk",
  "sicompass-settings",
- "sicompass-store",
  "sicompass-terminal",
  "sicompass-text-editor",
  "sicompass-tutorial",
@@ -3960,23 +3959,6 @@ dependencies = [
 name = "sicompass-settings"
 version = "0.1.0"
 dependencies = [
- "serde",
- "serde_json",
- "sicompass-sdk",
- "tempfile",
-]
-
-[[package]]
-name = "sicompass-shell"
-version = "0.1.0"
-dependencies = [
- "portable-pty",
-]
-
-[[package]]
-name = "sicompass-store"
-version = "0.1.0"
-dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
  "reqwest",
@@ -3986,6 +3968,13 @@ dependencies = [
  "tempfile",
  "tokio",
  "wiremock",
+]
+
+[[package]]
+name = "sicompass-shell"
+version = "0.1.0"
+dependencies = [
+ "portable-pty",
 ]
 
 [[package]]
