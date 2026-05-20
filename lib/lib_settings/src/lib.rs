@@ -428,6 +428,18 @@ impl SettingsProvider {
 
     // ---- FFON tree building ------------------------------------------------
 
+    /// Resolve a radio option's display label. Convention: option value `X`
+    /// under config key `Y` maps to Fluent message ID
+    /// `settings-Y-option-X`. Falls back to the raw option value when no
+    /// translation is registered (preserving the legacy behaviour where the
+    /// stored value doubled as the display string — and avoiding garbage
+    /// keys for numeric options like fontScale `"1.25"`).
+    fn localize_option_label(config_key: &str, opt: &str) -> String {
+        let key = format!("settings-{}-option-{}", config_key, opt);
+        let label = localize::t(&key);
+        if label == key { opt.to_owned() } else { label }
+    }
+
     fn populate_section(&self, section_name: &str) -> FfonElement {
         let mut obj = FfonElement::new_obj(section_name);
         let o = obj.as_obj_mut().unwrap();
@@ -454,10 +466,11 @@ impl SettingsProvider {
                 ));
                 let ro = radio.as_obj_mut().unwrap();
                 for opt in &e.options {
+                    let label = Self::localize_option_label(&e.config_key, opt);
                     let s = if *opt == e.current_value {
-                        format!("<checked>{opt}")
+                        format!("<checked>{label}")
                     } else {
-                        opt.clone()
+                        label
                     };
                     ro.push(FfonElement::Str(s));
                 }
@@ -503,8 +516,18 @@ impl Provider for SettingsProvider {
                 localize::t("settings-radio-color-scheme")
             ));
             let ro = radio.as_obj_mut().unwrap();
-            ro.push(FfonElement::Str(if is_dark { "<checked>dark".to_owned() } else { "dark".to_owned() }));
-            ro.push(FfonElement::Str(if is_dark { "light".to_owned() } else { "<checked>light".to_owned() }));
+            let dark_label = Self::localize_option_label("colorScheme", "dark");
+            let light_label = Self::localize_option_label("colorScheme", "light");
+            ro.push(FfonElement::Str(if is_dark {
+                format!("<checked>{dark_label}")
+            } else {
+                dark_label
+            }));
+            ro.push(FfonElement::Str(if is_dark {
+                light_label
+            } else {
+                format!("<checked>{light_label}")
+            }));
             sc_obj.as_obj_mut().unwrap().push(radio);
         }
         // Also add any registered sicompass section entries
@@ -930,6 +953,74 @@ mod tests {
             .find(|c| c.as_obj().map_or(false, |o| o.key.contains("<radio>")))
             .expect("color scheme radio");
         radio.as_obj().unwrap().key.clone()
+    }
+
+    /// Color-scheme radio options translate too (dark / light → donker /
+    /// licht / foncé / clair / dunkel / hell). Stored value is still
+    /// language-neutral ("dark"/"light"); only the displayed label flips.
+    #[test]
+    fn poc_color_scheme_options_translate_per_locale() {
+        let _g = locale_test_lock();
+        let mut p = headless();
+
+        fn radio_option_strings(p: &mut SettingsProvider) -> Vec<String> {
+            let elems = p.fetch();
+            let sc = elems.iter()
+                .find(|e| e.as_obj().map_or(false, |o| o.key == "sicompass"))
+                .expect("sicompass section");
+            let radio = sc.as_obj().unwrap().children.iter()
+                .find(|c| c.as_obj().map_or(false, |o| o.key.contains("<radio>")))
+                .expect("color scheme radio");
+            radio.as_obj().unwrap().children.iter()
+                .filter_map(|c| c.as_str().map(|s| s.to_owned()))
+                .collect()
+        }
+
+        sicompass_sdk::localize::set_locale("nl-BE");
+        let nl = radio_option_strings(&mut p);
+        assert!(nl.iter().any(|s| s.contains("donker")), "nl-BE: {nl:?}");
+        assert!(nl.iter().any(|s| s.contains("licht")),  "nl-BE: {nl:?}");
+
+        sicompass_sdk::localize::set_locale("fr-BE");
+        let fr = radio_option_strings(&mut p);
+        assert!(fr.iter().any(|s| s.contains("foncé")), "fr-BE: {fr:?}");
+        assert!(fr.iter().any(|s| s.contains("clair")), "fr-BE: {fr:?}");
+
+        sicompass_sdk::localize::set_locale("de-BE");
+        let de = radio_option_strings(&mut p);
+        assert!(de.iter().any(|s| s.contains("dunkel")), "de-BE: {de:?}");
+        assert!(de.iter().any(|s| s.contains("hell")),   "de-BE: {de:?}");
+
+        sicompass_sdk::localize::set_locale("en-US");
+    }
+
+    /// Language-radio option labels show in each language's native form,
+    /// regardless of the active locale — standard convention for language
+    /// pickers so users can find their language even from a foreign UI.
+    #[test]
+    fn poc_language_option_labels_use_localize_helper() {
+        let _g = locale_test_lock();
+        // We don't have a SettingsProvider with a registered "language" radio
+        // in this test crate (that registration lives in src/sicompass).
+        // Verify the convention directly via the helper.
+        let en = SettingsProvider::localize_option_label("language", "en-US");
+        let nl = SettingsProvider::localize_option_label("language", "nl-BE");
+        let fr = SettingsProvider::localize_option_label("language", "fr-BE");
+        let de = SettingsProvider::localize_option_label("language", "de-BE");
+        assert_eq!(en, "English");
+        assert_eq!(nl, "Nederlands (België)");
+        assert_eq!(fr, "Français (Belgique)");
+        assert_eq!(de, "Deutsch (Belgien)");
+    }
+
+    /// Options without a translation entry (e.g. fontScale "1.25", which
+    /// also contains a period that would make for an invalid Fluent ID) must
+    /// fall back to the raw stored value rather than rendering the key.
+    #[test]
+    fn option_label_falls_back_to_raw_value_when_no_translation() {
+        let _g = locale_test_lock();
+        let label = SettingsProvider::localize_option_label("fontScale", "1.25");
+        assert_eq!(label, "1.25");
     }
 
     #[test]

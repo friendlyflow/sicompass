@@ -887,10 +887,13 @@ fn apply_setting(
         }
         "language" => {
             // Switch the active locale on every t() / t_args() call from now
-            // on, then re-fetch the active provider so the new locale is
-            // immediately visible in the FFON tree. Other tabs pick up the
-            // change on their next fetch (navigation, F5, or focus switch).
+            // on, then (a) re-key every provider's root Obj so the root
+            // program list flips immediately (display_name() is translation-
+            // backed for every provider) and (b) re-fetch the active
+            // provider so its children flip too. Inactive providers' deeper
+            // children re-fetch lazily on next navigation / F5.
             sicompass_sdk::localize::set_locale(value);
+            crate::provider::refresh_all_provider_root_keys(renderer);
             crate::provider::refresh_current_directory(renderer);
         }
         _ => {}

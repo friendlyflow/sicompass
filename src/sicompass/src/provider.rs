@@ -67,6 +67,18 @@ pub fn set_provider_path(renderer: &mut AppRenderer, path: &str) {
 // Refresh / re-fetch
 // ---------------------------------------------------------------------------
 
+/// Update every provider's root Obj key in `renderer.ffon` to match the
+/// current `display_name()`. Used when locale changes — provider names are
+/// shown in the root list and must flip even for providers that aren't
+/// active. Cheap: walks N top-level Objs and rewrites one `String` each.
+pub fn refresh_all_provider_root_keys(renderer: &mut AppRenderer) {
+    for (i, provider) in renderer.providers.iter().enumerate() {
+        if let Some(obj) = renderer.ffon.get_mut(i).and_then(|e| e.as_obj_mut()) {
+            obj.key = provider.display_name();
+        }
+    }
+}
+
 /// Explicitly re-fetch the active provider and graft the result onto the
 /// container Obj currently in view (the level whose children form the visible
 /// list). Used by F5 / `needs_refresh`.
