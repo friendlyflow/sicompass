@@ -3741,6 +3741,7 @@ dependencies = [
  "nucleo-matcher",
  "rustybuzz",
  "sdl3",
+ "sdl3-sys",
  "serde",
  "serde_json",
  "sicompass-builtins",

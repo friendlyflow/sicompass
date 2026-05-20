@@ -570,6 +570,8 @@ pub fn build_app() -> Result<AppState, SiError> {
     let sdl_exts = window
         .vulkan_instance_extensions()
         .map_err(|e| SiError::Sdl(e.to_string()))?;
+    // `mut` is only consumed by the debug_assertions push below; harmless in release.
+    #[allow(unused_mut)]
     let mut ext_names_raw: Vec<*const i8> = sdl_exts
         .iter()
         .map(|s| CString::new(s.as_str()).unwrap().into_raw() as *const i8)
