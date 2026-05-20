@@ -719,6 +719,29 @@ impl AppRenderer {
         use sicompass_sdk::tags::strip_display;
         use std::path::PathBuf;
 
+        // Whole-tree providers (currently `settings`) return their entire
+        // navigable structure from a single `fetch()` regardless of
+        // `current_path`. The per-segment re-fetch + graft pattern below
+        // would replace each ancestor's children with the WHOLE top-level
+        // tree (sections nested inside sections), so a deep cursor like
+        // `[settings, sicompass_idx, language_radio_idx, option_idx]` would
+        // resolve into a *sibling section* (e.g. email client) rather than
+        // back into the language radio. Handle them specially: one fetch,
+        // descend by key-match without re-fetching.
+        if self.providers[provider_idx].name() == "settings" {
+            let display_name = self.providers[provider_idx].display_name();
+            self.providers[provider_idx].set_current_path(path);
+            let root_children = self.providers[provider_idx].fetch();
+            let mut root = FfonElement::new_obj(&display_name);
+            if let Some(obj) = root.as_obj_mut() {
+                for c in root_children {
+                    obj.push(c);
+                }
+            }
+            self.ffon[provider_idx] = root;
+            return;
+        }
+
         // Filesystem providers (filebrowser, texteditor) use native paths —
         // on Windows those carry backslash separators and drive prefixes
         // (`C:\…`). Splitting them on `/` collapses the whole path into one

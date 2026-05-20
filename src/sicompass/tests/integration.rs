@@ -6276,6 +6276,102 @@ fn load_active_tab_preserves_valid_deep_cursor() {
     assert_eq!(h.renderer.list_index, 1);
 }
 
+/// Regression: navigating deep into the settings provider (e.g. into a
+/// radio's option list at `/sicompass/language`), then closing and
+/// reopening the app, must land back at the language radio — NOT at a
+/// sibling section like "email client".
+///
+/// The bug: `deep_rebuild_provider_tree` was re-fetching per path segment.
+/// The settings provider's `fetch()` returns its WHOLE tree regardless of
+/// `current_path`, so each re-fetch returned the full top-level section
+/// list, and the graft step replaced the sicompass section's children with
+/// the top-level sections list. A saved cursor like
+/// `[settings, sicompass_idx, lang_radio_idx, opt_idx]` then resolved into
+/// whatever sibling section happened to sit at `lang_radio_idx` of the
+/// top-level list (file browser, email client, …) — not back into the
+/// language radio.
+#[test]
+fn load_active_tab_settings_deep_cursor_restores_into_correct_section() {
+    let mut h = Harness::new();
+    let settings_idx = h.provider_idx("settings")
+        .expect("settings provider must be registered");
+
+    // Build a fully-fetched settings tree as it'd look at runtime, so
+    // load_active_tab has a real tree to clamp against.
+    h.renderer.providers[settings_idx].set_current_path("/");
+    let root_children = h.renderer.providers[settings_idx].fetch();
+    let mut root = FfonElement::new_obj("settings");
+    for c in root_children {
+        root.as_obj_mut().unwrap().push(c);
+    }
+    h.renderer.ffon[settings_idx] = root;
+
+    // Locate the sicompass section.
+    let sicompass_section_idx = {
+        let r = h.renderer.ffon[settings_idx].as_obj().unwrap();
+        r.children.iter().position(|c| matches!(c, FfonElement::Obj(o)
+            if sicompass_sdk::tags::strip_display(&o.key) == "sicompass"))
+            .expect("sicompass section must be present")
+    };
+
+    // Pick any radio inside the sicompass section as the "deep target".
+    // (The exact one doesn't matter — what matters is the cursor doesn't
+    // get redirected into a *different* section.)
+    let (radio_idx_in_section, radio_child_count) = {
+        let sicompass_obj = h.renderer.ffon[settings_idx]
+            .as_obj().unwrap()
+            .children[sicompass_section_idx]
+            .as_obj().unwrap();
+        let pos = sicompass_obj.children.iter().position(|c|
+            matches!(c, FfonElement::Obj(o) if o.key.contains("<radio>")))
+            .expect("sicompass should have at least one radio");
+        let n = sicompass_obj.children[pos].as_obj().unwrap().children.len();
+        (pos, n)
+    };
+    assert!(radio_child_count > 0, "radio should have at least one option");
+
+    // Save a depth-4 cursor pointing at the first option of that radio,
+    // and a provider_path that the OLD buggy code would split into
+    // segments and re-fetch per-level.
+    let mut cursor = sicompass_sdk::ffon::IdArray::new();
+    cursor.push(settings_idx);
+    cursor.push(sicompass_section_idx);
+    cursor.push(radio_idx_in_section);
+    cursor.push(0);
+
+    // Force `provider_path` to differ from `current_path()` so the rebuild
+    // branch in load_active_tab actually fires (it skips otherwise).
+    h.renderer.providers[settings_idx].set_current_path("/");
+    h.renderer.tabs[0] = sicompass::app_state::TabSnapshot {
+        current_id: cursor.clone(),
+        provider_path: "/sicompass/language".to_owned(),
+    };
+    h.renderer.active_tab = 0;
+    h.renderer.load_active_tab();
+
+    // The restored cursor must still descend through `settings →
+    // sicompass-section → that-radio → option`, NOT through a sibling
+    // section. Verify by walking the tree.
+    assert_eq!(h.renderer.current_id.get(0), Some(settings_idx),
+        "should still be in the settings provider");
+    assert_eq!(h.renderer.current_id.get(1), Some(sicompass_section_idx),
+        "second level must remain the sicompass section");
+
+    // The node at depth-2 must still be an Obj keyed as the sicompass
+    // section (key may be translated; we strip display tags).
+    let depth2_obj = h.renderer.ffon[settings_idx]
+        .as_obj().unwrap()
+        .children[sicompass_section_idx]
+        .as_obj()
+        .expect("depth-2 must resolve to an Obj (the sicompass section)");
+    assert_eq!(
+        sicompass_sdk::tags::strip_display(&depth2_obj.key),
+        "sicompass",
+        "depth-2 must STILL be the sicompass section, not a sibling like \
+         'email client' or 'file browser'"
+    );
+}
+
 /// Regression test for the bug the user reported: navigating Left in tab A
 /// rebuilds the file browser's FFON tree, leaving tab B's saved indices
 /// pointing at the wrong content. With per-tab provider_path snapshots,

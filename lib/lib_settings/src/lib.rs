@@ -970,6 +970,11 @@ mod tests {
 
     #[test]
     fn test_fetch_dark_scheme_is_checked() {
+        // Serialize with the locale-switching tests so the global locale
+        // can't be flipped mid-fetch and turn "dark" into "donker"/"foncé"/
+        // "dunkel".
+        let _g = locale_test_lock();
+        sicompass_sdk::localize::set_locale("en-US");
         let mut p = headless(); // default is dark
         let elems = p.fetch();
         let sc = elems.iter().find(|e| e.as_obj().map_or(false, |o| o.key == "sicompass")).unwrap();
