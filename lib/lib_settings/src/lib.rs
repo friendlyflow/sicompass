@@ -463,14 +463,17 @@ impl SettingsProvider {
         let mut obj = FfonElement::new_obj(Self::localize_section_name(section_name));
         let o = obj.as_obj_mut().unwrap();
 
-        // Checkboxes (sorted alphabetically by label)
-        let mut checkboxes: Vec<&CheckboxEntry> = self.checkbox_entries.iter()
+        // Checkboxes (sorted alphabetically by displayed label, so the order
+        // matches what the user reads on screen — even when labels are
+        // language-specific).
+        let mut checkboxes: Vec<(&CheckboxEntry, String)> = self.checkbox_entries.iter()
             .filter(|e| e.section == section_name)
+            .map(|e| (e, localize::t(&e.label)))
             .collect();
-        checkboxes.sort_by(|a, b| a.label.to_ascii_lowercase().cmp(&b.label.to_ascii_lowercase()));
-        for e in checkboxes {
+        checkboxes.sort_by(|(_, a), (_, b)| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()));
+        for (e, displayed) in checkboxes {
             let tag = if e.checked { "<checkbox checked>" } else { "<checkbox>" };
-            o.push(FfonElement::Str(format!("{}{}", tag, e.label)));
+            o.push(FfonElement::Str(format!("{}{}", tag, displayed)));
         }
 
         // Radio groups. The `radio_key` is treated as a Fluent message ID
@@ -502,7 +505,8 @@ impl SettingsProvider {
             if e.section == section_name {
                 o.push(FfonElement::Str(format!(
                     "{}: <input>{}</input>",
-                    e.label, e.current_value
+                    localize::t(&e.label),
+                    e.current_value
                 )));
             }
         }
@@ -554,7 +558,11 @@ impl Provider for SettingsProvider {
         for e in &self.checkbox_entries {
             if e.section == "sicompass" {
                 let tag = if e.checked { "<checkbox checked>" } else { "<checkbox>" };
-                sc_obj.as_obj_mut().unwrap().push(FfonElement::Str(format!("{}{}", tag, e.label)));
+                sc_obj.as_obj_mut().unwrap().push(FfonElement::Str(format!(
+                    "{}{}",
+                    tag,
+                    localize::t(&e.label)
+                )));
             }
         }
         for e in &self.radio_entries {
@@ -580,7 +588,8 @@ impl Provider for SettingsProvider {
             if e.section == "sicompass" {
                 sc_obj.as_obj_mut().unwrap().push(FfonElement::Str(format!(
                     "{}: <input>{}</input>",
-                    e.label, e.current_value
+                    localize::t(&e.label),
+                    e.current_value
                 )));
             }
         }
@@ -645,8 +654,13 @@ impl Provider for SettingsProvider {
         if parts.len() < 2 { return false; }
         let (section, label) = (parts[0], parts[1]);
 
+        // `label` comes from the current_path, which tracks the *displayed*
+        // FFON Obj key the user descended through. Under a translated UI
+        // this is the localized label, so match against both the raw stored
+        // label and its translated form.
         if let Some(e) = self.text_entries.iter_mut()
-            .find(|e| e.section == section && e.label == label)
+            .find(|e| e.section == section
+                && (e.label == label || localize::t(&e.label) == label))
         {
             if e.current_value == new_content { return true; }
             let prev = e.current_value.clone();
@@ -754,7 +768,13 @@ impl Provider for SettingsProvider {
     }
 
     fn on_checkbox_change(&mut self, label: &str, checked: bool) {
-        if let Some(e) = self.checkbox_entries.iter_mut().find(|e| e.label == label) {
+        // The dispatcher pulls `label` from the *displayed* FFON text. When
+        // labels are translated, the stored `e.label` (a Fluent message ID
+        // like "settings-checkbox-maximized") won't directly match. Match
+        // against either the raw stored label or its translated form.
+        if let Some(e) = self.checkbox_entries.iter_mut().find(|e| {
+            e.label == label || localize::t(&e.label) == label
+        }) {
             if e.checked == checked { return; }
             let prev = e.checked;
             e.checked = checked;
@@ -1432,6 +1452,30 @@ mod tests {
         );
         drop(entries);
         assert_eq!(p.color_scheme, "light");
+
+        sicompass_sdk::localize::set_locale("en-US");
+    }
+
+    /// Regression for the symmetric checkbox bug: under a translated UI,
+    /// `notify_checkbox_changed` pulls the displayed (localized) label from
+    /// the rendered FFON. The handler must reverse-map it back to the
+    /// stored entry so `settings.json` gets the correct config_key toggled.
+    #[test]
+    fn on_checkbox_change_accepts_translated_label() {
+        let _g = locale_test_lock();
+        let (mut p, log) = with_callback();
+        // Register using a Fluent message ID as the stored label.
+        p.add_checkbox("sicompass", "settings-checkbox-maximized", "maximized", false);
+
+        sicompass_sdk::localize::set_locale("nl-BE");
+        // The dispatcher would pass the translated display string here.
+        p.on_checkbox_change("gemaximaliseerd", true);
+
+        let entries = log.lock().unwrap();
+        assert!(
+            entries.iter().any(|(k, v)| k == "maximized" && v == "true"),
+            "expected config 'maximized=true' to fire, got: {:?}", *entries
+        );
 
         sicompass_sdk::localize::set_locale("en-US");
     }

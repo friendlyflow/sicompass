@@ -28,3 +28,15 @@ settings-section-terminal = terminal
 settings-section-text-editor = text editor
 settings-section-store = Store
 settings-section-tutorial = tutorial
+
+# Setting labels (checkbox / radio / text). Storage keys (config_key) stay
+# language-neutral; lib_settings reverse-maps the displayed label back to
+# the stored entry when the user toggles a setting.
+settings-checkbox-maximized = maximized
+settings-checkbox-shoulder-surfing-protection = shoulder-surfing protection (blank screen)
+settings-radio-font-scale = font scale
+settings-radio-sort-order = sort order
+
+# Sort-order options
+settings-sortOrder-option-alphanumerically = alphanumerically
+settings-sortOrder-option-chronologically = chronologically

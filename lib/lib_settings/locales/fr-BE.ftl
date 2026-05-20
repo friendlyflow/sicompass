@@ -25,3 +25,13 @@ settings-section-terminal = terminal
 settings-section-text-editor = éditeur de texte
 settings-section-store = Magasin
 settings-section-tutorial = tutoriel
+
+# Setting labels
+settings-checkbox-maximized = agrandi
+settings-checkbox-shoulder-surfing-protection = protection contre l'espionnage (écran vide)
+settings-radio-font-scale = taille du texte
+settings-radio-sort-order = ordre de tri
+
+# Sort-order options
+settings-sortOrder-option-alphanumerically = alphanumérique
+settings-sortOrder-option-chronologically = chronologique

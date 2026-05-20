@@ -132,22 +132,21 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
         settings.set_config_path(path);
     }
 
-    // Core sicompass settings
+    // Core sicompass settings. Labels are Fluent message IDs so the settings
+    // panel renders them in the user's chosen language; lib_settings reverses
+    // the translation when the user clicks a toggle so settings.json stays
+    // language-neutral.
     settings.add_radio_setting(
         "sicompass", "color scheme", "colorScheme",
         &["dark", "light"], "dark",
     );
-    settings.add_checkbox_setting("sicompass", "maximized", "maximized", false);
-    settings.add_checkbox_setting("sicompass", "shoulder-surfing protection (blank screen)", "shoulderSurfingProtection", false);
+    settings.add_checkbox_setting("sicompass", "settings-checkbox-maximized", "maximized", false);
+    settings.add_checkbox_setting("sicompass", "settings-checkbox-shoulder-surfing-protection", "shoulderSurfingProtection", false);
     settings.add_radio_setting(
-        "sicompass", "font scale", "fontScale",
+        "sicompass", "settings-radio-font-scale", "fontScale",
         &["1.00", "1.25", "1.50", "1.75", "2.00", "2.25", "2.50"],
         "1.00",
     );
-    // The radio label is a Fluent message ID so the settings panel can show
-    // the word "language" in the user's chosen language. Option strings are
-    // raw locale tags (the stored value in settings.json); they double as
-    // displayed labels until the option-label translation convention lands.
     settings.add_radio_setting(
         "sicompass", "settings-radio-language", "language",
         &["en-US", "nl-BE", "fr-BE", "de-BE"], "en-US",
@@ -155,7 +154,7 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
 
     // File-browser settings
     settings.add_radio_setting(
-        "file browser", "sort order", "sortOrder",
+        "file browser", "settings-radio-sort-order", "sortOrder",
         &["alphanumerically", "chronologically"], "alphanumerically",
     );
 

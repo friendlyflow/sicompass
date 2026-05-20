@@ -25,3 +25,13 @@ settings-section-terminal = terminal
 settings-section-text-editor = tekstverwerker
 settings-section-store = Winkel
 settings-section-tutorial = handleiding
+
+# Setting labels
+settings-checkbox-maximized = gemaximaliseerd
+settings-checkbox-shoulder-surfing-protection = schermbescherming (blanco scherm)
+settings-radio-font-scale = tekstgrootte
+settings-radio-sort-order = sorteervolgorde
+
+# Sort-order options
+settings-sortOrder-option-alphanumerically = alfanumeriek
+settings-sortOrder-option-chronologically = chronologisch

@@ -25,3 +25,13 @@ settings-section-terminal = Terminal
 settings-section-text-editor = Texteditor
 settings-section-store = Geschäft
 settings-section-tutorial = Anleitung
+
+# Setting labels
+settings-checkbox-maximized = maximiert
+settings-checkbox-shoulder-surfing-protection = Sichtschutz (leerer Bildschirm)
+settings-radio-font-scale = Schriftgröße
+settings-radio-sort-order = Sortierreihenfolge
+
+# Sort-order options
+settings-sortOrder-option-alphanumerically = alphanumerisch
+settings-sortOrder-option-chronologically = chronologisch
