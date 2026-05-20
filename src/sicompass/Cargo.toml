@@ -33,7 +33,15 @@ eula = false
 # Off by default — local dev builds keep linking the system SDL3. Release
 # builds enable it (see `[workspace.metadata.dist] features` in the root
 # Cargo.toml). Building from source needs `cmake` and a C compiler on PATH.
-bundled-sdl3 = ["sdl3/build-from-source-static"]
+#
+# `no-sdl-libc` makes SDL3 use its own SDL_atof/SDL_sinf/etc. implementations
+# instead of calling into the C runtime. Required on Windows MSVC: the bundled
+# sdl3-sys + cmake 0.1.58 stack doesn't propagate Rust's static-CRT choice to
+# SDL3's CMake build, so SDL3 ends up compiled with /MD (dynamic CRT) while
+# rustc links /MT (static CRT). The resulting `__imp_atof`-style unresolved
+# externals break the release link. Cutting SDL's libc dependency sidesteps
+# the mismatch and keeps the binary truly standalone (no vcruntime140.dll).
+bundled-sdl3 = ["sdl3/build-from-source-static", "sdl3/no-sdl-libc"]
 
 [dependencies]
 sicompass-sdk = { workspace = true }
