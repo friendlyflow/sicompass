@@ -1,6 +1,7 @@
 pub mod dashboard;
 pub mod ffon;
 pub mod fs_trash;
+pub mod localize;
 pub mod manifest;
 pub mod placeholders;
 pub mod platform;

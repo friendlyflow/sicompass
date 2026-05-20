@@ -74,6 +74,12 @@ windows = { version = "0.62", features = ["Win32_Foundation"] }
 # Unicode
 unicode-normalization = "0.1"
 
+# Internationalization (Project Fluent)
+fluent = "0.16"
+fluent-langneg = "0.13"
+unic-langid = "0.9"
+intl-memoizer = "0.5"
+
 # Fuzzy search
 nucleo-matcher = "0.3"
 

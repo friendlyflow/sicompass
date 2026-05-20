@@ -268,7 +268,7 @@ impl Default for TextEditorProvider {
 impl Provider for TextEditorProvider {
     fn name(&self) -> &str { "texteditor" }
 
-    fn display_name(&self) -> &str { "text editor" }
+    fn display_name(&self) -> String { "text editor".to_owned() }
 
     fn init(&mut self) {
         // Read saved textEditorPath from config so the first fetch() shows the

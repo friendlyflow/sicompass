@@ -294,7 +294,7 @@ impl Default for WebbrowserProvider {
 
 impl Provider for WebbrowserProvider {
     fn name(&self) -> &str { "webbrowser" }
-    fn display_name(&self) -> &str { "web browser" }
+    fn display_name(&self) -> String { "web browser".to_owned() }
 
     fn fetch(&mut self) -> Vec<FfonElement> {
         let mut result = Vec::new();

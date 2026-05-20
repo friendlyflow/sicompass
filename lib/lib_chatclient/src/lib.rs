@@ -754,8 +754,8 @@ impl Provider for ChatClientProvider {
     fn name(&self) -> &str {
         "chatclient"
     }
-    fn display_name(&self) -> &str {
-        "chat client"
+    fn display_name(&self) -> String {
+        "chat client".to_owned()
     }
     fn stable_root_key(&self) -> bool {
         false

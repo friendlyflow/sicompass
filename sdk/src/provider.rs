@@ -40,9 +40,10 @@ pub trait Provider: Send + 'static {
 
     fn name(&self) -> &str;
 
-    /// Display name shown in the UI. Defaults to `name()`.
-    fn display_name(&self) -> &str {
-        self.name()
+    /// Display name shown in the UI. Defaults to `name()`. Returns owned
+    /// `String` so impls can route through the localizer (`localize::t(...)`).
+    fn display_name(&self) -> String {
+        self.name().to_owned()
     }
 
     // ---- Required: data source ---------------------------------------------
@@ -101,6 +102,14 @@ pub trait Provider: Send + 'static {
 
     fn command_list_items(&self, _cmd: &str) -> Vec<ListItem> { vec![] }
     fn execute_command(&mut self, _cmd: &str, _selection: &str) -> bool { false }
+
+    /// Display label for a command ID. The strings returned by `commands()`
+    /// are stable identifiers (matched on in `handle_command` /
+    /// `execute_command`); this method returns the localized text shown to
+    /// the user. Defaults to the command ID itself.
+    fn command_label(&self, cmd: &str) -> String {
+        cmd.to_owned()
+    }
 
     // ---- Optional: unified timeline undo/redo ------------------------------
 
@@ -396,7 +405,7 @@ impl GenericProvider {
 
 impl Provider for GenericProvider {
     fn name(&self) -> &str { &self.name }
-    fn display_name(&self) -> &str { &self.display_name }
+    fn display_name(&self) -> String { self.display_name.clone() }
 
     fn fetch(&mut self) -> Vec<FfonElement> {
         (self.fetch_fn)(&self.current_path)

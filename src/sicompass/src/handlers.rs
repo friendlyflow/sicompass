@@ -6691,7 +6691,7 @@ mod tests {
     }
     impl sicompass_sdk::provider::Provider for DashboardProv {
         fn name(&self) -> &str { "dashboardprov" }
-        fn display_name(&self) -> &str { "dashboardprov" }
+        fn display_name(&self) -> String { "dashboardprov".to_owned() }
         fn fetch(&mut self) -> Vec<sicompass_sdk::ffon::FfonElement> { vec![] }
         fn dashboard_kind(&self) -> sicompass_sdk::DashboardKind { self.kind }
         fn leave_dashboard(&mut self) {

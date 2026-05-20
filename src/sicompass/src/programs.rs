@@ -144,6 +144,14 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
         &["1.00", "1.25", "1.50", "1.75", "2.00", "2.25", "2.50"],
         "1.00",
     );
+    // The radio label is a Fluent message ID so the settings panel can show
+    // the word "language" in the user's chosen language. Option strings are
+    // raw locale tags (the stored value in settings.json); they double as
+    // displayed labels until the option-label translation convention lands.
+    settings.add_radio_setting(
+        "sicompass", "settings-radio-language", "language",
+        &["en-US", "nl-BE", "fr-BE", "de-BE"], "en-US",
+    );
 
     // File-browser settings
     settings.add_radio_setting(
@@ -876,6 +884,14 @@ fn apply_setting(
         }
         "fontScale" => {
             renderer.rebuild_font_renderer = true;
+        }
+        "language" => {
+            // Switch the active locale on every t() / t_args() call from now
+            // on, then re-fetch the active provider so the new locale is
+            // immediately visible in the FFON tree. Other tabs pick up the
+            // change on their next fetch (navigation, F5, or focus switch).
+            sicompass_sdk::localize::set_locale(value);
+            crate::provider::refresh_current_directory(renderer);
         }
         _ => {}
     }

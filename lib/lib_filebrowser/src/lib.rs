@@ -111,7 +111,7 @@ impl Default for FilebrowserProvider {
 
 impl Provider for FilebrowserProvider {
     fn name(&self) -> &str { "filebrowser" }
-    fn display_name(&self) -> &str { "file browser" }
+    fn display_name(&self) -> String { "file browser".to_owned() }
 
     fn init(&mut self) {
         self.current_path = PathBuf::from("/");

@@ -2004,7 +2004,7 @@ impl Default for EmailClientProvider {
 
 impl Provider for EmailClientProvider {
     fn name(&self) -> &str { "emailclient" }
-    fn display_name(&self) -> &str { "email client" }
+    fn display_name(&self) -> String { "email client".to_owned() }
 
     fn no_cache(&self) -> bool { true }
 

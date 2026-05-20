@@ -1,9 +1,23 @@
 use serde_json::{Map, Value};
 use sicompass_sdk::ffon::{FfonElement, IdArray};
+use sicompass_sdk::localize;
 use sicompass_sdk::platform;
 use sicompass_sdk::provider::Provider;
 use sicompass_sdk::timeline::TimelineEntry;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
+/// Register this crate's translation bundles with the SDK localizer.
+/// Idempotent — safe to call from `main()` and from individual tests.
+pub fn register_translations() {
+    static ONCE: OnceLock<()> = OnceLock::new();
+    ONCE.get_or_init(|| {
+        let _ = localize::register_bundle("en-US", include_str!("../locales/en-US.ftl"));
+        let _ = localize::register_bundle("nl-BE", include_str!("../locales/nl-BE.ftl"));
+        let _ = localize::register_bundle("fr-BE", include_str!("../locales/fr-BE.ftl"));
+        let _ = localize::register_bundle("de-BE", include_str!("../locales/de-BE.ftl"));
+    });
+}
 
 // ---------------------------------------------------------------------------
 // Setting entry types
@@ -68,6 +82,7 @@ pub struct SettingsProvider {
 
 impl SettingsProvider {
     pub fn new(apply_fn: impl Fn(&str, &str) + Send + 'static) -> Self {
+        register_translations();
         SettingsProvider {
             current_path: "/".to_owned(),
             color_scheme: "dark".to_owned(),
@@ -84,6 +99,7 @@ impl SettingsProvider {
 
     /// Create without an apply callback (useful for testing fetch output).
     pub fn new_headless() -> Self {
+        register_translations();
         SettingsProvider {
             current_path: "/".to_owned(),
             color_scheme: "dark".to_owned(),
@@ -426,10 +442,16 @@ impl SettingsProvider {
             o.push(FfonElement::Str(format!("{}{}", tag, e.label)));
         }
 
-        // Radio groups
+        // Radio groups. The `radio_key` is treated as a Fluent message ID
+        // first; if no translation is registered, `t()` falls back to the key
+        // string itself (existing callers passing English literals still
+        // render identically).
         for e in &self.radio_entries {
             if e.section == section_name {
-                let mut radio = FfonElement::new_obj(format!("<radio>{}", e.radio_key));
+                let mut radio = FfonElement::new_obj(format!(
+                    "<radio>{}",
+                    localize::t(&e.radio_key)
+                ));
                 let ro = radio.as_obj_mut().unwrap();
                 for opt in &e.options {
                     let s = if *opt == e.current_value {
@@ -476,7 +498,10 @@ impl Provider for SettingsProvider {
         let is_dark = self.color_scheme == "dark";
         let mut sc_obj = FfonElement::new_obj("sicompass");
         {
-            let mut radio = FfonElement::new_obj("<radio>color scheme");
+            let mut radio = FfonElement::new_obj(format!(
+                "<radio>{}",
+                localize::t("settings-radio-color-scheme")
+            ));
             let ro = radio.as_obj_mut().unwrap();
             ro.push(FfonElement::Str(if is_dark { "<checked>dark".to_owned() } else { "dark".to_owned() }));
             ro.push(FfonElement::Str(if is_dark { "light".to_owned() } else { "<checked>light".to_owned() }));
@@ -881,6 +906,55 @@ mod tests {
             c.as_str().map_or(false, |s| s.contains("<checked>") && s.contains("dark"))
         });
         assert!(dark_checked);
+    }
+
+    /// PoC: the color-scheme radio key text flips when the active locale
+    /// changes. Validates the end-to-end translation flow:
+    /// constructor → register_translations → t() inside fetch() → FFON key.
+    ///
+    /// Mutates global locale state, so this test serializes against any
+    /// other test that does the same via a process-static mutex.
+    fn locale_test_lock() -> std::sync::MutexGuard<'static, ()> {
+        static L: OnceLock<std::sync::Mutex<()>> = OnceLock::new();
+        L.get_or_init(|| std::sync::Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn color_scheme_radio_key(p: &mut SettingsProvider) -> String {
+        let elems = p.fetch();
+        let sc = elems.iter()
+            .find(|e| e.as_obj().map_or(false, |o| o.key == "sicompass"))
+            .expect("sicompass section");
+        let radio = sc.as_obj().unwrap().children.iter()
+            .find(|c| c.as_obj().map_or(false, |o| o.key.contains("<radio>")))
+            .expect("color scheme radio");
+        radio.as_obj().unwrap().key.clone()
+    }
+
+    #[test]
+    fn poc_color_scheme_label_translates_for_each_belgian_locale() {
+        let _g = locale_test_lock();
+        let mut p = headless();
+
+        sicompass_sdk::localize::set_locale("en-US");
+        assert!(color_scheme_radio_key(&mut p).contains("color scheme"),
+            "en-US should show English label");
+
+        sicompass_sdk::localize::set_locale("nl-BE");
+        assert!(color_scheme_radio_key(&mut p).contains("kleurenschema"),
+            "nl-BE should show Flemish label");
+
+        sicompass_sdk::localize::set_locale("fr-BE");
+        assert!(color_scheme_radio_key(&mut p).contains("jeu de couleurs"),
+            "fr-BE should show Belgian French label");
+
+        sicompass_sdk::localize::set_locale("de-BE");
+        assert!(color_scheme_radio_key(&mut p).contains("Farbschema"),
+            "de-BE should show Belgian German label");
+
+        // Reset so other tests start from a known state.
+        sicompass_sdk::localize::set_locale("en-US");
     }
 
     #[test]

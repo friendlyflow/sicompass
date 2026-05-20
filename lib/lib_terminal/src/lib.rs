@@ -344,8 +344,8 @@ impl Provider for TerminalProvider {
         "terminal"
     }
 
-    fn display_name(&self) -> &str {
-        "terminal"
+    fn display_name(&self) -> String {
+        "terminal".to_owned()
     }
 
     fn init(&mut self) {

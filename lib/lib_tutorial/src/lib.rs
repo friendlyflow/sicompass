@@ -591,8 +591,8 @@ impl TutorialProvider {
 impl Provider for TutorialProvider {
     fn name(&self) -> &str { "tutorial" }
 
-    fn display_name(&self) -> &str {
-        "tutorial --> here you can go up, down or right"
+    fn display_name(&self) -> String {
+        "tutorial --> here you can go up, down or right".to_owned()
     }
 
     fn fetch(&mut self) -> Vec<FfonElement> {

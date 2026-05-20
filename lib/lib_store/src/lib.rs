@@ -116,8 +116,8 @@ impl Provider for StoreProvider {
         "store"
     }
 
-    fn display_name(&self) -> &str {
-        "Store"
+    fn display_name(&self) -> String {
+        "Store".to_owned()
     }
 
     fn fetch(&mut self) -> Vec<FfonElement> {

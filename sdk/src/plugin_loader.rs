@@ -313,8 +313,8 @@ impl Provider for NativePlugin {
         &self.cached_name
     }
 
-    fn display_name(&self) -> &str {
-        &self.cached_display_name
+    fn display_name(&self) -> String {
+        self.cached_display_name.clone()
     }
 
     fn fetch(&mut self) -> Vec<FfonElement> {
@@ -692,8 +692,8 @@ impl Provider for ScriptProvider {
         &self.name
     }
 
-    fn display_name(&self) -> &str {
-        &self.display_name
+    fn display_name(&self) -> String {
+        self.display_name.clone()
     }
 
     fn supports_config_files(&self) -> bool {

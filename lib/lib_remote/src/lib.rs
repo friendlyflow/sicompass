@@ -183,8 +183,8 @@ impl Provider for RemoteProvider {
         &self.name
     }
 
-    fn display_name(&self) -> &str {
-        &self.name
+    fn display_name(&self) -> String {
+        self.name.clone()
     }
 
     fn fetch(&mut self) -> Vec<FfonElement> {

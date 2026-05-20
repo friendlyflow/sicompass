@@ -1893,7 +1893,7 @@ impl ButtonTestProvider {
 
 impl Provider for ButtonTestProvider {
     fn name(&self) -> &str { "buttontest" }
-    fn display_name(&self) -> &str { "Button Test" }
+    fn display_name(&self) -> String { "Button Test".to_owned() }
 
     fn fetch(&mut self) -> Vec<FfonElement> {
         match self.path.as_str() {
@@ -2427,7 +2427,7 @@ impl ConfigProvider {
 
 impl Provider for ConfigProvider {
     fn name(&self) -> &str { "configprovider" }
-    fn display_name(&self) -> &str { "Config Provider" }
+    fn display_name(&self) -> String { "Config Provider".to_owned() }
     fn supports_config_files(&self) -> bool { true }
     fn fetch(&mut self) -> Vec<FfonElement> { self.data.clone() }
     fn push_path(&mut self, segment: &str) {
@@ -2905,7 +2905,7 @@ impl InMemoryFormProvider {
 
 impl Provider for InMemoryFormProvider {
     fn name(&self) -> &str { "inmemform" }
-    fn display_name(&self) -> &str { "In-Mem Form" }
+    fn display_name(&self) -> String { "In-Mem Form".to_owned() }
 
     fn fetch(&mut self) -> Vec<FfonElement> {
         // This provider's script has no memory of user additions — same pattern
@@ -8473,7 +8473,7 @@ impl SilentCheckboxStrProvider {
 
 impl Provider for SilentCheckboxStrProvider {
     fn name(&self) -> &str { "silent_checkbox_str" }
-    fn display_name(&self) -> &str { "Silent CB Str" }
+    fn display_name(&self) -> String { "Silent CB Str".to_owned() }
     fn fetch(&mut self) -> Vec<FfonElement> {
         let tag = if self.checked { "<checkbox checked>" } else { "<checkbox>" };
         vec![FfonElement::Str(format!("{tag}Toggle me"))]
@@ -8504,7 +8504,7 @@ impl SilentCheckboxObjProvider {
 
 impl Provider for SilentCheckboxObjProvider {
     fn name(&self) -> &str { "silent_checkbox_obj" }
-    fn display_name(&self) -> &str { "Silent CB Obj" }
+    fn display_name(&self) -> String { "Silent CB Obj".to_owned() }
     fn fetch(&mut self) -> Vec<FfonElement> {
         let mut obj = FfonElement::new_obj("<checkbox>Section");
         obj.as_obj_mut().unwrap().push(FfonElement::Str("child-a".into()));
@@ -8537,7 +8537,7 @@ impl DeepSilentRadioProvider {
 
 impl Provider for DeepSilentRadioProvider {
     fn name(&self) -> &str { "deep_silent_radio" }
-    fn display_name(&self) -> &str { "Deep Silent Radio" }
+    fn display_name(&self) -> String { "Deep Silent Radio".to_owned() }
     fn fetch(&mut self) -> Vec<FfonElement> {
         let mut section = FfonElement::new_obj("Section A");
         let mut inner = FfonElement::new_obj("Inner B");
@@ -8574,7 +8574,7 @@ impl SilentRadioProvider {
 
 impl Provider for SilentRadioProvider {
     fn name(&self) -> &str { "silent_radio" }
-    fn display_name(&self) -> &str { "Silent Radio" }
+    fn display_name(&self) -> String { "Silent Radio".to_owned() }
     fn fetch(&mut self) -> Vec<FfonElement> {
         let mut group = FfonElement::new_obj("<radio>Direction");
         group.as_obj_mut().unwrap().push(FfonElement::Str("<checked>north".into()));
