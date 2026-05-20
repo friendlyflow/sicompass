@@ -960,11 +960,57 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
 // Hints
 // ---------------------------------------------------------------------------
 
+/// Derive a Fluent message ID from a SHORTCUTS `label` literal. Collapses
+/// every run of non-alphanumeric characters into a single `-`, lowercases,
+/// and prefixes with `hint-`. So `"Esc    Back"` → `"hint-esc-back"` and
+/// `"Ctrl+Shift+I Insert before"` →
+/// `"hint-ctrl-shift-i-insert-before"`. Keeps the derivation in-code so
+/// every entry's key is computable from its label — no parallel field on
+/// the Shortcut struct to keep in sync.
+pub(crate) fn label_fluent_key(label: &str) -> String {
+    let mut key = String::with_capacity(label.len() + 5);
+    key.push_str("hint-");
+    let mut prev_dash = true; // suppress the leading boundary
+    for c in label.chars() {
+        if c.is_ascii_alphanumeric() {
+            for lc in c.to_lowercase() { key.push(lc); }
+            prev_dash = false;
+        } else if !prev_dash {
+            key.push('-');
+            prev_dash = true;
+        }
+    }
+    if key.ends_with('-') { key.pop(); }
+    key
+}
+
+/// Register this crate's translation bundles (keyboard hints). Idempotent.
+pub fn register_translations() {
+    use std::sync::OnceLock;
+    static ONCE: OnceLock<()> = OnceLock::new();
+    ONCE.get_or_init(|| {
+        let _ = sicompass_sdk::localize::register_bundle(
+            "en-US", include_str!("../locales/en-US.ftl"));
+        let _ = sicompass_sdk::localize::register_bundle(
+            "nl-BE", include_str!("../locales/nl-BE.ftl"));
+        let _ = sicompass_sdk::localize::register_bundle(
+            "fr-BE", include_str!("../locales/fr-BE.ftl"));
+        let _ = sicompass_sdk::localize::register_bundle(
+            "de-BE", include_str!("../locales/de-BE.ftl"));
+    });
+}
+
 /// Return formatted hint strings for all shortcuts whose label is non-empty
 /// and whose `is_available` predicate passes in the current state.
 ///
-/// Used by `get_meta` to populate the M-key hint screen.
+/// Used by `get_meta` to populate the M-key hint screen. Each entry's label
+/// is treated as a Fluent message ID (via [`label_fluent_key`]); if no
+/// translation is registered the raw English literal is used as the
+/// fallback. So mixing translated and untranslated entries is safe — the
+/// untranslated ones just stay English.
 pub fn hints_for(r: &AppRenderer) -> Vec<String> {
+    register_translations();
+
     // When showing the Meta screen, hints are derived from the coordinate we
     // came from (previous_coordinate), not from Coordinate::Meta itself.
     let coord = if r.coordinate == Coordinate::Meta {
@@ -982,7 +1028,11 @@ pub fn hints_for(r: &AppRenderer) -> Vec<String> {
                 && (s.is_available)(r)
                 && seen_labels.insert(s.label)
         })
-        .map(|s| s.label.to_string())
+        .map(|s| {
+            let key = label_fluent_key(s.label);
+            let translated = sicompass_sdk::localize::t(&key);
+            if translated == key { s.label.to_string() } else { translated }
+        })
         .collect()
 }
 
@@ -1053,6 +1103,63 @@ mod tests {
     fn no_mod() -> Mod { Mod::empty() }
     fn ctrl()   -> Mod { Mod::LCTRLMOD }
     fn shift()  -> Mod { Mod::LSHIFTMOD }
+
+    // --- key derivation ---
+
+    #[test]
+    fn label_fluent_key_basic() {
+        assert_eq!(label_fluent_key("Esc    Back"), "hint-esc-back");
+        assert_eq!(label_fluent_key("Up     Previous"), "hint-up-previous");
+        assert_eq!(label_fluent_key("PgUp   Page up"), "hint-pgup-page-up");
+    }
+
+    #[test]
+    fn label_fluent_key_chord_modifiers() {
+        assert_eq!(label_fluent_key("Ctrl+Shift+I Insert before"),
+                   "hint-ctrl-shift-i-insert-before");
+        assert_eq!(label_fluent_key("Shift+Up Select up"),
+                   "hint-shift-up-select-up");
+    }
+
+    #[test]
+    fn label_fluent_key_punctuation_chord() {
+        // Leading colon (": Command") must be collapsed without leaving a
+        // stray hyphen at the start of the suffix.
+        assert_eq!(label_fluent_key(":      Command"), "hint-command");
+    }
+
+    #[test]
+    fn label_fluent_key_trailing_punct_trimmed() {
+        // Trailing dashes must be trimmed so we never emit a key ending in `-`.
+        assert_eq!(label_fluent_key("F5     "), "hint-f5");
+    }
+
+    /// Sanity: every SHORTCUTS label with a non-empty string must have a
+    /// corresponding entry in the en-US bundle. Catches typos where a label
+    /// in the table doesn't match any FTL key (would silently fall back to
+    /// the literal English text — fine but hides typos).
+    #[test]
+    fn every_label_has_en_us_ftl_entry() {
+        register_translations();
+        sicompass_sdk::localize::set_locale("en-US");
+        let mut missing: Vec<String> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for s in SHORTCUTS {
+            if s.label.is_empty() { continue; }
+            if !seen.insert(s.label) { continue; }
+            let key = label_fluent_key(s.label);
+            let resolved = sicompass_sdk::localize::t(&key);
+            if resolved == key {
+                missing.push(format!("{:?} -> {:?}", s.label, key));
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "Missing FTL entries for {} hint labels:\n{}",
+            missing.len(),
+            missing.join("\n")
+        );
+    }
 
     // --- dispatch correctness ---
 
