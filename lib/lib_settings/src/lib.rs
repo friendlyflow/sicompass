@@ -540,13 +540,17 @@ impl Provider for SettingsProvider {
         }
         for e in &self.radio_entries {
             if e.section == "sicompass" && e.config_key != "colorScheme" {
-                let mut radio = FfonElement::new_obj(format!("<radio>{}", e.radio_key));
+                let mut radio = FfonElement::new_obj(format!(
+                    "<radio>{}",
+                    localize::t(&e.radio_key)
+                ));
                 let ro = radio.as_obj_mut().unwrap();
                 for opt in &e.options {
+                    let label = Self::localize_option_label(&e.config_key, opt);
                     let s = if *opt == e.current_value {
-                        format!("<checked>{opt}")
+                        format!("<checked>{label}")
                     } else {
-                        opt.clone()
+                        label
                     };
                     ro.push(FfonElement::Str(s));
                 }
@@ -646,37 +650,84 @@ impl Provider for SettingsProvider {
     }
 
     fn on_radio_change(&mut self, group_key: &str, selected_value: &str) {
-        if group_key == "color scheme" {
-            if self.color_scheme == selected_value { return; }
+        // The app extracts `group_key` and `selected_value` from the rendered
+        // FFON (display strings). When translations are active, those don't
+        // match the stored radio identifiers / option values any more. We
+        // reverse-map both: a radio whose `radio_key` resolves through
+        // `localize::t()` to the incoming `group_key`, and an option whose
+        // `localize_option_label(config_key, opt)` matches the incoming
+        // `selected_value`. Falls back to the raw incoming string so
+        // English-literal callers (no FTL entry) still work.
+
+        // Hardcoded color-scheme radio.
+        let color_scheme_label = localize::t("settings-radio-color-scheme");
+        if group_key == "color scheme" || group_key == color_scheme_label {
+            let stored = if selected_value
+                == Self::localize_option_label("colorScheme", "dark")
+                || selected_value == "dark"
+            {
+                "dark"
+            } else if selected_value
+                == Self::localize_option_label("colorScheme", "light")
+                || selected_value == "light"
+            {
+                "light"
+            } else {
+                // Unrecognized: store as-is for backward-compat / debugging.
+                selected_value
+            };
+            if self.color_scheme == stored { return; }
             let prev = self.color_scheme.clone();
-            self.color_scheme = selected_value.to_owned();
-            self.write_key_string("sicompass", "colorScheme", selected_value);
-            self.fire_apply("colorScheme", selected_value);
+            self.color_scheme = stored.to_owned();
+            self.write_key_string("sicompass", "colorScheme", stored);
+            self.fire_apply("colorScheme", stored);
             self.push_settings_op(
                 "settings-radio",
                 "sicompass",
                 "colorScheme",
                 &prev,
-                selected_value,
+                stored,
                 "radio",
                 "color scheme",
             );
             return;
         }
-        if let Some(e) = self.radio_entries.iter_mut().find(|e| e.radio_key == group_key) {
-            if e.current_value == selected_value { return; }
+
+        // Dynamic radio entries: match group_key against either the raw
+        // radio_key or its translated form.
+        let entry_idx = self.radio_entries.iter().position(|e| {
+            e.radio_key == group_key || localize::t(&e.radio_key) == group_key
+        });
+        if let Some(idx) = entry_idx {
+            // Reverse-map the option label to the stored value. Match against
+            // both the raw option string (legacy English-literal callers) and
+            // the translated label.
+            let stored = {
+                let e = &self.radio_entries[idx];
+                e.options
+                    .iter()
+                    .find(|opt| {
+                        opt.as_str() == selected_value
+                            || Self::localize_option_label(&e.config_key, opt) == selected_value
+                    })
+                    .cloned()
+                    .unwrap_or_else(|| selected_value.to_owned())
+            };
+
+            let e = &mut self.radio_entries[idx];
+            if e.current_value == stored { return; }
             let prev = e.current_value.clone();
-            e.current_value = selected_value.to_owned();
+            e.current_value = stored.clone();
             let (section, config_key, rkey) =
                 (e.section.clone(), e.config_key.clone(), e.radio_key.clone());
-            self.write_key_string(&section, &config_key, selected_value);
-            self.fire_apply(&config_key, selected_value);
+            self.write_key_string(&section, &config_key, &stored);
+            self.fire_apply(&config_key, &stored);
             self.push_settings_op(
                 "settings-radio",
                 &section,
                 &config_key,
                 &prev,
-                selected_value,
+                &stored,
                 "radio",
                 &format!("set {rkey}"),
             );
@@ -1023,6 +1074,62 @@ mod tests {
         assert_eq!(label, "1.25");
     }
 
+    /// Reproduces the exact registration the app uses for the language
+    /// radio in `programs.rs`: add it as a dynamic radio with the four
+    /// locale codes as options, then verify each option's *displayed*
+    /// FFON Str text is the native language name, not the raw locale code.
+    #[test]
+    fn language_radio_options_render_native_names_via_dynamic_path() {
+        let _g = locale_test_lock();
+        let mut p = headless();
+        p.add_radio(
+            "sicompass",
+            "settings-radio-language",
+            "language",
+            &["en-US", "nl-BE", "fr-BE", "de-BE"],
+            "en-US",
+        );
+
+        // Default locale (en-US): all option Strs should show native names.
+        sicompass_sdk::localize::set_locale("en-US");
+        let elems = p.fetch();
+        let sicompass_obj = elems.iter()
+            .find(|e| e.as_obj().map_or(false, |o| o.key == "sicompass"))
+            .expect("sicompass section");
+        let lang_radio = sicompass_obj.as_obj().unwrap().children.iter()
+            .find(|c| c.as_obj().map_or(false, |o| {
+                // The radio_key string is "settings-radio-language"; under en-US
+                // it resolves to "language".
+                o.key.contains("language") || o.key.contains("settings-radio-language")
+            }))
+            .expect("language radio");
+        let option_strs: Vec<String> = lang_radio.as_obj().unwrap().children.iter()
+            .filter_map(|c| c.as_str().map(|s| s.to_owned()))
+            .collect();
+
+        // None of the raw locale codes should appear as-is in the displayed
+        // option text (each must be the native language name).
+        for code in &["en-US", "nl-BE", "fr-BE", "de-BE"] {
+            assert!(
+                !option_strs.iter().any(|s| s.contains(code)),
+                "raw locale code {code:?} leaked into displayed options: {option_strs:?}"
+            );
+        }
+        for native in &[
+            "English",
+            "Nederlands (België)",
+            "Français (Belgique)",
+            "Deutsch (Belgien)",
+        ] {
+            assert!(
+                option_strs.iter().any(|s| s.contains(native)),
+                "native name {native:?} missing from displayed options: {option_strs:?}"
+            );
+        }
+
+        sicompass_sdk::localize::set_locale("en-US");
+    }
+
     #[test]
     fn poc_color_scheme_label_translates_for_each_belgian_locale() {
         let _g = locale_test_lock();
@@ -1244,6 +1351,67 @@ mod tests {
         // "name" is the default — firing same value must not fire callback or save
         p.on_radio_change("sort", "name");
         assert!(log.lock().unwrap().is_empty());
+    }
+
+    /// Regression: when the UI is in a non-English locale, the radio change
+    /// dispatcher passes the *translated* group key and option label into
+    /// `on_radio_change`. The handler must reverse-map both back to the
+    /// stored identifiers so settings.json gets "light"/"dark" — not
+    /// "licht"/"donker".
+    #[test]
+    fn on_radio_change_color_scheme_accepts_translated_label() {
+        let _g = locale_test_lock();
+        let (mut p, log) = with_callback();
+        sicompass_sdk::localize::set_locale("nl-BE");
+
+        // The dispatcher would extract these display strings from the FFON.
+        p.on_radio_change("kleurenschema", "licht");
+
+        let entries = log.lock().unwrap();
+        // The STORED value must still be "light", regardless of the
+        // language-displayed label that triggered the change.
+        assert!(
+            entries.iter().any(|(k, v)| k == "colorScheme" && v == "light"),
+            "expected stored value 'light', got: {:?}", *entries
+        );
+        drop(entries);
+        assert_eq!(p.color_scheme, "light");
+
+        sicompass_sdk::localize::set_locale("en-US");
+    }
+
+    #[test]
+    fn on_radio_change_dynamic_radio_accepts_translated_label() {
+        let _g = locale_test_lock();
+        let (mut p, log) = with_callback();
+        // Register a synthetic radio + matching FTL entries so localize() can
+        // round-trip. The radio_key doubles as the Fluent message ID.
+        p.add_radio("sec", "test-sort-radio", "testSortOrder",
+                    &["asc", "desc"], "asc");
+        let _ = sicompass_sdk::localize::register_bundle(
+            "en-US",
+            "test-sort-radio = sort order\n\
+             settings-testSortOrder-option-asc = ascending\n\
+             settings-testSortOrder-option-desc = descending\n",
+        );
+        let _ = sicompass_sdk::localize::register_bundle(
+            "nl-BE",
+            "test-sort-radio = sorteervolgorde\n\
+             settings-testSortOrder-option-asc = oplopend\n\
+             settings-testSortOrder-option-desc = aflopend\n",
+        );
+
+        sicompass_sdk::localize::set_locale("nl-BE");
+        // Dispatcher would pass the translated group + option here.
+        p.on_radio_change("sorteervolgorde", "aflopend");
+
+        let entries = log.lock().unwrap();
+        assert!(
+            entries.iter().any(|(k, v)| k == "testSortOrder" && v == "desc"),
+            "expected stored value 'desc', got: {:?}", *entries
+        );
+
+        sicompass_sdk::localize::set_locale("en-US");
     }
 
     // --- on_checkbox_change ---
