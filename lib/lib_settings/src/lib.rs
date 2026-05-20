@@ -525,11 +525,6 @@ impl Provider for SettingsProvider {
     fn fetch(&mut self) -> Vec<FfonElement> {
         let mut result = Vec::new();
 
-        // Priority section first
-        if let Some(ref prio) = self.priority_section.clone() {
-            result.push(self.populate_section(prio));
-        }
-
         // sicompass section: color scheme radio group
         let is_dark = self.color_scheme == "dark";
         let mut sc_obj = FfonElement::new_obj(Self::localize_section_name("sicompass"));
@@ -594,6 +589,11 @@ impl Provider for SettingsProvider {
             }
         }
         result.push(sc_obj);
+
+        // Priority section after sicompass
+        if let Some(ref p) = prio {
+            result.push(self.populate_section(p));
+        }
 
         // Other sections (skip sicompass and priority — already rendered), sorted alphabetically
         let mut other_sections: Vec<String> = self.sections.iter()
@@ -1384,14 +1384,14 @@ mod tests {
     // --- priority section ---
 
     #[test]
-    fn test_priority_section_comes_after_meta_and_before_sicompass() {
+    fn test_sicompass_section_comes_before_priority_section() {
         let mut p = headless();
         p.add_checkbox("prio", "item", "key", false);
         p.add_priority_section("prio");
         let elems = p.fetch();
-        // Order: [prio, sicompass, ...]
-        assert_eq!(elems[0].as_obj().unwrap().key, "prio");
-        assert_eq!(elems[1].as_obj().unwrap().key, "sicompass");
+        // Order: [sicompass, prio, ...]
+        assert_eq!(elems[0].as_obj().unwrap().key, "sicompass");
+        assert_eq!(elems[1].as_obj().unwrap().key, "prio");
     }
 
     // --- on_radio_change ---
@@ -1783,10 +1783,10 @@ mod tests {
         p.add_priority_section("programs");
         p.add_checkbox("programs", "tutorial", "enable_tutorial", true);
         let items = p.fetch();
-        // programs + sicompass — programs not duplicated
+        // sicompass + programs — programs not duplicated
         assert_eq!(items.len(), 2);
-        assert_eq!(items[0].as_obj().unwrap().key, "programs");
-        assert_eq!(items[1].as_obj().unwrap().key, "sicompass");
+        assert_eq!(items[0].as_obj().unwrap().key, "sicompass");
+        assert_eq!(items[1].as_obj().unwrap().key, "programs");
     }
 
     #[test]
@@ -1868,12 +1868,12 @@ mod tests {
         p.add_text("email client", "label", "key", "val");
         p.add_text("web browser", "label", "key", "val");
         let items = p.fetch();
-        // Expected order: Available programs:, sicompass, chat client, email client, tutorial, web browser
+        // Expected order: sicompass, Available programs:, chat client, email client, tutorial, web browser
         let keys: Vec<&str> = items.iter()
             .filter_map(|e| e.as_obj().map(|o| o.key.as_str()))
             .collect();
-        assert_eq!(keys[0], "Available programs:");
-        assert_eq!(keys[1], "sicompass");
+        assert_eq!(keys[0], "sicompass");
+        assert_eq!(keys[1], "Available programs:");
         assert_eq!(keys[2], "chat client");
         assert_eq!(keys[3], "email client");
         assert_eq!(keys[4], "tutorial");
