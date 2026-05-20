@@ -41,7 +41,7 @@ eula = false
 # rustc links /MT (static CRT). The resulting `__imp_atof`-style unresolved
 # externals break the release link. Cutting SDL's libc dependency sidesteps
 # the mismatch and keeps the binary truly standalone (no vcruntime140.dll).
-bundled-sdl3 = ["sdl3/build-from-source-static", "sdl3/no-sdl-libc"]
+bundled-sdl3 = ["sdl3/build-from-source-static", "sdl3-sys/no-sdl-libc"]
 
 [dependencies]
 sicompass-sdk = { workspace = true }
@@ -59,6 +59,10 @@ rustybuzz = { workspace = true }
 image = { workspace = true }
 
 sdl3 = { workspace = true }
+# Pulled in transitively by `sdl3`; declared here so the `bundled-sdl3`
+# feature can flip its `no-sdl-libc` knob (see the feature comment above).
+# Version constraint matches `sdl3`'s own pin so Cargo unifies to one copy.
+sdl3-sys = "0.6.5"
 
 accesskit = { workspace = true }
 
