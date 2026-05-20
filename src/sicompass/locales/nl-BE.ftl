@@ -78,3 +78,22 @@ hint-ctrl-v-paste = Ctrl+V Plakken
 hint-ctrl-w-close-tab = Ctrl+W Sluit tabblad
 hint-ctrl-x-cut = Ctrl+X Knippen
 hint-ctrl-z-undo = Ctrl+Z Ongedaan
+
+# Coordinate (input-mode) display names
+mode-general = algemene modus
+mode-insert = invoegmodus
+mode-normal = normale modus
+mode-visual = visuele modus
+mode-search = zoeken
+mode-extended-search = uitgebreid zoeken
+mode-command = commando
+mode-scroll = scrolmodus
+mode-scroll-search = scrolzoeken
+mode-scroll-prefix-search = scrolvoorvoegsel zoeken
+mode-input-search = invoer zoeken
+mode-dashboard = dashboard
+mode-meta = meta
+mode-timeline = tijdlijn
+
+# Screen-reader announcements
+speak-tab-change = tabblad { $idx }/{ $total }: { $label }

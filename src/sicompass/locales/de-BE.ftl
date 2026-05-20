@@ -78,3 +78,22 @@ hint-ctrl-v-paste = Ctrl+V Einfügen
 hint-ctrl-w-close-tab = Ctrl+W Reiter schl.
 hint-ctrl-x-cut = Ctrl+X Ausschneiden
 hint-ctrl-z-undo = Ctrl+Z Rückgängig
+
+# Coordinate (input-mode) display names
+mode-general = allgemeiner Modus
+mode-insert = Einfügemodus
+mode-normal = Normalmodus
+mode-visual = visueller Modus
+mode-search = Suche
+mode-extended-search = erweiterte Suche
+mode-command = Befehl
+mode-scroll = Scroll-Modus
+mode-scroll-search = Scroll-Suche
+mode-scroll-prefix-search = Scroll-Präfixsuche
+mode-input-search = Eingabe-Suche
+mode-dashboard = Dashboard
+mode-meta = Meta
+mode-timeline = Verlauf
+
+# Screen-reader announcements
+speak-tab-change = Reiter { $idx }/{ $total }: { $label }

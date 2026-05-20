@@ -80,3 +80,25 @@ hint-ctrl-v-paste = Ctrl+V Paste
 hint-ctrl-w-close-tab = Ctrl+W Close tab
 hint-ctrl-x-cut = Ctrl+X Cut
 hint-ctrl-z-undo = Ctrl+Z Undo
+
+# Coordinate (input-mode) display names — spoken by the screen reader on
+# every mode switch and shown in the header status line + window title.
+mode-general = general mode
+mode-insert = insert mode
+mode-normal = normal mode
+mode-visual = visual mode
+mode-search = search
+mode-extended-search = extended search
+mode-command = command
+mode-scroll = scroll mode
+mode-scroll-search = scroll search
+mode-scroll-prefix-search = scroll prefix search
+mode-input-search = input search
+mode-dashboard = dashboard
+mode-meta = meta
+mode-timeline = timeline
+
+# Screen-reader announcements composed at runtime. Parameters:
+#   $idx, $total — 1-based position and tab count
+#   $label       — translated provider name of the active tab
+speak-tab-change = tab { $idx }/{ $total }: { $label }

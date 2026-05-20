@@ -78,3 +78,22 @@ hint-ctrl-v-paste = Ctrl+V Coller
 hint-ctrl-w-close-tab = Ctrl+W Fermer onglet
 hint-ctrl-x-cut = Ctrl+X Couper
 hint-ctrl-z-undo = Ctrl+Z Annuler
+
+# Coordinate (input-mode) display names
+mode-general = mode général
+mode-insert = mode insertion
+mode-normal = mode normal
+mode-visual = mode visuel
+mode-search = recherche
+mode-extended-search = recherche étendue
+mode-command = commande
+mode-scroll = mode défilement
+mode-scroll-search = recherche défilement
+mode-scroll-prefix-search = rech. préfixe défilement
+mode-input-search = recherche saisie
+mode-dashboard = tableau de bord
+mode-meta = méta
+mode-timeline = chronologie
+
+# Screen-reader announcements
+speak-tab-change = onglet { $idx }/{ $total } : { $label }

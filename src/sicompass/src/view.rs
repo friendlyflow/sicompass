@@ -2191,7 +2191,7 @@ fn render_tabs_band(
 /// Build the header status line (mirrors C updateView header format).
 fn build_header_text(r: &AppRenderer, line_height: i32) -> String {
     let _ = line_height;
-    let mode = r.coordinate.as_str();
+    let mode = r.coordinate.display_label();
     let depth = r.current_id.depth().saturating_sub(1);
     let last_id = r.current_id.last().unwrap_or(0);
     let total = r.active_list_len();
@@ -2341,7 +2341,7 @@ fn handle_keydown(app: &mut AppState, keycode: Option<Keycode>, keymod: Mod) {
 
 fn update_window_title(app: &mut AppState) {
     let r = &app.renderer;
-    let mode = r.coordinate.as_str();
+    let mode = r.coordinate.display_label();
     let path = build_display_path(r);
 
     let selected = r.current_list_item()

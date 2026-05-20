@@ -12,6 +12,10 @@ use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
 use unic_langid::LanguageIdentifier;
 
+// Re-export so callers in other crates can build FluentArgs without depending
+// on the `fluent` crate directly.
+pub use fluent::FluentArgs as Args;
+
 type FluentBundle = FluentBundleGen<FluentResource, IntlLangMemoizer>;
 
 /// Source/fallback locale. Every translatable string MUST exist in this

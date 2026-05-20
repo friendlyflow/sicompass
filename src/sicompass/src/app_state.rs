@@ -130,6 +130,10 @@ impl Coordinate {
         matches!(self, Coordinate::General)
     }
 
+    /// Stable English identifier — used in logs (`tracing::debug!`) and
+    /// internal tracing where translation would hurt grep-ability. For
+    /// user-facing UI (screen-reader announcements, header status line,
+    /// window title) use [`Coordinate::display_label`] instead.
     pub fn as_str(self) -> &'static str {
         match self {
             Coordinate::General => "general mode",
@@ -147,6 +151,32 @@ impl Coordinate {
             Coordinate::Meta => "meta",
             Coordinate::TimelineView => "timeline",
         }
+    }
+
+    /// Localized mode name for user-facing surfaces (screen reader, header
+    /// status line, window title). Resolves through the SDK localizer with
+    /// `mode-<id>` keys; falls back to the English `as_str()` literal if no
+    /// translation is registered.
+    pub fn display_label(self) -> String {
+        crate::shortcuts::register_translations();
+        let key = match self {
+            Coordinate::General => "mode-general",
+            Coordinate::Insert => "mode-insert",
+            Coordinate::Normal => "mode-normal",
+            Coordinate::Visual => "mode-visual",
+            Coordinate::SimpleSearch => "mode-search",
+            Coordinate::ExtendedSearch => "mode-extended-search",
+            Coordinate::Command => "mode-command",
+            Coordinate::Scroll => "mode-scroll",
+            Coordinate::ScrollSearch => "mode-scroll-search",
+            Coordinate::ScrollPrefixSearch => "mode-scroll-prefix-search",
+            Coordinate::InputSearch => "mode-input-search",
+            Coordinate::Dashboard => "mode-dashboard",
+            Coordinate::Meta => "mode-meta",
+            Coordinate::TimelineView => "mode-timeline",
+        };
+        let resolved = sicompass_sdk::localize::t(key);
+        if resolved == key { self.as_str().to_owned() } else { resolved }
     }
 }
 
@@ -835,7 +865,20 @@ impl AppRenderer {
     /// parity sentinel so back-to-back identical announcements still produce
     /// an AccessKit tree diff.
     pub fn speak_tab_change(&mut self, label: &str) {
-        let text = format!("tab {}/{}: {}", self.active_tab + 1, self.tabs.len(), label);
+        crate::shortcuts::register_translations();
+        let mut args = sicompass_sdk::localize::Args::new();
+        args.set("idx", (self.active_tab + 1) as i64);
+        args.set("total", self.tabs.len() as i64);
+        args.set("label", label.to_owned());
+        let text = sicompass_sdk::localize::t_args("speak-tab-change", &args);
+        // Fallback: if no translation is registered the message ID is
+        // returned verbatim. Use the legacy English template in that case
+        // so the screen reader still announces something readable.
+        let text = if text == "speak-tab-change" {
+            format!("tab {}/{}: {}", self.active_tab + 1, self.tabs.len(), label)
+        } else {
+            text
+        };
         self.announcement_parity = !self.announcement_parity;
         let sentinel = if self.announcement_parity { "\u{200B}" } else { "" };
         self.pending_announcement = Some(format!("{text}{sentinel}"));
@@ -853,10 +896,10 @@ impl AppRenderer {
     /// zero-width space is appended when parity is true — screen readers
     /// universally ignore it in speech output).
     pub fn speak_mode_change(&mut self, context: Option<String>) {
-        let mode = self.coordinate.as_str();
+        let mode = self.coordinate.display_label();
         let text = match context {
             Some(ctx) if !ctx.is_empty() => format!("{mode} - {ctx}"),
-            _ => mode.to_string(),
+            _ => mode,
         };
         self.announcement_parity = !self.announcement_parity;
         let sentinel = if self.announcement_parity { "\u{200B}" } else { "" };
@@ -1097,6 +1140,61 @@ impl Drop for AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    // The display_label / speak_tab_change tests mutate the global active
+    // locale; serialize them to avoid racing other tests in the binary.
+    fn locale_test_lock() -> std::sync::MutexGuard<'static, ()> {
+        static L: OnceLock<Mutex<()>> = OnceLock::new();
+        L.get_or_init(|| Mutex::new(())).lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    // --- Coordinate::display_label (i18n) ---
+
+    #[test]
+    fn coordinate_display_label_en_us_matches_as_str() {
+        let _g = locale_test_lock();
+        sicompass_sdk::localize::set_locale("en-US");
+        assert_eq!(Coordinate::General.display_label(), "general mode");
+        assert_eq!(Coordinate::Insert.display_label(), "insert mode");
+        assert_eq!(Coordinate::SimpleSearch.display_label(), "search");
+        sicompass_sdk::localize::set_locale("en-US");
+    }
+
+    #[test]
+    fn coordinate_display_label_translates_to_belgian_locales() {
+        let _g = locale_test_lock();
+
+        sicompass_sdk::localize::set_locale("nl-BE");
+        assert_eq!(Coordinate::General.display_label(), "algemene modus");
+        assert_eq!(Coordinate::Insert.display_label(), "invoegmodus");
+
+        sicompass_sdk::localize::set_locale("fr-BE");
+        assert_eq!(Coordinate::General.display_label(), "mode général");
+        assert_eq!(Coordinate::Insert.display_label(), "mode insertion");
+
+        sicompass_sdk::localize::set_locale("de-BE");
+        assert_eq!(Coordinate::General.display_label(), "allgemeiner Modus");
+        assert_eq!(Coordinate::Insert.display_label(), "Einfügemodus");
+
+        sicompass_sdk::localize::set_locale("en-US");
+    }
+
+    #[test]
+    fn speak_tab_change_uses_translated_template() {
+        let _g = locale_test_lock();
+        let mut r = AppRenderer::new();
+        sicompass_sdk::localize::set_locale("nl-BE");
+        r.speak_tab_change("bestandsverkenner");
+        // Strip parity sentinel (zero-width space) before asserting.
+        let ann = r.pending_announcement.as_ref().expect("ann set");
+        let ann = ann.trim_end_matches('\u{200B}');
+        assert!(
+            ann.starts_with("tabblad ") && ann.contains(": bestandsverkenner"),
+            "nl-BE tab announcement should use 'tabblad' template, got: {ann:?}"
+        );
+        sicompass_sdk::localize::set_locale("en-US");
+    }
 
     // --- Coordinate::as_str ---
 
