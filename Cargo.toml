@@ -1,6 +1,5 @@
 [workspace]
 members = [
-    "sdk",
     "lib/lib_tutorial",
     "lib/lib_settings",
     "lib/lib_filebrowser",
@@ -24,8 +23,11 @@ edition = "2024"
 license = "GPL-3.0-only"
 
 [workspace.dependencies]
-# SDK
-sicompass-sdk = { path = "sdk" }
+# SDK — lives in a sibling repo so plugin authors can depend on it independently.
+# When sicompass-sdk is published to crates.io, switch this to a versioned dep
+# (sicompass-sdk = "0.1") and add the same line to [patch.crates-io] below so
+# local development still uses the working copy.
+sicompass-sdk = { path = "../sicompass-plugin-sdk" }
 sicompass-tutorial = { path = "lib/lib_tutorial" }
 sicompass-settings = { path = "lib/lib_settings" }
 sicompass-filebrowser = { path = "lib/lib_filebrowser" }
