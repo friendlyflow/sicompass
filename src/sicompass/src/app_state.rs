@@ -717,21 +717,44 @@ impl AppRenderer {
     fn deep_rebuild_provider_tree(&mut self, provider_idx: usize, path: &str, cursor_depth: usize) {
         use sicompass_sdk::ffon::FfonElement;
         use sicompass_sdk::tags::strip_display;
+        use std::path::PathBuf;
 
-        let all_segments: Vec<String> = path
-            .split('/')
-            .filter(|s| !s.is_empty())
-            .map(str::to_owned)
-            .collect();
+        // Filesystem providers (filebrowser, texteditor) use native paths —
+        // on Windows those carry backslash separators and drive prefixes
+        // (`C:\…`). Splitting them on `/` collapses the whole path into one
+        // opaque segment and rebases the root to `"/"`, which on Windows is
+        // the drive-list sentinel — every navigated tab restored on Windows
+        // ended up showing `C:\, D:\` instead of its real directory. Route
+        // those paths through `std::path::PathBuf` so file-name extraction
+        // and joining stay platform-correct.
+        let is_fs = self.providers[provider_idx].path_is_filesystem();
+        let navigated_count = cursor_depth.saturating_sub(2);
 
-        // Split `path` into the tree-root prefix and the navigated tail.
-        let navigated = cursor_depth.saturating_sub(2).min(all_segments.len());
-        let split = all_segments.len() - navigated;
-        let root_prefix = {
-            let joined = all_segments[..split].join("/");
-            if joined.is_empty() { "/".to_owned() } else { format!("/{joined}") }
+        let (root_prefix, segments): (String, Vec<String>) = if is_fs {
+            let mut buf = PathBuf::from(path);
+            let mut leaf: Vec<String> = Vec::with_capacity(navigated_count);
+            for _ in 0..navigated_count {
+                let Some(name) = buf
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                else { break };
+                leaf.push(name);
+                if !buf.pop() { break; }
+            }
+            leaf.reverse();
+            (buf.to_string_lossy().into_owned(), leaf)
+        } else {
+            let all: Vec<String> = path
+                .split('/')
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .collect();
+            let n = navigated_count.min(all.len());
+            let split = all.len() - n;
+            let joined = all[..split].join("/");
+            let root = if joined.is_empty() { "/".to_owned() } else { format!("/{joined}") };
+            (root, all[split..].to_vec())
         };
-        let segments = &all_segments[split..];
 
         let display_name = self.providers[provider_idx].display_name().to_owned();
 
@@ -742,7 +765,7 @@ impl AppRenderer {
 
         let mut indices: Vec<usize> = Vec::with_capacity(segments.len());
         let mut prefix = root_prefix.clone();
-        for seg in segments {
+        for seg in &segments {
             let found = levels.last().unwrap().iter().position(|e| {
                 matches!(e, FfonElement::Obj(o) if strip_display(&o.key) == *seg)
             });
@@ -751,10 +774,15 @@ impl AppRenderer {
                 None => break, // can't descend further — graft what matched
             };
             indices.push(idx);
-            if !prefix.ends_with('/') {
-                prefix.push('/');
-            }
-            prefix.push_str(seg);
+            prefix = if is_fs {
+                let mut buf = PathBuf::from(&prefix);
+                buf.push(seg);
+                buf.to_string_lossy().into_owned()
+            } else if prefix == "/" {
+                format!("/{seg}")
+            } else {
+                format!("{prefix}/{seg}")
+            };
             self.providers[provider_idx].set_current_path(&prefix);
             levels.push(self.providers[provider_idx].fetch());
         }
