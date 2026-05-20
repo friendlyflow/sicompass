@@ -14,3 +14,17 @@ settings-language-option-en-US = English
 settings-language-option-nl-BE = Nederlands (België)
 settings-language-option-fr-BE = Français (Belgique)
 settings-language-option-de-BE = Deutsch (Belgien)
+
+# Section display names. The section storage id (used as a key in
+# settings.json) stays language-neutral; these entries only translate the
+# displayed FFON Obj key when navigating into a section.
+settings-section-sicompass = sicompass
+settings-section-available-programs = Available programs:
+settings-section-file-browser = file browser
+settings-section-web-browser = web browser
+settings-section-email-client = email client
+settings-section-chat-client = chat client
+settings-section-terminal = terminal
+settings-section-text-editor = text editor
+settings-section-store = Store
+settings-section-tutorial = tutorial

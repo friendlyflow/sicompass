@@ -440,8 +440,27 @@ impl SettingsProvider {
         if label == key { opt.to_owned() } else { label }
     }
 
+    /// Resolve a section's display name. Convention: section storage id `S`
+    /// maps to Fluent message ID `settings-section-<S>` with spaces→hyphens
+    /// and trailing `:` stripped (so `"Available programs:"` → key
+    /// `settings-section-available-programs`). Falls back to the raw
+    /// storage id so callers without an FTL entry render their literal.
+    /// Section storage ids are also used as keys in `settings.json`, so they
+    /// must stay language-neutral — only the displayed FFON Obj key changes.
+    fn localize_section_name(name: &str) -> String {
+        let normalized: String = name
+            .trim_end_matches(':')
+            .chars()
+            .map(|c| if c.is_ascii_whitespace() { '-' } else { c })
+            .collect::<String>()
+            .to_ascii_lowercase();
+        let key = format!("settings-section-{}", normalized);
+        let label = localize::t(&key);
+        if label == key { name.to_owned() } else { label }
+    }
+
     fn populate_section(&self, section_name: &str) -> FfonElement {
-        let mut obj = FfonElement::new_obj(section_name);
+        let mut obj = FfonElement::new_obj(Self::localize_section_name(section_name));
         let o = obj.as_obj_mut().unwrap();
 
         // Checkboxes (sorted alphabetically by label)
@@ -509,7 +528,7 @@ impl Provider for SettingsProvider {
 
         // sicompass section: color scheme radio group
         let is_dark = self.color_scheme == "dark";
-        let mut sc_obj = FfonElement::new_obj("sicompass");
+        let mut sc_obj = FfonElement::new_obj(Self::localize_section_name("sicompass"));
         {
             let mut radio = FfonElement::new_obj(format!(
                 "<radio>{}",
@@ -1077,6 +1096,38 @@ mod tests {
         let _g = locale_test_lock();
         let label = SettingsProvider::localize_option_label("fontScale", "1.25");
         assert_eq!(label, "1.25");
+    }
+
+    /// Section names translate via the `settings-section-<normalized>` key.
+    /// Storage ids (used as keys in settings.json) stay language-neutral;
+    /// only the displayed FFON Obj key changes.
+    #[test]
+    fn section_name_translates_for_known_sections() {
+        let _g = locale_test_lock();
+        // Trigger lib_settings's register_translations via constructor.
+        let _ = headless();
+
+        sicompass_sdk::localize::set_locale("en-US");
+        assert_eq!(SettingsProvider::localize_section_name("file browser"), "file browser");
+        assert_eq!(SettingsProvider::localize_section_name("Available programs:"), "Available programs:");
+
+        sicompass_sdk::localize::set_locale("nl-BE");
+        assert_eq!(SettingsProvider::localize_section_name("file browser"), "bestandsverkenner");
+        assert_eq!(SettingsProvider::localize_section_name("Available programs:"), "Beschikbare programma's:");
+
+        sicompass_sdk::localize::set_locale("fr-BE");
+        assert_eq!(SettingsProvider::localize_section_name("file browser"), "navigateur de fichiers");
+        assert_eq!(SettingsProvider::localize_section_name("Available programs:"), "Programmes disponibles :");
+
+        sicompass_sdk::localize::set_locale("de-BE");
+        assert_eq!(SettingsProvider::localize_section_name("file browser"), "Dateimanager");
+        assert_eq!(SettingsProvider::localize_section_name("Available programs:"), "Verfügbare Programme:");
+
+        // Unknown section name falls back to its literal.
+        sicompass_sdk::localize::set_locale("nl-BE");
+        assert_eq!(SettingsProvider::localize_section_name("mystery"), "mystery");
+
+        sicompass_sdk::localize::set_locale("en-US");
     }
 
     /// Reproduces the exact registration the app uses for the language
