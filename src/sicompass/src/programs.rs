@@ -1394,8 +1394,15 @@ mod tests {
         }
     }
 
+    /// Serializes tests that mutate the process-wide `USER_PLUGIN_CACHE`. The
+    /// cache's own `Mutex` guards individual accesses but not the
+    /// set-then-read invariant each test relies on, so without this lock a
+    /// parallel test can reset the cache between another test's set and read.
+    static PLUGIN_CACHE_TEST_LOCK: Mutex<()> = Mutex::new(());
+
     #[test]
     fn enable_provider_unknown_name_logs_and_returns() {
+        let _cache_guard = PLUGIN_CACHE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut r = AppRenderer::new();
         // Seed empty cache so we don't accidentally pick up real plugins
         _reset_user_plugin_cache(vec![]);
@@ -1412,6 +1419,7 @@ mod tests {
         // This test validates that enable_provider finds the user plugin in the cache.
         // ScriptProvider doesn't actually run `bun` in tests (init() is a no-op,
         // fetch() calls bun which will fail silently returning []).
+        let _cache_guard = PLUGIN_CACHE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut r = AppRenderer::new();
         let plugin = make_discovered_plugin("my-demo");
         _reset_user_plugin_cache(vec![plugin]);
@@ -1432,6 +1440,7 @@ mod tests {
     /// `name`, then return the FFON fetch output from the settings provider.
     fn settings_ffon_after_enable(name: &str) -> Vec<FfonElement> {
         use sicompass_settings::SettingsProvider;
+        let _cache_guard = PLUGIN_CACHE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Ensure the factory registry is populated (normally done in main()).
         sicompass_builtins::register_all();
         let mut r = AppRenderer::new();
