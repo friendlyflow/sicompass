@@ -181,7 +181,7 @@ mod tests {
     #[test]
     fn test_needs_refresh_propagates_via_flag() {
         let notify = Arc::new(AtomicBool::new(false));
-        let ctrl = IdleController::new(Arc::clone(&notify));
+        let _ctrl = IdleController::new(Arc::clone(&notify));
         // Simulate what the IDLE thread does on new mail.
         notify.store(true, Ordering::Relaxed);
         assert!(notify.load(Ordering::Relaxed));

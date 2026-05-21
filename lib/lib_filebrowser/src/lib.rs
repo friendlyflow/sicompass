@@ -922,7 +922,7 @@ mod tests {
 
     #[test]
     fn test_deep_search_dir_prefix() {
-        let (mut p, dir) = make_provider();
+        let (p, dir) = make_provider();
         std::fs::create_dir(dir.path().join("mydir")).unwrap();
         let results = p.collect_deep_search_items().unwrap_or_default();
         assert!(results.iter().any(|r| r.label.starts_with("+ ")));
@@ -930,7 +930,7 @@ mod tests {
 
     #[test]
     fn test_deep_search_file_prefix() {
-        let (mut p, dir) = make_provider();
+        let (p, dir) = make_provider();
         std::fs::write(dir.path().join("myfile.txt"), b"").unwrap();
         let results = p.collect_deep_search_items().unwrap_or_default();
         assert!(results.iter().any(|r| r.label.starts_with("- ")));
@@ -999,7 +999,7 @@ mod tests {
 
     #[test]
     fn test_deep_search_flat_files() {
-        let (mut p, dir) = make_provider();
+        let (p, dir) = make_provider();
         std::fs::write(dir.path().join("alpha.txt"), b"").unwrap();
         std::fs::write(dir.path().join("beta.txt"), b"").unwrap();
         std::fs::write(dir.path().join("gamma.txt"), b"").unwrap();
@@ -1029,7 +1029,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn test_deep_search_symlink_not_followed() {
-        let (mut p, dir) = make_provider();
+        let (p, dir) = make_provider();
         // Create a symlink pointing back to the root dir (circular)
         let link_path = dir.path().join("loop");
         std::os::unix::fs::symlink(dir.path(), &link_path).unwrap();
@@ -1159,7 +1159,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn test_list_directory_chrono_sort() {
-        use std::time::{Duration, UNIX_EPOCH, SystemTime};
+        use std::time::{Duration, UNIX_EPOCH};
         let (mut p, dir) = make_provider();
 
         // Create three files with distinct mtime set via FileTimes

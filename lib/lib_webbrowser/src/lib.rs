@@ -2671,7 +2671,6 @@ mod tests {
     fn test_form_interaction_local_file() {
         // Verify that a local HTML form is parsed and the provider
         // exposes its fields as editable FFON cells.  Requires Chrome.
-        use sicompass_sdk::provider::Provider;
         let html = r#"<!DOCTYPE html><html><body>
             <form>
               <input type="search" name="q" placeholder="Search">

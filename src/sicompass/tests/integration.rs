@@ -2361,8 +2361,6 @@ fn ctrl_i_operator_clones_add_element_section_for_create_element_provider() {
 /// editor (after escaping Insert), not via list navigation.
 #[test]
 fn ctrl_a_in_general_double_tap_does_append_append() {
-    use sicompass::app_state::Task;
-
     struct EditorMock;
     impl Provider for EditorMock {
         fn name(&self) -> &str { "mock_editor" }
@@ -2966,11 +2964,6 @@ impl Provider for InMemoryFormProvider {
     // No override for refresh_on_navigate → defaults to false (in-memory provider).
 }
 
-/// Helper: count children of the provider root element.
-fn root_child_count(renderer: &AppRenderer) -> usize {
-    renderer.ffon.get(0).and_then(|e| e.as_obj()).map(|o| o.children.len()).unwrap_or(0)
-}
-
 /// Helper: return child keys of the provider root element.
 fn root_child_keys(renderer: &AppRenderer) -> Vec<String> {
     renderer.ffon.get(0)
@@ -3153,7 +3146,7 @@ fn nav_into_filebrowser(h: &mut Harness) {
 
 #[test]
 fn get_meta_at_root_returns_universal_hints() {
-    let mut h = Harness::new();
+    let h = Harness::new();
     // Depth 1 = root navigation level.
     assert_eq!(h.renderer.current_id.depth(), 1);
     let meta = sicompass::provider::get_meta(&h.renderer);
@@ -3207,7 +3200,6 @@ fn get_meta_tag_derived_hints_appear_for_input_children() {
     }
 
     let mut renderer = AppRenderer::default();
-    let provider = Box::new(InputListProvider { path: "/".to_owned() });
     let children = {
         let mut p = InputListProvider { path: "/".to_owned() };
         p.fetch()
@@ -3884,7 +3876,7 @@ fn editing_leaf_in_nested_compose_body_does_not_empty_list() {
 /// state without going through the full SDL/network stack.
 fn email_renderer_inside_message() -> AppRenderer {
     use sicompass_emailclient::{EmailClientProvider, ImapBackend, FolderInfo, MessageHeader, EmailMessage};
-    use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
+    use sicompass_sdk::ffon::{FfonElement, IdArray};
 
     struct StubImap { messages: Vec<MessageHeader>, removed_uids: Vec<u32> }
     #[allow(unused_variables)]
@@ -4014,7 +4006,7 @@ fn ctrl_d_from_inside_message_shows_message_list_with_cursor_on_next() {
 #[test]
 fn ctrl_d_from_message_list_removes_message() {
     use sicompass_emailclient::{EmailClientProvider, ImapBackend, FolderInfo, MessageHeader, EmailMessage};
-    use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray};
+    use sicompass_sdk::ffon::{FfonElement, IdArray};
 
     struct StubImap2 { messages: Vec<MessageHeader>, removed_uids: Vec<u32> }
     #[allow(unused_variables)]
@@ -4225,7 +4217,6 @@ fn compose_body_delete_undo_syncs_draft_body() {
     // Re-commit to create a real Ffon body with two elements.
     p.commit_edit("line2_start", "line1"); // back to line1 in slot 0
     // Directly seed a 2-element Ffon body for simplicity.
-    use sicompass_emailclient::MailBody;
     // We can't access MailBody from the provider trait, so we set up the
     // FFON manually and drive state through the trait.
 
@@ -4895,10 +4886,6 @@ fn webbrowser_form_commit_returns_false_and_patches_cache() {
     // refresh_current_directory re-fetching stale cached_page data.
     // It must also patch cached_page so any subsequent re-fetch keeps the value.
     ensure_builtins();
-    use sicompass_sdk::ffon::{FfonElement, FormNode, FormNodeKind, FormMap};
-    use sicompass_sdk::provider::Provider;
-
-    let mut p = sicompass_sdk::create_provider_by_name("webbrowser").unwrap();
 
     // Inject a minimal page with a form field.
     // (We reach into the provider through fetch: craft the FFON directly via
@@ -5378,7 +5365,7 @@ fn text_editor_directory_entries_are_obj() {
 #[test]
 fn text_editor_right_arrow_opens_file() {
     // Pressing right on a file Obj entry should open the file content.
-    let (mut r, tmp) = harness_with_text_editor();
+    let (mut r, _tmp) = harness_with_text_editor();
     let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
     navigate_to_provider(&mut r, editor_idx);
     press_right(&mut r); // enter editor directory → General at depth 2
@@ -5517,7 +5504,7 @@ fn text_editor_right_arrow_into_subdir() {
     press_right(&mut r); // enter editor root dir listing
 
     // Refresh so subdir appears in the listing.
-    press((&mut r), Keycode::F5);
+    press(&mut r, Keycode::F5);
 
     let dir_idx = {
         let children = r.ffon[editor_idx].as_obj().unwrap().children.as_slice();
@@ -5553,7 +5540,7 @@ fn text_editor_empty_subdir_seeds_i_placeholder() {
     let editor_idx = r.providers.iter().position(|p| p.name() == "texteditor").unwrap();
     navigate_to_provider(&mut r, editor_idx);
     press_right(&mut r);
-    press((&mut r), Keycode::F5); // refresh to pick up empty_dir
+    press(&mut r, Keycode::F5); // refresh to pick up empty_dir
 
     let dir_idx = {
         let children = r.ffon[editor_idx].as_obj().unwrap().children.as_slice();

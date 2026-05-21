@@ -2031,7 +2031,7 @@ mod tests {
 
     #[test]
     fn test_send_message_unknown_room_fails() {
-        let mut p = ChatClientProvider::new();
+        let p = ChatClientProvider::new();
         let ok = p.send_message("NoSuchRoom", "Hello!");
         assert!(!ok);
     }
