@@ -17,6 +17,20 @@ pub const MAX_TEXT_VERTICES: usize = 1_048_576;
 pub const FONT_SIZE_PT: f32 = 12.0;
 pub const TEXT_PADDING: f32 = 4.0;
 
+/// Non-Latin-1 codepoints rasterized into the glyph atlas on top of the base
+/// 32..256 range: the euro sign plus common typographic punctuation. The
+/// glyph table is sized to the highest entry so a flat codepoint index stays
+/// valid for every one of them.
+const EXTRA_GLYPHS: &[u32] = &[
+    0x2013, // en dash
+    0x2014, // em dash
+    0x2018, 0x2019, // left/right single quote
+    0x201C, 0x201D, // left/right double quote
+    0x2022, // bullet
+    0x2026, // horizontal ellipsis
+    0x20AC, // euro sign
+];
+
 // ---------------------------------------------------------------------------
 // Data types
 // ---------------------------------------------------------------------------
@@ -54,7 +68,7 @@ pub struct FontRenderer {
     ft_face: ft::FT_Face,
 
     // ---- Glyph metrics and atlas -------------------------------------------
-    pub glyphs: Vec<GlyphInfo>,   // indexed 0-255
+    pub glyphs: Vec<GlyphInfo>,   // indexed by Unicode codepoint
     pub line_height: f32,
     pub ascender: f32,
     pub descender: f32,
@@ -136,13 +150,23 @@ impl FontRenderer {
         // ----------------------------------------------------------------
         let atlas_sz = font_atlas_size as usize;
         let mut atlas_data = vec![0u8; atlas_sz * atlas_sz];
-        let mut glyphs: Vec<GlyphInfo> = (0..256).map(|_| GlyphInfo::default()).collect();
+        // Glyph table indexed by Unicode codepoint, sized to cover the base
+        // 32..256 range and every EXTRA_GLYPHS entry with a flat index.
+        let glyph_count = EXTRA_GLYPHS
+            .iter()
+            .copied()
+            .max()
+            .unwrap_or(0)
+            .max(255) as usize
+            + 1;
+        let mut glyphs: Vec<GlyphInfo> =
+            (0..glyph_count).map(|_| GlyphInfo::default()).collect();
 
         let mut pen_x = 0i32;
         let mut pen_y = 0i32;
         let mut row_height = 0i32;
 
-        for c in 32u32..256 {
+        for c in (32u32..256).chain(EXTRA_GLYPHS.iter().copied()) {
             if ft::FT_Load_Char(ft_face, c as ft::FT_ULong, ft::FT_LOAD_RENDER as ft::FT_Int32) != 0 {
                 continue;
             }
@@ -484,14 +508,18 @@ impl FontRenderer {
         let col = [r, g, b];
 
         let mut cx = x;
+        let space_adv = self.glyphs[b' ' as usize].advance;
         for ch in text.chars() {
-            let cp = ch as u32;
-            if cp < 32 || cp >= 256 {
-                // fallback advance (space width)
-                cx += self.glyphs[b' ' as usize].advance * scale;
-                continue;
-            }
-            let gi = &self.glyphs[cp as usize];
+            let cp = ch as usize;
+            // A glyph is usable when it was rasterized into the atlas; an
+            // all-zero entry means the codepoint is outside the atlas.
+            let gi = match self.glyphs.get(cp) {
+                Some(g) if cp >= 32 && !(g.advance == 0.0 && g.size == [0.0, 0.0]) => g,
+                _ => {
+                    cx += space_adv * scale; // unknown char: advance like a space
+                    continue;
+                }
+            };
 
             let xpos = cx + gi.bearing[0] * scale;
             let ypos = y  - gi.bearing[1] * scale;
@@ -574,14 +602,19 @@ impl FontRenderer {
         self.glyphs[b'M' as usize].advance * scale
     }
 
+    /// Horizontal advance of `ch` in atlas pixels. Unknown codepoints fall
+    /// back to the space advance so layout still progresses.
+    fn char_advance(&self, ch: char) -> f32 {
+        let space = self.glyphs[b' ' as usize].advance;
+        match self.glyphs.get(ch as usize) {
+            Some(g) if (ch as u32) >= 32 && g.advance > 0.0 => g.advance,
+            _ => space,
+        }
+    }
+
     /// Pixel width of `text` at `scale` (sum of glyph advances).
     pub fn measure_text_width(&self, text: &str, scale: f32) -> f32 {
-        text.bytes()
-            .map(|b| {
-                let idx = if b >= 32 { b as usize } else { b' ' as usize };
-                self.glyphs[idx].advance * scale
-            })
-            .sum()
+        text.chars().map(|ch| self.char_advance(ch) * scale).sum()
     }
 
     /// Number of lines required to render `text` with word-wrapping at `max_width` pixels.
@@ -644,9 +677,17 @@ impl FontRenderer {
             return vec![(String::new(), 0)];
         }
 
-        let adv = |b: u8| -> f32 {
-            let idx = if b >= 32 { b as usize } else { b' ' as usize };
-            glyphs[idx.min(255)].advance * scale
+        let space_adv = glyphs[b' ' as usize].advance;
+        // Advance of the char starting at byte `i`, decoded as one codepoint
+        // (`i` is always on a char boundary). Unknown codepoints advance like
+        // a space so wrapping still progresses.
+        let adv = |i: usize| -> f32 {
+            let ch = text[i..].chars().next().unwrap_or(' ');
+            let a = match glyphs.get(ch as usize) {
+                Some(g) if (ch as u32) >= 32 && g.advance > 0.0 => g.advance,
+                _ => space_adv,
+            };
+            a * scale
         };
 
         let bytes = text.as_bytes();
@@ -679,7 +720,7 @@ impl FontRenderer {
                 continue;
             }
 
-            let next_width = line_width + adv(b);
+            let next_width = line_width + adv(i);
 
             if next_width > max_width && i > line_start {
                 let break_end = if let Some(sp) = last_space {
@@ -717,9 +758,17 @@ impl FontRenderer {
             return vec![String::new()];
         }
 
-        let adv = |b: u8| -> f32 {
-            let idx = if b >= 32 { b as usize } else { b' ' as usize };
-            glyphs[idx.min(255)].advance * scale
+        let space_adv = glyphs[b' ' as usize].advance;
+        // Advance of the char starting at byte `i`, decoded as one codepoint
+        // (`i` is always on a char boundary). Unknown codepoints advance like
+        // a space so wrapping still progresses.
+        let adv = |i: usize| -> f32 {
+            let ch = text[i..].chars().next().unwrap_or(' ');
+            let a = match glyphs.get(ch as usize) {
+                Some(g) if (ch as u32) >= 32 && g.advance > 0.0 => g.advance,
+                _ => space_adv,
+            };
+            a * scale
         };
 
         let bytes = text.as_bytes();
@@ -750,7 +799,7 @@ impl FontRenderer {
                 continue;
             }
 
-            let next_width = line_width + adv(b);
+            let next_width = line_width + adv(i);
 
             if next_width > max_width && i > line_start {
                 let break_end = if let Some(sp) = last_space {
