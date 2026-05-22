@@ -1,3 +1,5 @@
+**I specially made this software to accommodate blind and visually impaired computer users!**
+
 # Silicon's Compass
 
 From around 1981 until 2026, the way computers look and work on screen (the graphical user interface, or GUI) barely changed, and it never worked well for people who need accessibility. That changes now.
