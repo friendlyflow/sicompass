@@ -16,7 +16,7 @@ It does not try to look pretty, and it works very differently from web pages and
 - **Keyboard-First Design**: Faster and handier navigation because your hands never leave the keyboard
 - **Native Accessibility**: Built-in support for screen readers on Linux, macOS, and Windows
 - **Cross-Platform**: Shipped and tested on Ubuntu today. Paths, shells, and PTY plumbing route through platform helpers (XDG / `~/Library` / `%APPDATA%`, `bash`/`zsh`/`fish`/`pwsh`/`cmd.exe`, `forkpty`/ConPTY), with packaged macOS and Windows releases planned
-- **High-Performance Rendering**: Vulkan-powered graphics with FreeType2/HarfBuzz text shaping
+- **High-Performance Rendering**: Vulkan-powered graphics with a FreeType2 glyph atlas
 - **Extensible Architecture**: Provider-based plugin system with a built-in plugin store for hot enable/disable
 - **Lower Development Cost**: Because the user-interface elements are decided beforehand, design never has to be programmed. Development is navigation-first instead of design-first, which cuts complexity and speeds up delivery
 
