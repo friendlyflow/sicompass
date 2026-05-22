@@ -398,6 +398,10 @@ struct ParentInfo {
 }
 
 fn update_view(app: &mut AppState) {
+    // Speak any error that reached the header since the last frame. Done once
+    // here, before the header is drawn, so every error path is covered.
+    app.renderer.announce_error_if_new();
+
     // ---- Snapshot palette before mutable borrows ---------------------------
     let p = *app.renderer.palette();
 

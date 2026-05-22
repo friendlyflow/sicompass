@@ -26,11 +26,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// Ed25519 public key (base64 of 32 raw bytes) that certificates are verified
 /// against. The matching **private** key lives only on the license server.
 ///
-/// This is a placeholder (32 zero bytes) and will reject every real
-/// certificate until replaced. To set up a real key: in the `server/` repo run
+/// Replace this for a production release: in the `server/` repo run
 /// `cargo run --bin keygen`, paste the printed public key here, and put the
 /// printed private key in the server's `.env` as `SICOMPASS_SIGNING_KEY`.
-pub(crate) const LICENSE_PUBLIC_KEY_B64: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+pub(crate) const LICENSE_PUBLIC_KEY_B64: &str = "BXZk+tykjgJhV/TJeW8vnf7BVXrGdQEyELMvOxLAoJ4=";
 
 /// The signed portion of a certificate. Field order is the signing order —
 /// it must stay identical to the server's `Payload`.
@@ -79,20 +78,22 @@ pub(crate) enum LicenseStatus {
 }
 
 impl LicenseStatus {
-    /// One-line summary rendered at the top of the store sub-node.
-    pub(crate) fn summary_line(&self) -> String {
+    /// One-line summary suffixed onto a tier link title. `label` names the
+    /// license ("Cloud and store" / "Support"). Kept plain (no em dash) so a
+    /// screen reader reads it cleanly.
+    pub(crate) fn summary_line(&self, label: &str) -> String {
         match self {
             LicenseStatus::None => {
-                "Commercial license: none. sicompass is free under GPLv3.".to_owned()
+                format!("{label} license: none. sicompass is free under GPLv3.")
             }
             LicenseStatus::Active { licensee, renews_in_days } => format!(
-                "Commercial license: active, {licensee}, renews in {renews_in_days} days"
+                "{label} license: active, {licensee}, renews in {renews_in_days} days"
             ),
             LicenseStatus::Expired { licensee, expired_days_ago } => format!(
-                "Commercial license: expired {expired_days_ago} days ago, {licensee}"
+                "{label} license: expired {expired_days_ago} days ago, {licensee}"
             ),
             LicenseStatus::Invalid(why) => {
-                format!("Commercial license: invalid certificate ({why})")
+                format!("{label} license: invalid certificate ({why})")
             }
         }
     }
@@ -170,9 +171,10 @@ pub(crate) fn verify(cert: &Certificate) -> LicenseStatus {
     verify_against(cert, LICENSE_PUBLIC_KEY_B64)
 }
 
-/// On-disk location of the saved certificate.
-pub(crate) fn cert_path() -> Option<PathBuf> {
-    sicompass_sdk::platform::provider_config_path("store-license")
+/// On-disk location of the saved certificate for license `slug`
+/// (`"store-license"` for cloud and store, `"support-license"` for support).
+pub(crate) fn cert_path(slug: &str) -> Option<PathBuf> {
+    sicompass_sdk::platform::provider_config_path(slug)
 }
 
 /// Load and parse the certificate from `path` (no verification).
@@ -192,14 +194,14 @@ pub(crate) fn save_to(path: &Path, cert: &Certificate) -> bool {
     }
 }
 
-/// Load the saved certificate from the standard location, if present.
-pub(crate) fn load() -> Option<Certificate> {
-    load_from(&cert_path()?)
+/// Load the saved certificate for license `slug`, if present.
+pub(crate) fn load(slug: &str) -> Option<Certificate> {
+    load_from(&cert_path(slug)?)
 }
 
-/// Save a certificate to the standard location.
-pub(crate) fn save(cert: &Certificate) -> bool {
-    match cert_path() {
+/// Save a certificate for license `slug`.
+pub(crate) fn save(slug: &str, cert: &Certificate) -> bool {
+    match cert_path(slug) {
         Some(p) => save_to(&p, cert),
         None => false,
     }
@@ -322,7 +324,19 @@ mod tests {
             LicenseStatus::Expired { licensee: "X".into(), expired_days_ago: 1 },
             LicenseStatus::Invalid("why".into()),
         ] {
-            assert!(!s.summary_line().contains('\u{2014}'));
+            for label in ["Cloud and store", "Support"] {
+                let line = s.summary_line(label);
+                assert!(!line.contains('\u{2014}'));
+                assert!(line.starts_with(label), "label prefix missing: {line}");
+            }
         }
+    }
+
+    #[test]
+    fn cert_path_is_per_slug() {
+        let cloud = cert_path("store-license");
+        let support = cert_path("support-license");
+        assert!(cloud.is_some() && support.is_some());
+        assert_ne!(cloud, support);
     }
 }

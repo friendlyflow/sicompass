@@ -469,6 +469,10 @@ pub struct AppRenderer {
 
     // ---- Error display -----------------------------------------------------
     pub error_message: String,
+    /// The last error text already announced via `pending_announcement`. Lets
+    /// `announce_error_if_new` speak each error exactly once (and re-speak it
+    /// if the same text is set again after being cleared).
+    pub last_spoken_error: String,
 
     // ---- Command execution state ------------------------------------------
     pub current_command: CommandPhase,
@@ -626,6 +630,7 @@ impl AppRenderer {
             current_element_base_x: 0.0,
             current_element_y: 0.0,
             error_message: String::new(),
+            last_spoken_error: String::new(),
             current_command: CommandPhase::None,
             provider_command_name: String::new(),
             palette_theme: PaletteTheme::Dark,
@@ -904,6 +909,25 @@ impl AppRenderer {
         self.announcement_parity = !self.announcement_parity;
         let sentinel = if self.announcement_parity { "\u{200B}" } else { "" };
         self.pending_announcement = Some(format!("{text}{sentinel}"));
+    }
+
+    /// If `error_message` holds a new error, announce it via the live region.
+    /// Called once per render frame so any error reaching the header is spoken
+    /// exactly once, regardless of which code path set it. Clears the tracker
+    /// when the error clears, so the same text spoken again is re-announced.
+    /// Toggles `announcement_parity` so a repeat still produces a tree diff.
+    pub fn announce_error_if_new(&mut self) {
+        if self.error_message.is_empty() {
+            self.last_spoken_error.clear();
+            return;
+        }
+        if self.error_message == self.last_spoken_error {
+            return;
+        }
+        self.last_spoken_error = self.error_message.clone();
+        self.announcement_parity = !self.announcement_parity;
+        let sentinel = if self.announcement_parity { "\u{200B}" } else { "" };
+        self.pending_announcement = Some(format!("{}{sentinel}", self.error_message));
     }
 
     /// Set the pending screen-reader announcement to the currently selected

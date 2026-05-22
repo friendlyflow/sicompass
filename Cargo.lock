@@ -3823,6 +3823,7 @@ dependencies = [
  "libloading 0.9.0",
  "mockall",
  "nucleo-matcher",
+ "reqwest",
  "rustybuzz",
  "sdl3",
  "sdl3-sys",

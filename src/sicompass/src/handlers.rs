@@ -404,12 +404,43 @@ fn fetch_url_to_elements(url: &str) -> Vec<FfonElement> {
 /// Mirrors C's `resolveLinkToElements`.
 fn resolve_link_to_elements(url: &str) -> Vec<FfonElement> {
     if url.starts_with("http://") || url.starts_with("https://") {
-        fetch_url_to_elements(url)
+        resolve_http_link(url)
     } else if url.ends_with(".ffon") {
         sicompass_sdk::ffon::load_ffon_file(std::path::Path::new(url)).unwrap_or_default()
     } else {
         sicompass_sdk::ffon::load_json_file(std::path::Path::new(url)).unwrap_or_default()
     }
+}
+
+/// Resolve an HTTP(S) link.
+///
+/// The body is fetched with `reqwest` and inspected: if it parses as JSON and
+/// passes `is_ffon` it is a server-hosted FFON tree (parsed directly, no
+/// browser). Otherwise it is treated as an HTML page and rendered through the
+/// headless-Chromium fetcher. A real network error is reported in place — the
+/// browser would not do better — so the link node still renders.
+fn resolve_http_link(url: &str) -> Vec<FfonElement> {
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => return vec![FfonElement::new_str(format!("Error loading {url}: {e}"))],
+    };
+    let body = match client.get(url).send().and_then(|r| r.text()) {
+        Ok(b) => b,
+        Err(e) => return vec![FfonElement::new_str(format!("Error loading {url}: {e}"))],
+    };
+    // A JSON FFON document is a server-hosted tier tree — parse it directly.
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&body) {
+        if sicompass_sdk::ffon::is_ffon(&value) {
+            if let Ok(elems) = serde_json::from_value::<Vec<FfonElement>>(value) {
+                return elems;
+            }
+        }
+    }
+    // Not FFON — an HTML page. Render it through the Chromium fetcher.
+    fetch_url_to_elements(url)
 }
 
 /// Navigate into the selected item (Right key).

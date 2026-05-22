@@ -23,8 +23,17 @@ settings-section-email-client = e-mailclient
 settings-section-chat-client = chatclient
 settings-section-terminal = terminal
 settings-section-text-editor = tekstverwerker
-settings-section-store = Winkel
 settings-section-tutorial = handleiding
+
+# Titels van de sponsor- / cloud- / ondersteuningskoppelingen (lokaal gebouwd;
+# de inhoud van de niveaus wordt door de server geleverd, in het Engels).
+settings-tier-sponsor = WORD SPONSOR
+settings-tier-cloud = CLOUD EN WINKEL INSCHAKELEN
+settings-tier-support = ONDERSTEUNING INSCHAKELEN
+
+# Labels voor de offline licentiestatus achter de cloud- en ondersteuningskoppelingen.
+settings-license-label-cloud = Cloud en winkel
+settings-license-label-support = Ondersteuning
 
 # Setting labels
 settings-label-store-url = URL winkelserver

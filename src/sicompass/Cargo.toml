@@ -49,6 +49,7 @@ sicompass-builtins = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }
+reqwest = { workspace = true }
 
 ash = { workspace = true }
 glam = { workspace = true }
