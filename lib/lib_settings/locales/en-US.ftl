@@ -26,8 +26,17 @@ settings-section-email-client = email client
 settings-section-chat-client = chat client
 settings-section-terminal = terminal
 settings-section-text-editor = text editor
-settings-section-store = Store
 settings-section-tutorial = tutorial
+
+# Sponsor / cloud / support tier link titles (built client-side; the tier
+# trees themselves are served, in English, by the server).
+settings-tier-sponsor = BECOME A SPONSOR
+settings-tier-cloud = ENABLE CLOUD AND STORE
+settings-tier-support = ENABLE SUPPORT
+
+# Offline license-status labels suffixed onto the cloud / support tier links.
+settings-license-label-cloud = Cloud and store
+settings-license-label-support = Support
 
 # Setting labels (checkbox / radio / text). Storage keys (config_key) stay
 # language-neutral; lib_settings reverse-maps the displayed label back to

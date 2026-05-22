@@ -1,23 +1,25 @@
-//! Store sub-node helpers used by `SettingsProvider`.
+//! Sponsor / cloud / support helpers used by `SettingsProvider`.
 //!
-//! The store renders as a fixed, always-top child of the "Available programs:"
-//! settings section. Its UI is exactly: a license-status line, a server-hosted
-//! catalog (cached on first fetch), a checkout link, and the two text inputs
-//! that drive it. License verification is offline, display-only — never a
-//! feature gate (see memory `project_licensing_model`).
+//! "Available programs:" pins three `<link>` Objs (sponsor, cloud, support).
+//! Their tier trees are server-hosted and fetched by the app's link resolver;
+//! this module covers the two client-side concerns: redeeming a license token
+//! (offline, display-only verification) and the checkout / browser-launch
+//! handled by [`tiers`]. License verification is never a feature gate (see
+//! memory `project_licensing_model`).
 
-pub(crate) mod catalog;
 pub(crate) mod cert;
+pub(crate) mod tiers;
 
-/// Default store / license server. Overridable via the Store server URL input.
+/// Default server. Overridable via the "Store server URL" input.
 pub(crate) const DEFAULT_STORE_URL: &str = "https://store.sicompass.org";
 
-/// Port of the redeem flow that previously lived on `StoreProvider`.
+/// Redeem a license token and persist the verified certificate under `slug`
+/// (`"store-license"` for cloud and store, `"support-license"` for support).
 ///
-/// On any failure, returns `Err(message)` so the caller can stash it as the
+/// On any failure returns `Err(message)` so the caller can stash it as the
 /// provider's pending error. On success the verified certificate has been
 /// written to disk.
-pub(crate) fn redeem_license(store_url: &str, token: &str) -> Result<(), String> {
+pub(crate) fn redeem_license(store_url: &str, token: &str, slug: &str) -> Result<(), String> {
     if store_url.is_empty() || token.is_empty() {
         return Ok(());
     }
@@ -32,26 +34,26 @@ pub(crate) fn redeem_license(store_url: &str, token: &str) -> Result<(), String>
         .get(&url)
         .header("Accept", "application/json")
         .send()
-        .map_err(|e| format!("Could not reach the store: {e}"))?;
+        .map_err(|e| format!("Could not reach the server: {e}"))?;
 
     if !response.status().is_success() {
         return Err(format!(
-            "Redeem failed: the store returned {}",
+            "Redeem failed: the server returned {}",
             response.status().as_u16()
         ));
     }
 
     let body = response
         .text()
-        .map_err(|e| format!("Could not read the store reply: {e}"))?;
+        .map_err(|e| format!("Could not read the server reply: {e}"))?;
 
     let certificate: cert::Certificate = serde_json::from_str(&body)
-        .map_err(|e| format!("Store returned an invalid certificate: {e}"))?;
+        .map_err(|e| format!("Server returned an invalid certificate: {e}"))?;
 
     match cert::verify(&certificate) {
         cert::LicenseStatus::Invalid(why) => Err(format!("License certificate rejected: {why}")),
         _ => {
-            if !cert::save(&certificate) {
+            if !cert::save(slug, &certificate) {
                 Err("Could not save the license file".to_owned())
             } else {
                 Ok(())

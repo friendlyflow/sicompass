@@ -23,8 +23,17 @@ settings-section-email-client = client de messagerie
 settings-section-chat-client = client de chat
 settings-section-terminal = terminal
 settings-section-text-editor = éditeur de texte
-settings-section-store = Magasin
 settings-section-tutorial = tutoriel
+
+# Titres des liens des niveaux sponsor / cloud / support (construits côté
+# client ; le contenu des niveaux est fourni, en anglais, par le serveur).
+settings-tier-sponsor = DEVENIR SPONSOR
+settings-tier-cloud = ACTIVER LE CLOUD ET LE MAGASIN
+settings-tier-support = ACTIVER LE SUPPORT
+
+# Libellés du statut de licence hors ligne ajoutés aux liens cloud / support.
+settings-license-label-cloud = Cloud et magasin
+settings-license-label-support = Support
 
 # Setting labels
 settings-label-store-url = URL du serveur du magasin
