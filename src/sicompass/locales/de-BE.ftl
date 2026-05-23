@@ -65,6 +65,7 @@ hint-ctrl-d-delete = Ctrl+D Löschen
 hint-ctrl-enter-newline = Ctrl+Enter Neue Zeile
 hint-ctrl-f-extended-search = Ctrl+F Erw. Suche
 hint-ctrl-i-insert-before = Ctrl+I Vor einf.
+hint-ctrl-n-new-window = Ctrl+N Neues Fenster
 hint-ctrl-o-open = Ctrl+O Öffnen
 hint-ctrl-s-save = Ctrl+S Speichern
 hint-ctrl-shift-a-insert-after = Ctrl+Shift+A Nach einf.

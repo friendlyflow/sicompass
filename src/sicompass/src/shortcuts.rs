@@ -826,7 +826,10 @@ pub static SHORTCUTS: &[Shortcut] = &[
         modes: &[Coordinate::General],
         label: "F5     Refresh", is_available: always, handle: handlers::handle_f5 },
 
-    // ---- Tab management (Ctrl+T / Ctrl+W / Ctrl+Tab / Ctrl+Shift+Tab / Ctrl+1..9)
+    // ---- Window / tab management (Ctrl+N / Ctrl+T / Ctrl+W / Ctrl+Tab / Ctrl+Shift+Tab / Ctrl+1..9)
+    Shortcut { key: Keycode::N, key2: None, ctrl: true, shift: false,
+        modes: GENERAL,
+        label: "Ctrl+N New window", is_available: always, handle: handlers::handle_new_window },
     Shortcut { key: Keycode::T, key2: None, ctrl: true, shift: false,
         modes: GENERAL,
         label: "Ctrl+T New tab", is_available: always, handle: handlers::handle_tab_new },
