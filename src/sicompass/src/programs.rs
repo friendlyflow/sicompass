@@ -142,6 +142,9 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
         settings.set_config_path(path);
     }
 
+    // Surface the sicompass app version as a child of the "sicompass" section.
+    settings.set_section_version("sicompass", env!("CARGO_PKG_VERSION"));
+
     // Core sicompass settings. Labels are Fluent message IDs so the settings
     // panel renders them in the user's chosen language; lib_settings reverses
     // the translation when the user clicks a toggle so settings.json stays
@@ -341,7 +344,20 @@ fn load_user_plugins(renderer: &mut AppRenderer, settings: &mut dyn Provider) {
 
         // Construct and register the provider.
         match instantiate_user_plugin(plugin) {
-            Some(p) => register_provider(renderer, p),
+            Some(p) => {
+                register_provider(renderer, p);
+                // Third-party plugin version: prefer plugin.json's `version`
+                // field; fall back to the provider's own `Provider::version()`.
+                let v: Option<String> = m.version.clone().or_else(|| {
+                    renderer
+                        .providers
+                        .last()
+                        .and_then(|p| p.version().map(|s| s.to_owned()))
+                });
+                if let Some(v) = v {
+                    settings.set_section_version(&m.display_name, &v);
+                }
+            }
             None => eprintln!(
                 "sicompass: failed to load plugin '{}' from {}",
                 m.name,
@@ -695,6 +711,7 @@ pub fn enable_provider(renderer: &mut AppRenderer, name: &str) {
                     inject_builtin_manifest_settings(settings, m);
                 }
             })),
+            None,
         );
         return;
     }
@@ -706,7 +723,12 @@ pub fn enable_provider(renderer: &mut AppRenderer, name: &str) {
     };
     if let Some(plugin) = cached {
         if let Some(provider) = instantiate_user_plugin(&plugin) {
-            insert_provider_alphabetically(renderer, provider, None);
+            insert_provider_alphabetically(
+                renderer,
+                provider,
+                None,
+                plugin.manifest.version.clone(),
+            );
             return;
         }
     }
@@ -723,7 +745,7 @@ pub fn enable_provider(renderer: &mut AppRenderer, name: &str) {
         insert_provider_alphabetically(renderer, provider, Some(Box::new(move |settings: &mut dyn Provider| {
             settings.add_text_setting(&section_name, "remote URL", "remoteUrl", "");
             settings.add_text_setting(&section_name, "API key",    "apiKey",    "");
-        })));
+        })), None);
         return;
     }
 
@@ -765,6 +787,7 @@ fn insert_provider_alphabetically(
     renderer: &mut AppRenderer,
     mut provider: Box<dyn Provider>,
     extra_settings: Option<Box<dyn FnOnce(&mut dyn Provider)>>,
+    manifest_version: Option<String>,
 ) {
     provider.init();
     let children = provider.fetch();
@@ -792,10 +815,16 @@ fn insert_provider_alphabetically(
         }
     }
 
+    let provider_version: Option<String> = manifest_version
+        .or_else(|| provider.version().map(|s| s.to_owned()));
+
     renderer.ffon.insert(insert_idx, root);
     renderer.providers.insert(insert_idx, provider);
     if let Some(settings) = renderer.providers.last_mut() {
         settings.add_settings_section(&section_name);
+        if let Some(v) = &provider_version {
+            settings.set_section_version(&section_name, v);
+        }
         if let Some(cb) = extra_settings {
             cb(settings.as_mut());
         }
@@ -1162,7 +1191,7 @@ mod tests {
         let mut r = AppRenderer::new();
         register_provider(&mut r, Box::new(MockProv::new("filebrowser")));
         register_provider(&mut r, Box::new(MockProv::new("settings")));
-        insert_provider_alphabetically(&mut r, Box::new(MockProv::new("tutorial")), None);
+        insert_provider_alphabetically(&mut r, Box::new(MockProv::new("tutorial")), None, None);
         assert_eq!(r.providers.len(), 3);
         assert_eq!(r.providers[0].name(), "filebrowser");
         assert_eq!(r.providers[1].name(), "tutorial");
@@ -1175,8 +1204,8 @@ mod tests {
         register_provider(&mut r, Box::new(MockProv::new("filebrowser")));
         register_provider(&mut r, Box::new(MockProv::new("tutorial")));
         register_provider(&mut r, Box::new(MockProv::new("settings")));
-        insert_provider_alphabetically(&mut r, Box::new(MockProv::new("chat client")), None);
-        insert_provider_alphabetically(&mut r, Box::new(MockProv::new("email client")), None);
+        insert_provider_alphabetically(&mut r, Box::new(MockProv::new("chat client")), None, None);
+        insert_provider_alphabetically(&mut r, Box::new(MockProv::new("email client")), None, None);
         assert_eq!(r.providers.len(), 5);
         assert_eq!(r.providers[0].name(), "chat client");
         assert_eq!(r.providers[1].name(), "email client");
@@ -1193,7 +1222,7 @@ mod tests {
         register_provider(&mut r, Box::new(MockProv::new("settings")));
         r.current_id.set_last(1);
         r.current_id.push(3);
-        insert_provider_alphabetically(&mut r, Box::new(MockProv::new("chat client")), None);
+        insert_provider_alphabetically(&mut r, Box::new(MockProv::new("chat client")), None, None);
         assert_eq!(r.current_id.get(0), Some(2));
         assert_eq!(r.current_id.get(1), Some(3));
     }
@@ -1204,7 +1233,7 @@ mod tests {
         register_provider(&mut r, Box::new(MockProv::new("filebrowser")));
         register_provider(&mut r, Box::new(MockProv::new("chat client")));
         register_provider(&mut r, Box::new(MockProv::new("settings")));
-        insert_provider_alphabetically(&mut r, Box::new(MockProv::new("tutorial")), None);
+        insert_provider_alphabetically(&mut r, Box::new(MockProv::new("tutorial")), None, None);
         assert_eq!(r.current_id.get(0), Some(0));
     }
 
@@ -1384,6 +1413,7 @@ mod tests {
             entry: "plugin.ts".to_owned(),
             supports_config_files: false,
             settings: vec![],
+            version: None,
         }
     }
 

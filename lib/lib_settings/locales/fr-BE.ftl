@@ -38,6 +38,7 @@ settings-license-label-support = Support
 # Setting labels
 settings-label-store-url = URL du serveur du magasin
 settings-label-license-redeem-token = Jeton d'échange de licence
+settings-label-version = version
 settings-checkbox-maximized = agrandi
 settings-checkbox-shoulder-surfing-protection = protection contre l'espionnage (écran vide)
 settings-radio-font-scale = taille du texte

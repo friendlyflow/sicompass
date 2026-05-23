@@ -92,6 +92,9 @@ pub struct SettingsProvider {
     /// `"amount"`). Read by `on_button_press` to build the checkout request.
     server_form_state: HashMap<String, String>,
     store_error: Option<String>,
+    /// Version string per section (keyed by display name). Rendered as a
+    /// passive child of the section. Populated by `set_section_version`.
+    section_versions: HashMap<String, String>,
 }
 
 impl SettingsProvider {
@@ -113,6 +116,7 @@ impl SettingsProvider {
             support_redeem_token: String::new(),
             server_form_state: HashMap::new(),
             store_error: None,
+            section_versions: HashMap::new(),
         }
     }
 
@@ -135,6 +139,7 @@ impl SettingsProvider {
             support_redeem_token: String::new(),
             server_form_state: HashMap::new(),
             store_error: None,
+            section_versions: HashMap::new(),
         }
     }
 
@@ -639,6 +644,14 @@ impl SettingsProvider {
         let mut obj = FfonElement::new_obj(Self::localize_section_name(section_name));
         let o = obj.as_obj_mut().unwrap();
 
+        if let Some(v) = self.section_versions.get(section_name) {
+            o.push(FfonElement::Str(format!(
+                "{}: {}",
+                localize::t("settings-label-version"),
+                v
+            )));
+        }
+
         // Always-top sponsor / cloud / support tier links inside the
         // "Available programs:" section, followed by the server URL input.
         // Rendered before the program checkboxes regardless of ordering.
@@ -718,6 +731,13 @@ impl Provider for SettingsProvider {
         // sicompass section: color scheme radio group
         let is_dark = self.color_scheme == "dark";
         let mut sc_obj = FfonElement::new_obj(Self::localize_section_name("sicompass"));
+        if let Some(v) = self.section_versions.get("sicompass") {
+            sc_obj.as_obj_mut().unwrap().push(FfonElement::Str(format!(
+                "{}: {}",
+                localize::t("settings-label-version"),
+                v
+            )));
+        }
         {
             let mut radio = FfonElement::new_obj(format!(
                 "<radio>{}",
@@ -1183,6 +1203,11 @@ impl Provider for SettingsProvider {
 
     fn remove_settings_section(&mut self, name: &str) {
         self.remove_section(name);
+    }
+
+    fn set_section_version(&mut self, section: &str, version: &str) {
+        self.section_versions
+            .insert(section.to_owned(), version.to_owned());
     }
 
     fn add_text_setting(&mut self, section: &str, label: &str,
@@ -2235,6 +2260,71 @@ mod tests {
         assert!(path.exists(), "on_checkbox_change should write to the override path");
         let data = std::fs::read_to_string(&path).unwrap();
         assert!(data.contains("testFlag"), "written config should contain the key");
+    }
+
+    #[test]
+    fn set_section_version_renders_under_section() {
+        use sicompass_sdk::provider::Provider;
+        let mut p = SettingsProvider::new_headless()
+            .with_config_path(test_config_path());
+        p.add_section("file browser");
+        p.add_checkbox("file browser", "show hidden", "showHidden", false);
+        Provider::set_section_version(&mut p, "file browser", "1.2.3");
+
+        let items = p.fetch();
+        let section_key = SettingsProvider::localize_section_name("file browser");
+        let section = items
+            .iter()
+            .find(|e| e.as_obj().map(|o| o.key == section_key).unwrap_or(false))
+            .and_then(|e| e.as_obj())
+            .expect("file browser section");
+        let has_version = section.children.iter().any(|c| match c {
+            FfonElement::Str(s) => s.contains("1.2.3"),
+            _ => false,
+        });
+        assert!(has_version, "version line should appear in section children");
+    }
+
+    #[test]
+    fn set_section_version_for_sicompass_renders_in_fetch() {
+        use sicompass_sdk::provider::Provider;
+        let mut p = SettingsProvider::new_headless()
+            .with_config_path(test_config_path());
+        Provider::set_section_version(&mut p, "sicompass", "9.9.9");
+
+        let items = p.fetch();
+        let sc_key = SettingsProvider::localize_section_name("sicompass");
+        let sc = items
+            .iter()
+            .find(|e| e.as_obj().map(|o| o.key == sc_key).unwrap_or(false))
+            .and_then(|e| e.as_obj())
+            .expect("sicompass section");
+        let has_version = sc.children.iter().any(|c| match c {
+            FfonElement::Str(s) => s.contains("9.9.9"),
+            _ => false,
+        });
+        assert!(has_version, "app version should appear under sicompass section");
+    }
+
+    #[test]
+    fn no_version_when_unset() {
+        let mut p = SettingsProvider::new_headless()
+            .with_config_path(test_config_path());
+        p.add_section("file browser");
+        let items = p.fetch();
+        let section_key = SettingsProvider::localize_section_name("file browser");
+        let section = items
+            .iter()
+            .find(|e| e.as_obj().map(|o| o.key == section_key).unwrap_or(false))
+            .and_then(|e| e.as_obj())
+            .expect("file browser section");
+        // No version was set — none of the Str children should be a version line.
+        let label = sicompass_sdk::localize::t("settings-label-version");
+        let leak = section.children.iter().any(|c| match c {
+            FfonElement::Str(s) => s.starts_with(&format!("{}: ", label)),
+            _ => false,
+        });
+        assert!(!leak, "no version line should appear when set_section_version was not called");
     }
 
     #[test]
