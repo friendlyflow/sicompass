@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+Application manifest embedded into the lib_updater test binary on
+Windows MSVC. Reason: cargo names test binaries after the crate, so
+`sicompass-updater` produces `sicompass_updater-<hash>.exe`. Windows
+applies installer-detection heuristic to any `.exe` whose name contains
+`update`/`setup`/`install`/`patch` and tries to auto-elevate it via UAC.
+That makes the binary fail to launch in a non-elevated shell or in CI,
+which surfaces to cargo as a bare `error: test failed` with no test
+output (the binary never runs `main`, so no tests execute).
+
+Declaring `level="asInvoker"` here tells Windows to skip the heuristic
+and run the binary at the caller's existing privilege level — exactly
+what a test runner wants. See build.rs for the embed plumbing.
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+</assembly>
