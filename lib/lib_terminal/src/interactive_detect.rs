@@ -16,6 +16,13 @@
 //!   focus-tracking (`1004`) reporting, which a bare shell never does.
 //!   (`claude` specifically enables `?1004h`.)
 //!
+//! **Windows exception:** main-screen detection is disabled on Windows.
+//! ConPTY enables focus/mouse-tracking modes itself as part of its handshake,
+//! for *any* attached program — so honouring them would auto-enter the
+//! interactive dashboard for a bare `cmd.exe` and trap the user there (once in
+//! the interactive dashboard every key, including Esc and Ctrl+C, is forwarded
+//! to the program). On Windows only the alternate-screen modes trigger.
+//!
 //! Bracketed paste (`2004`) is deliberately *not* a trigger: interactive
 //! shells (bash/zsh ≥ 5.1) enable it at every prompt, so it carries no signal
 //! about a child program. Cursor visibility (`25`) is excluded for the same
@@ -40,15 +47,28 @@ pub enum InteractiveEvent {
     Leave,
 }
 
-/// DEC private modes that mark a "full-terminal" interactive program.
+/// Alternate-screen DEC private modes — `vim`, `less`, `htop`, `man`.
+/// Honoured on every platform.
+const ALT_SCREEN_MODES: [u32; 3] = [47, 1047, 1049];
+
+/// Main-screen-TUI DEC private modes — mouse tracking (`1000/1002/1003/1006`)
+/// and focus tracking (`1004`).
+///
+/// Empty on Windows: ConPTY enables these for any attached program, so they
+/// carry no signal there (see the module docs). Non-Windows only.
 ///
 /// Bracketed paste (`2004`) and cursor visibility (`25`) are intentionally
-/// absent — both are emitted by ordinary shell prompts and would false-trigger.
-const INTERACTIVE_MODES: [u32; 8] = [
-    47, 1047, 1049, // alternate screen
-    1000, 1002, 1003, 1006, // mouse tracking
-    1004, // focus tracking
-];
+/// absent everywhere — both are emitted by ordinary shell prompts and would
+/// false-trigger.
+#[cfg(not(windows))]
+const MAIN_SCREEN_MODES: [u32; 5] = [1000, 1002, 1003, 1006, 1004];
+#[cfg(windows)]
+const MAIN_SCREEN_MODES: [u32; 0] = [];
+
+/// Whether `mode` marks a "full-terminal" interactive program on this platform.
+fn is_interactive_mode(mode: u32) -> bool {
+    ALT_SCREEN_MODES.contains(&mode) || MAIN_SCREEN_MODES.contains(&mode)
+}
 
 #[derive(Debug)]
 pub struct InteractiveDetector {
@@ -152,7 +172,7 @@ impl InteractiveDetector {
     /// Apply a single `mode` set/reset, emitting a transition when the active
     /// set crosses the empty boundary.
     fn apply_mode(&mut self, mode: u32, on: bool, emit: &mut impl FnMut(InteractiveEvent)) {
-        if !INTERACTIVE_MODES.contains(&mode) {
+        if !is_interactive_mode(mode) {
             return;
         }
         let was_empty = self.active.is_empty();
@@ -193,7 +213,10 @@ mod tests {
         assert_eq!(collect(b"\x1b[?1047h"), vec![InteractiveEvent::Enter]);
     }
 
+    // Mouse/focus tracking is a trigger only off Windows — ConPTY emits those
+    // modes itself, so they are excluded from detection on Windows.
     #[test]
+    #[cfg(not(windows))]
     fn detects_mouse_tracking() {
         assert_eq!(collect(b"\x1b[?1000h"), vec![InteractiveEvent::Enter]);
         assert_eq!(
@@ -204,6 +227,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn detects_focus_tracking() {
         // This is the signal `claude` emits.
         assert_eq!(collect(b"\x1b[?1004h"), vec![InteractiveEvent::Enter]);
@@ -227,6 +251,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn claude_style_init_triggers_once() {
         // Sequence captured from a real `claude` startup: sync output, cursor
         // hide, bracketed paste, focus tracking. Only ?1004h is a trigger.
@@ -237,6 +262,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn multi_param_yields_single_enter() {
         // `CSI ? 1000;1002;1006 h` — three modes, one empty→non-empty cross.
         assert_eq!(collect(b"\x1b[?1000;1002;1006h"), vec![InteractiveEvent::Enter]);
@@ -258,11 +284,32 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn idempotent_enable_no_duplicate_enter() {
         assert_eq!(
             collect(b"\x1b[?1004h\x1b[?1004h"),
             vec![InteractiveEvent::Enter],
         );
+    }
+
+    /// On Windows the mouse/focus modes are excluded (ConPTY emits them for
+    /// any program); only the alternate-screen modes survive as triggers.
+    #[test]
+    #[cfg(windows)]
+    fn windows_ignores_mouse_and_focus_modes() {
+        // Focus + mouse tracking carry no signal on Windows.
+        assert_eq!(collect(b"\x1b[?1004h"), vec![]);
+        assert_eq!(collect(b"\x1b[?1000h"), vec![]);
+        assert_eq!(collect(b"\x1b[?1002h"), vec![]);
+        assert_eq!(collect(b"\x1b[?1006h"), vec![]);
+        assert_eq!(collect(b"\x1b[?1000;1002;1006h"), vec![]);
+        // A claude-style init (only ?1004h is interactive) must NOT trigger.
+        assert_eq!(
+            collect(b"\x1b[?2026h\x1b[?25l\x1b[?2004h\x1b[?1004h\x1b[?2026l"),
+            vec![],
+        );
+        // Alternate-screen modes still trigger normally.
+        assert_eq!(collect(b"\x1b[?1049h"), vec![InteractiveEvent::Enter]);
     }
 
     #[test]
