@@ -15,7 +15,6 @@ use crate::{
     PluginUpdate, PluginUpdateManifest, UpdateEvent,
 };
 use serde::Deserialize;
-use std::io::Write;
 use std::path::Path;
 use std::sync::mpsc;
 
@@ -181,9 +180,15 @@ fn check_one(
         "pubkey": installed.pubkey,
         "hotReload": installed.hot_reload,
     });
-    let mut f = std::fs::File::create(staging.join("plugin.json"))
-        .map_err(|e| format!("write staging manifest: {e}"))?;
-    f.write_all(serde_json::to_string_pretty(&new_disk_manifest).unwrap().as_bytes())
+    // One-shot write: `fs::write` opens, writes, and closes in a single call.
+    // The previous `File::create + write_all` pattern kept the handle alive
+    // until end-of-scope, which on Windows blocks the directory rename at the
+    // swap step below (Windows refuses to rename a directory while any file
+    // inside it has an open handle; Linux/macOS allow it, which is why this
+    // only surfaced once the lib_updater tests started running on Windows).
+    let serialized = serde_json::to_string_pretty(&new_disk_manifest)
+        .map_err(|e| format!("serialize staging manifest: {e}"))?;
+    std::fs::write(staging.join("plugin.json"), serialized)
         .map_err(|e| format!("write staging manifest: {e}"))?;
 
     // We deliberately don't copy the existing plugin.json verbatim because
