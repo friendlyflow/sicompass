@@ -43,6 +43,7 @@ settings-license-label-support = Support
 # the stored entry when the user toggles a setting.
 settings-label-store-url = Store server URL
 settings-label-license-redeem-token = License redeem token
+settings-label-version = version
 settings-checkbox-maximized = maximized
 settings-checkbox-shoulder-surfing-protection = shoulder-surfing protection (blank screen)
 settings-radio-font-scale = font scale

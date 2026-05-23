@@ -70,6 +70,10 @@ pub struct PluginManifest {
     pub supports_config_files: bool,
     #[serde(default)]
     pub settings: Vec<PluginSetting>,
+    /// Optional plugin version, displayed in the settings tree under the
+    /// plugin's section. Authors set this in `plugin.json`.
+    #[serde(default)]
+    pub version: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -156,6 +160,24 @@ mod tests {
         assert_eq!(m.entry, "plugin.so");
         assert!(!m.supports_config_files);
         assert!(m.settings.is_empty());
+        assert!(m.version.is_none());
+    }
+
+    #[test]
+    fn load_manifest_with_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_manifest(
+            &dir,
+            r#"{
+                "name": "versioned",
+                "displayName": "Versioned",
+                "type": "script",
+                "entry": "v.ts",
+                "version": "1.2.3"
+            }"#,
+        );
+        let m = load_manifest(&path).unwrap();
+        assert_eq!(m.version.as_deref(), Some("1.2.3"));
     }
 
     #[test]

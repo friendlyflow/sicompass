@@ -38,6 +38,7 @@ settings-license-label-support = Support
 # Setting labels
 settings-label-store-url = URL des Geschäftsservers
 settings-label-license-redeem-token = Lizenz-Einlösetoken
+settings-label-version = Version
 settings-checkbox-maximized = maximiert
 settings-checkbox-shoulder-surfing-protection = Sichtschutz (leerer Bildschirm)
 settings-radio-font-scale = Schriftgröße

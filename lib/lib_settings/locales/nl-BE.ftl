@@ -38,6 +38,7 @@ settings-license-label-support = Ondersteuning
 # Setting labels
 settings-label-store-url = URL winkelserver
 settings-label-license-redeem-token = Licentie-inwisseltoken
+settings-label-version = versie
 settings-checkbox-maximized = gemaximaliseerd
 settings-checkbox-shoulder-surfing-protection = schermbescherming (blanco scherm)
 settings-radio-font-scale = tekstgrootte
