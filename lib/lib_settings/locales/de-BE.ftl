@@ -41,6 +41,7 @@ settings-label-license-redeem-token = Lizenz-Einlösetoken
 settings-label-version = Version
 settings-checkbox-maximized = maximiert
 settings-checkbox-shoulder-surfing-protection = Sichtschutz (leerer Bildschirm)
+settings-checkbox-auto-update-check = beim Start nach App- und Plugin-Updates suchen
 settings-radio-font-scale = Schriftgröße
 settings-radio-sort-order = Sortierreihenfolge
 

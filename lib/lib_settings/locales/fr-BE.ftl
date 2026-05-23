@@ -41,6 +41,7 @@ settings-label-license-redeem-token = Jeton d'échange de licence
 settings-label-version = version
 settings-checkbox-maximized = agrandi
 settings-checkbox-shoulder-surfing-protection = protection contre l'espionnage (écran vide)
+settings-checkbox-auto-update-check = vérifier les mises à jour de l'app et des plugins au démarrage
 settings-radio-font-scale = taille du texte
 settings-radio-sort-order = ordre de tri
 

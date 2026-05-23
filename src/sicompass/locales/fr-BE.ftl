@@ -74,6 +74,7 @@ hint-ctrl-shift-tab-prev-tab = Ctrl+Shift+Tab Onglet préc.
 hint-ctrl-shift-z-redo = Ctrl+Shift+Z Refaire
 hint-ctrl-t-new-tab = Ctrl+T Nouvel onglet
 hint-ctrl-tab-next-tab = Ctrl+Tab Onglet suiv.
+hint-ctrl-u-install-update = Ctrl+U Install. MAJ
 hint-ctrl-v-paste = Ctrl+V Coller
 hint-ctrl-w-close-tab = Ctrl+W Fermer onglet
 hint-ctrl-x-cut = Ctrl+X Couper

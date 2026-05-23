@@ -163,6 +163,13 @@ pub fn main_loop(app: &mut AppState) {
             crate::programs::apply_pending_settings(&mut app.renderer, &q, false);
         }
 
+        // ---- Drain updater events + refresh "update available" banner ------
+        // Hot-reload events run between frames so no provider call is in
+        // flight when we drop the old library and load the new one.
+        // FUTURE NOTIFICATION SYSTEM: the banner write inside this call is
+        // interim — see programs::process_update_events.
+        crate::programs::process_update_events(&mut app.renderer);
+
         // ---- Rebuild font renderer when fontScale changes -------------------
         if app.renderer.rebuild_font_renderer {
             app.renderer.rebuild_font_renderer = false;

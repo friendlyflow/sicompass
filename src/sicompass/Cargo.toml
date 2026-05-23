@@ -46,10 +46,12 @@ bundled-sdl3 = ["sdl3/build-from-source-static", "sdl3-sys/no-sdl-libc"]
 [dependencies]
 sicompass-sdk = { workspace = true }
 sicompass-builtins = { workspace = true }
+sicompass-updater = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }
 reqwest = { workspace = true }
+semver = { workspace = true }
 
 ash = { workspace = true }
 glam = { workspace = true }

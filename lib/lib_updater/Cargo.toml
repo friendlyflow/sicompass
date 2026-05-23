@@ -1,0 +1,32 @@
+[package]
+publish = false  # internal crate, never published to crates.io
+name = "sicompass-updater"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Startup self-update for sicompass + user plugins"
+
+[dependencies]
+sicompass-sdk = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { workspace = true }
+semver = { workspace = true }
+sha2 = { workspace = true }
+ed25519-dalek = { workspace = true }
+base64 = { workspace = true }
+tracing = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libloading = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libloading = { workspace = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+wiremock = { workspace = true }
+tokio = { workspace = true }

@@ -1147,7 +1147,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2430,7 +2430,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3373,7 +3373,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3430,7 +3430,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3810,7 +3810,7 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "sicompass"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -3827,6 +3827,7 @@ dependencies = [
  "rustybuzz",
  "sdl3",
  "sdl3-sys",
+ "semver",
  "serde",
  "serde_json",
  "sicompass-builtins",
@@ -3837,6 +3838,7 @@ dependencies = [
  "sicompass-sdk",
  "sicompass-settings",
  "sicompass-tutorial",
+ "sicompass-updater",
  "sicompass-webbrowser",
  "tempfile",
  "tokio",
@@ -3850,7 +3852,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-builtins"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "sicompass-chatclient",
  "sicompass-claude",
@@ -3868,7 +3870,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-chatclient"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "reqwest",
  "serde",
@@ -3881,7 +3883,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-claude"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -3890,7 +3892,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-emailclient"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "imap",
@@ -3908,7 +3910,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-filebrowser"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "libc",
  "natord",
@@ -3919,7 +3921,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-remote"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "reqwest",
  "serde_json",
@@ -3930,14 +3932,14 @@ dependencies = [
 
 [[package]]
 name = "sicompass-sales-demo"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "sicompass-sdk",
 ]
 
 [[package]]
 name = "sicompass-sdk"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "fluent",
  "fluent-langneg",
@@ -3956,7 +3958,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-settings"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
@@ -3971,14 +3973,14 @@ dependencies = [
 
 [[package]]
 name = "sicompass-shell"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "portable-pty",
 ]
 
 [[package]]
 name = "sicompass-terminal"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "sicompass-sdk",
  "sicompass-shell",
@@ -3988,7 +3990,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-text-editor"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde_json",
  "sicompass-sdk",
@@ -3998,7 +4000,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-tutorial"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde_json",
  "sicompass-sdk",
@@ -4006,8 +4008,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "sicompass-updater"
+version = "0.1.1"
+dependencies = [
+ "base64 0.22.1",
+ "ed25519-dalek",
+ "libloading 0.9.0",
+ "reqwest",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sicompass-sdk",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "windows 0.62.2",
+ "wiremock",
+]
+
+[[package]]
 name = "sicompass-webbrowser"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chromiumoxide",
  "futures",
@@ -4091,7 +4113,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4226,7 +4248,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4647,7 +4669,7 @@ checksum = "f2f6fb2847f6742cd76af783a2a2c49e9375d0a111c7bef6f71cd9e738c72d6e"
 dependencies = [
  "memoffset",
  "tempfile",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5021,7 +5043,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5385,7 +5407,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d6f32a0ff4a9f6f01231eb2059cc85479330739333e0e58cadf03b6af2cca10"
 dependencies = [
  "cfg-if",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
