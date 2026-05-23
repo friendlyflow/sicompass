@@ -65,6 +65,7 @@ hint-ctrl-d-delete = Ctrl+D Verwijder
 hint-ctrl-enter-newline = Ctrl+Enter Nieuwe regel
 hint-ctrl-f-extended-search = Ctrl+F Uitgebr. zoek
 hint-ctrl-i-insert-before = Ctrl+I Voeg voor in
+hint-ctrl-n-new-window = Ctrl+N Nieuw venster
 hint-ctrl-o-open = Ctrl+O Open
 hint-ctrl-s-save = Ctrl+S Bewaar
 hint-ctrl-shift-a-insert-after = Ctrl+Shift+A Voeg na in
