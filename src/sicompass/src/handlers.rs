@@ -5148,35 +5148,6 @@ fn after_tab_change(r: &mut AppRenderer) {
     persist_tabs(r);
 }
 
-/// Ctrl+N — launch a second sicompass process. Each process owns its own
-/// window and state; failures are logged and silently swallowed so a
-/// stuck spawn never freezes the active window.
-pub fn handle_new_window(_r: &mut AppRenderer) {
-    let exe = match std::env::current_exe() {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::warn!("Ctrl+N: current_exe() failed: {e}");
-            return;
-        }
-    };
-    let mut cmd = std::process::Command::new(&exe);
-    cmd.stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW: suppress the phantom console window Windows
-        // attaches to a child of a GUI parent.
-        cmd.creation_flags(0x0800_0000);
-    }
-
-    if let Err(e) = cmd.spawn() {
-        tracing::warn!("Ctrl+N: failed to spawn {:?}: {e}", exe);
-    }
-}
-
 /// Ctrl+T — duplicate the current navigation into a new tab inserted to the
 /// right of the active tab; the new tab becomes active.
 pub fn handle_tab_new(r: &mut AppRenderer) {
