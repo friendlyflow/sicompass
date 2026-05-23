@@ -137,6 +137,17 @@ static SECTIONS: &[Node] = &[
                     Leaf("tutorial-leaf-022"),
                 ],
             },
+            Branch { key: "tutorial-branch-047",
+                children: &[
+                    Leaf("tutorial-leaf-243"),
+                    Leaf("tutorial-leaf-244"),
+                    Leaf("tutorial-leaf-245"),
+                    Leaf("tutorial-leaf-246"),
+                    Leaf("tutorial-leaf-247"),
+                    Leaf("tutorial-leaf-248"),
+                    Leaf("tutorial-leaf-249"),
+                ],
+            },
         ],
     },
     Branch { key: "tutorial-branch-005",
@@ -256,6 +267,7 @@ static SECTIONS: &[Node] = &[
             ]},
             Branch { key: "tutorial-branch-018", children: &[
                 Leaf("tutorial-leaf-098"),
+                Leaf("tutorial-leaf-255"),
                 Leaf("tutorial-leaf-099"),
                 Leaf("tutorial-leaf-100"),
                 Leaf("tutorial-leaf-101"),
@@ -361,6 +373,13 @@ static SECTIONS: &[Node] = &[
                 Leaf("tutorial-leaf-165"),
                 Leaf("tutorial-leaf-166"),
                 Leaf("tutorial-leaf-167"),
+            ]},
+            Branch { key: "tutorial-branch-048", children: &[
+                Leaf("tutorial-leaf-250"),
+                Leaf("tutorial-leaf-251"),
+                Leaf("tutorial-leaf-252"),
+                Leaf("tutorial-leaf-253"),
+                Leaf("tutorial-leaf-254"),
             ]},
         ],
     },
@@ -872,6 +891,75 @@ mod tests {
         assert!(section_keys.contains(&"What gets recorded"));
         assert!(section_keys.contains(&"What cannot be undone"));
         assert!(section_keys.contains(&"Walking the path back"));
+    }
+
+    // Tabs and Windows section (added 2026-05)
+
+    #[test]
+    fn test_tabs_and_windows_section_present_under_navigation() {
+        let mut p = provider();
+        p.push_path("Navigation");
+        let elems = p.fetch();
+        let section_keys: Vec<&str> = elems
+            .iter()
+            .filter_map(|e| e.as_obj().map(|o| o.key.as_str()))
+            .collect();
+        assert!(
+            section_keys.contains(&"Tabs and Windows"),
+            "Tabs and Windows must appear under Navigation, got: {:?}",
+            section_keys
+        );
+    }
+
+    #[test]
+    fn test_tabs_and_windows_section_mentions_core_shortcuts() {
+        let mut p = provider();
+        p.set_current_path("/Navigation/Tabs and Windows");
+        let elems = p.fetch();
+        let joined: String = elems
+            .iter()
+            .filter_map(|e| e.as_str().map(|s| s.to_owned()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        for token in ["Ctrl+T", "Ctrl+W", "Ctrl+Tab", "Ctrl+N"] {
+            assert!(
+                joined.contains(token),
+                "Tabs and Windows section must mention {token}, content was:\n{joined}"
+            );
+        }
+    }
+
+    // Updates section (added 2026-05)
+
+    #[test]
+    fn test_updates_section_present_under_configuration() {
+        let mut p = provider();
+        p.push_path("Configuration");
+        let elems = p.fetch();
+        let section_keys: Vec<&str> = elems
+            .iter()
+            .filter_map(|e| e.as_obj().map(|o| o.key.as_str()))
+            .collect();
+        assert!(
+            section_keys.contains(&"Updates"),
+            "Updates must appear under Configuration, got: {:?}",
+            section_keys
+        );
+    }
+
+    #[test]
+    fn test_updates_section_mentions_ctrl_u_and_signature_verification() {
+        let mut p = provider();
+        p.set_current_path("/Configuration/Updates");
+        let elems = p.fetch();
+        let joined: String = elems
+            .iter()
+            .filter_map(|e| e.as_str().map(|s| s.to_owned()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("Ctrl+U"));
+        assert!(joined.contains("SHA-256"));
+        assert!(joined.contains("ed25519"));
     }
 }
 

@@ -52,6 +52,8 @@ tutorial-branch-043 = Events
 tutorial-branch-044 = Search
 tutorial-branch-045 = Element Tags
 tutorial-branch-046 = Next Steps
+tutorial-branch-047 = Tabs and Windows
+tutorial-branch-048 = Updates
 
 # Leaf paragraphs
 tutorial-leaf-001 = Welcome to Sicompass, a keyboard-driven interface for browsing and managing structured data.
@@ -150,7 +152,7 @@ tutorial-leaf-093 = It's backed by a PTY and a vte-based emulator. On Unix the s
 tutorial-leaf-094 = Each prompt is synthesized in-process so the location is always announced clearly to your screen reader: { "{" } "{ "{" }" { "}" }user{ "}" }@{ "{" } "{ "{" }" { "}" }host{ "}" }:{ "{" } "{ "{" }" { "}" }cwd{ "}" }$ on Unix, { "{" } "{ "{" }" { "}" }cwd{ "}" }> on Windows. On Linux the prompt updates after `cd`. On macOS and Windows it reflects the initial cwd, since live tracking would need OS-specific process introspection.
 tutorial-leaf-095 = Type a command, press Enter to run it, and the output is appended above the input slot. Use the standard navigation keys to scroll back through earlier output.
 tutorial-leaf-096 = The input slot remembers every command you have run. Press Right on it to open the recall history, a list of past commands, newest first. Press Enter on one to drop it into the input, ready to edit or re-run. Pressing Enter on the input slot itself runs whatever it currently holds, just like Enter in operator mode anywhere else.
-tutorial-leaf-097 = When a child program switches the terminal to the alt-screen (vim, htop, less, man, and most full-screen TUIs do this), Sicompass auto-enters its interactive dashboard mode and forwards every key (including arrows, function keys, and chords) straight to the TUI. Pressing Escape from the TUI's perspective leaves the alt-screen and Sicompass drops back to the linear scrollback view.
+tutorial-leaf-097 = When a child program switches the terminal to the alt-screen (vim, htop, less, man, and most full-screen TUIs do this), Sicompass auto-enters its interactive dashboard mode and forwards every key (including arrows, function keys, and chords) straight to the TUI. The TUI normally leaves the alt-screen on its own (vim's :q, htop's q, and so on), at which point Sicompass drops back to the linear scrollback view. As an escape hatch, pressing Ctrl+C twice within one second also leaves the dashboard. On Windows, only alt-screen TUIs trigger this mode, so a bare cmd.exe or PowerShell stays in the regular scrollback list while you keep typing commands.
 tutorial-leaf-098 = The Plugin Store lets you manage which providers are active. It appears in Settings under 'Available programs'.
 tutorial-leaf-099 = Each provider is shown as a checkbox. Check it to enable the provider, uncheck it to disable it.
 tutorial-leaf-100 = Changes take effect immediately. Providers are hot-loaded or unloaded without restarting the app.
@@ -296,3 +298,22 @@ tutorial-leaf-239 = Mobile - Android and iOS versions, bringing the same keyboar
 tutorial-leaf-240 = Contributions are welcome! Whether it's code, plugins, documentation, or feedback, every contribution helps make computing more accessible.
 tutorial-leaf-241 = Join the community on Discord to connect with other users and developers.
 tutorial-leaf-242 = Happy navigating!
+
+# Tabs and Windows (added under Navigation)
+tutorial-leaf-243 = Sicompass runs multiple tabs in a single window, and multiple windows side by side. Each tab keeps its own provider, path, selection, and undo timeline, so switching between tabs leaves none of them touched.
+tutorial-leaf-244 = Ctrl+T: open a new tab next to the current one. The new tab starts at the root list of providers.
+tutorial-leaf-245 = Ctrl+W: close the current tab. The previous tab becomes active. The last remaining tab cannot be closed this way, use the window close button or quit the app.
+tutorial-leaf-246 = Ctrl+Tab: switch to the next tab. Wraps to the first tab when at the end.
+tutorial-leaf-247 = Ctrl+Shift+Tab: switch to the previous tab. Wraps to the last tab when at the start.
+tutorial-leaf-248 = Ctrl+1 through Ctrl+9: jump directly to tab 1 through 9 by number. Out-of-range numbers are ignored.
+tutorial-leaf-249 = Ctrl+N: spawn a new Sicompass window. The new window runs independently with its own set of tabs and timelines.
+
+# Updates (added under Configuration)
+tutorial-leaf-250 = Each time you launch Sicompass, a background thread checks GitHub Releases for a newer version of the app. On Windows, the new MSI installer is downloaded and staged so it can be applied without a fresh download.
+tutorial-leaf-251 = When a staged update is ready, a banner appears in the header. Press Ctrl+U from operator mode to apply it. The installer takes over and relaunches Sicompass once the swap is done.
+tutorial-leaf-252 = User plugins update on the same launch-time check, one at a time. Each plugin manifest can declare an updateUrl, which the updater polls for newer versions. Downloads are verified by SHA-256 and, when the manifest carries one, by an ed25519 signature against the trust key embedded in the installed plugin.json.
+tutorial-leaf-253 = Updated plugins hot-reload mid-session. The provider is dropped, the file on disk is swapped, and the new version is loaded the next time you open the program. No restart of Sicompass is needed.
+tutorial-leaf-254 = To opt out, uncheck 'Automatic update check' in Settings under the sicompass namespace. The toggle is read at the next launch, so a check already in progress will still complete.
+
+# Store tier links (added to Plugin Store section)
+tutorial-leaf-255 = At the top of 'Available programs' you'll see three links: BECOME A SPONSOR, ENABLE CLOUD AND STORE, and ENABLE SUPPORT. They open server-served tier trees, so the catalog can change without an app update. Entering 'Enable cloud and store' or 'Enable support' lets you redeem a license token, which is then stored locally and verified offline.
