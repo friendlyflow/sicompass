@@ -18,6 +18,7 @@ use crate::plugin_loader::{NativePlugin, ScriptProvider};
 use crate::plugin_manifest::{DiscoveredPlugin, PluginManifest, PluginType, discover_user_plugins};
 use sicompass_sdk::ffon::FfonElement;
 use sicompass_sdk::provider::Provider;
+use sicompass_updater::UpdateEvent;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -155,6 +156,10 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
     );
     settings.add_checkbox_setting("sicompass", "settings-checkbox-maximized", "maximized", false);
     settings.add_checkbox_setting("sicompass", "settings-checkbox-shoulder-surfing-protection", "shoulderSurfingProtection", false);
+    // Checked at startup by `read_auto_update_check_setting` in main.rs.
+    // Toggling at runtime only affects the next launch — we don't spawn /
+    // cancel the updater thread on the fly.
+    settings.add_checkbox_setting("sicompass", "settings-checkbox-auto-update-check", "autoUpdateCheck", true);
     settings.add_radio_setting(
         "sicompass", "settings-radio-font-scale", "fontScale",
         &["1.00", "1.25", "1.50", "1.75", "2.00", "2.25", "2.50"],
@@ -275,8 +280,29 @@ fn instantiate_builtin(name: &str) -> Option<Box<dyn Provider>> {
 }
 
 /// Instantiate a user plugin (Script, Native, or Factory) from its discovered manifest.
+///
+/// Rejects plugins whose `minAppVersion` exceeds the running app version —
+/// the plugin file may already be on disk from an update, but if it
+/// declares it needs a newer app than this one, loading it would risk a
+/// missing-symbol crash. Logging makes the skip visible.
 fn instantiate_user_plugin(plugin: &DiscoveredPlugin) -> Option<Box<dyn Provider>> {
     let m = &plugin.manifest;
+
+    if let Some(min) = m.min_app_version.as_deref() {
+        let current = env!("CARGO_PKG_VERSION");
+        match (semver::Version::parse(min.trim_start_matches('v')),
+               semver::Version::parse(current)) {
+            (Ok(min_v), Ok(cur_v)) if min_v > cur_v => {
+                eprintln!(
+                    "sicompass: skipping plugin '{}' — needs app >= {min} but running {current}",
+                    m.name
+                );
+                return None;
+            }
+            _ => {}
+        }
+    }
+
     match m.plugin_type {
         PluginType::Native => NativePlugin::open(&plugin.entry_path)
             .map(|p| Box::new(p) as Box<dyn Provider>),
@@ -837,6 +863,220 @@ fn insert_provider_alphabetically(
             renderer.current_id.set(0, root_idx + 1);
         }
     }
+}
+
+/// Drain any pending `UpdateEvent`s from the updater thread and refresh
+/// the "update available" banner. Called once per frame from the main
+/// loop. Never panics.
+///
+/// FUTURE NOTIFICATION SYSTEM: when sicompass grows a real in-app
+/// notification surface, replace the `error_message` writes below with
+/// calls to the new notification API. The `update_state` Arc upstream
+/// and the Ctrl+U keybind downstream stay unchanged — only this
+/// rendering site moves. Grep for "FUTURE NOTIFICATION SYSTEM" to find
+/// all interim shims.
+pub fn process_update_events(renderer: &mut AppRenderer) {
+    // ---- Drain HotReload events ----
+    let events: Vec<UpdateEvent> = match renderer.update_event_rx.as_ref() {
+        Some(rx) => rx.try_iter().collect(),
+        None => Vec::new(),
+    };
+
+    for evt in events {
+        match evt {
+            UpdateEvent::HotReload { plugin_name, new_entry_path } => {
+                match hot_reload_plugin(renderer, &plugin_name, &new_entry_path) {
+                    Ok(()) => {
+                        tracing::info!("hot-reloaded plugin '{plugin_name}'");
+                        // Force banner refresh so user sees the result.
+                        renderer.update_message_active = false;
+                    }
+                    Err(e) => {
+                        tracing::warn!("hot reload '{plugin_name}': {e}");
+                        renderer.error_message =
+                            format!("plugin '{plugin_name}': {e}");
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- Refresh banner ----
+    let state = match renderer.update_state.as_ref() {
+        Some(s) => Arc::clone(s),
+        None => return,
+    };
+    let snap = state.lock().unwrap().clone();
+
+    let plugin_applied: Vec<_> = snap.plugin_updates.iter().filter(|p| p.applied).collect();
+    let app_pending = snap.app_update.is_some();
+    let has_news = app_pending || !plugin_applied.is_empty();
+
+    // FUTURE NOTIFICATION SYSTEM: this is the interim surface for update
+    // notifications. The error-slot is borrowed only when it is empty or
+    // contains our own previous banner, so real provider errors never get
+    // clobbered.
+    if !has_news {
+        if renderer.update_message_active {
+            renderer.error_message.clear();
+            renderer.update_message_active = false;
+        }
+        return;
+    }
+
+    let can_write =
+        renderer.error_message.is_empty() || renderer.update_message_active;
+    if !can_write {
+        return;
+    }
+
+    let mut msg = String::new();
+    if let Some(au) = snap.app_update.as_ref() {
+        msg = format!(
+            "Update available: app v{} (Ctrl+U to install)",
+            au.new_version
+        );
+    }
+    if !plugin_applied.is_empty() {
+        if !msg.is_empty() {
+            msg.push_str(" — ");
+        }
+        if plugin_applied.len() == 1 {
+            let p = plugin_applied[0];
+            msg.push_str(&format!("Plugin updated: {} v{}", p.plugin_name, p.new_version));
+        } else {
+            msg.push_str(&format!("{} plugin updates applied", plugin_applied.len()));
+        }
+    }
+
+    renderer.error_message = msg;
+    renderer.update_message_active = true;
+}
+
+/// Apply the staged app update (Ctrl+U). Spawns the platform installer
+/// and, on Windows, terminates the process. Surfaces failures via
+/// `error_message`.
+pub fn handle_apply_app_update(renderer: &mut AppRenderer) {
+    let Some(state) = renderer.update_state.as_ref() else {
+        return;
+    };
+    let snap = state.lock().unwrap().clone();
+    let Some(app_update) = snap.app_update else {
+        renderer.error_message = "no app update staged".to_string();
+        return;
+    };
+
+    let checker = sicompass_updater::UpdateChecker::new(
+        sicompass_updater::parse_version(env!("CARGO_PKG_VERSION"))
+            .unwrap_or_else(|_| semver::Version::new(0, 0, 0)),
+        std::path::PathBuf::new(),
+        "",
+        "",
+    );
+    match checker.apply_app_update(&app_update) {
+        Ok(()) => {
+            // Unreachable on Windows (we exit inside apply_app_update);
+            // on other platforms this branch isn't reached either (the
+            // call returns Err with Unsupported).
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::Unsupported => {
+            sicompass_sdk::platform::open_with_default(&app_update.release_url);
+            renderer.error_message = "Opened release page in browser".to_string();
+        }
+        Err(e) => {
+            renderer.error_message = format!("apply update failed: {e}");
+        }
+    }
+}
+
+/// No-op provider used as a placeholder in the registry slot while a
+/// native plugin is being hot-reloaded. Must exist for one instant
+/// (between `drop(old)` and `place(new)`) so that the OS dynamic linker
+/// can free the old `.so`/`.dll`/`.dylib` before we `dlopen` the new
+/// file at the same path. Without this drop-first dance, dlopen returns
+/// the cached old library and the update has no effect.
+struct HotReloadPlaceholder;
+impl Provider for HotReloadPlaceholder {
+    fn name(&self) -> &str { "" }
+    fn fetch(&mut self) -> Vec<FfonElement> { Vec::new() }
+}
+
+/// Tear down a running user plugin and re-instantiate it from the
+/// already-swapped-in entry file. Called from the main loop when an
+/// `UpdateEvent::HotReload` event arrives from the updater thread.
+///
+/// The plugin's directory on disk has already been atomically replaced
+/// by `sicompass-updater`; this function only handles the in-memory
+/// provider swap. Returns an error string suitable for `error_message`
+/// surfacing on failure.
+///
+/// Order matters for native plugins (see `HotReloadPlaceholder`): the
+/// old `Box<dyn Provider>` must be dropped before the new library is
+/// loaded, otherwise the dynamic linker reuses the cached handle and
+/// the update is invisible. Script plugins are immune (they spawn a
+/// subprocess), but we keep the same order for both for simplicity.
+pub fn hot_reload_plugin(
+    renderer: &mut AppRenderer,
+    plugin_name: &str,
+    new_entry: &Path,
+) -> Result<(), String> {
+    let idx = renderer
+        .providers
+        .iter()
+        .position(|p| name_matches_provider(plugin_name, p.name()))
+        .ok_or_else(|| format!("plugin '{plugin_name}' not currently loaded"))?;
+
+    let plugins_root = sicompass_sdk::platform::plugins_dir()
+        .ok_or_else(|| "no plugins dir on this platform".to_string())?;
+    let manifest_path = plugins_root.join(plugin_name).join("plugin.json");
+    let manifest = crate::plugin_manifest::load_manifest(&manifest_path)
+        .ok_or_else(|| format!("read updated manifest {}", manifest_path.display()))?;
+
+    if !manifest.hot_reload {
+        return Err(format!(
+            "plugin '{plugin_name}' opted out of hot reload — restart to activate update"
+        ));
+    }
+
+    let plugin = DiscoveredPlugin {
+        manifest,
+        entry_path: new_entry.to_path_buf(),
+    };
+
+    // Drop-first dance — see HotReloadPlaceholder doc.
+    let placeholder: Box<dyn Provider> = Box::new(HotReloadPlaceholder);
+    let old = std::mem::replace(&mut renderer.providers[idx], placeholder);
+    drop(old);
+
+    let mut new_provider = match instantiate_user_plugin(&plugin) {
+        Some(p) => p,
+        None => {
+            return Err(format!(
+                "failed to instantiate updated plugin '{plugin_name}' \
+                 — provider disabled until restart"
+            ));
+        }
+    };
+
+    new_provider.init();
+    let children = new_provider.fetch();
+    let display_name = new_provider.display_name().to_owned();
+    let mut root = FfonElement::new_obj(&display_name);
+    for child in children {
+        root.as_obj_mut().unwrap().push(child);
+    }
+    renderer.ffon[idx] = root;
+    renderer.providers[idx] = new_provider;
+
+    // Refresh the version shown in the settings tree for this plugin.
+    if let Some(v) = plugin.manifest.version.as_deref() {
+        if let Some(settings) = renderer.providers.last_mut() {
+            settings.set_section_version(&plugin.manifest.display_name, v);
+        }
+        rebuild_settings_ffon(renderer);
+    }
+
+    Ok(())
 }
 
 /// Disable and remove a provider by name.
@@ -1414,6 +1654,10 @@ mod tests {
             supports_config_files: false,
             settings: vec![],
             version: None,
+            update_url: None,
+            min_app_version: None,
+            pubkey: None,
+            hot_reload: true,
         }
     }
 

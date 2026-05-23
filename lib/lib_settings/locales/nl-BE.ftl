@@ -41,6 +41,7 @@ settings-label-license-redeem-token = Licentie-inwisseltoken
 settings-label-version = versie
 settings-checkbox-maximized = gemaximaliseerd
 settings-checkbox-shoulder-surfing-protection = schermbescherming (blanco scherm)
+settings-checkbox-auto-update-check = controleer op app- en plugin-updates bij opstarten
 settings-radio-font-scale = tekstgrootte
 settings-radio-sort-order = sorteervolgorde
 

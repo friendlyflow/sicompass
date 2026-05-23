@@ -46,6 +46,7 @@ settings-label-license-redeem-token = License redeem token
 settings-label-version = version
 settings-checkbox-maximized = maximized
 settings-checkbox-shoulder-surfing-protection = shoulder-surfing protection (blank screen)
+settings-checkbox-auto-update-check = check for app and plugin updates on startup
 settings-radio-font-scale = font scale
 settings-radio-sort-order = sort order
 

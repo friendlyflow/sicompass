@@ -74,6 +74,7 @@ hint-ctrl-shift-tab-prev-tab = Ctrl+Shift+Tab Vorig tabblad
 hint-ctrl-shift-z-redo = Ctrl+Shift+Z Opnieuw
 hint-ctrl-t-new-tab = Ctrl+T Nieuw tabblad
 hint-ctrl-tab-next-tab = Ctrl+Tab Volg. tabblad
+hint-ctrl-u-install-update = Ctrl+U Update install.
 hint-ctrl-v-paste = Ctrl+V Plakken
 hint-ctrl-w-close-tab = Ctrl+W Sluit tabblad
 hint-ctrl-x-cut = Ctrl+X Knippen

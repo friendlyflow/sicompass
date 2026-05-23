@@ -74,6 +74,28 @@ pub struct PluginManifest {
     /// plugin's section. Authors set this in `plugin.json`.
     #[serde(default)]
     pub version: Option<String>,
+    /// HTTPS URL the updater queries for a newer manifest. Absent =>
+    /// plugin opts out of auto-update.
+    #[serde(default)]
+    pub update_url: Option<String>,
+    /// Minimum sicompass app version this plugin works against. If the
+    /// running app is older, the plugin is skipped at load time.
+    #[serde(default)]
+    pub min_app_version: Option<String>,
+    /// Base64-encoded ed25519 public key. Trust root for verifying
+    /// signatures on future updates. First-install is trust-on-first-use.
+    #[serde(default)]
+    pub pubkey: Option<String>,
+    /// Whether the running provider can be torn down + re-instantiated
+    /// mid-session after an update lands on disk. Defaults to `true`;
+    /// plugins that spawn long-lived threads holding fn-pointers from
+    /// their own library must declare `false` and require a restart.
+    #[serde(default = "default_hot_reload")]
+    pub hot_reload: bool,
+}
+
+fn default_hot_reload() -> bool {
+    true
 }
 
 // ---------------------------------------------------------------------------

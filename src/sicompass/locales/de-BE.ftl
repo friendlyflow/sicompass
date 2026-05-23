@@ -74,6 +74,7 @@ hint-ctrl-shift-tab-prev-tab = Ctrl+Shift+Tab Vorh. Reiter
 hint-ctrl-shift-z-redo = Ctrl+Shift+Z Wiederholen
 hint-ctrl-t-new-tab = Ctrl+T Neuer Reiter
 hint-ctrl-tab-next-tab = Ctrl+Tab Nächst. Reiter
+hint-ctrl-u-install-update = Ctrl+U Update install.
 hint-ctrl-v-paste = Ctrl+V Einfügen
 hint-ctrl-w-close-tab = Ctrl+W Reiter schl.
 hint-ctrl-x-cut = Ctrl+X Ausschneiden

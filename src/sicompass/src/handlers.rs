@@ -2523,6 +2523,14 @@ pub fn handle_redo(r: &mut AppRenderer) {
     r.needs_redraw = true;
 }
 
+/// Ctrl+U — apply the staged app update (if any). Spawns the platform
+/// installer and terminates the process on Windows; on other platforms
+/// opens the release URL in the browser.
+pub fn handle_apply_update(r: &mut AppRenderer) {
+    crate::programs::handle_apply_app_update(r);
+    r.needs_redraw = true;
+}
+
 /// Cancel a freshly-inserted placeholder (Ctrl+I/A or :create command):
 /// remove the element from the FFON tree, restore the prior selection, and
 /// return to `target_general`. Returns `true` when a `placeholder_cancel`

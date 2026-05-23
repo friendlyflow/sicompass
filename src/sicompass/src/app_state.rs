@@ -546,6 +546,18 @@ pub struct AppRenderer {
     /// invokes `delete_item_by_name`, which would otherwise enqueue a fresh
     /// Delete entry and become the next redo target).
     pub in_history_action: bool,
+
+    // ---- Self-update state -------------------------------------------------
+    /// Latest snapshot from the background `sicompass-updater` thread.
+    /// `None` when the check is disabled or has not run yet.
+    pub update_state: Option<std::sync::Arc<std::sync::Mutex<sicompass_updater::UpdateStatus>>>,
+    /// Receives `HotReload` events from the updater thread. The main loop
+    /// drains this each frame (see `crate::programs::hot_reload_plugin`).
+    pub update_event_rx: Option<std::sync::mpsc::Receiver<sicompass_updater::UpdateEvent>>,
+    /// True after `error_message` has been clobbered with an "Update
+    /// available" banner so the per-frame writer doesn't re-clobber real
+    /// errors. Reset whenever the underlying status changes.
+    pub update_message_active: bool,
 }
 
 /// One tab's saved state.
@@ -654,6 +666,9 @@ impl AppRenderer {
             active_tab: 0,
             tab_timelines: vec![Timeline::new()],
             in_history_action: false,
+            update_state: None,
+            update_event_rx: None,
+            update_message_active: false,
         }
     }
 

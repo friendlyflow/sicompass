@@ -106,6 +106,16 @@ fn always(_: &AppRenderer) -> bool { true }
 
 fn more_than_one_tab(r: &AppRenderer) -> bool { r.tabs.len() > 1 }
 
+/// True when the background updater has staged an app update ready for
+/// `Ctrl+U` to apply. Keeps the keybind invisible at all other times so
+/// the help text doesn't advertise a command that does nothing.
+fn update_pending(r: &AppRenderer) -> bool {
+    r.update_state
+        .as_ref()
+        .map(|s| s.lock().unwrap().app_update.is_some())
+        .unwrap_or(false)
+}
+
 fn not_at_root(r: &AppRenderer) -> bool {
     r.current_id.depth() > 1
 }
@@ -798,6 +808,15 @@ pub static SHORTCUTS: &[Shortcut] = &[
     Shortcut { key: Keycode::Z, key2: None, ctrl: true, shift: true,
         modes: UNDO_MODES_ALL,
         label: "Ctrl+Shift+Z Redo", is_available: always, handle: handlers::handle_redo },
+
+    // ---- Ctrl+U (apply staged self-update) -------------------------------
+    // Visible only when a staged update is actually pending; the header
+    // banner is the discoverability hint.
+    Shortcut { key: Keycode::U, key2: None, ctrl: true, shift: false,
+        modes: GENERAL,
+        label: "Ctrl+U Install update",
+        is_available: update_pending,
+        handle: handlers::handle_apply_update },
 
     // ---- F5 (refresh) ----------------------------------------------------
     Shortcut { key: Keycode::F5, key2: None, ctrl: false, shift: false,
