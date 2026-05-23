@@ -2157,6 +2157,11 @@ mod tests {
 
     #[test]
     fn test_other_sections_sorted_alphabetically() {
+        // Resolves the priority section name per-locale; serialize against the
+        // locale-switching tests so the locale can't flip between `fetch()` and
+        // the `localize_section_name` lookup below.
+        let _g = locale_test_lock();
+        sicompass_sdk::localize::set_locale("en-US");
         let mut p = SettingsProvider::new_headless();
         p.add_priority_section("Available programs:");
         p.add_checkbox("Available programs:", "tutorial", "enable_tutorial", true);
