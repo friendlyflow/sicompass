@@ -898,6 +898,11 @@ pub static SHORTCUTS: &[Shortcut] = &[
 // Dispatch
 // ---------------------------------------------------------------------------
 
+/// Time window for the double-Ctrl+C gesture that exits the interactive
+/// dashboard (see the dashboard fast-path in `dispatch_key`). A second Ctrl+C
+/// within this many milliseconds of the first leaves the dashboard.
+const DASHBOARD_CTRL_C_EXIT_MS: u64 = 1000;
+
 /// Dispatch a key event using the SHORTCUTS table.
 ///
 /// Returns `true` if the application should quit (same semantics as `events::dispatch_key`).
@@ -930,6 +935,22 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
                 }
             }
             return false;
+        }
+        // Double Ctrl+C leaves the interactive dashboard. The first press is
+        // still forwarded to the program below (the 0x03 SIGINT byte, so a
+        // lone Ctrl+C interrupts whatever is running); a second press within
+        // DASHBOARD_CTRL_C_EXIT_MS exits instead. Without this the dashboard
+        // has no exit key — every keystroke goes to the program, and a shell
+        // that never emits the alt-screen-leave sequence traps the user.
+        if ctrl && !shift && !alt && k == Keycode::C {
+            let now = handlers::sdl_ticks();
+            let prev = r.dashboard_last_ctrl_c;
+            if prev != 0 && now.saturating_sub(prev) <= DASHBOARD_CTRL_C_EXIT_MS {
+                handlers::handle_dashboard_leave(r); // resets dashboard_last_ctrl_c
+                return false;
+            }
+            r.dashboard_last_ctrl_c = now;
+            // Fall through: forward this first Ctrl+C to the program as 0x03.
         }
         if let Some(keysym) = sdl_keycode_to_dashboard_keysym(k) {
             let key = sicompass_sdk::DashboardKey { keysym, ctrl, shift, alt };

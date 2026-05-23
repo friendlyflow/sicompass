@@ -4490,6 +4490,7 @@ pub fn enter_dashboard_for_active(r: &mut AppRenderer) {
             r.previous_coordinate = r.coordinate;
             r.coordinate = Coordinate::Dashboard;
             r.dashboard_cell_size = (0, 0);
+            r.dashboard_last_ctrl_c = 0;
             r.speak_mode_change(None);
             r.needs_redraw = true;
         }
@@ -4518,6 +4519,7 @@ pub fn handle_dashboard_leave(r: &mut AppRenderer) {
         }
         r.dashboard_cell_size = (0, 0);
     }
+    r.dashboard_last_ctrl_c = 0;
     r.coordinate = r.previous_coordinate;
     r.speak_mode_change(None);
     r.caret.reset(sdl_ticks());

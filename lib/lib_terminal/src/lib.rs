@@ -1548,7 +1548,10 @@ mod tests {
         assert!(p.auto_entered_dashboard);
     }
 
+    // Main-screen detection is Windows-disabled (see interactive_detect docs):
+    // ConPTY emits `?1004h` itself, so it carries no signal on Windows.
     #[test]
+    #[cfg(not(windows))]
     fn detector_emits_enter_for_main_screen_tui() {
         // `claude` and other main-screen TUIs never touch the alternate
         // screen; they announce themselves via focus tracking (`?1004h`).

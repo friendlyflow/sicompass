@@ -428,6 +428,12 @@ pub struct AppRenderer {
     /// view.rs to fire `dashboard_resize` only on actual size changes.
     /// Reset to `(0, 0)` on enter/leave.
     pub dashboard_cell_size: (u16, u16),
+    /// `sdl_ticks()` of the last Ctrl+C pressed inside the interactive
+    /// dashboard. A second Ctrl+C within `DASHBOARD_CTRL_C_EXIT_MS` leaves the
+    /// dashboard; the first press still forwards `0x03` to the program so a
+    /// lone Ctrl+C interrupts what's running inside. `0` means no pending
+    /// first press. Reset to `0` on dashboard enter/leave.
+    pub dashboard_last_ctrl_c: u64,
 
     // ---- Keypress timing (for double-tap detection) ------------------------
     pub last_keypress_time: u64,
@@ -625,6 +631,7 @@ impl AppRenderer {
             scroll_search_snap: false,
             dashboard_image_path: String::new(),
             dashboard_cell_size: (0, 0),
+            dashboard_last_ctrl_c: 0,
             last_keypress_time: 0,
             search_string: String::new(),
             search_origin_id: IdArray::new(),
