@@ -138,10 +138,14 @@ tempfile = "3"
 wiremock = "0.6"
 
 # Local override so SDK edits in the sibling repo are picked up immediately.
-# Drop this section to consume the published sicompass-sdk straight from
-# crates.io (e.g. on machines that don't have the sibling repo checked out).
-[patch.crates-io]
-sicompass-sdk = { path = "../sicompass-plugin-sdk" }
+# Uncomment this block during active SDK development; the CI release build
+# (cargo-dist) checks out only this repo, so a path patch pointing at a
+# missing sibling fails the build at manifest-parse time. Keeping it
+# disabled by default makes `git push <tag>` releases work without manual
+# surgery; re-enable locally when iterating on SDK changes.
+#
+# [patch.crates-io]
+# sicompass-sdk = { path = "../sicompass-plugin-sdk" }
 
 # Optimize heavy third-party deps even in debug builds — html5ever and the
 # TLS/HTTP stack are 10-50x slower without optimizations.
