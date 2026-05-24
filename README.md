@@ -1,4 +1,4 @@
-**I specially made this software to accommodate blind and visually impaired computer users! Can you tell if it works or not?**
+**I specially made this software to accommodate blind and visually impaired computer users! Can you tell me if it works or not?**
 
 # Silicon's Compass
 
