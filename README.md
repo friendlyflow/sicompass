@@ -12,6 +12,7 @@ It does not try to look pretty, and it works very differently from web pages and
 
 ## Key Features
 
+- **Unambiguous Focus**: You always know where the focus is, no guessing
 - **Flat Interface**: No popups, dialogs, or overlays, everything is navigated inline within the tree
 - **Keyboard-First Design**: Faster and handier navigation because your hands never leave the keyboard
 - **Native Accessibility**: Built-in support for screen readers on Linux, macOS, and Windows
