@@ -1206,6 +1206,61 @@ fn filebrowser_show_properties_refreshes_listing() {
         "labels should match original after toggling properties twice");
 }
 
+/// Regression: invoking "show/hide properties" while inside a subdirectory must
+/// keep the cursor in that directory — it used to unwind the provider path all
+/// the way back to the filesystem root — and the toggle must persist as the user
+/// moves back up and down the tree (navigation must ignore the properties prefix).
+#[test]
+fn filebrowser_show_properties_stays_in_subdir_and_persists() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r()); // enter filebrowser at depth 2 (listing tmp)
+
+    // Navigate into `subdir` → depth 3.
+    let to_subdir = |h: &mut Harness| {
+        let idx = h.renderer.total_list.iter()
+            .position(|i| i.label.contains("subdir"))
+            .expect("subdir not in listing");
+        let cur = h.renderer.list_index;
+        for _ in 0..idx.saturating_sub(cur) { press_down(h.r()); }
+        for _ in 0..cur.saturating_sub(idx) { press_up(h.r()); }
+        press_right(h.r());
+    };
+    to_subdir(&mut h);
+    assert_eq!(h.renderer.current_id.depth(), 3, "should be inside subdir");
+    let subdir_path = h.renderer.providers[fb_idx].current_path().to_owned();
+    assert!(subdir_path.ends_with("subdir"), "path should be subdir, got {subdir_path}");
+
+    // Toggle properties on.
+    execute_provider_command(&mut h, "show/hide properties");
+
+    // Bug fix: the cursor stays in the subdir and the provider path is unchanged.
+    assert_eq!(h.renderer.current_id.depth(), 3,
+        "show/hide properties must not unwind out of the subdir");
+    assert_eq!(h.renderer.providers[fb_idx].current_path(), subdir_path,
+        "show/hide properties must not reset the path away from the subdir");
+
+    // The subdir listing now carries a properties prefix (permission string).
+    assert!(h.renderer.total_list.iter().any(|i| i.label.contains("nested.txt") && i.label.contains("rw")),
+        "nested.txt should show a properties prefix, labels: {:?}",
+        h.renderer.total_list.iter().map(|i| i.label.clone()).collect::<Vec<_>>());
+
+    // Persistence going up: the parent listing also reflects the toggle.
+    press_left(h.r());
+    assert_eq!(h.renderer.current_id.depth(), 2);
+    assert!(h.renderer.total_list.iter().any(|i| i.label.contains("rw")),
+        "parent listing should also show properties after the toggle persisted");
+
+    // Persistence going back down: navigation segment must ignore the prefix.
+    to_subdir(&mut h);
+    assert_eq!(h.renderer.current_id.depth(), 3, "should re-enter subdir");
+    assert!(h.renderer.providers[fb_idx].current_path().ends_with("subdir"),
+        "re-entered path must be the subdir, not corrupted by the properties prefix");
+    assert!(h.renderer.total_list.iter().any(|i| i.label.contains("nested.txt")),
+        "subdir should still list nested.txt after re-entry");
+}
+
 /// After running "sort chronologically", the listing should immediately reorder.
 /// alpha.txt and beta.txt are created at slightly different times, so they may
 /// already be in chrono order — we just verify the command returns to normal mode
