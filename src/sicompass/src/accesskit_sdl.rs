@@ -237,6 +237,58 @@ pub(crate) fn label_to_speech(label: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Per-item language detection (so the screen reader speaks each item in its
+// own language instead of always the default voice)
+// ---------------------------------------------------------------------------
+
+/// The spoken *content* of a list label with the FFON list prefix stripped.
+/// Language detection runs on this so the English prefix words ("minus i",
+/// "current", …) don't bias the result.
+fn speech_content(label: &str) -> &str {
+    match label.split_once(' ') {
+        Some((prefix, content)) if list_prefix_to_word(prefix).is_some() => content,
+        _ => label,
+    }
+}
+
+/// Best-effort BCP-47 language tag for `content`, or `None` when detection is
+/// not trustworthy (too short, low confidence, or a language we don't map).
+/// The caller falls back to the active UI locale in that case.
+///
+/// `whatlang` is statistical and unreliable on short fragments (file names,
+/// single words, numeric lists), so we require a minimum amount of signal and
+/// a confidence floor before trusting it. This means short items keep the UI
+/// locale's voice by design.
+///
+/// The floor is deliberately well below `Info::is_reliable()`'s 0.9 (which
+/// rejects most ordinary one-line sentences); the length guard already filters
+/// out the genuinely ambiguous fragments.
+fn detect_language(content: &str) -> Option<String> {
+    const MIN_CONFIDENCE: f64 = 0.5;
+    let text = content.trim_end_matches('\u{200B}').trim();
+    if text.chars().count() < 12 || text.split_whitespace().count() < 3 {
+        return None;
+    }
+    let info = whatlang::detect(text)?;
+    if info.confidence() < MIN_CONFIDENCE {
+        return None;
+    }
+    // Map the languages we expect to the ISO 639-1 subtags screen readers use.
+    // Unmapped languages return None so the caller falls back to the UI locale.
+    let tag = match info.lang() {
+        whatlang::Lang::Eng => "en",
+        whatlang::Lang::Nld => "nl",
+        whatlang::Lang::Fra => "fr",
+        whatlang::Lang::Deu => "de",
+        whatlang::Lang::Spa => "es",
+        whatlang::Lang::Ita => "it",
+        whatlang::Lang::Por => "pt",
+        _ => return None,
+    };
+    Some(tag.to_owned())
+}
+
+// ---------------------------------------------------------------------------
 // Build the accessibility tree
 // ---------------------------------------------------------------------------
 
@@ -260,9 +312,14 @@ pub(crate) fn label_to_speech(label: &str) -> String {
 fn build_tree(renderer: &AppRenderer) -> TreeUpdate {
     let mut nodes: Vec<(NodeId, accesskit::Node)> = Vec::with_capacity(3);
 
+    // Active UI locale (e.g. "nl-BE"); used as the language fallback for any
+    // node whose content can't be reliably auto-detected, and directly for the
+    // app-generated announcement / root nodes.
+    let ui_locale = sicompass_sdk::localize::current_locale();
+
     // ---- Single focused element node (mirrors C's ELEMENT_ID) --------------
-    let element_label = if renderer.total_list.is_empty() {
-        String::new()
+    let (element_label, element_content) = if renderer.total_list.is_empty() {
+        (String::new(), String::new())
     } else {
         let raw_idx = if renderer.filtered_list_indices.is_empty() {
             renderer.list_index.min(renderer.total_list.len() - 1)
@@ -273,22 +330,34 @@ fn build_tree(renderer: &AppRenderer) -> TreeUpdate {
                 .unwrap_or(0)
                 .min(renderer.total_list.len() - 1)
         };
-        label_to_speech(&renderer.total_list[raw_idx].label)
+        let raw_label = &renderer.total_list[raw_idx].label;
+        (label_to_speech(raw_label), speech_content(raw_label).to_owned())
     };
     let mut elem = Node::new(Role::ListItem);
     elem.set_label(Box::<str>::from(element_label.as_str()));
+    // Speak each item in its own language: auto-detect from the content, fall
+    // back to the UI locale when detection isn't reliable. The screen reader
+    // only honours this when its automatic language switching is enabled and a
+    // voice for the language is installed.
+    let elem_lang = detect_language(&element_content).unwrap_or_else(|| ui_locale.clone());
+    elem.set_language(elem_lang);
     nodes.push((ELEMENT_ID, elem));
 
     // ---- Announcement live-region node (always present) --------------------
+    // Announcements (mode changes, errors, tab switches) are app-generated in
+    // the active locale and usually too short to detect, so tag them with the
+    // UI locale directly.
     let ann_text = renderer.pending_announcement.as_deref().unwrap_or("");
     let mut ann = Node::new(Role::ListItem);
     ann.set_label(Box::<str>::from(ann_text));
+    ann.set_language(ui_locale.clone());
     ann.set_live(Live::Polite);
     nodes.push((ANNOUNCEMENT_ID, ann));
 
     // ---- Root window node --------------------------------------------------
     let mut root_builder = Node::new(Role::Window);
     root_builder.set_label(Box::<str>::from("sicompass"));
+    root_builder.set_language(ui_locale.clone());
     root_builder.set_children(vec![ELEMENT_ID, ANNOUNCEMENT_ID]);
     nodes.insert(0, (ROOT_ID, root_builder));
 
@@ -443,6 +512,56 @@ mod tests {
         assert_eq!(label_to_speech("Files"), "Files");
     }
 
+    // --- detect_language ---
+    //
+    // whatlang only classifies Latin-script text confidently once there's a
+    // sentence or two of signal (short fragments get a low score and fall back
+    // by design), so these use realistic message-length passages.
+
+    const NL_PASSAGE: &str = "Goedemorgen, dit is een belangrijk bericht over de vergadering van volgende week. Laat ons alstublieft weten of u aanwezig kunt zijn want wij moeten de zaal op tijd reserveren.";
+    const EN_PASSAGE: &str = "Good morning, this is an important message about next week's meeting. Please let us know whether you will be able to attend because we need to reserve the room in time.";
+    const FR_PASSAGE: &str = "Bonjour, ceci est un message important concernant la réunion de la semaine prochaine.";
+    const DE_PASSAGE: &str = "Guten Morgen, dies ist eine wichtige Nachricht über das Treffen der nächsten Woche.";
+
+    #[test]
+    fn detect_language_dutch_passage() {
+        assert_eq!(detect_language(NL_PASSAGE).as_deref(), Some("nl"));
+    }
+
+    #[test]
+    fn detect_language_french_passage() {
+        assert_eq!(detect_language(FR_PASSAGE).as_deref(), Some("fr"));
+    }
+
+    #[test]
+    fn detect_language_german_passage() {
+        assert_eq!(detect_language(DE_PASSAGE).as_deref(), Some("de"));
+    }
+
+    #[test]
+    fn detect_language_english_passage() {
+        assert_eq!(detect_language(EN_PASSAGE).as_deref(), Some("en"));
+    }
+
+    #[test]
+    fn detect_language_short_single_word_is_none() {
+        // Too few words to classify — fall back to the UI locale.
+        assert_eq!(detect_language("newfile.txt"), None);
+    }
+
+    #[test]
+    fn detect_language_too_short_is_none() {
+        // Under the minimum character threshold.
+        assert_eq!(detect_language("a b c"), None);
+    }
+
+    #[test]
+    fn detect_language_ignores_parity_sentinel() {
+        // The trailing U+200B announcement-parity marker must not break detection.
+        let with_sentinel = format!("{FR_PASSAGE}\u{200B}");
+        assert_eq!(detect_language(&with_sentinel).as_deref(), Some("fr"));
+    }
+
     #[test]
     fn label_to_speech_minus_i() {
         assert_eq!(label_to_speech("-i newfile.txt"), "minus i newfile.txt");
@@ -504,6 +623,37 @@ mod tests {
         r2.list_index = 1;
         let tree2 = build_tree(&r2);
         assert_eq!(tree2.nodes[1].1.label().as_deref(), Some("Tutorial"));
+    }
+
+    // --- per-item language tagging ---
+
+    #[test]
+    fn build_tree_element_language_detected_from_content() {
+        // A Dutch item is tagged "nl" regardless of the UI locale. The "-"
+        // FFON prefix is stripped before detection by `speech_content`.
+        let label = format!("- {NL_PASSAGE}");
+        let r = make_renderer_with_list(&[label.as_str()]);
+        let tree = build_tree(&r);
+        assert_eq!(tree.nodes[1].1.language(), Some("nl"));
+    }
+
+    #[test]
+    fn build_tree_element_language_falls_back_to_ui_locale() {
+        // Short, undetectable content keeps the active UI locale's voice.
+        let r = make_renderer_with_list(&["-i newfile.txt"]);
+        let tree = build_tree(&r);
+        let ui = sicompass_sdk::localize::current_locale();
+        assert_eq!(tree.nodes[1].1.language(), Some(ui.as_str()));
+    }
+
+    #[test]
+    fn build_tree_announcement_language_is_ui_locale() {
+        let mut r = AppRenderer::new();
+        r.pending_announcement = Some("search".to_string());
+        let tree = build_tree(&r);
+        let ui = sicompass_sdk::localize::current_locale();
+        let ann = tree.nodes.iter().find(|(id, _)| *id == ANNOUNCEMENT_ID).unwrap();
+        assert_eq!(ann.1.language(), Some(ui.as_str()));
     }
 
     #[test]

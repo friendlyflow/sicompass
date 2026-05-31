@@ -78,6 +78,10 @@ accesskit_windows = "0.33"
 accesskit_macos = "0.26"
 windows = { version = "0.62", features = ["Win32_Foundation"] }
 
+# Language detection — tags each spoken AccessKit node with a BCP-47 language
+# so the screen reader speaks each item in its own language.
+whatlang = "0.16"
+
 # Unicode
 unicode-normalization = "0.1"
 
