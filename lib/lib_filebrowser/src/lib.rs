@@ -209,7 +209,7 @@ impl Provider for FilebrowserProvider {
     }
 
     fn delete_item(&mut self, name: &str) -> bool {
-        let name_clean = tags::strip_display(name).to_owned();
+        let name_clean = entry_name(name);
         let name_clean = name_clean.trim_end_matches('/').trim_end_matches('\\').to_owned();
         let full = self.current_path.join(&name_clean);
 
@@ -346,7 +346,7 @@ impl Provider for FilebrowserProvider {
                     *error = localize::t("filebrowser-error-open-with-not-file");
                     return None;
                 }
-                let filename = tags::strip_display(element_key);
+                let filename = entry_name(element_key);
                 if filename.is_empty() {
                     register_translations();
                     *error = localize::t("filebrowser-error-open-with-no-filename");
@@ -454,6 +454,21 @@ struct RawEntry {
     uid: u32,
     #[cfg(unix)]
     gid: u32,
+}
+
+/// The on-disk name of an entry given its rendered label.
+///
+/// Entries are wrapped as `<prop><input>name</input>` — with "show properties"
+/// on, a permissions/owner/size prefix sits *outside* the `<input>` tag, and
+/// `strip_display` would keep it (yielding `drwxr-xr-x … name`). The `<input>`
+/// content is the true filename, so prefer it whenever the tag is present and
+/// fall back to `strip_display` for labels without one.
+fn entry_name(label: &str) -> String {
+    if tags::has_input(label) {
+        tags::extract_input(label).unwrap_or_else(|| tags::strip_display(label))
+    } else {
+        tags::strip_display(label)
+    }
 }
 
 fn collect_raw_entries(path: &Path) -> Vec<RawEntry> {
@@ -773,6 +788,29 @@ mod tests {
         std::fs::write(dir.path().join("del.txt"), b"x").unwrap();
         assert!(p.delete_item("<input>del.txt</input>"));
         assert!(!dir.path().join("del.txt").exists());
+    }
+
+    #[test]
+    fn test_delete_file_with_properties_prefix() {
+        // With "show properties" on, the label carries a permissions/owner/size
+        // prefix *outside* the <input> tag. Deletion must still target the bare
+        // filename, not "drwxr-xr-x … del.txt".
+        let (mut p, dir) = make_provider();
+        std::fs::write(dir.path().join("del.txt"), b"x").unwrap();
+        let label = "-rw-r--r-- 1 user group 1 May 31 12:00 <input>del.txt</input>";
+        assert!(p.delete_item(label));
+        assert!(!dir.path().join("del.txt").exists());
+    }
+
+    #[test]
+    fn test_entry_name_strips_properties_prefix() {
+        assert_eq!(entry_name("<input>file.txt</input>"), "file.txt");
+        assert_eq!(
+            entry_name("drwxr-xr-x 1 user group 4096 May 31 12:00 <input>Downloads</input>"),
+            "Downloads"
+        );
+        // No input tag → fall back to strip_display.
+        assert_eq!(entry_name("plain"), "plain");
     }
 
     #[test]

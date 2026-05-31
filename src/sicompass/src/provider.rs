@@ -132,6 +132,174 @@ pub fn refresh_current_directory(renderer: &mut AppRenderer) {
     }
 }
 
+/// Raw, untagged backing text of an element (the `Str` payload or the `Obj`
+/// key) — the string from which display tags are derived.
+fn elem_raw(e: &sicompass_sdk::ffon::FfonElement) -> &str {
+    match e {
+        sicompass_sdk::ffon::FfonElement::Str(s) => s.as_str(),
+        sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.as_str(),
+    }
+}
+
+/// The navigable / editable identity of an element: the `<input>` content when
+/// present, otherwise the display-stripped text.
+///
+/// A filebrowser entry rendered with "show properties" on looks like
+/// `drwxr-xr-x … <input>Downloads</input>` — the properties prefix sits
+/// *outside* the `<input>` tag, and `strip_display` keeps it, so a plain
+/// `strip_display` would yield `drwxr-xr-x … Downloads` and corrupt the path
+/// segment / target name. The `<input>` content is the element's true name, so
+/// prefer it whenever the tag is present.
+pub(crate) fn element_nav_name(raw: &str) -> String {
+    if sicompass_sdk::tags::has_input(raw) {
+        sicompass_sdk::tags::extract_input(raw)
+            .unwrap_or_else(|| sicompass_sdk::tags::strip_display(raw))
+    } else {
+        sicompass_sdk::tags::strip_display(raw)
+    }
+}
+
+/// Index of the first child at `id`'s level whose navigable name equals `name`.
+fn locate_child_by_name(
+    ffon: &[sicompass_sdk::ffon::FfonElement],
+    id: &sicompass_sdk::ffon::IdArray,
+    name: &str,
+) -> Option<usize> {
+    sicompass_sdk::ffon::get_ffon_at_id(ffon, id)
+        .and_then(|slice| slice.iter().position(|e| element_nav_name(elem_raw(e)) == name))
+}
+
+/// Re-fetch every materialized directory level along the current navigation
+/// path so a provider-state toggle (show/hide properties, sort order) is
+/// reflected at *every* depth, and the cursor stays in the directory the user
+/// is viewing instead of unwinding to the provider root.
+///
+/// Only meaningful for path-backed providers whose `fetch()` returns the
+/// current level (filebrowser, editor). The active provider's `current_path`
+/// tracks the deepest level on entry; this walks the path from the root down,
+/// re-fetching and re-grafting each level, then leaves the cursor and provider
+/// path back at the deepest level.
+///
+/// Off-path levels materialized earlier are discarded (each level's slice is
+/// replaced by freshly fetched, childless Objs), so they re-fetch with the new
+/// state the next time the user navigates into them — the toggle is fully
+/// persistent across the whole subtree, not just the level in view.
+pub fn refresh_visible_path(renderer: &mut AppRenderer) {
+    use sicompass_sdk::ffon::{FfonElement, IdArray};
+
+    let idx = match renderer.current_id.get(0) {
+        Some(i) => i,
+        None => return,
+    };
+    if idx >= renderer.providers.len() || idx >= renderer.ffon.len() {
+        return;
+    }
+
+    let depth = renderer.current_id.depth();
+    if depth < 2 {
+        // At the provider-selection root — nothing path-scoped to walk.
+        refresh_current_directory(renderer);
+        return;
+    }
+
+    // Names of the directories descended into along the current path. `segments[k-2]`
+    // is the folder entered at level `k` to reach level `k+1` (k = 2 … depth-1).
+    // Captured before any re-fetch — via the `<input>` identity so a properties
+    // prefix doesn't leak in, and by name so a reordering (sort) toggle can't
+    // lose our place.
+    let segment_at = |renderer: &AppRenderer, k: usize| -> String {
+        let mut level_id = renderer.current_id.clone();
+        while level_id.depth() > k {
+            level_id.pop();
+        }
+        let cursor = level_id.last().unwrap_or(0);
+        sicompass_sdk::ffon::get_ffon_at_id(&renderer.ffon, &level_id)
+            .and_then(|s| s.get(cursor))
+            .map(|e| element_nav_name(elem_raw(e)))
+            .unwrap_or_default()
+    };
+    let segments: Vec<String> = (2..depth).map(|k| segment_at(renderer, k)).collect();
+    // The deepest-level selection, so the cursor lands on the same entry even
+    // if a sort toggle reordered the listing.
+    let leaf_name = segment_at(renderer, depth);
+
+    // Remember the deepest path so it can be restored after walking up. The
+    // provider's root path is *not* assumed to be "/" — we only ever pop the
+    // segments we descended through, so a provider rooted elsewhere is handled.
+    let deepest_path = renderer.providers[idx].current_path().to_owned();
+
+    // Pass 1 — re-fetch each level, deepest first, popping the provider path up
+    // one directory per level. Replacing a level's listing would discard the
+    // child we descended through (and its freshly rebuilt subtree), so snapshot
+    // that subtree first and re-attach it to the matching entry in the fresh
+    // listing. Off-path siblings are intentionally dropped — they re-fetch with
+    // the new state when next entered.
+    for k in (2..=depth).rev() {
+        let mut level_id = renderer.current_id.clone();
+        while level_id.depth() > k {
+            level_id.pop();
+        }
+
+        // The descended child's (already-refreshed) subtree, if this isn't the leaf.
+        let preserved: Option<(String, Vec<FfonElement>)> = if k < depth {
+            let seg = segments[k - 2].clone();
+            sicompass_sdk::ffon::get_ffon_at_id(&renderer.ffon, &level_id)
+                .and_then(|slice| {
+                    slice.iter().find(|e| element_nav_name(elem_raw(e)) == seg)
+                })
+                .and_then(|e| e.as_obj())
+                .map(|o| (seg, o.children.clone()))
+        } else {
+            None
+        };
+
+        let mut children = renderer.providers[idx].fetch();
+        if let Some(err) = renderer.providers[idx].take_error() {
+            renderer.error_message = err;
+        }
+        // Empty container → seed the `i` insert placeholder, matching navigate-right.
+        if children.is_empty() {
+            children.push(FfonElement::Str(
+                sicompass_sdk::placeholders::I_PLACEHOLDER.to_owned(),
+            ));
+        }
+        if let Some((seg, kids)) = preserved {
+            if let Some(obj) = children
+                .iter_mut()
+                .find(|e| element_nav_name(elem_raw(e)) == seg)
+                .and_then(|e| e.as_obj_mut())
+            {
+                obj.children = kids;
+            }
+        }
+
+        if let Some(slice) = get_ffon_at_id_mut(&mut renderer.ffon, &level_id) {
+            *slice = children;
+        }
+
+        // Move the provider path up to the parent directory for the next
+        // (shallower) level; stop at the root level so we never pop past it.
+        if k > 2 {
+            renderer.providers[idx].pop_path();
+        }
+    }
+
+    // Restore the provider path to the directory the user is viewing.
+    renderer.providers[idx].set_current_path(&deepest_path);
+
+    // Pass 2 — rebuild the cursor top-down, locating each descended folder (and
+    // the leaf selection) by name in the now-refreshed listings.
+    let mut new_id = IdArray::new();
+    new_id.push(idx);
+    for k in 2..=depth {
+        new_id.push(0);
+        let name = if k < depth { &segments[k - 2] } else { &leaf_name };
+        let pos = locate_child_by_name(&renderer.ffon, &new_id, name).unwrap_or(0);
+        new_id.set_last(pos);
+    }
+    renderer.current_id = new_id;
+}
+
 /// Ask the active provider for children at the **current sub-path** and update
 /// only the parent Obj's children in the FFON tree (without rebuilding the root).
 ///
@@ -965,7 +1133,6 @@ pub fn navigate_to_path(
     target_filename: &str,
 ) -> bool {
     use sicompass_sdk::ffon::{FfonElement, IdArray, get_ffon_at_id};
-    use sicompass_sdk::tags;
 
     if root_idx >= renderer.providers.len() { return false; }
 
@@ -995,11 +1162,7 @@ pub fn navigate_to_path(
                 let found = get_ffon_at_id(&renderer.ffon, &renderer.current_id)
                     .and_then(|slice| {
                         slice.iter().enumerate().find_map(|(i, e)| {
-                            let raw = match e {
-                                FfonElement::Str(s) => s.as_str(),
-                                FfonElement::Obj(o) => o.key.as_str(),
-                            };
-                            if tags::strip_display(raw) == target_filename { Some(i) } else { None }
+                            if element_nav_name(elem_raw(e)) == target_filename { Some(i) } else { None }
                         })
                     });
                 if let Some(i) = found {
@@ -1036,11 +1199,7 @@ pub fn navigate_to_path(
             let arr = get_ffon_at_id(&renderer.ffon, &renderer.current_id);
             arr.and_then(|slice| {
                 slice.iter().enumerate().find_map(|(i, e)| {
-                    let raw = match e {
-                        FfonElement::Str(s) => s.as_str(),
-                        FfonElement::Obj(o) => o.key.as_str(),
-                    };
-                    if tags::strip_display(raw) == component { Some(i) } else { None }
+                    if element_nav_name(elem_raw(e)) == component { Some(i) } else { None }
                 })
             })
         };
@@ -1058,11 +1217,7 @@ pub fn navigate_to_path(
             let arr = get_ffon_at_id(&renderer.ffon, &renderer.current_id);
             arr.and_then(|slice| {
                 slice.iter().enumerate().find_map(|(i, e)| {
-                    let raw = match e {
-                        FfonElement::Str(s) => s.as_str(),
-                        FfonElement::Obj(o) => o.key.as_str(),
-                    };
-                    if tags::strip_display(raw) == target_filename { Some(i) } else { None }
+                    if element_nav_name(elem_raw(e)) == target_filename { Some(i) } else { None }
                 })
             })
         };

@@ -288,6 +288,15 @@ pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
     }
 
     // Extract segment name + whether the Obj already has children (static vs lazy) + link URL.
+    // For filesystem providers the navigable segment is the `<input>` content,
+    // not the display-stripped key: with "show properties" on, a directory key
+    // is `drwxr-xr-x … <input>Downloads</input>`, and `strip_display` would keep
+    // the permissions prefix and corrupt the path. `element_nav_name` prefers the
+    // input content so navigation stays correct as properties persist.
+    let use_input_name = r.current_id.get(0)
+        .and_then(|i| r.providers.get(i))
+        .map(|p| p.path_is_filesystem())
+        .unwrap_or(false);
     let (segment, has_children, link_url) = {
         let depth = item_id.depth();
         let last_idx = item_id.get(depth.saturating_sub(1)).unwrap_or(0);
@@ -295,7 +304,12 @@ pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
         match elem {
             Some(FfonElement::Obj(o)) => {
                 let link = if tags::has_link(&o.key) { tags::extract_link(&o.key) } else { None };
-                (tags::strip_display(&o.key).to_string(), !o.children.is_empty(), link)
+                let segment = if use_input_name {
+                    crate::provider::element_nav_name(&o.key)
+                } else {
+                    tags::strip_display(&o.key).to_string()
+                };
+                (segment, !o.children.is_empty(), link)
             }
             _ => return false,
         }
@@ -994,19 +1008,32 @@ pub fn handle_enter_command(r: &mut AppRenderer) {
                 r.scroll_offset = 0;
 
                 if r.total_list.is_empty() {
-                    // Command was a state toggle — return to previous mode and refresh
+                    // Command was a state toggle (e.g. show/hide properties,
+                    // sort order) — return to previous mode and refresh.
                     r.current_command = CommandPhase::None;
                     r.coordinate = r.previous_coordinate;
                     r.speak_mode_change(None);
                     r.previous_coordinate = Coordinate::General;
 
-                    // Navigate back to provider root if deeper (matches C: while depth > 2)
-                    while r.current_id.depth() > 2 {
-                        navigate_left_raw(r);
+                    let is_fs = crate::provider::get_active_provider_ref(r)
+                        .map(|p| p.path_is_filesystem())
+                        .unwrap_or(false);
+                    if is_fs {
+                        // Path-backed providers (filebrowser, editor): keep the
+                        // cursor in the current directory and re-fetch every
+                        // level along the visible path, so the toggle persists
+                        // at all depths instead of snapping the view back to the
+                        // filesystem root.
+                        crate::provider::refresh_visible_path(r);
+                    } else {
+                        // Other providers' `fetch()` rebuilds their whole tree,
+                        // so staying deep is meaningless — unwind to the provider
+                        // root and rebuild (matches C: while depth > 2).
+                        while r.current_id.depth() > 2 {
+                            navigate_left_raw(r);
+                        }
+                        crate::provider::refresh_current_directory(r);
                     }
-
-                    // Re-fetch the directory with the updated provider state
-                    crate::provider::refresh_current_directory(r);
                     list::create_list_current_layer(r);
                 }
                 r.needs_redraw = true;
