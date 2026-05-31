@@ -51,6 +51,16 @@ accepted = [
 [private]
 ignore = true
 
+# sicompass-sdk is first-party — sicompass's own SDK, published to crates.io
+# under GPL-3.0-only just like the app. It is not third-party code to vet, but
+# because it is consumed as a *published* crate (not a publish=false workspace
+# member) the `private.ignore` above does not catch it. cargo-about has no
+# per-crate "skip", so accept its GPL here SCOPED TO THIS CRATE ONLY. The
+# global `accepted` list above stays GPL-free, so any *other* dependency that
+# pulls in GPL/AGPL still trips the gate as intended.
+[sicompass-sdk]
+accepted = ["GPL-3.0-only"]
+
 # miniz_oxide ships two MIT license files (`LICENSE` and `LICENSE-MIT.md`)
 # with identical wording but different blank-line spacing. Without this
 # clarification cargo-about picks whichever the filesystem lists first, so
