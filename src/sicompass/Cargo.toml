@@ -65,7 +65,7 @@ sdl3 = { workspace = true }
 # Pulled in transitively by `sdl3`; declared here so the `bundled-sdl3`
 # feature can flip its `no-sdl-libc` knob (see the feature comment above).
 # Version constraint matches `sdl3`'s own pin so Cargo unifies to one copy.
-sdl3-sys = "0.6.5"
+sdl3-sys = "0.6.6"
 
 accesskit = { workspace = true }
 
