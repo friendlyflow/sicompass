@@ -73,7 +73,7 @@ sdl3 = "0.18"
 
 # Accessibility
 accesskit = "0.24"
-accesskit_unix = "0.21"
+accesskit_unix = "0.22"
 accesskit_windows = "0.33"
 accesskit_macos = "0.26"
 windows = { version = "0.62", features = ["Win32_Foundation"] }
