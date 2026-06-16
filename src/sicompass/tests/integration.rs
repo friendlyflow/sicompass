@@ -1232,6 +1232,13 @@ fn filebrowser_show_properties_stays_in_subdir_and_persists() {
     let subdir_path = h.renderer.providers[fb_idx].current_path().to_owned();
     assert!(subdir_path.ends_with("subdir"), "path should be subdir, got {subdir_path}");
 
+    // Snapshot nested.txt's label before the toggle so we can verify a
+    // properties prefix gets added. Unix shows "rw" perms but Windows
+    // doesn't — compare against the no-properties baseline instead.
+    let nested_label_before = h.renderer.total_list.iter()
+        .find(|i| i.label.contains("nested.txt")).map(|i| i.label.clone())
+        .expect("nested.txt must be in subdir listing");
+
     // Toggle properties on.
     execute_provider_command(&mut h, "show/hide properties");
 
@@ -1241,16 +1248,22 @@ fn filebrowser_show_properties_stays_in_subdir_and_persists() {
     assert_eq!(h.renderer.providers[fb_idx].current_path(), subdir_path,
         "show/hide properties must not reset the path away from the subdir");
 
-    // The subdir listing now carries a properties prefix (permission string).
-    assert!(h.renderer.total_list.iter().any(|i| i.label.contains("nested.txt") && i.label.contains("rw")),
-        "nested.txt should show a properties prefix, labels: {:?}",
-        h.renderer.total_list.iter().map(|i| i.label.clone()).collect::<Vec<_>>());
+    // The subdir listing now carries a properties prefix.
+    let nested_label_after = h.renderer.total_list.iter()
+        .find(|i| i.label.contains("nested.txt")).map(|i| i.label.clone())
+        .expect("nested.txt should still be in listing after toggle");
+    assert!(nested_label_after.len() > nested_label_before.len(),
+        "nested.txt label should be longer after properties toggle, before: {nested_label_before:?}, after: {nested_label_after:?}");
 
     // Persistence going up: the parent listing also reflects the toggle.
     press_left(h.r());
     assert_eq!(h.renderer.current_id.depth(), 2);
-    assert!(h.renderer.total_list.iter().any(|i| i.label.contains("rw")),
-        "parent listing should also show properties after the toggle persisted");
+    let parent_alpha = h.renderer.total_list.iter()
+        .find(|i| i.label.contains("alpha.txt")).map(|i| i.label.clone())
+        .expect("alpha.txt should be in parent listing");
+    // "alpha.txt" is 9 chars; with a properties prefix the label is longer.
+    assert!(parent_alpha.len() > "alpha.txt".len() + 4,
+        "parent listing should also show properties prefix, got: {parent_alpha:?}");
 
     // Persistence going back down: navigation segment must ignore the prefix.
     to_subdir(&mut h);
