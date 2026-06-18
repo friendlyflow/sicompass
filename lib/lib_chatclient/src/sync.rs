@@ -695,11 +695,19 @@ fn persist_next_batch(config_path: &Option<std::path::PathBuf>, token: &str, fil
     use serde_json::{Map, Value};
     let Some(path) = config_path else { return };
     let _guard = lock(file_lock);
-    let mut root: Map<String, Value> = std::fs::read_to_string(path)
-        .ok()
-        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-        .and_then(|v| if let Value::Object(m) = v { Some(m) } else { None })
-        .unwrap_or_default();
+    // Read-modify-write. CRITICAL: never start from an empty map on a read or
+    // parse failure — doing so would overwrite settings.json with just this one
+    // key, wiping every other section (enabled programs, login tokens, …). An
+    // unparseable file means another writer is mid-write, so abort instead.
+    // Only a genuinely-absent file (first run) legitimately starts empty.
+    let mut root: Map<String, Value> = match std::fs::read_to_string(path) {
+        Ok(s) => match serde_json::from_str::<Value>(&s) {
+            Ok(Value::Object(m)) => m,
+            _ => return,
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Map::new(),
+        Err(_) => return,
+    };
     let section = root
         .entry("chat client".to_owned())
         .or_insert_with(|| Value::Object(Map::new()));
@@ -707,7 +715,9 @@ fn persist_next_batch(config_path: &Option<std::path::PathBuf>, token: &str, fil
         m.insert("chatSyncNextBatch".to_owned(), Value::String(token.to_owned()));
     }
     if let Ok(json) = serde_json::to_string_pretty(&Value::Object(root)) {
-        let _ = std::fs::write(path, json);
+        // Atomic write (temp + rename) so concurrent readers never observe a
+        // truncated file mid-write.
+        let _ = sicompass_sdk::platform::atomic_write(path, &json);
     }
 }
 

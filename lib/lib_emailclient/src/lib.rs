@@ -309,10 +309,22 @@ pub trait SmtpBackend: Send {
 // Settings file helpers (atomic write)
 // ---------------------------------------------------------------------------
 
-fn load_settings_json(path: &std::path::Path) -> serde_json::Value {
-    let content = std::fs::read_to_string(path).unwrap_or_default();
-    serde_json::from_str(&content)
-        .unwrap_or_else(|_| serde_json::Value::Object(Default::default()))
+/// Load the settings root for an in-place key write. Returns `Some(object)` for
+/// a parseable file, `Some(empty)` only when the file is genuinely absent (first
+/// write), and `None` when it exists but can't be read or parsed — in that case
+/// another writer is likely mid-write, so the caller MUST abort rather than
+/// rebuild from an empty object, which would wipe every other section.
+fn load_settings_json(path: &std::path::Path) -> Option<serde_json::Value> {
+    match std::fs::read_to_string(path) {
+        Ok(s) => match serde_json::from_str::<serde_json::Value>(&s) {
+            Ok(v @ serde_json::Value::Object(_)) => Some(v),
+            _ => None,
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            Some(serde_json::Value::Object(Default::default()))
+        }
+        Err(_) => None,
+    }
 }
 
 fn ensure_email_section(root: &mut serde_json::Value) -> &mut serde_json::Map<String, serde_json::Value> {
@@ -323,13 +335,12 @@ fn ensure_email_section(root: &mut serde_json::Value) -> &mut serde_json::Map<St
     obj.get_mut("email client").expect("just inserted").as_object_mut().expect("email client is object")
 }
 
-/// Write `value` as pretty JSON to `path` atomically (write to `.tmp`, then rename).
+/// Write `value` as pretty JSON to `path` atomically. Routes through the SDK's
+/// `atomic_write`, whose temp file is PID-keyed, so concurrent writers (e.g.
+/// one email provider instance per tab) don't collide on a shared `.tmp` path.
 fn atomic_write_json(path: &std::path::Path, value: &serde_json::Value) {
     let Ok(json) = serde_json::to_string_pretty(value) else { return };
-    let tmp = path.with_extension("json.tmp");
-    if std::fs::write(&tmp, &json).is_ok() {
-        let _ = std::fs::rename(&tmp, path);
-    }
+    let _ = platform::atomic_write(path, &json);
 }
 
 // ---------------------------------------------------------------------------
@@ -775,7 +786,7 @@ impl EmailClientProvider {
     /// Persist server connection fields (IMAP URL, SMTP URL, username) to settings.json.
     fn save_server_config(&self) {
         let Some(path) = self.config_path() else { return };
-        let mut root = load_settings_json(&path);
+        let Some(mut root) = load_settings_json(&path) else { return };
         let section = ensure_email_section(&mut root);
         section.insert("emailImapUrl".to_owned(), self.config.imap_url.clone().into());
         section.insert("emailSmtpUrl".to_owned(), self.config.smtp_url.clone().into());
@@ -786,7 +797,7 @@ impl EmailClientProvider {
     /// Persist OAuth tokens to settings.json.
     fn save_oauth_tokens(&self) {
         let Some(path) = self.config_path() else { return };
-        let mut root = load_settings_json(&path);
+        let Some(mut root) = load_settings_json(&path) else { return };
         let section = ensure_email_section(&mut root);
         section.insert("emailOAuthAccessToken".to_owned(), self.config.oauth_access_token.clone().into());
         section.insert("emailOAuthRefreshToken".to_owned(), self.config.oauth_refresh_token.clone().into());
