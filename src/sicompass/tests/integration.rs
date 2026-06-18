@@ -1208,8 +1208,9 @@ fn execute_provider_command(h: &mut Harness, command: &str) {
     assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::Command,
         "should be in Command mode after :");
 
-    // Find the command in the list and navigate to it
-    let idx = h.renderer.total_list.iter().position(|item| item.label == command)
+    // Find the command in the list and navigate to it. Command items render as
+    // buttons ("-b <name>"); the bare name is carried in nav_path, so match that.
+    let idx = h.renderer.total_list.iter().position(|item| item.nav_path.as_deref() == Some(command))
         .unwrap_or_else(|| panic!("command '{command}' not found in command list"));
     let cur = h.renderer.list_index;
     if idx > cur {
@@ -1809,7 +1810,9 @@ fn open_file_with_secondary_list_uses_nav_path_not_data() {
     press(h.r(), Keycode::Colon);
     assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::Command);
 
-    let idx = h.renderer.total_list.iter().position(|item| item.label == "open file with")
+    // Command items render as buttons ("-b open file with"); the bare command
+    // name is carried in nav_path, so locate by that rather than the display label.
+    let idx = h.renderer.total_list.iter().position(|item| item.nav_path.as_deref() == Some("open file with"))
         .expect("open file with command not found");
     let cur = h.renderer.list_index;
     if idx > cur {
