@@ -258,11 +258,17 @@ impl ChatClientProvider {
         use serde_json::{Map, Value};
         let Some(path) = self.config_path() else { return };
         let _guard = self.file_guard();
-        let mut root: Map<String, Value> = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-            .and_then(|v| if let Value::Object(m) = v { Some(m) } else { None })
-            .unwrap_or_default();
+        // See `sync::persist_next_batch`: abort on read/parse failure rather
+        // than starting from an empty map, which would wipe every other section
+        // of settings.json. Only a genuinely-missing file starts empty.
+        let mut root: Map<String, Value> = match std::fs::read_to_string(&path) {
+            Ok(s) => match serde_json::from_str::<Value>(&s) {
+                Ok(Value::Object(m)) => m,
+                _ => return,
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Map::new(),
+            Err(_) => return,
+        };
         let section = root
             .entry("chat client".to_owned())
             .or_insert_with(|| Value::Object(Map::new()));
@@ -273,7 +279,8 @@ impl ChatClientProvider {
             sicompass_sdk::platform::make_dirs(parent);
         }
         if let Ok(json) = serde_json::to_string_pretty(&Value::Object(root)) {
-            let _ = std::fs::write(&path, json);
+            // Atomic write so concurrent readers never see a truncated file.
+            let _ = sicompass_sdk::platform::atomic_write(&path, &json);
         }
     }
 
