@@ -156,6 +156,7 @@ static SECTIONS: &[Node] = &[
             Leaf("tutorial-leaf-024"),
             Leaf("tutorial-leaf-025"),
             Leaf("tutorial-leaf-026"),
+            Leaf("tutorial-leaf-256"),
         ],
     },
     Branch { key: "tutorial-branch-006",
@@ -167,6 +168,7 @@ static SECTIONS: &[Node] = &[
             Leaf("tutorial-leaf-031"),
             Leaf("tutorial-leaf-032"),
             Leaf("tutorial-leaf-033"),
+            Leaf("tutorial-leaf-257"),
         ],
     },
     Branch { key: "tutorial-branch-007",
@@ -893,10 +895,12 @@ mod tests {
         assert!(section_keys.contains(&"Walking the path back"));
     }
 
-    // Tabs and Windows section (added 2026-05)
+    // Tabs section (added 2026-05; renamed from "Tabs and Windows" after the
+    // Ctrl+N spawn-new-window shortcut was reverted — multi-window no longer
+    // exists, so the section and its tests no longer mention windows/Ctrl+N).
 
     #[test]
-    fn test_tabs_and_windows_section_present_under_navigation() {
+    fn test_tabs_section_present_under_navigation() {
         let mut p = provider();
         p.push_path("Navigation");
         let elems = p.fetch();
@@ -905,28 +909,87 @@ mod tests {
             .filter_map(|e| e.as_obj().map(|o| o.key.as_str()))
             .collect();
         assert!(
-            section_keys.contains(&"Tabs and Windows"),
-            "Tabs and Windows must appear under Navigation, got: {:?}",
+            section_keys.contains(&"Tabs"),
+            "Tabs must appear under Navigation, got: {:?}",
             section_keys
         );
     }
 
     #[test]
-    fn test_tabs_and_windows_section_mentions_core_shortcuts() {
+    fn test_tabs_section_mentions_core_shortcuts() {
         let mut p = provider();
-        p.set_current_path("/Navigation/Tabs and Windows");
+        p.set_current_path("/Navigation/Tabs");
         let elems = p.fetch();
         let joined: String = elems
             .iter()
             .filter_map(|e| e.as_str().map(|s| s.to_owned()))
             .collect::<Vec<_>>()
             .join("\n");
-        for token in ["Ctrl+T", "Ctrl+W", "Ctrl+Tab", "Ctrl+N"] {
+        for token in ["Ctrl+T", "Ctrl+W", "Ctrl+Tab"] {
             assert!(
                 joined.contains(token),
-                "Tabs and Windows section must mention {token}, content was:\n{joined}"
+                "Tabs section must mention {token}, content was:\n{joined}"
             );
         }
+        // Ctrl+N (spawn new window) was reverted; it must no longer appear.
+        assert!(
+            !joined.contains("Ctrl+N"),
+            "Tabs section must not mention the reverted Ctrl+N window shortcut, content was:\n{joined}"
+        );
+    }
+
+    #[test]
+    fn test_tabs_section_mentions_busy_close_confirmation() {
+        let mut p = provider();
+        p.set_current_path("/Navigation/Tabs");
+        let elems = p.fetch();
+        let joined: String = elems
+            .iter()
+            .filter_map(|e| e.as_str().map(|s| s.to_owned()))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .to_lowercase();
+        assert!(
+            joined.contains("busy") && joined.contains("confirmation"),
+            "Tabs section must describe the busy-tab close confirmation, content was:\n{joined}"
+        );
+    }
+
+    // Accessibility: per-item screen-reader language (added 2026-05)
+
+    #[test]
+    fn test_accessibility_section_mentions_per_item_language() {
+        let mut p = provider();
+        p.push_path("Accessibility");
+        let elems = p.fetch();
+        let joined: String = elems
+            .iter()
+            .filter_map(|e| e.as_str().map(|s| s.to_owned()))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .to_lowercase();
+        assert!(
+            joined.contains("language"),
+            "Accessibility section must describe per-item language detection, content was:\n{joined}"
+        );
+    }
+
+    // Editing: Enter appends only in editor providers (added 2026-06)
+
+    #[test]
+    fn test_editing_section_mentions_enter_append() {
+        let mut p = provider();
+        p.push_path("Editing");
+        let elems = p.fetch();
+        let joined: String = elems
+            .iter()
+            .filter_map(|e| e.as_str().map(|s| s.to_owned()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("Enter") && joined.to_lowercase().contains("append"),
+            "Editing section must describe Enter-to-append in editor providers, content was:\n{joined}"
+        );
     }
 
     // Updates section (added 2026-05)
