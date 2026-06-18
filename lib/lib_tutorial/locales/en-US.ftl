@@ -305,8 +305,9 @@ tutorial-leaf-242 = Happy navigating!
 tutorial-leaf-243 = Sicompass runs multiple tabs in a single window. Each tab owns its own provider instances, path, selection, and undo timeline, so switching between tabs leaves none of them touched. The settings provider is the one exception, it stays shared across every tab.
 tutorial-leaf-244 = Ctrl+T: open a new tab next to the current one. It gets a fresh set of providers mirroring the current tab (its own shell process, file browser, and so on) and starts at the root list.
 tutorial-leaf-245 = Ctrl+W: close the current tab, which shuts down its providers and kills its shell process. If the tab is busy, with a foreground command running in the terminal or a full-screen program open, a yes/no confirmation appears first. The last remaining tab cannot be closed this way, use the window close button or quit the app.
-tutorial-leaf-246 = Ctrl+Tab: switch to the next tab. Wraps to the first tab when at the end.
-tutorial-leaf-247 = Ctrl+Shift+Tab: switch to the previous tab. Wraps to the last tab when at the start.
+tutorial-leaf-246 = Ctrl+Tab: step through tabs in most-recently-used order. Hold Ctrl and tap Tab to open the tab switcher and move the highlight to the next most-recently-used tab, then release Ctrl to switch to it. A single quick Ctrl+Tab flips back to the tab you were just on.
+tutorial-leaf-247 = Ctrl+Shift+Tab: the same switcher in the other direction. Hold Ctrl and tap Shift+Tab to walk the highlight back up the most-recently-used list, then release Ctrl to commit.
+tutorial-leaf-258 = t: open the tab switcher as a sticky palette instead of a held overlay. It lists the tabs in most-recently-used order with the current tab highlighted at the top. Start typing to filter the list by name, use Up/Down to move the highlight, Enter to switch, and Escape to cancel.
 tutorial-leaf-248 = Ctrl+1 through Ctrl+9: jump directly to tab 1 through 9 by number. Out-of-range numbers are ignored.
 tutorial-leaf-249 = Each tab keeps its own live state, including its shell's working directory and any running program. Switching tabs parks the current tab's content and swaps the target tab's back in, so nothing is rebuilt or lost. Spawning separate windows is not yet available.
 

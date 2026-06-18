@@ -144,6 +144,7 @@ static SECTIONS: &[Node] = &[
                     Leaf("tutorial-leaf-245"),
                     Leaf("tutorial-leaf-246"),
                     Leaf("tutorial-leaf-247"),
+                    Leaf("tutorial-leaf-258"),
                     Leaf("tutorial-leaf-248"),
                     Leaf("tutorial-leaf-249"),
                 ],
@@ -952,6 +953,29 @@ mod tests {
         assert!(
             joined.contains("busy") && joined.contains("confirmation"),
             "Tabs section must describe the busy-tab close confirmation, content was:\n{joined}"
+        );
+    }
+
+    #[test]
+    fn test_tabs_section_describes_mru_switcher() {
+        let mut p = provider();
+        p.set_current_path("/Navigation/Tabs");
+        let elems = p.fetch();
+        let joined: String = elems
+            .iter()
+            .filter_map(|e| e.as_str().map(|s| s.to_owned()))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .to_lowercase();
+        // The `t` sticky palette and the most-recently-used ordering both need
+        // to be documented now that Ctrl+Tab opens the MRU switcher overlay.
+        assert!(
+            joined.contains("most-recently-used"),
+            "Tabs section must describe most-recently-used ordering, content was:\n{joined}"
+        );
+        assert!(
+            joined.contains("filter"),
+            "Tabs section must describe type-to-filter in the switcher, content was:\n{joined}"
         );
     }
 
