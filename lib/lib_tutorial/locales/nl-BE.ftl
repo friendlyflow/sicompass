@@ -49,7 +49,7 @@ tutorial-branch-043 = Gebeurtenissen
 tutorial-branch-044 = Zoeken
 tutorial-branch-045 = Elementtags
 tutorial-branch-046 = Volgende stappen
-tutorial-branch-047 = Tabbladen en vensters
+tutorial-branch-047 = Tabbladen
 tutorial-branch-048 = Updates
 
 # Leaf paragraphs
@@ -79,6 +79,7 @@ tutorial-leaf-023 = Sicompass heeft ingebouwde schermlezerondersteuning via Acce
 tutorial-leaf-024 = Schermlezerondersteuning is beschikbaar op alle platforms: Linux (AT-SPI), macOS (VoiceOver) en Windows (Narrator, NVDA, JAWS).
 tutorial-leaf-025 = Wanneer je omhoog, omlaag of een item binnen navigeert, wordt het huidige element automatisch door je schermlezer aangekondigd.
 tutorial-leaf-026 = Schermlezerondersteuning activeert zich automatisch zodra een schermlezer wordt gedetecteerd. Er is niets in te schakelen of te configureren.
+tutorial-leaf-256 = Elk item wordt in zijn eigen taal voorgelezen. Sicompass detecteert de taal van de tekst van elk item en tagt die voor de schermlezer, zodat een Frans bericht binnen een Engelse interface met Franse uitspraak wordt gelezen. Korte of dubbelzinnige items, en door de app gegenereerde meldingen, vallen terug op je interfacetaal.
 tutorial-leaf-027 = Sommige items in Sicompass zijn bewerkbaar. Je herkent ze aan een <input>-tag. Bestandsnamen in de bestandsverkenner of instellingswaarden kun je bijvoorbeeld direct ter plaatse bewerken.
 tutorial-leaf-028 = Druk op i om in invoegmodus te gaan. De cursor staat dan vooraan in de bewerkbare tekst en je kunt typen om die te vervangen of te wijzigen.
 tutorial-leaf-029 = Druk op a om in toevoegmodus te gaan. De cursor staat dan achteraan in de bewerkbare tekst, zodat je kunt aanvullen wat er al staat.
@@ -86,6 +87,7 @@ tutorial-leaf-030 = Tijdens het bewerken typ je gewoon om de tekst te wijzigen. 
 tutorial-leaf-031 = Druk op Enter om je bewerking te bevestigen en de wijziging te bewaren.
 tutorial-leaf-032 = Druk op Escape om de bewerking te annuleren en je wijzigingen ongedaan te maken.
 tutorial-leaf-033 = Niet alle items zijn bewerkbaar, enkel diegene die de provider met <input>-tags markeert. De bestandsverkenner maakt bestands- en mapnamen bewerkbaar. De instellingenprovider maakt configuratiewaarden bewerkbaar.
+tutorial-leaf-257 = In editorproviders, zoals de teksteditor en bewerkbare bestandsregels, voegt Enter op een element een nieuw leeg element eronder toe, klaar om in te typen. Buiten editorproviders voegt Enter nooit toe, het activeert dan het geselecteerde item, en op de wortellijst doet het niets.
 tutorial-leaf-034 = Ctrl+Z stapt terug door je acties. Ctrl+Shift+Z stapt vooruit.
 tutorial-leaf-035 = Elk tabblad houdt zijn eigen geschiedenis bij; ongedaan maken in het ene tabblad laat de andere ongemoeid.
 tutorial-leaf-036 = Druk op z om de historiekweergave te openen: een navigeerbare lijst van alles wat in dit tabblad is opgenomen, het nieuwste bovenaan. De rij met '> ' is wat de volgende Ctrl+Z ongedaan maakt. Rijen met een puntje zijn al ongedaan gemaakt en zijn wat Ctrl+Shift+Z opnieuw zal toepassen. Druk op Escape om de weergave te verlaten.
@@ -295,14 +297,14 @@ tutorial-leaf-239 = Mobiel - Android- en iOS-versies, voor dezelfde toetsenbord-
 tutorial-leaf-240 = Bijdragen zijn welkom! Of het nu code, plug-ins, documentatie of feedback is, elke bijdrage helpt het rekenen toegankelijker te maken.
 tutorial-leaf-241 = Sluit aan bij de community op Discord om in contact te komen met andere gebruikers en ontwikkelaars.
 tutorial-leaf-242 = Veel navigatieplezier!
-# Tabbladen en vensters (toegevoegd onder Navigatie)
-tutorial-leaf-243 = Sicompass draait meerdere tabbladen in één venster, en meerdere vensters naast elkaar. Elk tabblad heeft zijn eigen provider, pad, selectie en undo-tijdlijn, dus van tabblad wisselen laat geen van die toestanden onaangeroerd.
-tutorial-leaf-244 = Ctrl+T: open een nieuw tabblad naast het huidige. Het nieuwe tabblad start op de wortelmlijst van providers.
-tutorial-leaf-245 = Ctrl+W: sluit het huidige tabblad. Het vorige tabblad wordt actief. Het laatste overgebleven tabblad kan je zo niet sluiten — gebruik de sluitknop van het venster of verlaat de app.
+# Tabbladen (toegevoegd onder Navigatie)
+tutorial-leaf-243 = Sicompass draait meerdere tabbladen in één venster. Elk tabblad heeft zijn eigen providerinstanties, pad, selectie en undo-tijdlijn, dus van tabblad wisselen laat geen van die toestanden onaangeroerd. De instellingenprovider is de enige uitzondering, die blijft gedeeld over alle tabbladen.
+tutorial-leaf-244 = Ctrl+T: open een nieuw tabblad naast het huidige. Het krijgt een verse set providers die het huidige tabblad weerspiegelt (een eigen shellproces, bestandsverkenner enzovoort) en start op de wortellijst.
+tutorial-leaf-245 = Ctrl+W: sluit het huidige tabblad, waarbij zijn providers worden afgesloten en zijn shellproces wordt beëindigd. Als het tabblad bezig is, met een voorgrondopdracht in de terminal of een schermvullend programma open, verschijnt eerst een ja/nee-bevestiging. Het laatste overgebleven tabblad kan je zo niet sluiten, gebruik de sluitknop van het venster of verlaat de app.
 tutorial-leaf-246 = Ctrl+Tab: schakel naar het volgende tabblad. Wikkelt naar het eerste tabblad wanneer je aan het einde bent.
 tutorial-leaf-247 = Ctrl+Shift+Tab: schakel naar het vorige tabblad. Wikkelt naar het laatste tabblad wanneer je aan het begin bent.
 tutorial-leaf-248 = Ctrl+1 tot en met Ctrl+9: spring rechtstreeks naar tabblad 1 tot 9 op nummer. Nummers buiten bereik worden genegeerd.
-tutorial-leaf-249 = Ctrl+N: open een nieuw Sicompass-venster. Het nieuwe venster draait zelfstandig met zijn eigen tabbladen en tijdlijnen.
+tutorial-leaf-249 = Elk tabblad behoudt zijn eigen levende toestand, inclusief de werkmap van zijn shell en elk lopend programma. Van tabblad wisselen parkeert de inhoud van het huidige tabblad en wisselt die van het doeltabblad terug in, zodat niets opnieuw wordt opgebouwd of verloren gaat. Aparte vensters openen is nog niet beschikbaar.
 
 # Updates (toegevoegd onder Configuratie)
 tutorial-leaf-250 = Telkens je Sicompass start, controleert een achtergrondthread GitHub Releases op een nieuwere versie van de app. Op Windows wordt het nieuwe MSI-installatiebestand gedownload en klaargezet, zodat het later kan worden toegepast zonder opnieuw te downloaden.

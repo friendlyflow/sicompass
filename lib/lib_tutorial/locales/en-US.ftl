@@ -52,7 +52,7 @@ tutorial-branch-043 = Events
 tutorial-branch-044 = Search
 tutorial-branch-045 = Element Tags
 tutorial-branch-046 = Next Steps
-tutorial-branch-047 = Tabs and Windows
+tutorial-branch-047 = Tabs
 tutorial-branch-048 = Updates
 
 # Leaf paragraphs
@@ -82,6 +82,7 @@ tutorial-leaf-023 = Sicompass has built-in screen reader support powered by Acce
 tutorial-leaf-024 = Screen reader support is available on all platforms: Linux (AT-SPI), macOS (VoiceOver), and Windows (Narrator, NVDA, JAWS).
 tutorial-leaf-025 = When you navigate up, down, or into items, the current element is automatically announced by your screen reader.
 tutorial-leaf-026 = Screen reader support activates automatically when a screen reader is detected. There is nothing to enable or configure.
+tutorial-leaf-256 = Each item is spoken in its own language. Sicompass detects the language of every item's text and tags it for the screen reader, so a French message inside an English interface is read with French pronunciation. Short or ambiguous items, and app-generated announcements, fall back to your interface language.
 tutorial-leaf-027 = Some items in Sicompass are editable. You can tell because they contain an <input> tag. For example, file names in the file browser or setting values can be edited inline.
 tutorial-leaf-028 = Press i to enter insert mode. Your cursor is placed at the beginning of the editable text, and you can type to replace or modify it.
 tutorial-leaf-029 = Press a to enter append mode. Your cursor is placed at the end of the editable text, so you can add to what's already there.
@@ -89,6 +90,7 @@ tutorial-leaf-030 = While editing, type normally to change the text. Use Backspa
 tutorial-leaf-031 = Press Enter to confirm your edit and save the change.
 tutorial-leaf-032 = Press Escape to cancel the edit and discard your changes.
 tutorial-leaf-033 = Not all items are editable, only those marked with <input> tags by the provider. The file browser makes file and directory names editable. The settings provider makes configuration values editable.
+tutorial-leaf-257 = In editor providers, like the text editor and editable file lines, pressing Enter on an element appends a new empty element below it, ready to type into. Outside editor providers Enter never appends, it activates the selected item instead, and at the root list it does nothing.
 tutorial-leaf-034 = Ctrl+Z walks back through your actions. Ctrl+Shift+Z walks forward.
 tutorial-leaf-035 = Each tab keeps its own history, undoing in one tab leaves the others alone.
 tutorial-leaf-036 = Press z to open the history view: a navigable list of everything recorded in this tab, newest at the top. The row marked '> ' is what the next Ctrl+Z will undo. Rows marked with a dot have already been undone and are what Ctrl+Shift+Z will redo. Press Escape to leave the view.
@@ -299,14 +301,14 @@ tutorial-leaf-240 = Contributions are welcome! Whether it's code, plugins, docum
 tutorial-leaf-241 = Join the community on Discord to connect with other users and developers.
 tutorial-leaf-242 = Happy navigating!
 
-# Tabs and Windows (added under Navigation)
-tutorial-leaf-243 = Sicompass runs multiple tabs in a single window, and multiple windows side by side. Each tab keeps its own provider, path, selection, and undo timeline, so switching between tabs leaves none of them touched.
-tutorial-leaf-244 = Ctrl+T: open a new tab next to the current one. The new tab starts at the root list of providers.
-tutorial-leaf-245 = Ctrl+W: close the current tab. The previous tab becomes active. The last remaining tab cannot be closed this way, use the window close button or quit the app.
+# Tabs (added under Navigation)
+tutorial-leaf-243 = Sicompass runs multiple tabs in a single window. Each tab owns its own provider instances, path, selection, and undo timeline, so switching between tabs leaves none of them touched. The settings provider is the one exception, it stays shared across every tab.
+tutorial-leaf-244 = Ctrl+T: open a new tab next to the current one. It gets a fresh set of providers mirroring the current tab (its own shell process, file browser, and so on) and starts at the root list.
+tutorial-leaf-245 = Ctrl+W: close the current tab, which shuts down its providers and kills its shell process. If the tab is busy, with a foreground command running in the terminal or a full-screen program open, a yes/no confirmation appears first. The last remaining tab cannot be closed this way, use the window close button or quit the app.
 tutorial-leaf-246 = Ctrl+Tab: switch to the next tab. Wraps to the first tab when at the end.
 tutorial-leaf-247 = Ctrl+Shift+Tab: switch to the previous tab. Wraps to the last tab when at the start.
 tutorial-leaf-248 = Ctrl+1 through Ctrl+9: jump directly to tab 1 through 9 by number. Out-of-range numbers are ignored.
-tutorial-leaf-249 = Ctrl+N: spawn a new Sicompass window. The new window runs independently with its own set of tabs and timelines.
+tutorial-leaf-249 = Each tab keeps its own live state, including its shell's working directory and any running program. Switching tabs parks the current tab's content and swaps the target tab's back in, so nothing is rebuilt or lost. Spawning separate windows is not yet available.
 
 # Updates (added under Configuration)
 tutorial-leaf-250 = Each time you launch Sicompass, a background thread checks GitHub Releases for a newer version of the app. On Windows, the new MSI installer is downloaded and staged so it can be applied without a fresh download.

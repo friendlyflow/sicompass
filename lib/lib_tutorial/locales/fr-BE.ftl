@@ -49,7 +49,7 @@ tutorial-branch-043 = Événements
 tutorial-branch-044 = Recherche
 tutorial-branch-045 = Balises d'élément
 tutorial-branch-046 = Étapes suivantes
-tutorial-branch-047 = Onglets et fenêtres
+tutorial-branch-047 = Onglets
 tutorial-branch-048 = Mises à jour
 
 # Leaf paragraphs
@@ -79,6 +79,7 @@ tutorial-leaf-023 = Sicompass intègre une prise en charge des lecteurs d'écran
 tutorial-leaf-024 = La prise en charge des lecteurs d'écran est disponible sur toutes les plateformes : Linux (AT-SPI), macOS (VoiceOver) et Windows (Narrator, NVDA, JAWS).
 tutorial-leaf-025 = Quand vous montez, descendez ou entrez dans des éléments, l'élément courant est automatiquement annoncé par votre lecteur d'écran.
 tutorial-leaf-026 = La prise en charge des lecteurs d'écran s'active automatiquement dès qu'un lecteur d'écran est détecté. Il n'y a rien à activer ou configurer.
+tutorial-leaf-256 = Chaque élément est lu dans sa propre langue. Sicompass détecte la langue du texte de chaque élément et l'étiquette pour le lecteur d'écran, de sorte qu'un message français dans une interface anglaise est lu avec la prononciation française. Les éléments courts ou ambigus, ainsi que les annonces générées par l'application, reviennent à la langue de votre interface.
 tutorial-leaf-027 = Certains éléments dans Sicompass sont modifiables. Vous le reconnaissez à la balise <input>. Par exemple, les noms de fichiers dans le navigateur de fichiers ou les valeurs de paramètres peuvent être édités sur place.
 tutorial-leaf-028 = Appuyez sur i pour entrer en mode insertion. Le curseur se place au début du texte modifiable, et vous pouvez taper pour le remplacer ou le modifier.
 tutorial-leaf-029 = Appuyez sur a pour entrer en mode ajout. Le curseur se place à la fin du texte modifiable, pour que vous puissiez ajouter à ce qui est déjà là.
@@ -86,6 +87,7 @@ tutorial-leaf-030 = Pendant l'édition, tapez normalement pour modifier le texte
 tutorial-leaf-031 = Appuyez sur Enter pour confirmer votre modification et l'enregistrer.
 tutorial-leaf-032 = Appuyez sur Escape pour annuler l'édition et abandonner vos modifications.
 tutorial-leaf-033 = Tous les éléments ne sont pas modifiables ; seuls ceux que le provider marque avec des balises <input> le sont. Le navigateur de fichiers rend les noms de fichiers et de dossiers modifiables. Le provider de paramètres rend les valeurs de configuration modifiables.
+tutorial-leaf-257 = Dans les providers d'édition, comme l'éditeur de texte et les lignes de fichier modifiables, appuyer sur Enter sur un élément ajoute un nouvel élément vide en dessous, prêt à être saisi. En dehors des providers d'édition, Enter n'ajoute jamais, elle active l'élément sélectionné à la place, et sur la liste racine elle ne fait rien.
 tutorial-leaf-034 = Ctrl+Z remonte vos actions. Ctrl+Shift+Z les rejoue.
 tutorial-leaf-035 = Chaque onglet garde son propre historique : annuler dans un onglet n'affecte pas les autres.
 tutorial-leaf-036 = Appuyez sur z pour ouvrir la vue historique : une liste navigable de tout ce qui est enregistré dans cet onglet, le plus récent en haut. La ligne marquée '> ' est ce que le prochain Ctrl+Z annulera. Les lignes marquées d'un point ont déjà été annulées et seront refaites par Ctrl+Shift+Z. Appuyez sur Escape pour quitter la vue.
@@ -295,14 +297,14 @@ tutorial-leaf-239 = Mobile - versions Android et iOS, apportant la même expéri
 tutorial-leaf-240 = Les contributions sont les bienvenues ! Que ce soit du code, des plug-ins, de la documentation ou des retours, chaque contribution aide à rendre l'informatique plus accessible.
 tutorial-leaf-241 = Rejoignez la communauté sur Discord pour échanger avec d'autres utilisateurs et développeurs.
 tutorial-leaf-242 = Bonne navigation !
-# Onglets et fenêtres (ajouté sous Navigation)
-tutorial-leaf-243 = Sicompass exécute plusieurs onglets dans une seule fenêtre, et plusieurs fenêtres côte à côte. Chaque onglet garde son propre provider, chemin, sélection et chronologie d'annulation, donc changer d'onglet n'affecte aucun de ces états.
-tutorial-leaf-244 = Ctrl+T : ouvrir un nouvel onglet à côté de l'onglet courant. Le nouvel onglet commence à la liste racine des providers.
-tutorial-leaf-245 = Ctrl+W : fermer l'onglet courant. L'onglet précédent devient actif. Le dernier onglet restant ne peut pas être fermé ainsi, utilisez le bouton de fermeture de la fenêtre ou quittez l'application.
+# Onglets (ajouté sous Navigation)
+tutorial-leaf-243 = Sicompass exécute plusieurs onglets dans une seule fenêtre. Chaque onglet possède ses propres instances de provider, son chemin, sa sélection et sa chronologie d'annulation, donc changer d'onglet n'affecte aucun de ces états. Le provider de paramètres est la seule exception, il reste partagé entre tous les onglets.
+tutorial-leaf-244 = Ctrl+T : ouvrir un nouvel onglet à côté de l'onglet courant. Il reçoit un jeu de providers neuf calqué sur l'onglet courant (son propre processus shell, navigateur de fichiers, etc.) et commence à la liste racine.
+tutorial-leaf-245 = Ctrl+W : fermer l'onglet courant, ce qui arrête ses providers et tue son processus shell. Si l'onglet est occupé, avec une commande au premier plan dans le terminal ou un programme plein écran ouvert, une confirmation oui/non apparaît d'abord. Le dernier onglet restant ne peut pas être fermé ainsi, utilisez le bouton de fermeture de la fenêtre ou quittez l'application.
 tutorial-leaf-246 = Ctrl+Tab : passer à l'onglet suivant. Revient au premier onglet une fois arrivé à la fin.
 tutorial-leaf-247 = Ctrl+Shift+Tab : passer à l'onglet précédent. Revient au dernier onglet une fois arrivé au début.
 tutorial-leaf-248 = Ctrl+1 à Ctrl+9 : sauter directement à l'onglet 1 à 9 par son numéro. Les numéros hors plage sont ignorés.
-tutorial-leaf-249 = Ctrl+N : ouvrir une nouvelle fenêtre Sicompass. La nouvelle fenêtre s'exécute indépendamment avec son propre jeu d'onglets et de chronologies.
+tutorial-leaf-249 = Chaque onglet conserve son propre état vivant, y compris le répertoire de travail de son shell et tout programme en cours. Changer d'onglet met en attente le contenu de l'onglet courant et réintègre celui de l'onglet cible, donc rien n'est reconstruit ou perdu. L'ouverture de fenêtres séparées n'est pas encore disponible.
 
 # Mises à jour (ajouté sous Configuration)
 tutorial-leaf-250 = Chaque fois que vous lancez Sicompass, un fil en arrière-plan interroge GitHub Releases pour une nouvelle version de l'application. Sous Windows, le nouvel installeur MSI est téléchargé et préparé pour pouvoir être appliqué sans téléchargement supplémentaire.

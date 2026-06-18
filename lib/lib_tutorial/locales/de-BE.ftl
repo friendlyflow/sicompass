@@ -49,7 +49,7 @@ tutorial-branch-043 = Ereignisse
 tutorial-branch-044 = Suche
 tutorial-branch-045 = Element-Tags
 tutorial-branch-046 = Nächste Schritte
-tutorial-branch-047 = Tabs und Fenster
+tutorial-branch-047 = Tabs
 tutorial-branch-048 = Aktualisierungen
 
 # Leaf paragraphs
@@ -79,6 +79,7 @@ tutorial-leaf-023 = Sicompass enthält Screenreader-Unterstützung über AccessK
 tutorial-leaf-024 = Screenreader-Unterstützung ist auf allen Plattformen verfügbar: Linux (AT-SPI), macOS (VoiceOver) und Windows (Narrator, NVDA, JAWS).
 tutorial-leaf-025 = Wenn Sie nach oben, unten oder in Elemente hineinnavigieren, wird das aktuelle Element automatisch von Ihrem Screenreader angesagt.
 tutorial-leaf-026 = Screenreader-Unterstützung aktiviert sich automatisch, sobald ein Screenreader erkannt wird. Es gibt nichts einzuschalten oder zu konfigurieren.
+tutorial-leaf-256 = Jedes Element wird in seiner eigenen Sprache vorgelesen. Sicompass erkennt die Sprache des Textes jedes Elements und kennzeichnet sie für den Screenreader, sodass eine französische Nachricht in einer englischen Oberfläche mit französischer Aussprache gelesen wird. Kurze oder mehrdeutige Elemente sowie von der App erzeugte Ansagen fallen auf Ihre Oberflächensprache zurück.
 tutorial-leaf-027 = Einige Elemente in Sicompass sind bearbeitbar. Sie erkennen sie am <input>-Tag. Zum Beispiel Dateinamen im Dateimanager oder Einstellungswerte können vor Ort bearbeitet werden.
 tutorial-leaf-028 = Drücken Sie i, um in den Einfügemodus zu wechseln. Der Cursor steht am Anfang des bearbeitbaren Textes, und Sie können tippen, um ihn zu ersetzen oder zu ändern.
 tutorial-leaf-029 = Drücken Sie a, um in den Anhängemodus zu wechseln. Der Cursor steht am Ende des bearbeitbaren Textes, sodass Sie an das Bestehende anhängen können.
@@ -86,6 +87,7 @@ tutorial-leaf-030 = Tippen Sie beim Bearbeiten normal, um den Text zu ändern. M
 tutorial-leaf-031 = Drücken Sie Enter, um die Bearbeitung zu bestätigen und die Änderung zu speichern.
 tutorial-leaf-032 = Drücken Sie Escape, um die Bearbeitung abzubrechen und Ihre Änderungen zu verwerfen.
 tutorial-leaf-033 = Nicht alle Elemente sind bearbeitbar — nur solche, die der Provider mit <input>-Tags markiert. Der Dateimanager macht Datei- und Verzeichnisnamen bearbeitbar. Der Einstellungs-Provider macht Konfigurationswerte bearbeitbar.
+tutorial-leaf-257 = In Editor-Providern, wie dem Texteditor und bearbeitbaren Dateizeilen, fügt Enter auf einem Element ein neues leeres Element darunter ein, bereit zur Eingabe. Außerhalb von Editor-Providern fügt Enter nie etwas an, sondern aktiviert stattdessen das ausgewählte Element, und in der Wurzelliste tut es nichts.
 tutorial-leaf-034 = Strg+Z geht Ihre Aktionen rückwärts durch. Strg+Umschalt+Z geht vorwärts.
 tutorial-leaf-035 = Jeder Reiter hat seinen eigenen Verlauf — Rückgängigmachen in einem Reiter lässt die anderen unverändert.
 tutorial-leaf-036 = Drücken Sie z, um die Verlaufsansicht zu öffnen: eine navigierbare Liste alles in diesem Reiter aufgezeichneten, das Neueste oben. Die Zeile mit '> ' ist, was das nächste Strg+Z rückgängig macht. Zeilen mit einem Punkt wurden bereits rückgängig gemacht und werden mit Strg+Umschalt+Z wiederhergestellt. Drücken Sie Escape, um die Ansicht zu verlassen.
@@ -295,14 +297,14 @@ tutorial-leaf-239 = Mobil - Android- und iOS-Versionen, die dieselbe tastaturges
 tutorial-leaf-240 = Beiträge sind willkommen! Ob Code, Plug-ins, Dokumentation oder Rückmeldungen — jeder Beitrag hilft, das Rechnen zugänglicher zu machen.
 tutorial-leaf-241 = Treten Sie der Community auf Discord bei, um sich mit anderen Benutzern und Entwicklern auszutauschen.
 tutorial-leaf-242 = Viel Freude beim Navigieren!
-# Tabs und Fenster (unter Navigation hinzugefügt)
-tutorial-leaf-243 = Sicompass läuft mit mehreren Tabs in einem Fenster und mehreren Fenstern nebeneinander. Jeder Tab behält seinen eigenen Provider, Pfad, seine Auswahl und seine Undo-Zeitleiste, sodass das Wechseln des Tabs keinen davon berührt.
-tutorial-leaf-244 = Strg+T: einen neuen Tab neben dem aktuellen öffnen. Der neue Tab startet bei der Wurzelliste der Provider.
-tutorial-leaf-245 = Strg+W: den aktuellen Tab schließen. Der vorherige Tab wird aktiv. Der letzte verbleibende Tab kann so nicht geschlossen werden, verwenden Sie die Schließen-Schaltfläche des Fensters oder beenden Sie die App.
+# Tabs (unter Navigation hinzugefügt)
+tutorial-leaf-243 = Sicompass läuft mit mehreren Tabs in einem Fenster. Jeder Tab besitzt seine eigenen Provider-Instanzen, seinen Pfad, seine Auswahl und seine Undo-Zeitleiste, sodass das Wechseln des Tabs keinen davon berührt. Der Einstellungs-Provider ist die einzige Ausnahme, er bleibt über alle Tabs hinweg geteilt.
+tutorial-leaf-244 = Strg+T: einen neuen Tab neben dem aktuellen öffnen. Er erhält einen frischen Satz Provider nach dem Vorbild des aktuellen Tabs (einen eigenen Shell-Prozess, Dateimanager und so weiter) und startet bei der Wurzelliste.
+tutorial-leaf-245 = Strg+W: den aktuellen Tab schließen, wodurch seine Provider beendet und sein Shell-Prozess beendet wird. Wenn der Tab beschäftigt ist, mit einem Vordergrundbefehl im Terminal oder einem geöffneten Vollbildprogramm, erscheint zuerst eine Ja/Nein-Bestätigung. Der letzte verbleibende Tab kann so nicht geschlossen werden, verwenden Sie die Schließen-Schaltfläche des Fensters oder beenden Sie die App.
 tutorial-leaf-246 = Strg+Tab: zum nächsten Tab wechseln. Springt zum ersten Tab zurück, wenn am Ende angekommen.
 tutorial-leaf-247 = Strg+Umschalt+Tab: zum vorherigen Tab wechseln. Springt zum letzten Tab zurück, wenn am Anfang angekommen.
 tutorial-leaf-248 = Strg+1 bis Strg+9: direkt zu Tab 1 bis 9 nach Nummer springen. Nummern außerhalb des Bereichs werden ignoriert.
-tutorial-leaf-249 = Strg+N: ein neues Sicompass-Fenster öffnen. Das neue Fenster läuft unabhängig mit eigenen Tabs und Zeitleisten.
+tutorial-leaf-249 = Jeder Tab behält seinen eigenen lebendigen Zustand, einschließlich des Arbeitsverzeichnisses seiner Shell und jedes laufenden Programms. Beim Tabwechsel wird der Inhalt des aktuellen Tabs geparkt und der des Zieltabs wieder eingeblendet, sodass nichts neu aufgebaut oder verloren geht. Das Öffnen separater Fenster ist noch nicht verfügbar.
 
 # Aktualisierungen (unter Konfiguration hinzugefügt)
 tutorial-leaf-250 = Jedes Mal, wenn Sie Sicompass starten, prüft ein Hintergrund-Thread GitHub Releases auf eine neuere Version der App. Unter Windows wird der neue MSI-Installer heruntergeladen und vorbereitet, sodass er später ohne erneuten Download angewendet werden kann.
