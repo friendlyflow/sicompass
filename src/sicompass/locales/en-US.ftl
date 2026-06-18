@@ -76,6 +76,8 @@ hint-ctrl-shift-tab-prev-tab = Ctrl+Shift+Tab Prev tab
 hint-ctrl-shift-z-redo = Ctrl+Shift+Z Redo
 hint-ctrl-t-new-tab = Ctrl+T New tab
 hint-ctrl-tab-next-tab = Ctrl+Tab Next tab
+hint-t-switch-tab = t      Switch tab
+hint-enter-switch = Enter  Switch
 hint-ctrl-u-install-update = Ctrl+U Install update
 hint-ctrl-v-paste = Ctrl+V Paste
 hint-ctrl-w-close-tab = Ctrl+W Close tab
@@ -98,6 +100,7 @@ mode-input-search = input search
 mode-dashboard = dashboard
 mode-meta = meta
 mode-timeline = timeline
+mode-tab-switcher = tab switcher
 
 # Screen-reader announcements composed at runtime. Parameters:
 #   $idx, $total — 1-based position and tab count

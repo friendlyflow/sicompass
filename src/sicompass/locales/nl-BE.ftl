@@ -74,6 +74,8 @@ hint-ctrl-shift-tab-prev-tab = Ctrl+Shift+Tab Vorig tabblad
 hint-ctrl-shift-z-redo = Ctrl+Shift+Z Opnieuw
 hint-ctrl-t-new-tab = Ctrl+T Nieuw tabblad
 hint-ctrl-tab-next-tab = Ctrl+Tab Volg. tabblad
+hint-t-switch-tab = t      Wissel tabblad
+hint-enter-switch = Enter  Wissel
 hint-ctrl-u-install-update = Ctrl+U Update install.
 hint-ctrl-v-paste = Ctrl+V Plakken
 hint-ctrl-w-close-tab = Ctrl+W Sluit tabblad
@@ -95,6 +97,7 @@ mode-input-search = invoer zoeken
 mode-dashboard = dashboard
 mode-meta = meta
 mode-timeline = tijdlijn
+mode-tab-switcher = tabbladwisselaar
 
 # Screen-reader announcements
 speak-tab-change = tabblad { $idx }/{ $total }: { $label }

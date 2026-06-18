@@ -127,6 +127,11 @@ pub enum Coordinate {
     /// are still busy (e.g. a terminal running a foreground command). The list
     /// holds two `<button>` options; Enter activates the highlighted one.
     ConfirmCloseTab,
+    /// MRU tab switcher overlay (VS Code style). Lists open tabs in
+    /// most-recently-used order with `-b` button prefixes. Entered by the `t`
+    /// key (sticky: Enter confirms, Escape cancels) or by held Ctrl+Tab /
+    /// Ctrl+Shift+Tab (releasing Ctrl commits, see `tab_switcher_held`).
+    TabSwitcher,
 }
 
 impl Coordinate {
@@ -155,6 +160,7 @@ impl Coordinate {
             Coordinate::Meta => "meta",
             Coordinate::TimelineView => "timeline",
             Coordinate::ConfirmCloseTab => "confirm close tab",
+            Coordinate::TabSwitcher => "tab switcher",
         }
     }
 
@@ -180,6 +186,7 @@ impl Coordinate {
             Coordinate::Meta => "mode-meta",
             Coordinate::TimelineView => "mode-timeline",
             Coordinate::ConfirmCloseTab => "mode-confirm-close-tab",
+            Coordinate::TabSwitcher => "mode-tab-switcher",
         };
         let resolved = sicompass_sdk::localize::t(key);
         if resolved == key { self.as_str().to_owned() } else { resolved }
@@ -552,6 +559,15 @@ pub struct AppRenderer {
     /// is always equal to `tabs.len()`. `tab_timelines[active_tab]` is the
     /// timeline that ctrl-Z / ctrl-Shift-Z operate on.
     pub tab_timelines: Vec<Timeline>,
+    /// Most-recently-used tab order (VS Code style switcher). Holds every tab
+    /// index exactly once, most-recent first; `tab_mru[0]` is always the active
+    /// tab. Maintained at the three `tabs` mutation sites (new/close/switch);
+    /// runtime-only, not persisted. Drives the `Coordinate::TabSwitcher` list.
+    pub tab_mru: Vec<usize>,
+    /// True while a `Coordinate::TabSwitcher` overlay was opened by held
+    /// Ctrl+Tab / Ctrl+Shift+Tab (releasing Ctrl commits the highlighted tab).
+    /// False for the sticky `t`-key palette (Enter commits, Escape cancels).
+    pub tab_switcher_held: bool,
 
     /// Set by `walk_back` / `walk_forward` while applying an undo/redo so
     /// `record_entry` can ignore side-effect emissions (e.g. a Create undo
@@ -691,6 +707,8 @@ impl AppRenderer {
             tabs: vec![TabSnapshot::nav_only(current_id_clone, String::new())],
             active_tab: 0,
             tab_timelines: vec![Timeline::new()],
+            tab_mru: vec![0],
+            tab_switcher_held: false,
             in_history_action: false,
             update_state: None,
             update_event_rx: None,
@@ -746,6 +764,28 @@ impl AppRenderer {
     /// parked providers. No FFON rebuild is needed — each tab's provider
     /// instances retain their own live state. No-op if `target` is out of range
     /// or already active.
+    /// Move `idx` to the front of the MRU order (most-recently-used). Called by
+    /// user-driven tab switches so `tab_mru[0]` tracks the active tab. No-op for
+    /// an out-of-range index.
+    pub fn touch_mru(&mut self, idx: usize) {
+        if idx >= self.tabs.len() { return; }
+        self.tab_mru.retain(|&x| x != idx);
+        self.tab_mru.insert(0, idx);
+    }
+
+    /// Reset the MRU order to a default front-first sequence with `active` at
+    /// the front, then `0..len` skipping `active`. Used when the tab set is
+    /// rebuilt wholesale (cold-start restore), where no real visit history
+    /// exists yet.
+    pub fn reset_mru_default(&mut self, active: usize) {
+        let mut mru = Vec::with_capacity(self.tabs.len());
+        if active < self.tabs.len() { mru.push(active); }
+        for i in 0..self.tabs.len() {
+            if i != active { mru.push(i); }
+        }
+        self.tab_mru = mru;
+    }
+
     pub fn switch_to_tab(&mut self, target: usize) {
         if target >= self.tabs.len() || target == self.active_tab { return; }
         let active = self.active_tab;

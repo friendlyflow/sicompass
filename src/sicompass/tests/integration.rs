@@ -6059,29 +6059,189 @@ fn ctrl_w_closes_index_zero_keeps_zero() {
     assert_eq!(h.renderer.active_tab, 0);
 }
 
+/// Assert the MRU invariants: parallel length, every tab index present exactly
+/// once, and the front entry is the active tab.
+fn assert_mru_valid(r: &AppRenderer) {
+    assert_eq!(r.tab_mru.len(), r.tabs.len(), "tab_mru parallel to tabs");
+    let mut sorted = r.tab_mru.clone();
+    sorted.sort_unstable();
+    assert_eq!(
+        sorted,
+        (0..r.tabs.len()).collect::<Vec<_>>(),
+        "tab_mru is a permutation of tab indices"
+    );
+    assert_eq!(r.tab_mru[0], r.active_tab, "tab_mru front is the active tab");
+}
+
 #[test]
-fn ctrl_tab_cycles_with_wraparound() {
+fn mru_order_tracks_visits() {
+    let mut h = Harness::new();
+    press_ctrl(h.r(), Keycode::T); // active 1, mru [1,0]
+    press_ctrl(h.r(), Keycode::T); // active 2, mru [2,1,0]
+    assert_eq!(h.renderer.tab_mru, vec![2, 1, 0]);
+    assert_mru_valid(&h.renderer);
+
+    // Jump to tab 0 — it becomes most-recent, the rest keep their order.
+    press_ctrl(h.r(), Keycode::_1);
+    assert_eq!(h.renderer.active_tab, 0);
+    assert_eq!(h.renderer.tab_mru, vec![0, 2, 1]);
+    assert_mru_valid(&h.renderer);
+}
+
+#[test]
+fn closing_tab_keeps_mru_valid() {
     let mut h = Harness::new();
     press_ctrl(h.r(), Keycode::T);
-    press_ctrl(h.r(), Keycode::T);
-    assert_eq!(h.renderer.active_tab, 2);
+    press_ctrl(h.r(), Keycode::T); // 3 tabs, active 2, mru [2,1,0]
 
-    press_ctrl(h.r(), Keycode::Tab);
+    press_ctrl(h.r(), Keycode::W); // close active 2
+    assert_eq!(h.renderer.tabs.len(), 2);
+    assert_mru_valid(&h.renderer);
+}
+
+#[test]
+fn t_opens_switcher_with_button_prefixes_in_mru_order() {
+    let mut h = Harness::new();
+    press_ctrl(h.r(), Keycode::T);
+    press_ctrl(h.r(), Keycode::T); // mru [2,1,0]
+
+    press(h.r(), Keycode::T);
+    assert_eq!(h.renderer.coordinate, Coordinate::TabSwitcher);
+    // Items follow MRU order, carry the real tab index in their id, and render
+    // with the `-b` button prefix.
+    let ids: Vec<usize> = h.renderer.total_list.iter()
+        .map(|it| it.id.last().unwrap()).collect();
+    assert_eq!(ids, vec![2, 1, 0]);
+    assert!(h.renderer.total_list.iter().all(|it| it.label.starts_with("-b ")));
+    // Highlight starts on the previously-used tab (2nd item, VS Code style).
+    assert_eq!(h.renderer.list_index, 1);
+}
+
+#[test]
+fn t_switcher_enter_confirms_highlighted_tab() {
+    let mut h = Harness::new();
+    press_ctrl(h.r(), Keycode::T);
+    press_ctrl(h.r(), Keycode::T); // active 2, mru [2,1,0]
+
+    press(h.r(), Keycode::T);       // highlight previously-used tab = 1
+    press_enter(h.r());
+
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
+    assert_eq!(h.renderer.active_tab, 1);
+    assert_eq!(h.renderer.tab_mru, vec![1, 2, 0]);
+}
+
+#[test]
+fn t_switcher_escape_cancels_without_switching() {
+    let mut h = Harness::new();
+    press_ctrl(h.r(), Keycode::T);
+    press_ctrl(h.r(), Keycode::T); // active 2
+
+    press(h.r(), Keycode::T);
+    press_escape(h.r());
+
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
+    assert_eq!(h.renderer.active_tab, 2, "escape must not change the tab");
+}
+
+#[test]
+fn t_switcher_arrows_navigate_then_enter() {
+    let mut h = Harness::new();
+    press_ctrl(h.r(), Keycode::T);
+    press_ctrl(h.r(), Keycode::T); // active 2, mru [2,1,0]
+
+    press(h.r(), Keycode::T);    // index 1 → tab 1
+    press_down(h.r());           // index 2 → tab 0
+    press_enter(h.r());
 
     assert_eq!(h.renderer.active_tab, 0);
 }
 
 #[test]
-fn ctrl_shift_tab_prev_with_wraparound() {
+fn ctrl_tab_quick_switch_to_previous_tab() {
     let mut h = Harness::new();
     press_ctrl(h.r(), Keycode::T);
+    press_ctrl(h.r(), Keycode::T); // active 2, mru [2,1,0]
+
+    // Held Ctrl+Tab opens the switcher highlighting the previous tab; releasing
+    // Ctrl (simulated) commits.
+    press_ctrl(h.r(), Keycode::Tab);
+    assert_eq!(h.renderer.coordinate, Coordinate::TabSwitcher);
+    sicompass::handlers::handle_tab_switcher_commit(h.r());
+
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
+    assert_eq!(h.renderer.active_tab, 1);
+    assert_mru_valid(&h.renderer);
+}
+
+#[test]
+fn ctrl_tab_advances_then_commits() {
+    let mut h = Harness::new();
     press_ctrl(h.r(), Keycode::T);
-    h.renderer.active_tab = 0;
-    h.renderer.current_id = h.renderer.tabs[0].current_id.clone();
+    press_ctrl(h.r(), Keycode::T); // active 2, mru [2,1,0]
 
+    press_ctrl(h.r(), Keycode::Tab); // open, index 1 → tab 1
+    press_ctrl(h.r(), Keycode::Tab); // index 2 → tab 0
+    sicompass::handlers::handle_tab_switcher_commit(h.r());
+
+    assert_eq!(h.renderer.active_tab, 0);
+}
+
+#[test]
+fn ctrl_shift_tab_opens_at_least_recent() {
+    let mut h = Harness::new();
+    press_ctrl(h.r(), Keycode::T);
+    press_ctrl(h.r(), Keycode::T); // active 2, mru [2,1,0]
+
+    // Opening with Ctrl+Shift+Tab highlights the last (least-recent) tab.
     press_ctrl_shift(h.r(), Keycode::Tab);
+    assert_eq!(h.renderer.coordinate, Coordinate::TabSwitcher);
+    assert_eq!(h.renderer.list_index, 2);
+    sicompass::handlers::handle_tab_switcher_commit(h.r());
 
-    assert_eq!(h.renderer.active_tab, 2);
+    assert_eq!(h.renderer.active_tab, 0);
+}
+
+#[test]
+fn commit_is_noop_for_sticky_t_palette() {
+    let mut h = Harness::new();
+    press_ctrl(h.r(), Keycode::T); // active 1
+
+    press(h.r(), Keycode::T); // sticky entry (not held)
+    // A stray Ctrl release must not commit the sticky palette.
+    sicompass::handlers::handle_tab_switcher_commit(h.r());
+    assert_eq!(h.renderer.coordinate, Coordinate::TabSwitcher,
+        "sticky palette stays open on Ctrl release");
+}
+
+#[test]
+fn t_is_noop_with_single_tab() {
+    let mut h = Harness::new();
+    press(h.r(), Keycode::T);
+    assert_eq!(h.renderer.coordinate, Coordinate::General,
+        "t does nothing with only one tab");
+}
+
+#[test]
+fn switcher_labels_parked_settings_tab_by_name() {
+    let mut h = Harness::new();
+    let settings_idx = h.provider_idx("settings").expect("settings provider exists");
+    let settings_name = h.renderer.providers[settings_idx].display_name().to_owned();
+
+    // New tab, point it at the shared settings provider, then switch away so the
+    // settings tab becomes parked (settings is never parked into a tab's content).
+    press_ctrl(h.r(), Keycode::T); // active 1
+    navigate_to_provider(h.r(), settings_idx);
+    press_ctrl(h.r(), Keycode::_1); // back to tab 0; tab 1 (settings) now parked
+
+    press(h.r(), Keycode::T);
+    let item = h.renderer.total_list.iter()
+        .find(|it| it.id.last() == Some(1))
+        .expect("parked settings tab present in switcher");
+    assert!(item.label.contains(&settings_name),
+        "parked settings tab must show its name, got: {:?}", item.label);
+    assert!(!item.label.contains('—'),
+        "parked settings tab must not fall back to a dash, got: {:?}", item.label);
 }
 
 #[test]
@@ -6281,10 +6441,13 @@ fn tab_switch_announces_via_pending_announcement() {
     let mut h = Harness::new();
     press_ctrl(h.r(), Keycode::T);
     h.renderer.pending_announcement = None;
+    // Held Ctrl+Tab opens the switcher and commits on Ctrl release, producing
+    // the "tab N/M: <label>" announcement.
     press_ctrl(h.r(), Keycode::Tab);
+    sicompass::handlers::handle_tab_switcher_commit(h.r());
 
     let raw = h.renderer.pending_announcement.as_ref()
-        .expect("Ctrl+Tab must produce an announcement");
+        .expect("Ctrl+Tab commit must produce an announcement");
     let text = strip_announcement_sentinel(raw);
     assert!(text.starts_with("tab "), "announcement should start with 'tab ', got: {text:?}");
     assert!(text.contains("/"), "announcement should contain N/M, got: {text:?}");
