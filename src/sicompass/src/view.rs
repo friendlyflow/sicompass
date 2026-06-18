@@ -3,7 +3,7 @@
 //! Routes SDL events to key handlers, updates the window title with
 //! navigation state, and drives the Vulkan render loop.
 
-use crate::app_state::{AppRenderer, AppState, Coordinate, History, Task};
+use crate::app_state::{AppRenderer, AppState, CommandPhase, Coordinate, History, Task};
 use crate::handlers;
 use crate::render;
 use sdl3::event::{Event, WindowEvent};
@@ -463,13 +463,18 @@ fn update_view(app: &mut AppState) {
         get_radio_type(label) != RadioType::None || get_checkbox_type(label) != CheckboxType::None
     });
 
-    // Command/meta mode items are plain strings without a type-indicator prefix,
-    // so skip column alignment there (matches C render.c which renders all items
-    // at a fixed itemX with no prefix-column offset).
+    // Meta/timeline items are plain strings without a type-indicator prefix, so
+    // skip column alignment there (matches C render.c which renders all items at a
+    // fixed itemX with no prefix-column offset). The colon command palette
+    // (`Command` + `CommandPhase::None`) is a button list: its items carry a `-b `
+    // prefix and render through the normal prefix-column path. The secondary
+    // command list (`CommandPhase::Provider`, e.g. "open with") has no prefix and
+    // stays flat.
     let is_flat_list = matches!(
         app.renderer.coordinate,
-        Coordinate::Command | Coordinate::Meta | Coordinate::TimelineView
-    );
+        Coordinate::Meta | Coordinate::TimelineView
+    ) || (app.renderer.coordinate == Coordinate::Command
+        && app.renderer.current_command == CommandPhase::Provider);
 
     // Compute indent and max prefix width before centering so the full visual
     // width (indent + prefix + content) can be centered in the window.

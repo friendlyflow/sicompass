@@ -866,15 +866,27 @@ fn build_command_list(renderer: &mut AppRenderer) {
 
     match renderer.current_command {
         CommandPhase::None => {
-            // Show provider commands as list items
+            // Show provider commands as list items. Each command executes a
+            // provider function on Enter, so it is an actionable button: wrap it
+            // as a `<button>` Str (like the tab switcher) so `build_str_label`
+            // gives it the `-b` prefix and it is announced as a button. The bare
+            // command name is the dispatch key, so stash it in `nav_path` (the
+            // field the Provider phase already uses) rather than parsing it back
+            // out of the prefixed label.
             let cmds = crate::provider::get_commands(renderer);
             let items: Vec<RenderListItem> = cmds
                 .into_iter()
                 .enumerate()
-                .map(|(i, label)| {
+                .map(|(i, cmd)| {
                     let mut id = IdArray::new();
                     id.push(i);
-                    RenderListItem { id, label, data: None, nav_path: None, ext_prefix: None }
+                    RenderListItem {
+                        id,
+                        label: build_str_label(&format!("<button>{cmd}</button>{cmd}"), false),
+                        data: None,
+                        nav_path: Some(cmd),
+                        ext_prefix: None,
+                    }
                 })
                 .collect();
             renderer.total_list = items;

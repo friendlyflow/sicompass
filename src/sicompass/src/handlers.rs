@@ -926,9 +926,12 @@ pub fn handle_colon(r: &mut AppRenderer) {
 pub fn handle_enter_command(r: &mut AppRenderer) {
     match r.current_command {
         CommandPhase::None => {
-            // Phase 1: user chose a command name from the list
+            // Phase 1: user chose a command name from the list. The display label
+            // carries a `-b ` button prefix, so the bare command name lives in
+            // `nav_path` (set by `build_command_list`); fall back to the label for
+            // robustness.
             let cmd = match r.current_list_item() {
-                Some(item) => item.label.clone(),
+                Some(item) => item.nav_path.clone().unwrap_or_else(|| item.label.clone()),
                 None => { handle_escape(r); return; }
             };
 
@@ -6095,12 +6098,35 @@ mod tests {
         assert_eq!(r.total_list.len(), 1);
         r.list_index = 0;
 
+        // The command renders as a button: `-b ` prefix in the display label,
+        // bare name carried in `nav_path` for dispatch.
+        assert!(r.total_list[0].label.starts_with("-b "), "label = {:?}", r.total_list[0].label);
+        assert_eq!(r.total_list[0].nav_path.as_deref(), Some("open"));
+
         handle_enter_command(&mut r);
 
         // Now in Phase 2: CommandPhase::Provider, secondary list visible
         assert_eq!(r.current_command, CommandPhase::Provider);
         assert_eq!(r.coordinate, Coordinate::Command);
         assert_eq!(r.total_list[0].label, "App A");
+        // Dispatch used the bare command name (from nav_path), not the `-b ` label.
+        assert_eq!(r.provider_command_name, "open");
+    }
+
+    #[test]
+    fn command_list_items_render_as_buttons() {
+        let mut r = make_renderer_with_cmd_provider(&["open", "rename"], None, vec![]);
+        r.coordinate = Coordinate::Command;
+        r.current_command = CommandPhase::None;
+        list::create_list_current_layer(&mut r);
+
+        assert_eq!(r.total_list.len(), 2);
+        for (item, name) in r.total_list.iter().zip(["open", "rename"]) {
+            assert!(item.label.starts_with("-b "), "label = {:?}", item.label);
+            assert!(item.label.contains(name));
+            // Bare command name is the dispatch key, kept out of the display label.
+            assert_eq!(item.nav_path.as_deref(), Some(name));
+        }
     }
 
     #[test]
