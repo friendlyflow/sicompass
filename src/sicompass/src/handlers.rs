@@ -2707,6 +2707,8 @@ pub fn handle_escape(r: &mut AppRenderer) {
             // Cancel the switcher without changing tabs.
             r.coordinate = r.previous_coordinate;
             r.tab_switcher_held = false;
+            r.input_buffer.clear();
+            r.cursor_position = 0;
             r.speak_mode_change(None);
             list::create_list_current_layer(r);
             r.list_index = r.current_id.last().unwrap_or(0);
@@ -2811,6 +2813,12 @@ pub fn handle_input(r: &mut AppRenderer, text: &str) {
         return;
     }
 
+    // Same idea for the tab switcher: the `t` that opened the palette also fires
+    // a text event once text input is enabled — don't seed the filter with it.
+    if r.coordinate == Coordinate::TabSwitcher && r.input_buffer.is_empty() && text == "t" {
+        return;
+    }
+
     match r.coordinate {
         Coordinate::SimpleSearch => {
             let pos = r.cursor_position.min(r.search_string.len());
@@ -2833,6 +2841,21 @@ pub fn handle_input(r: &mut AppRenderer, text: &str) {
             let filter = r.input_buffer.clone();
             list::create_list_current_layer(r);
             list::populate_list_current_layer(r, &filter);
+            r.speak_current_element();
+            r.needs_redraw = true;
+        }
+        Coordinate::TabSwitcher => {
+            // Type-to-filter the MRU tab list by name. `create_list_current_layer`
+            // rebuilds the tab buttons; `populate_list_current_layer` fuzzy-filters
+            // them into `filtered_list_indices`.
+            let pos = r.cursor_position.min(r.input_buffer.len());
+            r.input_buffer.insert_str(pos, text);
+            r.cursor_position = pos + text.len();
+            r.caret.reset(sdl_ticks());
+            let filter = r.input_buffer.clone();
+            list::create_list_current_layer(r);
+            list::populate_list_current_layer(r, &filter);
+            r.list_index = 0;
             r.speak_current_element();
             r.needs_redraw = true;
         }
@@ -2891,12 +2914,12 @@ pub fn handle_backspace(r: &mut AppRenderer) {
                 r.needs_redraw = true;
             }
         }
-        Coordinate::Command | Coordinate::Insert | Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch | Coordinate::ExtendedSearch => {
+        Coordinate::Command | Coordinate::Insert | Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch | Coordinate::ExtendedSearch | Coordinate::TabSwitcher => {
             let buffer_changed = if has_selection(r) {
                 delete_selection(r);
                 r.caret.reset(sdl_ticks());
                 maybe_update_search(r);
-                if matches!(r.coordinate, Coordinate::Command | Coordinate::ExtendedSearch) {
+                if matches!(r.coordinate, Coordinate::Command | Coordinate::ExtendedSearch | Coordinate::TabSwitcher) {
                     r.speak_current_element();
                 }
                 r.needs_redraw = true;
@@ -2911,7 +2934,7 @@ pub fn handle_backspace(r: &mut AppRenderer) {
                 r.cursor_position = new_end;
                 r.caret.reset(sdl_ticks());
                 maybe_update_search(r);
-                if matches!(r.coordinate, Coordinate::Command | Coordinate::ExtendedSearch) {
+                if matches!(r.coordinate, Coordinate::Command | Coordinate::ExtendedSearch | Coordinate::TabSwitcher) {
                     r.speak_current_element();
                 }
                 r.needs_redraw = true;
@@ -4005,13 +4028,17 @@ pub fn handle_delete_forward(r: &mut AppRenderer) {
 /// Re-filter the list when editing in search/command modes.
 fn maybe_update_search(r: &mut AppRenderer) {
     match r.coordinate {
-        Coordinate::SimpleSearch | Coordinate::Command => {
+        Coordinate::SimpleSearch | Coordinate::Command | Coordinate::TabSwitcher => {
             let s = match r.coordinate {
-                Coordinate::Command => r.input_buffer.clone(),
-                _ => r.search_string.clone(),
+                Coordinate::SimpleSearch => r.search_string.clone(),
+                // Command + TabSwitcher both filter from `input_buffer`.
+                _ => r.input_buffer.clone(),
             };
             list::create_list_current_layer(r);
             list::populate_list_current_layer(r, &s);
+            if r.coordinate == Coordinate::TabSwitcher {
+                r.list_index = 0;
+            }
         }
         Coordinate::ExtendedSearch => {
             let s = r.input_buffer.clone();
@@ -5337,6 +5364,10 @@ fn open_tab_switcher(r: &mut AppRenderer, held: bool, start_index: usize) {
     r.previous_coordinate = r.coordinate;
     r.coordinate = Coordinate::TabSwitcher;
     r.tab_switcher_held = held;
+    // Fresh, unfiltered search each time the overlay opens.
+    r.input_buffer.clear();
+    r.cursor_position = 0;
+    r.fuzzy_match_positions.clear();
     list::create_list_current_layer(r);
     let max = r.total_list.len().saturating_sub(1);
     r.list_index = start_index.min(max);
@@ -5363,7 +5394,7 @@ pub fn handle_ctrl_tab(r: &mut AppRenderer) {
         open_tab_switcher(r, true, 1);
         return;
     }
-    let len = r.total_list.len();
+    let len = r.active_list_len();
     if len == 0 { return; }
     r.list_index = (r.list_index + 1) % len;
     r.speak_current_element();
@@ -5380,7 +5411,7 @@ pub fn handle_ctrl_shift_tab(r: &mut AppRenderer) {
         open_tab_switcher(r, true, usize::MAX);
         return;
     }
-    let len = r.total_list.len();
+    let len = r.active_list_len();
     if len == 0 { return; }
     r.list_index = (r.list_index + len - 1) % len;
     r.speak_current_element();
@@ -5390,12 +5421,13 @@ pub fn handle_ctrl_shift_tab(r: &mut AppRenderer) {
 /// Commit the highlighted tab in the switcher and leave the overlay. Switches
 /// (and refreshes MRU) only if the highlighted tab differs from the active one.
 fn confirm_tab_switcher(r: &mut AppRenderer) {
-    let target = r
-        .total_list
-        .get(r.list_index)
-        .and_then(|it| it.id.last());
+    // `current_list_item` honours the active filter (`filtered_list_indices`),
+    // so the right tab is picked even when a search query is narrowing the list.
+    let target = r.current_list_item().and_then(|it| it.id.last());
     r.coordinate = r.previous_coordinate;
     r.tab_switcher_held = false;
+    r.input_buffer.clear();
+    r.cursor_position = 0;
     match target {
         Some(t) if t != r.active_tab && t < r.tabs.len() => {
             r.switch_to_tab(t);
