@@ -58,6 +58,7 @@ const NAV_UP_DOWN: &[Coordinate] = &[
     Coordinate::ScrollPrefixSearch,
     Coordinate::Meta,
     Coordinate::TimelineView,
+    Coordinate::ConfirmCloseTab,
 ];
 
 // Modes where Undo/Redo are active
@@ -350,7 +351,8 @@ pub static SHORTCUTS: &[Shortcut] = &[
                  Coordinate::Visual,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
                  Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch,
-                 Coordinate::InputSearch, Coordinate::Meta, Coordinate::TimelineView, Coordinate::Dashboard],
+                 Coordinate::InputSearch, Coordinate::Meta, Coordinate::TimelineView, Coordinate::Dashboard,
+                 Coordinate::ConfirmCloseTab],
         label: "Esc    Back", is_available: not_at_root, handle: handlers::handle_escape },
     Shortcut { key: Keycode::Escape, key2: None, ctrl: false, shift: false,
         modes: &[Coordinate::General,
@@ -358,7 +360,8 @@ pub static SHORTCUTS: &[Shortcut] = &[
                  Coordinate::Visual,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
                  Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch,
-                 Coordinate::InputSearch, Coordinate::Meta, Coordinate::TimelineView, Coordinate::Dashboard],
+                 Coordinate::InputSearch, Coordinate::Meta, Coordinate::TimelineView, Coordinate::Dashboard,
+                 Coordinate::ConfirmCloseTab],
         label: "", is_available: always, handle: handlers::handle_escape },
 
     // ---- Up / K ----------------------------------------------------------
@@ -576,6 +579,10 @@ pub static SHORTCUTS: &[Shortcut] = &[
     Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
         modes: &[Coordinate::Scroll, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch],
         label: "Enter  Go to element", is_available: always, handle: handlers::handle_enter_scroll },
+    // Close-tab confirmation: Enter → activate highlighted button
+    Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
+        modes: &[Coordinate::ConfirmCloseTab],
+        label: "Enter  Confirm", is_available: always, handle: handlers::handle_enter_confirm_close_tab },
     // Insert modes: Ctrl+Return → newline
     Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: true, shift: false,
         modes: &[Coordinate::Insert],

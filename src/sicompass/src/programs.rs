@@ -64,22 +64,59 @@ pub(crate) fn _reset_user_plugin_cache(plugins: Vec<DiscoveredPlugin>) {
 
 /// Register a `Box<dyn Provider>` into the renderer: calls `init()`, fetches
 /// the initial tree, and creates the root `FfonElement::Obj`.
-pub fn register_provider(renderer: &mut AppRenderer, mut provider: Box<dyn Provider>) {
+pub fn register_provider(renderer: &mut AppRenderer, provider: Box<dyn Provider>) {
+    let (provider, root) = init_provider_root(provider, &mut renderer.error_message);
+    renderer.ffon.push(root);
+    renderer.providers.push(provider);
+}
+
+/// `init()` a provider and build its FFON root Obj (key = display name,
+/// children = first `fetch()`). Any fetch error is surfaced through `err_sink`.
+/// Shared by `register_provider` and the per-tab content rebuild.
+fn init_provider_root(
+    mut provider: Box<dyn Provider>,
+    err_sink: &mut String,
+) -> (Box<dyn Provider>, FfonElement) {
     provider.init();
     let children = provider.fetch();
     if let Some(err) = provider.take_error() {
         eprintln!("provider '{}' fetch error on register: {err}", provider.display_name());
-        renderer.error_message = err;
+        *err_sink = err;
     }
     let display_name = provider.display_name().to_owned();
-
     let mut root = FfonElement::new_obj(&display_name);
     for child in children {
         root.as_obj_mut().unwrap().push(child);
     }
+    (provider, root)
+}
 
-    renderer.ffon.push(root);
-    renderer.providers.push(provider);
+/// Re-instantiate a fresh provider instance by name, mirroring `enable_provider`'s
+/// resolution order: built-ins first, then the user-plugin cache, then a remote
+/// FFON service. Returns `None` only when the name matches none of these — the
+/// caller substitutes a placeholder so per-tab provider indices stay aligned.
+fn reinstantiate_provider(name: &str) -> Option<Box<dyn Provider>> {
+    if let Some(p) = instantiate_builtin(name) {
+        return Some(p);
+    }
+    let cached: Option<DiscoveredPlugin> = {
+        let guard = user_plugin_cache().lock().unwrap();
+        guard.iter()
+            .find(|p| p.manifest.name == name || p.manifest.display_name == name)
+            .cloned()
+    };
+    if let Some(plugin) = cached {
+        if let Some(p) = instantiate_user_plugin(&plugin) {
+            return Some(p);
+        }
+    }
+    if let Some((remote_url, api_key)) = read_remote_config(name) {
+        if !api_key.is_empty() {
+            crate::provider::register_auth(&remote_url, &api_key);
+        }
+        return Some(sicompass_builtins::create_remote(name, remote_url, api_key));
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------
@@ -187,27 +224,56 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
         }
     }
 
-    // ---- Always register always_enabled providers first (e.g. file browser) -
+    // ---- Build the content providers + configure their settings sections ----
+    load_content_providers(renderer, Some(settings.as_mut()));
+
+    // ---- Register settings as the last provider ----------------------------
+    register_provider(renderer, settings);
+
+    queue
+}
+
+/// Build and register the content providers (everything except the shared
+/// settings provider) into `renderer`, in canonical order: always-enabled
+/// builtins first, then enabled opt-in builtins, then user plugins, then remote
+/// services, all sorted alphabetically.
+///
+/// When `settings` is `Some`, also configures the settings provider (injects
+/// per-provider setting entries, registers sections, adds plugin/remote
+/// checkboxes) — done once, at initial app load (`load_programs`). New tabs
+/// pass `None`: they reuse the already-configured shared settings provider and
+/// only need fresh provider instances, so they must NOT mutate settings (which
+/// would duplicate sections/checkboxes). The registered provider set is
+/// identical either way, so provider indices stay stable across tabs.
+pub fn load_content_providers(
+    renderer: &mut AppRenderer,
+    mut settings: Option<&mut dyn Provider>,
+) {
+    // Always-enabled providers first (e.g. file browser).
     for m in sicompass_sdk::builtin_manifests() {
         if m.always_enabled {
             if let Some(p) = instantiate_builtin(&m.name) {
                 register_provider(renderer, p);
             }
-            if !m.settings.is_empty() {
-                inject_builtin_manifest_settings(settings.as_mut(), &m);
+            if let Some(s) = settings.as_deref_mut() {
+                if !m.settings.is_empty() {
+                    inject_builtin_manifest_settings(s, &m);
+                }
             }
         }
     }
 
-    // ---- Load enabled content providers (before registering settings) -------
+    // Enabled opt-in content providers.
     let enabled = enabled_programs();
     for name in &enabled {
         if let Some(p) = instantiate_builtin(name.as_str()) {
-            let manifest = sicompass_sdk::builtin_manifests()
-                .into_iter()
-                .find(|m| m.display_name == *name || m.name == *name);
-            if let Some(m) = &manifest {
-                inject_builtin_manifest_settings(settings.as_mut(), m);
+            if let Some(s) = settings.as_deref_mut() {
+                let manifest = sicompass_sdk::builtin_manifests()
+                    .into_iter()
+                    .find(|m| m.display_name == *name || m.name == *name);
+                if let Some(m) = &manifest {
+                    inject_builtin_manifest_settings(s, m);
+                }
             }
             register_provider(renderer, p);
         } else {
@@ -215,31 +281,57 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
         }
     }
 
-    // ---- Register a settings section for each loaded program ---------------
-    for p in renderer.providers.iter() {
-        if let Some(m) = sicompass_sdk::builtin_manifests()
-            .into_iter()
-            .find(|m| name_matches_provider(&m.display_name, p.name()))
-        {
-            settings.add_settings_section(&m.display_name);
+    // Register a settings section for each loaded builtin program.
+    if let Some(s) = settings.as_deref_mut() {
+        for p in renderer.providers.iter() {
+            if let Some(m) = sicompass_sdk::builtin_manifests()
+                .into_iter()
+                .find(|m| name_matches_provider(&m.display_name, p.name()))
+            {
+                s.add_settings_section(&m.display_name);
+            }
         }
     }
 
-    // ---- Load user-installed plugins ----------------------------------------
-    load_user_plugins(renderer, settings.as_mut());
+    // User-installed plugins, then remote services.
+    load_user_plugins(renderer, settings.as_deref_mut());
+    load_remote_programs(renderer, settings.as_deref_mut());
 
-    // ---- Load remote service providers from Available programs: config ------
-    // Scans for enable_*=true entries that don't match any known program and
-    // routes them through RemoteProvider (mirrors C's loadProgram remote branch).
-    load_remote_programs(renderer, settings.as_mut());
-
-    // ---- Sort all registered providers alphabetically ----------------------
+    // Sort content providers alphabetically (settings is appended afterwards).
     sort_providers_alphabetically(renderer);
+}
 
-    // ---- Register settings as the last provider ----------------------------
-    register_provider(renderer, settings);
-
-    queue
+/// Build a fresh, independent set of content providers + their ffon roots for a
+/// new tab by re-instantiating each provider in `names` (the active tab's
+/// content providers, everything except the trailing shared settings provider).
+///
+/// Mirroring the live set name-for-name (rather than re-running the discovery
+/// pipeline) guarantees the new tab has the exact same provider count and order,
+/// so `current_id[0]` stays valid across tabs. A provider that can't be
+/// re-instantiated is replaced by an inert [`GenericProvider`] placeholder
+/// carrying its name, so indices never shift.
+///
+/// Callers must capture `names` *before* detaching the live content (a detach
+/// leaves only the settings provider behind). `renderer` is borrowed only as an
+/// error sink.
+pub fn build_content_set_from_names(
+    renderer: &mut AppRenderer,
+    names: &[String],
+) -> (Vec<Box<dyn Provider>>, Vec<FfonElement>) {
+    let mut fresh_p: Vec<Box<dyn Provider>> = Vec::with_capacity(names.len());
+    let mut fresh_f: Vec<FfonElement> = Vec::with_capacity(names.len());
+    for name in names {
+        let provider = reinstantiate_provider(name).unwrap_or_else(|| {
+            eprintln!("sicompass: cannot re-instantiate provider '{name}' for new tab — using placeholder");
+            Box::new(sicompass_sdk::provider::GenericProvider::new(
+                name.clone(), name.clone(), |_| Vec::new(),
+            ))
+        });
+        let (provider, root) = init_provider_root(provider, &mut renderer.error_message);
+        fresh_p.push(provider);
+        fresh_f.push(root);
+    }
+    (fresh_p, fresh_f)
 }
 
 /// Inject setting entries from a `BuiltinManifest` into the settings provider.
@@ -343,7 +435,14 @@ fn inject_plugin_settings(settings: &mut dyn Provider, manifest: &PluginManifest
 ///
 /// Mirrors `discoverUserPlugins` + `registerProgramsSection` (user half) +
 /// the user-plugin loading loop in `programsLoad` from `src/sicompass/programs.c`.
-fn load_user_plugins(renderer: &mut AppRenderer, settings: &mut dyn Provider) {
+/// Load enabled user plugins into `renderer`. When `settings` is `Some`, also
+/// configures the settings provider (checkboxes, per-plugin settings, sections,
+/// versions) — done once at initial load. New tabs pass `None`: they reuse the
+/// already-configured shared settings provider and must only instantiate fresh
+/// provider instances, so settings is left untouched. The set of registered
+/// providers is identical regardless of `settings`, keeping provider indices
+/// stable across tabs.
+fn load_user_plugins(renderer: &mut AppRenderer, mut settings: Option<&mut dyn Provider>) {
     let discovered = discover_user_plugins();
 
     // Populate the global cache so hot-enable can find manifests later.
@@ -355,33 +454,37 @@ fn load_user_plugins(renderer: &mut AppRenderer, settings: &mut dyn Provider) {
         // Add the enable checkbox to "Available programs:" (same as C's registerProgramsSection).
         let config_key = format!("enable_{}", m.name);
         let currently_enabled = is_plugin_enabled_in_config(&m.name);
-        settings.add_checkbox_setting("Available programs:", &m.display_name, &config_key, currently_enabled);
+        if let Some(s) = settings.as_deref_mut() {
+            s.add_checkbox_setting("Available programs:", &m.display_name, &config_key, currently_enabled);
+        }
 
         // Skip disabled plugins (mirrors C's isEnabledInConfig check in programsLoad).
         if !currently_enabled {
             continue;
         }
 
-        // Inject per-plugin settings.
-        inject_plugin_settings(settings, m);
-
-        // Register a section in settings for this plugin.
-        settings.add_settings_section(&m.display_name);
+        if let Some(s) = settings.as_deref_mut() {
+            // Inject per-plugin settings and register a section.
+            inject_plugin_settings(s, m);
+            s.add_settings_section(&m.display_name);
+        }
 
         // Construct and register the provider.
         match instantiate_user_plugin(plugin) {
             Some(p) => {
                 register_provider(renderer, p);
-                // Third-party plugin version: prefer plugin.json's `version`
-                // field; fall back to the provider's own `Provider::version()`.
-                let v: Option<String> = m.version.clone().or_else(|| {
-                    renderer
-                        .providers
-                        .last()
-                        .and_then(|p| p.version().map(|s| s.to_owned()))
-                });
-                if let Some(v) = v {
-                    settings.set_section_version(&m.display_name, &v);
+                if let Some(s) = settings.as_deref_mut() {
+                    // Third-party plugin version: prefer plugin.json's `version`
+                    // field; fall back to the provider's own `Provider::version()`.
+                    let v: Option<String> = m.version.clone().or_else(|| {
+                        renderer
+                            .providers
+                            .last()
+                            .and_then(|p| p.version().map(|s| s.to_owned()))
+                    });
+                    if let Some(v) = v {
+                        s.set_section_version(&m.display_name, &v);
+                    }
                 }
             }
             None => eprintln!(
@@ -574,50 +677,82 @@ pub fn apply_tabs_section(
     use sicompass_sdk::ffon::IdArray;
     use crate::app_state::TabSnapshot;
 
+    // The bootstrap live set is `[content…, settings]`; every tab shares the
+    // same provider ordering, so this count gates persisted `current_id[0]`
+    // values for all of them.
     let provider_count = r.providers.len();
 
-    if let Some(tabs_str) = sec.get("tabs").and_then(|v| v.as_str()) {
-        if let Ok(serde_json::Value::Array(arr)) = serde_json::from_str::<serde_json::Value>(tabs_str) {
-            let parsed: Vec<TabSnapshot> = arr.into_iter().filter_map(|v| {
-                let obj = v.as_object()?;
-                let ids = obj.get("id")?.as_array()?;
-                let path = obj.get("path")?.as_str()?.to_owned();
-                let mut id = IdArray::new();
-                for n in ids {
-                    id.push(n.as_u64()? as usize);
-                }
-                match id.get(0) {
-                    Some(pi) if pi < provider_count && id.depth() > 0 => Some(TabSnapshot {
-                        current_id: id,
-                        provider_path: path,
-                    }),
-                    _ => None,
-                }
-            }).collect();
-            if !parsed.is_empty() {
-                r.tabs = parsed;
+    // Parse the persisted nav entries (id + active provider path) per tab,
+    // dropping any whose provider index no longer exists.
+    let parsed: Vec<(IdArray, String)> = sec.get("tabs").and_then(|v| v.as_str())
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+        .and_then(|v| match v { serde_json::Value::Array(a) => Some(a), _ => None })
+        .map(|arr| arr.into_iter().filter_map(|v| {
+            let obj = v.as_object()?;
+            let ids = obj.get("id")?.as_array()?;
+            let path = obj.get("path")?.as_str()?.to_owned();
+            let mut id = IdArray::new();
+            for n in ids {
+                id.push(n.as_u64()? as usize);
+            }
+            match id.get(0) {
+                Some(pi) if pi < provider_count && id.depth() > 0 => Some((id, path)),
+                _ => None,
+            }
+        }).collect())
+        .unwrap_or_default();
+
+    if !parsed.is_empty() {
+        // Capture the bootstrap content provider names BEFORE detaching, so
+        // each freshly built tab mirrors them exactly (count + order).
+        let content_n = r.providers.len().saturating_sub(1);
+        let content_names: Vec<String> = r.providers[..content_n]
+            .iter()
+            .map(|p| p.name().to_owned())
+            .collect();
+
+        // Each restored tab gets its own independent content-provider set.
+        // The first tab reuses the already-live bootstrap set; the rest are
+        // built fresh. For each we attach the set, rebuild its saved provider
+        // path, then park it back out into the tab record.
+        let mut tabs: Vec<TabSnapshot> = Vec::with_capacity(parsed.len());
+        for (i, (id, path)) in parsed.into_iter().enumerate() {
+            let (cp, cf) = if i == 0 {
+                r.detach_content()
+            } else {
+                build_content_set_from_names(r, &content_names)
+            };
+            r.attach_content(cp, cf);
+            r.rebuild_and_clamp(&path, id);
+            let current_id = r.current_id.clone();
+            let (cp, cf) = r.detach_content();
+            tabs.push(TabSnapshot { current_id, provider_path: path, providers: cp, ffon: cf });
+        }
+        r.tabs = tabs;
+        // Keep `tab_timelines` parallel to `tabs` (invariant relied on by
+        // `active_timeline_mut()`).
+        r.tab_timelines.resize_with(r.tabs.len(), crate::app_state::Timeline::new);
+
+        // Resolve the active tab and make its parked content the live set.
+        let mut active = 0;
+        if let Some(active_str) = sec.get("activeTab").and_then(|v| v.as_str()) {
+            if let Ok(n) = active_str.parse::<usize>() {
+                if n < r.tabs.len() { active = n; }
             }
         }
+        r.active_tab = active;
+        let cp = std::mem::take(&mut r.tabs[active].providers);
+        let cf = std::mem::take(&mut r.tabs[active].ffon);
+        r.attach_content(cp, cf);
+        r.current_id = r.tabs[active].current_id.clone();
+        r.list_index = r.current_id.last().unwrap_or(0);
+        return;
     }
 
-    // Keep `tab_timelines` parallel to `tabs`. The constructor seeds a single
-    // empty Timeline; if the persisted layout has more tabs we must extend so
-    // the invariant `tab_timelines.len() == tabs.len()` holds before any
-    // `active_timeline_mut()` call (e.g. the first arrow press, which records
-    // a Navigate entry).
+    // No persisted tabs: keep the single bootstrap tab. Keep timelines parallel
+    // and apply the active tab's saved nav (path is empty by default → no-op).
     r.tab_timelines.resize_with(r.tabs.len(), crate::app_state::Timeline::new);
-
-    if let Some(active_str) = sec.get("activeTab").and_then(|v| v.as_str()) {
-        if let Ok(n) = active_str.parse::<usize>() {
-            if n < r.tabs.len() {
-                r.active_tab = n;
-            }
-        }
-    }
     if r.active_tab >= r.tabs.len() { r.active_tab = 0; }
-
-    // Apply the active tab's saved state (path + current_id), re-fetching the
-    // provider's FFON tree so saved indices index into the right content.
     r.load_active_tab();
 }
 
@@ -657,7 +792,7 @@ fn read_remote_config(section: &str) -> Option<(String, String)> {
 /// providers.  Mirrors the "unknown program → remote service" branch of C's
 /// `loadProgram` (src/sicompass/programs.c:247-273) but applied at startup so
 /// remote services are reachable without requiring a hot-enable action.
-fn load_remote_programs(renderer: &mut AppRenderer, settings: &mut dyn Provider) {
+fn load_remote_programs(renderer: &mut AppRenderer, mut settings: Option<&mut dyn Provider>) {
     let path = match sicompass_sdk::platform::main_config_path() {
         Some(p) => p,
         None => return,
@@ -703,9 +838,11 @@ fn load_remote_programs(renderer: &mut AppRenderer, settings: &mut dyn Provider)
         register_provider(renderer, provider);
 
         // Register the two settings text entries for this remote service.
-        settings.add_text_setting(name, "remote URL", "remoteUrl", "");
-        settings.add_text_setting(name, "API key",    "apiKey",    "");
-        settings.add_settings_section(name);
+        if let Some(s) = settings.as_deref_mut() {
+            s.add_text_setting(name, "remote URL", "remoteUrl", "");
+            s.add_text_setting(name, "API key",    "apiKey",    "");
+            s.add_settings_section(name);
+        }
     }
 }
 
@@ -1118,6 +1255,70 @@ pub fn disable_provider(renderer: &mut AppRenderer, name: &str) {
     }
 }
 
+/// Propagate a just-enabled provider to every INACTIVE tab's parked content set
+/// so the enabled-program list stays identical across tabs. The active tab is
+/// skipped (already handled by [`enable_provider`], whose changes live in
+/// `renderer.providers`). Each parked tab gets its OWN fresh instance, so other
+/// tabs' running shells are left untouched.
+fn propagate_enable_to_parked_tabs(renderer: &mut AppRenderer, name: &str) {
+    let active = renderer.active_tab;
+    for i in 0..renderer.tabs.len() {
+        if i == active { continue; }
+        // Skip tabs that somehow already have it (idempotent).
+        if renderer.tabs[i].providers.iter().any(|p| name_matches_provider(name, p.name())) {
+            continue;
+        }
+        let Some(provider) = reinstantiate_provider(name) else { continue; };
+        let (provider, root) = init_provider_root(provider, &mut renderer.error_message);
+        let new_name_lower = provider.name().to_ascii_lowercase();
+
+        let tab = &mut renderer.tabs[i];
+        let mut insert_idx = tab.providers.len();
+        for j in 0..tab.providers.len() {
+            if tab.providers[j].name().to_ascii_lowercase() > new_name_lower {
+                insert_idx = j;
+                break;
+            }
+        }
+        tab.ffon.insert(insert_idx, root);
+        tab.providers.insert(insert_idx, provider);
+        // Keep the parked cursor on the same provider it pointed at.
+        if let Some(root_idx) = tab.current_id.get(0) {
+            if root_idx >= insert_idx {
+                tab.current_id.set(0, root_idx + 1);
+            }
+        }
+    }
+}
+
+/// Propagate a just-disabled provider's removal to every INACTIVE tab's parked
+/// content set. Dropping the parked instance fires its Drop (killing that tab's
+/// shell for a terminal), which is the intended teardown.
+fn propagate_disable_to_parked_tabs(renderer: &mut AppRenderer, name: &str) {
+    let active = renderer.active_tab;
+    for i in 0..renderer.tabs.len() {
+        if i == active { continue; }
+        let tab = &mut renderer.tabs[i];
+        let Some(idx) = tab.providers.iter().position(|p| name_matches_provider(name, p.name()))
+        else { continue; };
+        tab.ffon.remove(idx);
+        tab.providers.remove(idx);
+        // Fix the parked cursor's provider index.
+        let max_root = tab.ffon.len().saturating_sub(1);
+        if let Some(root_idx) = tab.current_id.get(0) {
+            if root_idx == idx {
+                // The provider the cursor was in is gone — collapse to a shallow
+                // id at the clamped position.
+                let mut id = sicompass_sdk::ffon::IdArray::new();
+                id.push(idx.min(max_root));
+                tab.current_id = id;
+            } else if root_idx > idx {
+                tab.current_id.set(0, root_idx - 1);
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Apply pending settings from the queue
 // ---------------------------------------------------------------------------
@@ -1153,8 +1354,10 @@ fn apply_setting(
         if name == "file browser" { return; } // always present
         if value == "true" {
             enable_provider(renderer, name);
+            propagate_enable_to_parked_tabs(renderer, name);
         } else {
             disable_provider(renderer, name);
+            propagate_disable_to_parked_tabs(renderer, name);
         }
         return;
     }
@@ -1201,8 +1404,16 @@ fn apply_setting(
 
     // Broadcast to all providers so they can react to settings that affect them
     // (e.g. chatHomeserver → ChatClientProvider, sortOrder → FilebrowserProvider).
+    // Cover BOTH the active tab's live providers AND every inactive tab's parked
+    // providers, so a setting change reaches all tabs, not just the visible one.
+    // (The active tab's own slot has empty parked vectors, so no double-apply.)
     for provider in &mut renderer.providers {
         provider.on_setting_change(key, value);
+    }
+    for tab in &mut renderer.tabs {
+        for provider in &mut tab.providers {
+            provider.on_setting_change(key, value);
+        }
     }
 }
 

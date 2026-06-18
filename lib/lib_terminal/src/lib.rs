@@ -293,6 +293,11 @@ impl TerminalProvider {
         let cfg = ShellConfig {
             program: self.shell_program.clone(),
             cwd: self.cwd.clone(),
+            // Make each tab's shell identifiable in process monitors (btop/ps,
+            // Task Manager) by launching it through a link renamed to this. Works
+            // for any shell (fish included); falls back to a normal spawn if the
+            // link can't be created.
+            title: Some("sicompass-shell".to_owned()),
             ..ShellConfig::default()
         };
         match Shell::spawn(cfg) {
@@ -370,6 +375,14 @@ impl Provider for TerminalProvider {
     fn cleanup(&mut self) {
         self.shell = None;
         self.init_attempted = false;
+    }
+
+    /// Busy while a full-screen interactive program is up (`in_dashboard`) or
+    /// while the PTY has a foreground command running (`Shell::foreground_busy`,
+    /// Linux only). The app uses this to confirm before Ctrl+W kills the shell.
+    fn is_busy(&self) -> bool {
+        self.in_dashboard
+            || self.shell.as_ref().map(|s| s.foreground_busy()).unwrap_or(false)
     }
 
     fn fetch(&mut self) -> Vec<FfonElement> {
