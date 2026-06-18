@@ -550,6 +550,15 @@ pub static SHORTCUTS: &[Shortcut] = &[
         label: "Del    Delete fwd", is_available: always, handle: handlers::handle_delete_forward },
 
     // ---- Return ----------------------------------------------------------
+    // General: Enter → append — editor providers only, at any depth. Listed
+    // first so it takes priority over the `handle_enter_general` rows below
+    // (which would otherwise capture an editor element at depth >= 2 via
+    // `avail_enter_op`'s `not_at_root`). In non-editor providers Enter never
+    // appends: it falls through to the activate/follow-link/op rows, and is
+    // inert at root.
+    Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
+        modes: &[Coordinate::General],
+        label: "Enter  Append", is_available: is_editor, handle: handlers::handle_append },
     // General: Enter → activate element
     Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
         modes: &[Coordinate::General],
@@ -563,10 +572,6 @@ pub static SHORTCUTS: &[Shortcut] = &[
         modes: &[Coordinate::General],
         label: "Enter  Open", is_available: avail_enter_op,
         handle: handlers::handle_enter_general },
-    // General: Enter → append
-    Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
-        modes: &[Coordinate::General],
-        label: "Enter  Append", is_available: always, handle: handlers::handle_append },
     // Search: Enter → commit search
     Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
         modes: SEARCH,
