@@ -741,6 +741,9 @@ pub fn apply_tabs_section(
             }
         }
         r.active_tab = active;
+        // Seed the MRU order to a default front-first sequence (no real visit
+        // history exists across restarts; the active tab leads).
+        r.reset_mru_default(active);
         let cp = std::mem::take(&mut r.tabs[active].providers);
         let cf = std::mem::take(&mut r.tabs[active].ffon);
         r.attach_content(cp, cf);
@@ -753,6 +756,7 @@ pub fn apply_tabs_section(
     // and apply the active tab's saved nav (path is empty by default → no-op).
     r.tab_timelines.resize_with(r.tabs.len(), crate::app_state::Timeline::new);
     if r.active_tab >= r.tabs.len() { r.active_tab = 0; }
+    r.reset_mru_default(r.active_tab);
     r.load_active_tab();
 }
 

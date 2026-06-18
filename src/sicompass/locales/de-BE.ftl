@@ -74,6 +74,8 @@ hint-ctrl-shift-tab-prev-tab = Ctrl+Shift+Tab Vorh. Reiter
 hint-ctrl-shift-z-redo = Ctrl+Shift+Z Wiederholen
 hint-ctrl-t-new-tab = Ctrl+T Neuer Reiter
 hint-ctrl-tab-next-tab = Ctrl+Tab Nächst. Reiter
+hint-t-switch-tab = t      Reiter wechseln
+hint-enter-switch = Enter  Wechseln
 hint-ctrl-u-install-update = Ctrl+U Update install.
 hint-ctrl-v-paste = Ctrl+V Einfügen
 hint-ctrl-w-close-tab = Ctrl+W Reiter schl.
@@ -95,6 +97,7 @@ mode-input-search = Eingabe-Suche
 mode-dashboard = Dashboard
 mode-meta = Meta
 mode-timeline = Verlauf
+mode-tab-switcher = Reiterwechsler
 
 # Screen-reader announcements
 speak-tab-change = Reiter { $idx }/{ $total }: { $label }

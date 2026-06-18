@@ -99,6 +99,23 @@ pub fn main_loop(app: &mut AppState) {
                     }
                 }
 
+                Event::KeyUp { keycode, window_id, .. } => {
+                    if window_id != app.window.id() {
+                        continue;
+                    }
+                    // Releasing Ctrl commits the held MRU tab switcher (VS Code
+                    // style). No-op in every other mode / for the sticky `t`
+                    // palette, which commits on Enter instead.
+                    if matches!(keycode, Some(Keycode::LCtrl) | Some(Keycode::RCtrl)) {
+                        handlers::handle_tab_switcher_commit(&mut app.renderer);
+                        if is_insert_mode(app.renderer.coordinate) {
+                            app._video.text_input().start(&app.window);
+                        } else {
+                            app._video.text_input().stop(&app.window);
+                        }
+                    }
+                }
+
                 Event::Window { win_event, window_id, .. } => {
                     if window_id != app.window.id() {
                         continue;
@@ -753,6 +770,9 @@ fn update_view(app: &mut AppState) {
     let search_str = if app.renderer.coordinate == Coordinate::ConfirmCloseTab {
         // Modal prompt above the two `-b` button options.
         Some("This tab has a running program. Close it?".to_string())
+    } else if app.renderer.coordinate == Coordinate::TabSwitcher {
+        // Header above the MRU-ordered `-b` tab buttons.
+        Some("Switch tab:".to_string())
     } else if matches!(
         app.renderer.coordinate,
         Coordinate::SimpleSearch | Coordinate::ExtendedSearch | Coordinate::Command

@@ -74,6 +74,8 @@ hint-ctrl-shift-tab-prev-tab = Ctrl+Shift+Tab Onglet préc.
 hint-ctrl-shift-z-redo = Ctrl+Shift+Z Refaire
 hint-ctrl-t-new-tab = Ctrl+T Nouvel onglet
 hint-ctrl-tab-next-tab = Ctrl+Tab Onglet suiv.
+hint-t-switch-tab = t      Changer onglet
+hint-enter-switch = Enter  Changer
 hint-ctrl-u-install-update = Ctrl+U Install. MAJ
 hint-ctrl-v-paste = Ctrl+V Coller
 hint-ctrl-w-close-tab = Ctrl+W Fermer onglet
@@ -95,6 +97,7 @@ mode-input-search = recherche saisie
 mode-dashboard = tableau de bord
 mode-meta = méta
 mode-timeline = chronologie
+mode-tab-switcher = sélecteur d'onglets
 
 # Screen-reader announcements
 speak-tab-change = onglet { $idx }/{ $total } : { $label }

@@ -190,6 +190,10 @@ pub fn create_list_current_layer(renderer: &mut AppRenderer) {
             build_confirm_close_tab_list(renderer);
             return;
         }
+        Coordinate::TabSwitcher => {
+            build_tab_switcher_list(renderer);
+            return;
+        }
         Coordinate::Scroll | Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch => {
             create_list_scroll(renderer);
             return;
@@ -571,6 +575,64 @@ fn build_confirm_close_tab_list(renderer: &mut AppRenderer) {
             RenderListItem {
                 id,
                 label: build_str_label(s, false),
+                data: None,
+                nav_path: None,
+                ext_prefix: None,
+            }
+        })
+        .collect();
+}
+
+/// Display name for tab `ti` (its active provider's `display_name()`, truncated
+/// to 20 chars). The active tab reads from the live working set; inactive tabs
+/// read from their parked provider list. Mirrors `active_tab_label`.
+///
+/// The shared settings provider is never parked into a tab's content list (it
+/// always lives last in the live `providers`), so an inactive tab sitting on
+/// settings has a `current_id[0]` that points just past its parked content. In
+/// that case read the shared settings provider from the live set instead of
+/// falling back to a bare "—".
+fn tab_display_name(r: &AppRenderer, ti: usize) -> String {
+    let name = if ti == r.active_tab {
+        r.current_id
+            .get(0)
+            .and_then(|i| r.providers.get(i))
+            .map(|p| p.display_name().to_owned())
+    } else {
+        r.tabs.get(ti).and_then(|tab| {
+            match tab.current_id.get(0) {
+                Some(i) if i < tab.providers.len() => {
+                    tab.providers.get(i).map(|p| p.display_name().to_owned())
+                }
+                // Settings (or any shared provider past the parked content):
+                // resolve from the live working set, where it lives last.
+                Some(_) => r.providers.last().map(|p| p.display_name().to_owned()),
+                None => None,
+            }
+        })
+    };
+    name.map(|n| n.chars().take(20).collect())
+        .unwrap_or_else(|| "—".to_string())
+}
+
+/// Build the MRU-ordered tab list for `Coordinate::TabSwitcher`.
+///
+/// Items follow `tab_mru` order (most-recently-used first, so the active tab
+/// leads). Each entry is a `<button>` Str so it renders with the `-b` prefix via
+/// [`build_str_label`] and is announced as an actionable button. The real tab
+/// index is stored in each item's `id` (read back on confirm). `list_index` is
+/// set by the caller (`open_tab_switcher`), not here.
+fn build_tab_switcher_list(renderer: &mut AppRenderer) {
+    let order = renderer.tab_mru.clone();
+    renderer.total_list = order
+        .iter()
+        .map(|&ti| {
+            let name = tab_display_name(renderer, ti);
+            let mut id = IdArray::new();
+            id.push(ti);
+            RenderListItem {
+                id,
+                label: build_str_label(&format!("<button>tab</button>{name}"), false),
                 data: None,
                 nav_path: None,
                 ext_prefix: None,

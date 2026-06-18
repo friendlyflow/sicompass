@@ -33,11 +33,11 @@ pub fn handle_up(r: &mut AppRenderer) {
             r.text_scroll_offset = (r.text_scroll_offset - step).max(0);
             r.needs_redraw = true;
         }
-        Coordinate::SimpleSearch | Coordinate::Command | Coordinate::ExtendedSearch | Coordinate::Meta | Coordinate::TimelineView | Coordinate::ConfirmCloseTab => {
+        Coordinate::SimpleSearch | Coordinate::Command | Coordinate::ExtendedSearch | Coordinate::Meta | Coordinate::TimelineView | Coordinate::ConfirmCloseTab | Coordinate::TabSwitcher => {
             r.error_message.clear();
             if r.list_index > 0 {
                 r.list_index -= 1;
-                if r.coordinate != Coordinate::Command && r.coordinate != Coordinate::Meta && r.coordinate != Coordinate::TimelineView && r.coordinate != Coordinate::ConfirmCloseTab {
+                if r.coordinate != Coordinate::Command && r.coordinate != Coordinate::Meta && r.coordinate != Coordinate::TimelineView && r.coordinate != Coordinate::ConfirmCloseTab && r.coordinate != Coordinate::TabSwitcher {
                     r.sync_current_id_from_list();
                 }
                 r.speak_current_element();
@@ -75,7 +75,7 @@ pub fn handle_down(r: &mut AppRenderer) {
             r.text_scroll_offset = (r.text_scroll_offset + step).min(max_offset);
             r.needs_redraw = true;
         }
-        Coordinate::SimpleSearch | Coordinate::Command | Coordinate::ExtendedSearch | Coordinate::Meta | Coordinate::TimelineView | Coordinate::ConfirmCloseTab => {
+        Coordinate::SimpleSearch | Coordinate::Command | Coordinate::ExtendedSearch | Coordinate::Meta | Coordinate::TimelineView | Coordinate::ConfirmCloseTab | Coordinate::TabSwitcher => {
             r.error_message.clear();
             let max_index = if r.filtered_list_indices.is_empty() {
                 r.total_list.len().saturating_sub(1)
@@ -84,7 +84,7 @@ pub fn handle_down(r: &mut AppRenderer) {
             };
             if r.list_index < max_index {
                 r.list_index += 1;
-                if r.coordinate != Coordinate::Command && r.coordinate != Coordinate::Meta && r.coordinate != Coordinate::TimelineView && r.coordinate != Coordinate::ConfirmCloseTab {
+                if r.coordinate != Coordinate::Command && r.coordinate != Coordinate::Meta && r.coordinate != Coordinate::TimelineView && r.coordinate != Coordinate::ConfirmCloseTab && r.coordinate != Coordinate::TabSwitcher {
                     r.sync_current_id_from_list();
                 }
                 r.speak_current_element();
@@ -2703,6 +2703,18 @@ pub fn handle_escape(r: &mut AppRenderer) {
             r.needs_redraw = true;
             return;
         }
+        Coordinate::TabSwitcher => {
+            // Cancel the switcher without changing tabs.
+            r.coordinate = r.previous_coordinate;
+            r.tab_switcher_held = false;
+            r.speak_mode_change(None);
+            list::create_list_current_layer(r);
+            r.list_index = r.current_id.last().unwrap_or(0);
+            r.scroll_offset = 0;
+            r.caret.reset(sdl_ticks());
+            r.needs_redraw = true;
+            return;
+        }
         Coordinate::TimelineView => {
             r.coordinate = r.previous_coordinate;
             r.speak_mode_change(None);
@@ -5228,6 +5240,12 @@ pub fn handle_tab_new(r: &mut AppRenderer) {
     // timeline — a fresh tab carries no history.
     r.tab_timelines
         .insert(insert_at, crate::app_state::Timeline::new());
+    // Keep `tab_mru` parallel and consistent: existing indices at or past the
+    // insertion point shift up by one, then the new tab becomes most-recent.
+    for idx in r.tab_mru.iter_mut() {
+        if *idx >= insert_at { *idx += 1; }
+    }
+    r.tab_mru.insert(0, insert_at);
     r.active_tab = insert_at;
     after_tab_change(r);
 }
@@ -5293,6 +5311,14 @@ fn close_active_tab(r: &mut AppRenderer) {
     r.tab_timelines.remove(closed);
     if r.active_tab > 0 { r.active_tab -= 1; }
 
+    // Keep `tab_mru` parallel: drop the closed index and shift indices past it
+    // down by one, then make the new active tab most-recent.
+    r.tab_mru.retain(|&x| x != closed);
+    for idx in r.tab_mru.iter_mut() {
+        if *idx > closed { *idx -= 1; }
+    }
+    r.touch_mru(r.active_tab);
+
     // Swap the new active tab's parked content into the live working set.
     let idx = r.active_tab;
     let np = std::mem::take(&mut r.tabs[idx].providers);
@@ -5303,25 +5329,104 @@ fn close_active_tab(r: &mut AppRenderer) {
     after_tab_change(r);
 }
 
-/// Ctrl+Tab — cycle to next tab (wraps around).
-pub fn handle_tab_next(r: &mut AppRenderer) {
-    if r.tabs.len() < 2 { return; }
-    let target = (r.active_tab + 1) % r.tabs.len();
-    r.switch_to_tab(target);
-    after_tab_change(r);
+/// Open the `Coordinate::TabSwitcher` overlay, building the MRU-ordered list and
+/// placing the highlight on `start_index` (clamped). Shared by both the sticky
+/// `t` entry and the held Ctrl+Tab entry. Announces the mode plus the
+/// highlighted tab (mirrors `handle_colon`).
+fn open_tab_switcher(r: &mut AppRenderer, held: bool, start_index: usize) {
+    r.previous_coordinate = r.coordinate;
+    r.coordinate = Coordinate::TabSwitcher;
+    r.tab_switcher_held = held;
+    list::create_list_current_layer(r);
+    let max = r.total_list.len().saturating_sub(1);
+    r.list_index = start_index.min(max);
+    let ctx = r
+        .current_list_item()
+        .map(|it| crate::accesskit_sdl::label_to_speech(&it.label));
+    r.speak_mode_change(ctx);
+    r.needs_redraw = true;
 }
 
-/// Ctrl+Shift+Tab — cycle to previous tab (wraps around).
-pub fn handle_tab_prev(r: &mut AppRenderer) {
+/// `t` (general mode) — open the sticky MRU tab switcher. Highlight starts on
+/// the previously-used tab (VS Code style); Enter confirms, Escape cancels.
+pub fn handle_t_tab_switcher(r: &mut AppRenderer) {
+    if r.coordinate != Coordinate::General || r.tabs.len() < 2 { return; }
+    open_tab_switcher(r, false, 1);
+}
+
+/// Ctrl+Tab — open the held switcher (if not already open) and move the
+/// highlight down one (wrapping). Releasing Ctrl commits (see
+/// `handle_tab_switcher_commit`).
+pub fn handle_ctrl_tab(r: &mut AppRenderer) {
     if r.tabs.len() < 2 { return; }
-    let target = (r.active_tab + r.tabs.len() - 1) % r.tabs.len();
-    r.switch_to_tab(target);
-    after_tab_change(r);
+    if r.coordinate != Coordinate::TabSwitcher {
+        open_tab_switcher(r, true, 1);
+        return;
+    }
+    let len = r.total_list.len();
+    if len == 0 { return; }
+    r.list_index = (r.list_index + 1) % len;
+    r.speak_current_element();
+    r.needs_redraw = true;
+}
+
+/// Ctrl+Shift+Tab — open the held switcher (if not already open) and move the
+/// highlight up one (wrapping). Opening highlights the last (least-recently-used)
+/// tab, i.e. one step up from the active tab with wraparound.
+pub fn handle_ctrl_shift_tab(r: &mut AppRenderer) {
+    if r.tabs.len() < 2 { return; }
+    if r.coordinate != Coordinate::TabSwitcher {
+        // `usize::MAX` clamps to the last item in `open_tab_switcher`.
+        open_tab_switcher(r, true, usize::MAX);
+        return;
+    }
+    let len = r.total_list.len();
+    if len == 0 { return; }
+    r.list_index = (r.list_index + len - 1) % len;
+    r.speak_current_element();
+    r.needs_redraw = true;
+}
+
+/// Commit the highlighted tab in the switcher and leave the overlay. Switches
+/// (and refreshes MRU) only if the highlighted tab differs from the active one.
+fn confirm_tab_switcher(r: &mut AppRenderer) {
+    let target = r
+        .total_list
+        .get(r.list_index)
+        .and_then(|it| it.id.last());
+    r.coordinate = r.previous_coordinate;
+    r.tab_switcher_held = false;
+    match target {
+        Some(t) if t != r.active_tab && t < r.tabs.len() => {
+            r.switch_to_tab(t);
+            r.touch_mru(t);
+            after_tab_change(r);
+        }
+        _ => {
+            list::create_list_current_layer(r);
+            r.list_index = r.current_id.last().unwrap_or(0);
+            r.needs_redraw = true;
+        }
+    }
+}
+
+/// Enter (in `Coordinate::TabSwitcher`) — confirm the highlighted tab.
+pub fn handle_enter_tab_switcher(r: &mut AppRenderer) {
+    confirm_tab_switcher(r);
+}
+
+/// Ctrl release while the held switcher is open — commit the highlighted tab.
+/// No-op for the sticky `t` palette (which commits on Enter instead).
+pub fn handle_tab_switcher_commit(r: &mut AppRenderer) {
+    if r.coordinate == Coordinate::TabSwitcher && r.tab_switcher_held {
+        confirm_tab_switcher(r);
+    }
 }
 
 fn handle_tab_select_n(r: &mut AppRenderer, n: usize) {
     if n >= r.tabs.len() || n == r.active_tab { return; }
     r.switch_to_tab(n);
+    r.touch_mru(n);
     after_tab_change(r);
 }
 

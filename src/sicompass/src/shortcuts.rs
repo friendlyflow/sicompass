@@ -59,6 +59,7 @@ const NAV_UP_DOWN: &[Coordinate] = &[
     Coordinate::Meta,
     Coordinate::TimelineView,
     Coordinate::ConfirmCloseTab,
+    Coordinate::TabSwitcher,
 ];
 
 // Modes where Undo/Redo are active
@@ -352,7 +353,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
                  Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch,
                  Coordinate::InputSearch, Coordinate::Meta, Coordinate::TimelineView, Coordinate::Dashboard,
-                 Coordinate::ConfirmCloseTab],
+                 Coordinate::ConfirmCloseTab, Coordinate::TabSwitcher],
         label: "Esc    Back", is_available: not_at_root, handle: handlers::handle_escape },
     Shortcut { key: Keycode::Escape, key2: None, ctrl: false, shift: false,
         modes: &[Coordinate::General,
@@ -361,7 +362,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
                  Coordinate::Command, Coordinate::Scroll, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch,
                  Coordinate::InputSearch, Coordinate::Meta, Coordinate::TimelineView, Coordinate::Dashboard,
-                 Coordinate::ConfirmCloseTab],
+                 Coordinate::ConfirmCloseTab, Coordinate::TabSwitcher],
         label: "", is_available: always, handle: handlers::handle_escape },
 
     // ---- Up / K ----------------------------------------------------------
@@ -588,6 +589,10 @@ pub static SHORTCUTS: &[Shortcut] = &[
     Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
         modes: &[Coordinate::ConfirmCloseTab],
         label: "Enter  Confirm", is_available: always, handle: handlers::handle_enter_confirm_close_tab },
+    // Tab switcher: Enter → switch to highlighted tab
+    Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
+        modes: &[Coordinate::TabSwitcher],
+        label: "Enter  Switch", is_available: always, handle: handlers::handle_enter_tab_switcher },
     // Insert modes: Ctrl+Return → newline
     Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: true, shift: false,
         modes: &[Coordinate::Insert],
@@ -846,14 +851,22 @@ pub static SHORTCUTS: &[Shortcut] = &[
         modes: GENERAL,
         label: "Ctrl+W Close tab", is_available: more_than_one_tab,
         handle: handlers::handle_tab_close },
+    // Ctrl+Tab / Ctrl+Shift+Tab open the held MRU switcher and walk it; they
+    // stay active inside TabSwitcher so repeated taps keep advancing. Releasing
+    // Ctrl commits (handled via Event::KeyUp, not the shortcut table).
     Shortcut { key: Keycode::Tab, key2: None, ctrl: true, shift: false,
-        modes: GENERAL,
+        modes: &[Coordinate::General, Coordinate::TabSwitcher],
         label: "Ctrl+Tab Next tab", is_available: more_than_one_tab,
-        handle: handlers::handle_tab_next },
+        handle: handlers::handle_ctrl_tab },
     Shortcut { key: Keycode::Tab, key2: None, ctrl: true, shift: true,
-        modes: GENERAL,
+        modes: &[Coordinate::General, Coordinate::TabSwitcher],
         label: "Ctrl+Shift+Tab Prev tab", is_available: more_than_one_tab,
-        handle: handlers::handle_tab_prev },
+        handle: handlers::handle_ctrl_shift_tab },
+    // t (general mode) — open the sticky MRU tab switcher palette.
+    Shortcut { key: Keycode::T, key2: None, ctrl: false, shift: false,
+        modes: GENERAL,
+        label: "t      Switch tab", is_available: more_than_one_tab,
+        handle: handlers::handle_t_tab_switcher },
     // Ctrl+1..9 — labels empty (Ctrl+Tab/Ctrl+Shift+Tab already advertise tab nav)
     Shortcut { key: Keycode::_1, key2: None, ctrl: true, shift: false,
         modes: GENERAL, label: "", is_available: always, handle: handlers::handle_tab_select_1 },
