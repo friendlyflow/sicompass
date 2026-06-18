@@ -28,6 +28,11 @@ fn is_insert_mode(c: Coordinate) -> bool {
             // the screen. The image variant ignores text input, so always
             // enabling it in Dashboard is harmless.
             | Coordinate::Dashboard
+            // The tab switcher has a type-to-filter search field (like the
+            // colon command palette), so it needs SDL text input too. This only
+            // enables text events — the overlay still renders as a list, not
+            // element-editing (see the separate render-local `in_insert_mode`).
+            | Coordinate::TabSwitcher
     )
 }
 
@@ -770,24 +775,25 @@ fn update_view(app: &mut AppState) {
     let search_str = if app.renderer.coordinate == Coordinate::ConfirmCloseTab {
         // Modal prompt above the two `-b` button options.
         Some("This tab has a running program. Close it?".to_string())
-    } else if app.renderer.coordinate == Coordinate::TabSwitcher {
-        // Header above the MRU-ordered `-b` tab buttons.
-        Some("Switch tab:".to_string())
     } else if matches!(
         app.renderer.coordinate,
         Coordinate::SimpleSearch | Coordinate::ExtendedSearch | Coordinate::Command
+            | Coordinate::TabSwitcher
     ) {
         let (prefix, text) = match app.renderer.coordinate {
             Coordinate::Command => ("search: ", app.renderer.input_buffer.as_str()),
             Coordinate::ExtendedSearch => ("ext search: ", app.renderer.input_buffer.as_str()),
+            Coordinate::TabSwitcher => ("switch tab: ", app.renderer.input_buffer.as_str()),
             _ => ("search: ", app.renderer.search_string.as_str()),
         };
         // Tab (ExtendedSearch) and Ctrl-F (SimpleSearch) append a result count,
-        // matching the `[N items]` readout shown by scroll-mode searches.
+        // matching the `[N items]` readout shown by scroll-mode searches; the
+        // tab switcher shows a tab count.
         let count_suffix = match app.renderer.coordinate {
             Coordinate::SimpleSearch | Coordinate::ExtendedSearch => {
                 format!(" [{} items]", list_items.len())
             }
+            Coordinate::TabSwitcher => format!(" [{} tabs]", list_items.len()),
             _ => String::new(),
         };
         Some(format!("{}{}{}", prefix, text, count_suffix))
@@ -1579,12 +1585,13 @@ fn update_view(app: &mut AppState) {
         } else if matches!(
             app.renderer.coordinate,
             Coordinate::SimpleSearch | Coordinate::ExtendedSearch | Coordinate::Command
-                | Coordinate::ScrollSearch | Coordinate::InputSearch
+                | Coordinate::ScrollSearch | Coordinate::InputSearch | Coordinate::TabSwitcher
         ) {
             // Search/command caret after the prefix
             let (prefix, buf, cursor) = match app.renderer.coordinate {
                 Coordinate::Command => ("search: ", insert_buf.as_str(), insert_cursor),
                 Coordinate::ExtendedSearch => ("ext search: ", insert_buf.as_str(), insert_cursor),
+                Coordinate::TabSwitcher => ("switch tab: ", insert_buf.as_str(), insert_cursor),
                 _ => ("search: ", app.renderer.search_string.as_str(), insert_cursor),
             };
             // search_y is the baseline — shift to cell top + padding

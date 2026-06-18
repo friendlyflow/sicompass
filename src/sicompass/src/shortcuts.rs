@@ -539,7 +539,8 @@ pub static SHORTCUTS: &[Shortcut] = &[
                  Coordinate::Insert, Coordinate::Normal,
                  Coordinate::Visual,
                  Coordinate::SimpleSearch, Coordinate::ExtendedSearch,
-                 Coordinate::Command, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch, Coordinate::InputSearch],
+                 Coordinate::Command, Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch, Coordinate::InputSearch,
+                 Coordinate::TabSwitcher],
         label: "Bspc   Backspace", is_available: always, handle: handlers::handle_backspace },
 
     // ---- Delete (forward) ------------------------------------------------

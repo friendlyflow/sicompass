@@ -6222,6 +6222,78 @@ fn t_is_noop_with_single_tab() {
         "t does nothing with only one tab");
 }
 
+/// Open the switcher over two tabs on distinct providers (file browser in tab 0,
+/// settings in tab 1) and return `(filebrowser_name, harness)`. Distinct names
+/// let the type-to-filter query select one tab.
+fn switcher_over_two_named_tabs() -> (String, Harness) {
+    let mut h = Harness::new();
+    let fb = h.provider_idx("filebrowser").unwrap();
+    let settings = h.provider_idx("settings").unwrap();
+
+    navigate_to_provider(h.r(), fb);       // tab 0 → file browser
+    press_ctrl(h.r(), Keycode::T);         // tab 1
+    navigate_to_provider(h.r(), settings); // tab 1 → settings
+
+    press(h.r(), Keycode::T);              // open switcher, mru [1, 0]
+    let fb_name = h.renderer.total_list.iter()
+        .find(|it| it.id.last() == Some(0))
+        .map(|it| it.label.trim_start_matches("-b ").to_string())
+        .expect("filebrowser tab present");
+    (fb_name, h)
+}
+
+#[test]
+fn switcher_filters_by_typed_query_and_enter_switches() {
+    let (fb_name, mut h) = switcher_over_two_named_tabs();
+    assert_eq!(h.renderer.active_tab, 1, "started on the web-browser tab");
+
+    type_text(h.r(), &fb_name); // filter down to the file-browser tab
+    assert!(!h.renderer.filtered_list_indices.is_empty(), "query matches a tab");
+    assert_eq!(h.renderer.current_list_item().and_then(|it| it.id.last()), Some(0),
+        "best match is the file-browser tab (id 0)");
+
+    press_enter(h.r());
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
+    assert_eq!(h.renderer.active_tab, 0, "Enter switches to the filtered tab");
+}
+
+#[test]
+fn switcher_backspace_widens_filter() {
+    let (fb_name, mut h) = switcher_over_two_named_tabs();
+    let total = h.renderer.total_list.len();
+
+    type_text(h.r(), &fb_name);
+    assert!(!h.renderer.filtered_list_indices.is_empty());
+
+    for _ in 0..fb_name.chars().count() {
+        press(h.r(), Keycode::Backspace);
+    }
+    assert!(h.renderer.input_buffer.is_empty(), "query cleared by backspace");
+    assert!(h.renderer.filtered_list_indices.is_empty(), "empty query = unfiltered");
+    assert_eq!(h.renderer.active_list_len(), total, "all tabs visible again");
+}
+
+#[test]
+fn switcher_escape_clears_query_and_keeps_tab() {
+    let (_fb_name, mut h) = switcher_over_two_named_tabs();
+    type_text(h.r(), "fi");
+    press_escape(h.r());
+
+    assert_eq!(h.renderer.coordinate, Coordinate::General);
+    assert!(h.renderer.input_buffer.is_empty(), "escape clears the query buffer");
+    assert_eq!(h.renderer.active_tab, 1, "escape does not switch tabs");
+}
+
+#[test]
+fn switcher_ignores_activation_t_in_query() {
+    // The `t` that opened the palette must not seed the filter.
+    let (_fb_name, mut h) = switcher_over_two_named_tabs();
+    assert!(h.renderer.input_buffer.is_empty());
+    type_text(h.r(), "t"); // simulates the activation key's text event
+    assert!(h.renderer.input_buffer.is_empty(),
+        "the activation 't' is ignored while the query is empty");
+}
+
 #[test]
 fn switcher_labels_parked_settings_tab_by_name() {
     let mut h = Harness::new();
