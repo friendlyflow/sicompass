@@ -1098,6 +1098,54 @@ fn meta_key_does_not_enter_meta_from_editor_insert() {
     assert_eq!(r.coordinate, Coordinate::Insert);
 }
 
+/// Regression: Enter at the global root provider list (depth 1, a non-editor
+/// provider) must be inert — it must NOT append a stray string element.
+#[test]
+fn enter_at_root_does_not_append() {
+    let mut h = Harness::new();
+    assert_eq!(h.renderer.current_id.depth(), 1, "expected to start at root");
+    let before = h.renderer.ffon.len();
+    press_enter(h.r());
+    assert_eq!(
+        h.renderer.ffon.len(),
+        before,
+        "Enter at root must not append a new element",
+    );
+}
+
+/// Regression: Enter inside a non-editor provider (filebrowser, depth 2) must
+/// not append a blank string element to the listing.
+#[test]
+fn enter_in_filebrowser_does_not_append() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r()); // enter filebrowser (depth 2)
+
+    let before = h.renderer.ffon[fb_idx].as_obj().unwrap().children.len();
+    press_enter(h.r());
+    let after = h.renderer.ffon[fb_idx].as_obj().unwrap().children.len();
+    assert_eq!(
+        after, before,
+        "Enter in the filebrowser must not append a new element",
+    );
+}
+
+/// Editor providers keep their structural append-on-Enter behaviour: pressing
+/// Enter in General on an editor-semantics provider inserts a new empty sibling.
+#[test]
+fn enter_in_editor_general_appends() {
+    let mut r = editor_renderer_in(Coordinate::General);
+    let before = r.ffon[0].as_obj().unwrap().children.len();
+    press_enter(&mut r);
+    let after = r.ffon[0].as_obj().unwrap().children.len();
+    assert_eq!(
+        after,
+        before + 1,
+        "Enter in an editor provider should append a new sibling element",
+    );
+}
+
 /// A `<link>` Obj injected into the webbrowser FFON (simulating what
 /// `html_to_ffon` produces for `<a>` tags) should show the `+l` prefix in
 /// the visual list and navigating Right into it should push depth by one.
