@@ -186,6 +186,10 @@ pub fn create_list_current_layer(renderer: &mut AppRenderer) {
             build_timeline_list(renderer);
             return;
         }
+        Coordinate::ConfirmCloseTab => {
+            build_confirm_close_tab_list(renderer);
+            return;
+        }
         Coordinate::Scroll | Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch => {
             create_list_scroll(renderer);
             return;
@@ -538,6 +542,41 @@ fn build_timeline_list(renderer: &mut AppRenderer) {
         });
     }
     renderer.total_list = items;
+}
+
+/// Button payloads for the close-tab confirmation list (also the function name
+/// inside each `<button>` tag). Compared against `extract_button_function_name`
+/// in the Enter handler.
+pub const CONFIRM_CLOSE_CANCEL: &str = "cancel";
+pub const CONFIRM_CLOSE_KILL: &str = "close";
+
+/// Build the modal yes/no list for `Coordinate::ConfirmCloseTab`.
+///
+/// Both options are `<button>` Strs, so each renders with the `-b` ("button")
+/// list prefix via [`build_str_label`] and is announced as an actionable button
+/// by the screen reader. Index 0 ("Cancel") is the safe default the cursor
+/// starts on.
+fn build_confirm_close_tab_list(renderer: &mut AppRenderer) {
+    renderer.list_index = 0;
+    let options = [
+        format!("<button>{CONFIRM_CLOSE_CANCEL}</button>Cancel"),
+        format!("<button>{CONFIRM_CLOSE_KILL}</button>Close tab and kill process"),
+    ];
+    renderer.total_list = options
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let mut id = IdArray::new();
+            id.push(i);
+            RenderListItem {
+                id,
+                label: build_str_label(s, false),
+                data: None,
+                nav_path: None,
+                ext_prefix: None,
+            }
+        })
+        .collect();
 }
 
 /// Per-provider context passed to `timeline_entry_label` so it can pick the

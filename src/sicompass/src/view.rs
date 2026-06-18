@@ -750,7 +750,10 @@ fn update_view(app: &mut AppState) {
     let insert_cursor = app.renderer.cursor_position;
     let insert_sel = app.renderer.selection_anchor;
     let caret_visible = app.renderer.caret.visible;
-    let search_str = if matches!(
+    let search_str = if app.renderer.coordinate == Coordinate::ConfirmCloseTab {
+        // Modal prompt above the two `-b` button options.
+        Some("This tab has a running program. Close it?".to_string())
+    } else if matches!(
         app.renderer.coordinate,
         Coordinate::SimpleSearch | Coordinate::ExtendedSearch | Coordinate::Command
     ) {

@@ -33,11 +33,11 @@ pub fn handle_up(r: &mut AppRenderer) {
             r.text_scroll_offset = (r.text_scroll_offset - step).max(0);
             r.needs_redraw = true;
         }
-        Coordinate::SimpleSearch | Coordinate::Command | Coordinate::ExtendedSearch | Coordinate::Meta | Coordinate::TimelineView => {
+        Coordinate::SimpleSearch | Coordinate::Command | Coordinate::ExtendedSearch | Coordinate::Meta | Coordinate::TimelineView | Coordinate::ConfirmCloseTab => {
             r.error_message.clear();
             if r.list_index > 0 {
                 r.list_index -= 1;
-                if r.coordinate != Coordinate::Command && r.coordinate != Coordinate::Meta && r.coordinate != Coordinate::TimelineView {
+                if r.coordinate != Coordinate::Command && r.coordinate != Coordinate::Meta && r.coordinate != Coordinate::TimelineView && r.coordinate != Coordinate::ConfirmCloseTab {
                     r.sync_current_id_from_list();
                 }
                 r.speak_current_element();
@@ -75,7 +75,7 @@ pub fn handle_down(r: &mut AppRenderer) {
             r.text_scroll_offset = (r.text_scroll_offset + step).min(max_offset);
             r.needs_redraw = true;
         }
-        Coordinate::SimpleSearch | Coordinate::Command | Coordinate::ExtendedSearch | Coordinate::Meta | Coordinate::TimelineView => {
+        Coordinate::SimpleSearch | Coordinate::Command | Coordinate::ExtendedSearch | Coordinate::Meta | Coordinate::TimelineView | Coordinate::ConfirmCloseTab => {
             r.error_message.clear();
             let max_index = if r.filtered_list_indices.is_empty() {
                 r.total_list.len().saturating_sub(1)
@@ -84,7 +84,7 @@ pub fn handle_down(r: &mut AppRenderer) {
             };
             if r.list_index < max_index {
                 r.list_index += 1;
-                if r.coordinate != Coordinate::Command && r.coordinate != Coordinate::Meta && r.coordinate != Coordinate::TimelineView {
+                if r.coordinate != Coordinate::Command && r.coordinate != Coordinate::Meta && r.coordinate != Coordinate::TimelineView && r.coordinate != Coordinate::ConfirmCloseTab {
                     r.sync_current_id_from_list();
                 }
                 r.speak_current_element();
@@ -2713,6 +2713,17 @@ pub fn handle_escape(r: &mut AppRenderer) {
             r.needs_redraw = true;
             return;
         }
+        Coordinate::ConfirmCloseTab => {
+            // Cancel the close: restore the prior mode and its list.
+            r.coordinate = r.previous_coordinate;
+            r.speak_mode_change(None);
+            list::create_list_current_layer(r);
+            r.list_index = r.current_id.last().unwrap_or(0);
+            r.scroll_offset = 0;
+            r.caret.reset(sdl_ticks());
+            r.needs_redraw = true;
+            return;
+        }
         Coordinate::Dashboard => {
             handle_dashboard_leave(r);
             return;
@@ -5175,28 +5186,120 @@ fn after_tab_change(r: &mut AppRenderer) {
     persist_tabs(r);
 }
 
-/// Ctrl+T — duplicate the current navigation into a new tab inserted to the
-/// right of the active tab; the new tab becomes active.
+/// Ctrl+T — open a new tab to the right of the active tab with its own fresh,
+/// independent set of content providers (its own shell process, file browser,
+/// etc.). The new tab opens on the same provider as the current one (e.g. a
+/// fresh terminal if you were in the terminal) and becomes active.
 pub fn handle_tab_new(r: &mut AppRenderer) {
-    let snap = crate::app_state::TabSnapshot::capture(r);
-    r.tabs[r.active_tab] = snap.clone();
-    let insert_at = r.active_tab + 1;
-    r.tabs.insert(insert_at, snap);
+    let active = r.active_tab;
+
+    // Capture the content provider names while the live set is still intact
+    // (detach_content leaves only the shared settings provider behind).
+    let content_n = r.providers.len().saturating_sub(1);
+    let content_names: Vec<String> = r.providers[..content_n]
+        .iter()
+        .map(|p| p.name().to_owned())
+        .collect();
+
+    // Save the outgoing tab's navigation, then park its live content providers.
+    r.tabs[active].current_id = r.current_id.clone();
+    r.tabs[active].provider_path = crate::app_state::active_provider_path(r);
+    let (cp, cf) = r.detach_content();
+    r.tabs[active].providers = cp;
+    r.tabs[active].ffon = cf;
+
+    // Build a fresh content-provider set mirroring the source tab and make it
+    // the live working set.
+    let (np, nf) = crate::programs::build_content_set_from_names(r, &content_names);
+    r.attach_content(np, nf);
+
+    // Open the new tab on the same provider AND location as the source tab
+    // (e.g. a fresh terminal in the same cwd, or the file browser in the same
+    // directory) — "a tab like it is now", but with its own provider instances.
+    let src_id = r.tabs[active].current_id.clone();
+    let src_path = r.tabs[active].provider_path.clone();
+    r.rebuild_and_clamp(&src_path, src_id);
+    let new_id = r.current_id.clone();
+    let new_path = crate::app_state::active_provider_path(r);
+
+    let insert_at = active + 1;
+    r.tabs.insert(insert_at, crate::app_state::TabSnapshot::nav_only(new_id, new_path));
     // Keep `tab_timelines` parallel to `tabs`. New tabs start with an empty
-    // timeline — duplicating navigation does not duplicate history.
+    // timeline — a fresh tab carries no history.
     r.tab_timelines
         .insert(insert_at, crate::app_state::Timeline::new());
     r.active_tab = insert_at;
     after_tab_change(r);
 }
 
-/// Ctrl+W — close the active tab. No-op when only one tab remains.
+/// Whether any of the active tab's content providers (everything except the
+/// trailing shared settings provider) is busy — e.g. a terminal running a
+/// foreground command or a full-screen interactive program.
+fn active_tab_busy(r: &AppRenderer) -> bool {
+    let n = r.providers.len();
+    if n <= 1 { return false; }
+    r.providers[..n - 1].iter().any(|p| p.is_busy())
+}
+
+/// Ctrl+W — close the active tab and tear down its providers (killing any shell
+/// process). No-op when only one tab remains. If the tab is busy, first show a
+/// confirmation prompt instead of closing immediately.
 pub fn handle_tab_close(r: &mut AppRenderer) {
     if r.tabs.len() <= 1 { return; }
-    r.tabs.remove(r.active_tab);
-    r.tab_timelines.remove(r.active_tab);
+    if active_tab_busy(r) {
+        enter_confirm_close_tab(r);
+        return;
+    }
+    close_active_tab(r);
+}
+
+/// Enter the modal close-tab confirmation (`Coordinate::ConfirmCloseTab`).
+fn enter_confirm_close_tab(r: &mut AppRenderer) {
+    r.previous_coordinate = r.coordinate;
+    r.coordinate = Coordinate::ConfirmCloseTab;
+    list::create_list_current_layer(r);
+    r.list_index = 0; // default to "Cancel"
+    r.speak_mode_change(None);
+    r.needs_redraw = true;
+}
+
+/// Enter handler for `Coordinate::ConfirmCloseTab`: activate the highlighted
+/// button. "Cancel" returns to the prior mode; "Close" tears the tab down.
+pub fn handle_enter_confirm_close_tab(r: &mut AppRenderer) {
+    let kill = r.list_index == 1; // [0]=Cancel, [1]=Close tab and kill process
+    // Restore the prior mode first; close_active_tab rebuilds the list/state.
+    r.coordinate = r.previous_coordinate;
+    if kill {
+        close_active_tab(r);
+    } else {
+        list::create_list_current_layer(r);
+        r.list_index = r.current_id.last().unwrap_or(0);
+        r.speak_mode_change(None);
+        r.needs_redraw = true;
+    }
+}
+
+/// Remove the active tab: drop its live content providers (Drop kills shells),
+/// swap the neighbouring tab's parked providers in, and refresh.
+fn close_active_tab(r: &mut AppRenderer) {
+    // Drop the active tab's live content providers — this fires each provider's
+    // Drop impl, killing the terminal's child shell process. The trailing
+    // shared settings provider stays in `r.providers`.
+    let (content_providers, _content_ffon) = r.detach_content();
+    drop(content_providers);
+
+    let closed = r.active_tab;
+    r.tabs.remove(closed);
+    r.tab_timelines.remove(closed);
     if r.active_tab > 0 { r.active_tab -= 1; }
-    r.load_active_tab();
+
+    // Swap the new active tab's parked content into the live working set.
+    let idx = r.active_tab;
+    let np = std::mem::take(&mut r.tabs[idx].providers);
+    let nf = std::mem::take(&mut r.tabs[idx].ffon);
+    r.attach_content(np, nf);
+    r.current_id = r.tabs[idx].current_id.clone();
+    r.list_index = r.current_id.last().unwrap_or(0);
     after_tab_change(r);
 }
 

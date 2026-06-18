@@ -123,6 +123,10 @@ pub enum Coordinate {
     Dashboard,
     Meta,
     TimelineView,
+    /// Modal yes/no list shown when Ctrl+W would close a tab whose providers
+    /// are still busy (e.g. a terminal running a foreground command). The list
+    /// holds two `<button>` options; Enter activates the highlighted one.
+    ConfirmCloseTab,
 }
 
 impl Coordinate {
@@ -150,6 +154,7 @@ impl Coordinate {
             Coordinate::Dashboard => "dashboard",
             Coordinate::Meta => "meta",
             Coordinate::TimelineView => "timeline",
+            Coordinate::ConfirmCloseTab => "confirm close tab",
         }
     }
 
@@ -174,6 +179,7 @@ impl Coordinate {
             Coordinate::Dashboard => "mode-dashboard",
             Coordinate::Meta => "mode-meta",
             Coordinate::TimelineView => "mode-timeline",
+            Coordinate::ConfirmCloseTab => "mode-confirm-close-tab",
         };
         let resolved = sicompass_sdk::localize::t(key);
         if resolved == key { self.as_str().to_owned() } else { resolved }
@@ -566,34 +572,50 @@ pub struct AppRenderer {
     pub update_message_active: bool,
 }
 
-/// One tab's saved state.
+/// One tab's state.
 ///
-/// Both fields matter because all tabs share the same FFON tree and provider
-/// instances. Saving only `current_id` would leave other tabs indexing into a
-/// stale tree (e.g. tab A navigates the file browser into `/Downloads`, which
-/// rebuilds `r.ffon[0]`; tab B's saved indices then point at the wrong
-/// directory). Saving the active provider's `current_path` lets the switch
-/// logic call `set_current_path` + re-fetch and rebuild the tree to match.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Each tab owns an independent set of *content* providers (terminal, file
+/// browser, …) and their FFON roots — its own shell process, own navigation,
+/// "like separate windows". The single shared `settings` provider is the one
+/// exception: it is never duplicated and always lives as the last entry of the
+/// live `AppRenderer.providers`.
+///
+/// Invariant: the **active** tab's providers/ffon live in `AppRenderer`'s
+/// `providers`/`ffon` (the working set), so its parked `providers`/`ffon` here
+/// are empty. **Inactive** tabs park their content providers/ffon in these
+/// fields. Switching tabs is a swap of the content slices (see
+/// `AppRenderer::switch_to_tab`) — no tree rebuild, because the provider
+/// instances retain their own live state.
+///
+/// `current_id` + `provider_path` are also what gets persisted to disk so the
+/// layout can be reconstructed across restarts (`persist_tabs`).
 pub struct TabSnapshot {
     pub current_id: IdArray,
     /// `current_path()` of the provider at `current_id[0]` at snapshot time.
     /// Empty when there is no provider (shouldn't happen in practice).
     pub provider_path: String,
+    /// Parked content providers for an INACTIVE tab (everything except the
+    /// shared settings provider, in the same order). Empty for the active tab.
+    pub providers: Vec<Box<dyn Provider>>,
+    /// FFON roots parallel to `providers`. Empty for the active tab.
+    pub ffon: Vec<FfonElement>,
 }
 
 impl TabSnapshot {
-    /// Capture the live state of `r` into a snapshot.
-    pub fn capture(r: &AppRenderer) -> Self {
-        let provider_path = r.current_id.get(0)
-            .and_then(|i| r.providers.get(i))
-            .map(|p| p.current_path().to_owned())
-            .unwrap_or_default();
-        TabSnapshot {
-            current_id: r.current_id.clone(),
-            provider_path,
-        }
+    /// A fresh tab record holding the given navigation, with no parked
+    /// providers (used for the tab that is about to become active, whose
+    /// providers live in `AppRenderer`).
+    pub fn nav_only(current_id: IdArray, provider_path: String) -> Self {
+        TabSnapshot { current_id, provider_path, providers: Vec::new(), ffon: Vec::new() }
     }
+}
+
+/// `current_path()` of the active provider (`current_id[0]`) in `r`, or empty.
+pub fn active_provider_path(r: &AppRenderer) -> String {
+    r.current_id.get(0)
+        .and_then(|i| r.providers.get(i))
+        .map(|p| p.current_path().to_owned())
+        .unwrap_or_default()
 }
 
 impl AppRenderer {
@@ -666,10 +688,7 @@ impl AppRenderer {
             pending_announcement: None,
             announcement_parity: false,
             privacy_blank: false,
-            tabs: vec![TabSnapshot {
-                current_id: current_id_clone,
-                provider_path: String::new(),
-            }],
+            tabs: vec![TabSnapshot::nav_only(current_id_clone, String::new())],
             active_tab: 0,
             tab_timelines: vec![Timeline::new()],
             in_history_action: false,
@@ -690,35 +709,88 @@ impl AppRenderer {
         &mut self.tab_timelines[self.active_tab]
     }
 
-    /// Switch to the tab at `target`. Saves the current navigation + active
-    /// provider's path into the outgoing tab slot, then loads the target snapshot
-    /// and re-fetches the provider's FFON tree if the saved path differs from the
-    /// provider's current path. No-op if `target` is out of range or already active.
-    pub fn switch_to_tab(&mut self, target: usize) {
-        if target >= self.tabs.len() || target == self.active_tab { return; }
-        self.tabs[self.active_tab] = TabSnapshot::capture(self);
-        self.active_tab = target;
-        self.load_active_tab();
+    /// Detach the active tab's *content* providers/ffon (everything except the
+    /// trailing shared settings provider) out of the live working set, leaving
+    /// only settings in `self.providers`/`self.ffon`. Returns the detached
+    /// content vectors so the caller can park them in a tab slot.
+    pub fn detach_content(&mut self) -> (Vec<Box<dyn Provider>>, Vec<FfonElement>) {
+        // Settings is always the last provider; keep it in place.
+        let settings_p = self.providers.pop();
+        let settings_f = self.ffon.pop();
+        let content_p = std::mem::take(&mut self.providers);
+        let content_f = std::mem::take(&mut self.ffon);
+        if let Some(p) = settings_p { self.providers.push(p); }
+        if let Some(f) = settings_f { self.ffon.push(f); }
+        (content_p, content_f)
     }
 
-    /// Restore live state from `tabs[active_tab]`. Called by `switch_to_tab`
-    /// (after saving the outgoing tab) and by `handle_tab_close` (which has
-    /// nothing to save into the slot it just removed).
-    pub fn load_active_tab(&mut self) {
-        let snap = self.tabs[self.active_tab].clone();
+    /// Inverse of [`detach_content`]: splice `content_p`/`content_f` back in
+    /// front of the trailing shared settings provider, making them the live
+    /// working set. Assumes `self.providers`/`self.ffon` currently hold only the
+    /// settings provider (i.e. a prior `detach_content`).
+    pub fn attach_content(
+        &mut self,
+        mut content_p: Vec<Box<dyn Provider>>,
+        mut content_f: Vec<FfonElement>,
+    ) {
+        let settings_p = self.providers.pop();
+        let settings_f = self.ffon.pop();
+        if let Some(p) = settings_p { content_p.push(p); }
+        if let Some(f) = settings_f { content_f.push(f); }
+        self.providers = content_p;
+        self.ffon = content_f;
+    }
 
+    /// Switch to the tab at `target`. Parks the active tab's content providers
+    /// into its slot (saving its navigation) and swaps in the target tab's
+    /// parked providers. No FFON rebuild is needed — each tab's provider
+    /// instances retain their own live state. No-op if `target` is out of range
+    /// or already active.
+    pub fn switch_to_tab(&mut self, target: usize) {
+        if target >= self.tabs.len() || target == self.active_tab { return; }
+        let active = self.active_tab;
+        // Save outgoing navigation, then park its content providers.
+        self.tabs[active].current_id = self.current_id.clone();
+        self.tabs[active].provider_path = active_provider_path(self);
+        let (cp, cf) = self.detach_content();
+        self.tabs[active].providers = cp;
+        self.tabs[active].ffon = cf;
+        // Swap in the target tab's parked content.
+        self.active_tab = target;
+        let cp = std::mem::take(&mut self.tabs[target].providers);
+        let cf = std::mem::take(&mut self.tabs[target].ffon);
+        self.attach_content(cp, cf);
+        self.current_id = self.tabs[target].current_id.clone();
+        self.list_index = self.current_id.last().unwrap_or(0);
+    }
+
+    /// Rebuild the active tab's saved provider FFON tree (for the cold-start
+    /// restore path, where providers were freshly instantiated and need their
+    /// saved navigation re-grafted) and clamp `current_id` to what actually
+    /// resolves. The active tab's providers must already be the live working
+    /// set. Used by `apply_tabs_section` and `handle_tab_close`.
+    pub fn load_active_tab(&mut self) {
+        let provider_path = self.tabs[self.active_tab].provider_path.clone();
+        let current_id = self.tabs[self.active_tab].current_id.clone();
+        self.rebuild_and_clamp(&provider_path, current_id);
+    }
+
+    /// Deep-rebuild the provider tree at `provider_path` (if it differs from the
+    /// provider's current path) and set `self.current_id` to `current_id`
+    /// clamped to the rebuilt tree.
+    pub fn rebuild_and_clamp(&mut self, provider_path: &str, current_id: IdArray) {
         // Rebuild the saved provider's FFON tree at full depth so a deep
         // `current_id` still resolves into it (see `deep_rebuild_provider_tree`).
-        if let Some(provider_idx) = snap.current_id.get(0) {
+        if let Some(provider_idx) = current_id.get(0) {
             if provider_idx < self.providers.len()
                 && provider_idx < self.ffon.len()
-                && !snap.provider_path.is_empty()
-                && self.providers[provider_idx].current_path() != snap.provider_path
+                && !provider_path.is_empty()
+                && self.providers[provider_idx].current_path() != provider_path
             {
                 self.deep_rebuild_provider_tree(
                     provider_idx,
-                    &snap.provider_path,
-                    snap.current_id.depth(),
+                    provider_path,
+                    current_id.depth(),
                 );
             }
         }
@@ -730,7 +802,7 @@ impl AppRenderer {
         // past the end. Without this clamp, downstream code that propagates
         // `current_id.last()` into `list_index` (see view.rs after a tick)
         // would leave focus on a non-existent row.
-        let mut current_id = snap.current_id;
+        let mut current_id = current_id;
         // Pop trailing indices while the path no longer resolves through the
         // rebuilt FFON tree — handles providers whose tree shrinks at any
         // depth after restart, e.g. the webbrowser, which does not persist

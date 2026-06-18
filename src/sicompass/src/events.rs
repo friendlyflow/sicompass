@@ -333,10 +333,16 @@ pub fn dispatch_key(r: &mut AppRenderer, keycode: Option<Keycode>, keymod: Mod) 
 
     let result = crate::shortcuts::dispatch_key(r, keycode, keymod);
 
-    let new_snap = crate::app_state::TabSnapshot::capture(r);
-    let snap_changed = r.tabs.get(r.active_tab).map_or(false, |s| s != &new_snap);
+    // Mirror the live navigation back into the active tab slot. Compare only
+    // the persisted nav fields — the slot's parked provider vectors are empty
+    // for the active tab and must stay untouched here.
+    let new_id = r.current_id.clone();
+    let new_path = crate::app_state::active_provider_path(r);
+    let snap_changed = r.tabs.get(r.active_tab)
+        .map_or(false, |s| s.current_id != new_id || s.provider_path != new_path);
     if let Some(slot) = r.tabs.get_mut(r.active_tab) {
-        *slot = new_snap;
+        slot.current_id = new_id;
+        slot.provider_path = new_path;
     }
     let tab_structure_changed = r.active_tab != prior_active || r.tabs.len() != prior_len;
     if snap_changed && !tab_structure_changed {

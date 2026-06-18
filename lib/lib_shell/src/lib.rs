@@ -5,7 +5,7 @@
 //! sicompass-sdk dependency and is not registered as a provider.
 
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -22,6 +22,16 @@ pub struct ShellConfig {
     pub env: Vec<(String, String)>,
     pub rows: u16,
     pub cols: u16,
+    /// Optional process title so the spawned shell is identifiable in process
+    /// monitors (btop, `ps`, Task Manager). The shell is launched through a
+    /// temp link renamed to `<title>` (symlink on Unix, hard link / copy on
+    /// Windows), which makes the process's actual *name* — `comm` on Unix, the
+    /// image name on Windows — equal to `<title>`. This is shell-agnostic, so
+    /// it works for fish/dash too (no `exec -a` needed). Falls back to a normal
+    /// spawn if the link can't be created. Note: Linux truncates `comm` to 15
+    /// bytes, so keep titles short; on Windows this works for `cmd.exe` but a
+    /// relocated PowerShell may fail to find its modules.
+    pub title: Option<String>,
 }
 
 impl Default for ShellConfig {
@@ -33,6 +43,7 @@ impl Default for ShellConfig {
             env: Vec::new(),
             rows: 24,
             cols: 80,
+            title: None,
         }
     }
 }
@@ -50,6 +61,9 @@ pub struct Shell {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
     output: Arc<Mutex<Vec<u8>>>,
+    /// Temp dir holding the renamed launch link (see `ShellConfig::title`).
+    /// Removed on drop. `None` when no title was applied.
+    title_link_dir: Option<PathBuf>,
 }
 
 impl Shell {
@@ -65,12 +79,31 @@ impl Shell {
             })
             .map_err(io_err)?;
 
-        let mut cmd = CommandBuilder::new(&cfg.program);
+        // Optionally launch the shell through a temp link named after
+        // `cfg.title` so it shows up under that name in process monitors (btop,
+        // `ps`, Task Manager). This changes the process's actual *name* (`comm`
+        // on Unix, image name on Windows) — not just its command line — and is
+        // shell-agnostic, so it works for shells without `exec -a` (fish/dash)
+        // too. If the link can't be created, fall back to the real program.
+        let mut title_link_dir: Option<PathBuf> = None;
+        let program_for_cmd: String = match cfg.title.as_deref()
+            .and_then(|t| resolve_program(&cfg.program).map(|p| (p, t)))
+            .and_then(|(p, t)| make_title_link(&p, t))
+        {
+            Some((dir, link_path)) => {
+                title_link_dir = Some(dir);
+                link_path.to_string_lossy().into_owned()
+            }
+            None => cfg.program.clone(),
+        };
+
+        let mut cmd = CommandBuilder::new(&program_for_cmd);
         // Default to interactive mode for known shells. Without an interactive
         // flag bash/zsh skip PS1 and disable the `complete` builtin, so a
         // user's rc file typically prints "complete: command not found" and no
         // prompt shows. PowerShell uses `-NoLogo`; cmd.exe has no analog.
-        // Caller-supplied args override this.
+        // Caller-supplied args override this. The flag is derived from the
+        // ORIGINAL program name (the link is renamed and wouldn't match).
         if cfg.args.is_empty() {
             if let Some(flag) = interactive_flag(&cfg.program) {
                 cmd.arg(flag);
@@ -158,6 +191,7 @@ impl Shell {
             writer,
             child,
             output,
+            title_link_dir,
         })
     }
 
@@ -207,6 +241,42 @@ impl Shell {
         self.child.kill()
     }
 
+    /// Whether a foreground command (something other than the shell itself) is
+    /// currently running on the PTY.
+    ///
+    /// Linux-only: reads the shell's `/proc/<pid>/stat` and compares the
+    /// controlling terminal's foreground process group (`tpgid`, field 8)
+    /// against the shell's own process group (`pgrp`, field 5). At the prompt
+    /// the shell *is* the foreground group, so they match; while a command
+    /// runs the shell moves it into its own group and `tpgid` diverges. Returns
+    /// `false` on other platforms or when the stat line can't be read/parsed.
+    pub fn foreground_busy(&self) -> bool {
+        #[cfg(target_os = "linux")]
+        {
+            let Some(pid) = self.pid() else { return false; };
+            let Ok(content) = std::fs::read_to_string(format!("/proc/{}/stat", pid))
+            else {
+                return false;
+            };
+            // `comm` (field 2) is parenthesized and may itself contain spaces
+            // or parens, so split after the final ')'. The remaining
+            // whitespace-separated fields are state, ppid, pgrp, session,
+            // tty_nr, tpgid, … → pgrp at index 2, tpgid at index 5.
+            let Some(rparen) = content.rfind(')') else { return false; };
+            let fields: Vec<&str> = content[rparen + 1..].split_whitespace().collect();
+            let pgrp = fields.get(2).and_then(|s| s.parse::<i32>().ok());
+            let tpgid = fields.get(5).and_then(|s| s.parse::<i32>().ok());
+            match (pgrp, tpgid) {
+                (Some(pg), Some(tp)) => tp >= 0 && tp != pg,
+                _ => false,
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            false
+        }
+    }
+
     /// Inform the PTY (and child) of a new size.
     pub fn resize(&mut self, rows: u16, cols: u16) -> std::io::Result<()> {
         self.master
@@ -223,6 +293,9 @@ impl Shell {
 impl Drop for Shell {
     fn drop(&mut self) {
         let _ = self.child.kill();
+        if let Some(dir) = &self.title_link_dir {
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 }
 
@@ -243,6 +316,69 @@ pub fn default_program() -> String {
 
 fn io_err<E: std::fmt::Display>(e: E) -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
+}
+
+/// Resolve `program` to an existing absolute path so a renamed launch link can
+/// target it. Absolute paths are returned as-is when they exist; bare names are
+/// looked up on `PATH` (also trying `<name>.exe` on Windows). Returns `None` if
+/// nothing is found.
+fn resolve_program(program: &str) -> Option<PathBuf> {
+    let p = Path::new(program);
+    if p.is_absolute() {
+        return p.exists().then(|| p.to_path_buf());
+    }
+    let path_var = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path_var) {
+        let cand = dir.join(program);
+        if cand.is_file() {
+            return Some(cand);
+        }
+        #[cfg(windows)]
+        {
+            let cand_exe = dir.join(format!("{program}.exe"));
+            if cand_exe.is_file() {
+                return Some(cand_exe);
+            }
+        }
+    }
+    None
+}
+
+/// Create a temp dir containing a link named `title` that points at `program`,
+/// returning `(dir, link_path)`. Launching the link makes the process appear
+/// under `title` in monitors (`comm` on Unix, image name on Windows). The link
+/// is a symlink on Unix and a hard link (falling back to a copy) on Windows.
+/// Returns `None` if neither can be created. The kernel truncates `comm` to 15
+/// bytes on Linux, so keep titles short.
+fn make_title_link(program: &Path, title: &str) -> Option<(PathBuf, PathBuf)> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir()
+        .join(format!("sicompass-shell-{}-{}", std::process::id(), n));
+    std::fs::create_dir_all(&dir).ok()?;
+
+    #[cfg(windows)]
+    let link_name = format!("{title}.exe");
+    #[cfg(not(windows))]
+    let link_name = title.to_owned();
+    let link_path = dir.join(&link_name);
+
+    #[cfg(unix)]
+    let ok = std::os::unix::fs::symlink(program, &link_path).is_ok();
+    #[cfg(windows)]
+    let ok = std::fs::hard_link(program, &link_path).is_ok()
+        || std::fs::copy(program, &link_path).is_ok();
+    #[cfg(not(any(unix, windows)))]
+    let ok = false;
+
+    if ok {
+        Some((dir, link_path))
+    } else {
+        let _ = std::fs::remove_dir_all(&dir);
+        None
+    }
 }
 
 /// For known interactive shells, return the flag that should be appended so
@@ -324,6 +460,40 @@ mod tests {
         assert!(!default_program().is_empty());
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn foreground_busy_false_at_prompt_true_while_running() {
+        // A freshly spawned interactive shell sits at its prompt, so the
+        // foreground process group is the shell itself → not busy.
+        let cfg = ShellConfig {
+            program: "/bin/sh".to_owned(),
+            ..Default::default()
+        };
+        let mut shell = Shell::spawn(cfg).expect("spawn /bin/sh");
+        // Give the shell a moment to reach its prompt.
+        let settle = Instant::now() + Duration::from_millis(300);
+        while Instant::now() < settle {
+            let _ = shell.drain_output();
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!shell.foreground_busy(), "idle shell at prompt is not busy");
+
+        // Launch a foreground command that blocks; the shell hands the terminal
+        // to it, so `foreground_busy` must report true while it runs.
+        shell.write_line("sleep 5").expect("write");
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut saw_busy = false;
+        while Instant::now() < deadline {
+            let _ = shell.drain_output();
+            if shell.foreground_busy() {
+                saw_busy = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(saw_busy, "shell should report busy while `sleep` runs");
+    }
+
     #[cfg(windows)]
     #[test]
     fn spawn_cmd_echo_observes_output() {
@@ -377,6 +547,60 @@ mod tests {
             thread::sleep(Duration::from_millis(20));
         }
         panic!("child still alive after kill");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn make_title_link_creates_symlink_to_program() {
+        let target = std::path::Path::new("/bin/sh");
+        if !target.exists() { return; }
+        let (dir, link) = make_title_link(target, "sicompass-shell")
+            .expect("symlink should be creatable in temp dir");
+        assert!(link.exists(), "link should exist");
+        assert_eq!(link.file_name().unwrap(), "sicompass-shell");
+        assert_eq!(std::fs::read_link(&link).unwrap(), target);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolve_program_handles_absolute_and_path_lookup() {
+        // Absolute path that exists resolves to itself.
+        #[cfg(unix)]
+        if std::path::Path::new("/bin/sh").exists() {
+            assert_eq!(resolve_program("/bin/sh").unwrap(),
+                std::path::PathBuf::from("/bin/sh"));
+        }
+        // A clearly-missing absolute path resolves to None.
+        assert!(resolve_program("/definitely/not/here/xyzzy").is_none());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn title_sets_process_name_comm() {
+        // Works for any shell; use /bin/sh which is always present.
+        let cfg = ShellConfig {
+            program: "/bin/sh".to_owned(),
+            title: Some("sicompass-shell".to_owned()),
+            ..Default::default()
+        };
+        let shell = Shell::spawn(cfg).expect("spawn shell with title");
+        let pid = shell.pid().expect("pid");
+
+        // The renamed link is what's exec'd, so the kernel sets `comm` to it.
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            if let Ok(comm) = std::fs::read_to_string(format!("/proc/{pid}/comm")) {
+                if comm.trim_end() == "sicompass-shell" {
+                    return;
+                }
+            }
+            if Instant::now() >= deadline {
+                let comm = std::fs::read_to_string(format!("/proc/{pid}/comm"))
+                    .unwrap_or_default();
+                panic!("comm never became the title; comm={comm:?}");
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
     }
 
     #[test]

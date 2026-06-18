@@ -6074,6 +6074,149 @@ fn tab_switch_preserves_per_tab_navigation() {
     assert_eq!(h.renderer.current_id, tab1_path);
 }
 
+/// Minimal provider whose `is_busy()` is configurable, for exercising the
+/// Ctrl+W close-tab confirmation path.
+struct BusyProvider {
+    busy: bool,
+}
+
+impl Provider for BusyProvider {
+    fn name(&self) -> &str { "busybox" }
+    fn fetch(&mut self) -> Vec<FfonElement> { Vec::new() }
+    fn is_busy(&self) -> bool { self.busy }
+}
+
+#[test]
+fn ctrl_w_non_busy_tab_closes_immediately() {
+    let mut h = Harness::new();
+    press_ctrl(h.r(), Keycode::T);
+    assert_eq!(h.renderer.tabs.len(), 2);
+
+    press_ctrl(h.r(), Keycode::W);
+
+    assert_eq!(h.renderer.tabs.len(), 1, "non-busy tab closes without a prompt");
+    assert_ne!(h.renderer.coordinate, Coordinate::ConfirmCloseTab);
+}
+
+#[test]
+fn ctrl_w_busy_tab_shows_confirmation_with_button_prefixes() {
+    let mut h = Harness::new();
+    press_ctrl(h.r(), Keycode::T);
+    // Make the active tab's content provider report busy.
+    h.renderer.providers[0] = Box::new(BusyProvider { busy: true });
+
+    press_ctrl(h.r(), Keycode::W);
+
+    assert_eq!(h.renderer.coordinate, Coordinate::ConfirmCloseTab);
+    assert_eq!(h.renderer.tabs.len(), 2, "busy tab is NOT closed before confirmation");
+    assert_eq!(h.renderer.total_list.len(), 2, "Cancel + Close options");
+    // Both options render with the `-b` button list prefix.
+    assert!(h.renderer.total_list[0].label.starts_with("-b "),
+        "cancel option should carry the -b prefix, got {:?}", h.renderer.total_list[0].label);
+    assert!(h.renderer.total_list[1].label.starts_with("-b "),
+        "close option should carry the -b prefix, got {:?}", h.renderer.total_list[1].label);
+    assert_eq!(h.renderer.list_index, 0, "cursor defaults to the safe Cancel option");
+}
+
+#[test]
+fn ctrl_w_busy_tab_escape_cancels() {
+    let mut h = Harness::new();
+    press_ctrl(h.r(), Keycode::T);
+    h.renderer.providers[0] = Box::new(BusyProvider { busy: true });
+
+    press_ctrl(h.r(), Keycode::W);
+    assert_eq!(h.renderer.coordinate, Coordinate::ConfirmCloseTab);
+
+    press(h.r(), Keycode::Escape);
+
+    assert_eq!(h.renderer.tabs.len(), 2, "Escape cancels the close");
+    assert_ne!(h.renderer.coordinate, Coordinate::ConfirmCloseTab);
+}
+
+#[test]
+fn ctrl_w_busy_tab_cancel_button_keeps_tab() {
+    let mut h = Harness::new();
+    press_ctrl(h.r(), Keycode::T);
+    h.renderer.providers[0] = Box::new(BusyProvider { busy: true });
+
+    press_ctrl(h.r(), Keycode::W);
+    // list_index 0 == Cancel; Enter activates it.
+    press(h.r(), Keycode::Return);
+
+    assert_eq!(h.renderer.tabs.len(), 2, "Cancel keeps the tab open");
+    assert_ne!(h.renderer.coordinate, Coordinate::ConfirmCloseTab);
+}
+
+#[test]
+fn enabling_app_in_settings_propagates_to_all_tabs() {
+    let mut h = Harness::new(); // [filebrowser] + shared settings, 1 tab
+    press_ctrl(h.r(), Keycode::T); // 2 tabs, each its own filebrowser
+    assert_eq!(h.renderer.tabs.len(), 2);
+    let inactive = if h.renderer.active_tab == 0 { 1 } else { 0 };
+
+    // Enable the web browser via the settings-apply path.
+    let queue: sicompass::programs::SettingsQueue = std::sync::Arc::new(std::sync::Mutex::new(
+        vec![("enable_webbrowser".to_owned(), "true".to_owned())],
+    ));
+    sicompass::programs::apply_pending_settings(h.r(), &queue, false);
+
+    // Active tab (live providers) has it.
+    assert!(h.renderer.providers.iter().any(|p| p.name() == "webbrowser"),
+        "active tab should have the newly enabled provider");
+    // Inactive tab's parked set has it too.
+    assert!(h.renderer.tabs[inactive].providers.iter().any(|p| p.name() == "webbrowser"),
+        "inactive tab should ALSO have the newly enabled provider");
+
+    // Now disable it again — both tabs lose it.
+    let queue: sicompass::programs::SettingsQueue = std::sync::Arc::new(std::sync::Mutex::new(
+        vec![("enable_webbrowser".to_owned(), "false".to_owned())],
+    ));
+    sicompass::programs::apply_pending_settings(h.r(), &queue, false);
+
+    assert!(!h.renderer.providers.iter().any(|p| p.name() == "webbrowser"),
+        "active tab should drop the disabled provider");
+    assert!(!h.renderer.tabs[inactive].providers.iter().any(|p| p.name() == "webbrowser"),
+        "inactive tab should ALSO drop the disabled provider");
+}
+
+#[test]
+fn language_change_refreshes_parked_tab_root_keys() {
+    let mut h = Harness::new();
+    press_ctrl(h.r(), Keycode::T); // 2 tabs, each with its own provider roots
+    let inactive = if h.renderer.active_tab == 0 { 1 } else { 0 };
+
+    // Simulate a stale (wrong-language) root label on the parked tab.
+    h.renderer.tabs[inactive].ffon[0].as_obj_mut().unwrap().key = "STALE".to_owned();
+
+    // Apply a language event (en-US keeps the process-global locale stable for
+    // parallel tests; the refresh runs regardless of whether the value changed).
+    let queue: sicompass::programs::SettingsQueue = std::sync::Arc::new(std::sync::Mutex::new(
+        vec![("language".to_owned(), "en-US".to_owned())],
+    ));
+    sicompass::programs::apply_pending_settings(h.r(), &queue, false);
+
+    // The parked tab's root key is re-derived from its own provider.
+    let expected = h.renderer.tabs[inactive].providers[0].display_name();
+    let actual = h.renderer.tabs[inactive].ffon[0].as_obj().unwrap().key.clone();
+    assert_eq!(actual, expected, "parked tab root key should be refreshed");
+    assert_ne!(actual, "STALE");
+}
+
+#[test]
+fn ctrl_w_busy_tab_confirm_button_closes_tab() {
+    let mut h = Harness::new();
+    press_ctrl(h.r(), Keycode::T);
+    h.renderer.providers[0] = Box::new(BusyProvider { busy: true });
+
+    press_ctrl(h.r(), Keycode::W);
+    // Move to "Close tab and kill process" (index 1) and confirm.
+    press_down(h.r());
+    press(h.r(), Keycode::Return);
+
+    assert_eq!(h.renderer.tabs.len(), 1, "confirming closes the tab");
+    assert_ne!(h.renderer.coordinate, Coordinate::ConfirmCloseTab);
+}
+
 #[test]
 fn ctrl_t_blocked_outside_general() {
     let mut h = Harness::new();
@@ -6133,7 +6276,12 @@ fn load_tabs_state_restores_persisted_layout() {
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
     press_ctrl(h.r(), Keycode::T);
-    let expected_tabs = h.renderer.tabs.clone();
+    // Capture the persisted nav fields (TabSnapshot now owns per-tab provider
+    // instances, so it is neither Clone nor PartialEq — compare nav only).
+    let expected_tabs: Vec<(sicompass_sdk::ffon::IdArray, String)> = h.renderer.tabs
+        .iter()
+        .map(|t| (t.current_id.clone(), t.provider_path.clone()))
+        .collect();
     let expected_active = h.renderer.active_tab;
 
     // Re-parse the on-disk settings using the same JSON shape the production
@@ -6147,12 +6295,11 @@ fn load_tabs_state_restores_persisted_layout() {
     let active_str = sec.get("activeTab").and_then(|v| v.as_str()).unwrap();
 
     use sicompass_sdk::ffon::IdArray;
-    use sicompass::app_state::TabSnapshot;
     let arr = match serde_json::from_str::<serde_json::Value>(tabs_str).unwrap() {
         serde_json::Value::Array(a) => a,
         _ => panic!("tabs should serialize to a JSON array"),
     };
-    let parsed: Vec<TabSnapshot> = arr.into_iter().map(|v| {
+    let parsed: Vec<(IdArray, String)> = arr.into_iter().map(|v| {
         let obj = v.as_object().unwrap();
         let ids = obj.get("id").unwrap().as_array().unwrap();
         let path = obj.get("path").unwrap().as_str().unwrap().to_owned();
@@ -6160,7 +6307,7 @@ fn load_tabs_state_restores_persisted_layout() {
         for n in ids {
             id.push(n.as_u64().unwrap() as usize);
         }
-        TabSnapshot { current_id: id, provider_path: path }
+        (id, path)
     }).collect();
     let parsed_active: usize = active_str.parse().unwrap();
 
@@ -6222,10 +6369,7 @@ fn load_active_tab_clamps_stale_cursor_past_end() {
     let mut id = sicompass_sdk::ffon::IdArray::new();
     id.push(fb_idx);
     id.push(children_len + 100);
-    h.renderer.tabs[0] = sicompass::app_state::TabSnapshot {
-        current_id: id,
-        provider_path,
-    };
+    h.renderer.tabs[0] = sicompass::app_state::TabSnapshot::nav_only(id, provider_path);
     h.renderer.active_tab = 0;
     h.renderer.load_active_tab();
 
@@ -6270,10 +6414,7 @@ fn load_active_tab_pops_stale_levels_for_webbrowser() {
     id.push(0);
     id.push(3);
     id.push(1);
-    h.renderer.tabs[0] = sicompass::app_state::TabSnapshot {
-        current_id: id,
-        provider_path: "/".to_owned(),
-    };
+    h.renderer.tabs[0] = sicompass::app_state::TabSnapshot::nav_only(id, "/".to_owned());
     h.renderer.active_tab = 0;
     h.renderer.load_active_tab();
 
@@ -6317,10 +6458,7 @@ fn load_active_tab_preserves_valid_deep_cursor() {
     id.push(fb_idx);
     id.push(0);
     id.push(1);
-    h.renderer.tabs[0] = sicompass::app_state::TabSnapshot {
-        current_id: id.clone(),
-        provider_path: "/".to_owned(),
-    };
+    h.renderer.tabs[0] = sicompass::app_state::TabSnapshot::nav_only(id.clone(), "/".to_owned());
     h.renderer.active_tab = 0;
     h.renderer.load_active_tab();
 
@@ -6397,10 +6535,7 @@ fn load_active_tab_settings_deep_cursor_restores_into_correct_section() {
     // Force `provider_path` to differ from `current_path()` so the rebuild
     // branch in load_active_tab actually fires (it skips otherwise).
     h.renderer.providers[settings_idx].set_current_path("/");
-    h.renderer.tabs[0] = sicompass::app_state::TabSnapshot {
-        current_id: cursor.clone(),
-        provider_path: "/sicompass/language".to_owned(),
-    };
+    h.renderer.tabs[0] = sicompass::app_state::TabSnapshot::nav_only(cursor.clone(), "/sicompass/language".to_owned());
     h.renderer.active_tab = 0;
     h.renderer.load_active_tab();
 

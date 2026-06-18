@@ -77,6 +77,17 @@ pub fn refresh_all_provider_root_keys(renderer: &mut AppRenderer) {
             obj.key = provider.display_name();
         }
     }
+    // Each inactive tab owns its own provider instances + ffon roots (the swap
+    // on tab-switch preserves them verbatim), so re-key those too. Otherwise a
+    // locale change would leave parked tabs showing the previous language's
+    // program names until their providers happened to re-fetch.
+    for tab in &mut renderer.tabs {
+        for (i, provider) in tab.providers.iter().enumerate() {
+            if let Some(obj) = tab.ffon.get_mut(i).and_then(|e| e.as_obj_mut()) {
+                obj.key = provider.display_name();
+            }
+        }
+    }
 }
 
 /// Explicitly re-fetch the active provider and graft the result onto the
