@@ -6116,8 +6116,8 @@ fn t_opens_switcher_with_button_prefixes_in_mru_order() {
         .map(|it| it.id.last().unwrap()).collect();
     assert_eq!(ids, vec![2, 1, 0]);
     assert!(h.renderer.total_list.iter().all(|it| it.label.starts_with("-b ")));
-    // Highlight starts on the previously-used tab (2nd item, VS Code style).
-    assert_eq!(h.renderer.list_index, 1);
+    // Highlight starts on the current tab (1st item, `tab_mru[0]`).
+    assert_eq!(h.renderer.list_index, 0);
 }
 
 #[test]
@@ -6126,7 +6126,8 @@ fn t_switcher_enter_confirms_highlighted_tab() {
     press_ctrl(h.r(), Keycode::T);
     press_ctrl(h.r(), Keycode::T); // active 2, mru [2,1,0]
 
-    press(h.r(), Keycode::T);       // highlight previously-used tab = 1
+    press(h.r(), Keycode::T);       // index 0 → current tab 2
+    press_down(h.r());              // index 1 → tab 1
     press_enter(h.r());
 
     assert_eq!(h.renderer.coordinate, Coordinate::General);
@@ -6153,7 +6154,8 @@ fn t_switcher_arrows_navigate_then_enter() {
     press_ctrl(h.r(), Keycode::T);
     press_ctrl(h.r(), Keycode::T); // active 2, mru [2,1,0]
 
-    press(h.r(), Keycode::T);    // index 1 → tab 1
+    press(h.r(), Keycode::T);    // index 0 → current tab 2
+    press_down(h.r());           // index 1 → tab 1
     press_down(h.r());           // index 2 → tab 0
     press_enter(h.r());
 

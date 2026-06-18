@@ -451,8 +451,8 @@ fn update_view(app: &mut AppState) {
         em_width = fr.get_width_em(scale);
     }
 
-    // Tabs band sits at y=0..line_height; everything else shifts down by this amount.
-    let top_offset: f32 = line_height as f32;
+    // The visual tabs band has been removed; content starts at the top.
+    let top_offset: f32 = 0.0;
 
     // Snapshot the display state so we can borrow font_renderer mutably after
     let header = build_header_text(&app.renderer, line_height);
@@ -551,14 +551,7 @@ fn update_view(app: &mut AppState) {
             ir.begin_image_rendering();
         }
 
-        // Tabs band above the header
-        {
-            let fr = app.font_renderer.as_mut().unwrap();
-            render_tabs_band(fr, app.rect_renderer.as_mut(), &app.renderer,
-                win_w, line_height, scale, ascender, em_width, &p);
-        }
-
-        // Header separator and text (same as list mode), shifted down by the tabs band
+        // Header separator and text
         if let Some(rr) = app.rect_renderer.as_mut() {
             rr.prepare_rectangle(0.0, line_height as f32 + top_offset, win_w, 1.0, p.header_sep, 0.0);
         }
@@ -656,14 +649,7 @@ fn update_view(app: &mut AppState) {
                 ir.begin_image_rendering();
             }
 
-            // Tabs band above the header
-            {
-                let fr = app.font_renderer.as_mut().unwrap();
-                render_tabs_band(fr, app.rect_renderer.as_mut(), &app.renderer,
-                    win_w, line_height, scale, ascender, em_width, &p);
-            }
-
-            // Header separator + title, shifted down by the tabs band
+            // Header separator + title
             if let Some(rr) = app.rect_renderer.as_mut() {
                 rr.prepare_rectangle(0.0, line_height as f32 + top_offset, win_w, 1.0, p.header_sep, 0.0);
             }
@@ -719,14 +705,7 @@ fn update_view(app: &mut AppState) {
                 ir.begin_image_rendering();
             }
 
-            // Tabs band above the header
-            {
-                let fr = app.font_renderer.as_mut().unwrap();
-                render_tabs_band(fr, app.rect_renderer.as_mut(), &app.renderer,
-                    win_w, line_height, scale, ascender, em_width, &p);
-            }
-
-            // Header separator and text, shifted down by the tabs band
+            // Header separator and text
             if let Some(rr) = app.rect_renderer.as_mut() {
                 rr.prepare_rectangle(0.0, line_height as f32 + top_offset, win_w, 1.0, p.header_sep, 0.0);
             }
@@ -1088,10 +1067,6 @@ fn update_view(app: &mut AppState) {
     if let Some(ir) = app.image_renderer.as_mut() {
         ir.begin_image_rendering();
     }
-
-    // ---- Tabs band (above the header) ------------------------------------
-    render_tabs_band(fr, app.rect_renderer.as_mut(), &app.renderer,
-        win_w, line_height, scale, ascender, em_width, &p);
 
     // ---- Header separator line (between header and content) --------------
     if let Some(rr) = app.rect_renderer.as_mut() {
@@ -2183,55 +2158,6 @@ fn rgba_u32_to_f32(c: u32) -> [f32; 4] {
         ((c >>  8) & 0xFF) as f32 / 255.0,
         ( c        & 0xFF) as f32 / 255.0,
     ]
-}
-
-/// Render the tabs band at the top of the window.
-///
-/// Layout:
-/// - Each cell is a fixed `22 * em_width` wide (1ch padding + 20ch label + 1ch padding).
-/// - Active tab gets a `selected`-coloured background; others render on the window background.
-/// - 1px vertical `header_sep` separator between adjacent cells.
-/// - 1px horizontal `header_sep` separator at `y = line_height` between the band and the header.
-/// - Labels are the active provider's `display_name()` truncated to 20 chars and centred in the cell.
-fn render_tabs_band(
-    fr: &mut crate::text::FontRenderer,
-    rr: Option<&mut crate::rectangle::RectangleRenderer>,
-    r: &AppRenderer,
-    win_w: f32,
-    line_height: i32,
-    scale: f32,
-    ascender: f32,
-    em_width: f32,
-    p: &crate::app_state::ColorPalette,
-) {
-    let cell_w = 22.0 * em_width;
-    let band_h = line_height as f32;
-    let baseline = ascender * scale + crate::text::TEXT_PADDING;
-
-    if let Some(rr) = rr {
-        for (i, _t) in r.tabs.iter().enumerate() {
-            let x = i as f32 * cell_w;
-            if i == r.active_tab {
-                rr.prepare_rectangle(x, 0.0, cell_w, band_h, p.selected, 0.0);
-            }
-            if i + 1 < r.tabs.len() {
-                rr.prepare_rectangle(x + cell_w - 1.0, 0.0, 1.0, band_h, p.header_sep, 0.0);
-            }
-        }
-        // Horizontal separator between tabs band and header.
-        rr.prepare_rectangle(0.0, band_h, win_w, 1.0, p.header_sep, 0.0);
-    }
-
-    for (i, tab) in r.tabs.iter().enumerate() {
-        let label: String = tab.current_id.get(0)
-            .and_then(|pi| r.providers.get(pi))
-            .map(|prov| prov.display_name().chars().take(20).collect::<String>())
-            .unwrap_or_else(|| "—".to_string());
-        let cell_x = i as f32 * cell_w;
-        let label_w = fr.measure_text_width(&label, scale);
-        let text_x = cell_x + (cell_w - label_w) / 2.0;
-        fr.prepare_text_for_rendering(&label, text_x, baseline, scale, p.text);
-    }
 }
 
 /// Build the header status line (mirrors C updateView header format).

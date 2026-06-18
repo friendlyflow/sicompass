@@ -5382,10 +5382,10 @@ fn open_tab_switcher(r: &mut AppRenderer, held: bool, start_index: usize) {
 }
 
 /// `t` (general mode) — open the sticky MRU tab switcher. Highlight starts on
-/// the previously-used tab (VS Code style); Enter confirms, Escape cancels.
+/// the current tab (`tab_mru[0]`); Enter confirms, Escape cancels.
 pub fn handle_t_tab_switcher(r: &mut AppRenderer) {
     if r.coordinate != Coordinate::General || r.tabs.len() < 2 { return; }
-    open_tab_switcher(r, false, 1);
+    open_tab_switcher(r, false, 0);
 }
 
 /// Ctrl+Tab — open the held switcher (if not already open) and move the
