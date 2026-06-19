@@ -594,7 +594,7 @@ fn build_confirm_close_tab_list(renderer: &mut AppRenderer) {
 /// `display_name()`) and descends every component up to and including the cursor
 /// element, so the crumb is the full absolute path, e.g.
 /// `Files > home > projects > main.rs` or `Terminal > …`.
-fn tab_breadcrumb(ffon: &[FfonElement], id: &IdArray) -> String {
+pub(crate) fn tab_breadcrumb(ffon: &[FfonElement], id: &IdArray) -> String {
     let mut segs: Vec<String> = Vec::new();
     let mut level: &[FfonElement] = ffon;
     let depth = id.depth();
@@ -1298,6 +1298,62 @@ mod tests {
             children: vec![],
         });
         assert_eq!(label, "+i p ls -la");
+    }
+
+    #[test]
+    fn tab_breadcrumb_joins_levels_with_arrow() {
+        // Files > home > main.rs (descends Obj keys, stops at the Str leaf).
+        let ffon = vec![FfonElement::Obj(FfonObject {
+            key: "Files".to_owned(),
+            children: vec![FfonElement::Obj(FfonObject {
+                key: "home".to_owned(),
+                children: vec![FfonElement::Str("main.rs".to_owned())],
+            })],
+        })];
+        let mut id = IdArray::new();
+        id.push(0);
+        id.push(0);
+        id.push(0);
+        assert_eq!(tab_breadcrumb(&ffon, &id), "Files > home > main.rs");
+
+        // A shallower cursor yields just the ancestors walked so far.
+        let mut shallow = IdArray::new();
+        shallow.push(0);
+        shallow.push(0);
+        assert_eq!(tab_breadcrumb(&ffon, &shallow), "Files > home");
+    }
+
+    #[test]
+    fn tab_breadcrumb_empty_at_root_or_out_of_range() {
+        let ffon = vec![FfonElement::Obj(FfonObject {
+            key: "Files".to_owned(),
+            children: vec![],
+        })];
+        // Depth 0: nothing walked.
+        assert_eq!(tab_breadcrumb(&ffon, &IdArray::new()), "");
+        // Index past the end: the walk breaks before pushing any segment.
+        let mut bad = IdArray::new();
+        bad.push(5);
+        assert_eq!(tab_breadcrumb(&ffon, &bad), "");
+    }
+
+    #[test]
+    fn tab_breadcrumb_strips_display_tags() {
+        // The displayed crumb is the stripped key, not the raw tagged text.
+        let ffon = vec![FfonElement::Obj(FfonObject {
+            key: "<dir><input>projects</input>".to_owned(),
+            children: vec![],
+        })];
+        let mut id = IdArray::new();
+        id.push(0);
+        let expected = sicompass_sdk::tags::strip_display("<dir><input>projects</input>")
+            .trim()
+            .to_owned();
+        assert_eq!(tab_breadcrumb(&ffon, &id), expected);
+        assert!(
+            tab_breadcrumb(&ffon, &id).contains("projects"),
+            "stripped crumb should contain the display text"
+        );
     }
 
     #[test]

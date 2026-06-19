@@ -863,6 +863,16 @@ pub fn handle_z(r: &mut AppRenderer) {
     r.needs_redraw = true;
 }
 
+/// Announce the position of the focus (header + breadcrumb path) via the
+/// screen reader. The `w` (whereami) key is only bound in General mode.
+pub fn handle_speak_position(r: &mut AppRenderer) {
+    if r.coordinate != Coordinate::General {
+        return;
+    }
+    r.speak_focus_position();
+    r.needs_redraw = true;
+}
+
 /// Enter Tab search mode.
 pub fn handle_tab(r: &mut AppRenderer) {
     match r.coordinate {

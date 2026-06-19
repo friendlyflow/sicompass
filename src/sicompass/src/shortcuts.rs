@@ -700,6 +700,13 @@ pub static SHORTCUTS: &[Shortcut] = &[
         modes: &[Coordinate::General],
         label: "Z      Timeline", is_available: always, handle: handlers::handle_z },
 
+    // ---- W (whereami: speak the focus position) --------------------------
+    // General mode only. Announces the header line plus the breadcrumb path to
+    // the current focus. Plain `w` only — Ctrl+W (close tab) is bound below.
+    Shortcut { key: Keycode::W, key2: None, ctrl: false, shift: false,
+        modes: &[Coordinate::General],
+        label: "w      Where am I", is_available: always, handle: handlers::handle_speak_position },
+
     // ---- Ctrl+D / Delete key → provider delete command (email message delete) ----
     // These must come before the editor/filebrowser Ctrl+D rows so they win when
     // the active provider advertises "delete" (e.g. email client in folder/message view).

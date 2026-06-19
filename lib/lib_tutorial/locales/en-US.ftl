@@ -80,6 +80,7 @@ tutorial-leaf-019 = Tab: enter simple search mode. Start typing to filter items 
 tutorial-leaf-020 = S: switch to scroll mode. It flattens the current list and all of its sublists into one continuous, scrollable reading view. Each element shows a 'layer: X list: Y/Z' header (with its list prefix) and its content - text or image - below. Up/Down scroll the view. Tab searches the headers and Ctrl+F searches the content. Enter on a highlighted element jumps to it back in operator mode.
 tutorial-leaf-021 = Ctrl+F: enter extended search mode. This searches recursively through all children, not just the current level. Results are shown as a flat list you can jump to.
 tutorial-leaf-022 = z: open the history view, a navigable, read-only list of this tab's undo timeline. Escape leaves it. See the 'Undo and Redo' section.
+tutorial-leaf-265 = w: where am I. Speak the position of the focus. Your screen reader announces the header line (the mode, the layer, and the list position), then the breadcrumb path to where you are. This is the same path that Ctrl+F extended search and the tab switcher show.
 tutorial-leaf-023 = Sicompass has built-in screen reader support powered by AccessKit. If you use a screen reader, Sicompass works with it out of the box, no configuration needed.
 tutorial-leaf-024 = Screen reader support is available on all platforms: Linux (AT-SPI), macOS (VoiceOver), and Windows (Narrator, NVDA, JAWS).
 tutorial-leaf-025 = When you navigate up, down, or into items, the current element is automatically announced by your screen reader.

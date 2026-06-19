@@ -51,6 +51,7 @@ hint-f5-refresh = F5     Vernieuwen
 
 hint-m-meta = M      Meta
 hint-z-timeline = Z      Tijdlijn
+hint-w-where-am-i = w      Waar ben ik
 hint-i-edit = I      Bewerken
 hint-i-edit-input = I      Bewerk invoer
 hint-a-append = A      Voeg toe

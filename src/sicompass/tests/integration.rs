@@ -2899,6 +2899,64 @@ fn editor_insert_left_announces_char() {
     assert_eq!(announced_text(&r).as_deref(), Some("l"), "left over second 'l'");
 }
 
+/// Pressing `w` (whereami) in General mode announces the focus position: the
+/// header line (mode, layer, list position) followed by the Ctrl+F-style
+/// breadcrumb path to the cursor.
+#[test]
+fn w_speaks_focus_position() {
+    use sicompass_sdk::provider::Provider;
+
+    // A minimal provider so `current_id[0]` resolves and the list builder runs.
+    struct NavMock;
+    impl Provider for NavMock {
+        fn name(&self) -> &str { "navmock" }
+        fn fetch(&mut self) -> Vec<FfonElement> { Vec::new() }
+    }
+
+    // Files > home > [main.rs, lib.rs], cursor on main.rs (depth 3, layer 2).
+    let mut r = AppRenderer::new();
+    r.providers.push(Box::new(NavMock));
+    let mut home = FfonElement::new_obj("home");
+    home.as_obj_mut().unwrap().push(FfonElement::new_str("main.rs"));
+    home.as_obj_mut().unwrap().push(FfonElement::new_str("lib.rs"));
+    let mut files = FfonElement::new_obj("Files");
+    files.as_obj_mut().unwrap().push(home);
+    r.ffon = vec![files];
+    r.current_id = {
+        let mut id = sicompass_sdk::ffon::IdArray::new();
+        id.push(0);
+        id.push(0);
+        id.push(0);
+        id
+    };
+    r.coordinate = Coordinate::General;
+    r.previous_coordinate = Coordinate::General;
+    sicompass::list::create_list_current_layer(&mut r);
+
+    press(&mut r, Keycode::W);
+    let spoken = announced_text(&r).expect("w should set an announcement");
+    assert!(
+        spoken.starts_with("general mode, layer: 2 list: 1/2"),
+        "header should lead the announcement, got {spoken:?}"
+    );
+    assert!(
+        spoken.contains("Files > home > main.rs"),
+        "breadcrumb path should follow the header, got {spoken:?}"
+    );
+
+    // Parity: a second press re-announces (different raw text via the U+200B
+    // sentinel) but the spoken text is identical.
+    let raw_first = r.pending_announcement.clone();
+    press(&mut r, Keycode::W);
+    let raw_second = r.pending_announcement.clone();
+    assert_ne!(raw_first, raw_second, "consecutive presses must toggle the parity sentinel");
+    assert_eq!(
+        announced_text(&r).as_deref(),
+        Some(spoken.as_str()),
+        "spoken text (sentinel stripped) should be stable across presses"
+    );
+}
+
 #[test]
 fn editor_insert_right_announces_char() {
     let mut r = AppRenderer::new();
