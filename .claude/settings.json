@@ -3,10 +3,12 @@
   "permissions": {
     "defaultMode": "plan",
     "allow": [
+      "Bash(cd:*)",
       "Bash(cargo build:*)",
       "Bash(cargo test:*)",
       "Bash(cargo check:*)",
       "Bash(cargo clippy:*)",
+      "Bash(graphify:*)",
       "Bash(bun test:*)",
       "Bash(sed:*)",
       "Bash(grep:*)",
