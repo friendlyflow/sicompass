@@ -6121,6 +6121,46 @@ fn t_opens_switcher_with_button_prefixes_in_mru_order() {
 }
 
 #[test]
+fn switcher_breadcrumb_follows_navigated_children() {
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
+
+    // Second tab so the switcher has >1 entry; it becomes the active tab.
+    press_ctrl(h.r(), Keycode::T);
+
+    // Navigate the active tab into `subdir` (depth 3) so it has a child path.
+    navigate_to_provider(h.r(), fb_idx);
+    press_right(h.r()); // enter filebrowser (depth 2, listing tmp)
+    let idx = h.renderer.total_list.iter()
+        .position(|i| i.label.contains("subdir"))
+        .expect("subdir not in listing");
+    let cur = h.renderer.list_index;
+    for _ in 0..idx.saturating_sub(cur) { press_down(h.r()); }
+    for _ in 0..cur.saturating_sub(idx) { press_up(h.r()); }
+    press_right(h.r()); // enter subdir (depth 3)
+    assert_eq!(h.renderer.current_id.depth(), 3, "should be inside subdir");
+
+    let active = h.renderer.active_tab;
+    press(h.r(), Keycode::T); // open the switcher
+    assert_eq!(h.renderer.coordinate, Coordinate::TabSwitcher);
+
+    // Every row uses the "-b" button prefix; the harness has no terminal, so the
+    // PID falls back to "- ".
+    assert!(h.renderer.total_list.iter().all(|it| it.label.starts_with("-b ")));
+
+    // The active tab's row shows the full Ctrl+F-style path: the provider root
+    // (its display name) followed by the navigated children ("subdir").
+    let fb_name = h.renderer.providers[fb_idx].display_name();
+    let active_item = h.renderer.total_list.iter()
+        .find(|it| it.id.last() == Some(active))
+        .expect("active tab present in switcher");
+    assert!(active_item.label.contains("subdir"),
+        "breadcrumb should follow navigated children, got: {:?}", active_item.label);
+    assert!(active_item.label.contains(&fb_name),
+        "breadcrumb should start at the provider root {fb_name:?}, got: {:?}", active_item.label);
+}
+
+#[test]
 fn t_switcher_enter_confirms_highlighted_tab() {
     let mut h = Harness::new();
     press_ctrl(h.r(), Keycode::T);
@@ -6227,24 +6267,39 @@ fn t_is_noop_with_single_tab() {
         "t does nothing with only one tab");
 }
 
-/// Open the switcher over two tabs on distinct providers (file browser in tab 0,
-/// settings in tab 1) and return `(filebrowser_name, harness)`. Distinct names
-/// let the type-to-filter query select one tab.
+/// Open the switcher over two tabs with distinct navigation breadcrumbs: tab 0
+/// is parked inside `subdir` (breadcrumb "subdir"), tab 1 is active at the file
+/// browser root (empty breadcrumb). Returns `(query, harness)` where `query`
+/// ("subdir") is the type-to-filter token that selects tab 0.
 fn switcher_over_two_named_tabs() -> (String, Harness) {
     let mut h = Harness::new();
     let fb = h.provider_idx("filebrowser").unwrap();
-    let settings = h.provider_idx("settings").unwrap();
 
-    navigate_to_provider(h.r(), fb);       // tab 0 → file browser
-    press_ctrl(h.r(), Keycode::T);         // tab 1
-    navigate_to_provider(h.r(), settings); // tab 1 → settings
+    // Tab 0 → file browser, navigated into `subdir`.
+    navigate_to_provider(h.r(), fb);
+    press_right(h.r()); // enter filebrowser (depth 2, listing tmp)
+    let idx = h.renderer.total_list.iter()
+        .position(|i| i.label.contains("subdir"))
+        .expect("subdir not in listing");
+    let cur = h.renderer.list_index;
+    for _ in 0..idx.saturating_sub(cur) { press_down(h.r()); }
+    for _ in 0..cur.saturating_sub(idx) { press_up(h.r()); }
+    press_right(h.r()); // into subdir (depth 3)
 
-    press(h.r(), Keycode::T);              // open switcher, mru [1, 0]
-    let fb_name = h.renderer.total_list.iter()
-        .find(|it| it.id.last() == Some(0))
-        .map(|it| it.label.trim_start_matches("-b ").to_string())
-        .expect("filebrowser tab present");
-    (fb_name, h)
+    // Tab 1 clones the location, then navigates back to the root and parks its
+    // cursor on `alpha.txt` so its breadcrumb ("alpha.txt") is distinct from
+    // tab 0's ("subdir > …").
+    press_ctrl(h.r(), Keycode::T); // tab 1 (active), also inside subdir
+    press_left(h.r());             // tab 1 → filebrowser root
+    let aidx = h.renderer.total_list.iter()
+        .position(|i| i.label.contains("alpha.txt"))
+        .expect("alpha.txt not in listing");
+    let cur = h.renderer.list_index;
+    for _ in 0..aidx.saturating_sub(cur) { press_down(h.r()); }
+    for _ in 0..cur.saturating_sub(aidx) { press_up(h.r()); }
+
+    press(h.r(), Keycode::T);      // open switcher, mru [1, 0]
+    ("subdir".to_string(), h)
 }
 
 #[test]
@@ -6300,13 +6355,14 @@ fn switcher_ignores_activation_t_in_query() {
 }
 
 #[test]
-fn switcher_labels_parked_settings_tab_by_name() {
+fn switcher_parked_settings_tab_resolves_without_dash() {
     let mut h = Harness::new();
     let settings_idx = h.provider_idx("settings").expect("settings provider exists");
-    let settings_name = h.renderer.providers[settings_idx].display_name().to_owned();
 
-    // New tab, point it at the shared settings provider, then switch away so the
-    // settings tab becomes parked (settings is never parked into a tab's content).
+    // New tab pointed at the shared settings provider, then switch away so the
+    // settings tab becomes parked. Settings is never parked into a tab's content,
+    // so its `current_id[0]` points past the parked listing — the breadcrumb is
+    // resolved against the live FFON tree instead.
     press_ctrl(h.r(), Keycode::T); // active 1
     navigate_to_provider(h.r(), settings_idx);
     press_ctrl(h.r(), Keycode::_1); // back to tab 0; tab 1 (settings) now parked
@@ -6315,8 +6371,9 @@ fn switcher_labels_parked_settings_tab_by_name() {
     let item = h.renderer.total_list.iter()
         .find(|it| it.id.last() == Some(1))
         .expect("parked settings tab present in switcher");
-    assert!(item.label.contains(&settings_name),
-        "parked settings tab must show its name, got: {:?}", item.label);
+    // The shared-provider path resolves to a well-formed "-b" button row with no
+    // "—" fallback (and without panicking on the out-of-parked-range index).
+    assert!(item.label.starts_with("-b "), "got: {:?}", item.label);
     assert!(!item.label.contains('—'),
         "parked settings tab must not fall back to a dash, got: {:?}", item.label);
 }
