@@ -1,5 +1,6 @@
 # Build artifacts
 target/
+graphify-out/
 .cache
 .vscode
 PLAN.md
