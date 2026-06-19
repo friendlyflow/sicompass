@@ -54,6 +54,8 @@ tutorial-branch-045 = Element Tags
 tutorial-branch-046 = Next Steps
 tutorial-branch-047 = Tabs
 tutorial-branch-048 = Updates
+tutorial-branch-049 = Window controls
+tutorial-branch-050 = Text and emoji
 
 # Leaf paragraphs
 tutorial-leaf-001 = Welcome to Sicompass, a keyboard-driven interface for browsing and managing structured data.
@@ -307,7 +309,17 @@ tutorial-leaf-244 = Ctrl+T: open a new tab next to the current one. It gets a fr
 tutorial-leaf-245 = Ctrl+W: close the current tab, which shuts down its providers and kills its shell process. If the tab is busy, with a foreground command running in the terminal or a full-screen program open, a yes/no confirmation appears first. The last remaining tab cannot be closed this way, use the window close button or quit the app.
 tutorial-leaf-246 = Ctrl+Tab: step through tabs in most-recently-used order. Hold Ctrl and tap Tab to open the tab switcher and move the highlight to the next most-recently-used tab, then release Ctrl to switch to it. A single quick Ctrl+Tab flips back to the tab you were just on.
 tutorial-leaf-247 = Ctrl+Shift+Tab: the same switcher in the other direction. Hold Ctrl and tap Shift+Tab to walk the highlight back up the most-recently-used list, then release Ctrl to commit.
-tutorial-leaf-258 = t: open the tab switcher as a sticky palette instead of a held overlay. It lists the tabs in most-recently-used order with the current tab highlighted at the top. Start typing to filter the list by name, use Up/Down to move the highlight, Enter to switch, and Escape to cancel.
+tutorial-leaf-258 = t: open the tab switcher as a sticky palette instead of a held overlay. It lists the tabs in most-recently-used order with the current tab highlighted at the top. Each entry is labeled by the tab's shell process id and its current navigation breadcrumb, so you can tell tabs apart at a glance. Start typing to filter the list by that label, use Up/Down to move the highlight, Enter to switch, and Escape to cancel.
+
+# Window controls (added under Navigation)
+tutorial-leaf-259 = Sicompass draws its own borderless titlebar across the top of the window, with minimize, maximize, and close controls at one end. Maximize is a toggle, it maximizes a restored window and restores a maximized one. You can click these titlebar buttons with a pointer, and they are also fully reachable from the keyboard.
+tutorial-leaf-260 = c: open the window controls as a sticky palette, the same kind of overlay as the t tab switcher. It lists minimize, maximize, and close. Start typing to filter the list, use Up/Down to move the highlight, Enter to activate the control, and Escape to cancel.
+
+# Text and emoji (added under Interactive Elements)
+tutorial-leaf-261 = Sicompass rasterizes glyphs on demand and falls back across the bundled fonts, so text is no longer limited to plain ASCII. Accented and European Latin renders directly: café, naïve, Zürich, żółć.
+tutorial-leaf-262 = Other scripts and symbols render too, pulled from the fallback fonts: Greek αβγ, Cyrillic Привет, arrows → ⇒ ↺, and math ≈ ≠ ∑ √.
+tutorial-leaf-263 = Box-drawing and block characters stay aligned in monospace, handy for terminal output: ┌─┬─┐ │ ├─┼─┤ │ └─┴─┘ █▓▒░.
+tutorial-leaf-264 = Color emoji render from a dedicated color atlas: 😀 🎉 ✅ 🚀 📁 🔒 🌍. They scale to the surrounding text size and keep their own colors.
 tutorial-leaf-248 = Ctrl+1 through Ctrl+9: jump directly to tab 1 through 9 by number. Out-of-range numbers are ignored.
 tutorial-leaf-249 = Each tab keeps its own live state, including its shell's working directory and any running program. Switching tabs parks the current tab's content and swaps the target tab's back in, so nothing is rebuilt or lost. Spawning separate windows is not yet available.
 

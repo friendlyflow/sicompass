@@ -51,6 +51,8 @@ tutorial-branch-045 = Element-Tags
 tutorial-branch-046 = Nächste Schritte
 tutorial-branch-047 = Tabs
 tutorial-branch-048 = Aktualisierungen
+tutorial-branch-049 = Fenstersteuerung
+tutorial-branch-050 = Text und Emoji
 
 # Leaf paragraphs
 tutorial-leaf-001 = Willkommen bei Sicompass, einer tastaturgesteuerten Oberfläche zum Durchsuchen und Verwalten strukturierter Daten.
@@ -303,7 +305,17 @@ tutorial-leaf-244 = Strg+T: einen neuen Tab neben dem aktuellen öffnen. Er erh�
 tutorial-leaf-245 = Strg+W: den aktuellen Tab schließen, wodurch seine Provider beendet und sein Shell-Prozess beendet wird. Wenn der Tab beschäftigt ist, mit einem Vordergrundbefehl im Terminal oder einem geöffneten Vollbildprogramm, erscheint zuerst eine Ja/Nein-Bestätigung. Der letzte verbleibende Tab kann so nicht geschlossen werden, verwenden Sie die Schließen-Schaltfläche des Fensters oder beenden Sie die App.
 tutorial-leaf-246 = Strg+Tab: Tabs in der Reihenfolge der zuletzt verwendeten durchlaufen. Halten Sie Strg gedrückt und tippen Sie Tab, um den Tab-Umschalter zu öffnen und die Hervorhebung zum nächsten zuletzt verwendeten Tab zu bewegen, lassen Sie dann Strg los, um dorthin zu wechseln. Ein einzelnes schnelles Strg+Tab springt zum Tab zurück, auf dem Sie gerade waren.
 tutorial-leaf-247 = Strg+Umschalt+Tab: derselbe Umschalter in die andere Richtung. Halten Sie Strg gedrückt und tippen Sie Umschalt+Tab, um die Hervorhebung in der Liste der zuletzt verwendeten Tabs wieder nach oben zu bewegen, lassen Sie dann Strg los, um zu bestätigen.
-tutorial-leaf-258 = t: den Tab-Umschalter als bleibende Palette statt als gehaltene Überlagerung öffnen. Er listet die Tabs in der Reihenfolge der zuletzt verwendeten auf, mit dem aktuellen Tab oben hervorgehoben. Beginnen Sie zu tippen, um die Liste nach Namen zu filtern, verwenden Sie Up/Down, um die Hervorhebung zu bewegen, Enter zum Wechseln und Escape zum Abbrechen.
+tutorial-leaf-258 = t: den Tab-Umschalter als bleibende Palette statt als gehaltene Überlagerung öffnen. Er listet die Tabs in der Reihenfolge der zuletzt verwendeten auf, mit dem aktuellen Tab oben hervorgehoben. Jeder Eintrag ist mit der Shell-Prozess-ID des Tabs und seinem aktuellen Navigationspfad beschriftet, sodass Sie Tabs auf einen Blick unterscheiden können. Beginnen Sie zu tippen, um die Liste nach dieser Beschriftung zu filtern, verwenden Sie Up/Down, um die Hervorhebung zu bewegen, Enter zum Wechseln und Escape zum Abbrechen.
+
+# Fenstersteuerung (hinzugefügt unter Navigation)
+tutorial-leaf-259 = Sicompass zeichnet seine eigene randlose Titelleiste am oberen Rand des Fensters, mit den Steuerelementen Minimieren, Maximieren und Schließen an einem Ende. Maximieren ist ein Umschalter, es maximiert ein wiederhergestelltes Fenster und stellt ein maximiertes Fenster wieder her. Sie können diese Titelleisten-Schaltflächen mit einem Zeiger anklicken, und sie sind auch vollständig mit der Tastatur erreichbar.
+tutorial-leaf-260 = c: die Fenstersteuerung als bleibende Palette öffnen, dieselbe Art Überlagerung wie der t-Tab-Umschalter. Sie listet Minimieren, Maximieren und Schließen auf. Beginnen Sie zu tippen, um die Liste zu filtern, verwenden Sie Up/Down, um die Hervorhebung zu bewegen, Enter, um das Steuerelement zu aktivieren, und Escape zum Abbrechen.
+
+# Text und Emoji (hinzugefügt unter Interaktive Elemente)
+tutorial-leaf-261 = Sicompass rastert Glyphen bei Bedarf und greift auf die mitgelieferten Schriften zurück, sodass Text nicht mehr auf reines ASCII beschränkt ist. Akzentuiertes und europäisches Latein wird direkt dargestellt: café, naïve, Zürich, żółć.
+tutorial-leaf-262 = Auch andere Schriften und Symbole werden dargestellt, aus den Ersatzschriften gezogen: Griechisch αβγ, Kyrillisch Привет, Pfeile → ⇒ ↺, und Mathematik ≈ ≠ ∑ √.
+tutorial-leaf-263 = Linien- und Blockzeichen bleiben in dicktengleicher Schrift ausgerichtet, praktisch für Terminalausgabe: ┌─┬─┐ │ ├─┼─┤ │ └─┴─┘ █▓▒░.
+tutorial-leaf-264 = Farbige Emoji werden aus einem eigenen Farb-Atlas dargestellt: 😀 🎉 ✅ 🚀 📁 🔒 🌍. Sie passen sich der umgebenden Textgröße an und behalten ihre eigenen Farben.
 tutorial-leaf-248 = Strg+1 bis Strg+9: direkt zu Tab 1 bis 9 nach Nummer springen. Nummern außerhalb des Bereichs werden ignoriert.
 tutorial-leaf-249 = Jeder Tab behält seinen eigenen lebendigen Zustand, einschließlich des Arbeitsverzeichnisses seiner Shell und jedes laufenden Programms. Beim Tabwechsel wird der Inhalt des aktuellen Tabs geparkt und der des Zieltabs wieder eingeblendet, sodass nichts neu aufgebaut oder verloren geht. Das Öffnen separater Fenster ist noch nicht verfügbar.
 

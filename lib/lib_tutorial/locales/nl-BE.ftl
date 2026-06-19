@@ -51,6 +51,8 @@ tutorial-branch-045 = Elementtags
 tutorial-branch-046 = Volgende stappen
 tutorial-branch-047 = Tabbladen
 tutorial-branch-048 = Updates
+tutorial-branch-049 = Vensterbediening
+tutorial-branch-050 = Tekst en emoji
 
 # Leaf paragraphs
 tutorial-leaf-001 = Welkom bij Sicompass, een toetsenbord-gestuurde interface om gestructureerde data te bekijken en te beheren.
@@ -303,7 +305,17 @@ tutorial-leaf-244 = Ctrl+T: open een nieuw tabblad naast het huidige. Het krijgt
 tutorial-leaf-245 = Ctrl+W: sluit het huidige tabblad, waarbij zijn providers worden afgesloten en zijn shellproces wordt beëindigd. Als het tabblad bezig is, met een voorgrondopdracht in de terminal of een schermvullend programma open, verschijnt eerst een ja/nee-bevestiging. Het laatste overgebleven tabblad kan je zo niet sluiten, gebruik de sluitknop van het venster of verlaat de app.
 tutorial-leaf-246 = Ctrl+Tab: doorloop tabbladen in volgorde van meest recent gebruikt. Houd Ctrl ingedrukt en tik op Tab om de tabbladwisselaar te openen en de markering naar het volgende meest recent gebruikte tabblad te verplaatsen, laat dan Ctrl los om ernaartoe te schakelen. Een enkele snelle Ctrl+Tab springt terug naar het tabblad waar je net was.
 tutorial-leaf-247 = Ctrl+Shift+Tab: dezelfde wisselaar in de andere richting. Houd Ctrl ingedrukt en tik op Shift+Tab om de markering terug omhoog door de lijst van meest recent gebruikte tabbladen te bewegen, laat dan Ctrl los om te bevestigen.
-tutorial-leaf-258 = t: open de tabbladwisselaar als een blijvend palet in plaats van een ingedrukte overlay. Het toont de tabbladen in volgorde van meest recent gebruikt, met het huidige tabblad bovenaan gemarkeerd. Begin te typen om de lijst op naam te filteren, gebruik Up/Down om de markering te verplaatsen, Enter om te schakelen en Escape om te annuleren.
+tutorial-leaf-258 = t: open de tabbladwisselaar als een blijvend palet in plaats van een ingedrukte overlay. Het toont de tabbladen in volgorde van meest recent gebruikt, met het huidige tabblad bovenaan gemarkeerd. Elke vermelding is gelabeld met het shell-proces-id van het tabblad en de huidige navigatiekruimel, zodat je tabbladen in één oogopslag kunt onderscheiden. Begin te typen om de lijst op dat label te filteren, gebruik Up/Down om de markering te verplaatsen, Enter om te schakelen en Escape om te annuleren.
+
+# Vensterbediening (toegevoegd onder Navigatie)
+tutorial-leaf-259 = Sicompass tekent zijn eigen randloze titelbalk boven aan het venster, met de knoppen minimaliseren, maximaliseren en sluiten aan één kant. Maximaliseren is een schakelaar, het maximaliseert een hersteld venster en herstelt een gemaximaliseerd venster. Je kunt op deze titelbalkknoppen klikken met een aanwijzer, en ze zijn ook volledig bereikbaar met het toetsenbord.
+tutorial-leaf-260 = c: open de vensterbediening als een blijvend palet, hetzelfde soort overlay als de t-tabbladwisselaar. Het toont minimaliseren, maximaliseren en sluiten. Begin te typen om de lijst te filteren, gebruik Up/Down om de markering te verplaatsen, Enter om de knop te activeren en Escape om te annuleren.
+
+# Tekst en emoji (toegevoegd onder Interactieve elementen)
+tutorial-leaf-261 = Sicompass rastert glyphs op aanvraag en valt terug op de meegeleverde lettertypes, dus tekst is niet langer beperkt tot gewone ASCII. Latijn met accenten en Europese tekens worden rechtstreeks weergegeven: café, naïve, Zürich, żółć.
+tutorial-leaf-262 = Andere schriften en symbolen worden ook weergegeven, gehaald uit de terugvallettertypes: Grieks αβγ, Cyrillisch Привет, pijlen → ⇒ ↺, en wiskunde ≈ ≠ ∑ √.
+tutorial-leaf-263 = Lijntekens en bloktekens blijven uitgelijnd in monospace, handig voor terminaluitvoer: ┌─┬─┐ │ ├─┼─┤ │ └─┴─┘ █▓▒░.
+tutorial-leaf-264 = Kleurenemoji worden weergegeven vanuit een aparte kleuratlas: 😀 🎉 ✅ 🚀 📁 🔒 🌍. Ze schalen mee met de omringende tekstgrootte en behouden hun eigen kleuren.
 tutorial-leaf-248 = Ctrl+1 tot en met Ctrl+9: spring rechtstreeks naar tabblad 1 tot 9 op nummer. Nummers buiten bereik worden genegeerd.
 tutorial-leaf-249 = Elk tabblad behoudt zijn eigen levende toestand, inclusief de werkmap van zijn shell en elk lopend programma. Van tabblad wisselen parkeert de inhoud van het huidige tabblad en wisselt die van het doeltabblad terug in, zodat niets opnieuw wordt opgebouwd of verloren gaat. Aparte vensters openen is nog niet beschikbaar.
 

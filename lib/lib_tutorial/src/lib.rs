@@ -149,6 +149,12 @@ static SECTIONS: &[Node] = &[
                     Leaf("tutorial-leaf-249"),
                 ],
             },
+            Branch { key: "tutorial-branch-049",
+                children: &[
+                    Leaf("tutorial-leaf-259"),
+                    Leaf("tutorial-leaf-260"),
+                ],
+            },
         ],
     },
     Branch { key: "tutorial-branch-005",
@@ -352,6 +358,14 @@ static SECTIONS: &[Node] = &[
             Branch { key: "tutorial-branch-028", children: &[] },
             Leaf("tutorial-leaf-151"),
             Leaf("tutorial-leaf-152"),
+            // Text rendering showcase: the dynamic glyph atlas + font fallback
+            // now render extended Unicode and color emoji inline.
+            Branch { key: "tutorial-branch-050", children: &[
+                Leaf("tutorial-leaf-261"),
+                Leaf("tutorial-leaf-262"),
+                Leaf("tutorial-leaf-263"),
+                Leaf("tutorial-leaf-264"),
+            ]},
         ],
     },
     Branch { key: "tutorial-branch-029",
@@ -977,6 +991,83 @@ mod tests {
             joined.contains("filter"),
             "Tabs section must describe type-to-filter in the switcher, content was:\n{joined}"
         );
+    }
+
+    // Window controls (added 2026-06): borderless titlebar + the `c` palette.
+
+    #[test]
+    fn test_window_controls_section_present_under_navigation() {
+        let mut p = provider();
+        p.push_path("Navigation");
+        let elems = p.fetch();
+        let section_keys: Vec<&str> = elems
+            .iter()
+            .filter_map(|e| e.as_obj().map(|o| o.key.as_str()))
+            .collect();
+        assert!(
+            section_keys.contains(&"Window controls"),
+            "Window controls must appear under Navigation, got: {:?}",
+            section_keys
+        );
+    }
+
+    #[test]
+    fn test_window_controls_section_describes_palette_and_buttons() {
+        let mut p = provider();
+        p.set_current_path("/Navigation/Window controls");
+        let elems = p.fetch();
+        let joined: String = elems
+            .iter()
+            .filter_map(|e| e.as_str().map(|s| s.to_owned()))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .to_lowercase();
+        // The `c` palette is the keyboard route; the titlebar buttons are the
+        // pointer route. Both, plus the three actions, must be documented.
+        assert!(joined.contains("minimize") && joined.contains("maximize") && joined.contains("close"),
+            "Window controls section must list minimize/maximize/close, content was:\n{joined}");
+        assert!(joined.contains("titlebar"),
+            "Window controls section must mention the custom titlebar, content was:\n{joined}");
+        assert!(joined.contains("filter"),
+            "Window controls section must describe type-to-filter in the c palette, content was:\n{joined}");
+    }
+
+    #[test]
+    fn test_tab_switcher_labels_by_pid_and_breadcrumb() {
+        let mut p = provider();
+        p.set_current_path("/Navigation/Tabs");
+        let elems = p.fetch();
+        let joined: String = elems
+            .iter()
+            .filter_map(|e| e.as_str().map(|s| s.to_owned()))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .to_lowercase();
+        assert!(
+            joined.contains("process id") && joined.contains("breadcrumb"),
+            "Tabs section must describe the switcher's shell-PID + breadcrumb labels, content was:\n{joined}"
+        );
+    }
+
+    // Interactive Elements: text-rendering showcase (added 2026-06) — the
+    // dynamic glyph atlas + font fallback now render extended Unicode and emoji.
+    #[test]
+    fn test_text_and_emoji_showcase_renders_extended_unicode() {
+        let mut p = provider();
+        p.set_current_path("/Interactive Elements/Text and emoji");
+        let elems = p.fetch();
+        let joined: String = elems
+            .iter()
+            .filter_map(|e| e.as_str().map(|s| s.to_owned()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        // Literal samples must survive into the content so they actually render.
+        assert!(joined.contains('😀') || joined.contains('🎉'),
+            "Text and emoji section must contain a color emoji, content was:\n{joined}");
+        assert!(joined.contains("café") || joined.contains("Zürich"),
+            "section must contain accented Latin, content was:\n{joined}");
+        assert!(joined.contains('─') && joined.contains('│'),
+            "section must contain box-drawing characters, content was:\n{joined}");
     }
 
     // Accessibility: per-item screen-reader language (added 2026-05)
