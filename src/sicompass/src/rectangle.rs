@@ -273,6 +273,42 @@ impl RectangleRenderer {
         self.vertices.push(RectVertex { pos: [cx + nx2, cy + ny2], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
     }
 
+    /// Append a straight stroke (thick line segment) from `(x0, y0)` to
+    /// `(x1, y1)`. Uses the same perpendicular-offset quad technique as
+    /// [`prepare_checkmark`], so arbitrary diagonals render correctly (the
+    /// axis-aligned `prepare_rectangle` can't). Used to draw the custom titlebar
+    /// control icons as strokes.
+    pub fn prepare_line(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, thickness: f32, color: u32) {
+        if self.vertices.len() + 6 > MAX_RECT_VERTICES { return; }
+
+        let dx = x1 - x0;
+        let dy = y1 - y0;
+        let len = (dx * dx + dy * dy).sqrt();
+        if len <= f32::EPSILON { return; }
+
+        let r = ((color >> 24) & 0xFF) as f32 / 255.0;
+        let g = ((color >> 16) & 0xFF) as f32 / 255.0;
+        let b = ((color >>  8) & 0xFF) as f32 / 255.0;
+        let a = ( color        & 0xFF) as f32 / 255.0;
+        let col = [r, g, b, a];
+
+        let half = thickness * 0.5;
+        let nx = -dy / len * half;
+        let ny =  dx / len * half;
+
+        // Neutralize SDF — a huge rect makes the fragment shader fill all pixels.
+        let cr = [0.0_f32, 0.0];
+        let rs = [10000.0_f32, 10000.0];
+        let ro = [0.0_f32, 0.0];
+
+        self.vertices.push(RectVertex { pos: [x0 + nx, y0 + ny], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
+        self.vertices.push(RectVertex { pos: [x0 - nx, y0 - ny], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
+        self.vertices.push(RectVertex { pos: [x1 - nx, y1 - ny], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
+        self.vertices.push(RectVertex { pos: [x0 + nx, y0 + ny], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
+        self.vertices.push(RectVertex { pos: [x1 - nx, y1 - ny], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
+        self.vertices.push(RectVertex { pos: [x1 + nx, y1 + ny], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
+    }
+
     /// Upload vertices and issue draw command.
     pub unsafe fn draw_rectangles(
         &self,

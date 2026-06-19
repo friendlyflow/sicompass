@@ -191,7 +191,9 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
         "sicompass", "color scheme", "colorScheme",
         &["dark", "light"], "dark",
     );
-    settings.add_checkbox_setting("sicompass", "settings-checkbox-maximized", "maximized", false);
+    // Window maximize/restore is driven by the custom titlebar controls (the
+    // `c` palette and corner buttons), so there is no settings checkbox for it.
+    // The window still restores its last maximized state via `read_maximized`.
     settings.add_checkbox_setting("sicompass", "settings-checkbox-shoulder-surfing-protection", "shoulderSurfingProtection", false);
     // Checked at startup by `read_auto_update_check_setting` in main.rs.
     // Toggling at runtime only affects the next launch — we don't spawn /
@@ -648,6 +650,46 @@ pub fn read_maximized() -> bool {
         Some(serde_json::Value::Bool(b)) => *b,
         Some(serde_json::Value::String(s)) => s == "true",
         _ => false,
+    }
+}
+
+/// Persist `sicompass.maximized` to settings.json, preserving every other key.
+///
+/// The maximize/restore checkbox was removed from the settings UI, so this is
+/// the sole writer of the window-state value (read back by [`read_maximized`]
+/// at startup). Mirrors the settings provider's safe merge-write: load the
+/// existing root, set the one key, atomic-write the whole file back. Aborts —
+/// leaving the file intact — if it exists but can't be read or parsed, so a
+/// transient failure never wipes the user's config.
+pub fn write_maximized(value: bool) {
+    // Only touch the file when the value actually changes — never rewrite
+    // (and so never reformat / "refresh") settings.json for a no-op toggle.
+    if read_maximized() == value {
+        return;
+    }
+    let Some(path) = sicompass_sdk::platform::main_config_path() else { return };
+    if let Some(parent) = path.parent() {
+        sicompass_sdk::platform::make_dirs(parent);
+    }
+    // Only a genuinely missing file may start from scratch; an existing but
+    // unreadable/corrupt file is left untouched rather than clobbered.
+    let mut root = match std::fs::read_to_string(&path) {
+        Ok(data) => match serde_json::from_str::<serde_json::Value>(&data) {
+            Ok(serde_json::Value::Object(m)) => m,
+            _ => return,
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => serde_json::Map::new(),
+        Err(_) => return,
+    };
+
+    let sec = root
+        .entry("sicompass".to_owned())
+        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+    if let serde_json::Value::Object(m) = sec {
+        m.insert("maximized".to_owned(), serde_json::Value::Bool(value));
+    }
+    if let Ok(json) = serde_json::to_string_pretty(&serde_json::Value::Object(root)) {
+        let _ = sicompass_sdk::platform::atomic_write(&path, &json);
     }
 }
 

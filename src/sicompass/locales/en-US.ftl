@@ -106,3 +106,4 @@ mode-tab-switcher = tab switcher
 #   $idx, $total — 1-based position and tab count
 #   $label       — translated provider name of the active tab
 speak-tab-change = tab { $idx }/{ $total }: { $label }
+hint-c-controls = c      Controls

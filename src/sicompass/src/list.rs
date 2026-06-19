@@ -923,6 +923,35 @@ fn build_command_list(renderer: &mut AppRenderer) {
                 .collect();
             renderer.total_list = items;
         }
+        CommandPhase::Controls => {
+            // Window-management actions for the borderless titlebar. Each is a
+            // button (so `build_str_label` gives the `-b ` prefix and it is
+            // announced as a button); the stable action key lives in `nav_path`
+            // (see `WindowAction::key` / `from_key`). The maximize label tracks
+            // the live window state so it reads "restore" when maximized.
+            let max_label = if renderer.window_is_maximized { "restore" } else { "maximize" };
+            let entries = [
+                (crate::app_state::WindowAction::Minimize.key(), "minimize"),
+                (crate::app_state::WindowAction::MaximizeToggle.key(), max_label),
+                (crate::app_state::WindowAction::Close.key(), "close"),
+            ];
+            let items: Vec<RenderListItem> = entries
+                .iter()
+                .enumerate()
+                .map(|(i, (key, label))| {
+                    let mut id = IdArray::new();
+                    id.push(i);
+                    RenderListItem {
+                        id,
+                        label: build_str_label(&format!("<button>{label}</button>{label}"), false),
+                        data: None,
+                        nav_path: Some((*key).to_string()),
+                        ext_prefix: None,
+                    }
+                })
+                .collect();
+            renderer.total_list = items;
+        }
         CommandPhase::Provider => {
             // Show secondary selection list (e.g. list of apps for "open with")
             let cmd_name = renderer.provider_command_name.clone();

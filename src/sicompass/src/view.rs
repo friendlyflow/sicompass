@@ -3,11 +3,12 @@
 //! Routes SDL events to key handlers, updates the window title with
 //! navigation state, and drives the Vulkan render loop.
 
-use crate::app_state::{AppRenderer, AppState, CommandPhase, Coordinate, History, Task};
+use crate::app_state::{AppRenderer, AppState, CommandPhase, Coordinate, History, Task, WindowAction};
 use crate::handlers;
 use crate::render;
 use sdl3::event::{Event, WindowEvent};
 use sdl3::keyboard::{Keycode, Mod};
+use sdl3::mouse::MouseButton;
 use tracing;
 
 // Modes where the caret blinks and we need continuous redraw
@@ -54,6 +55,27 @@ pub fn main_loop(app: &mut AppState) {
                 app.window.maximize();
             } else {
                 app.window.restore();
+            }
+        }
+
+        // ---- Custom titlebar window actions ---------------------------------
+        // Set by the `c` controls palette or a titlebar-button click; performed
+        // here because only the main loop owns the SDL window.
+        if let Some(action) = app.renderer.pending_window_action.take() {
+            match action {
+                WindowAction::Minimize => {
+                    app.window.minimize();
+                }
+                WindowAction::MaximizeToggle => {
+                    if app.window.is_maximized() {
+                        app.window.restore();
+                    } else {
+                        app.window.maximize();
+                    }
+                }
+                WindowAction::Close => {
+                    app.running = false;
+                }
             }
         }
 
@@ -130,17 +152,27 @@ pub fn main_loop(app: &mut AppState) {
                         | WindowEvent::PixelSizeChanged(..)
                         | WindowEvent::Exposed => {
                             app.framebuffer_resized = true;
+                            // Keep the borderless hit-test region (draggable
+                            // strip + resize borders) in sync with the new size.
+                            let (wp, hp) = app.window.size();
+                            use std::sync::atomic::Ordering;
+                            app.hit_test_win_pt.0.store(wp as i32, Ordering::Relaxed);
+                            app.hit_test_win_pt.1.store(hp as i32, Ordering::Relaxed);
                         }
                         WindowEvent::Maximized | WindowEvent::Restored => {
                             app.framebuffer_resized = true;
-                            // Only update the setting once the initial pending_maximized
-                            // has been applied; ignoring earlier events prevents writing
-                            // a stale value during the startup window-creation sequence.
+                            let is_maximized = matches!(win_event, WindowEvent::Maximized);
+                            // Track maximized state for the `c` palette's
+                            // maximize/restore label.
+                            app.renderer.window_is_maximized = is_maximized;
+                            // Persist so the window reopens in the same state.
+                            // Gated on `maximized_ready` so the Restored event SDL
+                            // fires during startup window-creation doesn't write a
+                            // stale value. `write_maximized` is a no-op when the
+                            // value is unchanged, so it never needlessly rewrites
+                            // settings.json.
                             if app.maximized_ready {
-                                let is_maximized = matches!(win_event, WindowEvent::Maximized);
-                                if let Some(s) = app.renderer.providers.iter_mut().find(|p| p.name() == "settings") {
-                                    s.on_checkbox_change("maximized", is_maximized);
-                                }
+                                crate::programs::write_maximized(is_maximized);
                             }
                         }
                         WindowEvent::CloseRequested => {
@@ -170,6 +202,38 @@ pub fn main_loop(app: &mut AppState) {
                         "text_input"
                     );
                     handlers::handle_input(&mut app.renderer, &text);
+                }
+
+                // ---- Custom titlebar buttons (mouse) ------------------------
+                // Button rects are filled by the renderer each frame in logical
+                // point space — the same space SDL reports mouse coords in.
+                Event::MouseMotion { x, y, window_id, .. } => {
+                    if window_id != app.window.id() {
+                        continue;
+                    }
+                    let hover = crate::app_state::window_button_at(
+                        &app.renderer.window_button_rects, x, y);
+                    if hover != app.renderer.window_button_hover {
+                        app.renderer.window_button_hover = hover;
+                        app.renderer.needs_redraw = true;
+                    }
+                }
+
+                Event::MouseButtonDown { x, y, mouse_btn, window_id, .. } => {
+                    if window_id != app.window.id() {
+                        continue;
+                    }
+                    if mouse_btn == MouseButton::Left {
+                        if let Some(idx) = crate::app_state::window_button_at(
+                            &app.renderer.window_button_rects, x, y)
+                        {
+                            app.renderer.pending_window_action = Some(match idx {
+                                0 => WindowAction::Minimize,
+                                1 => WindowAction::MaximizeToggle,
+                                _ => WindowAction::Close,
+                            });
+                        }
+                    }
                 }
 
                 _ => {}
@@ -385,6 +449,10 @@ pub fn main_loop(app: &mut AppState) {
 
         // ---- Fill vertex buffers for this frame ----------------------------
         update_view(app);
+        // Overlay the custom titlebar controls on top of whatever update_view
+        // rendered (every render path has already begun the passes; the submit
+        // happens below in draw_frame).
+        draw_window_controls(app);
 
         // ---- Update accessibility tree (no-op when no AT is active) ---------
         if let Some(adapter) = app.accesskit_adapter.as_mut() {
@@ -424,6 +492,85 @@ struct ParentInfo {
     display_text: String,
     is_radio: bool,
     radio_summary: Option<String>,
+}
+
+/// Append the custom titlebar controls (minimize / maximize / close) to the
+/// current frame's vertex buffers and record their hit-test rects.
+///
+/// Called once per frame after `update_view`, so it covers every render path
+/// (each has already called `begin_*_rendering`; the submit happens afterwards
+/// in `draw_frame`). Geometry is computed in logical point space — the space SDL
+/// reports mouse coords in — and scaled to physical pixels for drawing via the
+/// device pixel ratio. All colours come from the active palette, so the controls
+/// follow light/dark theme switching automatically.
+fn draw_window_controls(app: &mut AppState) {
+    let p = *app.renderer.palette();
+    let win_w_px = app.swapchain_extent.width as f32;
+    let (sz_w, _) = app.window.size();
+    let device_scale = if sz_w > 0 { win_w_px / sz_w as f32 } else { 1.0 };
+    let win_w_pt = if device_scale > 0.0 { win_w_px / device_scale } else { win_w_px };
+    let on_left = crate::app_state::controls_on_left();
+
+    let rects = crate::app_state::window_button_rects(win_w_pt, on_left);
+    app.renderer.window_button_rects = rects;
+    let hover = app.renderer.window_button_hover;
+
+    let maximized = app.renderer.window_is_maximized;
+
+    let Some(rr) = app.rect_renderer.as_mut() else {
+        return;
+    };
+    // All three icons are drawn as strokes (no font glyph), so they look
+    // consistent and don't depend on the font's glyph coverage (Consolas has
+    // no square/✕ glyphs at all).
+    for (i, &(bx, by, bw, bh)) in rects.iter().enumerate() {
+        let px = bx * device_scale;
+        let py = by * device_scale;
+        let pw = bw * device_scale;
+        let ph = bh * device_scale;
+
+        // Hovered button face: red for close, selection highlight otherwise.
+        if hover == Some(i) {
+            let bg = if i == 2 { p.error } else { p.selected };
+            rr.prepare_rectangle(px, py, pw, ph, bg, 0.0);
+        }
+
+        let cx = px + pw / 2.0;
+        let cy = py + ph / 2.0;
+        // Icon half-extent and stroke thickness, scaled with DPI.
+        let h = (ph * 0.17).round().max(3.0);
+        let t = (1.5 * device_scale).round().max(1.0);
+
+        match i {
+            0 => {
+                // Minimize: a horizontal line.
+                rr.prepare_line(cx - h, cy, cx + h, cy, t, p.text);
+            }
+            1 => {
+                // Maximize / restore: a square outline drawn as four strokes.
+                // When maximized, draw two offset squares to read as "restore".
+                let square = |rr: &mut crate::rectangle::RectangleRenderer, ox: f32, oy: f32, he: f32| {
+                    let (x0, y0, x1, y1) = (cx - he + ox, cy - he + oy, cx + he + ox, cy + he + oy);
+                    rr.prepare_line(x0, y0, x1, y0, t, p.text); // top
+                    rr.prepare_line(x0, y1, x1, y1, t, p.text); // bottom
+                    rr.prepare_line(x0, y0, x0, y1, t, p.text); // left
+                    rr.prepare_line(x1, y0, x1, y1, t, p.text); // right
+                };
+                if maximized {
+                    let off = (h * 0.55).round();
+                    square(rr, off, -off, h - off / 2.0);
+                    square(rr, -off, off, h - off / 2.0);
+                } else {
+                    square(rr, 0.0, 0.0, h);
+                }
+            }
+            _ => {
+                // Close: an X drawn as two diagonal strokes.
+                rr.prepare_line(cx - h, cy - h, cx + h, cy + h, t, p.text);
+                rr.prepare_line(cx - h, cy + h, cx + h, cy - h, t, p.text);
+            }
+        }
+    }
 }
 
 fn update_view(app: &mut AppState) {

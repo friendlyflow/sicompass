@@ -868,6 +868,11 @@ pub static SHORTCUTS: &[Shortcut] = &[
         modes: GENERAL,
         label: "t      Switch tab", is_available: more_than_one_tab,
         handle: handlers::handle_t_tab_switcher },
+    // c (general mode) — open the window-controls palette (minimize/maximize/close).
+    Shortcut { key: Keycode::C, key2: None, ctrl: false, shift: false,
+        modes: GENERAL,
+        label: "c      Controls", is_available: always,
+        handle: handlers::handle_controls },
     // Ctrl+1..9 — labels empty (Ctrl+Tab/Ctrl+Shift+Tab already advertise tab nav)
     Shortcut { key: Keycode::_1, key2: None, ctrl: true, shift: false,
         modes: GENERAL, label: "", is_available: always, handle: handlers::handle_tab_select_1 },
