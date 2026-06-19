@@ -101,3 +101,4 @@ mode-tab-switcher = tabbladwisselaar
 
 # Screen-reader announcements
 speak-tab-change = tabblad { $idx }/{ $total }: { $label }
+hint-c-controls = c      Vensterknoppen

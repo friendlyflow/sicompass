@@ -3,7 +3,7 @@
 //! Each function corresponds to one key action and mutates `AppRenderer`
 //! in-place. Rendering is triggered by setting `needs_redraw = true`.
 
-use crate::app_state::{AppRenderer, CommandPhase, Coordinate, History, Task};
+use crate::app_state::{AppRenderer, CommandPhase, Coordinate, History, Task, WindowAction};
 use crate::list;
 use sicompass_sdk::ffon::{get_ffon_at_id, next_layer_exists, FfonElement, IdArray};
 use sicompass_sdk::placeholders::{is_i_placeholder, I_PLACEHOLDER};
@@ -917,6 +917,26 @@ pub fn handle_colon(r: &mut AppRenderer) {
     r.needs_redraw = true;
 }
 
+/// Open the window-controls palette (`c` key) — minimize / maximize / close.
+///
+/// Reuses the `Coordinate::Command` machinery via `CommandPhase::Controls`, so
+/// it inherits type-to-filter search, navigation, and the `-b ` button
+/// rendering/announcement for free. Unlike `handle_colon` it is available at any
+/// depth (window controls are global, not element-scoped).
+pub fn handle_controls(r: &mut AppRenderer) {
+    r.previous_coordinate = r.coordinate;
+    r.coordinate = Coordinate::Command;
+    r.current_command = CommandPhase::Controls;
+    r.provider_command_name.clear();
+    r.input_buffer.clear();
+    r.cursor_position = 0;
+    list::create_list_current_layer(r);
+    let ctx = r.current_list_item()
+        .map(|it| crate::accesskit_sdl::label_to_speech(&it.label));
+    r.speak_mode_change(ctx);
+    r.needs_redraw = true;
+}
+
 /// Execute the selected command or its secondary selection (Return in Command mode).
 ///
 /// Two-phase flow:
@@ -925,6 +945,20 @@ pub fn handle_colon(r: &mut AppRenderer) {
 /// 2. `CommandPhase::Provider` → user selected from the secondary list; execute.
 pub fn handle_enter_command(r: &mut AppRenderer) {
     match r.current_command {
+        CommandPhase::Controls => {
+            // Window-controls palette: map the selected button's action key
+            // (stashed in `nav_path`) to a `WindowAction` and hand it to the
+            // main loop, which owns the SDL window. Then leave the palette.
+            let action = r.current_list_item()
+                .and_then(|item| item.nav_path.as_deref())
+                .and_then(WindowAction::from_key);
+            if let Some(action) = action {
+                r.pending_window_action = Some(action);
+            }
+            r.current_command = CommandPhase::None;
+            handle_escape(r);
+            return;
+        }
         CommandPhase::None => {
             // Phase 1: user chose a command name from the list. The display label
             // carries a `-b ` button prefix, so the bare command name lives in

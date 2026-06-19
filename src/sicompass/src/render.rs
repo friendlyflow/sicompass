@@ -542,7 +542,11 @@ pub fn build_app() -> Result<AppState, SiError> {
     let video = sdl.video().map_err(|e| SiError::Sdl(e.to_string()))?;
 
     let mut wb = video.window(WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT);
-    wb.vulkan().resizable().hidden();
+    // Borderless: the app draws its own min/max/close controls (see
+    // `app_state::WindowAction` and the renderer's titlebar buttons) and
+    // restores drag/resize via `set_hit_test` below. `resizable()` is kept so
+    // SDL still honours the resize hit-test results.
+    wb.vulkan().resizable().borderless().hidden();
     if crate::programs::read_maximized() {
         wb.maximized();
     }
@@ -550,7 +554,60 @@ pub fn build_app() -> Result<AppState, SiError> {
     // scale (e.g. 150% on Windows) and SDL_GetDisplayContentScale returns the
     // real factor rather than always 1.0.
     wb.high_pixel_density();
-    let window = wb.build().map_err(|e| SiError::Sdl(e.to_string()))?;
+    let mut window = wb.build().map_err(|e| SiError::Sdl(e.to_string()))?;
+
+    // ---- Custom-titlebar hit-test ------------------------------------------
+    // With no OS border the window can't be moved or resized by default. Define
+    // a draggable top strip (minus the button rects) plus resize borders. The
+    // callback is `'static` and gets no window handle, so share the live window
+    // size (logical points) through atomics the main loop keeps current.
+    let (init_w, init_h) = window.size();
+    let hit_test_win_pt = std::sync::Arc::new((
+        std::sync::atomic::AtomicI32::new(init_w as i32),
+        std::sync::atomic::AtomicI32::new(init_h as i32),
+    ));
+    {
+        use std::sync::atomic::Ordering;
+        use sdl3::video::HitTestResult;
+        let size = hit_test_win_pt.clone();
+        let on_left = crate::app_state::controls_on_left();
+        // Resize-border thickness in logical points.
+        const BORDER: f32 = 6.0;
+        let _ = window.set_hit_test(move |p| {
+            let w = size.0.load(Ordering::Relaxed) as f32;
+            let h = size.1.load(Ordering::Relaxed) as f32;
+            let x = p.x() as f32;
+            let y = p.y() as f32;
+            let left = x < BORDER;
+            let right = x > w - BORDER;
+            let top = y < BORDER;
+            let bottom = y > h - BORDER;
+            match (top, bottom, left, right) {
+                (true, _, true, _) => HitTestResult::ResizeTopLeft,
+                (true, _, _, true) => HitTestResult::ResizeTopRight,
+                (_, true, true, _) => HitTestResult::ResizeBottomLeft,
+                (_, true, _, true) => HitTestResult::ResizeBottomRight,
+                (true, _, _, _) => HitTestResult::ResizeTop,
+                (_, true, _, _) => HitTestResult::ResizeBottom,
+                (_, _, true, _) => HitTestResult::ResizeLeft,
+                (_, _, _, true) => HitTestResult::ResizeRight,
+                _ => {
+                    // Top strip is draggable, except over the control buttons
+                    // (let those receive the click as a normal hit).
+                    if y < crate::app_state::WINDOW_BUTTON_H {
+                        let rects = crate::app_state::window_button_rects(w, on_left);
+                        if crate::app_state::window_button_at(&rects, x, y).is_some() {
+                            HitTestResult::Normal
+                        } else {
+                            HitTestResult::Draggable
+                        }
+                    } else {
+                        HitTestResult::Normal
+                    }
+                }
+            }
+        });
+    }
 
     let event_pump = sdl.event_pump().map_err(|e| SiError::Sdl(e.to_string()))?;
 
@@ -778,6 +835,7 @@ pub fn build_app() -> Result<AppState, SiError> {
         accesskit_adapter: None,
         settings_queue: None,
         maximized_ready: false,
+        hit_test_win_pt,
     })
 }
 

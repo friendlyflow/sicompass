@@ -10563,3 +10563,53 @@ fn texteditor_undo_of_delete_keeps_dir_file_prefix() {
     }
     assert!(checked, "both entries should reappear in the listing after undo");
 }
+
+// ---------------------------------------------------------------------------
+// Window controls palette (`c`)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn c_opens_controls_palette_with_three_buttons() {
+    use sicompass::app_state::CommandPhase;
+    let mut r = AppRenderer::new();
+    assert_eq!(r.coordinate, Coordinate::General);
+
+    dispatch_key(&mut r, Some(Keycode::C), Mod::empty());
+
+    assert_eq!(r.coordinate, Coordinate::Command);
+    assert_eq!(r.current_command, CommandPhase::Controls);
+    assert_eq!(r.total_list.len(), 3);
+    // Rendered as buttons (announced "button"): `-b ` prefix from build_str_label.
+    assert!(r.total_list.iter().all(|it| it.label.starts_with("-b ")),
+        "labels: {:?}", r.total_list.iter().map(|it| it.label.clone()).collect::<Vec<_>>());
+    // Stable action keys live in nav_path, in min/max/close order.
+    let keys: Vec<&str> = r.total_list.iter()
+        .filter_map(|it| it.nav_path.as_deref()).collect();
+    assert_eq!(keys, vec!["minimize", "maximize", "close"]);
+}
+
+#[test]
+fn controls_palette_close_sets_pending_window_action() {
+    use sicompass::app_state::{CommandPhase, WindowAction};
+    let mut r = AppRenderer::new();
+    dispatch_key(&mut r, Some(Keycode::C), Mod::empty());
+    assert_eq!(r.current_command, CommandPhase::Controls);
+
+    // Select "close" (third button) and press Enter.
+    r.list_index = 2;
+    dispatch_key(&mut r, Some(Keycode::Return), Mod::empty());
+
+    assert_eq!(r.pending_window_action, Some(WindowAction::Close));
+    // Palette closed, back to General.
+    assert_eq!(r.coordinate, Coordinate::General);
+}
+
+#[test]
+fn controls_palette_maximize_label_tracks_state() {
+    let mut r = AppRenderer::new();
+    r.window_is_maximized = true;
+    dispatch_key(&mut r, Some(Keycode::C), Mod::empty());
+    // Middle button reads "restore" when the window is maximized.
+    assert!(r.total_list[1].label.contains("restore"),
+        "got {:?}", r.total_list[1].label);
+}

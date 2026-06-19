@@ -247,11 +247,91 @@ pub enum History {
 ///
 /// `None` → showing the command list.
 /// `Provider` → showing the secondary selection list for `provider_command_name`.
+/// `Controls` → showing the window-controls palette (minimize/maximize/close),
+///   opened with the `c` key. Reuses the `Coordinate::Command` machinery; only
+///   `build_command_list` and `handle_enter_command` branch on it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CommandPhase {
     #[default]
     None,
     Provider,
+    Controls,
+}
+
+/// A window-management action requested from the keyboard (`c` controls palette)
+/// or the custom titlebar buttons. The `AppRenderer` only records the request in
+/// `pending_window_action`; the `view.rs` main loop, which owns the SDL window,
+/// drains and performs it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowAction {
+    Minimize,
+    /// Maximize if currently restored, restore if currently maximized.
+    MaximizeToggle,
+    Close,
+}
+
+impl WindowAction {
+    /// Dispatch key used in the controls palette `nav_path` (stable identifier,
+    /// independent of the display label which varies with window state).
+    pub fn key(self) -> &'static str {
+        match self {
+            WindowAction::Minimize => "minimize",
+            WindowAction::MaximizeToggle => "maximize",
+            WindowAction::Close => "close",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Option<WindowAction> {
+        match key {
+            "minimize" => Some(WindowAction::Minimize),
+            "maximize" => Some(WindowAction::MaximizeToggle),
+            "close" => Some(WindowAction::Close),
+            _ => None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Custom titlebar button geometry
+//
+// All geometry here is in **logical point space** — the coordinate system SDL
+// uses for both mouse events and the `set_hit_test` callback. The renderer
+// multiplies by the device pixel ratio (`size_in_pixels / size`) to draw in
+// physical pixels. Keeping one source of truth (these pure functions) means the
+// hit-test region, the mouse hit-testing, and the drawn rects can never drift.
+// ---------------------------------------------------------------------------
+
+/// Logical width of each titlebar button.
+pub const WINDOW_BUTTON_W: f32 = 46.0;
+/// Logical height of each titlebar button (also the draggable top-strip height).
+pub const WINDOW_BUTTON_H: f32 = 30.0;
+
+/// Whether the window controls sit at the top-left (macOS traffic-light
+/// convention) rather than the top-right (Windows/Linux).
+pub const fn controls_on_left() -> bool {
+    cfg!(target_os = "macos")
+}
+
+/// Point-space rects `(x, y, w, h)` of the three titlebar buttons, laid out in a
+/// row in the order `[minimize, maximize, close]`. `win_w_pt` is the window width
+/// in logical points; `on_left` selects the left/right corner.
+pub fn window_button_rects(win_w_pt: f32, on_left: bool) -> [(f32, f32, f32, f32); 3] {
+    let strip_w = WINDOW_BUTTON_W * 3.0;
+    let start_x = if on_left { 0.0 } else { (win_w_pt - strip_w).max(0.0) };
+    let mut rects = [(0.0, 0.0, 0.0, 0.0); 3];
+    let mut i = 0;
+    while i < 3 {
+        rects[i] = (start_x + WINDOW_BUTTON_W * i as f32, 0.0, WINDOW_BUTTON_W, WINDOW_BUTTON_H);
+        i += 1;
+    }
+    rects
+}
+
+/// Index of the button containing point `(x, y)` (point space), or `None`.
+pub fn window_button_at(rects: &[(f32, f32, f32, f32); 3], x: f32, y: f32) -> Option<usize> {
+    rects
+        .iter()
+        .position(|&(bx, by, bw, bh)| x >= bx && x < bx + bw && y >= by && y < by + bh)
 }
 
 // ---------------------------------------------------------------------------
@@ -507,6 +587,23 @@ pub struct AppRenderer {
     /// rebuild the font renderer without a restart.
     pub rebuild_font_renderer: bool,
 
+    // ---- Custom window controls (borderless titlebar) ----------------------
+    /// Window-management action requested by the `c` controls palette or a
+    /// titlebar-button click; drained and performed by the `view.rs` main loop
+    /// (which owns the SDL window). `None` = nothing pending.
+    pub pending_window_action: Option<WindowAction>,
+    /// Pixel rects `(x, y, w, h)` of the three custom titlebar buttons
+    /// (minimize, maximize, close), filled by the renderer each frame so the
+    /// event loop can hit-test mouse clicks against them.
+    pub window_button_rects: [(f32, f32, f32, f32); 3],
+    /// Index (0..3) of the titlebar button under the mouse cursor, for hover
+    /// highlight. `None` when the cursor is over none of them.
+    pub window_button_hover: Option<usize>,
+    /// Tracks whether the window is currently maximized, updated from SDL
+    /// Maximized/Restored events. Drives the `c` palette's maximize/restore
+    /// label (the action toggle itself queries SDL directly in the main loop).
+    pub window_is_maximized: bool,
+
     // ---- Save/load path (set by save-as dialog, used by Ctrl+S) ------------
     /// The filesystem path last used for Ctrl+S / save-as. Empty = no path set yet.
     pub current_save_path: String,
@@ -693,6 +790,10 @@ impl AppRenderer {
             palette_theme: PaletteTheme::Dark,
             pending_maximized: None,
             rebuild_font_renderer: false,
+            pending_window_action: None,
+            window_button_rects: [(0.0, 0.0, 0.0, 0.0); 3],
+            window_button_hover: None,
+            window_is_maximized: false,
             current_save_path: String::new(),
             placeholder_cancel: None,
             pending_file_browser_save_as: false,
@@ -1210,6 +1311,13 @@ pub struct AppState {
     /// startup race where SDL fires a Restored event before the window is
     /// maximized, which would write `maximized: false` to settings.json.
     pub maximized_ready: bool,
+
+    // ---- Custom titlebar hit-test ------------------------------------------
+    /// Current window size in logical points `(width, height)`, shared with the
+    /// `set_hit_test` callback (which is `'static` and gets no window handle).
+    /// The main loop writes the new size on every resize so the draggable strip
+    /// and resize borders track the window.
+    pub hit_test_win_pt: std::sync::Arc<(std::sync::atomic::AtomicI32, std::sync::atomic::AtomicI32)>,
 }
 
 impl AppState {
@@ -1305,6 +1413,54 @@ mod tests {
     fn locale_test_lock() -> std::sync::MutexGuard<'static, ()> {
         static L: OnceLock<Mutex<()>> = OnceLock::new();
         L.get_or_init(|| Mutex::new(())).lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    // --- Custom titlebar button geometry ---
+
+    #[test]
+    fn window_buttons_right_aligned_by_default() {
+        let rects = window_button_rects(1000.0, false);
+        // Three buttons flush to the right edge, in min/max/close order.
+        let strip = WINDOW_BUTTON_W * 3.0;
+        assert_eq!(rects[0].0, 1000.0 - strip);
+        assert_eq!(rects[1].0, 1000.0 - strip + WINDOW_BUTTON_W);
+        assert_eq!(rects[2].0, 1000.0 - WINDOW_BUTTON_W);
+        // Rightmost button ends at the window edge.
+        assert_eq!(rects[2].0 + rects[2].2, 1000.0);
+        for r in &rects {
+            assert_eq!(r.1, 0.0);
+            assert_eq!(r.2, WINDOW_BUTTON_W);
+            assert_eq!(r.3, WINDOW_BUTTON_H);
+        }
+    }
+
+    #[test]
+    fn window_buttons_left_aligned_on_mac_layout() {
+        let rects = window_button_rects(1000.0, true);
+        assert_eq!(rects[0].0, 0.0);
+        assert_eq!(rects[1].0, WINDOW_BUTTON_W);
+        assert_eq!(rects[2].0, WINDOW_BUTTON_W * 2.0);
+    }
+
+    #[test]
+    fn window_button_at_hits_each_button_and_misses_gaps() {
+        let rects = window_button_rects(1000.0, false);
+        // A point in the middle of each button resolves to that index.
+        for i in 0..3 {
+            let (x, y, w, h) = rects[i];
+            assert_eq!(window_button_at(&rects, x + w / 2.0, y + h / 2.0), Some(i));
+        }
+        // Below the strip and far to the left hit nothing.
+        assert_eq!(window_button_at(&rects, 10.0, 10.0), None);
+        assert_eq!(window_button_at(&rects, 999.0, WINDOW_BUTTON_H + 5.0), None);
+    }
+
+    #[test]
+    fn window_action_key_roundtrips() {
+        for a in [WindowAction::Minimize, WindowAction::MaximizeToggle, WindowAction::Close] {
+            assert_eq!(WindowAction::from_key(a.key()), Some(a));
+        }
+        assert_eq!(WindowAction::from_key("bogus"), None);
     }
 
     // --- Coordinate::display_label (i18n) ---
