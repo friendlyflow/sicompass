@@ -1181,6 +1181,42 @@ impl AppRenderer {
         self.pending_announcement = Some(format!("{text}{sentinel}"));
     }
 
+    /// The header status line: spoken mode name, layer depth, and 1-based
+    /// position within the active list. Shared by the renderer
+    /// (`view::build_header_text`) and `speak_focus_position`.
+    pub(crate) fn header_text(&self) -> String {
+        let mode = self.coordinate.display_label();
+        let depth = self.current_id.depth().saturating_sub(1);
+        let last_id = self.current_id.last().unwrap_or(0);
+        let total = self.active_list_len();
+        format!("{mode}, layer: {depth} list: {}/{total}", last_id + 1)
+    }
+
+    /// The Ctrl+F-style absolute breadcrumb path to the current focus, e.g.
+    /// "Files > home > projects > main.rs". Empty at a provider root (depth 0/1
+    /// with no descended segment). Uses the same builder the tab switcher and
+    /// extended search render with, so the spoken path matches what is shown.
+    pub(crate) fn focus_path(&self) -> String {
+        crate::list::tab_breadcrumb(&self.ffon, &self.current_id)
+    }
+
+    /// Announce the position of the focus: the header line followed by the
+    /// breadcrumb path to where the cursor is. Bound to the `w` (whereami) key
+    /// in General mode. Toggles `announcement_parity` like the other `speak_*`
+    /// helpers so a repeat press still produces an AccessKit tree diff.
+    pub fn speak_focus_position(&mut self) {
+        let header = self.header_text();
+        let path = self.focus_path();
+        let text = if path.is_empty() {
+            header
+        } else {
+            format!("{header}, {path}")
+        };
+        self.announcement_parity = !self.announcement_parity;
+        let sentinel = if self.announcement_parity { "\u{200B}" } else { "" };
+        self.pending_announcement = Some(format!("{text}{sentinel}"));
+    }
+
     /// Return the active color palette.
     pub fn palette(&self) -> &'static ColorPalette {
         match self.palette_theme {

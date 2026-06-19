@@ -135,6 +135,7 @@ static SECTIONS: &[Node] = &[
                     Leaf("tutorial-leaf-020"),
                     Leaf("tutorial-leaf-021"),
                     Leaf("tutorial-leaf-022"),
+                    Leaf("tutorial-leaf-265"),
                 ],
             },
             Branch { key: "tutorial-branch-047",

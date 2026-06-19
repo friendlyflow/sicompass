@@ -2310,11 +2310,7 @@ fn rgba_u32_to_f32(c: u32) -> [f32; 4] {
 /// Build the header status line (mirrors C updateView header format).
 fn build_header_text(r: &AppRenderer, line_height: i32) -> String {
     let _ = line_height;
-    let mode = r.coordinate.display_label();
-    let depth = r.current_id.depth().saturating_sub(1);
-    let last_id = r.current_id.last().unwrap_or(0);
-    let total = r.active_list_len();
-    format!("{mode}, layer: {depth} list: {}/{total}", last_id + 1)
+    r.header_text()
 }
 
 /// Snapshot the active list for rendering (avoids mixed borrows later).
