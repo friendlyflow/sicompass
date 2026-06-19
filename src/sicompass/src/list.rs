@@ -586,56 +586,100 @@ fn build_confirm_close_tab_list(renderer: &mut AppRenderer) {
         .collect();
 }
 
-/// Display name for tab `ti` (its active provider's `display_name()`, truncated
-/// to 20 chars). The active tab reads from the live working set; inactive tabs
-/// read from their parked provider list. Mirrors `active_tab_label`.
+/// Navigation breadcrumb for a tab, built by walking the in-memory FFON tree
+/// `ffon` along `id` and joining each level's display text with " > " — the same
+/// path Ctrl+F extended search shows (breadcrumb + item).
 ///
-/// The shared settings provider is never parked into a tab's content list (it
-/// always lives last in the live `providers`), so an inactive tab sitting on
-/// settings has a `current_id[0]` that points just past its parked content. In
-/// that case read the shared settings provider from the live set instead of
-/// falling back to a bare "—".
-fn tab_display_name(r: &AppRenderer, ti: usize) -> String {
-    let name = if ti == r.active_tab {
-        r.current_id
-            .get(0)
-            .and_then(|i| r.providers.get(i))
-            .map(|p| p.display_name().to_owned())
+/// The walk starts at the provider root (whose key is the provider's
+/// `display_name()`) and descends every component up to and including the cursor
+/// element, so the crumb is the full absolute path, e.g.
+/// `Files > home > projects > main.rs` or `Terminal > …`.
+fn tab_breadcrumb(ffon: &[FfonElement], id: &IdArray) -> String {
+    let mut segs: Vec<String> = Vec::new();
+    let mut level: &[FfonElement] = ffon;
+    let depth = id.depth();
+    for d in 0..depth {
+        let Some(idx) = id.get(d) else { break };
+        let Some(elem) = level.get(idx) else { break };
+        let text = match elem {
+            FfonElement::Obj(obj) => sicompass_sdk::tags::strip_display(&obj.key),
+            FfonElement::Str(s) => sicompass_sdk::tags::strip_display(s),
+        };
+        let text = text.trim();
+        if !text.is_empty() {
+            segs.push(text.to_owned());
+        }
+        match elem {
+            FfonElement::Obj(obj) => level = &obj.children,
+            FfonElement::Str(_) => break, // leaf — nothing deeper to walk
+        }
+    }
+    segs.join(" > ")
+}
+
+/// Shell PID and navigation breadcrumb for tab `ti`, used to label tab-switcher
+/// rows as "{pid} - {breadcrumb}".
+///
+/// The PID is the tab's terminal provider's child shell ([`Provider::process_id`]);
+/// `None` when the tab has no terminal provider or its shell has not started yet.
+/// The breadcrumb is the Ctrl+F-style navigation path (see [`tab_breadcrumb`]).
+///
+/// The active tab reads from the live FFON tree / cursor; inactive tabs read
+/// from their parked snapshot (`tab.ffon` is content-only, parallel to
+/// `tab.providers`).
+fn tab_pid_and_path(r: &AppRenderer, ti: usize) -> (Option<u32>, String) {
+    if ti == r.active_tab {
+        // The shared settings provider lives last and is never a terminal, so
+        // scanning the whole live set for the shell PID is safe.
+        let pid = r
+            .providers
+            .iter()
+            .find(|p| p.name() == "terminal")
+            .and_then(|p| p.process_id());
+        (pid, tab_breadcrumb(&r.ffon, &r.current_id))
     } else {
-        r.tabs.get(ti).and_then(|tab| {
-            match tab.current_id.get(0) {
-                Some(i) if i < tab.providers.len() => {
-                    tab.providers.get(i).map(|p| p.display_name().to_owned())
-                }
-                // Settings (or any shared provider past the parked content):
-                // resolve from the live working set, where it lives last.
-                Some(_) => r.providers.last().map(|p| p.display_name().to_owned()),
-                None => None,
-            }
-        })
-    };
-    name.map(|n| n.chars().take(20).collect())
-        .unwrap_or_else(|| "—".to_string())
+        let Some(tab) = r.tabs.get(ti) else {
+            return (None, String::new());
+        };
+        let pid = tab
+            .providers
+            .iter()
+            .find(|p| p.name() == "terminal")
+            .and_then(|p| p.process_id());
+        // The shared settings provider is never parked into `tab.ffon`; a tab
+        // sitting on it has a `current_id[0]` past the parked content, so resolve
+        // those against the live FFON tree where the shared provider lives.
+        let in_parked = tab.current_id.get(0).is_some_and(|i| i < tab.ffon.len());
+        let ffon = if in_parked { &tab.ffon } else { &r.ffon };
+        (pid, tab_breadcrumb(ffon, &tab.current_id))
+    }
 }
 
 /// Build the MRU-ordered tab list for `Coordinate::TabSwitcher`.
 ///
 /// Items follow `tab_mru` order (most-recently-used first, so the active tab
 /// leads). Each entry is a `<button>` Str so it renders with the `-b` prefix via
-/// [`build_str_label`] and is announced as an actionable button. The real tab
-/// index is stored in each item's `id` (read back on confirm). `list_index` is
-/// set by the caller (`open_tab_switcher`), not here.
+/// [`build_str_label`] (same setup as the colon command palette) and is announced
+/// as an actionable button. Its displayed text is `{shell PID} - {breadcrumb}`
+/// (the breadcrumb matches Ctrl+F extended search); the leading `-` with no
+/// number means the tab has no terminal or its shell has not started yet. The
+/// real tab index is stored in each item's `id` (read back on confirm).
+/// `list_index` is set by the caller (`open_tab_switcher`), not here.
 fn build_tab_switcher_list(renderer: &mut AppRenderer) {
     let order = renderer.tab_mru.clone();
     renderer.total_list = order
         .iter()
         .map(|&ti| {
-            let name = tab_display_name(renderer, ti);
+            let (pid, crumb) = tab_pid_and_path(renderer, ti);
+            let label_text = match pid {
+                Some(p) => format!("{p} - {crumb}"),
+                None => format!("- {crumb}"),
+            };
             let mut id = IdArray::new();
             id.push(ti);
             RenderListItem {
                 id,
-                label: build_str_label(&format!("<button>tab</button>{name}"), false),
+                label: build_str_label(&format!("<button>tab</button>{label_text}"), false),
                 data: None,
                 nav_path: None,
                 ext_prefix: None,

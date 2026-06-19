@@ -377,6 +377,13 @@ impl Provider for TerminalProvider {
         self.init_attempted = false;
     }
 
+    /// OS process id of the child shell, if started. `None` until the shell has
+    /// been spawned (lazy `ensure_shell`), so the tab-switcher label falls back
+    /// gracefully.
+    fn process_id(&self) -> Option<u32> {
+        self.shell.as_ref().and_then(|s| s.pid())
+    }
+
     /// Busy while a full-screen interactive program is up (`in_dashboard`) or
     /// while the PTY has a foreground command running (`Shell::foreground_busy`,
     /// Linux only). The app uses this to confirm before Ctrl+W kills the shell.
@@ -959,6 +966,26 @@ mod tests {
         // A pasted `ESC[201~` must not be able to close the bracket early.
         let out = build_paste_bytes("evil\x1b[201~tail", true);
         assert_eq!(out, b"\x1b[200~eviltail\x1b[201~".to_vec());
+    }
+
+    #[test]
+    fn process_id_exposes_shell_pid() {
+        // Before the shell spawns there is no PID → the tab switcher shows the
+        // "- {breadcrumb}" fallback.
+        let mut p = TerminalProvider::new();
+        assert_eq!(p.process_id(), None);
+
+        p.on_setting_change("shellProgram", "/bin/sh");
+        p.init();
+        // Skip if spawn failed (e.g. CI sandbox).
+        if p.shell.is_none() {
+            return;
+        }
+
+        // Once the shell is running the tab switcher can label the tab as
+        // "{pid} - {breadcrumb}".
+        assert!(p.process_id().is_some(),
+            "shell PID should be exposed once the shell is running");
     }
 
     #[test]
