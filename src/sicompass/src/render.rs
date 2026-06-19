@@ -139,6 +139,14 @@ pub(crate) unsafe fn transition_image_layout(
             vk::PipelineStageFlags::TRANSFER,
             vk::PipelineStageFlags::FRAGMENT_SHADER,
         ),
+        // Re-upload into an already-sampled image (dynamic glyph atlas): the
+        // shader must finish reading before the transfer overwrites texels.
+        (vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL, vk::ImageLayout::TRANSFER_DST_OPTIMAL) => (
+            vk::AccessFlags::SHADER_READ,
+            vk::AccessFlags::TRANSFER_WRITE,
+            vk::PipelineStageFlags::FRAGMENT_SHADER,
+            vk::PipelineStageFlags::TRANSFER,
+        ),
         _ => panic!("transition_image_layout: unsupported layout pair"),
     };
 
@@ -928,6 +936,13 @@ pub fn draw_frame(app: &mut AppState) {
         };
 
         app.device.reset_fences(&[app.in_flight[frame]]).unwrap();
+
+        // Re-upload any glyphs rasterized on demand during this frame's view
+        // build. Must happen outside the render pass (it transitions the atlas
+        // image layout) and before the text draw reads it.
+        if let Some(fr) = &app.font_renderer {
+            fr.flush_atlas(&app.device, app.command_pool, app.graphics_queue);
+        }
 
         // Record command buffer
         let cb = app.command_buffers[frame];

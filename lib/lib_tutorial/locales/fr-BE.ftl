@@ -51,6 +51,8 @@ tutorial-branch-045 = Balises d'élément
 tutorial-branch-046 = Étapes suivantes
 tutorial-branch-047 = Onglets
 tutorial-branch-048 = Mises à jour
+tutorial-branch-049 = Contrôles de fenêtre
+tutorial-branch-050 = Texte et emoji
 
 # Leaf paragraphs
 tutorial-leaf-001 = Bienvenue dans Sicompass, une interface pilotée au clavier pour parcourir et gérer des données structurées.
@@ -303,7 +305,17 @@ tutorial-leaf-244 = Ctrl+T : ouvrir un nouvel onglet à côté de l'onglet coura
 tutorial-leaf-245 = Ctrl+W : fermer l'onglet courant, ce qui arrête ses providers et tue son processus shell. Si l'onglet est occupé, avec une commande au premier plan dans le terminal ou un programme plein écran ouvert, une confirmation oui/non apparaît d'abord. Le dernier onglet restant ne peut pas être fermé ainsi, utilisez le bouton de fermeture de la fenêtre ou quittez l'application.
 tutorial-leaf-246 = Ctrl+Tab : parcourir les onglets dans l'ordre d'utilisation la plus récente. Maintenez Ctrl et tapez Tab pour ouvrir le sélecteur d'onglets et déplacer la surbrillance vers l'onglet utilisé le plus récemment suivant, puis relâchez Ctrl pour y basculer. Un seul Ctrl+Tab rapide revient à l'onglet que vous veniez de quitter.
 tutorial-leaf-247 = Ctrl+Shift+Tab : le même sélecteur dans l'autre sens. Maintenez Ctrl et tapez Shift+Tab pour remonter la surbrillance dans la liste des onglets utilisés le plus récemment, puis relâchez Ctrl pour valider.
-tutorial-leaf-258 = t : ouvrir le sélecteur d'onglets sous forme de palette persistante plutôt qu'en superposition maintenue. Il liste les onglets dans l'ordre d'utilisation la plus récente, avec l'onglet courant en surbrillance en haut. Commencez à taper pour filtrer la liste par nom, utilisez Up/Down pour déplacer la surbrillance, Enter pour basculer et Escape pour annuler.
+tutorial-leaf-258 = t : ouvrir le sélecteur d'onglets sous forme de palette persistante plutôt qu'en superposition maintenue. Il liste les onglets dans l'ordre d'utilisation la plus récente, avec l'onglet courant en surbrillance en haut. Chaque entrée est étiquetée par l'identifiant de processus du shell de l'onglet et son fil d'Ariane de navigation actuel, afin de distinguer les onglets d'un coup d'œil. Commencez à taper pour filtrer la liste par cette étiquette, utilisez Up/Down pour déplacer la surbrillance, Enter pour basculer et Escape pour annuler.
+
+# Contrôles de fenêtre (ajoutés sous Navigation)
+tutorial-leaf-259 = Sicompass dessine sa propre barre de titre sans bordure en haut de la fenêtre, avec les contrôles réduire, agrandir et fermer à une extrémité. Agrandir est une bascule, il agrandit une fenêtre restaurée et restaure une fenêtre agrandie. Vous pouvez cliquer sur ces boutons de la barre de titre avec un pointeur, et ils sont aussi entièrement accessibles au clavier.
+tutorial-leaf-260 = c : ouvrir les contrôles de fenêtre sous forme de palette persistante, le même type de superposition que le sélecteur d'onglets t. Il liste réduire, agrandir et fermer. Commencez à taper pour filtrer la liste, utilisez Up/Down pour déplacer la surbrillance, Enter pour activer le contrôle et Escape pour annuler.
+
+# Texte et emoji (ajouté sous Éléments interactifs)
+tutorial-leaf-261 = Sicompass matrice les glyphes à la demande et se rabat sur les polices fournies, donc le texte n'est plus limité à l'ASCII simple. Le latin accentué et européen s'affiche directement : café, naïve, Zürich, żółć.
+tutorial-leaf-262 = D'autres écritures et symboles s'affichent aussi, tirés des polices de repli : grec αβγ, cyrillique Привет, flèches → ⇒ ↺, et maths ≈ ≠ ∑ √.
+tutorial-leaf-263 = Les caractères de filets et de blocs restent alignés en chasse fixe, pratiques pour la sortie du terminal : ┌─┬─┐ │ ├─┼─┤ │ └─┴─┘ █▓▒░.
+tutorial-leaf-264 = Les emoji en couleur s'affichent depuis un atlas de couleur dédié : 😀 🎉 ✅ 🚀 📁 🔒 🌍. Ils s'adaptent à la taille du texte environnant et conservent leurs propres couleurs.
 tutorial-leaf-248 = Ctrl+1 à Ctrl+9 : sauter directement à l'onglet 1 à 9 par son numéro. Les numéros hors plage sont ignorés.
 tutorial-leaf-249 = Chaque onglet conserve son propre état vivant, y compris le répertoire de travail de son shell et tout programme en cours. Changer d'onglet met en attente le contenu de l'onglet courant et réintègre celui de l'onglet cible, donc rien n'est reconstruit ou perdu. L'ouverture de fenêtres séparées n'est pas encore disponible.
 
