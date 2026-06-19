@@ -216,10 +216,11 @@ fn list_prefix_to_word(prefix: &str) -> Option<&'static str> {
         "+l"  => Some("plus l"),
         "+R"  => Some("plus R"),
         "+i"  => Some("plus i"),
-        // Timeline-view markers: HEAD is the next ctrl-Z target; redo-branch
-        // entries have already been undone. Without these mappings the prefix
-        // is silently stripped, leaving screenreader users with no way to
-        // distinguish current / undone / older entries in the history list.
+        // Timeline-view positioners, which follow the `-` list prefix
+        // (e.g. "- > x" → "minus current x"). HEAD is the next ctrl-Z target;
+        // redo-branch entries have already been undone. Without these mappings
+        // the marker is silently stripped, leaving screenreader users with no
+        // way to distinguish current / undone / older entries in the history.
         ">"        => Some("current"),
         "\u{00B7}" => Some("undone"),  // ·
         _     => None,
@@ -231,8 +232,17 @@ pub(crate) fn label_to_speech(label: &str) -> String {
         return label.to_string();
     };
     match list_prefix_to_word(prefix) {
-        Some(word) => format!("{word} {content}"),
-        None       => content.to_string(),
+        Some(word) => {
+            // A list prefix may be followed by a timeline positioner marker
+            // ("- > x" / "- · x"); announce that second marker too.
+            if let Some((marker, rest)) = content.split_once(' ') {
+                if let Some(marker_word) = list_prefix_to_word(marker) {
+                    return format!("{word} {marker_word} {rest}");
+                }
+            }
+            format!("{word} {content}")
+        }
+        None => content.to_string(),
     }
 }
 
@@ -245,10 +255,17 @@ pub(crate) fn label_to_speech(label: &str) -> String {
 /// Language detection runs on this so the English prefix words ("minus i",
 /// "current", …) don't bias the result.
 fn speech_content(label: &str) -> &str {
-    match label.split_once(' ') {
-        Some((prefix, content)) if list_prefix_to_word(prefix).is_some() => content,
-        _ => label,
+    // Peel every leading known prefix, including a timeline positioner that
+    // follows the list prefix ("- > x" → "x"), so detection sees only content.
+    let mut s = label;
+    while let Some((prefix, content)) = s.split_once(' ') {
+        if list_prefix_to_word(prefix).is_some() {
+            s = content;
+        } else {
+            break;
+        }
     }
+    s
 }
 
 /// Best-effort BCP-47 language tag for `content`, or `None` when detection is
@@ -596,6 +613,22 @@ mod tests {
         assert_eq!(
             label_to_speech("\u{00B7} nav ArrowRight /home/nico"),
             "undone nav ArrowRight /home/nico",
+        );
+    }
+
+    #[test]
+    fn label_to_speech_timeline_head_minus_arrow_says_minus_current() {
+        assert_eq!(
+            label_to_speech("- > nav ArrowRight /home/nico"),
+            "minus current nav ArrowRight /home/nico",
+        );
+    }
+
+    #[test]
+    fn label_to_speech_timeline_redo_minus_dot_says_minus_undone() {
+        assert_eq!(
+            label_to_speech("- \u{00B7} nav ArrowRight /home/nico"),
+            "minus undone nav ArrowRight /home/nico",
         );
     }
 

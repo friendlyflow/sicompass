@@ -479,9 +479,12 @@ fn check_parent_has_radio(renderer: &AppRenderer) -> bool {
 /// Build the list for `Coordinate::TimelineView` — per-tab undo timeline.
 ///
 /// Entries are shown in reverse order (most recent on top). The entry
-/// currently at HEAD (next Ctrl+Z target) is prefixed `"> "`; entries
-/// in the redo branch (already undone) are prefixed `"\u{00B7} "` (·);
-/// older history below the cursor is unprefixed. ASCII `>` is used (vs
+/// every entry carries the standard `"- "` list prefix (announced as "minus"),
+/// consistent with every other list. On top of that, the entry currently at
+/// HEAD (next Ctrl+Z target) adds a `">"` positioner (`"- > "`, announced as
+/// "minus current") and entries in the redo branch (already undone) add a `"·"`
+/// positioner (`"- \u{00B7} "`, "minus undone"); older history below the cursor
+/// stays at the bare `"- "`. ASCII `>` is used (vs
 /// the more decorative U+25B6 ▶) because the bundled Consolas font's
 /// rasteriser only covers codepoints 32..256.
 fn build_timeline_list(renderer: &mut AppRenderer) {
@@ -506,7 +509,7 @@ fn build_timeline_list(renderer: &mut AppRenderer) {
         id.push(0);
         renderer.total_list = vec![RenderListItem {
             id,
-            label: "  (no history)".to_string(),
+            label: "- (no history)".to_string(),
             data: None,
             nav_path: None,
             ext_prefix: None,
@@ -528,11 +531,11 @@ fn build_timeline_list(renderer: &mut AppRenderer) {
     let mut items: Vec<RenderListItem> = Vec::with_capacity(len);
     for (i, entry) in entries.iter().enumerate().rev() {
         let prefix = if Some(i) == head_idx {
-            "> "
+            "- > "
         } else if i >= redo_branch_start {
-            "\u{00B7} " // ·
+            "- \u{00B7} " // - ·
         } else {
-            "  "
+            "- "
         };
         let label = format!("{}{}", prefix, timeline_entry_label(entry, &providers));
         let mut id = IdArray::new();
@@ -842,9 +845,38 @@ fn chat_op_summary(op: &ChatOpKind) -> String {
     }
 }
 
+/// Format raw meta hint strings into aligned, list-prefixed labels.
+///
+/// Each raw hint is `"KEY<padding>DESCRIPTION"`; the key is the first
+/// whitespace-delimited token (modifier chords are joined with `+`, never
+/// spaces), so we split on the first whitespace run and trim the remainder.
+/// Keys are padded to the widest key in the set so the description column lines
+/// up. The `- ` prefix matches [`build_str_label`]'s default and is announced as
+/// "minus" by the screen reader (see `accesskit_sdl::list_prefix_to_word`).
+fn format_meta_hints(hints: &[String]) -> Vec<String> {
+    let split: Vec<(&str, &str)> = hints
+        .iter()
+        .map(|h| match h.split_once(char::is_whitespace) {
+            Some((key, rest)) => (key, rest.trim_start()),
+            None => (h.as_str(), ""),
+        })
+        .collect();
+    let width = split.iter().map(|(k, _)| k.chars().count()).max().unwrap_or(0);
+    split
+        .iter()
+        .map(|(key, desc)| {
+            if desc.is_empty() {
+                format!("- {key}")
+            } else {
+                format!("- {key:<width$}  {desc}")
+            }
+        })
+        .collect()
+}
+
 fn build_meta_list(renderer: &mut AppRenderer) {
     renderer.list_index = 0;
-    let hints = crate::provider::get_meta(renderer);
+    let hints = format_meta_hints(&crate::provider::get_meta(renderer));
     let items: Vec<RenderListItem> = hints
         .into_iter()
         .enumerate()
@@ -933,6 +965,42 @@ mod tests {
         r.ffon = ffon;
         r.current_id = { let mut id = IdArray::new(); id.push(0); id };
         r
+    }
+
+    #[test]
+    fn format_meta_hints_prefixes_and_aligns() {
+        let hints = vec![
+            "Esc    Back".to_string(),
+            "Shift+Up Select up".to_string(),
+            "Ctrl+S Save".to_string(),
+        ];
+        let out = format_meta_hints(&hints);
+
+        // Every item gets the "- " list prefix.
+        assert!(out.iter().all(|s| s.starts_with("- ")), "got: {out:?}");
+
+        // Description columns align: the byte offset of the description text is
+        // identical across entries with differing key lengths.
+        let desc_offset = |line: &str, desc: &str| line.find(desc).unwrap();
+        let o0 = desc_offset(&out[0], "Back");
+        let o1 = desc_offset(&out[1], "Select up");
+        let o2 = desc_offset(&out[2], "Save");
+        assert_eq!(o0, o1, "Back vs Select up misaligned: {out:?}");
+        assert_eq!(o0, o2, "Back vs Save misaligned: {out:?}");
+
+        // Widest key here is "Shift+Up" (8 chars). "- " + 8 + "  " = 12.
+        assert_eq!(o0, 12, "unexpected description column: {out:?}");
+    }
+
+    #[test]
+    fn format_meta_hints_key_only_has_no_trailing_padding() {
+        let out = format_meta_hints(&["M".to_string()]);
+        assert_eq!(out, vec!["- M".to_string()]);
+    }
+
+    #[test]
+    fn format_meta_hints_empty_input() {
+        assert!(format_meta_hints(&[]).is_empty());
     }
 
     #[test]
@@ -1302,19 +1370,19 @@ mod tests {
         create_list_current_layer(&mut r);
 
         assert_eq!(r.total_list.len(), 2);
-        // First row = most recent (entries[1]) = HEAD → prefixed "> "
+        // First row = most recent (entries[1]) = HEAD → prefixed "- > "
         assert!(
-            r.total_list[0].label.starts_with("> "),
-            "expected `> ` prefix on HEAD row, got: {:?}",
+            r.total_list[0].label.starts_with("- > "),
+            "expected `- > ` prefix on HEAD row, got: {:?}",
             r.total_list[0].label
         );
         // Provider info is empty here, so the renderer falls back to the
         // breadcrumb path; "/b" and "/c" surface as bare "b" and "c".
         assert!(r.total_list[0].label.contains('b') && r.total_list[0].label.contains('c'));
-        // Second row = older (entries[0]) → no marker prefix
+        // Second row = older (entries[0]) → standard "- " list prefix
         assert!(
-            r.total_list[1].label.starts_with("  "),
-            "expected blank prefix on older row, got: {:?}",
+            r.total_list[1].label.starts_with("- "),
+            "expected `- ` prefix on older row, got: {:?}",
             r.total_list[1].label
         );
     }
@@ -1333,11 +1401,11 @@ mod tests {
 
         assert_eq!(r.total_list.len(), 3);
         // Most recent (entries[2]) → redo branch
-        assert!(r.total_list[0].label.starts_with("\u{00B7} "));
+        assert!(r.total_list[0].label.starts_with("- \u{00B7} "));
         // entries[1] → redo branch
-        assert!(r.total_list[1].label.starts_with("\u{00B7} "));
+        assert!(r.total_list[1].label.starts_with("- \u{00B7} "));
         // entries[0] → HEAD
-        assert!(r.total_list[2].label.starts_with("> "));
+        assert!(r.total_list[2].label.starts_with("- > "));
     }
 
     #[test]
