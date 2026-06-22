@@ -4148,6 +4148,110 @@ pub(crate) fn sdl_get_clipboard() -> Option<String> {
     }
 }
 
+/// Data offered to the OS clipboard when an image is copied. Held alive by SDL
+/// (via `userdata`) until the clipboard is cleared or replaced, at which point
+/// `clipboard_image_cleanup` drops it.
+///
+/// Both a PNG and a BMP encoding are offered so the picture pastes everywhere:
+/// - Linux serves `image/png` directly to the compositor.
+/// - macOS (SDL >= 3.4.10) maps `image/png` to UTI `public.png`.
+/// - Windows turns `image/bmp` into `CF_DIB`, the format every Office / paint
+///   app accepts (its `image/png` path only registers a custom "PNG" format).
+/// A UTF-8 `text` fallback (alt text / path) covers text-only paste targets.
+struct ClipboardImagePayload {
+    png: Vec<u8>,
+    bmp: Vec<u8>,
+    text: Vec<u8>,
+}
+
+/// SDL pull callback: hand back the bytes for the requested mime-type.
+unsafe extern "C" fn clipboard_image_cb(
+    userdata: *mut std::ffi::c_void,
+    mime_type: *const std::ffi::c_char,
+    size: *mut usize,
+) -> *const std::ffi::c_void {
+    if userdata.is_null() || mime_type.is_null() {
+        return std::ptr::null();
+    }
+    let payload = unsafe { &*(userdata as *const ClipboardImagePayload) };
+    let mime = unsafe { std::ffi::CStr::from_ptr(mime_type) }.to_bytes();
+    let data: &[u8] = if mime.starts_with(b"image/bmp") {
+        &payload.bmp
+    } else if mime.starts_with(b"image/") {
+        &payload.png
+    } else {
+        &payload.text
+    };
+    if !size.is_null() { unsafe { *size = data.len(); } }
+    data.as_ptr() as *const std::ffi::c_void
+}
+
+/// SDL cleanup callback: reclaim and drop the payload box.
+unsafe extern "C" fn clipboard_image_cleanup(userdata: *mut std::ffi::c_void) {
+    if !userdata.is_null() {
+        drop(unsafe { Box::from_raw(userdata as *mut ClipboardImagePayload) });
+    }
+}
+
+/// Offer image bytes (`image/png` + `image/bmp`) plus a `text` fallback to the
+/// OS clipboard, so pasting into an image-aware app (Word, LibreOffice, Pages)
+/// yields a picture and pasting into a text field yields the alt text. Returns
+/// whether SDL accepted the offer.
+fn sdl_set_clipboard_image(png: Vec<u8>, bmp: Vec<u8>, text: String) -> bool {
+    use std::ffi::CString;
+    let payload = Box::new(ClipboardImagePayload { png, bmp, text: text.into_bytes() });
+    let userdata = Box::into_raw(payload) as *mut std::ffi::c_void;
+    let m_png = CString::new("image/png").unwrap();
+    let m_bmp = CString::new("image/bmp").unwrap();
+    let m_txt = CString::new("text/plain;charset=utf-8").unwrap();
+    // SDL copies the mime list during the call, so these CStrings need only
+    // live until SDL_SetClipboardData returns.
+    let mimes = [m_png.as_ptr(), m_bmp.as_ptr(), m_txt.as_ptr()];
+    let ok = unsafe {
+        sdl3::sys::clipboard::SDL_SetClipboardData(
+            Some(clipboard_image_cb),
+            Some(clipboard_image_cleanup),
+            userdata,
+            mimes.as_ptr(),
+            mimes.len(),
+        )
+    };
+    if !ok {
+        // SDL rejected the offer and will not call cleanup — reclaim the box.
+        drop(unsafe { Box::from_raw(userdata as *mut ClipboardImagePayload) });
+    }
+    ok
+}
+
+/// Resolve an `<image>` value (local path or http(s) URL) to a decoded image.
+/// Fetches/reads the source and decodes it (PNG, JPEG, WebP, …).
+fn load_clipboard_image(value: &str) -> Result<::image::DynamicImage, String> {
+    let raw: Vec<u8> = if value.starts_with("http://") || value.starts_with("https://") {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .map_err(|e| e.to_string())?;
+        let resp = client.get(value).send().map_err(|e| e.to_string())?;
+        resp.bytes().map_err(|e| e.to_string())?.to_vec()
+    } else {
+        std::fs::read(value).map_err(|e| e.to_string())?
+    };
+    ::image::load_from_memory(&raw).map_err(|e| e.to_string())
+}
+
+/// Encode a decoded image to the given format as a byte buffer.
+fn encode_image(img: &::image::DynamicImage, fmt: ::image::ImageFormat) -> Result<Vec<u8>, String> {
+    let mut out = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut out, fmt).map_err(|e| e.to_string())?;
+    Ok(out.into_inner())
+}
+
+/// Resolve an `<image>` value to PNG-encoded bytes (re-encoded for paste
+/// compatibility). Thin wrapper over [`load_clipboard_image`] + [`encode_image`].
+fn image_path_to_png(value: &str) -> Result<Vec<u8>, String> {
+    encode_image(&load_clipboard_image(value)?, ::image::ImageFormat::Png)
+}
+
 pub(crate) fn is_text_edit_mode(r: &AppRenderer) -> bool {
     matches!(
         r.coordinate,
@@ -4418,7 +4522,54 @@ pub fn handle_ctrl_x(r: &mut AppRenderer) {
     }
 }
 
-/// Ctrl+C — copy selected text (insert modes), file path (filebrowser), or FFON element.
+/// The focused (highlighted) list element, resolved from `current_list_item`
+/// so it honours `list_index` and any active search filter — the same source
+/// the previous Ctrl+C used.
+fn focused_list_element(r: &AppRenderer) -> Option<FfonElement> {
+    let id = r.current_list_item()?.id.clone();
+    let idx = id.last()?;
+    get_ffon_at_id(&r.ffon, &id)?.get(idx).cloned()
+}
+
+/// Raw key/string (tags intact) of the focused list element, if any.
+pub(crate) fn focused_element_raw(r: &AppRenderer) -> Option<String> {
+    focused_list_element(r).map(|e| match e {
+        FfonElement::Str(s) => s,
+        FfonElement::Obj(o) => o.key,
+    })
+}
+
+/// Plain display text put on the system clipboard by Ctrl+C — all tags stripped.
+/// A `<password>` field is masked to one asterisk per character (mirroring the
+/// rendered list, see `list::masked_password_display`), so the real secret never
+/// reaches the OS clipboard.
+pub(crate) fn copy_display_text(raw: &str) -> String {
+    if tags::has_password(raw) {
+        let value = tags::extract_password(raw).unwrap_or_default();
+        let masked = raw.replacen(
+            &tags::format_password(&value),
+            &tags::format_password(&tags::mask_password(&value)),
+            1,
+        );
+        return tags::strip_display(&masked);
+    }
+    tags::strip_display(raw)
+}
+
+/// Underlying value put on the system clipboard by Ctrl+Shift+C: link URL,
+/// image path, or input value; falls back to (masked) display text otherwise.
+/// Deliberately never extracts `<password>` — real passwords must not reach
+/// the OS clipboard.
+pub(crate) fn copy_underlying_value(raw: &str) -> String {
+    tags::extract_link(raw)
+        .or_else(|| tags::extract_image(raw))
+        .or_else(|| tags::extract_input(raw))
+        .unwrap_or_else(|| copy_display_text(raw))
+}
+
+/// Ctrl+C — copy selected text (insert modes) or, in General mode, the focused
+/// element's display text to the system clipboard (all providers). Also preserves
+/// the filebrowser file-copy and compose/structural internal-clipboard behaviors.
 pub fn handle_ctrl_c(r: &mut AppRenderer) {
     if is_text_edit_mode(r) {
         if !has_selection(r) { return; }
@@ -4428,30 +4579,61 @@ pub fn handle_ctrl_c(r: &mut AppRenderer) {
         r.needs_redraw = true;
         return;
     }
-    // File browser: record filesystem copy path
-    if r.coordinate == Coordinate::General && active_provider_is_filebrowser(r) {
-        handle_file_copy(r);
-        return;
-    }
-    // Compose body: copy focused element to internal clipboard
-    if r.coordinate == Coordinate::General && crate::provider::is_in_email_compose_body(r) {
-        let idx = r.current_id.last().unwrap_or(0);
-        if let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) {
-            r.clipboard = slice.get(idx).cloned();
-        }
-        r.needs_redraw = true;
-        return;
-    }
-    if matches!(r.coordinate, Coordinate::General) {
-        if let Some(item) = r.current_list_item().cloned() {
-            if let Some(slice) = get_ffon_at_id(&r.ffon, &item.id) {
-                if let Some(idx) = item.id.last() {
-                    r.clipboard = slice.get(idx).cloned();
+    if !matches!(r.coordinate, Coordinate::General) { return; }
+
+    let focused = focused_list_element(r);
+
+    // Universal: copy the focused element to the system clipboard. For an
+    // `<image>`, offer the actual picture bytes (so it pastes into Word /
+    // LibreOffice as an image); for everything else, the display text.
+    if let Some(elem) = &focused {
+        let raw = match elem {
+            FfonElement::Str(s) => s.as_str(),
+            FfonElement::Obj(o) => o.key.as_str(),
+        };
+        let mut copied_image = false;
+        if let Some(path) = tags::extract_image(raw) {
+            match load_clipboard_image(&path).and_then(|img| {
+                let png = encode_image(&img, ::image::ImageFormat::Png)?;
+                let bmp = encode_image(&img, ::image::ImageFormat::Bmp)?;
+                Ok((png, bmp))
+            }) {
+                Ok((png, bmp)) => {
+                    copied_image = sdl_set_clipboard_image(png, bmp, copy_display_text(raw));
+                }
+                Err(e) => {
+                    r.error_message = format!("could not copy image: {e}");
                 }
             }
         }
-        r.needs_redraw = true;
+        if !copied_image {
+            // Plain text (also the fallback when an image fails to load).
+            let display = copy_display_text(raw);
+            if !display.is_empty() { sdl_set_clipboard(&display); }
+        }
     }
+
+    // File browser: also record filesystem copy path (preserves file paste).
+    if active_provider_is_filebrowser(r) {
+        handle_file_copy(r);
+        return;
+    }
+    // Compose body / generic structural: also keep the focused element in the
+    // internal clipboard (preserves structural paste).
+    if focused.is_some() {
+        r.clipboard = focused;
+    }
+    r.needs_redraw = true;
+}
+
+/// Ctrl+Shift+C — copy the focused element's underlying value (link URL, image
+/// path, input value) to the system clipboard; falls back to display text.
+pub fn handle_ctrl_shift_c(r: &mut AppRenderer) {
+    if !matches!(r.coordinate, Coordinate::General) { return; }
+    let Some(raw) = focused_element_raw(r) else { return; };
+    let value = copy_underlying_value(&raw);
+    if !value.is_empty() { sdl_set_clipboard(&value); }
+    r.needs_redraw = true;
 }
 
 /// Ctrl+V — paste from system clipboard (insert modes), file paste (filebrowser), or FFON paste.
@@ -8408,5 +8590,94 @@ mod tests {
         assert_eq!(r.coordinate, Coordinate::Insert);
         assert!(!r.error_message.is_empty());
         assert!(r.placeholder_insert_mode);
+    }
+
+    // -----------------------------------------------------------------------
+    // Ctrl+C / Ctrl+Shift+C copy-string derivation (pure, no SDL)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn copy_display_text_strips_all_tags() {
+        // Ctrl+C copies the visible display form regardless of tag type — exactly
+        // what the rendered list label shows (sans prefix). Webbrowser links are
+        // formatted "anchor text <link>url</link>", so the display keeps both.
+        assert_eq!(copy_display_text("Visit us <link>https://x.test</link>"), "Visit us https://x.test");
+        assert_eq!(copy_display_text("<button>do_thing</button>Click me"), "Click me");
+        assert_eq!(copy_display_text("<input>typed value</input>"), "typed value");
+        assert_eq!(copy_display_text("plain item"), "plain item");
+    }
+
+    #[test]
+    fn copy_display_text_password_is_masked_not_real() {
+        // The masked display must never leak the real secret onto the clipboard.
+        let display = copy_display_text("API key: <password>hunter2</password>");
+        assert!(!display.contains("hunter2"), "real password must not be in display text");
+        assert_eq!(display, "API key: *******", "value masked one asterisk per char, label kept");
+    }
+
+    #[test]
+    fn copy_underlying_value_prefers_link_image_input() {
+        // Ctrl+Shift+C copies the underlying value where it differs.
+        assert_eq!(copy_underlying_value("Visit us <link>https://x.test</link>"), "https://x.test");
+        assert_eq!(copy_underlying_value("<image>/tmp/pic.png</image>alt"), "/tmp/pic.png");
+        assert_eq!(copy_underlying_value("<input>typed value</input>"), "typed value");
+    }
+
+    #[test]
+    fn copy_underlying_value_falls_back_to_display_text() {
+        // No special tag -> behaves like Ctrl+C.
+        assert_eq!(copy_underlying_value("plain item"), "plain item");
+        assert_eq!(copy_underlying_value("<button>do_thing</button>Click me"), "Click me");
+    }
+
+    #[test]
+    fn copy_underlying_value_never_extracts_password() {
+        // A password field must not yield the real secret.
+        let value = copy_underlying_value("<password>hunter2</password>");
+        assert!(!value.contains("hunter2"), "real password must not be copied");
+    }
+
+    // -----------------------------------------------------------------------
+    // Image clipboard — local file decode + PNG re-encode
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn image_path_to_png_local_file_roundtrips_to_png() {
+        // Write a tiny JPEG, then confirm Ctrl+C's loader returns valid PNG bytes
+        // (re-encoded for paste compatibility) of the same dimensions.
+        let src = ::image::RgbaImage::from_pixel(3, 2, ::image::Rgba([10, 20, 30, 255]));
+        let path = std::env::temp_dir().join("sicompass_clip_roundtrip.jpg");
+        ::image::DynamicImage::ImageRgba8(src)
+            .to_rgb8()
+            .save_with_format(&path, ::image::ImageFormat::Jpeg)
+            .expect("write test jpeg");
+
+        let png = image_path_to_png(path.to_str().unwrap()).expect("should encode png");
+        assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n", "output must be PNG-encoded");
+        let decoded = ::image::load_from_memory(&png).expect("png decodes");
+        assert_eq!(decoded.width(), 3);
+        assert_eq!(decoded.height(), 2);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn image_path_to_png_missing_file_errors() {
+        assert!(image_path_to_png("/no/such/sicompass-image.png").is_err());
+    }
+
+    #[test]
+    fn clipboard_image_encodes_both_png_and_bmp() {
+        // Windows needs BMP (-> CF_DIB); Linux/macOS use PNG. Confirm both encode.
+        let img = ::image::DynamicImage::ImageRgba8(
+            ::image::RgbaImage::from_pixel(4, 4, ::image::Rgba([200, 100, 50, 255])),
+        );
+        let png = encode_image(&img, ::image::ImageFormat::Png).expect("png");
+        let bmp = encode_image(&img, ::image::ImageFormat::Bmp).expect("bmp");
+        assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n", "png magic");
+        assert_eq!(&bmp[..2], b"BM", "bmp magic");
+        // Both must decode back to the same dimensions.
+        assert_eq!(::image::load_from_memory(&png).unwrap().width(), 4);
+        assert_eq!(::image::load_from_memory(&bmp).unwrap().height(), 4);
     }
 }

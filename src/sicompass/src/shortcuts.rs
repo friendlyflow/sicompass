@@ -303,9 +303,27 @@ fn avail_file_delete(r: &AppRenderer) -> bool {
     not_at_root(r) && (is_filebrowser(r) || is_editor(r))
 }
 
-/// File clipboard (Ctrl+X/C/V) in General — only for filebrowser.
+/// File clipboard (Ctrl+X/V) in General — only for filebrowser.
 fn avail_file_clipboard(r: &AppRenderer) -> bool {
     not_at_root(r) && is_filebrowser(r)
+}
+
+/// Ctrl+C copy target — any focused FFON element exists (root list included).
+fn avail_copy(r: &AppRenderer) -> bool {
+    let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) else { return false };
+    slice.get(r.current_id.last().unwrap_or(0)).is_some()
+}
+
+/// Ctrl+Shift+C — advertised only when the focused element has an underlying
+/// value distinct from its display text (link URL, image path, input value).
+fn avail_copy_value(r: &AppRenderer) -> bool {
+    let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) else { return false };
+    let idx = r.current_id.last().unwrap_or(0);
+    let Some(raw) = slice.get(idx).map(|e| match e {
+        sicompass_sdk::ffon::FfonElement::Str(s) => s.as_str(),
+        sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.as_str(),
+    }) else { return false };
+    tags::has_link(raw) || tags::has_image(raw) || tags::has_input(raw)
 }
 
 /// Enter "Activate" — focused item is a button.
@@ -781,14 +799,20 @@ pub static SHORTCUTS: &[Shortcut] = &[
         modes: &[Coordinate::General],
         label: "Ctrl+X Cut", is_available: avail_file_clipboard,
         handle: handlers::handle_ctrl_x },
-    Shortcut { key: Keycode::C, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::General],
-        label: "Ctrl+C Copy", is_available: avail_file_clipboard,
-        handle: handlers::handle_ctrl_c },
     Shortcut { key: Keycode::V, key2: None, ctrl: true, shift: false,
         modes: &[Coordinate::General],
         label: "Ctrl+V Paste", is_available: avail_file_clipboard,
         handle: handlers::handle_ctrl_v },
+    // Copy: available for any focused element (all providers, root included).
+    Shortcut { key: Keycode::C, key2: None, ctrl: true, shift: false,
+        modes: &[Coordinate::General],
+        label: "Ctrl+C Copy", is_available: avail_copy,
+        handle: handlers::handle_ctrl_c },
+    // Copy underlying value (link URL / image path / input value).
+    Shortcut { key: Keycode::C, key2: None, ctrl: true, shift: true,
+        modes: &[Coordinate::General],
+        label: "Ctrl+Shift+C Copy URL/value", is_available: avail_copy_value,
+        handle: handlers::handle_ctrl_shift_c },
     // General + text modes: clipboard (dispatch always, hint for structural contexts)
     Shortcut { key: Keycode::X, key2: None, ctrl: true, shift: false,
         modes: &[Coordinate::General],
@@ -797,10 +821,6 @@ pub static SHORTCUTS: &[Shortcut] = &[
     Shortcut { key: Keycode::X, key2: None, ctrl: true, shift: false,
         modes: TEXT,
         label: "Ctrl+X Cut", is_available: always, handle: handlers::handle_ctrl_x },
-    Shortcut { key: Keycode::C, key2: None, ctrl: true, shift: false,
-        modes: &[Coordinate::General],
-        label: "Ctrl+C Copy", is_available: avail_structural_edit,
-        handle: handlers::handle_ctrl_c },
     Shortcut { key: Keycode::C, key2: None, ctrl: true, shift: false,
         modes: TEXT,
         label: "Ctrl+C Copy", is_available: always, handle: handlers::handle_ctrl_c },

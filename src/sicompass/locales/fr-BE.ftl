@@ -62,6 +62,7 @@ hint-command = :      Commande
 hint-ctrl-a-insert-after = Ctrl+A Insérer après
 hint-ctrl-a-select-all = Ctrl+A Tout sél.
 hint-ctrl-c-copy = Ctrl+C Copier
+hint-ctrl-shift-c-copy-url-value = Ctrl+Shift+C Copier URL/valeur
 hint-ctrl-d-delete = Ctrl+D Supprimer
 hint-ctrl-enter-newline = Ctrl+Enter Nouv. ligne
 hint-ctrl-f-extended-search = Ctrl+F Rech. étendue
