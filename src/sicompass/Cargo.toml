@@ -60,6 +60,7 @@ freetype = { workspace = true }
 rustybuzz = { workspace = true }
 
 image = { workspace = true }
+base64 = { workspace = true }
 
 sdl3 = { workspace = true }
 # Pulled in transitively by `sdl3`; declared here so the `bundled-sdl3`
