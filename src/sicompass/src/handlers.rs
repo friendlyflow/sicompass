@@ -4152,13 +4152,22 @@ pub(crate) fn sdl_get_clipboard() -> Option<String> {
 /// (via `userdata`) until the clipboard is cleared or replaced, at which point
 /// `clipboard_image_cleanup` drops it.
 ///
-/// Both a PNG and a BMP encoding are offered so the picture pastes everywhere:
-/// - Linux serves `image/png` directly to the compositor.
-/// - macOS (SDL >= 3.4.10) maps `image/png` to UTI `public.png`.
-/// - Windows turns `image/bmp` into `CF_DIB`, the format every Office / paint
-///   app accepts (its `image/png` path only registers a custom "PNG" format).
-/// A UTF-8 `text` fallback (alt text / path) covers text-only paste targets.
+/// Four flavors are offered so the picture (and any text around it) pastes as
+/// richly as each target allows:
+/// - `text/html`: prefix text + embedded `<img>` + suffix text. Apps that
+///   accept HTML clipboard (LibreOffice, Pages, Word) render text and picture
+///   together. Served on Linux (compositor) and macOS (UTI `public.html`).
+/// - `image/png`: the bare picture. Linux serves it directly; macOS maps it to
+///   `public.png`.
+/// - `image/bmp`: Windows turns this into `CF_DIB`, the format every Office /
+///   paint app accepts (SDL's `image/png` path only registers a custom "PNG").
+/// - `text/plain`: prefix + suffix text, for text-only paste targets.
+///
+/// Windows note: SDL routes every `text/*` mime to `CF_UNICODETEXT` and has no
+/// `CF_HTML` path, so on Windows this yields image (`CF_DIB`) + plain text, not
+/// rich HTML. Listing `text/plain` last makes it win `CF_UNICODETEXT` there.
 struct ClipboardImagePayload {
+    html: Vec<u8>,
     png: Vec<u8>,
     bmp: Vec<u8>,
     text: Vec<u8>,
@@ -4175,7 +4184,9 @@ unsafe extern "C" fn clipboard_image_cb(
     }
     let payload = unsafe { &*(userdata as *const ClipboardImagePayload) };
     let mime = unsafe { std::ffi::CStr::from_ptr(mime_type) }.to_bytes();
-    let data: &[u8] = if mime.starts_with(b"image/bmp") {
+    let data: &[u8] = if mime.starts_with(b"text/html") {
+        &payload.html
+    } else if mime.starts_with(b"image/bmp") {
         &payload.bmp
     } else if mime.starts_with(b"image/") {
         &payload.png
@@ -4193,20 +4204,21 @@ unsafe extern "C" fn clipboard_image_cleanup(userdata: *mut std::ffi::c_void) {
     }
 }
 
-/// Offer image bytes (`image/png` + `image/bmp`) plus a `text` fallback to the
-/// OS clipboard, so pasting into an image-aware app (Word, LibreOffice, Pages)
-/// yields a picture and pasting into a text field yields the alt text. Returns
-/// whether SDL accepted the offer.
-fn sdl_set_clipboard_image(png: Vec<u8>, bmp: Vec<u8>, text: String) -> bool {
+/// Offer `text/html` (prefix+image+suffix), `image/png`, `image/bmp` and a
+/// plain-`text` fallback to the OS clipboard. Returns whether SDL accepted the
+/// offer.
+fn sdl_set_clipboard_image(html: Vec<u8>, png: Vec<u8>, bmp: Vec<u8>, text: String) -> bool {
     use std::ffi::CString;
-    let payload = Box::new(ClipboardImagePayload { png, bmp, text: text.into_bytes() });
+    let payload = Box::new(ClipboardImagePayload { html, png, bmp, text: text.into_bytes() });
     let userdata = Box::into_raw(payload) as *mut std::ffi::c_void;
+    let m_html = CString::new("text/html").unwrap();
     let m_png = CString::new("image/png").unwrap();
     let m_bmp = CString::new("image/bmp").unwrap();
     let m_txt = CString::new("text/plain;charset=utf-8").unwrap();
     // SDL copies the mime list during the call, so these CStrings need only
-    // live until SDL_SetClipboardData returns.
-    let mimes = [m_png.as_ptr(), m_bmp.as_ptr(), m_txt.as_ptr()];
+    // live until SDL_SetClipboardData returns. text/plain is listed last so it
+    // wins CF_UNICODETEXT on Windows (where SDL collapses all text/* mimes).
+    let mimes = [m_html.as_ptr(), m_png.as_ptr(), m_bmp.as_ptr(), m_txt.as_ptr()];
     let ok = unsafe {
         sdl3::sys::clipboard::SDL_SetClipboardData(
             Some(clipboard_image_cb),
@@ -4221,6 +4233,42 @@ fn sdl_set_clipboard_image(png: Vec<u8>, bmp: Vec<u8>, text: String) -> bool {
         drop(unsafe { Box::from_raw(userdata as *mut ClipboardImagePayload) });
     }
     ok
+}
+
+/// Split an image element's raw string into the display text before and after
+/// the `<image>…</image>` tag — e.g. `"Image with prefix: <image>/p.png</image>and suffix"`
+/// → `("Image with prefix: ", "and suffix")`. Each side is run through
+/// `strip_display` so any other markup resolves to plain text.
+fn image_prefix_suffix(raw: &str) -> (String, String) {
+    const OPEN: &str = "<image>";
+    const CLOSE: &str = "</image>";
+    if let Some(open) = raw.find(OPEN) {
+        let prefix = &raw[..open];
+        let rest = &raw[open..];
+        if let Some(close) = rest.find(CLOSE) {
+            let suffix = &rest[close + CLOSE.len()..];
+            return (tags::strip_display(prefix), tags::strip_display(suffix));
+        }
+    }
+    (String::new(), String::new())
+}
+
+/// HTML-escape `&`, `<`, `>` for safe interpolation into clipboard HTML.
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
+/// Build the `text/html` clipboard fragment: prefix text, the image embedded as
+/// a base64 `data:` URI, then suffix text.
+fn build_image_html(prefix: &str, png: &[u8], suffix: &str) -> String {
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(png);
+    format!(
+        "{}<img src=\"data:image/png;base64,{}\">{}",
+        html_escape(prefix),
+        b64,
+        html_escape(suffix),
+    )
 }
 
 /// Resolve an `<image>` value (local path or http(s) URL) to a decoded image.
@@ -4599,7 +4647,12 @@ pub fn handle_ctrl_c(r: &mut AppRenderer) {
                 Ok((png, bmp))
             }) {
                 Ok((png, bmp)) => {
-                    copied_image = sdl_set_clipboard_image(png, bmp, copy_display_text(raw));
+                    // Carry the text around the image too: rich HTML for
+                    // image-aware apps, plain prefix+suffix for text targets.
+                    let (prefix, suffix) = image_prefix_suffix(raw);
+                    let html = build_image_html(&prefix, &png, &suffix);
+                    let plain = format!("{prefix}{suffix}");
+                    copied_image = sdl_set_clipboard_image(html.into_bytes(), png, bmp, plain);
                 }
                 Err(e) => {
                     r.error_message = format!("could not copy image: {e}");
@@ -8664,6 +8717,40 @@ mod tests {
     #[test]
     fn image_path_to_png_missing_file_errors() {
         assert!(image_path_to_png("/no/such/sicompass-image.png").is_err());
+    }
+
+    #[test]
+    fn image_prefix_suffix_splits_around_tag() {
+        assert_eq!(
+            image_prefix_suffix("Image with prefix: <image>/p.png</image>and suffix"),
+            ("Image with prefix: ".to_string(), "and suffix".to_string())
+        );
+        assert_eq!(
+            image_prefix_suffix("<image>/p.png</image>and suffix"),
+            (String::new(), "and suffix".to_string())
+        );
+        assert_eq!(
+            image_prefix_suffix("just text, no image"),
+            (String::new(), String::new())
+        );
+    }
+
+    #[test]
+    fn build_image_html_embeds_text_and_base64_png() {
+        let png = b"\x89PNG\r\n\x1a\nfake".to_vec();
+        let html = build_image_html("Before ", &png, " after");
+        assert!(html.starts_with("Before <img src=\"data:image/png;base64,"));
+        assert!(html.ends_with("\"> after"));
+        // The prefix and suffix text are both present (the reported gap).
+        assert!(html.contains("Before "));
+        assert!(html.contains(" after"));
+    }
+
+    #[test]
+    fn build_image_html_escapes_markup_in_text() {
+        let html = build_image_html("a & b <x>", b"png", "");
+        assert!(html.contains("a &amp; b &lt;x&gt;"));
+        assert!(!html.contains("<x>"));
     }
 
     #[test]
