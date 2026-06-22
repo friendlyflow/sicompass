@@ -4019,9 +4019,9 @@ dependencies = [
 
 [[package]]
 name = "sicompass-sdk"
-version = "0.1.3"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0dfda219483130c69faf21ae159278bac28b025b3a620fae02c1f72a7e501a7"
+checksum = "29da18ab2f5d6d6d55e3df428b39675a6abccc603fd9182982e903e072cc8d34"
 dependencies = [
  "fluent",
  "fluent-langneg",

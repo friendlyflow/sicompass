@@ -41,6 +41,9 @@ pub struct TextEntry {
     pub label: String,
     pub config_key: String,
     pub current_value: String,
+    /// When true the value is rendered masked (`<password>` tag) rather than
+    /// plain (`<input>` tag). The stored value is unchanged.
+    pub is_password: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -255,11 +258,38 @@ impl SettingsProvider {
     }
 
     pub fn add_text(&mut self, section: &str, label: &str, config_key: &str, default: &str) {
+        self.add_text_inner(section, label, config_key, default, false);
+    }
+
+    /// Register a text entry whose value is rendered masked (asterisks).
+    pub fn add_password(&mut self, section: &str, label: &str, config_key: &str, default: &str) {
+        self.add_text_inner(section, label, config_key, default, true);
+    }
+
+    /// Render a text entry's value as an editable FFON tag: `<password>` for
+    /// secret entries (masked downstream), `<input>` otherwise.
+    fn text_entry_value_tag(e: &TextEntry) -> String {
+        if e.is_password {
+            sicompass_sdk::tags::format_password(&e.current_value)
+        } else {
+            sicompass_sdk::tags::format_input(&e.current_value)
+        }
+    }
+
+    fn add_text_inner(
+        &mut self,
+        section: &str,
+        label: &str,
+        config_key: &str,
+        default: &str,
+        is_password: bool,
+    ) {
         self.text_entries.push(TextEntry {
             section: section.to_owned(),
             label: label.to_owned(),
             config_key: config_key.to_owned(),
             current_value: default.to_owned(),
+            is_password,
         });
         self.add_section(section);
     }
@@ -707,9 +737,9 @@ impl SettingsProvider {
         for e in &self.text_entries {
             if e.section == section_name {
                 o.push(FfonElement::Str(format!(
-                    "{}: <input>{}</input>",
+                    "{}: {}",
                     localize::t(&e.label),
-                    e.current_value
+                    Self::text_entry_value_tag(e)
                 )));
             }
         }
@@ -792,9 +822,9 @@ impl Provider for SettingsProvider {
         for e in &self.text_entries {
             if e.section == "sicompass" {
                 sc_obj.as_obj_mut().unwrap().push(FfonElement::Str(format!(
-                    "{}: <input>{}</input>",
+                    "{}: {}",
                     localize::t(&e.label),
-                    e.current_value
+                    Self::text_entry_value_tag(e)
                 )));
             }
         }
@@ -1213,6 +1243,11 @@ impl Provider for SettingsProvider {
     fn add_text_setting(&mut self, section: &str, label: &str,
                         config_key: &str, default: &str) {
         self.add_text(section, label, config_key, default);
+    }
+
+    fn add_password_setting(&mut self, section: &str, label: &str,
+                            config_key: &str, default: &str) {
+        self.add_password(section, label, config_key, default);
     }
 
     fn add_checkbox_setting(&mut self, section: &str, label: &str,
@@ -1844,6 +1879,35 @@ mod tests {
         assert_eq!(p.text_entries[0].current_value, "new_value");
         let entries = log.lock().unwrap();
         assert!(entries.iter().any(|(k, v)| k == "serverKey" && v == "new_value"));
+    }
+
+    #[test]
+    fn test_password_entry_renders_password_tag() {
+        let mut p = headless();
+        p.add_password("Acme", "API key", "apiKey", "s3cr3t");
+        // The value surfaces wrapped in <password>, not <input>, so the app
+        // masks it. The real value is still present in the tag for editing.
+        let found = p.fetch().iter().any(|sec| {
+            sec.as_obj().map_or(false, |o| {
+                o.children.iter().any(|c| {
+                    c.as_str().map_or(false, |s| s.contains("<password>s3cr3t</password>"))
+                })
+            })
+        });
+        assert!(found, "expected a <password>s3cr3t</password> entry in: {:?}", p.fetch());
+    }
+
+    #[test]
+    fn test_commit_edit_updates_password_entry_with_real_value() {
+        let (mut p, log) = with_callback();
+        p.add_password("Acme", "API key", "apiKey", "old");
+        p.set_current_path("/Acme/API key");
+        // commit_edit receives the raw (unmasked) value from the app.
+        let ok = p.commit_edit("old", "new_secret");
+        assert!(ok);
+        assert_eq!(p.text_entries[0].current_value, "new_secret");
+        let entries = log.lock().unwrap();
+        assert!(entries.iter().any(|(k, v)| k == "apiKey" && v == "new_secret"));
     }
 
     #[test]

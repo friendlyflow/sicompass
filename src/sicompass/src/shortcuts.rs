@@ -219,7 +219,10 @@ fn focused_is_link(r: &AppRenderer) -> bool {
     })
 }
 
-/// True when the focused element itself carries an `<input>` or `<input-all>` tag.
+/// True when the focused element itself carries an `<input>`, `<input-all>`,
+/// or `<password>` tag. A `<password>` field is edited exactly like an
+/// `<input>` (it just renders masked), so the `i`/`a` insert shortcuts must
+/// treat it as editable.
 fn focused_is_input(r: &AppRenderer) -> bool {
     let Some(slice) = get_ffon_at_id(&r.ffon, &r.current_id) else { return false };
     let idx = r.current_id.last().unwrap_or(0);
@@ -228,7 +231,7 @@ fn focused_is_input(r: &AppRenderer) -> bool {
             sicompass_sdk::ffon::FfonElement::Str(s) => s.as_str(),
             sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.as_str(),
         };
-        tags::has_input(k)
+        tags::has_input(k) || tags::has_password(k)
     })
 }
 

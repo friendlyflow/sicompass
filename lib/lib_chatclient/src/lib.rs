@@ -3279,7 +3279,7 @@ pub fn register() {
                 "chatHomeserver",
                 "https://matrix.org",
             ),
-            sicompass_sdk::SettingDecl::text(
+            sicompass_sdk::SettingDecl::password(
                 "chat client",
                 "access token",
                 "chatAccessToken",
@@ -3291,7 +3291,7 @@ pub fn register() {
                 "chatUsername",
                 "",
             ),
-            sicompass_sdk::SettingDecl::text(
+            sicompass_sdk::SettingDecl::password(
                 "chat client",
                 "password",
                 "chatPassword",
