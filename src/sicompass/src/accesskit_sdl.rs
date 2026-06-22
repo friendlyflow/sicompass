@@ -750,6 +750,31 @@ mod tests {
     }
 
     #[test]
+    fn speak_mode_change_masks_password_context() {
+        // A password field's value must never be spoken: the context is masked
+        // to one asterisk per character.
+        let mut r = AppRenderer::new();
+        r.coordinate = crate::app_state::Coordinate::Insert;
+        r.input_is_password = true;
+        r.speak_mode_change(Some("s3cr3t".to_string()));
+        assert_eq!(announced_text(&r).as_deref(), Some("insert mode - ******"));
+    }
+
+    #[test]
+    fn announce_char_masks_password() {
+        // Each typed/cursored character is echoed as `*` while editing a
+        // password, not the real character.
+        let mut r = AppRenderer::new();
+        r.input_is_password = true;
+        crate::handlers::announce_char(&mut r, 'k');
+        assert_eq!(announced_text(&r).as_deref(), Some("*"));
+        // Non-password edits announce the real character.
+        r.input_is_password = false;
+        crate::handlers::announce_char(&mut r, 'k');
+        assert_eq!(announced_text(&r).as_deref(), Some("k"));
+    }
+
+    #[test]
     fn speak_mode_change_empty_context_gives_mode_only() {
         let mut r = AppRenderer::new();
         r.coordinate = crate::app_state::Coordinate::Command;

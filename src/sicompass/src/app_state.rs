@@ -489,6 +489,10 @@ pub struct AppRenderer {
     pub input_prefix: String,
     /// Non-editable text displayed after the input widget.
     pub input_suffix: String,
+    /// True while editing a `<password>` field: the rendered insert buffer and
+    /// the committed FFON element are masked (one asterisk per character).
+    /// Set by `populate_input_buffer`, reset on insert-mode exit.
+    pub input_is_password: bool,
 
     /// Active per-keystroke edit session on an `<input>` tag (see
     /// [`InsertSession`]). `Some` from insert-mode entry until Enter or Escape.
@@ -754,6 +758,7 @@ impl AppRenderer {
             selection_anchor: None,
             input_prefix: String::new(),
             input_suffix: String::new(),
+            input_is_password: false,
             insert_session: None,
             scroll_offset: 0,
             text_scroll_offset: 0,
@@ -1137,6 +1142,14 @@ impl AppRenderer {
     /// universally ignore it in speech output).
     pub fn speak_mode_change(&mut self, context: Option<String>) {
         let mode = self.coordinate.display_label();
+        // Never speak a password field's value: mask the spoken context so the
+        // screen reader announces asterisks, not the secret.
+        let context = match context {
+            Some(ctx) if self.input_is_password => {
+                Some(sicompass_sdk::tags::mask_password(&ctx))
+            }
+            other => other,
+        };
         let text = match context {
             Some(ctx) if !ctx.is_empty() => format!("{mode} - {ctx}"),
             _ => mode,

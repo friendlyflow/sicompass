@@ -346,6 +346,9 @@ fn inject_builtin_manifest_settings(settings: &mut dyn Provider, manifest: &sico
             SettingKind::Text => {
                 settings.add_text_setting(&s.section, &s.label, &s.key, &s.default);
             }
+            SettingKind::Password => {
+                settings.add_password_setting(&s.section, &s.label, &s.key, &s.default);
+            }
             SettingKind::Checkbox => {
                 settings.add_checkbox_setting(&s.section, &s.label, &s.key, s.default_checked);
             }
@@ -886,7 +889,7 @@ fn load_remote_programs(renderer: &mut AppRenderer, mut settings: Option<&mut dy
         // Register the two settings text entries for this remote service.
         if let Some(s) = settings.as_deref_mut() {
             s.add_text_setting(name, "remote URL", "remoteUrl", "");
-            s.add_text_setting(name, "API key",    "apiKey",    "");
+            s.add_password_setting(name, "API key", "apiKey", "");
             s.add_settings_section(name);
         }
     }
@@ -953,7 +956,7 @@ pub fn enable_provider(renderer: &mut AppRenderer, name: &str) {
         let section_name = name.to_owned();
         insert_provider_alphabetically(renderer, provider, Some(Box::new(move |settings: &mut dyn Provider| {
             settings.add_text_setting(&section_name, "remote URL", "remoteUrl", "");
-            settings.add_text_setting(&section_name, "API key",    "apiKey",    "");
+            settings.add_password_setting(&section_name, "API key", "apiKey", "");
         })), None);
         return;
     }
@@ -1992,16 +1995,20 @@ mod tests {
         let ffon = settings_ffon_after_enable("email client");
         let children = section_children(&ffon, "email client")
             .expect("email client section should be present");
-        // Should have 6 text entries, not the fallback "no settings"
+        // Should have 6 editable entries, not the fallback "no settings".
+        // Two of them (password, OAuth client secret) are masked `<password>`
+        // fields; the rest are plain `<input>`.
         assert!(
             !children.iter().any(|e| e.as_str() == Some("no settings")),
             "email client section should not show 'no settings'"
         );
-        let inputs: Vec<_> = children.iter()
+        let editable: Vec<_> = children.iter()
             .filter_map(|e| e.as_str())
-            .filter(|s| s.contains("<input>"))
+            .filter(|s| s.contains("<input>") || s.contains("<password>"))
             .collect();
-        assert_eq!(inputs.len(), 6, "expected 6 text settings, got {}: {:?}", inputs.len(), inputs);
+        assert_eq!(editable.len(), 6, "expected 6 editable settings, got {}: {:?}", editable.len(), editable);
+        let masked: Vec<_> = editable.iter().filter(|s| s.contains("<password>")).collect();
+        assert_eq!(masked.len(), 2, "expected 2 masked (password) settings, got {:?}", masked);
     }
 
     #[test]
@@ -2013,11 +2020,14 @@ mod tests {
             !children.iter().any(|e| e.as_str() == Some("no settings")),
             "chat client section should not show 'no settings'"
         );
-        let inputs: Vec<_> = children.iter()
+        // 5 editable entries; two (access token, password) are masked.
+        let editable: Vec<_> = children.iter()
             .filter_map(|e| e.as_str())
-            .filter(|s| s.contains("<input>"))
+            .filter(|s| s.contains("<input>") || s.contains("<password>"))
             .collect();
-        assert_eq!(inputs.len(), 5, "expected 5 text settings, got {}: {:?}", inputs.len(), inputs);
+        assert_eq!(editable.len(), 5, "expected 5 editable settings, got {}: {:?}", editable.len(), editable);
+        let masked: Vec<_> = editable.iter().filter(|s| s.contains("<password>")).collect();
+        assert_eq!(masked.len(), 2, "expected 2 masked (password) settings, got {:?}", masked);
     }
 
     #[test]

@@ -5664,9 +5664,9 @@ pub fn register() {
             sicompass_sdk::SettingDecl::text("email client", "IMAP URL",              "emailImapUrl",       "imaps://imap.gmail.com"),
             sicompass_sdk::SettingDecl::text("email client", "SMTP URL",              "emailSmtpUrl",       "smtps://smtp.gmail.com"),
             sicompass_sdk::SettingDecl::text("email client", "username",              "emailUsername",      ""),
-            sicompass_sdk::SettingDecl::text("email client", "password",              "emailPassword",      ""),
+            sicompass_sdk::SettingDecl::password("email client", "password",              "emailPassword",      ""),
             sicompass_sdk::SettingDecl::text("email client", "client ID (OAuth)",     "emailClientId",      ""),
-            sicompass_sdk::SettingDecl::text("email client", "client secret (OAuth)", "emailClientSecret",  ""),
+            sicompass_sdk::SettingDecl::password("email client", "client secret (OAuth)", "emailClientSecret",  ""),
         ]),
     );
 }

@@ -9778,6 +9778,64 @@ fn settings_text_input_commit_keeps_section_intact() {
     );
 }
 
+/// A `<password>` settings field masks its value: the live FFON keeps the real
+/// value wrapped in `<password>` (so commit/persist round-trip), the rendered
+/// list label shows asterisks, the screen reader announces `*` while typing,
+/// and the committed value is stored unmasked.
+#[test]
+fn settings_password_field_masks_value_everywhere() {
+    ensure_builtins();
+    let tmp = TempDir::new().unwrap();
+    let mut settings = sicompass_settings::SettingsProvider::new_headless();
+    settings.set_config_path(tmp.path().join("settings.json"));
+    settings.add_section("test");
+    settings.add_password("test", "API key", "test.apiKey", "");
+    let mut r = AppRenderer::new();
+    register(&mut r, Box::new(settings));
+    set_cursor(&mut r, &[0, 1, 0]);
+
+    // Pressing `i` must enter insert on a password field (the editable-element
+    // shortcut gate must recognize <password>, not just <input>).
+    press(&mut r, Keycode::I);
+    assert_eq!(r.coordinate, Coordinate::Insert, "i must enter Insert on a password field");
+    assert!(r.input_is_password, "password field must set input_is_password");
+
+    type_text(&mut r, "s3cr3t");
+    // The buffer holds the real value (editing works), but the live FFON element
+    // stays `<password>`-wrapped so the rebuilt list label masks it.
+    assert_eq!(r.input_buffer, "s3cr3t");
+    let live = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)
+        .and_then(|a| a.get(r.current_id.last().unwrap_or(0)));
+    assert!(
+        matches!(live, Some(FfonElement::Str(s)) if s.contains("<password>s3cr3t</password>")),
+        "live FFON must keep the real value in a <password> tag; got {live:?}",
+    );
+
+    // Cursoring over the masked value announces `*`, never the real character.
+    r.cursor_position = r.input_buffer.len();
+    press_shift_left(&mut r);
+    let announced = r.pending_announcement.as_deref().unwrap_or("")
+        .trim_end_matches('\u{200B}');
+    assert_eq!(announced, "*", "cursoring over a password char must announce '*'");
+
+    press_enter(&mut r);
+
+    // Committed value is stored UNMASKED in the FFON tag (and persisted), but the
+    // rendered label masks it to asterisks.
+    let sec = r.ffon[0].as_obj().unwrap().children[1].as_obj().unwrap();
+    assert!(
+        matches!(&sec.children[0], FfonElement::Str(s) if s.contains("<password>s3cr3t</password>")),
+        "committed FFON must store the real value; got {:?}", sec.children[0],
+    );
+    let masked_label = r.total_list.iter().find(|it| it.label.contains("API key"));
+    if let Some(item) = masked_label {
+        assert!(
+            item.label.contains("******") && !item.label.contains("s3cr3t"),
+            "rendered label must be masked, not plaintext; got {:?}", item.label,
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Per-keystroke `<input>` editing: FFON mutates as the user types and
 // TextChunks are recorded with TEXT_CHUNK_IDLE_MS merging, so ctrl-Z reverts

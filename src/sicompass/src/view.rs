@@ -894,14 +894,35 @@ fn update_view(app: &mut AppState) {
         app.renderer.coordinate,
         Coordinate::Insert | Coordinate::Normal | Coordinate::Visual
     );
-    let insert_buf = app.renderer.input_buffer.clone();
+    // For a `<password>` field, render the buffer as one `*` per character so
+    // the secret never reaches the glyph pipeline. Cursor/selection are byte
+    // offsets into the real buffer; remap them to the masked string (each
+    // mask char is one byte) so the caret and highlight stay aligned. Done
+    // once here so every downstream use (glyphs, caret, selection, line
+    // counting) sees the same masked text.
+    let mask_password = in_insert_mode && app.renderer.input_is_password;
+    let (insert_buf, insert_cursor, insert_sel) = if mask_password {
+        let raw = &app.renderer.input_buffer;
+        let masked: String = raw.chars().map(|c| if c == '\n' { '\n' } else { '*' }).collect();
+        let to_masked = |b: usize| raw.get(..b).map(|s| s.chars().count())
+            .unwrap_or_else(|| raw.chars().count());
+        (
+            masked,
+            to_masked(app.renderer.cursor_position),
+            app.renderer.selection_anchor.map(to_masked),
+        )
+    } else {
+        (
+            app.renderer.input_buffer.clone(),
+            app.renderer.cursor_position,
+            app.renderer.selection_anchor,
+        )
+    };
     // `input_prefix`/`input_suffix` are kept raw (they reconstruct the FFON
     // key on commit), but an input slot puts a dangling `<input>` in the
     // prefix and `</input>` in the suffix — strip all tag tokens for display.
     let insert_prefix = sicompass_sdk::tags::strip_tags(&app.renderer.input_prefix);
     let insert_suffix = sicompass_sdk::tags::strip_tags(&app.renderer.input_suffix);
-    let insert_cursor = app.renderer.cursor_position;
-    let insert_sel = app.renderer.selection_anchor;
     let caret_visible = app.renderer.caret.visible;
     let search_str = if app.renderer.coordinate == Coordinate::ConfirmCloseTab {
         // Modal prompt above the two `-b` button options.

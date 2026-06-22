@@ -325,6 +325,18 @@ pub fn populate_list_current_layer(renderer: &mut AppRenderer, search: &str) {
 // Label building
 // ---------------------------------------------------------------------------
 
+/// Display text for a string carrying a `<password>` tag: the surrounding
+/// label (prefix/suffix) is kept, only the secret value is masked to one
+/// asterisk per character. e.g. `"API key: <password>s3cr3t</password>"` →
+/// `"API key: ******"`.
+fn masked_password_display(s: &str) -> String {
+    let value = tags::extract_password(s).unwrap_or_default();
+    let masked_tag = tags::format_password(&tags::mask_password(&value));
+    let orig_tag = tags::format_password(&value);
+    let masked_full = s.replacen(&orig_tag, &masked_tag, 1);
+    tags::strip_display(&masked_full)
+}
+
 fn build_label_for_element(elem: &FfonElement, parent_has_radio: bool) -> String {
     match elem {
         FfonElement::Str(s) => build_str_label(s, parent_has_radio),
@@ -374,6 +386,11 @@ fn build_str_label(s: &str, parent_has_radio: bool) -> String {
             .unwrap_or_else(|| tags::strip_display(s)))
     } else if tags::has_button(s) {
         ("-b", tags::strip_display(s))
+    } else if tags::has_password(s) {
+        // Password field: same `-i` editable prefix as <input> (so the i-edit
+        // flow and spoken prefix word match), but the value is masked here so
+        // neither the rendered list nor the screen-reader label leaks it.
+        ("-i", masked_password_display(s))
     } else if tags::has_input(s) {
         let content = tags::strip_display(s);
         if content.trim() == "i" {
@@ -442,6 +459,8 @@ fn build_obj_label(obj: &FfonObject) -> String {
             _ => None,
         }).unwrap_or_default();
         return format!("+R {group} [{state}]");
+    } else if tags::has_password(key) {
+        return format!("+i {}", masked_password_display(key));
     } else if tags::has_input(key) {
         return format!("+i {}", tags::strip_display(key));
     }
@@ -1230,6 +1249,26 @@ mod tests {
     #[test]
     fn input_str_label() {
         assert!(build_str_label("edit: <input>value</input>", false).starts_with("-i"));
+    }
+
+    #[test]
+    fn password_str_label_masks_value_keeps_label() {
+        // <password> renders with the `-i` editable prefix (like <input>) but
+        // the secret value is masked to one asterisk per character; the label
+        // prefix is preserved.
+        let label = build_str_label("API key: <password>s3cr3t</password>", false);
+        assert_eq!(label, "-i API key: ******");
+        assert!(!label.contains("s3cr3t"));
+    }
+
+    #[test]
+    fn password_obj_label_masks_value() {
+        let label = build_obj_label(&FfonObject {
+            key: "API key: <password>abcd</password>".to_owned(),
+            children: vec![],
+        });
+        assert_eq!(label, "+i API key: ****");
+        assert!(!label.contains("abcd"));
     }
 
     #[test]

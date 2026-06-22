@@ -1934,8 +1934,11 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
         }
     };
 
-    // Extract the old content from the tag
-    let old_content = if tags::has_input(&elem_text) {
+    // Extract the old content from the tag (`<input>` or its masked sibling
+    // `<password>` — both edit identically; `input_is_password` drives masking).
+    let old_content = if tags::has_password(&elem_text) {
+        tags::extract_password(&elem_text)
+    } else if tags::has_input(&elem_text) {
         tags::extract_input(&elem_text)
     } else {
         // No input tag — just escape
@@ -2398,11 +2401,17 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
         crate::provider::pop_path(r);
     }
 
-    // Build replacement element text (re-wrap in tag format)
+    // Build replacement element text (re-wrap in tag format). Keep `<password>`
+    // for secret fields so the element stays masked until the provider refresh
+    // re-emits it (avoids a one-frame plaintext flash).
     let new_elem_text = {
         let prefix = &r.input_prefix;
         let suffix = &r.input_suffix;
-        format!("{prefix}<input>{new_content}</input>{suffix}")
+        if r.input_is_password {
+            format!("{prefix}<password>{new_content}</password>{suffix}")
+        } else {
+            format!("{prefix}<input>{new_content}</input>{suffix}")
+        }
     };
 
     // Update FFON element regardless of commit result (provider may not implement commit_edit).
@@ -2505,6 +2514,7 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
     }
     r.input_buffer.clear();
     r.cursor_position = 0;
+    r.input_is_password = false;
 
     let saved_error = r.error_message.clone();
     // Terminal/chat-style providers re-emit a trailing `<input></input>` slot
@@ -2654,6 +2664,9 @@ fn try_cancel_inserted_placeholder(r: &mut AppRenderer, target_general: Coordina
 /// Return to the previous mode (Escape).
 pub fn handle_escape(r: &mut AppRenderer) {
     clear_selection(r);
+    // Leaving any edit clears the password-masking flag; the next field edit
+    // re-derives it in `populate_input_buffer`.
+    r.input_is_password = false;
     match r.coordinate {
         Coordinate::Insert => {
             // Discard any per-keystroke `<input>` edit session: restore the
@@ -3532,6 +3545,7 @@ fn populate_input_buffer(r: &mut AppRenderer) {
     r.input_buffer.clear();
     r.input_prefix.clear();
     r.input_suffix.clear();
+    r.input_is_password = false;
 
     let arr = match get_ffon_at_id(&r.ffon, &r.current_id) {
         Some(a) => a,
@@ -3548,14 +3562,21 @@ fn populate_input_buffer(r: &mut AppRenderer) {
         sicompass_sdk::ffon::FfonElement::Obj(o) => &o.key,
     };
 
-    let extracted = tags::extract_input(element_key);
+    // A `<password>` field edits exactly like `<input>` (the buffer holds the
+    // real value), but it carries `input_is_password` so the renderer masks
+    // the typed value and the commit re-wraps it as `<password>`.
+    let (extracted, open_tag, close_tag, is_password) = if tags::has_password(element_key) {
+        (tags::extract_password(element_key), "<password>", "</password>", true)
+    } else {
+        (tags::extract_input(element_key), "<input>", "</input>", false)
+    };
 
     if let Some(content) = extracted {
+        r.input_is_password = is_password;
         // Strip internal annotations (<src=N>, <srcins=N>) so the user edits clean text.
         r.input_buffer = tags::strip_display(&content);
 
         // Extract prefix (text before the opening tag) and suffix (text after closing tag)
-        let (open_tag, close_tag) = ("<input>", "</input>");
         if let Some(open_pos) = element_key.find(open_tag) {
             r.input_prefix = element_key[..open_pos].to_owned();
             let after_open = open_pos + open_tag.len();
@@ -3604,7 +3625,7 @@ pub(crate) fn begin_insert_session(r: &mut AppRenderer) {
         FfonElement::Str(s) => s,
         FfonElement::Obj(o) => &o.key,
     };
-    if !tags::has_input(key) {
+    if !tags::has_input(key) && !tags::has_password(key) {
         return;
     }
     r.insert_session = Some(InsertSession {
@@ -3649,10 +3670,13 @@ pub(crate) fn apply_insert_session_chunk(r: &mut AppRenderer) {
     // the very first chunk's `before` (the I_PLACEHOLDER itself), so Escape
     // and the final undo step still restore the marker.
     let effective_prefix: &str = if r.placeholder_insert_mode { "" } else { &r.input_prefix };
-    let new_key = format!(
-        "{}<input>{}</input>{}",
-        effective_prefix, r.input_buffer, r.input_suffix
-    );
+    // Preserve the tag type so the live FFON (and the list label rebuilt from
+    // it) keeps masking a password while it is being typed.
+    let new_key = if r.input_is_password {
+        format!("{}<password>{}</password>{}", effective_prefix, r.input_buffer, r.input_suffix)
+    } else {
+        format!("{}<input>{}</input>{}", effective_prefix, r.input_buffer, r.input_suffix)
+    };
     let after = match &before {
         FfonElement::Str(_) => FfonElement::new_str(new_key),
         FfonElement::Obj(o) => {
@@ -3858,6 +3882,10 @@ pub fn handle_select_all(r: &mut AppRenderer) {
 /// tree diff. The zero-width space sentinel appended when parity is true is
 /// universally ignored by screen readers in speech output.
 pub(crate) fn announce_char(r: &mut AppRenderer, ch: char) {
+    // While editing a password field, echo every character (typed or
+    // cursored-over) as a masking `*` so the screen reader never speaks the
+    // secret. Newlines pass through (passwords are single-line anyway).
+    let ch = if r.input_is_password && ch != '\n' { '*' } else { ch };
     r.announcement_parity = !r.announcement_parity;
     let sentinel = if r.announcement_parity { "\u{200B}" } else { "" };
     r.pending_announcement = Some(format!("{ch}{sentinel}"));
