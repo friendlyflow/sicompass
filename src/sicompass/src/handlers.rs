@@ -4204,21 +4204,33 @@ unsafe extern "C" fn clipboard_image_cleanup(userdata: *mut std::ffi::c_void) {
     }
 }
 
-/// Offer `text/html` (prefix+image+suffix), `image/png`, `image/bmp` and a
-/// plain-`text` fallback to the OS clipboard. Returns whether SDL accepted the
-/// offer.
-fn sdl_set_clipboard_image(html: Vec<u8>, png: Vec<u8>, bmp: Vec<u8>, text: String) -> bool {
+/// Offer `text/html` (prefix+image+suffix) plus a plain-`text` fallback to the
+/// OS clipboard. When `image` is `Some((png, bmp))` the bare picture flavors are
+/// offered too. Returns whether SDL accepted the offer.
+///
+/// The bare image flavors are deliberately omitted when the element carries
+/// surrounding text: word processors (LibreOffice, Word) prefer a bitmap flavor
+/// over `text/html` on a normal paste, so offering the picture alongside would
+/// make them paste only the image and drop the prefix/suffix text. Without a
+/// competing image flavor they fall back to the rich HTML (which embeds the
+/// image as a `data:` URI), pasting text and picture together. Bare images (no
+/// surrounding text) keep the image flavors so they still paste as a picture.
+fn sdl_set_clipboard_image(html: Vec<u8>, image: Option<(Vec<u8>, Vec<u8>)>, text: String) -> bool {
     use std::ffi::CString;
+    let include_image = image.is_some();
+    let (png, bmp) = image.unwrap_or_default();
     let payload = Box::new(ClipboardImagePayload { html, png, bmp, text: text.into_bytes() });
     let userdata = Box::into_raw(payload) as *mut std::ffi::c_void;
-    let m_html = CString::new("text/html").unwrap();
-    let m_png = CString::new("image/png").unwrap();
-    let m_bmp = CString::new("image/bmp").unwrap();
-    let m_txt = CString::new("text/plain;charset=utf-8").unwrap();
-    // SDL copies the mime list during the call, so these CStrings need only
-    // live until SDL_SetClipboardData returns. text/plain is listed last so it
-    // wins CF_UNICODETEXT on Windows (where SDL collapses all text/* mimes).
-    let mimes = [m_html.as_ptr(), m_png.as_ptr(), m_bmp.as_ptr(), m_txt.as_ptr()];
+    // SDL copies the mime list during the call, so these CStrings need only live
+    // until SDL_SetClipboardData returns. text/plain is listed last so it wins
+    // CF_UNICODETEXT on Windows (where SDL collapses all text/* mimes).
+    let mut cmimes = vec![CString::new("text/html").unwrap()];
+    if include_image {
+        cmimes.push(CString::new("image/png").unwrap());
+        cmimes.push(CString::new("image/bmp").unwrap());
+    }
+    cmimes.push(CString::new("text/plain;charset=utf-8").unwrap());
+    let mimes: Vec<*const std::ffi::c_char> = cmimes.iter().map(|c| c.as_ptr()).collect();
     let ok = unsafe {
         sdl3::sys::clipboard::SDL_SetClipboardData(
             Some(clipboard_image_cb),
@@ -4647,12 +4659,20 @@ pub fn handle_ctrl_c(r: &mut AppRenderer) {
                 Ok((png, bmp))
             }) {
                 Ok((png, bmp)) => {
-                    // Carry the text around the image too: rich HTML for
-                    // image-aware apps, plain prefix+suffix for text targets.
+                    // Carry the text around the image too: rich HTML (image
+                    // embedded) for image-aware apps, plain prefix+suffix for
+                    // text targets. When there IS surrounding text, omit the bare
+                    // image flavors so word processors use the HTML (text+image)
+                    // instead of pasting just the picture.
                     let (prefix, suffix) = image_prefix_suffix(raw);
                     let html = build_image_html(&prefix, &png, &suffix);
                     let plain = format!("{prefix}{suffix}");
-                    copied_image = sdl_set_clipboard_image(html.into_bytes(), png, bmp, plain);
+                    let image_flavors = if prefix.is_empty() && suffix.is_empty() {
+                        Some((png, bmp))
+                    } else {
+                        None
+                    };
+                    copied_image = sdl_set_clipboard_image(html.into_bytes(), image_flavors, plain);
                 }
                 Err(e) => {
                     r.error_message = format!("could not copy image: {e}");
