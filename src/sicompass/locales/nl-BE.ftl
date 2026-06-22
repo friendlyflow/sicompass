@@ -62,6 +62,7 @@ hint-command = :      Commando
 hint-ctrl-a-insert-after = Ctrl+A Voeg na in
 hint-ctrl-a-select-all = Ctrl+A Sel. alles
 hint-ctrl-c-copy = Ctrl+C Kopieer
+hint-ctrl-shift-c-copy-url-value = Ctrl+Shift+C URL/waarde kop.
 hint-ctrl-d-delete = Ctrl+D Verwijder
 hint-ctrl-enter-newline = Ctrl+Enter Nieuwe regel
 hint-ctrl-f-extended-search = Ctrl+F Uitgebr. zoek
