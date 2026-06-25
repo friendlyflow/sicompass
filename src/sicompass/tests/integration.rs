@@ -2322,7 +2322,7 @@ fn root_blocks_editing_keys() {
     press_ctrl(h.r(), Keycode::A);
     assert_eq!(h.renderer.coordinate, coord_before, "Ctrl+A must be no-op at root");
 
-    // Enter — should not trigger enter_operator at root
+    // Enter — should not enter general mode at root
     press_enter(h.r());
     assert_eq!(h.renderer.coordinate, coord_before, "Enter must be no-op at root");
 
@@ -2393,7 +2393,7 @@ fn test_d_key_noop_without_dashboard_image() {
 /// "Add element:" section rather than inserting a raw `<input></input>`.
 /// The cursor should land on the clone and stay in General (not Insert).
 #[test]
-fn ctrl_a_operator_clones_add_element_section_for_create_element_provider() {
+fn ctrl_a_general_clones_add_element_section_for_create_element_provider() {
     let mut renderer = AppRenderer::new();
     register(&mut renderer, Box::new(ButtonTestProvider::new()));
     sicompass::list::create_list_current_layer(&mut renderer);
@@ -2438,7 +2438,7 @@ fn ctrl_a_operator_clones_add_element_section_for_create_element_provider() {
 /// Ctrl+I in General for a createElement provider should clone the
 /// "Add element:" section before the current item (same logic as Ctrl+A but different index).
 #[test]
-fn ctrl_i_operator_clones_add_element_section_for_create_element_provider() {
+fn ctrl_i_general_clones_add_element_section_for_create_element_provider() {
     let mut renderer = AppRenderer::new();
     register(&mut renderer, Box::new(ButtonTestProvider::new()));
     sicompass::list::create_list_current_layer(&mut renderer);
@@ -5450,7 +5450,7 @@ fn text_editor_provider_lists_directory_and_parses_file() {
 }
 
 // ---------------------------------------------------------------------------
-// has_editor_semantics / text editor coordinate tests
+// has_editor_semantics / text editor behavior tests
 // ---------------------------------------------------------------------------
 
 /// Build an AppRenderer with filebrowser (idx 0) + text editor (idx 1).

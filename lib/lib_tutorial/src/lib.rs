@@ -1,6 +1,5 @@
 use sicompass_sdk::ffon::FfonElement;
 use sicompass_sdk::localize;
-use sicompass_sdk::placeholders::I_PLACEHOLDER;
 use sicompass_sdk::provider::Provider;
 use std::path::Path;
 use std::sync::OnceLock;
@@ -21,7 +20,7 @@ pub fn register_translations() {
 // Tutorial content tree
 // ---------------------------------------------------------------------------
 
-/// A node in the tutorial content tree (mirrors the TypeScript `Section` type).
+/// A node in the tutorial content tree.
 enum Node {
     Leaf(&'static str),
     Branch { key: &'static str, children: &'static [Node] },
@@ -81,437 +80,152 @@ fn lorem_ipsum() -> &'static str {
      in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur \
      sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est \
      laborum. Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium \
-     doloremque laudantium. \
-     Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut \
-     labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco \
-     laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in \
-     voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat \
-     cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. \
-     Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque \
-     laudantium. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor \
-     incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud \
-     exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor \
-     in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur \
-     sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est \
-     laborum. Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium \
      doloremque laudantium."
 }
 
-// Static tree matching tutorial.ts `sections` array.
-// Asset paths (TEXTURE_JPG, SF_JSON) are substituted at runtime via TutorialProvider.
+// The tutorial is intentionally short and guided. It teaches the core of using
+// Sicompass by doing, keeps a single keyboard-shortcut reference, gives one
+// short leaf per program, and points to the repo/SDK for plugin development
+// rather than inlining a manual. See docs/tutorial-guidelines.md.
+//
+// Section headings use `tutorial-sec-*` keys, content leaves use semantic keys
+// per section. Asset paths (TEXTURE_JPG, FFON_JSON) and the lorem-ipsum block
+// are substituted at runtime by `apply_asset_placeholders`.
 
 static SECTIONS: &[Node] = &[
-    Branch { key: "tutorial-branch-001",
+    // 1. Getting Started: a guided do-and-confirm path. Each step asks for one
+    //    keypress and relies on the screen-reader announcement as confirmation.
+    Branch { key: "tutorial-sec-getting-started",
         children: &[
-            Leaf("tutorial-leaf-001"),
-            Leaf("tutorial-leaf-002"),
-            Leaf("tutorial-leaf-003"),
-            Leaf("tutorial-leaf-004"),
-            Leaf("tutorial-leaf-005"),
-            Leaf("tutorial-leaf-006"),
+            Leaf("tutorial-gs-intro"),
+            Leaf("tutorial-gs-moved"),
+            Branch { key: "tutorial-gs-step", children: &[
+                Leaf("tutorial-gs-inside"),
+                Leaf("tutorial-gs-back"),
+            ]},
+            Leaf("tutorial-gs-checkbox-intro"),
+            Leaf("tutorial-gs-checkbox"),
+            Leaf("tutorial-gs-input-intro"),
+            Leaf("tutorial-gs-input"),
+            Leaf("tutorial-gs-modes"),
+            Leaf("tutorial-gs-done"),
         ],
     },
-    Branch { key: "tutorial-branch-002",
+    // 2. Shortcuts at a glance: the single source for every key, grouped by mode.
+    //    Every leaf leads with the key so the screen reader speaks it first.
+    Branch { key: "tutorial-sec-shortcuts",
         children: &[
-            Leaf("tutorial-leaf-007"),
-            Branch { key: "tutorial-branch-003",
-                children: &[
-                    Leaf("tutorial-leaf-008"),
-                    Leaf("tutorial-leaf-009"),
-                    Leaf("tutorial-leaf-010"),
-                    Leaf("tutorial-leaf-011"),
-                    Leaf("tutorial-leaf-012"),
-                    Leaf("tutorial-leaf-013"),
-                    Leaf("tutorial-leaf-014"),
-                    Leaf("tutorial-leaf-015"),
-                    Leaf("tutorial-leaf-016"),
-                ],
-            },
-            Branch { key: "tutorial-branch-004",
-                children: &[
-                    Leaf("tutorial-leaf-017"),
-                    Leaf("tutorial-leaf-018"),
-                    Leaf("tutorial-leaf-019"),
-                    Leaf("tutorial-leaf-020"),
-                    Leaf("tutorial-leaf-021"),
-                    Leaf("tutorial-leaf-022"),
-                    Leaf("tutorial-leaf-265"),
-                ],
-            },
-            Branch { key: "tutorial-branch-047",
-                children: &[
-                    Leaf("tutorial-leaf-243"),
-                    Leaf("tutorial-leaf-244"),
-                    Leaf("tutorial-leaf-245"),
-                    Leaf("tutorial-leaf-246"),
-                    Leaf("tutorial-leaf-247"),
-                    Leaf("tutorial-leaf-258"),
-                    Leaf("tutorial-leaf-248"),
-                    Leaf("tutorial-leaf-249"),
-                ],
-            },
-            Branch { key: "tutorial-branch-049",
-                children: &[
-                    Leaf("tutorial-leaf-259"),
-                    Leaf("tutorial-leaf-260"),
-                ],
-            },
-        ],
-    },
-    Branch { key: "tutorial-branch-005",
-        children: &[
-            Leaf("tutorial-leaf-023"),
-            Leaf("tutorial-leaf-024"),
-            Leaf("tutorial-leaf-025"),
-            Leaf("tutorial-leaf-026"),
-            Leaf("tutorial-leaf-256"),
-        ],
-    },
-    Branch { key: "tutorial-branch-006",
-        children: &[
-            Leaf("tutorial-leaf-027"),
-            Leaf("tutorial-leaf-028"),
-            Leaf("tutorial-leaf-029"),
-            Leaf("tutorial-leaf-030"),
-            Leaf("tutorial-leaf-031"),
-            Leaf("tutorial-leaf-032"),
-            Leaf("tutorial-leaf-033"),
-            Leaf("tutorial-leaf-257"),
-        ],
-    },
-    Branch { key: "tutorial-branch-007",
-        children: &[
-            Leaf("tutorial-leaf-034"),
-            Leaf("tutorial-leaf-035"),
-            Leaf("tutorial-leaf-036"),
-            Branch { key: "tutorial-branch-008",
-                children: &[
-                    Leaf("tutorial-leaf-037"),
-                    Leaf("tutorial-leaf-038"),
-                    Leaf("tutorial-leaf-039"),
-                    Leaf("tutorial-leaf-040"),
-                    Leaf("tutorial-leaf-041"),
-                    Leaf("tutorial-leaf-042"),
-                    Leaf("tutorial-leaf-043"),
-                    Leaf("tutorial-leaf-044"),
-                ],
-            },
-            Branch { key: "tutorial-branch-009",
-                children: &[
-                    Leaf("tutorial-leaf-045"),
-                    Leaf("tutorial-leaf-046"),
-                    Leaf("tutorial-leaf-047"),
-                    Leaf("tutorial-leaf-048"),
-                ],
-            },
-            Branch { key: "tutorial-branch-010",
-                children: &[
-                    Leaf("tutorial-leaf-049"),
-                    Leaf("tutorial-leaf-050"),
-                    Leaf("tutorial-leaf-051"),
-                    Leaf("tutorial-leaf-052"),
-                ],
-            },
-        ],
-    },
-    Branch { key: "tutorial-branch-011",
-        children: &[
-            Leaf("tutorial-leaf-053"),
-            Leaf("tutorial-leaf-054"),
-            Leaf("tutorial-leaf-055"),
-            Leaf("tutorial-leaf-056"),
-            Leaf("tutorial-leaf-057"),
-            Leaf("tutorial-leaf-058"),
-            Leaf("tutorial-leaf-059"),
-            Leaf("tutorial-leaf-060"),
-        ],
-    },
-    Branch { key: "tutorial-branch-012",
-        children: &[
-            Leaf("tutorial-leaf-061"),
-            Leaf("tutorial-leaf-062"),
-            Leaf("tutorial-leaf-063"),
-            Branch { key: "tutorial-branch-013", children: &[
-                Leaf("tutorial-leaf-064"),
-                Leaf("tutorial-leaf-065"),
-                Leaf("tutorial-leaf-066"),
-                Leaf("tutorial-leaf-067"),
-                Leaf("tutorial-leaf-068"),
-                Leaf("tutorial-leaf-069"),
-                Leaf("tutorial-leaf-070"),
-                Leaf("tutorial-leaf-071"),
+            Leaf("tutorial-sc-intro"),
+            Branch { key: "tutorial-sc-general", children: &[
+                Leaf("tutorial-sc-gen-updown"),
+                Leaf("tutorial-sc-gen-rightleft"),
+                Leaf("tutorial-sc-gen-enter"),
+                Leaf("tutorial-sc-gen-escape"),
+                Leaf("tutorial-sc-gen-page"),
+                Leaf("tutorial-sc-gen-f5"),
+                Leaf("tutorial-sc-gen-whereami"),
+                Leaf("tutorial-sc-gen-meta"),
+                Leaf("tutorial-sc-gen-dashboard"),
             ]},
-            Branch { key: "tutorial-branch-014", children: &[
-                Leaf("tutorial-leaf-072"),
-                Leaf("tutorial-leaf-073"),
-                Leaf("tutorial-leaf-074"),
-                Leaf("tutorial-leaf-075"),
-                Leaf("tutorial-leaf-076"),
-                Leaf("tutorial-leaf-077"),
+            Branch { key: "tutorial-sc-insert", children: &[
+                Leaf("tutorial-sc-in-i"),
+                Leaf("tutorial-sc-in-a"),
+                Leaf("tutorial-sc-in-enter"),
+                Leaf("tutorial-sc-in-backspace"),
             ]},
-            Branch { key: "tutorial-branch-015", children: &[
-                Leaf("tutorial-leaf-078"),
-                Leaf("tutorial-leaf-079"),
-                Leaf("tutorial-leaf-080"),
-                Leaf("tutorial-leaf-081"),
-                Leaf("tutorial-leaf-082"),
-                Leaf("tutorial-leaf-083"),
+            Branch { key: "tutorial-sc-command", children: &[
+                Leaf("tutorial-sc-cmd-colon"),
+                Leaf("tutorial-sc-cmd-tab"),
+                Leaf("tutorial-sc-cmd-ctrlf"),
+                Leaf("tutorial-sc-cmd-scroll"),
+                Leaf("tutorial-sc-cmd-history"),
             ]},
-            Branch { key: "tutorial-branch-016", children: &[
-                Leaf("tutorial-leaf-084"),
-                Leaf("tutorial-leaf-085"),
-                Leaf("tutorial-leaf-086"),
-                Leaf("tutorial-leaf-087"),
-                Leaf("tutorial-leaf-088"),
-                Leaf("tutorial-leaf-089"),
-                Leaf("tutorial-leaf-090"),
-                Leaf("tutorial-leaf-091"),
+            Branch { key: "tutorial-sc-tabs", children: &[
+                Leaf("tutorial-sc-tab-new"),
+                Leaf("tutorial-sc-tab-mru"),
+                Leaf("tutorial-sc-tab-number"),
+                Leaf("tutorial-sc-tab-palette"),
+                Leaf("tutorial-sc-tab-controls"),
             ]},
-            Branch { key: "tutorial-branch-017", children: &[
-                Leaf("tutorial-leaf-092"),
-                Leaf("tutorial-leaf-093"),
-                Leaf("tutorial-leaf-094"),
-                Leaf("tutorial-leaf-095"),
-                Leaf("tutorial-leaf-096"),
-                Leaf("tutorial-leaf-097"),
-            ]},
-            Branch { key: "tutorial-branch-018", children: &[
-                Leaf("tutorial-leaf-098"),
-                Leaf("tutorial-leaf-255"),
-                Leaf("tutorial-leaf-099"),
-                Leaf("tutorial-leaf-100"),
-                Leaf("tutorial-leaf-101"),
-                Leaf("tutorial-leaf-102"),
-            ]},
-            Branch { key: "tutorial-branch-019", children: &[
-                Leaf("tutorial-leaf-103"),
-                Leaf("tutorial-leaf-104"),
-                Leaf("tutorial-leaf-105"),
-                Leaf("tutorial-leaf-106"),
-                Leaf("tutorial-leaf-107"),
-            ]},
-            Branch { key: "tutorial-branch-020", children: &[
-                Leaf("tutorial-leaf-108"),
-                Leaf("tutorial-leaf-109"),
-                Leaf("tutorial-leaf-110"),
-                Leaf("tutorial-leaf-111"),
-                Leaf("tutorial-leaf-112"),
-                Leaf("tutorial-leaf-113"),
-                Leaf("tutorial-leaf-114"),
-                Leaf("tutorial-leaf-115"),
-            ]},
-            Branch { key: "tutorial-branch-021", children: &[
-                Leaf("tutorial-leaf-116"),
-                Leaf("tutorial-leaf-117"),
-                Leaf("tutorial-leaf-118"),
-                Leaf("tutorial-leaf-119"),
-                Leaf("tutorial-leaf-120"),
-                Leaf("tutorial-leaf-121"),
-                Leaf("tutorial-leaf-122"),
-                Leaf("tutorial-leaf-123"),
-            ]},
-            Branch { key: "tutorial-branch-022", children: &[
-                Leaf("tutorial-leaf-124"),
-                Leaf("tutorial-leaf-125"),
-                Leaf("tutorial-leaf-126"),
-                Leaf("tutorial-leaf-127"),
-                Leaf("tutorial-leaf-128"),
-                Leaf("tutorial-leaf-129"),
-                Leaf("tutorial-leaf-130"),
+            Branch { key: "tutorial-sc-files", children: &[
+                Leaf("tutorial-sc-file-undo"),
+                Leaf("tutorial-sc-file-clipboard"),
+                Leaf("tutorial-sc-file-save"),
+                Leaf("tutorial-sc-file-update"),
             ]},
         ],
     },
-    // "Interactive Elements" section - leaf nodes with tag examples.
-    // Asset paths (<image> and <link>) are filled in at runtime by TutorialProvider.
-    Branch { key: "tutorial-branch-023",
+    // 3. How it works: the mental model, lean. No key dumps (those live above).
+    Branch { key: "tutorial-sec-how-it-works",
         children: &[
-            Leaf("tutorial-leaf-131"),
-            Leaf("tutorial-leaf-132"),
-            Leaf("tutorial-leaf-133"),
-            Leaf("tutorial-leaf-134"),
-            Branch { key: "tutorial-branch-024", children: &[
-                Leaf("tutorial-leaf-135"),
-                Leaf("tutorial-leaf-136"),
-                Leaf("tutorial-leaf-137"),
-            ]},
-            Branch { key: "tutorial-branch-025", children: &[
-                Leaf("tutorial-leaf-138"),
-            ]},
-            Leaf("tutorial-leaf-139"),
-            Leaf("tutorial-leaf-140"),
-            Branch { key: "tutorial-branch-026", children: &[
-                Leaf(I_PLACEHOLDER),
-            ]},
-            Branch { key: "tutorial-branch-027", children: &[
-                Leaf("tutorial-leaf-141"),
-                Leaf("tutorial-leaf-142"),
-                Leaf("tutorial-leaf-143"),
-            ]},
-            Leaf("tutorial-leaf-144"),
-            Leaf("tutorial-leaf-145"),
-            // TEXTURE_JPG placeholder, replaced by TutorialProvider::make_interactive_elements
-            Leaf("tutorial-leaf-146"),
-            Leaf("tutorial-leaf-147"),
-            Leaf("tutorial-leaf-148"),
-            Leaf("tutorial-leaf-149"),
-            Leaf("tutorial-leaf-150"),
-            // SF_JSON placeholder, replaced at runtime
-            Branch { key: "tutorial-branch-028", children: &[] },
-            Leaf("tutorial-leaf-151"),
-            Leaf("tutorial-leaf-152"),
-            // Text rendering showcase: the dynamic glyph atlas + font fallback
-            // now render extended Unicode and color emoji inline.
-            Branch { key: "tutorial-branch-050", children: &[
-                Leaf("tutorial-leaf-261"),
-                Leaf("tutorial-leaf-262"),
-                Leaf("tutorial-leaf-263"),
-                Leaf("tutorial-leaf-264"),
-            ]},
+            Leaf("tutorial-hiw-tree"),
+            Leaf("tutorial-hiw-programs"),
+            Leaf("tutorial-hiw-modes"),
+            Leaf("tutorial-hiw-editing"),
+            Leaf("tutorial-hiw-undo"),
+            Leaf("tutorial-hiw-undo-caveats"),
+            Leaf("tutorial-hiw-accessibility"),
         ],
     },
-    Branch { key: "tutorial-branch-029",
+    // 4. The programs: one short leaf each.
+    Branch { key: "tutorial-sec-programs",
         children: &[
-            Leaf("tutorial-leaf-153"),
-            Branch { key: "tutorial-branch-030", children: &[
-                Leaf("tutorial-leaf-154"),
-                Leaf("tutorial-leaf-155"),
-                Leaf("tutorial-leaf-156"),
-                Leaf("tutorial-leaf-157"),
-                Leaf("tutorial-leaf-158"),
-            ]},
-            Branch { key: "tutorial-branch-031", children: &[
-                Leaf("tutorial-leaf-159"),
-                Leaf("tutorial-leaf-160"),
-                Leaf("tutorial-leaf-161"),
-                Leaf("tutorial-leaf-162"),
-                Leaf("tutorial-leaf-163"),
-            ]},
-            Branch { key: "tutorial-branch-032", children: &[
-                Leaf("tutorial-leaf-164"),
-                Leaf("tutorial-leaf-165"),
-                Leaf("tutorial-leaf-166"),
-                Leaf("tutorial-leaf-167"),
-            ]},
-            Branch { key: "tutorial-branch-048", children: &[
-                Leaf("tutorial-leaf-250"),
-                Leaf("tutorial-leaf-251"),
-                Leaf("tutorial-leaf-252"),
-                Leaf("tutorial-leaf-253"),
-                Leaf("tutorial-leaf-254"),
-            ]},
+            Leaf("tutorial-prog-intro"),
+            Leaf("tutorial-prog-filebrowser"),
+            Leaf("tutorial-prog-texteditor"),
+            Leaf("tutorial-prog-web"),
+            Leaf("tutorial-prog-terminal"),
+            Leaf("tutorial-prog-chat"),
+            Leaf("tutorial-prog-email"),
+            Leaf("tutorial-prog-salesdemo"),
+            Leaf("tutorial-prog-remote"),
+            Leaf("tutorial-prog-settings"),
         ],
     },
-    Branch { key: "tutorial-branch-033",
+    // 5. Interactive playground: hands-on element types. Asset placeholders are
+    //    filled in at runtime by TutorialProvider.
+    Branch { key: "tutorial-sec-playground",
         children: &[
-            Leaf("tutorial-leaf-168"),
-            Leaf("tutorial-leaf-169"),
-            Branch { key: "tutorial-branch-034", children: &[
-                Leaf("tutorial-leaf-170"),
-                Leaf("tutorial-leaf-171"),
-                Leaf("tutorial-leaf-172"),
-                Leaf("tutorial-leaf-173"),
-                Leaf("tutorial-leaf-174"),
-                Leaf("tutorial-leaf-175"),
-                Leaf("tutorial-leaf-176"),
-                Leaf("tutorial-leaf-177"),
-                Leaf("tutorial-leaf-178"),
+            Leaf("tutorial-play-intro"),
+            Leaf("tutorial-play-checkbox"),
+            Leaf("tutorial-play-input"),
+            Leaf("tutorial-play-radio-intro"),
+            Branch { key: "tutorial-play-radio", children: &[
+                Leaf("tutorial-play-radio-blue"),
+                Leaf("tutorial-play-radio-green"),
+                Leaf("tutorial-play-radio-red"),
             ]},
-            Branch { key: "tutorial-branch-035", children: &[
-                Leaf("tutorial-leaf-179"),
-                Leaf("tutorial-leaf-180"),
-                Leaf("tutorial-leaf-181"),
-                Leaf("tutorial-leaf-182"),
-                Leaf("tutorial-leaf-183"),
-                Leaf("tutorial-leaf-184"),
-                Leaf("tutorial-leaf-185"),
-                Leaf("tutorial-leaf-186"),
-                Leaf("tutorial-leaf-187"),
-                Leaf("tutorial-leaf-188"),
-            ]},
-            Branch { key: "tutorial-branch-036", children: &[
-                Leaf("tutorial-leaf-189"),
-                Leaf("tutorial-leaf-190"),
-                Leaf("tutorial-leaf-191"),
-                Leaf("tutorial-leaf-192"),
-            ]},
-            Branch { key: "tutorial-branch-037", children: &[
-                Leaf("tutorial-leaf-193"),
-                Branch { key: "tutorial-branch-038", children: &[
-                    Leaf("tutorial-leaf-194"),
-                    Leaf("tutorial-leaf-195"),
-                    Leaf("tutorial-leaf-196"),
-                    Leaf("tutorial-leaf-197"),
-                ]},
-                Branch { key: "tutorial-branch-039", children: &[
-                    Leaf("tutorial-leaf-198"),
-                    Leaf("tutorial-leaf-199"),
-                    Leaf("tutorial-leaf-200"),
-                    Leaf("tutorial-leaf-201"),
-                ]},
-                Branch { key: "tutorial-branch-040", children: &[
-                    Leaf("tutorial-leaf-202"),
-                    Leaf("tutorial-leaf-203"),
-                    Leaf("tutorial-leaf-204"),
-                    Leaf("tutorial-leaf-205"),
-                ]},
-                Branch { key: "tutorial-branch-041", children: &[
-                    Leaf("tutorial-leaf-206"),
-                    Leaf("tutorial-leaf-207"),
-                    Leaf("tutorial-leaf-208"),
-                    Leaf("tutorial-leaf-209"),
-                ]},
-                Branch { key: "tutorial-branch-042", children: &[
-                    Leaf("tutorial-leaf-210"),
-                    Leaf("tutorial-leaf-211"),
-                    Leaf("tutorial-leaf-212"),
-                    Leaf("tutorial-leaf-213"),
-                ]},
-                Branch { key: "tutorial-branch-043", children: &[
-                    Leaf("tutorial-leaf-214"),
-                    Leaf("tutorial-leaf-215"),
-                    Leaf("tutorial-leaf-216"),
-                ]},
-                Branch { key: "tutorial-branch-044", children: &[
-                    Leaf("tutorial-leaf-217"),
-                    Leaf("tutorial-leaf-218"),
-                ]},
-            ]},
-            Branch { key: "tutorial-branch-045", children: &[
-                Leaf("tutorial-leaf-219"),
-                Leaf("tutorial-leaf-220"),
-                Leaf("tutorial-leaf-221"),
-                Leaf("tutorial-leaf-222"),
-                Leaf("tutorial-leaf-223"),
-                Leaf("tutorial-leaf-224"),
-                Leaf("tutorial-leaf-225"),
-                Leaf("tutorial-leaf-226"),
-                Leaf("tutorial-leaf-227"),
-                Leaf("tutorial-leaf-228"),
-                Leaf("tutorial-leaf-229"),
-                Leaf("tutorial-leaf-230"),
-                Leaf("tutorial-leaf-231"),
-                Leaf("tutorial-leaf-232"),
-                Leaf("tutorial-leaf-233"),
-            ]},
+            Leaf("tutorial-play-image-intro"),
+            Leaf("tutorial-play-image"),
+            // A navigable Obj (empty children) whose key carries the <link> tag.
+            // Pressing Right lazy-loads the linked file's contents as children
+            // (see resolve_link_to_elements). A Str leaf would not be navigable.
+            Branch { key: "tutorial-play-link", children: &[] },
+            Leaf("tutorial-play-scroll"),
+            Leaf("tutorial-play-lorem"),
         ],
     },
-    Branch { key: "tutorial-branch-046",
+    // 6. Settings and config.
+    Branch { key: "tutorial-sec-config",
         children: &[
-            Leaf("tutorial-leaf-234"),
-            Leaf("tutorial-leaf-235"),
-            Leaf("tutorial-leaf-236"),
-            Leaf("tutorial-leaf-237"),
-            Leaf("tutorial-leaf-238"),
-            Leaf("tutorial-leaf-239"),
-            Leaf("tutorial-leaf-240"),
-            Leaf("tutorial-leaf-241"),
-            Leaf("tutorial-leaf-242"),
+            Leaf("tutorial-cfg-file"),
+            Leaf("tutorial-cfg-logs"),
+            Leaf("tutorial-cfg-settings"),
+            Leaf("tutorial-cfg-saveload"),
+            Leaf("tutorial-cfg-updates"),
+        ],
+    },
+    // 7. Extending Sicompass: a pointer to the real docs, not an inline manual.
+    Branch { key: "tutorial-sec-extending",
+        children: &[
+            Leaf("tutorial-ext-build"),
+            Leaf("tutorial-ext-docs"),
         ],
     },
 ];
 
 // ---------------------------------------------------------------------------
-// Navigation helper - mirrors getChildrenAtPath in tutorial.ts
+// Navigation helper
 // ---------------------------------------------------------------------------
 
 /// Returns the children slice for `path_parts` within `nodes`, or `None` if not found.
@@ -525,13 +239,11 @@ fn get_children_at_path<'a>(
     let (head, rest) = (&path_parts[0], &path_parts[1..]);
     for node in nodes {
         if let Node::Branch { key, children } = node {
-            // Path segments are the *stripped* display text of an Obj key (see
-            // `navigate_right_raw`, which pushes `tags::strip_display(&o.key)`).
-            // After i18n migration, `key` is a Fluent message ID like
-            // `tutorial-branch-023`; we must translate it through the same
-            // chain `node_to_ffon` uses to render the Obj key, then strip
-            // display tags. Otherwise the path that the app records on
-            // navigation can never resolve back to the branch.
+            // Path segments are the *stripped* display text of an Obj key (the
+            // app pushes `tags::strip_display(&o.key)` on navigation). The `key`
+            // here is a Fluent message ID, so we translate it through the same
+            // chain `node_to_ffon` uses, then strip display tags. Otherwise the
+            // recorded path can never resolve back to the branch.
             let translated = translate_node_string(key);
             if sicompass_sdk::tags::strip_display(&translated) == **head {
                 return get_children_at_path(children, rest);
@@ -549,9 +261,8 @@ fn node_to_ffon(node: &Node, texture_jpg: &str, ffon_json: &str) -> FfonElement 
     match node {
         Node::Leaf(s) => {
             // Resolve the translation key first, then run asset-placeholder
-            // substitution on the resolved value. Asset sentinels like
-            // `__TEXTURE_JPG__` live in the FTL value (or in non-key
-            // literals such as `I_PLACEHOLDER`), so this order is required.
+            // substitution on the resolved value (sentinels like __TEXTURE_JPG__
+            // live in the FTL value).
             let translated = translate_node_string(s);
             FfonElement::Str(apply_asset_placeholders(&translated, texture_jpg, ffon_json))
         }
@@ -569,11 +280,9 @@ fn node_to_ffon(node: &Node, texture_jpg: &str, ffon_json: &str) -> FfonElement 
     }
 }
 
-/// Resolve a SECTIONS node string through the localizer. Strings that look
-/// like Fluent message IDs (alphanumeric + hyphens, no whitespace or other
-/// special chars) are routed through `t()`; everything else (the
-/// `I_PLACEHOLDER` literal that the tutorial uses for an inline input slot)
-/// is returned as-is.
+/// Resolve a SECTIONS node string through the localizer. Strings that look like
+/// Fluent message IDs (alphanumeric + hyphens, no whitespace or other special
+/// chars) are routed through `t()`; everything else is returned as-is.
 fn translate_node_string(s: &str) -> String {
     register_translations();
     let looks_like_key = !s.is_empty()
@@ -584,8 +293,8 @@ fn translate_node_string(s: &str) -> String {
     }
     let resolved = localize::t(s);
     if resolved == s {
-        // Unknown key — leave the literal in place so a missed entry shows
-        // up loudly rather than silently.
+        // Unknown key — leave the literal in place so a missed entry shows up
+        // loudly rather than silently.
         s.to_owned()
     } else {
         resolved
@@ -593,19 +302,13 @@ fn translate_node_string(s: &str) -> String {
 }
 
 fn apply_asset_placeholders(s: &str, texture_jpg: &str, ffon_json: &str) -> String {
-    match s {
-        "__TEXTURE_JPG__" => format!("<image>{texture_jpg}</image>"),
-        "__IMAGE_WITH_PREFIX_SUFFIX__" => {
-            format!("Image with prefix: <image>{texture_jpg}</image>and suffix")
-        }
-        "__IMAGE_SUFFIX_ONLY__" => format!("<image>{texture_jpg}</image>and suffix"),
-        "__IMAGE_PREFIX_ONLY__" => format!("Image with prefix: <image>{texture_jpg}</image>"),
-        "__LINK_WITH_PREFIX_SUFFIX__" => {
-            format!("Playground based on html <link>{ffon_json}</link> which can be with prefix and suffix")
-        }
-        "__LOREM_IPSUM__" => lorem_ipsum().to_owned(),
-        other => other.to_owned(),
-    }
+    // Substring substitution (not whole-value), so a localized leaf can wrap an
+    // asset in prefix/suffix text, e.g. "caption: __TEXTURE_JPG__ end". The
+    // screen reader then reads the prefix, the image, and the suffix in order,
+    // which is why the image example carries surrounding text.
+    s.replace("__TEXTURE_JPG__", &format!("<image>{texture_jpg}</image>"))
+        .replace("__FFON_JSON__", &format!("<link>{ffon_json}</link>"))
+        .replace("__LOREM_IPSUM__", lorem_ipsum())
 }
 
 fn nodes_to_ffon(nodes: &[Node], texture_jpg: &str, ffon_json: &str) -> Vec<FfonElement> {
@@ -616,10 +319,9 @@ fn nodes_to_ffon(nodes: &[Node], texture_jpg: &str, ffon_json: &str) -> Vec<Ffon
 // TutorialProvider
 // ---------------------------------------------------------------------------
 
-/// The tutorial provider: a read-only navigable guide to Sicompass.
+/// The tutorial provider: a short, guided, read-only introduction to Sicompass.
 ///
-/// `assets_dir` should point to the directory containing `texture.jpg` and `sf.json`.
-/// These are the same assets used by the TypeScript tutorial (`lib/lib_tutorial/assets/`).
+/// `assets_dir` should point to the directory containing `texture.jpg` and `ffon.json`.
 pub struct TutorialProvider {
     current_path: String,
     texture_jpg: String,
@@ -699,7 +401,7 @@ impl Provider for TutorialProvider {
 }
 
 // ---------------------------------------------------------------------------
-// Tests - port of tests/lib_tutorial/tutorial.test.ts (12 tests)
+// Tests
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -710,435 +412,211 @@ mod tests {
         TutorialProvider::new_headless()
     }
 
-    // Root level
+    fn joined(elems: &[FfonElement]) -> String {
+        elems
+            .iter()
+            .filter_map(|e| e.as_str().map(|s| s.to_owned()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn section_keys(elems: &[FfonElement]) -> Vec<String> {
+        elems
+            .iter()
+            .filter_map(|e| e.as_obj().map(|o| o.key.to_owned()))
+            .collect()
+    }
+
+    const SECTION_NAMES: [&str; 7] = [
+        "Getting Started",
+        "Shortcuts at a glance",
+        "How it works",
+        "The programs",
+        "Interactive playground",
+        "Settings and config",
+        "Extending Sicompass",
+    ];
 
     #[test]
-    fn test_root_returns_top_level_sections() {
+    fn test_root_has_the_seven_sections_getting_started_first() {
         let mut p = provider();
         let elems = p.fetch();
-        assert!(!elems.is_empty());
-        // First section is "Welcome..."
-        let first = elems[0].as_obj().unwrap();
-        assert!(first.key.starts_with("Welcome"));
+        let keys = section_keys(&elems);
+        assert_eq!(keys.len(), 7, "expected exactly 7 top-level sections, got: {keys:?}");
+        assert!(keys[0].starts_with("Getting Started"), "Getting Started must be first, got: {:?}", keys[0]);
+        // The Getting Started heading carries a "go right to visit" hint, so it
+        // is matched by prefix; the others match exactly.
+        for name in SECTION_NAMES {
+            assert!(keys.iter().any(|k| k.starts_with(name)), "missing section {name}, got: {keys:?}");
+        }
     }
 
     #[test]
-    fn test_root_contains_all_top_level_sections() {
+    fn test_getting_started_is_interactive() {
         let mut p = provider();
+        // Enter via the rendered heading key (it carries a display hint suffix).
+        let gs_key = section_keys(&p.fetch())[0].clone();
+        p.push_path(&gs_key);
         let elems = p.fetch();
-        let keys: Vec<&str> = elems.iter()
-            .filter_map(|e| e.as_obj().map(|o| o.key.as_str()))
-            .collect();
-        assert!(keys.iter().any(|k| k.starts_with("Navigation")));
-        assert!(keys.iter().any(|k| k.starts_with("Editing")));
-        assert!(keys.iter().any(|k| k.starts_with("Commands")));
-        assert!(keys.iter().any(|k| k.starts_with("Programs")));
-        assert!(keys.iter().any(|k| k.starts_with("Interactive")));
-        assert!(keys.iter().any(|k| k.starts_with("Development")));
-        assert!(keys.iter().any(|k| k.starts_with("Next Steps")));
-    }
-
-    // Path navigation
-
-    #[test]
-    fn test_navigation_section_children() {
-        let mut p = provider();
-        p.push_path("Navigation");
-        let elems = p.fetch();
-        assert!(!elems.is_empty());
-        // First child is a string (overview text)
-        assert!(elems[0].is_str());
-        // Then "Moving Around" and "Modes" sections
-        let section_keys: Vec<&str> = elems.iter()
-            .filter_map(|e| e.as_obj().map(|o| o.key.as_str()))
-            .collect();
-        assert!(section_keys.contains(&"Moving Around"));
-        assert!(section_keys.contains(&"Modes"));
+        let text = joined(&elems);
+        assert!(text.contains("<checkbox>"), "Getting Started must contain a checkbox to toggle");
+        assert!(text.contains("<input>"), "Getting Started must contain an input to edit");
+        assert!(
+            section_keys(&elems).iter().any(|k| k.starts_with("Step inside")),
+            "Getting Started must contain a sub-branch to step into"
+        );
     }
 
     #[test]
-    fn test_nested_navigation() {
+    fn test_shortcuts_has_the_five_mode_groups() {
         let mut p = provider();
-        p.push_path("Navigation");
-        p.push_path("Modes");
-        let elems = p.fetch();
-        assert!(!elems.is_empty());
-        assert!(elems[0].is_str());
+        p.push_path("Shortcuts at a glance");
+        let keys = section_keys(&p.fetch());
+        for group in [
+            "General mode",
+            "Insert and edit mode",
+            "Command and search",
+            "Tabs and window",
+            "Files, undo, and save",
+        ] {
+            assert!(keys.iter().any(|k| k == group), "missing shortcut group {group}, got: {keys:?}");
+        }
     }
+
+    #[test]
+    fn test_general_shortcuts_lead_with_the_key() {
+        let mut p = provider();
+        p.set_current_path("/Shortcuts at a glance/General mode");
+        let elems = p.fetch();
+        for line in elems.iter().filter_map(|e| e.as_str()) {
+            assert!(line.contains(':'), "every shortcut line must lead with a key then ':', got: {line}");
+        }
+        let text = joined(&elems);
+        for token in ["Right", "Left", "Enter", "Escape", "w:", "m:"] {
+            assert!(text.contains(token), "general shortcuts must mention {token}, got:\n{text}");
+        }
+    }
+
+    #[test]
+    fn test_tabs_group_lists_t_and_c_palettes_separately() {
+        let mut p = provider();
+        p.set_current_path("/Shortcuts at a glance/Tabs and window");
+        let elems = p.fetch();
+        // The tab switcher (t) and window controls (c) each get their own line.
+        let has_t = elems.iter().filter_map(|e| e.as_str()).any(|s| s.starts_with("t:"));
+        let has_c = elems.iter().filter_map(|e| e.as_str()).any(|s| s.starts_with("c:"));
+        assert!(has_t, "tabs group must have a dedicated t: line");
+        assert!(has_c, "tabs group must have a dedicated c: window-controls line");
+    }
+
+    #[test]
+    fn test_how_it_works_covers_the_model_and_undo_caveats() {
+        let mut p = provider();
+        p.push_path("How it works");
+        let text = joined(&p.fetch()).to_lowercase();
+        assert!(text.contains("tree of lists"), "must explain the tree-of-lists model");
+        assert!(text.contains("undo"), "must mention undo");
+        assert!(
+            text.contains("4 mib") || text.contains("redact"),
+            "must mention an irreversibility caveat"
+        );
+    }
+
+    #[test]
+    fn test_programs_lists_each_program_once() {
+        let mut p = provider();
+        p.push_path("The programs");
+        let text = joined(&p.fetch());
+        for token in ["File browser", "Text editor", "Web browser", "Terminal", "Chat", "Email", "Settings"] {
+            assert!(text.contains(token), "programs section must mention {token}, got:\n{text}");
+        }
+    }
+
+    #[test]
+    fn test_playground_has_every_element_type() {
+        let mut p = provider();
+        p.push_path("Interactive playground");
+        let elems = p.fetch();
+        let text = joined(&elems);
+        assert!(text.contains("<checkbox checked>"), "must contain a checked checkbox");
+        assert!(text.contains("<input>"), "must contain an input");
+        assert!(text.contains("<image>"), "must contain an inline image");
+        assert!(text.contains("Lorem ipsum"), "must contain the long passage for scroll practice");
+        // The link must be a navigable Obj (key carries <link>), not a Str leaf,
+        // otherwise pressing Right cannot lazy-load its contents.
+        assert!(
+            section_keys(&elems).iter().any(|k| k.contains("<link>")),
+            "must contain a navigable link Obj"
+        );
+        assert!(
+            section_keys(&elems).iter().any(|k| k.starts_with("<radio>")),
+            "must contain a radio group"
+        );
+        // The image must carry text before and after it, so a screen reader
+        // reads prefix, image, suffix rather than an unlabelled gap.
+        let image_line = elems
+            .iter()
+            .filter_map(|e| e.as_str())
+            .find(|s| s.contains("<image>"))
+            .expect("an image leaf");
+        let before = &image_line[..image_line.find("<image>").unwrap()];
+        let after = &image_line[image_line.find("</image>").unwrap() + "</image>".len()..];
+        assert!(!before.trim().is_empty(), "image must have prefix text, got: {image_line}");
+        assert!(!after.trim().is_empty(), "image must have suffix text, got: {image_line}");
+    }
+
+    #[test]
+    fn test_config_section_documents_logs() {
+        let mut p = provider();
+        p.push_path("Settings and config");
+        let text = joined(&p.fetch());
+        assert!(text.contains("sicompass.log"), "config section must document the log file");
+        assert!(text.contains("RUST_LOG"), "config section must mention RUST_LOG for stderr logging");
+        // All three platform log locations must be documented.
+        assert!(text.contains(".local/state"), "must give the Linux log path");
+        assert!(text.contains("Library/Logs"), "must give the macOS log path");
+        assert!(text.contains("LOCALAPPDATA"), "must give the Windows log path");
+    }
+
+    #[test]
+    fn test_extending_points_to_docs_not_inline_abi() {
+        let mut p = provider();
+        p.push_path("Extending Sicompass");
+        let text = joined(&p.fetch());
+        assert!(text.contains("lib/lib_sales_demo/"), "must point to the reference program");
+        assert!(
+            text.contains("Rust") && text.contains("TypeScript") && text.contains("ProviderOps"),
+            "must mention Rust (the standard), TypeScript, and C/ProviderOps plugin kinds"
+        );
+    }
+
+    // Path mechanics
 
     #[test]
     fn test_unknown_path_returns_empty() {
         let mut p = provider();
         p.push_path("NonExistentSection");
-        let elems = p.fetch();
-        assert!(elems.is_empty());
-    }
-
-    // Interactive elements
-
-    #[test]
-    fn test_interactive_elements_contains_checkbox() {
-        let mut p = provider();
-        p.push_path("Interactive Elements");
-        let elems = p.fetch();
-        let has_checked_checkbox = elems.iter().any(|e| {
-            e.as_str().map_or(false, |s| s.starts_with("<checkbox checked>"))
-        });
-        assert!(has_checked_checkbox);
+        assert!(p.fetch().is_empty());
     }
 
     #[test]
-    fn test_interactive_elements_contains_radio_group() {
+    fn test_nested_path_round_trips() {
+        // A translated, display-stripped branch key must resolve back to its
+        // children (the path the app records when you navigate in).
         let mut p = provider();
-        p.push_path("Interactive Elements");
+        p.set_current_path("/Shortcuts at a glance/General mode");
         let elems = p.fetch();
-        let has_radio = elems.iter().any(|e| {
-            e.as_obj().map_or(false, |o| o.key.starts_with("<radio>"))
-        });
-        assert!(has_radio);
+        assert!(!elems.is_empty());
+        assert!(elems.iter().all(|e| e.is_str()), "General mode holds only shortcut leaves");
     }
-
-    #[test]
-    fn test_interactive_elements_contains_input() {
-        let mut p = provider();
-        p.push_path("Interactive Elements");
-        let elems = p.fetch();
-        let has_input = elems.iter().any(|e| {
-            e.as_str().map_or(false, |s| s.contains("<input>"))
-        });
-        assert!(has_input);
-    }
-
-    #[test]
-    fn test_interactive_elements_contains_image() {
-        let mut p = provider();
-        p.push_path("Interactive Elements");
-        let elems = p.fetch();
-        let has_image = elems.iter().any(|e| {
-            e.as_str().map_or(false, |s| s.contains("<image>"))
-        });
-        assert!(has_image);
-    }
-
-    #[test]
-    fn test_input_example_path_round_trips() {
-        // Navigating Right into the "+i input example <input></input>" Obj
-        // pushes the *stripped* display key as the path segment. Restoring
-        // that path (on tab-switch / app restart) must still resolve to the
-        // Obj's I_PLACEHOLDER child, otherwise the saved cursor collapses out
-        // of the Obj after a close/reopen cycle.
-        let stripped =
-            sicompass_sdk::tags::strip_display("+i input example <input></input>");
-        let mut p = provider();
-        p.push_path("Interactive Elements");
-        p.push_path(&stripped);
-        let elems = p.fetch();
-        assert_eq!(elems.len(), 1, "expected the I_PLACEHOLDER child to resolve");
-        assert!(
-            elems[0].as_str().map_or(false, |s| s == I_PLACEHOLDER),
-            "child should be the I_PLACEHOLDER leaf, got: {:?}",
-            elems[0]
-        );
-    }
-
-    // Pop path
 
     #[test]
     fn test_pop_path_returns_to_root() {
         let mut p = provider();
-        p.push_path("Navigation");
+        p.push_path("The programs");
         p.pop_path();
         assert_eq!(p.current_path(), "/");
-        let elems = p.fetch();
-        // Should return all top-level sections again
-        assert!(elems.len() > 5);
-    }
-
-    #[test]
-    fn test_pop_path_from_nested() {
-        let mut p = provider();
-        p.push_path("Navigation");
-        p.push_path("Modes");
-        p.pop_path();
-        assert_eq!(p.current_path(), "/Navigation");
-        let elems = p.fetch();
-        // Should return Navigation's children
-        let keys: Vec<&str> = elems.iter()
-            .filter_map(|e| e.as_obj().map(|o| o.key.as_str()))
-            .collect();
-        assert!(keys.contains(&"Moving Around"));
-    }
-
-    // set_current_path
-
-    #[test]
-    fn test_set_current_path() {
-        let mut p = provider();
-        p.set_current_path("/Navigation/Modes");
-        let elems = p.fetch();
-        assert!(!elems.is_empty());
-        assert!(elems[0].is_str());
-    }
-
-    // Undo and Redo section
-
-    #[test]
-    fn test_undo_and_redo_section_present_at_root() {
-        let mut p = provider();
-        let elems = p.fetch();
-        let keys: Vec<&str> = elems
-            .iter()
-            .filter_map(|e| e.as_obj().map(|o| o.key.as_str()))
-            .collect();
-        assert!(
-            keys.iter().any(|k| *k == "Undo and Redo"),
-            "Undo and Redo section must appear at the root, got: {:?}",
-            keys
-        );
-    }
-
-    #[test]
-    fn test_undo_and_redo_section_has_subsections() {
-        let mut p = provider();
-        p.push_path("Undo and Redo");
-        let elems = p.fetch();
-        let section_keys: Vec<&str> = elems
-            .iter()
-            .filter_map(|e| e.as_obj().map(|o| o.key.as_str()))
-            .collect();
-        assert!(section_keys.contains(&"What gets recorded"));
-        assert!(section_keys.contains(&"What cannot be undone"));
-        assert!(section_keys.contains(&"Walking the path back"));
-    }
-
-    // Tabs section (added 2026-05; renamed from "Tabs and Windows" after the
-    // Ctrl+N spawn-new-window shortcut was reverted — multi-window no longer
-    // exists, so the section and its tests no longer mention windows/Ctrl+N).
-
-    #[test]
-    fn test_tabs_section_present_under_navigation() {
-        let mut p = provider();
-        p.push_path("Navigation");
-        let elems = p.fetch();
-        let section_keys: Vec<&str> = elems
-            .iter()
-            .filter_map(|e| e.as_obj().map(|o| o.key.as_str()))
-            .collect();
-        assert!(
-            section_keys.contains(&"Tabs"),
-            "Tabs must appear under Navigation, got: {:?}",
-            section_keys
-        );
-    }
-
-    #[test]
-    fn test_tabs_section_mentions_core_shortcuts() {
-        let mut p = provider();
-        p.set_current_path("/Navigation/Tabs");
-        let elems = p.fetch();
-        let joined: String = elems
-            .iter()
-            .filter_map(|e| e.as_str().map(|s| s.to_owned()))
-            .collect::<Vec<_>>()
-            .join("\n");
-        for token in ["Ctrl+T", "Ctrl+W", "Ctrl+Tab"] {
-            assert!(
-                joined.contains(token),
-                "Tabs section must mention {token}, content was:\n{joined}"
-            );
-        }
-        // Ctrl+N (spawn new window) was reverted; it must no longer appear.
-        assert!(
-            !joined.contains("Ctrl+N"),
-            "Tabs section must not mention the reverted Ctrl+N window shortcut, content was:\n{joined}"
-        );
-    }
-
-    #[test]
-    fn test_tabs_section_mentions_busy_close_confirmation() {
-        let mut p = provider();
-        p.set_current_path("/Navigation/Tabs");
-        let elems = p.fetch();
-        let joined: String = elems
-            .iter()
-            .filter_map(|e| e.as_str().map(|s| s.to_owned()))
-            .collect::<Vec<_>>()
-            .join("\n")
-            .to_lowercase();
-        assert!(
-            joined.contains("busy") && joined.contains("confirmation"),
-            "Tabs section must describe the busy-tab close confirmation, content was:\n{joined}"
-        );
-    }
-
-    #[test]
-    fn test_tabs_section_describes_mru_switcher() {
-        let mut p = provider();
-        p.set_current_path("/Navigation/Tabs");
-        let elems = p.fetch();
-        let joined: String = elems
-            .iter()
-            .filter_map(|e| e.as_str().map(|s| s.to_owned()))
-            .collect::<Vec<_>>()
-            .join("\n")
-            .to_lowercase();
-        // The `t` sticky palette and the most-recently-used ordering both need
-        // to be documented now that Ctrl+Tab opens the MRU switcher overlay.
-        assert!(
-            joined.contains("most-recently-used"),
-            "Tabs section must describe most-recently-used ordering, content was:\n{joined}"
-        );
-        assert!(
-            joined.contains("filter"),
-            "Tabs section must describe type-to-filter in the switcher, content was:\n{joined}"
-        );
-    }
-
-    // Window controls (added 2026-06): borderless titlebar + the `c` palette.
-
-    #[test]
-    fn test_window_controls_section_present_under_navigation() {
-        let mut p = provider();
-        p.push_path("Navigation");
-        let elems = p.fetch();
-        let section_keys: Vec<&str> = elems
-            .iter()
-            .filter_map(|e| e.as_obj().map(|o| o.key.as_str()))
-            .collect();
-        assert!(
-            section_keys.contains(&"Window controls"),
-            "Window controls must appear under Navigation, got: {:?}",
-            section_keys
-        );
-    }
-
-    #[test]
-    fn test_window_controls_section_describes_palette_and_buttons() {
-        let mut p = provider();
-        p.set_current_path("/Navigation/Window controls");
-        let elems = p.fetch();
-        let joined: String = elems
-            .iter()
-            .filter_map(|e| e.as_str().map(|s| s.to_owned()))
-            .collect::<Vec<_>>()
-            .join("\n")
-            .to_lowercase();
-        // The `c` palette is the keyboard route; the titlebar buttons are the
-        // pointer route. Both, plus the three actions, must be documented.
-        assert!(joined.contains("minimize") && joined.contains("maximize") && joined.contains("close"),
-            "Window controls section must list minimize/maximize/close, content was:\n{joined}");
-        assert!(joined.contains("titlebar"),
-            "Window controls section must mention the custom titlebar, content was:\n{joined}");
-        assert!(joined.contains("filter"),
-            "Window controls section must describe type-to-filter in the c palette, content was:\n{joined}");
-    }
-
-    #[test]
-    fn test_tab_switcher_labels_by_pid_and_breadcrumb() {
-        let mut p = provider();
-        p.set_current_path("/Navigation/Tabs");
-        let elems = p.fetch();
-        let joined: String = elems
-            .iter()
-            .filter_map(|e| e.as_str().map(|s| s.to_owned()))
-            .collect::<Vec<_>>()
-            .join("\n")
-            .to_lowercase();
-        assert!(
-            joined.contains("process id") && joined.contains("breadcrumb"),
-            "Tabs section must describe the switcher's shell-PID + breadcrumb labels, content was:\n{joined}"
-        );
-    }
-
-    // Interactive Elements: text-rendering showcase (added 2026-06) — the
-    // dynamic glyph atlas + font fallback now render extended Unicode and emoji.
-    #[test]
-    fn test_text_and_emoji_showcase_renders_extended_unicode() {
-        let mut p = provider();
-        p.set_current_path("/Interactive Elements/Text and emoji");
-        let elems = p.fetch();
-        let joined: String = elems
-            .iter()
-            .filter_map(|e| e.as_str().map(|s| s.to_owned()))
-            .collect::<Vec<_>>()
-            .join("\n");
-        // Literal samples must survive into the content so they actually render.
-        assert!(joined.contains('😀') || joined.contains('🎉'),
-            "Text and emoji section must contain a color emoji, content was:\n{joined}");
-        assert!(joined.contains("café") || joined.contains("Zürich"),
-            "section must contain accented Latin, content was:\n{joined}");
-        assert!(joined.contains('─') && joined.contains('│'),
-            "section must contain box-drawing characters, content was:\n{joined}");
-    }
-
-    // Accessibility: per-item screen-reader language (added 2026-05)
-
-    #[test]
-    fn test_accessibility_section_mentions_per_item_language() {
-        let mut p = provider();
-        p.push_path("Accessibility");
-        let elems = p.fetch();
-        let joined: String = elems
-            .iter()
-            .filter_map(|e| e.as_str().map(|s| s.to_owned()))
-            .collect::<Vec<_>>()
-            .join("\n")
-            .to_lowercase();
-        assert!(
-            joined.contains("language"),
-            "Accessibility section must describe per-item language detection, content was:\n{joined}"
-        );
-    }
-
-    // Editing: Enter appends only in editor providers (added 2026-06)
-
-    #[test]
-    fn test_editing_section_mentions_enter_append() {
-        let mut p = provider();
-        p.push_path("Editing");
-        let elems = p.fetch();
-        let joined: String = elems
-            .iter()
-            .filter_map(|e| e.as_str().map(|s| s.to_owned()))
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(
-            joined.contains("Enter") && joined.to_lowercase().contains("append"),
-            "Editing section must describe Enter-to-append in editor providers, content was:\n{joined}"
-        );
-    }
-
-    // Updates section (added 2026-05)
-
-    #[test]
-    fn test_updates_section_present_under_configuration() {
-        let mut p = provider();
-        p.push_path("Configuration");
-        let elems = p.fetch();
-        let section_keys: Vec<&str> = elems
-            .iter()
-            .filter_map(|e| e.as_obj().map(|o| o.key.as_str()))
-            .collect();
-        assert!(
-            section_keys.contains(&"Updates"),
-            "Updates must appear under Configuration, got: {:?}",
-            section_keys
-        );
-    }
-
-    #[test]
-    fn test_updates_section_mentions_ctrl_u_and_signature_verification() {
-        let mut p = provider();
-        p.set_current_path("/Configuration/Updates");
-        let elems = p.fetch();
-        let joined: String = elems
-            .iter()
-            .filter_map(|e| e.as_str().map(|s| s.to_owned()))
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(joined.contains("Ctrl+U"));
-        assert!(joined.contains("SHA-256"));
-        assert!(joined.contains("ed25519"));
+        assert_eq!(section_keys(&p.fetch()).len(), 7);
     }
 }
 

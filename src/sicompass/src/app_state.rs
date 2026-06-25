@@ -104,7 +104,7 @@ pub const PALETTE_LIGHT: ColorPalette = ColorPalette {
 // ---------------------------------------------------------------------------
 
 /// Navigation / edit mode. Vim-style modes (general/insert/normal/visual)
-/// apply to every provider; operator vs editor behavior is decided by
+/// apply to every provider; general vs editor behavior is decided by
 /// `Provider::has_editor_semantics()`, not by the variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Coordinate {

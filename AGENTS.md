@@ -30,6 +30,14 @@ In `README.md` and the tutorial content (`lib/lib_tutorial/src/lib.rs`), do not
 use em dashes or semicolons. Use commas instead, or split into separate
 sentences (parentheses are fine for true parentheticals).
 
+### Tutorial authoring
+
+When writing or restructuring the in-app tutorial (`lib/lib_tutorial/`), follow
+the rules in [docs/tutorial-guidelines.md](docs/tutorial-guidelines.md): teach by
+doing, one idea per step, confirm via the screen-reader announcement, keep a short
+guided path separate from the reference manual, make keyboard shortcuts lead each
+line, and add every new string to all four locale bundles.
+
 ## Testing
 
 - After implementing changes, always run relevant tests before finishing.
