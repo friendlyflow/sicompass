@@ -92,6 +92,7 @@ mode-visual = visueller Modus
 mode-search = Suche
 mode-extended-search = erweiterte Suche
 mode-command = Befehl
+mode-controls = Steuerung
 mode-scroll = Scroll-Modus
 mode-scroll-search = Scroll-Suche
 mode-scroll-prefix-search = Scroll-Präfixsuche

@@ -92,6 +92,7 @@ mode-visual = visuele modus
 mode-search = zoeken
 mode-extended-search = uitgebreid zoeken
 mode-command = commando
+mode-controls = bediening
 mode-scroll = scrolmodus
 mode-scroll-search = scrolzoeken
 mode-scroll-prefix-search = scrolvoorvoegsel zoeken
