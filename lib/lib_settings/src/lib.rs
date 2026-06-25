@@ -98,6 +98,10 @@ pub struct SettingsProvider {
     /// Version string per section (keyed by display name). Rendered as a
     /// passive child of the section. Populated by `set_section_version`.
     section_versions: HashMap<String, String>,
+    /// True when `init()` found no settings.json on disk (first launch). Drives
+    /// the one-time onboarding: the `onboarding` checkbox is force-enabled and
+    /// the app focuses the onboarding line.
+    first_run: bool,
 }
 
 impl SettingsProvider {
@@ -120,6 +124,7 @@ impl SettingsProvider {
             server_form_state: HashMap::new(),
             store_error: None,
             section_versions: HashMap::new(),
+            first_run: false,
         }
     }
 
@@ -143,6 +148,7 @@ impl SettingsProvider {
             server_form_state: HashMap::new(),
             store_error: None,
             section_versions: HashMap::new(),
+            first_run: false,
         }
     }
 
@@ -217,6 +223,12 @@ impl SettingsProvider {
 
     fn config_path(&self) -> Option<PathBuf> {
         self.config_path_override.clone().or_else(|| platform::main_config_path())
+    }
+
+    /// True when `init()` ran against a missing settings.json (first launch).
+    /// The app reads this to focus the onboarding line on first run.
+    pub fn was_first_run(&self) -> bool {
+        self.first_run
     }
 
     // ---- Registration API (mirrors settingsAdd* functions in C) -----------
@@ -761,18 +773,27 @@ impl Provider for SettingsProvider {
         // sicompass section: color scheme radio group
         let is_dark = self.color_scheme == "dark";
         let mut sc_obj = FfonElement::new_obj(Self::localize_section_name("sicompass"));
+
+        // Every sicompass child (version line, onboarding guide, color-scheme
+        // radio, other radios, checkboxes, text inputs) goes into one list that
+        // is sorted alphanumerically by displayed text, so the order matches what
+        // the user reads on screen regardless of registration order or language.
+        let prio = self.priority_section.clone();
+        let mut entries: Vec<(String, FfonElement)> = Vec::new();
+
         if let Some(v) = self.section_versions.get("sicompass") {
-            sc_obj.as_obj_mut().unwrap().push(FfonElement::Str(format!(
-                "{}: {}",
-                localize::t("settings-label-version"),
-                v
-            )));
+            let line = format!("{}: {}", localize::t("settings-label-version"), v);
+            entries.push((line.clone(), FfonElement::Str(line)));
         }
+        // Onboarding guide: a passive read-only `Str`. The app focuses it on
+        // first run (it locates the line by content, not position, so sorting it
+        // in alongside everything else is fine).
+        let onboarding = localize::t("settings-onboarding-body");
+        entries.push((onboarding.clone(), FfonElement::Str(onboarding)));
+
         {
-            let mut radio = FfonElement::new_obj(format!(
-                "<radio>{}",
-                localize::t("settings-radio-color-scheme")
-            ));
+            let title = localize::t("settings-radio-color-scheme");
+            let mut radio = FfonElement::new_obj(format!("<radio>{title}"));
             let ro = radio.as_obj_mut().unwrap();
             let dark_label = Self::localize_option_label("colorScheme", "dark");
             let light_label = Self::localize_option_label("colorScheme", "light");
@@ -786,26 +807,22 @@ impl Provider for SettingsProvider {
             } else {
                 format!("<checked>{light_label}")
             }));
-            sc_obj.as_obj_mut().unwrap().push(radio);
+            entries.push((title, radio));
         }
-        // Also add any registered sicompass section entries
-        let prio = self.priority_section.clone();
         for e in &self.checkbox_entries {
             if e.section == "sicompass" {
                 let tag = if e.checked { "<checkbox checked>" } else { "<checkbox>" };
-                sc_obj.as_obj_mut().unwrap().push(FfonElement::Str(format!(
-                    "{}{}",
-                    tag,
-                    localize::t(&e.label)
-                )));
+                let displayed = localize::t(&e.label);
+                entries.push((
+                    displayed.clone(),
+                    FfonElement::Str(format!("{tag}{displayed}")),
+                ));
             }
         }
         for e in &self.radio_entries {
             if e.section == "sicompass" && e.config_key != "colorScheme" {
-                let mut radio = FfonElement::new_obj(format!(
-                    "<radio>{}",
-                    localize::t(&e.radio_key)
-                ));
+                let title = localize::t(&e.radio_key);
+                let mut radio = FfonElement::new_obj(format!("<radio>{title}"));
                 let ro = radio.as_obj_mut().unwrap();
                 for opt in &e.options {
                     let label = Self::localize_option_label(&e.config_key, opt);
@@ -816,17 +833,27 @@ impl Provider for SettingsProvider {
                     };
                     ro.push(FfonElement::Str(s));
                 }
-                sc_obj.as_obj_mut().unwrap().push(radio);
+                entries.push((title, radio));
             }
         }
         for e in &self.text_entries {
             if e.section == "sicompass" {
-                sc_obj.as_obj_mut().unwrap().push(FfonElement::Str(format!(
-                    "{}: {}",
+                entries.push((
                     localize::t(&e.label),
-                    Self::text_entry_value_tag(e)
-                )));
+                    FfonElement::Str(format!(
+                        "{}: {}",
+                        localize::t(&e.label),
+                        Self::text_entry_value_tag(e)
+                    )),
+                ));
             }
+        }
+
+        entries.sort_by(|(a, _), (b, _)| {
+            a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase())
+        });
+        for (_, el) in entries {
+            sc_obj.as_obj_mut().unwrap().push(el);
         }
         result.push(sc_obj);
 
@@ -854,6 +881,9 @@ impl Provider for SettingsProvider {
             if path.exists() {
                 self.load_config(&path);
             } else {
+                // First launch: no settings.json yet. Seed the default program
+                // set; the app focuses the onboarding guide on first run.
+                self.first_run = true;
                 self.seed_priority_section_on_disk(&path);
             }
         }
@@ -1346,6 +1376,78 @@ mod tests {
             c.as_str().map_or(false, |s| s.contains("<checked>") && s.contains("dark"))
         });
         assert!(dark_checked);
+    }
+
+    // --- onboarding guide ---
+
+    /// Helper: the children of the rendered "sicompass" section.
+    fn sicompass_children(p: &mut SettingsProvider) -> Vec<FfonElement> {
+        let elems = p.fetch();
+        elems.into_iter()
+            .find(|e| e.as_obj().map_or(false, |o| o.key == "sicompass"))
+            .unwrap()
+            .as_obj().unwrap().children.clone()
+    }
+
+    #[test]
+    fn onboarding_body_renders_in_sicompass_section() {
+        let body = localize::t("settings-onboarding-body");
+        let mut p = headless();
+        assert!(sicompass_children(&mut p).iter().any(|c| c.as_str() == Some(body.as_str())),
+            "onboarding guide should always render in the sicompass section");
+    }
+
+    #[test]
+    fn first_run_is_flagged_when_file_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let mut p = SettingsProvider::new_headless().with_config_path(path);
+
+        p.init();
+
+        assert!(p.was_first_run(), "missing settings.json is a first run");
+        let body = localize::t("settings-onboarding-body");
+        let shown = sicompass_children(&mut p).iter()
+            .any(|c| c.as_str() == Some(body.as_str()));
+        assert!(shown, "onboarding guide should render on first run");
+    }
+
+    #[test]
+    fn existing_file_is_not_treated_as_first_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, r#"{"sicompass":{"colorScheme":"dark"}}"#).unwrap();
+        let mut p = SettingsProvider::new_headless().with_config_path(path);
+
+        p.init();
+
+        assert!(!p.was_first_run(), "an existing settings.json is not a first run");
+    }
+
+    #[test]
+    fn sicompass_entries_sorted_alphanumerically() {
+        let _g = locale_test_lock();
+        sicompass_sdk::localize::set_locale("en-US");
+        let mut p = headless();
+        // Registration order deliberately not alphabetical.
+        p.add_radio("sicompass", "settings-radio-font-scale", "fontScale",
+            &["1.00", "1.25"], "1.00");
+        p.add_checkbox("sicompass", "settings-checkbox-auto-update-check", "autoUpdateCheck", true);
+
+        let children = sicompass_children(&mut p);
+        // Skip the leading passive lines (version, onboarding); collect the
+        // displayed label of every interactive entry that follows.
+        let labels: Vec<String> = children.iter().filter_map(|c| match c {
+            FfonElement::Obj(o) => Some(o.key.replace("<radio>", "")),
+            FfonElement::Str(s) if s.starts_with("<checkbox") =>
+                Some(s.trim_start_matches("<checkbox checked>").trim_start_matches("<checkbox>").to_owned()),
+            _ => None,
+        }).collect();
+
+        let mut sorted = labels.clone();
+        sorted.sort_by(|a, b| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()));
+        assert_eq!(labels, sorted, "sicompass entries must render in alphanumeric label order");
+        sicompass_sdk::localize::set_locale("en-US");
     }
 
     /// PoC: the color-scheme radio key text flips when the active locale

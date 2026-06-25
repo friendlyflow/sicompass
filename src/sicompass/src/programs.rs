@@ -16,7 +16,7 @@
 use crate::app_state::AppRenderer;
 use crate::plugin_loader::{NativePlugin, ScriptProvider};
 use crate::plugin_manifest::{DiscoveredPlugin, PluginManifest, PluginType, discover_user_plugins};
-use sicompass_sdk::ffon::FfonElement;
+use sicompass_sdk::ffon::{FfonElement, IdArray};
 use sicompass_sdk::provider::Provider;
 use sicompass_updater::UpdateEvent;
 use std::path::{Path, PathBuf};
@@ -199,10 +199,13 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
     // Toggling at runtime only affects the next launch — we don't spawn /
     // cancel the updater thread on the fly.
     settings.add_checkbox_setting("sicompass", "settings-checkbox-auto-update-check", "autoUpdateCheck", true);
+    // Default coupled to read_font_scale's fallback so the radio selection and
+    // the actual on-screen scale always agree — change DEFAULT_FONT_SCALE alone.
+    let default_font_scale = format!("{DEFAULT_FONT_SCALE:.2}");
     settings.add_radio_setting(
         "sicompass", "settings-radio-font-scale", "fontScale",
         &["1.00", "1.25", "1.50", "1.75", "2.00", "2.25", "2.50"],
-        "1.00",
+        &default_font_scale,
     );
     settings.add_radio_setting(
         "sicompass", "settings-radio-language", "language",
@@ -233,6 +236,38 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
     register_provider(renderer, settings);
 
     queue
+}
+
+/// Move `current_id` onto the onboarding line in the settings provider's
+/// `sicompass` section, so it is the focused item on first launch. Called by
+/// `AppState::new` after `load_tabs_state` (which would otherwise reset the
+/// cursor to the bootstrap tab's default).
+///
+/// Layout contract from `SettingsProvider::fetch` (settings is the last
+/// provider): the `sicompass` section is the first child of the settings root.
+/// Its children are sorted, so the onboarding line is matched by content rather
+/// than position: it is the one untagged `Str` (not a radio/checkbox tag) that
+/// is not the "version: <ver>" line. The SDK boundary forbids importing
+/// `lib_settings`, and this degrades to the default focus if no match is found.
+pub fn focus_onboarding(renderer: &mut AppRenderer) {
+    let Some(settings_idx) = renderer.ffon.len().checked_sub(1) else { return };
+    let Some(root) = renderer.ffon.get(settings_idx).and_then(|e| e.as_obj()) else { return };
+    // sicompass section is the first child of the settings root.
+    let Some(section) = root.children.first().and_then(|e| e.as_obj()) else { return };
+    // The version line ends with the app version we passed to set_section_version;
+    // the onboarding guide is the other untagged Str.
+    let body_idx = section.children.iter().position(|c| match c {
+        FfonElement::Str(s) =>
+            !s.starts_with('<') && !s.trim_end().ends_with(env!("CARGO_PKG_VERSION")),
+        _ => false,
+    });
+    let Some(body_idx) = body_idx else { return };
+
+    let mut id = IdArray::new();
+    id.push(settings_idx);
+    id.push(0);
+    id.push(body_idx);
+    renderer.current_id = id;
 }
 
 /// Build and register the content providers (everything except the shared
@@ -805,12 +840,16 @@ pub fn apply_tabs_section(
     r.load_active_tab();
 }
 
+/// Default on-screen font scale when `sicompass.fontScale` is not set (matches
+/// the `fontScale` radio's default in `load_programs`).
+pub const DEFAULT_FONT_SCALE: f32 = 1.75;
+
 /// Read `sicompass.fontScale` from settings.json.
-/// Returns 1.0 if absent or unparseable. Clamped to [1.0, 2.5].
+/// Returns [`DEFAULT_FONT_SCALE`] if absent or unparseable. Clamped to [1.0, 2.5].
 pub fn read_font_scale() -> f32 {
-    let Some(path) = sicompass_sdk::platform::main_config_path() else { return 1.0 };
-    let Ok(data) = std::fs::read_to_string(&path) else { return 1.0 };
-    let Ok(root) = serde_json::from_str::<serde_json::Value>(&data) else { return 1.0 };
+    let Some(path) = sicompass_sdk::platform::main_config_path() else { return DEFAULT_FONT_SCALE };
+    let Ok(data) = std::fs::read_to_string(&path) else { return DEFAULT_FONT_SCALE };
+    let Ok(root) = serde_json::from_str::<serde_json::Value>(&data) else { return DEFAULT_FONT_SCALE };
     let raw = root.get("sicompass")
         .and_then(|v| v.as_object())
         .and_then(|s| s.get("fontScale"))
@@ -820,7 +859,7 @@ pub fn read_font_scale() -> f32 {
         });
     raw.and_then(|s| s.parse::<f32>().ok())
         .map(|f| f.clamp(1.0, 2.5))
-        .unwrap_or(1.0)
+        .unwrap_or(DEFAULT_FONT_SCALE)
 }
 
 /// Read `remoteUrl` and `apiKey` from settings.json for the given section.
@@ -1607,6 +1646,58 @@ mod tests {
         register_provider(&mut r, Box::new(MockProv::new("test")));
         assert_eq!(r.providers.len(), 1);
         assert_eq!(r.ffon.len(), 1);
+    }
+
+    // --- focus_onboarding ---
+
+    /// Build a renderer whose last provider mimics the settings FFON layout:
+    /// settings root → sicompass section (first child) → sorted children. The
+    /// version line uses the real crate version so `focus_onboarding` can tell
+    /// it apart from the onboarding body. Order here is deliberately not
+    /// version-first, to prove the match is by content, not position.
+    fn renderer_with_settings_layout() -> AppRenderer {
+        let mut r = AppRenderer::new();
+        // A content provider at index 0 (settings is always last).
+        r.ffon.push(FfonElement::new_obj("file browser"));
+
+        let version_line = format!("version: {}", env!("CARGO_PKG_VERSION"));
+        let mut sicompass = FfonElement::new_obj("sicompass");
+        let sc = sicompass.as_obj_mut().unwrap();
+        sc.push(FfonElement::Str("<checkbox>auto update".to_owned())); // #0 tagged
+        sc.push(FfonElement::Str(version_line));                       // #1 version
+        sc.push(FfonElement::Str(
+            "Use Up and Down to move through the list.".to_owned(),    // #2 = body
+        ));
+
+        let mut settings = FfonElement::new_obj("settings");
+        settings.as_obj_mut().unwrap().push(sicompass);
+        r.ffon.push(settings);
+        r
+    }
+
+    #[test]
+    fn focus_onboarding_targets_the_body_line() {
+        let mut r = renderer_with_settings_layout();
+        focus_onboarding(&mut r);
+        // [settings_idx = 1, sicompass = first child, body at child index 2]
+        assert_eq!(r.current_id.as_slice(), &[1, 0, 2]);
+    }
+
+    #[test]
+    fn focus_onboarding_noop_without_body() {
+        let mut r = AppRenderer::new();
+        let mut settings = FfonElement::new_obj("settings");
+        let mut sicompass = FfonElement::new_obj("sicompass");
+        // Only the version line (real crate version) — no onboarding body.
+        sicompass.as_obj_mut().unwrap().push(FfonElement::Str(
+            format!("version: {}", env!("CARGO_PKG_VERSION")),
+        ));
+        settings.as_obj_mut().unwrap().push(sicompass);
+        r.ffon.push(settings);
+        let before = r.current_id.as_slice().to_vec();
+        focus_onboarding(&mut r);
+        assert_eq!(r.current_id.as_slice(), before.as_slice(),
+            "focus is left untouched when there is no onboarding line");
     }
 
     #[test]

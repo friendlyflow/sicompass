@@ -42,6 +42,7 @@ settings-label-version = Version
 settings-checkbox-maximized = maximiert
 settings-checkbox-shoulder-surfing-protection = Sichtschutz (leerer Bildschirm)
 settings-checkbox-auto-update-check = beim Start nach App- und Plugin-Updates suchen
+settings-onboarding-body = Mit Hoch und Runter bewegst du dich durch die Liste. Drücke zweimal Home, um zur Wurzel zu gelangen und alle deine verfügbaren Programme zu sehen. Rechts öffnet einen Eintrag mit einem Pluszeichen (+), Links geht zum übergeordneten Eintrag, Enter aktiviert ein Kontrollkästchen, Escape geht zurück.
 settings-radio-font-scale = Schriftgröße
 settings-radio-sort-order = Sortierreihenfolge
 
