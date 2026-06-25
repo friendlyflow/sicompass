@@ -1711,7 +1711,7 @@ fn update_view(app: &mut AppState) {
         let caret_h = lh - 2.0 * crate::text::TEXT_PADDING;
 
         if in_insert_mode {
-            // Insert/editor mode caret using stored element position
+            // Insert mode caret using stored element position
             let buf = insert_buf.as_str();
             let pos = insert_cursor.min(buf.len());
             // Count newlines before cursor

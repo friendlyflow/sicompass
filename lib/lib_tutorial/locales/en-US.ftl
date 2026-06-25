@@ -1,335 +1,121 @@
-# Tutorial provider strings — English (source/fallback).
+# Tutorial provider strings, English (source/fallback).
+# The tutorial is short and guided. See docs/tutorial-guidelines.md.
+# Prose rule: no em dashes, no semicolons. Use commas or separate sentences.
 
 tutorial-display-name = tutorial --> here you can go up, down or right
 
-# Tutorial content nodes. Numbered keys are stable; consult the SECTIONS
-# tree in src/lib.rs for the position-to-content mapping.
+# ---------------------------------------------------------------------------
+# 1. Getting Started (guided do-and-confirm)
+# ---------------------------------------------------------------------------
+tutorial-sec-getting-started = Getting Started --> go right to visit
+tutorial-gs-intro = Welcome. This is a short, hands-on start. Do each step as you read it, every step here is safe and you can repeat it as often as you like. Press the Down arrow now to begin.
+tutorial-gs-moved = You pressed Down and your screen reader announced this line. Up and Down move the selection through a list. The next item below is a section. Move Down to it, then press the Right arrow to step inside.
+tutorial-gs-step = Step inside this section, press Right
+tutorial-gs-inside = You stepped in with the Right arrow. This is one level deeper. Everything in Sicompass is a tree of lists you move through this way. Press the Left arrow to go back out.
+tutorial-gs-back = Up and Down move between items here, Right goes deeper, and Left comes back. Press Left now to return to Getting Started.
+tutorial-gs-checkbox-intro = Welcome back. Now try a checkbox. Move Down to the checkbox below and press Enter. Your screen reader announces checked or unchecked each time.
+tutorial-gs-checkbox = <checkbox>Practice checkbox, press Enter to toggle me
+tutorial-gs-input-intro = Next, edit some text. Move Down to the line below, press i to start typing, change the text, then press Enter to save or Escape to cancel.
+tutorial-gs-input = Edit me, press i or a then Enter: <input>hello world</input>
+tutorial-gs-modes = That is the core of getting around. A few more keys to try from here: colon opens commands, Tab searches this list, S starts scroll mode, and w speaks where you are. Press Escape to leave any of them.
+tutorial-gs-done = You are ready. The sections below explain how Sicompass works and list every key. Browse them in any order, and press Left at any time to return to the root. Happy navigating.
 
-# Branch (section) headings
-tutorial-branch-001 = Welcome --> here you can go up, down, right or left
-tutorial-branch-002 = Navigation
-tutorial-branch-003 = Moving Around
-tutorial-branch-004 = Modes
-tutorial-branch-005 = Accessibility
-tutorial-branch-006 = Editing
-tutorial-branch-007 = Undo and Redo
-tutorial-branch-008 = What gets recorded
-tutorial-branch-009 = What cannot be undone
-tutorial-branch-010 = Walking the path back
-tutorial-branch-011 = Commands
-tutorial-branch-012 = Programs
-tutorial-branch-013 = File Browser
-tutorial-branch-014 = Text Editor
-tutorial-branch-015 = Sales Demo
-tutorial-branch-016 = Web Browser
-tutorial-branch-017 = Terminal
-tutorial-branch-018 = Plugin Store
-tutorial-branch-019 = Remote Services
-tutorial-branch-020 = Chat Client
-tutorial-branch-021 = Email Client
-tutorial-branch-022 = Settings
-tutorial-branch-023 = Interactive Elements
-tutorial-branch-024 = <checkbox checked>Navigable checkbox (go inside with Right key)
-tutorial-branch-025 = <checkbox>Another navigable checkbox (unchecked)
-tutorial-branch-026 = +i input example <input></input>
-tutorial-branch-027 = <radio>Pick a color
-tutorial-branch-028 = __LINK_WITH_PREFIX_SUFFIX__
-tutorial-branch-029 = Configuration
-tutorial-branch-030 = Save and Load
-tutorial-branch-031 = Settings File
-tutorial-branch-032 = Plugin Configuration
-tutorial-branch-033 = Development
-tutorial-branch-034 = Creating a TypeScript Plugin
-tutorial-branch-035 = Creating a C Plugin
-tutorial-branch-036 = Provider Types
-tutorial-branch-037 = ProviderOps Functions
-tutorial-branch-038 = Data
-tutorial-branch-039 = Lifecycle
-tutorial-branch-040 = Navigation
-tutorial-branch-041 = File Operations
-tutorial-branch-042 = Commands
-tutorial-branch-043 = Events
-tutorial-branch-044 = Search
-tutorial-branch-045 = Element Tags
-tutorial-branch-046 = Next Steps
-tutorial-branch-047 = Tabs
-tutorial-branch-048 = Updates
-tutorial-branch-049 = Window controls
-tutorial-branch-050 = Text and emoji
+# ---------------------------------------------------------------------------
+# 2. Shortcuts at a glance (the single key reference, grouped by mode)
+# ---------------------------------------------------------------------------
+tutorial-sec-shortcuts = Shortcuts at a glance
+tutorial-sc-intro = Every key, grouped by the mode it works in. Each line leads with the key so it is the first thing spoken. You are in general mode unless you are editing text or inside a prompt.
+tutorial-sc-general = General mode
+tutorial-sc-gen-updown = Up and Down: move the selection within the current list.
+tutorial-sc-gen-rightleft = Right: step into the selected item. Left: step back out to the parent.
+tutorial-sc-gen-enter = Enter: activate the selected item, toggle a checkbox, or follow a link.
+tutorial-sc-gen-escape = Escape: leave the current mode and return to general mode.
+tutorial-sc-gen-page = PgUp and PgDown: move by one line so images and multi-line items are not skipped. Home and End: jump to the first or last item.
+tutorial-sc-gen-f5 = F5: refresh the active program, re-fetching the current view.
+tutorial-sc-gen-whereami = w: where am I, speak the focus position and the breadcrumb path to it.
+tutorial-sc-gen-meta = m: open the meta screen, a navigable list of the keyboard actions and hints available where you are.
+tutorial-sc-gen-dashboard = d: show the active program's dashboard image fullscreen, where one is offered.
+tutorial-sc-insert = Insert and edit mode
+tutorial-sc-in-i = i: insert, place the cursor at the start of the editable text.
+tutorial-sc-in-a = a: append, place the cursor at the end of the editable text.
+tutorial-sc-in-enter = Enter: confirm and save the edit. Escape: cancel and discard it.
+tutorial-sc-in-backspace = Backspace: delete the character before the cursor.
+tutorial-sc-command = Command and search
+tutorial-sc-cmd-colon = : (colon): open command mode, type a command name and press Enter to run it.
+tutorial-sc-cmd-tab = Tab: search and filter the current list as you type.
+tutorial-sc-cmd-ctrlf = Ctrl+F: extended search through all children, with results as a flat list you can jump to.
+tutorial-sc-cmd-scroll = S: scroll mode, flatten the list and its sublists into one continuous reading view.
+tutorial-sc-cmd-history = z: open the read-only history view of this tab's undo timeline.
+tutorial-sc-tabs = Tabs and window
+tutorial-sc-tab-new = Ctrl+T: open a new tab. Ctrl+W: close the current tab.
+tutorial-sc-tab-mru = Ctrl+Tab and Ctrl+Shift+Tab: step through tabs in most-recently-used order.
+tutorial-sc-tab-number = Ctrl+1 through Ctrl+9: jump straight to a tab by its number.
+tutorial-sc-tab-palette = t: open the tab switcher palette.
+tutorial-sc-tab-controls = c: open the window controls palette, minimize, maximize, or close the window.
+tutorial-sc-files = Files, undo, and save
+tutorial-sc-file-undo = Ctrl+Z: undo. Ctrl+Shift+Z: redo. Each tab keeps its own timeline.
+tutorial-sc-file-clipboard = Ctrl+C: copy. Ctrl+V: paste. Delete: delete the selected item.
+tutorial-sc-file-save = Ctrl+S: save. Ctrl+Shift+S: save as. Ctrl+O: open a saved configuration file.
+tutorial-sc-file-update = Ctrl+U: apply a staged app update.
 
-# Leaf paragraphs
-tutorial-leaf-001 = Welcome to Sicompass, a keyboard-driven interface for browsing and managing structured data.
-tutorial-leaf-002 = Every graphical interface is essentially a tree of lists. Sicompass makes that structure explicit and navigable entirely from the keyboard, eliminating the need for a mouse.
-tutorial-leaf-003 = This means one consistent way to navigate everything: files, documents, settings, web pages, and any data source built on top of it.
-tutorial-leaf-004 = Each top-level item you see at the root is a program (also called a provider). Providers plug into the same unified interface, so once you learn to navigate one, you can navigate them all.
-tutorial-leaf-005 = This tutorial is itself a provider. Everything you learn here, you're practicing right now by navigating through it.
-tutorial-leaf-006 = Use the Right arrow key to dive into any section, and Left to come back. Let's get started!
-tutorial-leaf-007 = Navigation in Sicompass works like a file manager: you move through a tree of items using the arrow keys. Every provider, whether it's a file browser, web browser, or this tutorial, uses the same navigation model.
-tutorial-leaf-008 = PgUp/PgDown: move the selection by one visual/hearable/feelable line, so images and multi-line items aren't skipped over
-tutorial-leaf-009 = Up key: move the selection up in the current list
-tutorial-leaf-010 = Down key: move the selection down in the current list
-tutorial-leaf-011 = Right key: go into the selected item (descend into its children)
-tutorial-leaf-012 = Left key: go back to the parent level (ascend one level up)
-tutorial-leaf-013 = Enter: confirm or activate the selected item (e.g. toggle a checkbox, open a link)
-tutorial-leaf-014 = Escape: exit the current mode and return to operator mode (e.g. cancel a search, close a prompt)
-tutorial-leaf-015 = F5: refresh the active provider's data (re-fetch the current view from disk, network, or whatever the provider is backed by)
-tutorial-leaf-016 = These six keys are all you need to navigate any content in Sicompass. The tree can be arbitrarily deep. Just keep pressing Right to go deeper, and Left to come back.
-tutorial-leaf-017 = Sicompass has several modes that change what your keyboard inputs do. You always start in operator mode.
-tutorial-leaf-018 = : (colon): enter command mode. Type a command name and press Enter to execute it. Commands are context-sensitive, each provider can offer its own commands.
-tutorial-leaf-019 = Tab: enter simple search mode. Start typing to filter items in the current list. Only items matching your search will be shown.
-tutorial-leaf-020 = S: switch to scroll mode. It flattens the current list and all of its sublists into one continuous, scrollable reading view. Each element shows a 'layer: X list: Y/Z' header (with its list prefix) and its content - text or image - below. Up/Down scroll the view. Tab searches the headers and Ctrl+F searches the content. Enter on a highlighted element jumps to it back in operator mode.
-tutorial-leaf-021 = Ctrl+F: enter extended search mode. This searches recursively through all children, not just the current level. Results are shown as a flat list you can jump to.
-tutorial-leaf-022 = z: open the history view, a navigable, read-only list of this tab's undo timeline. Escape leaves it. See the 'Undo and Redo' section.
-tutorial-leaf-265 = w: where am I. Speak the position of the focus. Your screen reader announces the header line (the mode, the layer, and the list position), then the breadcrumb path to where you are. This is the same path that Ctrl+F extended search and the tab switcher show.
-tutorial-leaf-023 = Sicompass has built-in screen reader support powered by AccessKit. If you use a screen reader, Sicompass works with it out of the box, no configuration needed.
-tutorial-leaf-024 = Screen reader support is available on all platforms: Linux (AT-SPI), macOS (VoiceOver), and Windows (Narrator, NVDA, JAWS).
-tutorial-leaf-025 = When you navigate up, down, or into items, the current element is automatically announced by your screen reader.
-tutorial-leaf-026 = Screen reader support activates automatically when a screen reader is detected. There is nothing to enable or configure.
-tutorial-leaf-256 = Each item is spoken in its own language. Sicompass detects the language of every item's text and tags it for the screen reader, so a French message inside an English interface is read with French pronunciation. Short or ambiguous items, and app-generated announcements, fall back to your interface language.
-tutorial-leaf-027 = Some items in Sicompass are editable. You can tell because they contain an <input> tag. For example, file names in the file browser or setting values can be edited inline.
-tutorial-leaf-028 = Press i to enter insert mode. Your cursor is placed at the beginning of the editable text, and you can type to replace or modify it.
-tutorial-leaf-029 = Press a to enter append mode. Your cursor is placed at the end of the editable text, so you can add to what's already there.
-tutorial-leaf-030 = While editing, type normally to change the text. Use Backspace to delete characters.
-tutorial-leaf-031 = Press Enter to confirm your edit and save the change.
-tutorial-leaf-032 = Press Escape to cancel the edit and discard your changes.
-tutorial-leaf-033 = Not all items are editable, only those marked with <input> tags by the provider. The file browser makes file and directory names editable. The settings provider makes configuration values editable.
-tutorial-leaf-257 = In editor providers, like the text editor and editable file lines, pressing Enter on an element appends a new empty element below it, ready to type into. Outside editor providers Enter never appends, it activates the selected item instead, and at the root list it does nothing.
-tutorial-leaf-034 = Ctrl+Z walks back through your actions. Ctrl+Shift+Z walks forward.
-tutorial-leaf-035 = Each tab keeps its own history, undoing in one tab leaves the others alone.
-tutorial-leaf-036 = Press z to open the history view: a navigable list of everything recorded in this tab, newest at the top. The row marked '> ' is what the next Ctrl+Z will undo. Rows marked with a dot have already been undone and are what Ctrl+Shift+Z will redo. Press Escape to leave the view.
-tutorial-leaf-037 = Level-changing navigation: stepping into an item with the Right key, or back out with Left. Each step is recorded, so Ctrl+Z walks the cursor back along the route you took. Moving the selection up or down within a list is not recorded, only steps that change which list you are looking at.
-tutorial-leaf-038 = Typed text. Successive characters within about half a second merge into one chunk, so each undo removes a word-sized piece rather than one letter at a time.
-tutorial-leaf-039 = Structural edits: creating, inserting, deleting, cutting, and pasting elements in the FFON tree.
-tutorial-leaf-040 = Text editor edits: creating, changing, and deleting individual lines inside an open file.
-tutorial-leaf-041 = Filesystem operations: creating, renaming, moving, and deleting files. Delete keeps a content snapshot up to 4 MiB so undo can restore the file even after the OS trash is emptied.
-tutorial-leaf-042 = Email IMAP operations: trash, archive, move, mark-read/unread, star/unstar. The Message-ID is captured so a moved email can still be found and moved back.
-tutorial-leaf-043 = Matrix chat operations: leaving a room, accepting or rejecting invites, kicking and banning members.
-tutorial-leaf-044 = Settings changes: text fields, radio buttons, and checkboxes write the old value into the timeline before applying the new one.
-tutorial-leaf-045 = Terminal commands that have already been executed, only the unsubmitted input line is undoable.
-tutorial-leaf-046 = Directory deletions larger than 4 MiB if the OS trash has been emptied, undo reports an error rather than corrupting state.
-tutorial-leaf-047 = IMAP operations where the server-side message has moved or been deleted by another client.
-tutorial-leaf-048 = Matrix posted messages can only be redacted on undo, recipients see 'message deleted' rather than the message vanishing.
-tutorial-leaf-049 = Undo retraces the route you took, not just your final edit. Because stepping in (Right) and out (Left) are recorded, Ctrl+Z walks the cursor back through the same items you visited.
-tutorial-leaf-050 = Creating a file or directory is a single undo step: the keystrokes you typed for its name collapse into that one step, so one Ctrl+Z removes the whole new item, name and all.
-tutorial-leaf-051 = Editing the text of an existing line is chunked instead: one Ctrl+Z removes roughly the last word-sized burst of typing rather than a single character.
-tutorial-leaf-052 = Ctrl+Shift+Z replays the same path forward, step for step.
-tutorial-leaf-053 = Commands let you perform actions beyond simple navigation and editing. Each provider can define its own set of commands.
-tutorial-leaf-054 = Press : (colon) to enter command mode. A command prompt appears at the bottom of the screen.
-tutorial-leaf-055 = Start typing the command name. Matching commands will appear as suggestions. Press Enter to select one.
-tutorial-leaf-056 = Some commands take additional input. For example, 'create file' in the file browser will prompt you for a filename.
-tutorial-leaf-057 = Common file browser commands:
-tutorial-leaf-058 = :create file - create a new file in the current directory
-tutorial-leaf-059 = :create directory - create a new directory in the current directory
-tutorial-leaf-060 = Providers can define any commands they want. Check each provider's command list by pressing : and browsing the suggestions.
-tutorial-leaf-061 = Programs (also called providers) are the building blocks of Sicompass. Each program turns a different data source into the same navigable tree structure.
-tutorial-leaf-062 = Programs appear as top-level items when you navigate to the root (press Left until you can't go further).
-tutorial-leaf-063 = You can configure which programs are loaded in Settings under 'Available programs'. Enable or disable them at any time, changes take effect instantly.
-tutorial-leaf-064 = The file browser turns your filesystem into a navigable tree. Directories become sections you can enter with the Right key. Files are leaf items.
-tutorial-leaf-065 = Browse your filesystem by navigating up, down, and into directories. The current path is shown at the top of the screen.
-tutorial-leaf-066 = Rename files and directories by pressing i (insert mode) on any item. The name becomes editable inline. Type the new name and press Enter to confirm.
-tutorial-leaf-067 = Create new items inline: press Ctrl+I or Ctrl+A to enter insert mode on an empty placeholder. Type a plain name to create a file, or append : to the name to create a directory (the colon is stripped from the directory name). For example, type 'notes' to create a file, or 'projects:' to create a directory named 'projects'.
-tutorial-leaf-068 = You can also create items via commands: press : and type 'create file' or 'create directory'.
-tutorial-leaf-069 = Delete items by pressing the Delete key on a selected item. Directories are deleted recursively if non-empty.
-tutorial-leaf-070 = Copy with Ctrl+C and paste with Ctrl+V to duplicate files and directories.
-tutorial-leaf-071 = The file browser supports all the standard modes: search (Tab) to filter files, extended search (Ctrl+F) to find files recursively in subdirectories.
-tutorial-leaf-072 = The text editor turns the filesystem and the contents of files into a single navigable tree. Directories and files are listed like in the file browser, but pressing Right on a file opens its contents as FFON nodes you can navigate into.
-tutorial-leaf-073 = Parsing is language-aware: source files, JSON, and plain text all expand into their natural structure (sections, blocks, lines). Empty-body headers collapse into a single line for cleaner navigation.
-tutorial-leaf-074 = File lines are editable inline. Press i or a on a line to edit it, then Enter to commit. Multi-line edits are supported. The cursor coordinate is restored after each commit so consecutive Ctrl+A inserts keep working.
-tutorial-leaf-075 = Create new files and directories inline via the i placeholder, the same way as in the file browser. Inside a file, the same affordances let you add or remove content lines.
-tutorial-leaf-076 = Rename, copy, paste, and delete work the same as in the file browser.
-tutorial-leaf-077 = Every change here is on the undo timeline: Ctrl+Z reverses adding, editing, or deleting a line, as well as creating, renaming, or deleting a file or folder.
-tutorial-leaf-078 = The Sales Demo is an interactive air handling unit (HVAC) product configurator. It demonstrates how Sicompass can handle complex, hierarchical data with inline editing.
-tutorial-leaf-079 = Navigate supply air and return air sections to explore components like filters, coils, fans, and recovery wheels.
-tutorial-leaf-080 = Each component has editable parameters (temperatures, pressures, dimensions, and more) that you can modify inline.
-tutorial-leaf-081 = Optional components (chillers, fan coil units) can be added via 'Add element:' sections. These use the <one-opt> and <many-opt> element types.
-tutorial-leaf-082 = Press 'd' at the root level to view a technical unit diagram as a fullscreen image. This showcases the dashboardImagePath provider feature.
-tutorial-leaf-083 = This provider is a good reference for building data-heavy configurators on top of Sicompass.
-tutorial-leaf-084 = The web browser lets you browse the internet directly inside Sicompass, turning web pages into keyboard-navigable trees.
-tutorial-leaf-085 = At the top level, you'll find an address bar. Press i to edit it, type a URL, and press Enter to load the page.
-tutorial-leaf-086 = HTML is automatically converted into a navigable FFON tree based on the page's heading hierarchy (h1-h6). Headings become nested sections. Paragraphs, lists, tables, and links are preserved as tree items.
-tutorial-leaf-087 = Navigate web content the same way you navigate files or settings. Right to go deeper into a section, Left to go back.
-tutorial-leaf-088 = Links on web pages can be followed by selecting them and pressing Enter, which loads the linked page.
-tutorial-leaf-089 = Forms on web pages are fully interactive: text inputs become editable inline (i/a to edit, Enter to commit), checkboxes and radio groups toggle with Enter, and submit buttons activate with Enter. The browser drives the live page through the Chrome DevTools Protocol, so submissions go through the real site.
-tutorial-leaf-090 = Cookie-consent banners are auto-accepted on page load. The browser scans for common CMP selectors and accept-button keywords in multiple languages, including iframes, so you don't have to dismiss them manually.
-tutorial-leaf-091 = This demonstrates how any structured content, even the web, can be unified into the same navigation model.
-tutorial-leaf-092 = The terminal is a real interactive shell rendered as an FFON tree. Output from the shell appears as lines in the tree, and an editable <input> slot is pinned to the bottom for typing commands.
-tutorial-leaf-093 = It's backed by a PTY and a vte-based emulator. On Unix the shell is taken from $SHELL (bash, zsh, fish, …) and invoked with -i so your shell rc files are loaded and your aliases work. On Windows it's taken from %ComSpec% (cmd.exe by default, PowerShell also recognised) and invoked with -NoLogo where applicable.
-tutorial-leaf-094 = Each prompt is synthesized in-process so the location is always announced clearly to your screen reader: { "{" } "{ "{" }" { "}" }user{ "}" }@{ "{" } "{ "{" }" { "}" }host{ "}" }:{ "{" } "{ "{" }" { "}" }cwd{ "}" }$ on Unix, { "{" } "{ "{" }" { "}" }cwd{ "}" }> on Windows. On Linux the prompt updates after `cd`. On macOS and Windows it reflects the initial cwd, since live tracking would need OS-specific process introspection.
-tutorial-leaf-095 = Type a command, press Enter to run it, and the output is appended above the input slot. Use the standard navigation keys to scroll back through earlier output.
-tutorial-leaf-096 = The input slot remembers every command you have run. Press Right on it to open the recall history, a list of past commands, newest first. Press Enter on one to drop it into the input, ready to edit or re-run. Pressing Enter on the input slot itself runs whatever it currently holds, just like Enter in operator mode anywhere else.
-tutorial-leaf-097 = When a child program switches the terminal to the alt-screen (vim, htop, less, man, and most full-screen TUIs do this), Sicompass auto-enters its interactive dashboard mode and forwards every key (including arrows, function keys, and chords) straight to the TUI. The TUI normally leaves the alt-screen on its own (vim's :q, htop's q, and so on), at which point Sicompass drops back to the linear scrollback view. As an escape hatch, pressing Ctrl+C twice within one second also leaves the dashboard. On Windows, only alt-screen TUIs trigger this mode, so a bare cmd.exe or PowerShell stays in the regular scrollback list while you keep typing commands.
-tutorial-leaf-098 = The Plugin Store lets you manage which providers are active. It appears in Settings under 'Available programs'.
-tutorial-leaf-099 = Each provider is shown as a checkbox. Check it to enable the provider, uncheck it to disable it.
-tutorial-leaf-100 = Changes take effect immediately. Providers are hot-loaded or unloaded without restarting the app.
-tutorial-leaf-101 = Both built-in providers and user-installed plugins appear here. Plugins installed in ~/.config/sicompass/plugins/ are automatically discovered.
-tutorial-leaf-102 = This is the easiest way to customize your Sicompass setup. Enable only the programs you use.
-tutorial-leaf-103 = Sicompass can connect to remote FFON providers served over HTTP, extending the interface beyond your local machine.
-tutorial-leaf-104 = Configure a remoteUrl and optional apiKey in Settings to connect to a remote service.
-tutorial-leaf-105 = Remote content is lazily fetched as you navigate. Only the data you actually view is downloaded, keeping things fast even with large datasets.
-tutorial-leaf-106 = Providers can use the included TypeScript server SDK to build FFON services with optional Stripe or LemonSqueezy billing integration.
-tutorial-leaf-107 = This enables SaaS-style products where the entire user interface is delivered through Sicompass's navigable tree.
-tutorial-leaf-108 = A Matrix protocol chat client for real-time messaging inside Sicompass.
-tutorial-leaf-109 = On first launch, an inline login form appears at the root. Fill in homeserver URL, username, and password, then press the login button. New accounts can register from the same form. Errors are surfaced inline at the top of the form.
-tutorial-leaf-110 = Once logged in, your rooms appear as a navigable tree with unread badges next to room names. Spaces and pending invites are listed alongside regular rooms.
-tutorial-leaf-111 = Press Right on a room to open it. Messages appear as a list, with encrypted messages decrypted in place. Entering a room marks it as read.
-tutorial-leaf-112 = Type a message inline and press Enter to send. The same i/a editing keys apply.
-tutorial-leaf-113 = Public rooms can be searched and joined. Private rooms can be created, and members can be invited or removed via commands.
-tutorial-leaf-114 = A background /sync thread keeps room state and unread counts up to date without blocking navigation.
-tutorial-leaf-115 = Configure homeserver URL and credentials in Settings, or sign in via the inline login form.
-tutorial-leaf-116 = An IMAP/SMTP email client. Supports Google OAuth2 for seamless Gmail integration as well as plain username/password for any IMAP server.
-tutorial-leaf-117 = Folders (inbox, sent, drafts, etc.) appear as a navigable tree. Inside each folder, messages are listed paginated with [read], [unread], and [star] tag prefixes. Threaded history is reconstructed via IMAP THREAD.
-tutorial-leaf-118 = Press Right on a message to open it. The body is rendered as readable text, or as a navigable FFON tree if the sender included a structured FFON body part.
-tutorial-leaf-119 = Compose a new message via the command menu. Reply, reply-all, and forward are available on any open message. The compose form has To, Cc, Bcc, subject, attachments, and a body that supports both plain text and nested FFON elements.
-tutorial-leaf-120 = Drafts are saved automatically. Outgoing mail is queued in an outbox and retried on transient SMTP errors.
-tutorial-leaf-121 = Mark messages as read, flag/star, move between folders, or delete with the Delete key (or Ctrl+D). Every operation is undoable, including compose-body insertions and deletions.
-tutorial-leaf-122 = Search across messages in a folder with Tab. Extended search (Ctrl+F) searches deeply across the cached envelope database.
-tutorial-leaf-123 = Configure server URLs, credentials, or OAuth in Settings.
-tutorial-leaf-124 = The settings provider is always loaded as the last item in the root. It's where you configure Sicompass itself and all loaded providers.
-tutorial-leaf-125 = Settings are organized by namespace. 'sicompass' for global settings, and each provider can have its own section.
-tutorial-leaf-126 = Color scheme (dark/light) is configured here as a radio group. Changes take effect immediately.
-tutorial-leaf-127 = Display scaling can be set in steps from 100% to 250%, so the same interface stays comfortable on high-DPI screens and at distance.
-tutorial-leaf-128 = Shoulder-surfing protection: a checkbox that blanks the screen on demand. The screen reader keeps working, but the visual content is hidden from people nearby.
-tutorial-leaf-129 = The 'Available programs' section is where you enable and disable providers (see Plugin Store above).
-tutorial-leaf-130 = All settings are stored in ~/.config/sicompass/settings.json. You can edit this file directly if you prefer.
-tutorial-leaf-131 = This section is a hands-on playground for all the interactive element types that Sicompass supports. Try each one as you go!
-tutorial-leaf-132 = Checkboxes are boolean toggles. Press Enter on a checkbox to toggle it on or off.
-tutorial-leaf-133 = <checkbox checked>Try toggling this checkbox (it starts checked)
-tutorial-leaf-134 = <checkbox>And this unchecked one
-tutorial-leaf-135 = This is an object checkbox. It can be toggled AND navigated into.
-tutorial-leaf-136 = Press Enter to toggle the checkbox state, or press the Right key to view these children.
-tutorial-leaf-137 = Object checkboxes are useful when you want a feature toggle that also has sub-settings. For example, enabling a provider while also configuring its options.
-tutorial-leaf-138 = Object checkboxes work the same whether checked or unchecked. The checkbox state and the children are independent.
-tutorial-leaf-139 = Text inputs let you edit a value inline. Press i or a on the item below to start editing:
-tutorial-leaf-140 = Edit this text --> <input>hello world</input> <-- press i or a
-tutorial-leaf-141 = <checked>blue
-tutorial-leaf-142 = green
-tutorial-leaf-143 = red
-tutorial-leaf-144 = Radio groups let you pick exactly one option from a set. Navigate into the radio group above and press Enter on an option to select it. Only one option can be selected at a time.
-tutorial-leaf-145 = Images can be displayed inline within the tree. The image below is loaded from a file path:
-tutorial-leaf-146 = __TEXTURE_JPG__
-tutorial-leaf-147 = __IMAGE_WITH_PREFIX_SUFFIX__
-tutorial-leaf-148 = __IMAGE_SUFFIX_ONLY__
-tutorial-leaf-149 = __IMAGE_PREFIX_ONLY__
-tutorial-leaf-150 = Links lazy-load external JSON or FFON files as children. Navigate into the link below to load its content:
-tutorial-leaf-151 = Scroll mode flattens this list and every sublist into one continuous, scrollable reading view, with images laid out inline like below. Press S from operator mode to try it, then use Up/Down to scroll. Each element gets a 'layer: X list: Y/Z' header. Press Tab to search those headers or Ctrl+F to search element content, and Enter to jump to a result back in operator mode:
-tutorial-leaf-152 = __LOREM_IPSUM__
-tutorial-leaf-153 = Sicompass stores all configuration in a single file: ~/.config/sicompass/settings.json. This file is organized by namespace, each provider can have its own section.
-tutorial-leaf-154 = Some providers support saving and loading configuration files. This is useful for product configurators or any provider that manages persistent state.
-tutorial-leaf-155 = Ctrl+S: save the active provider's data to its default config file.
-tutorial-leaf-156 = Ctrl+Shift+S: save as, choose a custom filename for the saved configuration.
-tutorial-leaf-157 = Ctrl+O: open/load a saved configuration file.
-tutorial-leaf-158 = These shortcuts only work if the active provider has enabled config file support. Plugins enable this by adding "supportsConfigFiles": true to their plugin.json manifest.
-tutorial-leaf-159 = The main settings file at ~/.config/sicompass/settings.json uses a namespaced JSON format.
-tutorial-leaf-160 = Example structure: { "{" } "{ "{" }" { "}" } "sicompass": { "{" } "{ "{" }" { "}" } "colorScheme": "dark", "programsToLoad": [...] { "}" }, "file browser": { "{" } "{ "{" }" { "}" } "sortOrder": "name" { "}" } { "}" }
-tutorial-leaf-161 = The "sicompass" namespace contains global settings like color scheme and which programs to load.
-tutorial-leaf-162 = Each provider adds its own namespace for provider-specific settings.
-tutorial-leaf-163 = You can edit this file directly, but changes require a restart to take effect. Using the Settings provider inside Sicompass applies changes immediately.
-tutorial-leaf-164 = User plugins are installed in ~/.config/sicompass/plugins/<plugin-name>/.
-tutorial-leaf-165 = Each plugin has a plugin.json manifest that defines its name, display name, entry point, and capabilities.
-tutorial-leaf-166 = Plugins appear automatically in the Plugin Store once installed. Enable them there to load them.
-tutorial-leaf-167 = The programsToLoad array in settings.json controls the load order of all providers, including plugins.
-tutorial-leaf-168 = Sicompass has an extensible plugin architecture. You can build your own providers in TypeScript or C to add new data sources and functionality.
-tutorial-leaf-169 = Plugins generate simple JSON arrays that Sicompass renders as navigable trees. This means any programming language that can output JSON to stdout can be used to build a plugin.
-tutorial-leaf-170 = TypeScript plugins are the easiest way to extend Sicompass. They're simple scripts that receive a path as a command-line argument and output a JSON array to stdout.
-tutorial-leaf-171 = 1. Create a folder: ~/.config/sicompass/plugins/my-plugin/
-tutorial-leaf-172 = 2. Create a plugin.json manifest:
-tutorial-leaf-173 =    { "{" } "{ "{" }" { "}" } "name": "my-plugin", "displayName": "My Plugin", "entry": "plugin.ts" { "}" }
-tutorial-leaf-174 = 3. Write plugin.ts: read the path from process.argv[2], compute the children for that path, and output a JSON array to stdout.
-tutorial-leaf-175 = 4. In the output JSON, strings become leaf items and objects become navigable sections. For example: ["leaf item", { "{" } "{ "{" }" { "}" }"Section Name": ["child 1", "child 2"]{ "}" }]
-tutorial-leaf-176 = 5. Enable your plugin in Settings under 'Available programs'. It will appear in the Plugin Store automatically.
-tutorial-leaf-177 = Optional: add "supportsConfigFiles": true to plugin.json to enable Ctrl+S/O save/load functionality.
-tutorial-leaf-178 = See lib/lib_sales_demo/ in this repo for a working script provider you can use as a reference.
-tutorial-leaf-179 = C plugins are compiled shared libraries that implement the ProviderOps vtable. They offer maximum performance and full access to the Sicompass API.
-tutorial-leaf-180 = 1. Create a folder: ~/.config/sicompass/plugins/my-c-plugin/
-tutorial-leaf-181 = 2. Create a plugin.json manifest:
-tutorial-leaf-182 =    { "{" } "{ "{" }" { "}" } "name": "my-c-plugin", "displayName": "My C Plugin", "type": "native", "entry": "plugin.so" { "}" }
-tutorial-leaf-183 = 3. Write a C source file that exports: const ProviderOps* sicompass_plugin_init(void)
-tutorial-leaf-184 = 4. Return a pointer to a static ProviderOps struct. At minimum, you must set the name, displayName, and fetch function pointers.
-tutorial-leaf-185 = 5. Compile as a shared library: cc -shared -fPIC -o plugin.so plugin.c
-tutorial-leaf-186 = 6. Enable your plugin in Settings under 'Available programs'.
-tutorial-leaf-187 = C plugins can implement any subset of the ProviderOps functions. Only fetch is required. The more functions you implement, the richer the experience.
-tutorial-leaf-188 = The C ABI is not currently shipped as a header file. The struct layout, function-pointer signatures, and required symbol name are documented inline in sdk/src/plugin_loader.rs (the ProviderOpsC struct, with each field's exact C signature in the comments), translate that into your own provider_interface.h to compile against.
-tutorial-leaf-189 = There are three ways to create a provider, each suited to different use cases:
-tutorial-leaf-190 = C Provider (ProviderOps): implement a ProviderOps struct and call providerCreate(ops). Best for high-performance providers that need direct memory access.
-tutorial-leaf-191 = Script Provider: write a TypeScript (or any language) script that outputs JSON. Loaded via scriptProviderCreate(name, displayName, scriptPath). Best for rapid development and prototyping.
-tutorial-leaf-192 = Factory Provider: register a creation function with providerFactoryRegister(name, createFn), then instantiate providers by name. Best for providers that need dynamic instantiation.
-tutorial-leaf-193 = The ProviderOps struct defines the full set of functions a provider can implement. Only 'fetch' is required, all others are optional.
-tutorial-leaf-194 = fetch(path): return an array of FFON elements for the given path. This is the only required function. It defines what content your provider shows.
-tutorial-leaf-195 = commitEdit(path, newValue): save an inline edit. Called when the user edits an <input> element and presses Enter. For example, renaming a file or changing a setting value.
-tutorial-leaf-196 = dashboardImagePath(path): return a path to an image that will be shown fullscreen when the user presses 'd'. Used by the Sales Demo for technical diagrams.
-tutorial-leaf-197 = supportsConfigFiles: when true, enables Ctrl+S/Shift+S/O for save/load. Set this in plugin.json: "supportsConfigFiles": true.
-tutorial-leaf-198 = init(): called once at startup before any other operations. Use this to initialize state, open connections, or load cached data.
-tutorial-leaf-199 = cleanup(): called at shutdown to free resources. Close file handles, save state, and release memory here.
-tutorial-leaf-200 = loadConfig(filePath): load persistent configuration from the given file path. Called when the user presses Ctrl+O.
-tutorial-leaf-201 = saveConfig(filePath): save persistent configuration to the given file path. Called when the user presses Ctrl+S.
-tutorial-leaf-202 = pushPath(segment): append a segment to the current path. Called when the user presses Right to go deeper into the tree.
-tutorial-leaf-203 = popPath(): remove the last segment from the current path. Called when the user presses Left to go back up.
-tutorial-leaf-204 = getCurrentPath(): return the current path as a string. Used by the app to display the current location.
-tutorial-leaf-205 = setCurrentPath(path): jump directly to an absolute path. Used after extended search to teleport the user to a result deep in the tree.
-tutorial-leaf-206 = createDirectory(path, name): create a new directory at the given path. Triggered by the ':create directory' command.
-tutorial-leaf-207 = createFile(path, name): create a new file at the given path. Triggered by the ':create file' command.
-tutorial-leaf-208 = deleteItem(path): delete a file or directory at the given path. Directories are deleted recursively if non-empty.
-tutorial-leaf-209 = copyItem(source, destination): copy a file or directory from source to destination. Used by Ctrl+C/Ctrl+V.
-tutorial-leaf-210 = getCommands(): return a list of command names this provider supports. These appear when the user presses : (colon).
-tutorial-leaf-211 = handleCommand(name): prepare or validate a command. Optionally return a UI element (like a text input) for gathering additional input from the user.
-tutorial-leaf-212 = getCommandListItems(name): return a list of selectable options for a command. Shown as a navigable list the user can pick from.
-tutorial-leaf-213 = executeCommand(name, option): execute the command with the user's selected option. This is where the actual work happens.
-tutorial-leaf-214 = onRadioChange(groupKey, selectedValue): called when the user changes a radio group selection. Use this to react to configuration changes in real time.
-tutorial-leaf-215 = onButtonPress(functionName): called when the user activates a <button> element. The functionName matches the value in the button tag.
-tutorial-leaf-216 = createElement(parentPath, templateKey): create a new FFON element for 'Add element:' sections (<one-opt> and <many-opt> elements).
-tutorial-leaf-217 = collectDeepSearchItems(): return all searchable items for extended search (Ctrl+F). This lets you provide a custom index of searchable content.
-tutorial-leaf-218 = If not implemented, the system falls back to traversing the FFON tree automatically, which works well for most providers.
-tutorial-leaf-219 = Element tags are special markers in string content that tell Sicompass to render interactive elements instead of plain text.
-tutorial-leaf-220 = Use \< and \> to escape angle brackets when you want to display them as literal text.
-tutorial-leaf-221 = \<input>content\</input> - make the content editable inline. The user can press i or a to edit it.
-tutorial-leaf-222 = \<radio>group name - mark a parent object as a radio group. Its children become mutually exclusive options.
-tutorial-leaf-223 = \<checked>option - mark a radio option as the currently selected one.
-tutorial-leaf-224 = \<checkbox>label - render an unchecked boolean toggle. Press Enter to check it.
-tutorial-leaf-225 = \<checkbox checked>label - render a checked boolean toggle. Press Enter to uncheck it.
-tutorial-leaf-226 = \<link>path/to/file.json\</link> - lazy-load an external JSON or FFON file as children when the user navigates into this item.
-tutorial-leaf-227 = \<image>path/to/image.jpg\</image> - display an image inline within the tree.
-tutorial-leaf-228 = \<button>functionName\</button>Display Text - render a clickable button. When activated, calls onButtonPress with the function name.
-tutorial-leaf-229 = \<many-opt>\</many-opt>key - a repeatable creation button. The user can add multiple instances. Each instance can be deleted later.
-tutorial-leaf-230 = \<one-opt>\</one-opt>key - a single-use creation button. After creation, the button is replaced by the created element.
-tutorial-leaf-231 = All tags support prefix and suffix text: 'Label: \<input>value\</input> (hint)' renders 'Label: ' before and ' (hint)' after the interactive element.
-tutorial-leaf-232 = This works for input, link, image, and button tags.
-tutorial-leaf-233 = All elements support \\n for multiline content. Continuation lines automatically inherit the prefix formatting.
-tutorial-leaf-234 = Sicompass is actively growing. Here is what's on the roadmap:
-tutorial-leaf-235 = Notebook - structured note-taking with server-side sync, turning your notes into a navigable tree.
-tutorial-leaf-236 = IDE - code as a navigable structure. Browse functions, classes, and modules as a tree with C code generation.
-tutorial-leaf-237 = Terminal - a terminal emulator integrated as a provider, so you never need to leave Sicompass.
-tutorial-leaf-238 = Blog - publish structured content with optional paid access, viewable in both Sicompass and web browsers.
-tutorial-leaf-239 = Mobile - Android and iOS versions, bringing the same keyboard-driven (and touch-adapted) experience to mobile devices.
-tutorial-leaf-240 = Contributions are welcome! Whether it's code, plugins, documentation, or feedback, every contribution helps make computing more accessible.
-tutorial-leaf-241 = Join the community on Discord to connect with other users and developers.
-tutorial-leaf-242 = Happy navigating!
+# ---------------------------------------------------------------------------
+# 3. How it works (the mental model, lean)
+# ---------------------------------------------------------------------------
+tutorial-sec-how-it-works = How it works
+tutorial-hiw-tree = Every graphical interface is really a tree of lists. Sicompass makes that structure explicit and navigable entirely from the keyboard, so one set of keys drives everything.
+tutorial-hiw-programs = Each item at the root is a program, also called a provider: the file browser, web browser, email, this tutorial. They all plug into the same tree, so once you can navigate one you can navigate them all.
+tutorial-hiw-modes = Keys mean different things in different modes. You start in general mode and drop into insert, command, or search mode as needed. The Shortcuts at a glance section lists them all.
+tutorial-hiw-editing = Any item that contains an input box is editable. Press i or a to edit it, Enter to save, Escape to cancel. The file browser makes names editable, the settings program makes values editable.
+tutorial-hiw-undo = Each tab keeps its own undo timeline. Ctrl+Z walks back through your actions, including the route you navigated, and Ctrl+Shift+Z walks forward. Press z to see the history.
+tutorial-hiw-undo-caveats = A few things cannot be undone: a terminal command that already ran, a directory delete larger than 4 MiB once the trash is emptied, and a posted chat message (undo redacts it, so recipients see that it was deleted).
+tutorial-hiw-accessibility = Screen reader support is built in through AccessKit on Linux, macOS, and Windows, with nothing to configure. Each item is spoken in its own detected language, so a French line inside an English interface is read with French pronunciation.
 
-# Tabs (added under Navigation)
-tutorial-leaf-243 = Sicompass runs multiple tabs in a single window. Each tab owns its own provider instances, path, selection, and undo timeline, so switching between tabs leaves none of them touched. The settings provider is the one exception, it stays shared across every tab.
-tutorial-leaf-244 = Ctrl+T: open a new tab next to the current one. It gets a fresh set of providers mirroring the current tab (its own shell process, file browser, and so on) and starts at the root list.
-tutorial-leaf-245 = Ctrl+W: close the current tab, which shuts down its providers and kills its shell process. If the tab is busy, with a foreground command running in the terminal or a full-screen program open, a yes/no confirmation appears first. The last remaining tab cannot be closed this way, use the window close button or quit the app.
-tutorial-leaf-246 = Ctrl+Tab: step through tabs in most-recently-used order. Hold Ctrl and tap Tab to open the tab switcher and move the highlight to the next most-recently-used tab, then release Ctrl to switch to it. A single quick Ctrl+Tab flips back to the tab you were just on.
-tutorial-leaf-247 = Ctrl+Shift+Tab: the same switcher in the other direction. Hold Ctrl and tap Shift+Tab to walk the highlight back up the most-recently-used list, then release Ctrl to commit.
-tutorial-leaf-258 = t: open the tab switcher as a sticky palette instead of a held overlay. It lists the tabs in most-recently-used order with the current tab highlighted at the top. Each entry is labeled by the tab's shell process id and its current navigation breadcrumb, so you can tell tabs apart at a glance. Start typing to filter the list by that label, use Up/Down to move the highlight, Enter to switch, and Escape to cancel.
+# ---------------------------------------------------------------------------
+# 4. The programs (one short leaf each)
+# ---------------------------------------------------------------------------
+tutorial-sec-programs = The programs
+tutorial-prog-intro = Sicompass turns each data source into the same navigable tree. Enable or disable programs in Settings under 'Available programs'. Here is what ships with the app.
+tutorial-prog-filebrowser = File browser: your filesystem as a tree. Enter directories with Right, rename with i, and create, copy, paste, or delete items inline.
+tutorial-prog-texteditor = Text editor: press Right on a file to open its contents as a tree and edit the lines inline. Every change is on the undo timeline.
+tutorial-prog-web = Web browser: type a URL in the address bar to load a page as a navigable tree of headings, links, and forms you can fill in.
+tutorial-prog-terminal = Terminal: a real shell rendered as a tree, with an input line at the bottom. Full-screen programs like vim and htop get their own interactive mode.
+tutorial-prog-chat = Chat: a Matrix client. Log in inline, your rooms appear as a tree, and you type a message and press Enter to send.
+tutorial-prog-email = Email: IMAP and SMTP with Gmail OAuth. Folders and messages form a tree, and you can compose, reply, move, and delete, all undoable.
+tutorial-prog-salesdemo = Sales demo: an air handling unit configurator that shows how complex, editable, hierarchical data works in Sicompass.
+tutorial-prog-remote = Remote services: connect to FFON providers served over HTTP. Set a remote URL and key in Settings, and content is fetched as you navigate.
+tutorial-prog-settings = Settings: always the last item at the root. It configures Sicompass and every program, and changes take effect immediately.
 
-# Window controls (added under Navigation)
-tutorial-leaf-259 = Sicompass draws its own borderless titlebar across the top of the window, with minimize, maximize, and close controls at one end. Maximize is a toggle, it maximizes a restored window and restores a maximized one. You can click these titlebar buttons with a pointer, and they are also fully reachable from the keyboard.
-tutorial-leaf-260 = c: open the window controls as a sticky palette, the same kind of overlay as the t tab switcher. It lists minimize, maximize, and close. Start typing to filter the list, use Up/Down to move the highlight, Enter to activate the control, and Escape to cancel.
+# ---------------------------------------------------------------------------
+# 5. Interactive playground (hands-on element types)
+# ---------------------------------------------------------------------------
+tutorial-sec-playground = Interactive playground
+tutorial-play-intro = A hands-on playground for the interactive element types Sicompass supports. Try each one as you go.
+tutorial-play-checkbox = <checkbox checked>Checkboxes toggle with Enter (this one starts checked)
+tutorial-play-input = Inputs edit inline, press i or a then Enter: <input>edit me</input>
+tutorial-play-radio-intro = Radio groups let you pick exactly one option. Press Right to enter the group below, then Enter on a choice.
+tutorial-play-radio = <radio>Pick a color
+tutorial-play-radio-blue = <checked>blue
+tutorial-play-radio-green = green
+tutorial-play-radio-red = red
+tutorial-play-image-intro = Images render inline, and they can carry text before and after. Your screen reader reads the prefix, then the image, then the suffix, so an image is never an unlabelled gap.
+tutorial-play-image = Prefix text, then the image: __TEXTURE_JPG__ and suffix text after it.
+tutorial-play-link = Press Right to lazy-load this linked file: __FFON_JSON__
+tutorial-play-scroll = Scroll mode flattens this list and its sublists into one reading view. Press S, then use PgUp, PgDown, Home, and End on the long passage below.
+tutorial-play-lorem = __LOREM_IPSUM__
 
-# Text and emoji (added under Interactive Elements)
-tutorial-leaf-261 = Sicompass rasterizes glyphs on demand and falls back across the bundled fonts, so text is no longer limited to plain ASCII. Accented and European Latin renders directly: café, naïve, Zürich, żółć.
-tutorial-leaf-262 = Other scripts and symbols render too, pulled from the fallback fonts: Greek αβγ, Cyrillic Привет, arrows → ⇒ ↺, and math ≈ ≠ ∑ √.
-tutorial-leaf-263 = Box-drawing and block characters stay aligned in monospace, handy for terminal output: ┌─┬─┐ │ ├─┼─┤ │ └─┴─┘ █▓▒░.
-tutorial-leaf-264 = Color emoji render from a dedicated color atlas: 😀 🎉 ✅ 🚀 📁 🔒 🌍. They scale to the surrounding text size and keep their own colors.
-tutorial-leaf-248 = Ctrl+1 through Ctrl+9: jump directly to tab 1 through 9 by number. Out-of-range numbers are ignored.
-tutorial-leaf-249 = Each tab keeps its own live state, including its shell's working directory and any running program. Switching tabs parks the current tab's content and swaps the target tab's back in, so nothing is rebuilt or lost. Spawning separate windows is not yet available.
+# ---------------------------------------------------------------------------
+# 6. Settings and config
+# ---------------------------------------------------------------------------
+tutorial-sec-config = Settings and config
+tutorial-cfg-file = All configuration lives in one file, ~/.config/sicompass/settings.json, organized by namespace with a section per program.
+tutorial-cfg-logs = Sicompass writes a daily log file, sicompass.log, to a platform directory: ~/.local/state/sicompass/ on Linux, ~/Library/Logs/sicompass/ on macOS, and %LOCALAPPDATA%\sicompass\ on Windows. Set the RUST_LOG environment variable to also print logs to the terminal. Logs help when you report a problem.
+tutorial-cfg-settings = The Settings program edits everything live: color scheme, display scaling, a shoulder-surfing blank that hides the screen while the screen reader keeps working, and which programs load.
+tutorial-cfg-saveload = Some programs support their own config files. Ctrl+S saves, Ctrl+Shift+S saves under a new name, and Ctrl+O opens a saved file.
+tutorial-cfg-updates = Sicompass checks for updates at launch. When one is staged, press Ctrl+U to apply it. Plugins update the same way, verified by SHA-256 and an optional ed25519 signature.
 
-# Updates (added under Configuration)
-tutorial-leaf-250 = Each time you launch Sicompass, a background thread checks GitHub Releases for a newer version of the app. On Windows, the new MSI installer is downloaded and staged so it can be applied without a fresh download.
-tutorial-leaf-251 = When a staged update is ready, a banner appears in the header. Press Ctrl+U from operator mode to apply it. The installer takes over and relaunches Sicompass once the swap is done.
-tutorial-leaf-252 = User plugins update on the same launch-time check, one at a time. Each plugin manifest can declare an updateUrl, which the updater polls for newer versions. Downloads are verified by SHA-256 and, when the manifest carries one, by an ed25519 signature against the trust key embedded in the installed plugin.json.
-tutorial-leaf-253 = Updated plugins hot-reload mid-session. The provider is dropped, the file on disk is swapped, and the new version is loaded the next time you open the program. No restart of Sicompass is needed.
-tutorial-leaf-254 = To opt out, uncheck 'Automatic update check' in Settings under the sicompass namespace. The toggle is read at the next launch, so a check already in progress will still complete.
-
-# Store tier links (added to Plugin Store section)
-tutorial-leaf-255 = At the top of 'Available programs' you'll see three links: BECOME A SPONSOR, ENABLE CLOUD AND STORE, and ENABLE SUPPORT. They open server-served tier trees, so the catalog can change without an app update. Entering 'Enable cloud and store' or 'Enable support' lets you redeem a license token, which is then stored locally and verified offline.
+# ---------------------------------------------------------------------------
+# 7. Extending Sicompass (pointer to the real docs)
+# ---------------------------------------------------------------------------
+tutorial-sec-extending = Extending Sicompass
+tutorial-ext-build = You can build your own programs in Rust, TypeScript, or C. Rust is the standard way, implement the Provider trait from the sicompass-sdk crate and register it, exactly as every built-in program does. TypeScript programs are scripts that output JSON, and C programs are compiled ProviderOps libraries. Install plugins under ~/.config/sicompass/plugins/ and enable them in Settings.
+tutorial-ext-docs = The full Provider trait, the ProviderOps interface, the element tags, and a worked example are in the repository docs and the sicompass-sdk crate, not in this tutorial. See the lib/ crates for Rust providers and lib/lib_sales_demo/ for a script provider.

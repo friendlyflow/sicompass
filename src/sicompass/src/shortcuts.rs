@@ -275,8 +275,8 @@ fn has_add_element_sibling(r: &AppRenderer) -> bool {
 /// Structural editing is available for filebrowser, email compose body,
 /// or createElement providers. The editor provider has dedicated rows
 /// (avail_editor_edit) — keeping it out of this predicate stops the
-/// generic operator-style handlers from racing the editor-specific ones
-/// now that operator/editor coordinates are unified.
+/// generic general-mode handlers from racing the editor-specific ones
+/// now that editor providers share the general coordinate.
 fn avail_structural_edit(r: &AppRenderer) -> bool {
     not_at_root(r) && (is_filebrowser(r) || in_email_compose_body(r) || has_add_element_sibling(r))
 }
@@ -287,7 +287,7 @@ fn avail_ffon_delete(r: &AppRenderer) -> bool {
     not_at_root(r) && (in_email_compose_body(r) || has_add_element_sibling(r))
 }
 
-/// Predicates for keys that are operator-only after the coordinate collapse —
+/// Predicates for keys that are general-only after the coordinate collapse —
 /// the editor provider opts out (no scroll-mode / meta hint screen).
 fn avail_scroll_key(r: &AppRenderer) -> bool {
     not_at_root(r) && !is_editor(r)
