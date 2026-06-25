@@ -42,6 +42,7 @@ settings-label-version = version
 settings-checkbox-maximized = agrandi
 settings-checkbox-shoulder-surfing-protection = protection contre l'espionnage (écran vide)
 settings-checkbox-auto-update-check = vérifier les mises à jour de l'app et des plugins au démarrage
+settings-onboarding-body = Utilisez Haut et Bas pour parcourir la liste. Appuyez deux fois sur Home pour atteindre la racine et voir tous vos programmes disponibles. Droite ouvre un élément qui affiche un signe plus (+), Gauche remonte au parent, Entrée coche une case, Échap revient en arrière.
 settings-radio-font-scale = taille du texte
 settings-radio-sort-order = ordre de tri
 

@@ -42,6 +42,7 @@ settings-label-version = versie
 settings-checkbox-maximized = gemaximaliseerd
 settings-checkbox-shoulder-surfing-protection = schermbescherming (blanco scherm)
 settings-checkbox-auto-update-check = controleer op app- en plugin-updates bij opstarten
+settings-onboarding-body = Gebruik Omhoog en Omlaag om door de lijst te bewegen. Druk twee keer op Home om naar de wortel te gaan en al je beschikbare programma's te zien. Rechts opent een item met een plusteken (+), Links gaat naar de ouder, Enter vinkt een selectievakje aan, Escape gaat terug.
 settings-radio-font-scale = tekstgrootte
 settings-radio-sort-order = sorteervolgorde
 

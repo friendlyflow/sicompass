@@ -47,6 +47,7 @@ settings-label-version = version
 settings-checkbox-maximized = maximized
 settings-checkbox-shoulder-surfing-protection = shoulder-surfing protection (blank screen)
 settings-checkbox-auto-update-check = check for app and plugin updates on startup
+settings-onboarding-body = Use Up and Down to move through the list. Press Home twice to reach the root and see all your available programs. Right opens an item that shows a plus sign (+), Left goes to the parent, Enter checks a checkbox, Escape escapes.
 settings-radio-font-scale = font scale
 settings-radio-sort-order = sort order
 

@@ -1439,6 +1439,12 @@ impl AppState {
         state.accesskit_adapter =
             crate::accesskit_sdl::AccessKitAdapter::new(&state.window, &state.renderer);
 
+        // First launch = no settings.json yet. Captured before `load_programs`,
+        // whose settings-provider `init()` seeds the file (after which it exists).
+        let first_run = sicompass_sdk::platform::main_config_path()
+            .map(|p| !p.exists())
+            .unwrap_or(false);
+
         // Load providers (tutorial + settings by default)
         let queue = crate::programs::load_programs(&mut state.renderer);
         // Apply initial settings (skip enable_* — providers already loaded above)
@@ -1448,6 +1454,14 @@ impl AppState {
         // Restore persisted tab layout (no-op if none stored).
         // Must run AFTER providers are loaded so provider-index validation works.
         crate::programs::load_tabs_state(&mut state.renderer);
+
+        // On first run, land the cursor on the onboarding line so a new (screen
+        // reader) user is read the onboarding guide immediately. Must run AFTER
+        // load_tabs_state, which otherwise resets the cursor to the bootstrap
+        // tab's default (the first program in the root list).
+        if first_run {
+            crate::programs::focus_onboarding(&mut state.renderer);
+        }
 
         crate::list::create_list_current_layer(&mut state.renderer);
         Ok(state)
