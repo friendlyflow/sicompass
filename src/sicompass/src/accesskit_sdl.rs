@@ -783,6 +783,18 @@ mod tests {
     }
 
     #[test]
+    fn speak_mode_change_controls_palette_reads_controls() {
+        // The `c` window-controls palette reuses Coordinate::Command but is
+        // distinguished by CommandPhase::Controls; it must announce "controls",
+        // not "command".
+        let mut r = AppRenderer::new();
+        r.coordinate = crate::app_state::Coordinate::Command;
+        r.current_command = crate::app_state::CommandPhase::Controls;
+        r.speak_mode_change(Some(String::new()));
+        assert_eq!(announced_text(&r).as_deref(), Some("controls"));
+    }
+
+    #[test]
     fn speak_mode_change_general() {
         let mut r = AppRenderer::new(); // default is General
         r.speak_mode_change(None);

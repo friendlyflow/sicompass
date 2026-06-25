@@ -2477,7 +2477,7 @@ fn handle_keydown(app: &mut AppState, keycode: Option<Keycode>, keymod: Mod) {
 
 fn update_window_title(app: &mut AppState) {
     let r = &app.renderer;
-    let mode = r.coordinate.display_label();
+    let mode = r.mode_display_label();
     let path = build_display_path(r);
 
     let selected = r.current_list_item()

@@ -1141,7 +1141,7 @@ impl AppRenderer {
     /// zero-width space is appended when parity is true — screen readers
     /// universally ignore it in speech output).
     pub fn speak_mode_change(&mut self, context: Option<String>) {
-        let mode = self.coordinate.display_label();
+        let mode = self.mode_display_label();
         // Never speak a password field's value: mask the spoken context so the
         // screen reader announces asterisks, not the secret.
         let context = match context {
@@ -1194,11 +1194,28 @@ impl AppRenderer {
         self.pending_announcement = Some(format!("{text}{sentinel}"));
     }
 
+    /// User-facing mode label for the header, window title, and spoken mode
+    /// change. Identical to [`Coordinate::display_label`] except that the
+    /// window-controls palette (`c`) — which reuses `Coordinate::Command`
+    /// machinery — is reported as "controls" rather than "command". Keyed off
+    /// `current_command`, so the colon command palette (`CommandPhase::None`)
+    /// is unaffected.
+    pub(crate) fn mode_display_label(&self) -> String {
+        if self.coordinate == Coordinate::Command
+            && self.current_command == CommandPhase::Controls
+        {
+            crate::shortcuts::register_translations();
+            let resolved = sicompass_sdk::localize::t("mode-controls");
+            return if resolved == "mode-controls" { "controls".to_owned() } else { resolved };
+        }
+        self.coordinate.display_label()
+    }
+
     /// The header status line: spoken mode name, layer depth, and 1-based
     /// position within the active list. Shared by the renderer
     /// (`view::build_header_text`) and `speak_focus_position`.
     pub(crate) fn header_text(&self) -> String {
-        let mode = self.coordinate.display_label();
+        let mode = self.mode_display_label();
         let depth = self.current_id.depth().saturating_sub(1);
         let last_id = self.current_id.last().unwrap_or(0);
         let total = self.active_list_len();

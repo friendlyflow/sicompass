@@ -95,6 +95,7 @@ mode-visual = visual mode
 mode-search = search
 mode-extended-search = extended search
 mode-command = command
+mode-controls = controls
 mode-scroll = scroll mode
 mode-scroll-search = scroll search
 mode-scroll-prefix-search = scroll prefix search
