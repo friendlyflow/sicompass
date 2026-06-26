@@ -287,9 +287,14 @@ impl WebbrowserProvider {
         let Some(node) = self.form_map.get(form_key) else { return false; };
         let Some(live) = &self.live else { return false; };
         let selector = node.css_selector.clone();
+        let form_index = node.form_index;
+        let match_index = node.match_index;
+        // A form-less control (search box) has no submit button, so committing
+        // its value also submits via an Enter key sequence.
+        let submit = form_index == 0;
         let value = value.to_owned();
         let page = live.page.clone();
-        let js = build_fill_js(&selector, &value);
+        let js = build_fill_js(form_index, match_index, &selector, &value, submit);
         let result = chromium_runtime().block_on(async move {
             tokio::time::timeout(
                 tokio::time::Duration::from_secs(5),
@@ -399,13 +404,13 @@ impl Provider for WebbrowserProvider {
 
         #[cfg(not(target_os = "windows"))]
         {
-            let selector = self.form_map.iter()
+            let (selector, match_index) = self.form_map.iter()
                 .find(|(key, node)| {
                     key.starts_with(&format!("form_{form_n}/"))
                         && matches!(node.kind, FormNodeKind::Submit)
                 })
-                .map(|(_, node)| node.css_selector.clone())
-                .unwrap_or_else(|| html_submit_selector(form_n, "", ""));
+                .map(|(_, node)| (node.css_selector.clone(), node.match_index))
+                .unwrap_or_else(|| (html_submit_selector("", ""), 0));
 
             let Some(live) = &self.live else { return; };
             let page = live.page.clone();
@@ -413,11 +418,16 @@ impl Provider for WebbrowserProvider {
             let url = self.current_url.clone();
 
             std::thread::spawn(move || {
+                // Resolve the submit button within its form (document.forms is in
+                // document order, matching form_n), or against document for a
+                // form-less control. Fall back to form.submit() for real forms.
                 let js = format!(
-                    "(() => {{ const el = document.querySelector({}); \
+                    "(() => {{ const fi = {form_n}; \
+                     const root = fi > 0 ? (document.forms[fi-1] || document) : document; \
+                     const el = root.querySelectorAll({})[{match_index}]; \
                      if (el) {{ el.click(); return true; }} \
-                     const f = document.querySelector('form:nth-of-type({form_n})'); \
-                     if (f) {{ f.submit(); return true; }} return false; }})()",
+                     if (fi > 0 && document.forms[fi-1]) {{ document.forms[fi-1].submit(); return true; }} \
+                     return false; }})()",
                     js_quote(&selector)
                 );
                 chromium_runtime().block_on(async move {
@@ -478,7 +488,7 @@ impl Provider for WebbrowserProvider {
     }
 
     fn commands(&self) -> Vec<String> {
-        vec!["refresh".to_owned()]
+        vec!["refresh".to_owned(), "clear cookies".to_owned()]
     }
 
     fn handle_command(
@@ -497,8 +507,56 @@ impl Provider for WebbrowserProvider {
                 self.cached_page = None;
                 self.load_url(&url);
             }
+        } else if cmd == "clear cookies" {
+            self.clear_cookies(_error);
         }
         None
+    }
+}
+
+impl WebbrowserProvider {
+    /// Clear all cookies from the persistent profile. On non-Windows there is a
+    /// live browser holding the cookie store open, so clear it over CDP (which
+    /// also empties the backing store). On Windows each fetch uses a throwaway
+    /// browser, so there is nothing live to clear — remove the cookie files from
+    /// the persistent profile dir instead.
+    fn clear_cookies(&mut self, error: &mut String) {
+        #[cfg(not(target_os = "windows"))]
+        {
+            if let Some(live) = self.live.as_ref() {
+                use chromiumoxide::cdp::browser_protocol::network::ClearBrowserCookiesParams;
+                let page = live.page.clone();
+                let res = chromium_runtime().block_on(async {
+                    tokio::time::timeout(
+                        tokio::time::Duration::from_secs(5),
+                        page.execute(ClearBrowserCookiesParams::default()),
+                    ).await
+                });
+                if !matches!(res, Ok(Ok(_))) {
+                    *error = "Could not clear cookies (browser not responding)".to_owned();
+                }
+                return;
+            }
+            // No live session: nothing in memory, clear the on-disk store.
+            remove_cookie_files(&chrome_profile_dir());
+        }
+        #[cfg(target_os = "windows")]
+        {
+            remove_cookie_files(&chrome_profile_dir());
+        }
+    }
+}
+
+/// Best-effort removal of Chrome's cookie database files from a profile dir.
+/// Used when there is no live browser to clear over CDP. Chrome keeps cookies in
+/// `<profile>/Default/Cookies` (with a `-journal`/`-wal` sidecar); older or
+/// single-profile layouts may put them at `<profile>/Cookies`.
+fn remove_cookie_files(profile: &std::path::Path) {
+    for rel in [
+        "Default/Cookies", "Default/Cookies-journal", "Default/Cookies-wal",
+        "Cookies", "Cookies-journal", "Cookies-wal",
+    ] {
+        let _ = std::fs::remove_file(profile.join(rel));
     }
 }
 
@@ -533,10 +591,29 @@ fn js_quote(s: &str) -> String {
 
 /// Build a JS snippet that sets an input's value and dispatches input/change
 /// events so React/Vue/etc. reactive frameworks notice the change.
-fn build_fill_js(selector: &str, value: &str) -> String {
+///
+/// The control is resolved against its owning form — `document.forms[i-1]`, which
+/// is in document order and matches `form_index` — or against the whole document
+/// when `form_index == 0` (a control outside any `<form>`). When `submit` is set
+/// (a form-less search box), an Enter key sequence is dispatched afterwards so the
+/// site's search handler fires, since there is no submit button to click.
+fn build_fill_js(form_index: usize, match_index: usize, selector: &str, value: &str, submit: bool) -> String {
+    let root = if form_index > 0 {
+        format!("(document.forms[{}] || document)", form_index - 1)
+    } else {
+        "document".to_owned()
+    };
+    let submit_js = if submit {
+        "el.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', code:'Enter', keyCode:13, which:13, bubbles:true}));\n\
+            el.dispatchEvent(new KeyboardEvent('keyup',   {key:'Enter', code:'Enter', keyCode:13, which:13, bubbles:true}));\n\
+            const f = el.closest('form'); if (f) { (f.requestSubmit ? f.requestSubmit() : f.submit()); }"
+    } else {
+        ""
+    };
     format!(
         r#"(() => {{
-            const el = document.querySelector({sel});
+            const root = {root};
+            const el = root.querySelectorAll({sel})[{match_index}];
             if (!el) return false;
             el.focus();
             const setter =
@@ -546,6 +623,7 @@ fn build_fill_js(selector: &str, value: &str) -> String {
             else {{ el.value = {val}; }}
             el.dispatchEvent(new Event('input',  {{ bubbles: true }}));
             el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+            {submit_js}
             return true;
         }})()"#,
         sel = js_quote(selector),
@@ -892,7 +970,7 @@ async fn submit_form_windows_inner(
             // changed under us between check and fill (impossible here).
             continue;
         };
-        let js = build_fill_js(&node.css_selector, value);
+        let js = build_fill_js(node.form_index, node.match_index, &node.css_selector, value, false);
         tokio::time::timeout(t(5), page.evaluate(js))
             .await
             .map_err(|_| format!("Timed out filling field {form_key}"))?
@@ -1203,12 +1281,23 @@ struct BrowserSession {
 
 /// Linux: use xvfb-run so Chrome runs headed on an invisible X11 display.
 #[cfg(target_os = "linux")]
+/// Persistent Chrome profile directory so cookies and logins survive restarts.
+/// Lives alongside the app's other config (e.g. `settings.json`) rather than in
+/// a temp dir that the OS wipes on reboot. Falls back to a temp dir only if no
+/// config home can be resolved.
+fn chrome_profile_dir() -> std::path::PathBuf {
+    sicompass_sdk::platform::config_home()
+        .map(|d| d.join("sicompass").join("chrome-profile"))
+        .unwrap_or_else(|| std::env::temp_dir().join("sicompass-chrome"))
+}
+
 async fn launch_browser() -> Result<BrowserSession, String> {
     let exe = chrome_via_xvfb()?;
 
-    // Use a fixed profile dir so Chrome doesn't open first-run dialogs and so
-    // we can clean up any stale SingletonLock left by a previous crashed launch.
-    let profile_dir = std::env::temp_dir().join("sicompass-chrome");
+    // Persistent profile dir (see chrome_profile_dir) so cookies/logins survive
+    // restarts; also clean up any stale SingletonLock from a crashed launch.
+    let profile_dir = chrome_profile_dir();
+    let _ = std::fs::create_dir_all(&profile_dir);
     let _ = std::fs::remove_file(profile_dir.join("SingletonLock"));
 
     let config = BrowserConfig::builder()
@@ -1244,9 +1333,10 @@ async fn launch_browser() -> Result<BrowserSession, String> {
             .to_owned()
     })?;
 
-    // Use a fixed profile dir so Chrome doesn't open first-run dialogs and so
-    // we can clean up any stale SingletonLock left by a previous crashed launch.
-    let profile_dir = std::env::temp_dir().join("sicompass-chrome");
+    // Persistent profile dir (see chrome_profile_dir) so cookies/logins survive
+    // restarts; also clean up any stale SingletonLock from a crashed launch.
+    let profile_dir = chrome_profile_dir();
+    let _ = std::fs::create_dir_all(&profile_dir);
     let _ = std::fs::remove_file(profile_dir.join("SingletonLock"));
 
     let config = BrowserConfig::builder()
@@ -1310,11 +1400,16 @@ async fn launch_browser() -> Result<BrowserSession, String> {
          Install Chrome or set SICOMPASS_CHROME_PATH to the browser executable."
             .to_owned()
     })?;
+    // Persistent profile dir so cookies/logins survive restarts.
+    let profile_dir = chrome_profile_dir();
+    let _ = std::fs::create_dir_all(&profile_dir);
+    let _ = std::fs::remove_file(profile_dir.join("SingletonLock"));
     let config = BrowserConfig::builder()
         .with_head()
         .arg("--disable-blink-features=AutomationControlled")
         .arg("--no-first-run")
         .arg("--no-default-browser-check")
+        .user_data_dir(&profile_dir)
         .window_size(1920, 1080)
         .chrome_executable(&exe)
         .build()
@@ -2467,10 +2562,19 @@ mod tests {
 
     #[test]
     fn build_fill_js_contains_selector_and_value() {
-        let js = build_fill_js("#my-input", "hello world");
+        let js = build_fill_js(1, 0, "#my-input", "hello world", false);
         assert!(js.contains("\"#my-input\""), "selector missing: {js}");
         assert!(js.contains("\"hello world\""), "value missing: {js}");
         assert!(js.contains("dispatchEvent"), "event dispatch missing");
+        // form_index 1 resolves against the first form in document order.
+        assert!(js.contains("document.forms[0]"), "form scoping missing: {js}");
+    }
+
+    #[test]
+    fn build_fill_js_standalone_resolves_against_document_and_submits() {
+        let js = build_fill_js(0, 0, "[name=\"q\"]", "query", true);
+        assert!(js.contains("const root = document;"), "global scope missing: {js}");
+        assert!(js.contains("KeyboardEvent"), "Enter submit missing for standalone: {js}");
     }
 
     #[test]
@@ -2553,6 +2657,8 @@ mod tests {
         p.form_map.insert("form_1/q".into(), FormNode {
             css_selector: "#q".into(),
             kind: FormNodeKind::TextInput,
+            form_index: 1,
+            match_index: 0,
         });
         // Simulate being inside the form field.
         p.push_path("https://example.com");
@@ -2578,6 +2684,8 @@ mod tests {
             map.insert((*k).to_owned(), FormNode {
                 css_selector: format!("#{k}"),
                 kind: FormNodeKind::TextInput,
+                form_index: 1,
+                match_index: 0,
             });
         }
         map
@@ -2626,6 +2734,8 @@ mod tests {
         p.form_map.insert("form_1/email".into(), FormNode {
             css_selector: "#email".into(),
             kind: FormNodeKind::TextInput,
+            form_index: 1,
+            match_index: 0,
         });
         // Build cached_page so patch_cached_form_field has something to update.
         let mut form = FfonElement::new_obj("form_1");
