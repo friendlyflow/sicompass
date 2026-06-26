@@ -1957,10 +1957,15 @@ mod tests {
             "<html><body><nav><a href='/'>Home</a></nav><p>content</p></body></html>",
             "https://example.com",
         );
-        let found = result.iter().any(|e| {
-            e.as_obj().map_or(false, |o| o.key.contains("<link>") && o.key.contains("Home"))
+        // Landmark elements are now wrapped in a named Obj, so the nav link is
+        // nested inside the "navigation" container rather than at the top level.
+        let nav = result.iter().find_map(|e| e.as_obj())
+            .filter(|o| o.key.starts_with("navigation"))
+            .expect("nav should be wrapped in a navigation Obj");
+        let found = nav.children.iter().any(|c| {
+            c.as_obj().map_or(false, |o| o.key.contains("<link>") && o.key.contains("Home"))
         });
-        assert!(found, "nav link should be rendered as an Obj with <link> tag, got: {result:?}");
+        assert!(found, "nav link should render inside the navigation Obj, got: {result:?}");
     }
 
     #[test]
@@ -1969,8 +1974,11 @@ mod tests {
             "<html><body><footer><p>Copyright</p></footer></body></html>",
             "https://example.com",
         );
-        let found = result.iter().any(|e| e.as_str().map_or(false, |s| s.contains("Copyright")));
-        assert!(found, "footer children should be rendered, got: {result:?}");
+        // The footer's text is now nested inside the "footer" landmark Obj.
+        let footer = result.iter().find_map(|e| e.as_obj()).filter(|o| o.key == "footer")
+            .expect("footer should be wrapped in a footer Obj");
+        let found = footer.children.iter().any(|c| c.as_str().map_or(false, |s| s.contains("Copyright")));
+        assert!(found, "footer children should render inside the footer Obj, got: {result:?}");
     }
 
     #[test]
@@ -2005,8 +2013,9 @@ mod tests {
             "<html><body><ul><li>Alpha</li><li>Beta</li></ul></body></html>",
             "https://example.com",
         );
+        // The navigability pass enriches the generic "list" key from its items.
         let list = result.iter().find(|e| {
-            e.as_obj().map_or(false, |o| o.key == "list")
+            e.as_obj().map_or(false, |o| o.key.starts_with("list"))
         });
         assert!(list.is_some());
         let children = &list.unwrap().as_obj().unwrap().children;
@@ -2022,7 +2031,7 @@ mod tests {
             "https://example.com",
         );
         let list = result.iter().find(|e| {
-            e.as_obj().map_or(false, |o| o.key == "ordered list")
+            e.as_obj().map_or(false, |o| o.key.starts_with("ordered list"))
         });
         assert!(list.is_some());
         let children = &list.unwrap().as_obj().unwrap().children;
