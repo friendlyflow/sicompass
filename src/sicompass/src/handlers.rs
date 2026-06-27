@@ -2928,6 +2928,11 @@ pub fn handle_input(r: &mut AppRenderer, text: &str) {
             r.cursor_position = pos + text.len();
             r.caret.reset(sdl_ticks());
             apply_insert_session_chunk(r);
+            // Echo the typed character(s) to the screen reader. Unlike the
+            // filter modes above (which speak the newly selected list item),
+            // Insert is a plain text field, so the right feedback is the key
+            // just typed — matching the per-character cursor handlers.
+            announce_typed_text(r, text);
             r.needs_redraw = true;
         }
         Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch => {
@@ -2936,6 +2941,7 @@ pub fn handle_input(r: &mut AppRenderer, text: &str) {
             r.input_buffer.insert_str(pos, text);
             r.cursor_position = pos + text.len();
             r.caret.reset(sdl_ticks());
+            announce_typed_text(r, text);
             r.needs_redraw = true;
         }
         Coordinate::ExtendedSearch => {
@@ -2990,12 +2996,17 @@ pub fn handle_backspace(r: &mut AppRenderer) {
                 let new_end = before.char_indices().rev().next()
                     .map(|(i, _)| i)
                     .unwrap_or(0);
+                let deleted = r.input_buffer[new_end..r.cursor_position].chars().next();
                 r.input_buffer.replace_range(new_end..r.cursor_position, "");
                 r.cursor_position = new_end;
                 r.caret.reset(sdl_ticks());
                 maybe_update_search(r);
                 if matches!(r.coordinate, Coordinate::Command | Coordinate::ExtendedSearch | Coordinate::TabSwitcher) {
                     r.speak_current_element();
+                } else if let Some(ch) = deleted {
+                    // Insert / scroll-search have no list selection to speak —
+                    // echo the character just deleted, matching typing feedback.
+                    announce_char(r, ch);
                 }
                 r.needs_redraw = true;
                 true
@@ -3889,6 +3900,27 @@ pub(crate) fn announce_char(r: &mut AppRenderer, ch: char) {
     r.announcement_parity = !r.announcement_parity;
     let sentinel = if r.announcement_parity { "\u{200B}" } else { "" };
     r.pending_announcement = Some(format!("{ch}{sentinel}"));
+}
+
+/// Echo just-typed text to the screen reader. A single keypress reuses
+/// [`announce_char`] (one character, password-masked); a multi-character
+/// insertion (clipboard paste or an IME commit) is announced as one run, masked
+/// to `*` per character in password fields. No-op on empty text.
+pub(crate) fn announce_typed_text(r: &mut AppRenderer, text: &str) {
+    let mut chars = text.chars();
+    let Some(first) = chars.next() else { return; };
+    if chars.next().is_none() {
+        announce_char(r, first);
+        return;
+    }
+    let spoken = if r.input_is_password {
+        "*".repeat(text.chars().count())
+    } else {
+        text.to_owned()
+    };
+    r.announcement_parity = !r.announcement_parity;
+    let sentinel = if r.announcement_parity { "\u{200B}" } else { "" };
+    r.pending_announcement = Some(format!("{spoken}{sentinel}"));
 }
 
 /// Shift+Left — extend selection one character to the left.
@@ -7857,6 +7889,44 @@ mod tests {
         handle_shift_right(&mut r);
         assert_eq!(r.pending_announcement, None);
         assert_eq!(r.cursor_position, 3);
+    }
+
+    #[test]
+    fn insert_typing_echoes_the_typed_character() {
+        // Regression: Insert mode (web URL bar, form fields, text editor, chat,
+        // email compose) used to insert silently — no key echo for the screen
+        // reader. Each typed character must now be announced.
+        let mut r = make_input_renderer("");
+        handle_input(&mut r, "h");
+        assert_eq!(announced_text(&r).as_deref(), Some("h"));
+        handle_input(&mut r, "i");
+        assert_eq!(announced_text(&r).as_deref(), Some("i"));
+        assert_eq!(r.input_buffer, "hi");
+    }
+
+    #[test]
+    fn insert_typing_masks_password_characters() {
+        let mut r = make_input_renderer("");
+        r.input_is_password = true;
+        handle_input(&mut r, "s");
+        assert_eq!(announced_text(&r).as_deref(), Some("*"));
+    }
+
+    #[test]
+    fn insert_paste_announces_the_whole_run() {
+        let mut r = make_input_renderer("");
+        handle_input(&mut r, "abc"); // multi-char (paste / IME commit)
+        assert_eq!(announced_text(&r).as_deref(), Some("abc"));
+        assert_eq!(r.input_buffer, "abc");
+    }
+
+    #[test]
+    fn insert_backspace_announces_deleted_character() {
+        let mut r = make_input_renderer("hi");
+        r.cursor_position = 2;
+        handle_backspace(&mut r);
+        assert_eq!(announced_text(&r).as_deref(), Some("i"));
+        assert_eq!(r.input_buffer, "h");
     }
 
     // -----------------------------------------------------------------------

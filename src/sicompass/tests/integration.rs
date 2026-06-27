@@ -6602,6 +6602,80 @@ fn language_change_refreshes_parked_tab_root_keys() {
     assert_ne!(actual, "STALE");
 }
 
+/// Regression: changing the UI language while sitting inside Settings must drop
+/// the cached subtree of an *inactive* sibling provider (the tutorial), so that
+/// re-entering it re-fetches its strings in the new language instead of replaying
+/// the stale FFON it was first expanded with. The active provider keeps its tree,
+/// and a screen-reader announcement is queued so the AT switches voice.
+#[test]
+fn language_change_collapses_inactive_tutorial_and_announces() {
+    use sicompass_sdk::ffon::IdArray;
+
+    ensure_builtins();
+    let settings_tmp = TempDir::new().expect("settings temp dir");
+    let mut renderer = AppRenderer::new();
+
+    // Provider 0: tutorial (will be inactive). Provider 1: settings (active).
+    register(&mut renderer, sicompass_sdk::create_provider_by_name("tutorial").unwrap());
+    let mut settings = sicompass_sdk::create_provider_by_name("settings").unwrap();
+    settings.set_config_path(settings_tmp.path().join("settings.json"));
+    register(&mut renderer, settings);
+    let tut = 0usize;
+    let set = 1usize;
+
+    // Simulate the tutorial having been navigated into: an expanded subtree and a
+    // deep current_path recorded under the previous language.
+    renderer.providers[tut].set_current_path("/Getting Started");
+    {
+        let obj = renderer.ffon[tut].as_obj_mut().unwrap();
+        obj.children.clear();
+        obj.push(FfonElement::Str("STALE child".to_owned()));
+    }
+    assert!(
+        !renderer.ffon[tut].as_obj().unwrap().children.is_empty(),
+        "precondition: tutorial starts with an expanded subtree"
+    );
+
+    // Cursor sits inside Settings, so Settings is the active provider.
+    renderer.current_id = {
+        let mut id = IdArray::new();
+        id.push(set);
+        id.push(0);
+        id
+    };
+
+    // Apply a live language change (en-US keeps the process-global locale stable
+    // for parallel tests; the collapse runs regardless of the value).
+    let queue: sicompass::programs::SettingsQueue = std::sync::Arc::new(std::sync::Mutex::new(
+        vec![("language".to_owned(), "en-US".to_owned())],
+    ));
+    sicompass::programs::apply_pending_settings(&mut renderer, &queue, false);
+
+    // Inactive tutorial is collapsed back to a lazy root and rewound to "/".
+    assert!(
+        renderer.ffon[tut].as_obj().unwrap().children.is_empty(),
+        "inactive tutorial subtree must be dropped so it re-fetches in the new language"
+    );
+    assert_eq!(
+        renderer.providers[tut].current_path(),
+        "/",
+        "inactive tutorial path must rewind to root"
+    );
+
+    // Active settings provider keeps a populated tree (refreshed, not collapsed).
+    assert!(
+        !renderer.ffon[set].as_obj().unwrap().children.is_empty(),
+        "active settings provider must not be collapsed"
+    );
+
+    // The screen reader is told to re-read in the new locale.
+    let ann = renderer.pending_announcement.as_deref().unwrap_or("");
+    assert!(
+        ann.trim_end_matches('\u{200B}') == "Language changed",
+        "expected a localized language-change announcement, got: {ann:?}"
+    );
+}
+
 #[test]
 fn ctrl_w_busy_tab_confirm_button_closes_tab() {
     let mut h = Harness::new();
