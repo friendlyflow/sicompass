@@ -3863,7 +3863,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "sicompass"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -3907,7 +3907,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-builtins"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "sicompass-chatclient",
  "sicompass-claude",
@@ -3925,7 +3925,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-chatclient"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "reqwest",
  "serde",
@@ -3938,7 +3938,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-claude"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "serde",
  "serde_json",
@@ -3947,7 +3947,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-emailclient"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "base64 0.22.1",
  "imap",
@@ -3965,7 +3965,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-filebrowser"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "libc",
  "natord",
@@ -3976,7 +3976,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-remote"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "reqwest",
  "serde_json",
@@ -3987,16 +3987,16 @@ dependencies = [
 
 [[package]]
 name = "sicompass-sales-demo"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "sicompass-sdk",
 ]
 
 [[package]]
 name = "sicompass-sdk"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29da18ab2f5d6d6d55e3df428b39675a6abccc603fd9182982e903e072cc8d34"
+checksum = "f1374555ddd45d323e2bee9e5725543a5dabd95796d89a0e901ef529d7d31676"
 dependencies = [
  "fluent",
  "fluent-langneg",
@@ -4015,7 +4015,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-settings"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
@@ -4030,14 +4030,14 @@ dependencies = [
 
 [[package]]
 name = "sicompass-shell"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "portable-pty",
 ]
 
 [[package]]
 name = "sicompass-terminal"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "sicompass-sdk",
  "sicompass-shell",
@@ -4047,7 +4047,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-text-editor"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "serde_json",
  "sicompass-sdk",
@@ -4057,7 +4057,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-tutorial"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "serde_json",
  "sicompass-sdk",
@@ -4066,7 +4066,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-updater"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
@@ -4086,7 +4086,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-webbrowser"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "chromiumoxide",
  "futures",
