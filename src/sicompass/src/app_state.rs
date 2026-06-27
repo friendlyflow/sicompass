@@ -1159,6 +1159,26 @@ impl AppRenderer {
         self.pending_announcement = Some(format!("{text}{sentinel}"));
     }
 
+    /// Announce a UI language switch via the live region, resolved in the
+    /// now-active locale so the screen reader re-reads in the new voice. This is
+    /// necessary because the language radio shows each option's *native* name
+    /// regardless of locale, so the focused control's text does not change on a
+    /// switch and would not, on its own, prompt a re-read. Toggles
+    /// `announcement_parity` so a repeat switch still produces a tree diff.
+    pub fn speak_language_change(&mut self) {
+        crate::shortcuts::register_translations();
+        let resolved = sicompass_sdk::localize::t("speak-language-change");
+        // Fall back to a readable English literal if no bundle is registered.
+        let text = if resolved == "speak-language-change" {
+            "language changed".to_owned()
+        } else {
+            resolved
+        };
+        self.announcement_parity = !self.announcement_parity;
+        let sentinel = if self.announcement_parity { "\u{200B}" } else { "" };
+        self.pending_announcement = Some(format!("{text}{sentinel}"));
+    }
+
     /// If `error_message` holds a new error, announce it via the live region.
     /// Called once per render frame so any error reaching the header is spoken
     /// exactly once, regardless of which code path set it. Clears the tracker

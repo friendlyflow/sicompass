@@ -109,4 +109,7 @@ mode-tab-switcher = tab switcher
 #   $idx, $total — 1-based position and tab count
 #   $label       — translated provider name of the active tab
 speak-tab-change = tab { $idx }/{ $total }: { $label }
+# Spoken in the newly selected language when the UI language changes, so the
+# screen reader switches voice even if the focused control's text is unchanged.
+speak-language-change = Language changed
 hint-c-controls = c      Controls

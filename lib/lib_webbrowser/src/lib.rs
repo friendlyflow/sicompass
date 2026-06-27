@@ -841,6 +841,9 @@ async fn close_browser(session: &BrowserSession) {
         session.browser.execute(CloseParams::default()),
     )
     .await;
+    // Chrome is gone now; reclaim the foreground for the app window so the
+    // screen reader re-focuses sicompass (the automatic "alt-tab back").
+    win_hide::restore_foreground(session.prev_foreground);
 }
 
 /// Poll `page.url()` until it stays the same for `settle` (or `total` elapses).
@@ -1073,6 +1076,74 @@ mod win_hide {
             cx: i32, cy: i32,
             u_flags: u32,
         ) -> i32;
+        fn GetForegroundWindow() -> isize;
+        fn SetForegroundWindow(hwnd: isize) -> i32;
+        fn BringWindowToTop(hwnd: isize) -> i32;
+        fn IsWindow(hwnd: isize) -> i32;
+        fn GetCurrentThreadId() -> u32;
+        fn AttachThreadInput(id_attach: u32, id_attach_to: u32, f_attach: i32) -> i32;
+        fn GetWindowLongPtrW(hwnd: isize, n_index: i32) -> isize;
+        fn SetWindowLongPtrW(hwnd: isize, n_index: i32, dw_new_long: isize) -> isize;
+    }
+
+    /// Index of the extended window styles in the window's memory.
+    const GWL_EXSTYLE: i32 = -20;
+    /// A window with this extended style does not become the foreground window
+    /// when clicked/created, so it cannot steal focus from the app.
+    const WS_EX_NOACTIVATE: isize = 0x0800_0000;
+
+    /// Mark `hwnd` non-activating so it never takes the foreground again. Applied
+    /// to each Chrome window the first time we see it; idempotent if reapplied.
+    fn set_no_activate(hwnd: isize) {
+        unsafe {
+            let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            if ex & WS_EX_NOACTIVATE == 0 {
+                SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | WS_EX_NOACTIVATE);
+            }
+        }
+    }
+
+    /// The current foreground window. Captured before Chrome launches so we know
+    /// which window (the sicompass app) to hand focus back to afterwards.
+    pub fn current_foreground() -> isize {
+        unsafe { GetForegroundWindow() }
+    }
+
+    /// Force `hwnd` back to the foreground.
+    ///
+    /// When the off-screen Chrome window is created it steals foreground focus,
+    /// so the screen reader follows it off into a web document (browse mode) and
+    /// stops tracking the sicompass window — exactly the "first arrow-down goes
+    /// silent until I alt-tab" symptom. After a page load/submit completes we
+    /// call this with the window captured by `current_foreground()` to do what
+    /// that manual alt-tab does: re-activate the app window so the screen reader
+    /// re-enters focus mode on it.
+    ///
+    /// Windows blocks `SetForegroundWindow` from a process that does not own the
+    /// current foreground window (foreground lock), so we briefly attach our
+    /// input queue to the foreground thread first — the standard workaround.
+    pub fn restore_foreground(hwnd: isize) {
+        if hwnd == 0 {
+            return;
+        }
+        unsafe {
+            if IsWindow(hwnd) == 0 {
+                return;
+            }
+            let fg = GetForegroundWindow();
+            if fg == hwnd {
+                return; // already focused — nothing stole it
+            }
+            let our_tid = GetCurrentThreadId();
+            let mut _pid: u32 = 0;
+            let fg_tid = if fg != 0 { GetWindowThreadProcessId(fg, &mut _pid) } else { 0 };
+            let attached = fg_tid != 0 && fg_tid != our_tid && AttachThreadInput(our_tid, fg_tid, 1) != 0;
+            SetForegroundWindow(hwnd);
+            BringWindowToTop(hwnd);
+            if attached {
+                AttachThreadInput(our_tid, fg_tid, 0);
+            }
+        }
     }
 
     const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
@@ -1102,7 +1173,20 @@ mod win_hide {
     /// Move every visible top-level Chrome/Edge window that was NOT present in
     /// `before` to an off-screen position.  The window remains "visible" to
     /// Chrome (no SW_HIDE, no occlusion) so JavaScript timers are never throttled.
-    pub fn hide_new_browser_windows(before: &[isize]) {
+    ///
+    /// The first time each Chrome window is seen it is also marked
+    /// `WS_EX_NOACTIVATE` (so it can never take the foreground again) and the
+    /// foreground is handed straight back to `prev_foreground` (the app window).
+    /// Without this the newly-created Chrome window grabs the foreground on
+    /// creation, the screen reader follows it into a web document, and the app's
+    /// arrow keys stop working until the user alt-tabs back. `handled` carries
+    /// the set of windows already processed across the mover's 50 ms ticks so the
+    /// focus bounce fires once per window, not every tick.
+    pub fn hide_new_browser_windows(
+        before: &[isize],
+        handled: &mut Vec<isize>,
+        prev_foreground: isize,
+    ) {
         let mut current: Vec<isize> = Vec::new();
         unsafe extern "system" fn callback(hwnd: isize, lparam: isize) -> i32 {
             let vec = unsafe { &mut *(lparam as *mut Vec<isize>) };
@@ -1111,6 +1195,7 @@ mod win_hide {
         }
         unsafe { EnumWindows(callback, &mut current as *mut Vec<isize> as isize) };
 
+        let mut saw_new = false;
         for hwnd in current {
             if before.contains(&hwnd) { continue; }
             if unsafe { IsWindowVisible(hwnd) } == 0 { continue; }
@@ -1146,7 +1231,20 @@ mod win_hide {
                         SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
                     );
                 }
+                if !handled.contains(&hwnd) {
+                    handled.push(hwnd);
+                    // Stop this window from ever taking the foreground again.
+                    set_no_activate(hwnd);
+                    saw_new = true;
+                }
             }
+        }
+
+        // A Chrome window just appeared (and likely grabbed the foreground on
+        // creation). Hand focus straight back to the app so the screen reader
+        // re-acquires it — the programmatic equivalent of the user's alt-tab.
+        if saw_new {
+            restore_foreground(prev_foreground);
         }
     }
 }
@@ -1276,6 +1374,11 @@ struct BrowserSession {
     /// Windows only: dropping this signals the window-hider thread to stop.
     #[cfg(target_os = "windows")]
     _hider_stop: std::sync::mpsc::SyncSender<()>,
+    /// Windows only: the app window that was foreground before Chrome launched.
+    /// `close_browser` hands focus back to it so the screen reader returns to the
+    /// sicompass window rather than the off-screen Chrome window.
+    #[cfg(target_os = "windows")]
+    prev_foreground: isize,
 }
 
 // ── Platform-specific browser launch ─────────────────────────────────────────
@@ -1363,18 +1466,26 @@ async fn launch_browser() -> Result<BrowserSession, String> {
     // Snapshot existing windows before launch so we only target new ones.
     let before = win_hide::snapshot_windows();
 
+    // Capture the current foreground window (the sicompass app) before Chrome
+    // exists, so `close_browser` can hand focus back to it — Chrome's window
+    // grabs the foreground when created, dragging the screen reader off with it.
+    let prev_foreground = win_hide::current_foreground();
+
     // Channel: when stop_tx is dropped (BrowserSession dropped), recv_timeout
     // returns Disconnected and the thread exits cleanly.
     let (stop_tx, stop_rx) = std::sync::mpsc::sync_channel::<()>(0);
 
     // Background mover: runs for the entire session lifetime.
-    // Moves any new Chrome windows off-screen (never hides them).
+    // Moves any new Chrome windows off-screen (never hides them), marks them
+    // non-activating, and bounces focus back to the app the first time each one
+    // appears so the screen reader is never dragged off into Chrome.
     std::thread::spawn(move || {
         use std::sync::mpsc::RecvTimeoutError;
+        let mut handled: Vec<isize> = Vec::new();
         loop {
             match stop_rx.recv_timeout(std::time::Duration::from_millis(50)) {
                 Err(RecvTimeoutError::Timeout) => {
-                    win_hide::hide_new_browser_windows(&before);
+                    win_hide::hide_new_browser_windows(&before, &mut handled, prev_foreground);
                 }
                 _ => break, // Disconnected → BrowserSession dropped
             }
@@ -1388,7 +1499,7 @@ async fn launch_browser() -> Result<BrowserSession, String> {
     ))?;
     tokio::spawn(async move { while handler.next().await.is_some() {} });
 
-    Ok(BrowserSession { browser, _hider_stop: stop_tx })
+    Ok(BrowserSession { browser, _hider_stop: stop_tx, prev_foreground })
 }
 
 /// macOS / other: headed Chrome via chromiumoxide's built-in launcher.

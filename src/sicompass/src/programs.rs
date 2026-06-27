@@ -1482,10 +1482,20 @@ fn apply_setting(
             // program list flips immediately (display_name() is translation-
             // backed for every provider) and (b) re-fetch the active
             // provider so its children flip too. Inactive providers' deeper
-            // children re-fetch lazily on next navigation / F5.
+            // children re-fetch lazily on next navigation — but a sibling that
+            // was already expanded (e.g. the tutorial) caches its FFON subtree
+            // and would otherwise never re-translate, so collapse those inactive
+            // providers back to a lazy root.
             sicompass_sdk::localize::set_locale(value);
             crate::provider::refresh_all_provider_root_keys(renderer);
             crate::provider::refresh_current_directory(renderer);
+            crate::provider::collapse_inactive_for_relocalize(renderer);
+            // Re-announce in the new locale so the screen reader switches voice
+            // even when the focused control's text is unchanged. Skip during the
+            // startup settings drain — there is no AT interaction yet then.
+            if !skip_enable {
+                renderer.speak_language_change();
+            }
         }
         _ => {}
     }

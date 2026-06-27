@@ -104,4 +104,5 @@ mode-tab-switcher = sélecteur d'onglets
 
 # Screen-reader announcements
 speak-tab-change = onglet { $idx }/{ $total } : { $label }
+speak-language-change = Langue modifiée
 hint-c-controls = c      Contrôles fenêtre

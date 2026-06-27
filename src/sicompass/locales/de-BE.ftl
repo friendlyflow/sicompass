@@ -104,4 +104,5 @@ mode-tab-switcher = Reiterwechsler
 
 # Screen-reader announcements
 speak-tab-change = Reiter { $idx }/{ $total }: { $label }
+speak-language-change = Sprache geändert
 hint-c-controls = c      Fensterknöpfe

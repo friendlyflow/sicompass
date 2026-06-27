@@ -143,6 +143,41 @@ pub fn refresh_current_directory(renderer: &mut AppRenderer) {
     }
 }
 
+/// After a locale change, collapse every *inactive*, non-filesystem provider in
+/// the active tab back to a lazy (empty-children) root, so its subtree re-fetches
+/// in the new language the next time it is entered.
+///
+/// Why this is needed: navigation is in-memory. Once a provider's subtree has
+/// been expanded (e.g. the tutorial), re-entering it just walks the cached FFON
+/// and never re-resolves the now-stale translations. `refresh_all_provider_root_keys`
+/// only re-keys the root Obj, and `refresh_current_directory` only re-fetches the
+/// *active* provider, so a sibling like the tutorial keeps the previous language
+/// until forced to re-fetch. Dropping the cached children does exactly that.
+///
+/// Filesystem providers (filebrowser, texteditor) are skipped: their content
+/// (file and directory names) is locale-independent and their root is an absolute
+/// path, not `"/"`, so resetting them to `"/"` would derail navigation. The active
+/// provider is left to `refresh_current_directory`, which preserves its cursor.
+pub fn collapse_inactive_for_relocalize(renderer: &mut AppRenderer) {
+    use sicompass_sdk::ffon::FfonElement;
+
+    let active = renderer.current_id.get(0);
+    let count = renderer.providers.len().min(renderer.ffon.len());
+    for i in 0..count {
+        if Some(i) == active {
+            continue;
+        }
+        if renderer.providers[i].path_is_filesystem() {
+            continue;
+        }
+        // Reset to the provider root and drop the stale expanded subtree; the
+        // empty-children Obj re-fetches lazily on the next navigate-right.
+        renderer.providers[i].set_current_path("/");
+        let key = renderer.providers[i].display_name();
+        renderer.ffon[i] = FfonElement::new_obj(&key);
+    }
+}
+
 /// Raw, untagged backing text of an element (the `Str` payload or the `Obj`
 /// key) — the string from which display tags are derived.
 fn elem_raw(e: &sicompass_sdk::ffon::FfonElement) -> &str {
