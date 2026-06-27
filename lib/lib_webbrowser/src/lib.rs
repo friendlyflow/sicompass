@@ -520,6 +520,7 @@ impl WebbrowserProvider {
     /// also empties the backing store). On Windows each fetch uses a throwaway
     /// browser, so there is nothing live to clear — remove the cookie files from
     /// the persistent profile dir instead.
+    #[cfg_attr(target_os = "windows", allow(unused_variables))]
     fn clear_cookies(&mut self, error: &mut String) {
         #[cfg(not(target_os = "windows"))]
         {
@@ -986,7 +987,7 @@ async fn submit_form_windows_inner(
                 && matches!(node.kind, FormNodeKind::Submit)
         })
         .map(|(_, node)| node.css_selector.clone())
-        .unwrap_or_else(|| html_submit_selector(form_n, "", ""));
+        .unwrap_or_else(|| html_submit_selector("", ""));
 
     let click_js = format!(
         "(() => {{ const el = document.querySelector({}); \
@@ -1279,8 +1280,6 @@ struct BrowserSession {
 
 // ── Platform-specific browser launch ─────────────────────────────────────────
 
-/// Linux: use xvfb-run so Chrome runs headed on an invisible X11 display.
-#[cfg(target_os = "linux")]
 /// Persistent Chrome profile directory so cookies and logins survive restarts.
 /// Lives alongside the app's other config (e.g. `settings.json`) rather than in
 /// a temp dir that the OS wipes on reboot. Falls back to a temp dir only if no
@@ -1291,6 +1290,8 @@ fn chrome_profile_dir() -> std::path::PathBuf {
         .unwrap_or_else(|| std::env::temp_dir().join("sicompass-chrome"))
 }
 
+/// Linux: use xvfb-run so Chrome runs headed on an invisible X11 display.
+#[cfg(target_os = "linux")]
 async fn launch_browser() -> Result<BrowserSession, String> {
     let exe = chrome_via_xvfb()?;
 
