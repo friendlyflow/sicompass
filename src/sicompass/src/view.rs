@@ -46,6 +46,15 @@ pub fn main_loop(app: &mut AppState) {
     update_window_title(app);
 
     while app.running {
+        // Timestamp the start of the iteration. A provider operation (notably a
+        // webbrowser page load, which blocks on Chrome over CDP) can freeze this
+        // loop for several seconds. While frozen we cannot service AT-SPI, so a
+        // screen reader drops focus tracking on our window — after the load the
+        // user's arrow keys go silent until they alt-tab away and back. We detect
+        // such a long frame below and re-assert window focus to recover, doing
+        // programmatically what that alt-tab does. See the end of the loop.
+        let frame_start = handlers::sdl_ticks();
+
         // ---- Runtime maximize/restore (checkbox toggle) ---------------------
         // pending_maximized is set by a live settings change and must fire
         // every iteration.  At startup this is always None (the startup drain
@@ -457,6 +466,23 @@ pub fn main_loop(app: &mut AppState) {
         // ---- Update accessibility tree (no-op when no AT is active) ---------
         if let Some(adapter) = app.accesskit_adapter.as_mut() {
             adapter.update_if_active(&app.renderer);
+
+            // A blocking provider op (e.g. a webbrowser page load) can freeze
+            // this loop long enough that a screen reader stops tracking focus on
+            // our window — the user's arrow keys then go silent until they alt-tab
+            // away and back. Detect that long frame and re-assert window focus
+            // (toggle off→on, the same transition alt-tab produces) so the screen
+            // reader re-enters focus mode on its own. The tree rebuild alone is
+            // not enough: with the focused node unchanged, no focus event fires.
+            // Normal frames are sub-frame-time; only blocking ops (or a one-off
+            // swapchain/font rebuild) cross this threshold, and re-asserting focus
+            // there is harmless. Windows handles this in the provider via a
+            // foreground bounce, and `update_window_focus` is a no-op there.
+            const LONG_FRAME_MS: u64 = 750;
+            if handlers::sdl_ticks().saturating_sub(frame_start) >= LONG_FRAME_MS {
+                adapter.update_window_focus(false);
+                adapter.update_window_focus(true);
+            }
         }
         // Note: pending_announcement is NOT cleared here. It persists until a
         // handler overwrites it with the next announcement, so the AT has
