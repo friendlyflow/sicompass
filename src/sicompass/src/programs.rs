@@ -1488,12 +1488,21 @@ fn apply_setting(
             // providers back to a lazy root.
             sicompass_sdk::localize::set_locale(value);
             crate::provider::refresh_all_provider_root_keys(renderer);
-            crate::provider::refresh_current_directory(renderer);
-            crate::provider::collapse_inactive_for_relocalize(renderer);
-            // Re-announce in the new locale so the screen reader switches voice
-            // even when the focused control's text is unchanged. Skip during the
-            // startup settings drain — there is no AT interaction yet then.
+            // The re-fetch + inactive-collapse below are RUNTIME-only relocalize
+            // steps: they re-translate an already-expanded, now-stale FFON tree
+            // after the user flips the language radio. During the startup drain
+            // (skip_enable=true) the provider roots were *just* built by
+            // `load_programs`, already in the configured locale (set before any
+            // provider was constructed). Running the collapse there wipes those
+            // freshly built roots back to empty children, and since the restored
+            // cursor lands directly in an inactive provider (e.g. the tutorial at
+            // depth 2) without re-navigating, its list renders blank until a
+            // manual refresh. So gate these on a live (non-startup) change.
             if !skip_enable {
+                crate::provider::refresh_current_directory(renderer);
+                crate::provider::collapse_inactive_for_relocalize(renderer);
+                // Re-announce in the new locale so the screen reader switches
+                // voice even when the focused control's text is unchanged.
                 renderer.speak_language_change();
             }
         }

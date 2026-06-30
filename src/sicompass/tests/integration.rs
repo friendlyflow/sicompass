@@ -6678,6 +6678,47 @@ fn enabling_app_in_settings_propagates_to_all_tabs() {
         "inactive tab should ALSO drop the disabled provider");
 }
 
+/// Regression: the user reported that after restart, landing in the "second
+/// layer" (a provider's own list, `current_id` depth 2) of almost every
+/// in-memory provider (tutorial, settings, …) showed NO list until a manual
+/// refresh (F5).
+///
+/// Cause: the startup settings drain (`apply_pending_settings(skip_enable=true)`)
+/// applies the saved `language`, whose handler called
+/// `collapse_inactive_for_relocalize` — resetting every inactive non-filesystem
+/// provider's root to empty children (a runtime-relocalize step that drops a
+/// stale expanded subtree so it re-fetches on next navigation). But at startup
+/// the roots were just freshly built in the configured locale, and the restored
+/// cursor lands directly inside one of those collapsed providers without
+/// re-navigating, so its list rendered blank. The constant per-frame refresh a
+/// live terminal used to drive masked it until that refresh was scoped to the
+/// active provider. The fix gates the collapse on a live (non-startup) change.
+#[test]
+fn startup_language_drain_does_not_collapse_inactive_provider() {
+    let mut h = Harness::new(); // filebrowser(0) + shared settings
+    register(&mut h.renderer, sicompass_sdk::create_provider_by_name("tutorial").unwrap());
+    let tut = h.provider_idx("tutorial").unwrap();
+
+    let before = h.renderer.ffon[tut].as_obj().unwrap().children.len();
+    assert!(before > 0, "tutorial root must have children after register");
+
+    // Filebrowser active => the tutorial is an INACTIVE provider.
+    h.renderer.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+
+    // Startup drain (skip_enable = true) of the saved language.
+    let queue: sicompass::programs::SettingsQueue = std::sync::Arc::new(std::sync::Mutex::new(
+        vec![("language".to_owned(), "en-US".to_owned())],
+    ));
+    sicompass::programs::apply_pending_settings(h.r(), &queue, true);
+
+    let after = h.renderer.ffon[tut].as_obj().unwrap().children.len();
+    assert_eq!(
+        after, before,
+        "startup language drain must NOT collapse an inactive provider's root \
+         (it rendered blank-until-F5 after restart)"
+    );
+}
+
 #[test]
 fn language_change_refreshes_parked_tab_root_keys() {
     let mut h = Harness::new();
