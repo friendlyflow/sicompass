@@ -1420,6 +1420,7 @@ pub fn handle_enter_search(r: &mut AppRenderer) {
             if let Some((parent_before, parent_id)) = radio_parent_snapshot {
                 crate::provider::notify_radio_changed(r, parent_before, parent_id);
             }
+            crate::provider::sync_inmemory_provider_path_to_cursor(r);
             r.coordinate = r.previous_coordinate;
             r.speak_mode_change(None);
             r.search_string.clear();
@@ -1438,6 +1439,11 @@ pub fn handle_enter_search(r: &mut AppRenderer) {
     }
 
     r.current_id = selected_id;
+    // Search jumped the cursor deep into the tree without walking navigate_right,
+    // so re-sync the in-memory provider's path to the new cursor. Otherwise the
+    // next path-dependent op (e.g. a button press → refresh) re-fetches the layer
+    // where search was opened and snaps focus back up.
+    crate::provider::sync_inmemory_provider_path_to_cursor(r);
     r.coordinate = r.previous_coordinate;
     r.speak_mode_change(None);
     r.search_string.clear();
@@ -1595,6 +1601,7 @@ fn handle_enter_extended_search(r: &mut AppRenderer) {
             if let Some((parent_before, parent_id)) = radio_parent_snapshot {
                 crate::provider::notify_radio_changed(r, parent_before, parent_id);
             }
+            crate::provider::sync_inmemory_provider_path_to_cursor(r);
             r.coordinate = r.previous_coordinate;
             r.speak_mode_change(None);
             r.input_buffer.clear();
@@ -1638,6 +1645,10 @@ fn handle_enter_extended_search(r: &mut AppRenderer) {
 
     // Regular FFON-tree item: navigate by id
     r.current_id = item.id;
+    // Re-sync the in-memory provider path to the jumped-to cursor (see
+    // sync_inmemory_provider_path_to_cursor). Without this, activating a matched
+    // button re-fetches the layer where search was opened and snaps focus up.
+    crate::provider::sync_inmemory_provider_path_to_cursor(r);
     r.coordinate = r.previous_coordinate;
     r.speak_mode_change(None);
     r.input_buffer.clear();

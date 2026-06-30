@@ -2094,6 +2094,105 @@ impl Provider for ButtonTestProvider {
     }
 }
 
+/// In-memory provider with a button one layer deep: root holds "Group", and
+/// inside "Group" sits a plain `<button>` (generic on_button_press path, not the
+/// "Add element:" create path). Used to reproduce the Ctrl+F search desync.
+struct NestedButtonProvider {
+    path: String,
+}
+
+impl NestedButtonProvider {
+    fn new() -> Self {
+        NestedButtonProvider { path: "/".to_owned() }
+    }
+}
+
+impl Provider for NestedButtonProvider {
+    fn name(&self) -> &str { "nestedbutton" }
+    fn display_name(&self) -> String { "Nested Button".to_owned() }
+
+    fn fetch(&mut self) -> Vec<FfonElement> {
+        match self.path.as_str() {
+            "/" => {
+                let mut group = FfonElement::new_obj("Group");
+                group.as_obj_mut().unwrap().push(FfonElement::new_str("<button>noop</button>press me"));
+                group.as_obj_mut().unwrap().push(FfonElement::new_str("beta"));
+                vec![FfonElement::new_str("alpha"), group]
+            }
+            "/Group" => vec![
+                FfonElement::new_str("<button>noop</button>press me"),
+                FfonElement::new_str("beta"),
+            ],
+            _ => vec![],
+        }
+    }
+
+    fn push_path(&mut self, seg: &str) {
+        if self.path == "/" { self.path = format!("/{seg}"); }
+        else { self.path.push('/'); self.path.push_str(seg); }
+    }
+    fn pop_path(&mut self) {
+        if let Some(s) = self.path.rfind('/') {
+            self.path = if s == 0 { "/".to_owned() } else { self.path[..s].to_owned() };
+        }
+    }
+    fn current_path(&self) -> &str { &self.path }
+    fn set_current_path(&mut self, path: &str) { self.path = path.to_owned(); }
+}
+
+/// Regression: Ctrl+F (ExtendedSearch) jumps the cursor to a match one layer
+/// deeper than where search was opened, but leaves the provider's `current_path`
+/// at the search layer. Search Enter must re-sync that path; otherwise activating
+/// the matched button re-fetches the search layer and snaps focus back up a level.
+#[test]
+fn search_enter_on_deep_button_syncs_provider_path() {
+    let mut renderer = AppRenderer::new();
+    register(&mut renderer, Box::new(NestedButtonProvider::new()));
+    sicompass::list::create_list_current_layer(&mut renderer);
+
+    // fetch("/") already nests Group's children, so the deep button is present.
+    // Search is opened from the provider's root layer (path "/").
+    let mut origin = sicompass_sdk::ffon::IdArray::new();
+    origin.push(0);
+    origin.push(0);
+    renderer.current_id = origin;
+    assert_eq!(sicompass::provider::current_path(&renderer), "/");
+
+    // Enter ExtendedSearch (what Ctrl+F actually opens) and build its flattened
+    // tree-wide result list.
+    renderer.coordinate = Coordinate::ExtendedSearch;
+    renderer.previous_coordinate = Coordinate::General;
+    sicompass::list::create_list_extended_search(&mut renderer);
+
+    // Select the deep button match: provider 0 / Group 1 / button 0.
+    let btn_idx = renderer.total_list.iter().position(|it| {
+        it.id.get(0) == Some(0) && it.id.get(1) == Some(1) && it.id.get(2) == Some(0)
+    }).expect("deep button must appear in extended search results");
+    renderer.list_index = btn_idx;
+
+    // First Enter exits search onto the button. The path must re-sync to its layer.
+    press_enter(&mut renderer);
+    assert_eq!(renderer.coordinate, Coordinate::General, "search exits");
+    assert_eq!(renderer.current_id.depth(), 3, "cursor on the deep button");
+    assert_eq!(
+        sicompass::provider::current_path(&renderer),
+        "/Group",
+        "search Enter must sync the provider path to the cursor's layer"
+    );
+
+    // Second Enter activates the button (General-mode → refresh). Focus must stay
+    // on the deep layer, not snap back to the search-origin (root) layer.
+    press_enter(&mut renderer);
+    assert_eq!(renderer.current_id.depth(), 3, "focus must remain on the deep button layer");
+    let list_keys: Vec<String> = renderer.ffon[0].as_obj().unwrap()
+        .children[1].as_obj().unwrap()
+        .children.iter()
+        .map(|e| match e { FfonElement::Obj(o) => o.key.clone(), FfonElement::Str(s) => s.clone() })
+        .collect();
+    assert!(list_keys.iter().any(|k| k.contains("press me")),
+        "Group layer must still show its button after activation; got {list_keys:?}");
+}
+
 /// Pressing Enter on a button inside "Add element:" creates the element with the
 /// correct provider path and leaves path in the right state for further navigation.
 ///

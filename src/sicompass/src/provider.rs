@@ -63,6 +63,60 @@ pub fn set_provider_path(renderer: &mut AppRenderer, path: &str) {
     }
 }
 
+/// Rebuild a non-filesystem provider's `current_path` from the FFON ancestor
+/// keys of the focused element, so the provider path matches `current_id`.
+///
+/// Normal navigation keeps the two in lock-step (`navigate_right` pushes a
+/// segment as it descends). Ctrl+F search bypasses that: it jumps `current_id`
+/// straight to a match deep in the in-memory tree, leaving `current_path` at the
+/// layer where search was opened. A later path-dependent op then misfires — a
+/// button press calls `refresh_current_directory`, which re-fetches that stale
+/// layer and grafts it over the current view, snapping focus back up a level.
+/// Re-deriving the path here keeps the provider in sync with the cursor.
+///
+/// Filesystem providers (filebrowser/editor) are skipped: their `current_path`
+/// is an absolute OS path that can't be rebuilt from display keys, and their
+/// search results never leave the current directory anyway.
+pub fn sync_inmemory_provider_path_to_cursor(renderer: &mut AppRenderer) {
+    use sicompass_sdk::ffon::{get_ffon_at_id, IdArray};
+    use sicompass_sdk::tags;
+
+    let Some(idx) = renderer.current_id.get(0) else { return };
+    let is_fs = renderer
+        .providers
+        .get(idx)
+        .map(|p| p.path_is_filesystem())
+        .unwrap_or(false);
+    if is_fs {
+        return;
+    }
+
+    // Container ancestors sit at levels 1..depth-1: level 0 is the provider root
+    // and level depth-1 is the focused element itself, neither of which is a path
+    // segment.
+    let depth = renderer.current_id.depth();
+    let mut anc = IdArray::new();
+    anc.push(idx);
+    let mut segs: Vec<String> = Vec::new();
+    for level in 1..depth.saturating_sub(1) {
+        let i = renderer.current_id.get(level).unwrap_or(0);
+        anc.push(i);
+        let key = get_ffon_at_id(&renderer.ffon, &anc)
+            .and_then(|slice| slice.get(i))
+            .map(elem_raw)
+            .unwrap_or("");
+        segs.push(tags::strip_display(key).to_string());
+    }
+    let path = if segs.is_empty() {
+        "/".to_owned()
+    } else {
+        format!("/{}", segs.join("/"))
+    };
+    if let Some(p) = renderer.providers.get_mut(idx) {
+        p.set_current_path(&path);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Refresh / re-fetch
 // ---------------------------------------------------------------------------
@@ -1378,6 +1432,7 @@ mod tests {
         last_delete: Option<String>,
         last_execute: Option<(String, String)>,
         last_command: Option<String>,
+        fs: bool,
     }
 
     impl MockProvider {
@@ -1398,6 +1453,7 @@ mod tests {
                 last_delete: None,
                 last_execute: None,
                 last_command: None,
+                fs: false,
             }
         }
     }
@@ -1405,6 +1461,8 @@ mod tests {
     impl Provider for MockProvider {
         fn name(&self) -> &str { &self.name }
         fn fetch(&mut self) -> Vec<FfonElement> { self.items.clone() }
+        fn path_is_filesystem(&self) -> bool { self.fs }
+        fn set_current_path(&mut self, path: &str) { self.path = path.to_owned(); }
         fn push_path(&mut self, seg: &str) {
             if self.path == "/" { self.path = format!("/{seg}"); }
             else { self.path.push('/'); self.path.push_str(seg); }
@@ -1514,6 +1572,51 @@ mod tests {
         let p = MockProvider::new("test", vec![]);
         let r = make_renderer_with_provider(p);
         assert_eq!(current_path(&r), "/");
+    }
+
+    // --- sync_inmemory_provider_path_to_cursor (Ctrl+F search desync) ---
+
+    #[test]
+    fn sync_inmemory_path_rebuilds_from_deep_cursor() {
+        // Tree: root "test" → Obj "Interactive playground" → Str button. Search
+        // opened at root, so the provider path is still "/".
+        let mut p = MockProvider::new("test", vec![]);
+        p.path = "/".to_owned();
+        let mut r = AppRenderer::new();
+        let mut root = FfonElement::new_obj("test");
+        let mut playground = FfonElement::new_obj("Interactive playground");
+        playground
+            .as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("<button>demo</button>activate me"));
+        root.as_obj_mut().unwrap().push(playground);
+        r.ffon = vec![root];
+        r.providers = vec![Box::new(p)];
+        // Cursor jumped (via search) to the button: provider 0 / playground 0 / button 0.
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id.push(0); id };
+
+        sync_inmemory_provider_path_to_cursor(&mut r);
+        assert_eq!(current_path(&r), "/Interactive playground");
+    }
+
+    #[test]
+    fn sync_inmemory_path_skips_filesystem_providers() {
+        // Filesystem providers track an absolute OS path that cannot be rebuilt
+        // from display keys, so the sync must leave it alone.
+        let mut p = MockProvider::new("files", vec![]);
+        p.fs = true;
+        p.path = "/home/nico".to_owned();
+        let mut r = AppRenderer::new();
+        let mut root = FfonElement::new_obj("files");
+        let mut dir = FfonElement::new_obj("Downloads");
+        dir.as_obj_mut().unwrap().push(FfonElement::new_str("file.txt"));
+        root.as_obj_mut().unwrap().push(dir);
+        r.ffon = vec![root];
+        r.providers = vec![Box::new(p)];
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id.push(0); id };
+
+        sync_inmemory_provider_path_to_cursor(&mut r);
+        assert_eq!(current_path(&r), "/home/nico");
     }
 
     #[test]
