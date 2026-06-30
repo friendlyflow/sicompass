@@ -188,6 +188,7 @@ static SECTIONS: &[Node] = &[
         children: &[
             Leaf("tutorial-play-intro"),
             Leaf("tutorial-play-checkbox"),
+            Leaf("tutorial-play-button"),
             Leaf("tutorial-play-input"),
             Leaf("tutorial-play-radio-intro"),
             Branch { key: "tutorial-play-radio", children: &[
@@ -326,6 +327,10 @@ pub struct TutorialProvider {
     current_path: String,
     texture_jpg: String,
     ffon_json: String,
+    /// A one-shot screen-reader announcement, drained by `take_error`. The demo
+    /// button in the playground sets this so activating it confirms with a short
+    /// spoken line instead of silently re-fetching the list.
+    pending_announce: Option<String>,
 }
 
 impl TutorialProvider {
@@ -337,6 +342,7 @@ impl TutorialProvider {
             current_path: "/".to_owned(),
             texture_jpg,
             ffon_json,
+            pending_announce: None,
         }
     }
 
@@ -346,6 +352,7 @@ impl TutorialProvider {
             current_path: "/".to_owned(),
             texture_jpg: "/missing/texture.jpg".to_owned(),
             ffon_json: "/missing/ffon.json".to_owned(),
+            pending_announce: None,
         }
     }
 
@@ -398,6 +405,19 @@ impl Provider for TutorialProvider {
     fn set_current_path(&mut self, path: &str) {
         self.current_path = path.to_owned();
     }
+
+    /// The tutorial is read-only, so its only button (the playground demo) has no
+    /// real action. Instead of letting the generic press path silently re-fetch
+    /// the list, confirm with a short spoken line so activating it has a clear,
+    /// expected outcome.
+    fn on_button_press(&mut self, _function_name: &str) {
+        register_translations();
+        self.pending_announce = Some(localize::t("tutorial-play-button-pressed"));
+    }
+
+    fn take_error(&mut self) -> Option<String> {
+        self.pending_announce.take()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -425,6 +445,24 @@ mod tests {
             .iter()
             .filter_map(|e| e.as_obj().map(|o| o.key.to_owned()))
             .collect()
+    }
+
+    #[test]
+    fn test_demo_button_only_announces_and_changes_nothing() {
+        let mut p = provider();
+        p.push_path("Interactive playground");
+        let before = p.fetch();
+        let path_before = p.current_path().to_owned();
+
+        p.on_button_press("demo");
+
+        // It confirms with a spoken line (drained once)...
+        let msg = p.take_error().expect("demo button must announce a confirmation");
+        assert!(!msg.is_empty());
+        assert!(p.take_error().is_none(), "announcement must be one-shot");
+        // ...and otherwise leaves the path and rendered list untouched.
+        assert_eq!(p.current_path(), path_before, "button press must not navigate");
+        assert_eq!(joined(&p.fetch()), joined(&before), "button press must not mutate the list");
     }
 
     const SECTION_NAMES: [&str; 7] = [
@@ -539,6 +577,7 @@ mod tests {
         let elems = p.fetch();
         let text = joined(&elems);
         assert!(text.contains("<checkbox checked>"), "must contain a checked checkbox");
+        assert!(text.contains("<button>"), "must contain a button");
         assert!(text.contains("<input>"), "must contain an input");
         assert!(text.contains("<image>"), "must contain an inline image");
         assert!(text.contains("Lorem ipsum"), "must contain the long passage for scroll practice");
