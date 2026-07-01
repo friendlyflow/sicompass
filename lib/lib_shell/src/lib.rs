@@ -368,8 +368,22 @@ fn make_title_link(program: &Path, title: &str) -> Option<(PathBuf, PathBuf)> {
     #[cfg(unix)]
     let ok = std::os::unix::fs::symlink(program, &link_path).is_ok();
     #[cfg(windows)]
-    let ok = std::fs::hard_link(program, &link_path).is_ok()
-        || std::fs::copy(program, &link_path).is_ok();
+    let ok = {
+        let linked = std::fs::hard_link(program, &link_path).is_ok()
+            || std::fs::copy(program, &link_path).is_ok();
+        // System executables (cmd.exe, most Windows tools) load their
+        // user-facing strings from a satellite MUI file at
+        // `<exe_dir>\<lang>\<exe_name>.mui`. The loader resolves that path
+        // relative to the *running* image, so a renamed copy in our temp dir
+        // can't find `System32\<lang>\cmd.exe.mui` and every message-table
+        // lookup fails ("The system cannot find message text for message
+        // number 0x…" — e.g. `dir`'s summary and `<DIR>` labels). Replicate
+        // the MUI files next to the link, renamed to match, so they resolve.
+        if linked {
+            copy_mui_siblings(program, &dir, &link_name);
+        }
+        linked
+    };
     #[cfg(not(any(unix, windows)))]
     let ok = false;
 
@@ -378,6 +392,46 @@ fn make_title_link(program: &Path, title: &str) -> Option<(PathBuf, PathBuf)> {
     } else {
         let _ = std::fs::remove_dir_all(&dir);
         None
+    }
+}
+
+/// Replicate a program's satellite MUI resource files next to a renamed launch
+/// link. For a source `…\System32\cmd.exe`, each language folder holding
+/// `cmd.exe.mui` (e.g. `…\System32\en-US\cmd.exe.mui`) is mirrored to
+/// `<link_dir>\en-US\<link_name>.mui` so the Windows resource loader — which
+/// searches relative to the running image — can find the strings. Best-effort:
+/// programs with embedded resources (no `.mui`) simply have nothing to copy.
+#[cfg(windows)]
+fn copy_mui_siblings(program: &Path, link_dir: &Path, link_name: &str) {
+    let (Some(src_dir), Some(src_file)) = (program.parent(), program.file_name())
+    else {
+        return;
+    };
+    let Some(src_file) = src_file.to_str() else {
+        return;
+    };
+    let mui_name = format!("{src_file}.mui");
+    let Ok(entries) = std::fs::read_dir(src_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let src_mui = entry.path().join(&mui_name);
+        if !src_mui.is_file() {
+            continue;
+        }
+        let Some(lang) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        let dst_lang = link_dir.join(&lang);
+        if std::fs::create_dir_all(&dst_lang).is_err() {
+            continue;
+        }
+        let dst_mui = dst_lang.join(format!("{link_name}.mui"));
+        let _ = std::fs::hard_link(&src_mui, &dst_mui).is_ok()
+            || std::fs::copy(&src_mui, &dst_mui).is_ok();
     }
 }
 
@@ -524,6 +578,47 @@ mod tests {
         }
         panic!(
             "did not observe executed marker; got: {:?}",
+            String::from_utf8_lossy(&acc)
+        );
+    }
+
+    /// A renamed launch link (`title`) runs a *copy* of `cmd.exe` from a temp
+    /// dir. cmd loads its user-facing strings from a satellite `cmd.exe.mui`
+    /// resolved next to the running image, so without the MUI being replicated
+    /// (see `copy_mui_siblings`) every message-table lookup fails with "The
+    /// system cannot find message text for message number 0x… in the message
+    /// file for Application" — `dir` in particular becomes unusable. This
+    /// guards that regression: `dir` under a titled cmd must produce real
+    /// output, not the message-lookup error.
+    #[cfg(windows)]
+    #[test]
+    fn titled_cmd_loads_message_strings() {
+        let cfg = ShellConfig {
+            program: "cmd.exe".to_owned(),
+            title: Some("sicompass-shell".to_owned()),
+            ..Default::default()
+        };
+        let mut shell = Shell::spawn(cfg).expect("spawn cmd.exe");
+        shell.write_line("dir").expect("write");
+
+        let mut acc: Vec<u8> = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            acc.extend(shell.drain_output());
+            let text = String::from_utf8_lossy(&acc);
+            // `dir`'s summary line is loaded from the MUI; its presence means
+            // message strings resolved.
+            if text.contains("File(s)") {
+                assert!(
+                    !text.contains("cannot find message text"),
+                    "dir emitted message-lookup errors: {text:?}"
+                );
+                return;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        panic!(
+            "did not observe dir summary; got: {:?}",
             String::from_utf8_lossy(&acc)
         );
     }
