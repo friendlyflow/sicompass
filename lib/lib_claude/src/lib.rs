@@ -109,14 +109,17 @@ impl ClaudeProvider {
         self.init_attempted = true;
         let resume = self.last_session_id.clone();
         let restarting = resume.is_some();
+        tracing::debug!(program = %self.program, restarting, "claude: ensure_session spawning");
         match Session::spawn(&self.session_config(resume)) {
             Ok(s) => {
+                tracing::debug!("claude: ensure_session spawn OK");
                 self.session = Some(s);
                 if restarting {
                     self.error = Some("claude session restarted".to_owned());
                 }
             }
             Err(e) => {
+                tracing::error!(program = %self.program, error = %e, kind = ?e.kind(), "claude: ensure_session spawn failed");
                 self.error = Some(if e.kind() == std::io::ErrorKind::NotFound {
                     format!(
                         "could not start `{}`: binary not found on PATH",
@@ -136,10 +139,20 @@ impl ClaudeProvider {
             return false;
         };
         let mut changed = false;
-        for line in session.drain_lines() {
-            if let Some(ev) = events::parse_line(&line) {
-                self.convo.apply(ev);
-                changed = true;
+        let drained = session.drain_lines();
+        if !drained.is_empty() {
+            tracing::debug!(count = drained.len(), "claude: pump drained lines");
+        }
+        for line in drained {
+            match events::parse_line(&line) {
+                Some(ev) => {
+                    self.convo.apply(ev);
+                    changed = true;
+                }
+                None => {
+                    let preview: String = line.chars().take(120).collect();
+                    tracing::debug!(line = %preview, "claude: pump could not parse line");
+                }
             }
         }
         if let Some(sid) = &self.convo.session_id {
@@ -149,6 +162,7 @@ impl ClaudeProvider {
         // `--resume` re-spawn on the next `ensure_session()`.
         if !session.is_alive() {
             let stderr = session.take_stderr();
+            tracing::error!(stderr = %stderr.trim(), "claude: child exited unexpectedly");
             self.session = None;
             self.init_attempted = false;
             self.convo.busy = false;
@@ -191,19 +205,23 @@ impl Provider for ClaudeProvider {
     }
 
     fn commit_edit(&mut self, old: &str, new: &str) -> bool {
+        tracing::debug!(old_len = old.len(), new = %new, "claude: commit_edit called");
         // The handler strips the `<input>...</input>` wrapper before calling
         // us, so the trailing live slot arrives with `old == ""`. Reject any
         // non-empty `old` (editing a past conversation line is not supported).
         if !old.is_empty() {
+            tracing::debug!("claude: commit_edit rejected — non-empty `old`");
             return false;
         }
         let prompt = new.trim();
         if prompt.is_empty() {
+            tracing::debug!("claude: commit_edit rejected — empty prompt");
             return false;
         }
         self.ensure_session();
         let Some(session) = self.session.as_mut() else {
             // `ensure_session` already set a descriptive error.
+            tracing::error!(error = ?self.error, "claude: commit_edit — no session after ensure_session");
             return false;
         };
         let msg = serde_json::json!({
@@ -214,6 +232,7 @@ impl Provider for ClaudeProvider {
             },
         });
         let line = msg.to_string();
+        tracing::debug!(prompt = %prompt, "claude: writing user message to child");
         if let Err(e) = session.write_user(&line) {
             // Broken pipe → the child died; drop it so the next call re-spawns
             // with `--resume`.
