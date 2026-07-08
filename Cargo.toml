@@ -50,7 +50,7 @@ serde_json = "1"
 
 # Cryptography (offline license-certificate verification in lib_settings;
 # also used by sicompass-updater for plugin signature verification)
-ed25519-dalek = "2"
+ed25519-dalek = "3"
 base64 = "0.22"
 sha2 = "0.11"
 
@@ -62,7 +62,7 @@ ash = "0.38"
 glam = "0.33"
 
 # Text rendering
-freetype = "0.7"
+freetype = "0.8"
 rustybuzz = "0.20"
 
 # Image loading
@@ -137,7 +137,7 @@ libc = "0.2"
 winres = "0.1"
 
 # Test dependencies
-mockall = "0.14"
+mockall = "0.15"
 tempfile = "3"
 wiremock = "0.6"
 
