@@ -75,8 +75,14 @@
               export VULKAN_SDK="${vulkan-headers}";
               export VK_LAYER_PATH="${vulkan-validation-layers}/share/vulkan/explicit_layer.d";
 
-              # Point Vulkan loader to system drivers (for non-NixOS systems)
-              export VK_ICD_FILENAMES="/usr/share/vulkan/icd.d/radeon_icd.json";
+              # Point the Vulkan loader at system drivers on non-NixOS distros.
+              # On NixOS the drivers live in /run/opengl-driver and the loader
+              # finds them on its own, so leave VK_ICD_FILENAMES unset there:
+              # setting it to a missing path makes the loader report zero ICDs
+              # and SDL fails with "Vulkan doesn't implement VK_KHR_surface".
+              if [ -e /usr/share/vulkan/icd.d/radeon_icd.json ]; then
+                export VK_ICD_FILENAMES="/usr/share/vulkan/icd.d/radeon_icd.json";
+              fi
 
               exec fish
             '';
