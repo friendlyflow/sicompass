@@ -177,6 +177,7 @@ static SECTIONS: &[Node] = &[
             Leaf("tutorial-prog-terminal"),
             Leaf("tutorial-prog-chat"),
             Leaf("tutorial-prog-email"),
+            Leaf("tutorial-prog-email-gmail"),
             Leaf("tutorial-prog-salesdemo"),
             Leaf("tutorial-prog-remote"),
             Leaf("tutorial-prog-settings"),
@@ -568,6 +569,18 @@ mod tests {
         for token in ["File browser", "Text editor", "Web browser", "Terminal", "Chat", "Email", "Settings"] {
             assert!(text.contains(token), "programs section must mention {token}, got:\n{text}");
         }
+    }
+
+    #[test]
+    fn test_programs_documents_gmail_setup() {
+        let mut p = provider();
+        p.push_path("The programs");
+        let text = joined(&p.fetch());
+        // The Gmail setup leaf must call out the mail scope (the actual fix) and
+        // the recovery colon commands.
+        assert!(text.contains("https://mail.google.com/"), "must name the mail scope, got:\n{text}");
+        assert!(text.contains(":refresh"), "must mention the :refresh colon command");
+        assert!(text.contains(":logout"), "must mention re-authorizing via :logout");
     }
 
     #[test]
