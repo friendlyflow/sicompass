@@ -1249,24 +1249,52 @@ mod win_hide {
     }
 }
 
-/// On Linux, write a one-shot wrapper script that invokes Chrome through
-/// `xvfb-run -a` so it runs on an auto-allocated virtual display (invisible).
-/// Returns the path to the wrapper, or the plain Chrome binary if xvfb-run
-/// is not available (Chrome will open visibly in that case).
+/// On Linux, return a wrapper script that runs Chrome on an invisible virtual
+/// X11 display, so the browser never appears on the user's real screen.
+///
+/// Preference order:
+/// 1. `xvfb-run -a` — the standard helper; it allocates a display and cleans up.
+/// 2. Bare `Xvfb` — if `xvfb-run` is missing but `Xvfb` exists, emulate what
+///    xvfb-run does (start our own Xvfb on a free display, run Chrome against
+///    it, tear both down on exit). This keeps Chrome invisible even on systems
+///    that ship `Xvfb` without the `xvfb-run` wrapper (e.g. some Nix setups).
+/// 3. Neither present — fall back to the plain Chrome binary, which opens a
+///    visible window. This is a last resort, not the normal path.
 #[cfg(target_os = "linux")]
 fn chrome_via_xvfb() -> Result<std::path::PathBuf, String> {
     let chrome = find_chrome_executable()
         .ok_or_else(|| "Chrome/Chromium not found in PATH".to_owned())?;
+    let chrome = chrome.to_string_lossy();
 
-    if which::which("xvfb-run").is_err() {
-        return Ok(chrome);
-    }
+    let script = if which::which("xvfb-run").is_ok() {
+        format!(
+            "#!/bin/sh\nunset WAYLAND_DISPLAY\nexec xvfb-run -a {chrome} --ozone-platform=x11 \"$@\"\n"
+        )
+    } else if which::which("Xvfb").is_ok() {
+        // Emulate xvfb-run: pick a free display number, start Xvfb on it, run
+        // Chrome (backgrounded so we keep the shell alive), and kill both Xvfb
+        // and Chrome on any exit signal. Chrome inherits our stdout/stderr, so
+        // chromiumoxide still reads its "DevTools listening on ws://…" line.
+        format!(
+            "#!/bin/sh\n\
+             unset WAYLAND_DISPLAY\n\
+             d=99\n\
+             while [ -e /tmp/.X${{d}}-lock ] || [ -e /tmp/.X11-unix/X${{d}} ]; do d=$((d+1)); done\n\
+             Xvfb :$d -screen 0 1920x1080x24 -nolisten tcp >/dev/null 2>&1 &\n\
+             xp=$!\n\
+             i=0\n\
+             while [ ! -e /tmp/.X11-unix/X${{d}} ]; do i=$((i+1)); [ $i -ge 100 ] && break; sleep 0.05; done\n\
+             DISPLAY=:$d {chrome} --ozone-platform=x11 \"$@\" &\n\
+             cp=$!\n\
+             trap 'kill $cp $xp 2>/dev/null' EXIT HUP INT TERM\n\
+             wait $cp\n"
+        )
+    } else {
+        // No virtual display available: Chrome will open a visible window.
+        return Ok(std::path::PathBuf::from(chrome.into_owned()));
+    };
 
     let wrapper = std::env::temp_dir().join("sicompass-xvfb-chrome.sh");
-    let script = format!(
-        "#!/bin/sh\nunset WAYLAND_DISPLAY\nexec xvfb-run -a {} --ozone-platform=x11 \"$@\"\n",
-        chrome.to_string_lossy()
-    );
     std::fs::write(&wrapper, &script)
         .map_err(|e| format!("failed to write Xvfb wrapper: {e}"))?;
     #[cfg(unix)]
