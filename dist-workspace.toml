@@ -22,10 +22,11 @@ targets = [
 # The curl|sh "shell" installer is macOS/Linux only, so it is dropped
 # until the macOS targets come back.
 installers = ["powershell", "msi"]
-# Build with the bundled-* features so SDL3 and FreeType are compiled from
-# source and statically linked — the release binaries are self-contained, with
-# no system SDL3 / freetype and nothing for the user to install. Needed on the
-# Windows runner, which has neither pkg-config nor a system freetype.
-features = ["bundled-sdl3", "bundled-freetype"]
+# Build with the bundled-sdl3 feature so SDL3 is compiled from source and
+# statically linked — the release binaries are self-contained, with no system
+# SDL3 / SDL3.dll / libSDL3.dylib and nothing for the user to install.
+# (FreeType is bundled from source automatically by freetype-sys 0.20.1, the
+# version freetype 0.7 pins — no feature flag needed.)
+features = ["bundled-sdl3"]
 # Ship the third-party attribution file inside every release archive.
 include = ["THIRD-PARTY-LICENSES.html"]

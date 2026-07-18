@@ -43,14 +43,6 @@ eula = false
 # the mismatch and keeps the binary truly standalone (no vcruntime140.dll).
 bundled-sdl3 = ["sdl3/build-from-source-static", "sdl3-sys/no-sdl-libc"]
 
-# Build FreeType from its vendored source (via cmake) instead of locating a
-# system freetype2 through pkg-config. Off by default — local dev builds keep
-# using the system freetype. Release builds enable it (see the dist `features`
-# list), because the Windows runner has no pkg-config/system freetype and
-# freetype-sys 0.23 dropped the implicit bundled build that 0.20 did by default.
-# Same rationale and build requirements (cmake + C compiler) as `bundled-sdl3`.
-bundled-freetype = ["freetype-sys/bundled"]
-
 [dependencies]
 sicompass-sdk = { workspace = true }
 sicompass-builtins = { workspace = true }
@@ -65,10 +57,6 @@ ash = { workspace = true }
 glam = { workspace = true }
 
 freetype = { workspace = true }
-# Pulled in transitively by `freetype`; declared here so the `bundled-freetype`
-# feature can flip its `bundled` knob (see the feature comment above).
-# Version constraint matches `freetype`'s own pin so Cargo unifies to one copy.
-freetype-sys = "0.23"
 rustybuzz = { workspace = true }
 
 image = { workspace = true }
