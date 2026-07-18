@@ -2137,6 +2137,44 @@ mod tests {
     }
 
     #[test]
+    fn test_custom_element_wrappers_do_not_collapse_to_one_blob() {
+        // Regression: sites like elevenways.be wrap their real blocks (<h2>,
+        // <p>) inside custom elements the converter doesn't recognize
+        // (<al-widget>, <micro-copy>, web components, …). The DOM->FFON block
+        // detection must look for a block descendant at any depth, not just
+        // among direct children, or the whole subtree flattens into a single
+        // giant string. The check is structural, so it holds for ANY custom
+        // element name, not a hard-coded list.
+        let result = html_to_ffon(
+            "<html><body><main>\
+               <al-widgets><al-widget><div>\
+                 <h2>Alpha</h2><p>First paragraph</p>\
+               </div></al-widget><al-widget><div>\
+                 <h2>Beta</h2><p>Second paragraph</p>\
+               </div></al-widget></al-widgets>\
+             </main></body></html>",
+            "https://example.com",
+        );
+        // Both headings survive as their own navigable nodes...
+        fn find_key<'a>(elems: &'a [FfonElement], key: &str) -> bool {
+            elems.iter().any(|e| match e {
+                FfonElement::Obj(o) => o.key == key || find_key(&o.children, key),
+                _ => false,
+            })
+        }
+        assert!(find_key(&result, "Alpha"), "h2 'Alpha' lost: {result:?}");
+        assert!(find_key(&result, "Beta"), "h2 'Beta' lost: {result:?}");
+        // ...and no single string swallows the entire main content.
+        fn any_blob(elems: &[FfonElement]) -> bool {
+            elems.iter().any(|e| match e {
+                FfonElement::Str(s) => s.contains("First paragraph") && s.contains("Second paragraph"),
+                FfonElement::Obj(o) => any_blob(&o.children),
+            })
+        }
+        assert!(!any_blob(&result), "content collapsed into one blob: {result:?}");
+    }
+
+    #[test]
     fn test_whitespace_normalized_in_paragraph() {
         let result = html_to_ffon(
             "<html><body><p>Hello\n    world\t  here</p></body></html>",
