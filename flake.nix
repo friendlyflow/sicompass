@@ -46,7 +46,15 @@
 
               # Script providers (TypeScript)
               bun
+
+              # graphify code-graph CLI is a uv-installed Python tool
+              # (PyPI package `graphifyy`); uv bootstraps it in the shellHook.
+              uv
             ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+              # xvfb-run: lets the web browser provider run headed Chrome on an
+              # invisible X11 display. Without it, chrome_via_xvfb() falls back
+              # to launching Chrome on the real display and a window pops up.
+              xvfb-run
               vulkan-volk
               vulkan-tools
               vulkan-validation-layers
@@ -82,6 +90,14 @@
               # and SDL fails with "Vulkan doesn't implement VK_KHR_surface".
               if [ -e /usr/share/vulkan/icd.d/radeon_icd.json ]; then
                 export VK_ICD_FILENAMES="/usr/share/vulkan/icd.d/radeon_icd.json";
+              fi
+
+              # graphify: uv installs the `graphifyy` package's binaries into
+              # ~/.local/bin. Put it on PATH and bootstrap the tool if missing
+              # so `graphify` works out of the box in this shell.
+              export PATH="$HOME/.local/bin:$PATH";
+              if ! command -v graphify >/dev/null 2>&1; then
+                uv tool install graphifyy >/dev/null 2>&1 || true;
               fi
 
               exec fish
