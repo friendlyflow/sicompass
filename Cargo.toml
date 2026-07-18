@@ -62,7 +62,12 @@ ash = "0.38"
 glam = "0.33"
 
 # Text rendering
-freetype = "0.8"
+# Pinned to 0.7 (freetype-sys 0.20.1): it bundles + builds FreeType from source
+# by default, which is what the Windows release runner needs (no pkg-config, no
+# system freetype). 0.8 pulls freetype-sys 0.23, whose default build needs
+# pkg-config and whose `bundled` feature has a broken libpng/zlib include path
+# on MSVC. Revisit when freetype-sys fixes the bundled build.
+freetype = "0.7"
 rustybuzz = "0.20"
 
 # Image loading
