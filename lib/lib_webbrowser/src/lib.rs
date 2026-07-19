@@ -751,7 +751,15 @@ async fn navigate_and_get_html(page: &chromiumoxide::Page, url: &str) -> Result<
 
     let current_url = await_stable_url(page, t(5)).await;
 
-    if is_consent_wall_str(&current_url) {
+    // Read the page once up front.  Google/YouTube serve their GDPR wall inline
+    // on a normal URL (www.google.com), so the URL alone does not reveal it; we
+    // also sniff the fetched content for the consent-save endpoint.
+    let mut html = tokio::time::timeout(t(15), page.content())
+        .await
+        .map_err(|_| "timed out waiting for page content (15 s)".to_owned())?
+        .map_err(|e| format!("failed to get page content: {e}"))?;
+
+    if is_consent_wall_str(&current_url) || html_has_consent_wall(&html) {
         let mut accepted = false;
         for attempt in 0..4u32 {
             if attempt > 0 {
@@ -762,25 +770,25 @@ async fn navigate_and_get_html(page: &chromiumoxide::Page, url: &str) -> Result<
             if accepted { break; }
         }
         if accepted {
+            // Follow the accept round-trip (Google bounces through
+            // consent.google.com/save) by URL, then wait for the reloaded page to
+            // drop the inline wall and re-read its content.
             wait_until_off_consent(page, t(8)).await;
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            if let Some(cleared) = wait_for_consent_content_cleared(page, t(8)).await {
+                html = cleared;
+            }
         }
         let post_url = tokio::time::timeout(t(5), page.url())
             .await.ok().and_then(|r| r.ok()).flatten().unwrap_or_default();
-        if is_consent_wall_str(&post_url) {
+        if is_consent_wall_str(&post_url) || html_has_consent_wall(&html) {
             return Err(
-                "Site redirected to a cookie-consent page that could not be \
+                "Site presented a cookie-consent wall that could not be \
                  auto-accepted. Try visiting the site in a real browser first \
                  to accept cookies, then reload here."
                     .to_owned(),
             );
         }
     }
-
-    let html = tokio::time::timeout(t(15), page.content())
-        .await
-        .map_err(|_| "timed out waiting for page content (15 s)".to_owned())?
-        .map_err(|e| format!("failed to get page content: {e}"))?;
 
     if is_cf_blocked_html(&html) {
         return Err(format!(
@@ -1777,8 +1785,15 @@ async fn fetch_page(session: &BrowserSession, url: &str) -> Result<String, Strin
     // (which may return before the redirect) is not reliable cross-platform.
     let current_url = await_stable_url(&page, tokio::time::Duration::from_secs(5)).await;
 
+    // Read the page once up front so inline consent walls (Google/YouTube serve
+    // theirs on a normal URL) are visible via the content, not just the URL.
+    let mut html = tokio::time::timeout(t(15), page.content())
+        .await
+        .map_err(|_| "timed out waiting for page content (15 s)".to_owned())?
+        .map_err(|e| format!("failed to get page content: {e}"))?;
+
     // If we landed on a consent wall, try to auto-accept and follow back.
-    if is_consent_wall_str(&current_url) {
+    if is_consent_wall_str(&current_url) || html_has_consent_wall(&html) {
         // Retry up to 4 times with 1-second pauses between attempts.  The
         // consent page uses client-side JS (React/Next.js) and the accept button
         // may not be in the DOM yet when the first attempt runs, especially on
@@ -1793,18 +1808,20 @@ async fn fetch_page(session: &BrowserSession, url: &str) -> Result<String, Strin
             if accepted { break; }
         }
         if accepted {
-            // Poll until we leave the consent wall (up to 8 s) then let the
-            // page settle for 500 ms before reading its content.
+            // Follow the accept round-trip by URL, then wait for the reloaded
+            // page to drop the inline wall and re-read its content.
             wait_until_off_consent(&page, tokio::time::Duration::from_secs(8)).await;
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            if let Some(cleared) =
+                wait_for_consent_content_cleared(&page, tokio::time::Duration::from_secs(8)).await
+            {
+                html = cleared;
+            }
         }
         let post_url = tokio::time::timeout(t(5), page.url())
             .await.ok().and_then(|r| r.ok()).flatten().unwrap_or_default();
-        if is_consent_wall_str(&post_url) {
+        if is_consent_wall_str(&post_url) || html_has_consent_wall(&html) {
             // Capture a snippet of the page HTML to diagnose why acceptance failed.
-            let diag_html = tokio::time::timeout(t(5), page.content())
-                .await.ok().and_then(|r| r.ok()).unwrap_or_default();
-            let snippet: String = diag_html.chars().take(2000).collect();
+            let snippet: String = html.chars().take(2000).collect();
             eprintln!("=== consent-wall debug ===");
             eprintln!("Consent URL : {current_url}");
             eprintln!("Button found: {accepted}");
@@ -1813,7 +1830,7 @@ async fn fetch_page(session: &BrowserSession, url: &str) -> Result<String, Strin
             eprintln!("=== end consent-wall debug ===");
             let _ = tokio::time::timeout(t(3), page.close()).await;
             return Err(
-                "Site redirected to a cookie-consent page that could not be \
+                "Site presented a cookie-consent wall that could not be \
                  auto-accepted. Try visiting the site in a real browser first \
                  to accept cookies, then reload here."
                     .to_owned(),
@@ -1821,10 +1838,6 @@ async fn fetch_page(session: &BrowserSession, url: &str) -> Result<String, Strin
         }
     }
 
-    let html = tokio::time::timeout(t(15), page.content())
-        .await
-        .map_err(|_| "timed out waiting for page content (15 s)".to_owned())?
-        .map_err(|e| format!("failed to get page content: {e}"))?;
     let _ = tokio::time::timeout(t(3), page.close()).await;
 
     if is_cf_blocked_html(&html) {
@@ -1965,6 +1978,40 @@ async fn try_accept_consent(page: &chromiumoxide::Page) -> bool {
         .unwrap_or(false);
     if dpg_accepted { return true; }
 
+    // ── Strategy 1.5: Google / YouTube consent ───────────────────────────────
+    // Google serves its GDPR wall inline (see html_has_consent_wall) and ignores
+    // programmatic clicks on the accept button, even trusted CDP mouse clicks
+    // (verified live: the button stays in the DOM and the URL never changes).
+    // Setting the consent cookies directly and reloading is what actually clears
+    // it — the reloaded homepage drops the accept button and the /save endpoint.
+    // The cookies then persist in the profile so the wall stays gone.
+    if let Ok(Some(url)) = page.url().await {
+        if url.contains("google.") || url.contains("youtube.") {
+            use chromiumoxide::cdp::browser_protocol::network::CookieParam;
+            let domain = if url.contains("youtube.") { ".youtube.com" } else { ".google.com" };
+            let cookies: Vec<CookieParam> = [
+                // SOCS is Google's current consent cookie; this value records an
+                // "accept all" choice.  CONSENT is the legacy fallback.
+                ("SOCS", "CAESHAgBEhIaAB"),
+                ("CONSENT", "YES+cb.20210328-17-p0.en+FX+410"),
+            ]
+            .iter()
+            .filter_map(|(n, v)| {
+                CookieParam::builder().name(*n).value(*v)
+                    .domain(domain).path("/").build().ok()
+            })
+            .collect();
+            if !cookies.is_empty() && page.set_cookies(cookies).await.is_ok() {
+                // Reload so the server serves the real page now that consent is set.
+                let _ = tokio::time::timeout(
+                    tokio::time::Duration::from_secs(15),
+                    page.goto(&url),
+                ).await;
+                return true;
+            }
+        }
+    }
+
     // ── Strategy 2: generic button click ────────────────────────────────────
     let cmp_sels    = js_array(CMP_SELECTORS);
     let reject_kws  = js_array(REJECT_KEYWORDS);
@@ -2026,6 +2073,24 @@ fn is_consent_wall_str(url: &str) -> bool {
         || url.contains("cmp.")
 }
 
+/// Detect a consent wall that is served *inline* on an otherwise normal URL.
+///
+/// Google and YouTube embed the GDPR wall directly at `www.google.com` /
+/// `www.youtube.com` (HTTP 200, URL unchanged) rather than redirecting to a
+/// `consent.*` host, so `is_consent_wall_str` on the URL never fires for them.
+/// The wall's accept button submits to a `consent.google.com/save` endpoint that
+/// is present only while the wall is unaccepted.  Verified live: the walled
+/// homepage references `/save` twice, the accepted homepage zero times.  (The
+/// sibling `/d` endpoint is *not* usable as a marker: it persists in a footer
+/// privacy link on the accepted page and would cause false positives.)
+fn html_has_consent_wall(html: &str) -> bool {
+    const MARKERS: &[&str] = &[
+        "consent.google.com/save",
+        "consent.youtube.com/save",
+    ];
+    MARKERS.iter().any(|m| html.contains(m))
+}
+
 /// Poll `page.url()` every 250 ms until we are no longer on a consent wall,
 /// or until `budget` elapses.  Returns `true` if we left the wall.
 async fn wait_until_off_consent(
@@ -2051,6 +2116,39 @@ async fn wait_until_off_consent(
         if tokio::time::Instant::now() >= deadline {
             return false;
         }
+    }
+}
+
+/// After clicking "accept", poll the page *content* every 400 ms until it no
+/// longer shows an inline consent wall (see `html_has_consent_wall`), or until
+/// `budget` elapses.  Inline walls (Google/YouTube) reload in place, so leaving
+/// the wall is not observable from the URL alone; this watches the content.
+/// Returns the most recently fetched content (whether or not it cleared) so the
+/// caller can reuse it instead of fetching again.
+async fn wait_for_consent_content_cleared(
+    page: &chromiumoxide::Page,
+    budget: tokio::time::Duration,
+) -> Option<String> {
+    let interval = tokio::time::Duration::from_millis(400);
+    let deadline = tokio::time::Instant::now() + budget;
+    let mut last = None;
+    loop {
+        if let Ok(Ok(html)) = tokio::time::timeout(
+            tokio::time::Duration::from_secs(15),
+            page.content(),
+        )
+        .await
+        {
+            let cleared = !html_has_consent_wall(&html);
+            last = Some(html);
+            if cleared {
+                return last;
+            }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return last;
+        }
+        tokio::time::sleep(interval).await;
     }
 }
 
@@ -2548,6 +2646,44 @@ mod tests {
         assert!(is_consent_wall_str("https://cmp.example.com/notice"));
     }
 
+    // ---- html_has_consent_wall unit tests ----
+    // Google/YouTube serve the GDPR wall inline at www.google.com (URL unchanged),
+    // so is_consent_wall_str on the URL misses it; the content is the only signal.
+
+    #[test]
+    fn test_html_consent_wall_detects_google_save_endpoint() {
+        let html = r#"<button jsaction="click:...">
+            <div role="none">Alles accepteren</div></button>
+            <script>var u="https://consent.google.com/save?continue=https://www.google.com/";</script>"#;
+        assert!(html_has_consent_wall(html));
+    }
+
+    #[test]
+    fn test_html_consent_wall_ignores_google_d_endpoint() {
+        // The /d endpoint persists as a footer privacy link on the *accepted*
+        // page (verified live: accepted homepage has /d but zero /save), so it
+        // must NOT be treated as a wall on its own.
+        let html = r#"<a href="https://consent.google.com/d?continue=https://www.google.com/">More</a>"#;
+        assert!(!html_has_consent_wall(html));
+    }
+
+    #[test]
+    fn test_html_consent_wall_detects_youtube() {
+        let html = r#"<form action="https://consent.youtube.com/save"></form>"#;
+        assert!(html_has_consent_wall(html));
+    }
+
+    #[test]
+    fn test_html_consent_wall_ignores_normal_page() {
+        // A plain search-results page (post-accept) or an article must not match,
+        // even if it merely mentions the word "consent" or links to google.com.
+        let html = r#"<html><body><form action="/search" role="search">
+            <input name="q" aria-label="Zoeken"></form>
+            <p>We asked for consent before continuing.</p>
+            <a href="https://www.google.com/">Google</a></body></html>"#;
+        assert!(!html_has_consent_wall(html));
+    }
+
     // ---- is_reject_text unit tests ----
 
     #[test]
@@ -2979,6 +3115,36 @@ mod tests {
         assert_eq!(form.key, "form_1");
         assert!(map.contains_key("form_1/Search"), "Search field missing from map");
         assert!(map.contains_key("form_1/Go"), "Submit button missing from map");
+    }
+
+    // Live end-to-end check: exercises the real Linux runtime path
+    // (init_live_session -> navigate_and_get_html) against google.com with a
+    // fresh cookieless profile, so Google serves its inline GDPR wall. Verifies
+    // the auto-accept clears it and the search box becomes reachable.
+    //
+    // Ignored by default (needs Chrome + Xvfb + network). Run with:
+    //   XDG_CONFIG_HOME=$(mktemp -d) cargo test -p sicompass-webbrowser \
+    //     live_google_consent_is_cleared -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    #[cfg(target_os = "linux")]
+    fn live_google_consent_is_cleared() {
+        let html = chromium_runtime().block_on(async {
+            let live = init_live_session().await.expect("launch chrome");
+            navigate_and_get_html(&live.page, "https://www.google.com/").await
+        });
+        let html = html.expect("navigate_and_get_html should not return the consent-wall error");
+        assert!(
+            !html_has_consent_wall(&html),
+            "consent wall should be cleared after auto-accept, but markers remain"
+        );
+        // Post-accept Google homepage exposes the search box (name=\"q\").
+        let (_ffon, map) = html_to_ffon_with_forms(&html, "https://www.google.com/");
+        assert!(
+            map.keys().any(|k| k.contains("/q") || k.contains("/Zoek") || k.contains("/Search")),
+            "search field not found in form map after clearing consent; keys: {:?}",
+            map.keys().collect::<Vec<_>>()
+        );
     }
 }
 
