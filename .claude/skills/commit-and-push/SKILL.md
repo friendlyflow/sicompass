@@ -14,11 +14,11 @@ Commit and push all changes.
 2. Stage relevant files (prefer specific files over `git add -A`).
 3. Draft a concise commit message based on the changes. If `$ARGUMENTS` is provided, use it as the commit message. Do not add a co-authored trailer.
 4. Commit on `main`.
-5. Push using `gh`'s HTTPS credentials (the SSH remote is not usable in this environment). Pass the credential helper inline so no global git config is written:
+5. Push to the `origin` remote. `origin` is the HTTPS URL and git is already configured (globally, via home.nix) to authenticate github.com through `gh`, so a plain push works and — because it targets the named remote — advances the `origin/main` tracking ref so VS Code follows the push:
 
    ```
-   git -c credential.helper='' -c credential.helper='!gh auth git-credential' push https://github.com/friendlyflow/sicompass.git HEAD:main
+   git push origin HEAD:main
    ```
 
-   If the push reports `main` diverged, `git fetch` over the same HTTPS URL first, then reconcile — never force-push and never move work onto a branch.
+   If the push reports `main` diverged, `git fetch origin` first, then reconcile — never force-push and never move work onto a branch.
 6. Report the result.
