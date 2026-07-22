@@ -1780,15 +1780,97 @@ fn filebrowser_sort_alpha_refreshes_listing() {
         "item count should be unchanged after sort");
 }
 
+/// Provider exposing one "open file with"-shaped command whose secondary list is
+/// fixed, so the list-building invariant can be checked without depending on
+/// which applications the host machine happens to have installed.
+struct OpenWithMock;
+
+impl Provider for OpenWithMock {
+    fn name(&self) -> &str { "openwithmock" }
+    fn fetch(&mut self) -> Vec<FfonElement> { vec![FfonElement::new_str("- doc.txt")] }
+    fn commands(&self) -> Vec<String> { vec!["open file with".to_string()] }
+    fn handle_command(&mut self, _cmd: &str, _key: &str, _ty: i32, _err: &mut String) -> Option<FfonElement> {
+        // None + no error = "I need a secondary selection", the same contract
+        // the real filebrowser uses for this command.
+        None
+    }
+    fn command_list_items(&self, _cmd: &str) -> Vec<sicompass_sdk::provider::ListItem> {
+        vec![
+            sicompass_sdk::provider::ListItem { label: "App A".into(), data: "/usr/bin/app-a".into() },
+            sicompass_sdk::provider::ListItem { label: "App B".into(), data: "/usr/bin/app-b".into() },
+        ]
+    }
+    fn execute_command(&mut self, _cmd: &str, _sel: &str) -> bool { true }
+}
+
+/// Walk the cursor to `idx` in the current list.
+fn move_to_index(h: &mut Harness, idx: usize) {
+    let cur = h.renderer.list_index;
+    if idx > cur {
+        for _ in 0..(idx - cur) { press_down(h.r()); }
+    } else {
+        for _ in 0..(cur - idx) { press_up(h.r()); }
+    }
+}
+
+/// Open the command palette and select "open file with".
+fn select_open_file_with(h: &mut Harness) {
+    press(h.r(), Keycode::Colon);
+    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::Command);
+
+    // Command items render as buttons ("-b open file with"); the bare command
+    // name is carried in nav_path, so locate by that rather than the display label.
+    let idx = h.renderer.total_list.iter().position(|item| item.nav_path.as_deref() == Some("open file with"))
+        .expect("open file with command not found");
+    move_to_index(h, idx);
+    press_enter(h.r());
+}
+
 /// "open file with" secondary list must store the exec payload in `nav_path`,
 /// not in `data`. The renderer treats a non-None `data` field as an image path
 /// and attempts to load it as a texture — putting the exec command there caused
 /// spurious "image load failed" errors and a stray "-p image tag" in the UI.
+///
+/// Driven through a mock provider with a fixed app list: the invariant lives in
+/// `list::create_list_current_layer`'s `CommandPhase::Provider` arm, so asserting
+/// it must not depend on the host having `.desktop` entries installed.
 #[test]
 fn open_file_with_secondary_list_uses_nav_path_not_data() {
     let mut h = Harness::new();
-    let fb_idx = h.renderer.providers.iter().position(|p| p.name() == "filebrowser")
-        .expect("filebrowser not found");
+    register(h.r(), Box::new(OpenWithMock));
+    let idx = h.provider_idx("openwithmock").expect("mock provider not found");
+    navigate_to_provider(h.r(), idx);
+    press_right(h.r());
+
+    select_open_file_with(&mut h);
+
+    // Should now be in CommandPhase::Provider showing the app list
+    assert_eq!(h.renderer.current_command, sicompass::app_state::CommandPhase::Provider,
+        "should be in Provider phase after selecting 'open file with'");
+
+    assert_eq!(h.renderer.total_list.len(), 2, "both mock applications should be listed");
+    for (item, exec) in h.renderer.total_list.iter().zip(["/usr/bin/app-a", "/usr/bin/app-b"]) {
+        assert!(item.data.is_none(),
+            "item '{}': data should be None (exec must be in nav_path to avoid image load)", item.label);
+        assert_eq!(item.nav_path.as_deref(), Some(exec),
+            "item '{}': nav_path should hold the exec command", item.label);
+    }
+}
+
+/// End-to-end variant against the real filebrowser. Only asserts when the host
+/// actually has `.desktop` entries — a bare container or a distribution whose
+/// entries the SDK cannot see would otherwise fail here for reasons unrelated to
+/// the code under test. The invariant itself is covered unconditionally by
+/// `open_file_with_secondary_list_uses_nav_path_not_data`.
+#[test]
+fn filebrowser_open_file_with_lists_installed_applications() {
+    if sicompass_sdk::platform::get_applications().is_empty() {
+        eprintln!("skipping: no .desktop applications visible on this host");
+        return;
+    }
+
+    let mut h = Harness::new();
+    let fb_idx = h.provider_idx("filebrowser").expect("filebrowser not found");
     navigate_to_provider(h.r(), fb_idx);
     press_right(h.r());
 
@@ -1798,37 +1880,13 @@ fn open_file_with_secondary_list_uses_nav_path_not_data() {
         !item.label.is_empty() && item.data.is_none()
     });
     if let Some(idx) = file_idx {
-        let cur = h.renderer.list_index;
-        if idx > cur {
-            for _ in 0..(idx - cur) { press_down(h.r()); }
-        } else {
-            for _ in 0..(cur - idx) { press_up(h.r()); }
-        }
+        move_to_index(&mut h, idx);
     }
 
-    // Enter command mode and navigate to "open file with"
-    press(h.r(), Keycode::Colon);
-    assert_eq!(h.renderer.coordinate, sicompass::app_state::Coordinate::Command);
+    select_open_file_with(&mut h);
 
-    // Command items render as buttons ("-b open file with"); the bare command
-    // name is carried in nav_path, so locate by that rather than the display label.
-    let idx = h.renderer.total_list.iter().position(|item| item.nav_path.as_deref() == Some("open file with"))
-        .expect("open file with command not found");
-    let cur = h.renderer.list_index;
-    if idx > cur {
-        for _ in 0..(idx - cur) { press_down(h.r()); }
-    } else {
-        for _ in 0..(cur - idx) { press_up(h.r()); }
-    }
-    press_enter(h.r());
-
-    // Should now be in CommandPhase::Provider showing the app list
     assert_eq!(h.renderer.current_command, sicompass::app_state::CommandPhase::Provider,
         "should be in Provider phase after selecting 'open file with'");
-
-    // The secondary list must be non-empty (there are applications installed)
-    // and every item must carry its payload in nav_path, never in data.
-    // A non-None `data` would be treated as an image path by the renderer.
     assert!(!h.renderer.total_list.is_empty(),
         "open file with should show at least one application");
     for item in &h.renderer.total_list {
