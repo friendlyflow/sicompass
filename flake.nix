@@ -100,7 +100,13 @@
                 uv tool install graphifyy >/dev/null 2>&1 || true;
               fi
 
-              exec fish
+              # Drop into fish for interactive shells only. `nix develop -c <cmd>`
+              # and tooling (Claude Code's Bash tool, CI) get no tty; exec'ing
+              # fish there would replace the process and silently discard the
+              # command, which exits 0 with no output.
+              if [ -t 0 ]; then
+                exec fish
+              fi
             '';
           };
         });
