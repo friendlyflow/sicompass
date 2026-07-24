@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Runs the relevant test suite after source file edits.
 # RS files: cargo test (non-blocking, exit 0 so Claude can keep iterating)
 # TS files: bun test (blocking)
