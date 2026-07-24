@@ -2,6 +2,7 @@
 name: release
 description: Bump the sicompass workspace version and cut a GitHub release via the tag-push pipeline
 disable-model-invocation: true
+model: sonnet
 ---
 
 Cut a new sicompass release. The release pipeline is triggered entirely by
