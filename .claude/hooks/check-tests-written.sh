@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Reminds Claude to write/update tests when source code is added or modified.
 # - Write (new file): remind to create tests
 # - Edit (handlers/provider): remind to add integration tests

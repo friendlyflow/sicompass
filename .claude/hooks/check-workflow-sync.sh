@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Reminds to keep build.yml and release.yml in sync when either is edited.
 
 INPUT=$(cat)
