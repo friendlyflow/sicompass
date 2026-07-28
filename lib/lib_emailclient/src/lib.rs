@@ -954,7 +954,7 @@ impl EmailClientProvider {
     /// Apply an `ImapOpKind` for undo (`is_undo = true`) or redo
     /// (`is_undo = false`). Mirrors `apply_provider_command` but operates on
     /// the typed enum instead of a JSON payload.
-    fn apply_imap_op(&mut self, op: &ImapOpKind, is_undo: bool, error: &mut String) {
+    async fn apply_imap_op(&mut self, op: &ImapOpKind, is_undo: bool, error: &mut String) {
         let imap = match self.imap.as_mut() {
             Some(i) => i,
             None => {
@@ -972,9 +972,9 @@ impl EmailClientProvider {
                 } else {
                     (src_folder.as_str(), trash_folder.as_str())
                 };
-                match block_on(imap.fetch_message_by_message_id(search_in, msg_id)) {
+                match imap.fetch_message_by_message_id(search_in, msg_id).await {
                     Ok(Some(msg)) => {
-                        if let Err(e) = block_on(imap.move_message(search_in, msg.uid, move_to)) {
+                        if let Err(e) = imap.move_message(search_in, msg.uid, move_to).await {
                             let mut args = localize::Args::new();
                             args.set("label", label.to_owned());
                             args.set("err", e.to_string());
@@ -1004,7 +1004,7 @@ impl EmailClientProvider {
                 } else {
                     (&[], &["\\Seen"])
                 };
-                if let Err(e) = block_on(imap.set_flags(folder, *msg_uid, add, remove)) {
+                if let Err(e) = imap.set_flags(folder, *msg_uid, add, remove).await {
                     let mut args = localize::Args::new();
                     args.set("label", label.to_owned());
                     args.set("err", e.to_string());
@@ -1023,7 +1023,7 @@ impl EmailClientProvider {
                 } else {
                     (&[], &["\\Flagged"])
                 };
-                if let Err(e) = block_on(imap.set_flags(folder, *msg_uid, add, remove)) {
+                if let Err(e) = imap.set_flags(folder, *msg_uid, add, remove).await {
                     let mut args = localize::Args::new();
                     args.set("label", label.to_owned());
                     args.set("err", e.to_string());
@@ -2717,6 +2717,7 @@ impl Default for EmailClientProvider {
     }
 }
 
+#[async_trait::async_trait]
 impl Provider for EmailClientProvider {
     fn name(&self) -> &str { "emailclient" }
     fn display_name(&self) -> String {
@@ -3113,22 +3114,22 @@ impl Provider for EmailClientProvider {
         std::mem::take(&mut self.pending_timeline_entries)
     }
 
-    fn undo(&mut self, entry: &TimelineEntry, error: &mut String) {
+    async fn undo(&mut self, entry: &TimelineEntry, error: &mut String) {
         register_translations();
         let op = match entry {
             TimelineEntry::ImapOp { op, .. } => op,
             _ => return,
         };
-        self.apply_imap_op(op, true, error);
+        self.apply_imap_op(op, true, error).await;
     }
 
-    fn redo(&mut self, entry: &TimelineEntry, error: &mut String) {
+    async fn redo(&mut self, entry: &TimelineEntry, error: &mut String) {
         register_translations();
         let op = match entry {
             TimelineEntry::ImapOp { op, .. } => op,
             _ => return,
         };
-        self.apply_imap_op(op, false, error);
+        self.apply_imap_op(op, false, error).await;
     }
 
     fn fetch_subtree_parent_key(&mut self) -> Option<String> {
@@ -6468,7 +6469,7 @@ mod tests {
         // mark-unread issued -FLAGS \Seen. Now undo: should issue +FLAGS \Seen.
         let mock = p.imap.as_mut().unwrap().as_mut() as *mut dyn ImapBackend as *mut MockImap;
         unsafe { (*mock).stored_flags.clear(); }
-        p.undo(&entries[0], &mut err);
+        sicompass_sdk::block_on(p.undo(&entries[0], &mut err));
         assert!(err.is_empty(), "{err}");
         let stored = unsafe { &(*mock).stored_flags };
         assert!(

@@ -764,6 +764,7 @@ impl SettingsProvider {
     }
 }
 
+#[async_trait::async_trait]
 impl Provider for SettingsProvider {
     fn name(&self) -> &str { "settings" }
 
@@ -1136,7 +1137,7 @@ impl Provider for SettingsProvider {
         }
     }
 
-    fn undo(&mut self, entry: &TimelineEntry, error: &mut String) {
+    async fn undo(&mut self, entry: &TimelineEntry, error: &mut String) {
         register_translations();
         let payload = match entry {
             TimelineEntry::ProviderOp { command, payload, .. }
@@ -1197,7 +1198,7 @@ impl Provider for SettingsProvider {
         }
     }
 
-    fn redo(&mut self, entry: &TimelineEntry, error: &mut String) {
+    async fn redo(&mut self, entry: &TimelineEntry, error: &mut String) {
         register_translations();
         let payload = match entry {
             TimelineEntry::ProviderOp { command, payload, .. }

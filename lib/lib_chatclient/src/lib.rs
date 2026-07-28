@@ -787,6 +787,7 @@ impl Default for ChatClientProvider {
     }
 }
 
+#[async_trait::async_trait]
 impl Provider for ChatClientProvider {
     fn name(&self) -> &str {
         "chatclient"
@@ -1516,62 +1517,66 @@ impl Provider for ChatClientProvider {
         std::mem::take(&mut self.pending_timeline_entries)
     }
 
-    fn undo(&mut self, entry: &TimelineEntry, error: &mut String) {
-        register_translations();
-        let op = match entry {
-            TimelineEntry::ChatOp { op, .. } => op,
-            _ => return,
-        };
-        let result = match op {
-            ChatOpKind::LeaveRoom { room_id } => self.do_join(room_id).map(|_| ()),
-            ChatOpKind::AcceptInvite { room_id } | ChatOpKind::RejectInvite { room_id } => {
-                self.do_leave(room_id)
+    async fn undo(&mut self, entry: &TimelineEntry, error: &mut String) {
+        tokio::task::block_in_place(move || {
+            register_translations();
+            let op = match entry {
+                TimelineEntry::ChatOp { op, .. } => op,
+                _ => return,
+            };
+            let result = match op {
+                ChatOpKind::LeaveRoom { room_id } => self.do_join(room_id).map(|_| ()),
+                ChatOpKind::AcceptInvite { room_id } | ChatOpKind::RejectInvite { room_id } => {
+                    self.do_leave(room_id)
+                }
+                ChatOpKind::KickMember { room_id, user_id, .. } => {
+                    self.do_invite_user(room_id, user_id)
+                }
+                ChatOpKind::BanMember { room_id, user_id, .. } => {
+                    self.do_unban_member(room_id, user_id)
+                }
+                ChatOpKind::PostMessage { .. } => {
+                    // Redact-on-undo path is deferred — see plan step 9.
+                    *error = localize::t("chatclient-error-post-message-undo-not-implemented");
+                    return;
+                }
+            };
+            if let Err(e) = result {
+                let mut args = localize::Args::new();
+                args.set("err", e.to_string());
+                *error = localize::t_args("chatclient-error-undo-failed", &args);
             }
-            ChatOpKind::KickMember { room_id, user_id, .. } => {
-                self.do_invite_user(room_id, user_id)
-            }
-            ChatOpKind::BanMember { room_id, user_id, .. } => {
-                self.do_unban_member(room_id, user_id)
-            }
-            ChatOpKind::PostMessage { .. } => {
-                // Redact-on-undo path is deferred — see plan step 9.
-                *error = localize::t("chatclient-error-post-message-undo-not-implemented");
-                return;
-            }
-        };
-        if let Err(e) = result {
-            let mut args = localize::Args::new();
-            args.set("err", e.to_string());
-            *error = localize::t_args("chatclient-error-undo-failed", &args);
-        }
+        });
     }
 
-    fn redo(&mut self, entry: &TimelineEntry, error: &mut String) {
-        register_translations();
-        let op = match entry {
-            TimelineEntry::ChatOp { op, .. } => op,
-            _ => return,
-        };
-        let result = match op {
-            ChatOpKind::LeaveRoom { room_id } => self.do_leave(room_id),
-            ChatOpKind::AcceptInvite { room_id } => self.do_join(room_id).map(|_| ()),
-            ChatOpKind::RejectInvite { room_id } => self.do_leave(room_id),
-            ChatOpKind::KickMember { room_id, user_id, reason } => {
-                self.do_kick_member(room_id, user_id, reason.as_deref().unwrap_or(""))
+    async fn redo(&mut self, entry: &TimelineEntry, error: &mut String) {
+        tokio::task::block_in_place(move || {
+            register_translations();
+            let op = match entry {
+                TimelineEntry::ChatOp { op, .. } => op,
+                _ => return,
+            };
+            let result = match op {
+                ChatOpKind::LeaveRoom { room_id } => self.do_leave(room_id),
+                ChatOpKind::AcceptInvite { room_id } => self.do_join(room_id).map(|_| ()),
+                ChatOpKind::RejectInvite { room_id } => self.do_leave(room_id),
+                ChatOpKind::KickMember { room_id, user_id, reason } => {
+                    self.do_kick_member(room_id, user_id, reason.as_deref().unwrap_or(""))
+                }
+                ChatOpKind::BanMember { room_id, user_id, reason } => {
+                    self.do_ban_member(room_id, user_id, reason.as_deref().unwrap_or(""))
+                }
+                ChatOpKind::PostMessage { .. } => {
+                    *error = localize::t("chatclient-error-post-message-redo-not-implemented");
+                    return;
+                }
+            };
+            if let Err(e) = result {
+                let mut args = localize::Args::new();
+                args.set("err", e.to_string());
+                *error = localize::t_args("chatclient-error-redo-failed", &args);
             }
-            ChatOpKind::BanMember { room_id, user_id, reason } => {
-                self.do_ban_member(room_id, user_id, reason.as_deref().unwrap_or(""))
-            }
-            ChatOpKind::PostMessage { .. } => {
-                *error = localize::t("chatclient-error-post-message-redo-not-implemented");
-                return;
-            }
-        };
-        if let Err(e) = result {
-            let mut args = localize::Args::new();
-            args.set("err", e.to_string());
-            *error = localize::t_args("chatclient-error-redo-failed", &args);
-        }
+        });
     }
 
     fn create_file(&mut self, name: &str) -> bool {
@@ -3253,7 +3258,7 @@ mod tests {
             },
         };
         let mut err = String::new();
-        p.undo(&entry, &mut err);
+        sicompass_sdk::block_on(p.undo(&entry, &mut err));
         assert!(err.is_empty(), "undo error: {err}");
         // If do_join hit the endpoint without throwing, we're good. (The mock
         // returns 200, so any other error path would leave a non-empty `err`.)
