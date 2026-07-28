@@ -126,6 +126,14 @@ pub struct WebbrowserProvider {
     // parallel would contend on the singleton profile dir).
     #[cfg(target_os = "windows")]
     submit_in_flight: Arc<AtomicBool>,
+    // Set when a URL navigation starts, consumed when its content lands: the
+    // cursor is parked on the URL bar the user just typed into, so the app is
+    // asked to descend into the page content once there is content to read.
+    // Armed only by URL navigation — a form submit response arrives while the
+    // cursor is already deep inside the page, where descending would be wrong.
+    pending_enter_content: bool,
+    // Handed to the app through `take_navigation_request` on the next poll.
+    enter_content_request: bool,
 }
 
 impl WebbrowserProvider {
@@ -145,6 +153,8 @@ impl WebbrowserProvider {
             pending_error: Arc::new(Mutex::new(None)),
             #[cfg(target_os = "windows")]
             submit_in_flight: Arc::new(AtomicBool::new(false)),
+            pending_enter_content: false,
+            enter_content_request: false,
         }
     }
 
@@ -176,6 +186,7 @@ impl WebbrowserProvider {
             });
             self.form_map = FormMap::new();
             self.current_url = url.to_owned();
+            self.content_landed();
             return;
         }
 
@@ -263,8 +274,18 @@ impl WebbrowserProvider {
                     self.form_map = FormMap::new();
                 }
             }
+            self.content_landed();
         }
         self.current_url = url.to_owned();
+    }
+
+    /// A page the user navigated to is now readable: turn the armed
+    /// "enter the content" intent into a request for the app to act on.
+    fn content_landed(&mut self) {
+        if self.pending_enter_content {
+            self.pending_enter_content = false;
+            self.enter_content_request = true;
+        }
     }
 
     /// Persist a form field's new value into `cached_page` so re-fetches keep it.
@@ -378,6 +399,19 @@ impl Provider for WebbrowserProvider {
             if self.current_url.is_empty() { "https://" } else { &self.current_url }
         );
 
+        // A load is running: the URL bar plus a status line, so the view is not
+        // silently empty for the seconds Chrome takes. The URL bar is a plain
+        // row here, deliberately childless: the app dives into a committed
+        // element that has children, and neither a "Loading…" placeholder nor
+        // the previous page is worth dropping the user into. The descent is
+        // asked for through `take_navigation_request` once the page lands.
+        #[cfg(not(target_os = "windows"))]
+        if self.load_inflight.load(Ordering::Acquire) {
+            result.push(FfonElement::new_str(url_bar));
+            result.push(FfonElement::new_str("Loading…".to_owned()));
+            return result;
+        }
+
         if let Some(ref page) = self.cached_page {
             // Page loaded: wrap URL bar + page content in an Obj
             let mut page_obj = FfonElement::new_obj(&url_bar);
@@ -387,17 +421,6 @@ impl Provider for WebbrowserProvider {
             }
             result.push(page_obj);
         } else {
-            // No page yet: URL bar, plus a placeholder while a load is running
-            // so the view is not silently empty for the seconds Chrome takes.
-            #[cfg(not(target_os = "windows"))]
-            if self.load_inflight.load(Ordering::Acquire) {
-                let mut page_obj = FfonElement::new_obj(&url_bar);
-                if let Some(o) = page_obj.as_obj_mut() {
-                    o.push(FfonElement::new_str("Loading…".to_owned()));
-                }
-                result.push(page_obj);
-                return result;
-            }
             result.push(FfonElement::new_str(url_bar));
         }
 
@@ -430,6 +453,12 @@ impl Provider for WebbrowserProvider {
         }
         // Otherwise treat as URL navigation.
         let Some(full_url) = normalize_url_input(new_content) else { return false; };
+        // The cursor is on the URL bar the user just typed into. Once the page
+        // is readable the app should drop them into its content, so they don't
+        // have to press Right after every load. Armed here rather than inside
+        // `load_url` so the "refresh" command — which can run from anywhere in
+        // the page — never moves the cursor.
+        self.pending_enter_content = true;
         self.load_url(&full_url);
         true
     }
@@ -522,9 +551,15 @@ impl Provider for WebbrowserProvider {
             // apply to any field on this page.  Clear them so a subsequent
             // submit on a new form starts from a clean slate.
             self.form_field_values.clear();
+            self.content_landed();
             return true;
         }
         false
+    }
+
+    fn take_navigation_request(&mut self) -> Option<sicompass_sdk::NavigationRequest> {
+        std::mem::take(&mut self.enter_content_request)
+            .then_some(sicompass_sdk::NavigationRequest::EnterChildren)
     }
 
     fn take_error(&mut self) -> Option<String> {
@@ -2972,6 +3007,81 @@ mod tests {
         );
         // Second tick with no new content returns false.
         assert!(!p.tick());
+    }
+
+    #[test]
+    fn page_landing_asks_app_to_enter_content() {
+        let mut p = WebbrowserProvider::new();
+        // What `commit_edit` does for a URL navigation.
+        p.pending_enter_content = true;
+        assert!(
+            p.take_navigation_request().is_none(),
+            "no request before the page has landed — the content isn't there to enter yet"
+        );
+        {
+            let mut guard = p.ready_content.lock().unwrap();
+            *guard = Some((vec![FfonElement::new_str("body text")], FormMap::new()));
+        }
+        assert!(p.tick());
+        assert_eq!(
+            p.take_navigation_request(),
+            Some(sicompass_sdk::NavigationRequest::EnterChildren)
+        );
+        assert!(p.take_navigation_request().is_none(), "request must not repeat");
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn fetch_while_loading_keeps_the_url_bar_childless() {
+        let mut p = WebbrowserProvider::new();
+        p.current_url = "https://example.com".to_owned();
+        // A page from a previous navigation, and a load now running.
+        p.cached_page = Some(CachedPage {
+            url: "https://old.example".to_owned(),
+            elements: vec![FfonElement::new_str("stale body")],
+        });
+        p.load_inflight.store(true, Ordering::Release);
+
+        let items = p.fetch();
+        assert_eq!(items.len(), 2, "URL bar plus a status line: {items:?}");
+        assert!(
+            matches!(&items[0], FfonElement::Str(s) if s.contains("https://example.com")),
+            "URL bar must be childless while loading so nothing descends into \
+             the previous page: {:?}", items[0]
+        );
+        assert_eq!(items[1].as_str(), Some("Loading…"));
+    }
+
+    #[test]
+    fn submit_response_does_not_move_the_cursor() {
+        // Content arriving without an armed URL navigation (a form submit
+        // response) must not pull the cursor out of the form the user is in.
+        let mut p = WebbrowserProvider::new();
+        {
+            let mut guard = p.ready_content.lock().unwrap();
+            *guard = Some((vec![FfonElement::new_str("results")], FormMap::new()));
+        }
+        assert!(p.tick());
+        assert!(p.take_navigation_request().is_none());
+    }
+
+    #[test]
+    fn url_commit_arms_enter_content_but_refresh_does_not() {
+        _set_test_no_launch(true);
+        let mut p = WebbrowserProvider::new();
+        assert!(p.commit_edit("", "https://example.invalid"));
+        assert_eq!(
+            p.take_navigation_request(),
+            Some(sicompass_sdk::NavigationRequest::EnterChildren),
+            "committing a URL should drop the user into the loaded page"
+        );
+
+        // `refresh` reloads the same URL, but can be run from anywhere inside
+        // the page — it must leave the cursor alone.
+        let mut error = String::new();
+        p.handle_command("refresh", "", 0, &mut error);
+        assert!(p.take_navigation_request().is_none());
+        _set_test_no_launch(false);
     }
 
     #[test]
