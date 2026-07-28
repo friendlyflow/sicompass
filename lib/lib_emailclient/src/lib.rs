@@ -575,7 +575,7 @@ enum HistoryItem {
 
 /// Outcome of resolving a message body for rendering.
 enum MessageState {
-    Ready(EmailMessage),
+    Ready(Box<EmailMessage>),
     /// A fetch is in flight; render a placeholder this frame.
     Loading,
     Missing,
@@ -730,12 +730,12 @@ impl EmailClientProvider {
                 if let Ok(Some(m)) = block_on(imap.fetch_message(real_folder, uid)) {
                     self.message_detail = Some(m.clone());
                     self.message_detail_folder = real_folder.to_owned();
-                    return MessageState::Ready(m);
+                    return MessageState::Ready(Box::new(m));
                 }
             }
             // Fall back to cached detail if available.
             return match self.message_detail.clone() {
-                Some(m) => MessageState::Ready(m),
+                Some(m) => MessageState::Ready(Box::new(m)),
                 None => MessageState::Missing,
             };
         }
@@ -768,7 +768,7 @@ impl EmailClientProvider {
             .filter(|m| m.uid == uid && self.message_detail_folder == real_folder)
             .cloned();
         if let Some(m) = cached {
-            return MessageState::Ready(m);
+            return MessageState::Ready(Box::new(m));
         }
 
         // Nothing usable yet — start (or keep waiting on) the fetch.
@@ -1513,7 +1513,7 @@ impl EmailClientProvider {
         };
 
         let msg = match self.resolve_message(&real_folder, uid) {
-            MessageState::Ready(m) => m,
+            MessageState::Ready(m) => *m,
             MessageState::Loading => {
                 return vec![FfonElement::new_str("Loading…".to_owned())];
             }
