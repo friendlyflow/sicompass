@@ -516,6 +516,18 @@ pub struct EmailClientProvider {
     // mailbox, so the folder is part of the cache key.
     message_detail_folder: String,
 
+    // Raised when a background fetch or mutation finishes, so `tick` can ask
+    // for a re-render.
+    //
+    // Deliberately NOT `needs_refresh_flag`: the app answers that one with
+    // `clear_needs_refresh`, which invalidates `envelope_cache`. A fetch
+    // signalling through it would therefore throw away the very result it just
+    // produced and start another fetch — the folder list would flash and, once
+    // any other background work raised the flag, re-fetch indefinitely.
+    // `needs_refresh_flag` means "the server's data changed" (IDLE); this means
+    // "our own work finished".
+    bg_completed: Arc<AtomicBool>,
+
     // Errors raised by background mutations, drained by `take_error`.
     bg_errors: Arc<Mutex<Vec<String>>>,
 
@@ -652,6 +664,7 @@ impl EmailClientProvider {
             message_fetch_key: None,
             message_fetch_failed: None,
             message_detail_folder: String::new(),
+            bg_completed: Arc::new(AtomicBool::new(false)),
             bg_errors: Arc::new(Mutex::new(Vec::new())),
             send_inflight: Arc::new(AtomicBool::new(false)),
             send_result: Arc::new(Mutex::new(None)),
@@ -708,7 +721,7 @@ impl EmailClientProvider {
     fn spawn_bg_op(&mut self, op: BgOp) {
         let imap = self.bg_imap();
         let errors = Arc::clone(&self.bg_errors);
-        let needs_refresh = Arc::clone(&self.needs_refresh_flag);
+        let bg_done = Arc::clone(&self.bg_completed);
 
         crate::connection::runtime().spawn(async move {
             let mut guard = imap.lock().await;
@@ -727,7 +740,7 @@ impl EmailClientProvider {
             }
             // Re-render either way: on success the optimistic local state is
             // confirmed, on failure the error needs to reach the user.
-            needs_refresh.store(true, Ordering::Release);
+            bg_done.store(true, Ordering::Release);
         });
     }
 
@@ -808,7 +821,7 @@ impl EmailClientProvider {
     fn spawn_envelope_fetch(&mut self, folder: &str, limit: usize) {
         let imap = self.bg_imap();
         let slot = Arc::clone(&self.envelope_fetch_result);
-        let needs_refresh = Arc::clone(&self.needs_refresh_flag);
+        let bg_done = Arc::clone(&self.bg_completed);
         let folder_owned = folder.to_owned();
 
         self.envelope_fetch_key = Some((folder_owned.clone(), limit));
@@ -819,7 +832,7 @@ impl EmailClientProvider {
                 guard.list_messages(&folder_owned, limit).await
             };
             *slot.lock().unwrap() = Some((folder_owned, limit, result));
-            needs_refresh.store(true, Ordering::Release);
+            bg_done.store(true, Ordering::Release);
         });
     }
 
@@ -830,7 +843,7 @@ impl EmailClientProvider {
     fn spawn_thread_fetch(&mut self, folder: &str) {
         let imap = self.bg_imap();
         let slot = Arc::clone(&self.thread_fetch_result);
-        let needs_refresh = Arc::clone(&self.needs_refresh_flag);
+        let bg_done = Arc::clone(&self.bg_completed);
         let folder_owned = folder.to_owned();
 
         self.thread_fetch_key = Some(folder_owned.clone());
@@ -843,7 +856,7 @@ impl EmailClientProvider {
             // A THREAD failure is non-fatal and already covered by the
             // References path, so it is recorded as "no map", not an error.
             *slot.lock().unwrap() = Some((folder_owned, result.ok().flatten()));
-            needs_refresh.store(true, Ordering::Release);
+            bg_done.store(true, Ordering::Release);
         });
     }
 
@@ -852,7 +865,7 @@ impl EmailClientProvider {
         let imap = self.bg_imap();
         let slot = Arc::clone(&self.message_fetch_result);
         let inflight = Arc::clone(&self.message_fetch_inflight);
-        let needs_refresh = Arc::clone(&self.needs_refresh_flag);
+        let bg_done = Arc::clone(&self.bg_completed);
         let folder_owned = folder.to_owned();
 
         self.message_fetch_key = Some((folder_owned.clone(), uid));
@@ -865,7 +878,7 @@ impl EmailClientProvider {
             };
             *slot.lock().unwrap() = Some((folder_owned, uid, result));
             inflight.store(false, Ordering::Release);
-            needs_refresh.store(true, Ordering::Release);
+            bg_done.store(true, Ordering::Release);
         });
     }
 
@@ -1317,7 +1330,7 @@ impl EmailClientProvider {
         let inflight = Arc::clone(&self.folder_fetch_inflight);
         let folder_slot = Arc::clone(&self.folder_fetch_result);
         let inbox_slot = Arc::clone(&self.inbox_prefetch_result);
-        let needs_refresh = Arc::clone(&self.needs_refresh_flag);
+        let bg_done = Arc::clone(&self.bg_completed);
         let config = self.config.clone();
 
         crate::connection::runtime().spawn(async move {
@@ -1337,7 +1350,7 @@ impl EmailClientProvider {
             // Clear inflight before raising the refresh flag, so the render
             // thread cannot observe "done but still in flight".
             inflight.store(false, Ordering::Release);
-            needs_refresh.store(true, Ordering::Release);
+            bg_done.store(true, Ordering::Release);
         });
     }
 
@@ -1687,7 +1700,7 @@ impl EmailClientProvider {
         let (plan, folders) = self.history_plan();
         let imap = self.bg_imap();
         let slot = Arc::clone(&self.history_fetch_result);
-        let needs_refresh = Arc::clone(&self.needs_refresh_flag);
+        let bg_done = Arc::clone(&self.bg_completed);
 
         self.history_fetch_key = Some(key.clone());
 
@@ -1723,7 +1736,7 @@ impl EmailClientProvider {
             }
             drop(guard);
             *slot.lock().unwrap() = Some((key, labels));
-            needs_refresh.store(true, Ordering::Release);
+            bg_done.store(true, Ordering::Release);
         });
     }
 
@@ -2045,7 +2058,7 @@ impl EmailClientProvider {
 
         let slot = Arc::clone(&self.send_result);
         let inflight = Arc::clone(&self.send_inflight);
-        let needs_refresh = Arc::clone(&self.needs_refresh_flag);
+        let bg_done = Arc::clone(&self.bg_completed);
         inflight.store(true, Ordering::Release);
         self.pending_send_draft = Some(draft);
 
@@ -2061,7 +2074,7 @@ impl EmailClientProvider {
                 .await;
             *slot.lock().unwrap() = Some(result);
             inflight.store(false, Ordering::Release);
-            needs_refresh.store(true, Ordering::Release);
+            bg_done.store(true, Ordering::Release);
         });
         true
     }
@@ -2191,7 +2204,7 @@ impl EmailClientProvider {
         self.token_refresh_inflight.store(true, Ordering::Release);
         let inflight = Arc::clone(&self.token_refresh_inflight);
         let result_slot = Arc::clone(&self.token_refresh_result);
-        let needs_refresh = Arc::clone(&self.needs_refresh_flag);
+        let bg_done = Arc::clone(&self.bg_completed);
         let client_id = self.config.client_id.clone();
         let client_secret = self.config.client_secret.clone();
         let refresh_token_str = self.config.oauth_refresh_token.clone();
@@ -2212,7 +2225,7 @@ impl EmailClientProvider {
             };
             *result_slot.lock().unwrap() = Some(outcome);
             inflight.store(false, Ordering::Release);
-            needs_refresh.store(true, Ordering::Release);
+            bg_done.store(true, Ordering::Release);
         });
         false
     }
@@ -3065,7 +3078,9 @@ impl Provider for EmailClientProvider {
     }
 
     fn tick(&mut self) -> bool {
-        let mut needs_refresh = false;
+        // A background fetch or mutation finished: re-render, but leave the
+        // caches alone — the result has already been folded in.
+        let mut needs_refresh = self.bg_completed.swap(false, Ordering::AcqRel);
 
         // Apply a background send that finished since the last tick.
         if self.drain_send_result() {
@@ -4036,6 +4051,31 @@ mod tests {
         p.config.imap_url = "imap://127.0.0.1:1".to_owned();
         assert!(p.bg_enabled());
         p
+    }
+
+    #[test]
+    fn test_background_completion_refreshes_without_dropping_the_cache() {
+        let mut p = bg_provider();
+        p.envelope_cache = Some(vec![FfonElement::new_str("cached".to_owned())]);
+        p.bg_completed.store(true, Ordering::Release);
+
+        assert!(p.tick(), "a finished background fetch must ask for a re-render");
+        assert!(
+            p.envelope_cache.is_some(),
+            "the result was already folded in; dropping the cache here would              re-fetch the folder and flash the list"
+        );
+        assert!(!p.tick(), "the signal is one-shot");
+    }
+
+    #[test]
+    fn test_server_side_change_still_invalidates_the_cache() {
+        let mut p = bg_provider();
+        p.envelope_cache = Some(vec![FfonElement::new_str("cached".to_owned())]);
+
+        // IDLE reporting new mail is the opposite case: the server's data
+        // changed, so the cache must go.
+        p.clear_needs_refresh();
+        assert!(p.envelope_cache.is_none());
     }
 
     #[test]
