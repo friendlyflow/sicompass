@@ -385,3 +385,41 @@ pub fn run_provider_ticks(
     }
     (active_tick_update, dashboard_requests)
 }
+
+/// Drain every provider's pending cursor request and apply the **active**
+/// provider's, if any. Returns `true` when the cursor moved.
+///
+/// Must run *after* the tick-driven `refresh_current_directory`, so the move
+/// lands in the tree the background work just delivered rather than the stale
+/// one (the web browser asks to enter page content the frame its load
+/// completes).
+///
+/// Every provider is polled so a background provider's request is consumed
+/// rather than fired later when the user finally navigates there, but only the
+/// active one can move the cursor. Requests are dropped while the user is in
+/// insert mode — yanking the caret out of a half-typed line would lose it.
+pub fn apply_navigation_requests(r: &mut AppRenderer) -> bool {
+    use sicompass_sdk::{NavigationRequest, Provider};
+    let active_root = r.current_id.get(0);
+    let mut active_request = None;
+    for (i, p) in r.providers.iter_mut().enumerate() {
+        if let Some(req) = p.take_navigation_request() {
+            if Some(i) == active_root {
+                active_request = Some(req);
+            }
+        }
+    }
+    let Some(NavigationRequest::EnterChildren) = active_request else { return false; };
+    // Only from the provider's own top level. Depth 1 is the root list of
+    // providers, where the move would enter a provider the user never opened;
+    // deeper than 2 the user is already inside the content the request is
+    // about, and descending again would bury them a level too far.
+    if r.current_id.depth() != 2 || crate::view::is_insert_mode(r.coordinate) {
+        return false;
+    }
+    let before = r.current_id.clone();
+    // Same path as the Right key, so the descent records a Navigate entry and
+    // undo steps back out to the row the user came from.
+    crate::handlers::handle_right(r);
+    r.current_id != before
+}

@@ -12,7 +12,7 @@ use sdl3::mouse::MouseButton;
 use tracing;
 
 // Modes where the caret blinks and we need continuous redraw
-fn is_insert_mode(c: Coordinate) -> bool {
+pub(crate) fn is_insert_mode(c: Coordinate) -> bool {
     matches!(
         c,
         Coordinate::Insert
@@ -393,6 +393,14 @@ pub fn main_loop(app: &mut AppState) {
             // what handlers.rs does after notify_button_pressed.
             crate::list::create_list_current_layer(&mut app.renderer);
             app.renderer.list_index = app.renderer.current_id.last().unwrap_or(0);
+            app.renderer.needs_redraw = true;
+        }
+
+        // ---- Honour provider-requested cursor moves -------------------------
+        // After the refresh above, so a provider that just delivered content
+        // (e.g. the web browser finishing a page load while the cursor sits on
+        // the URL bar) moves into the tree that content produced.
+        if crate::events::apply_navigation_requests(&mut app.renderer) {
             app.renderer.needs_redraw = true;
         }
 

@@ -735,6 +735,61 @@ fn webbrowser_url_commit_updates_ffon() {
     );
 }
 
+/// After a URL commit the cursor should end up inside the page content, not on
+/// the URL bar — the user should not have to press Right after every load. The
+/// test stub loads synchronously, so the commit-time descent already lands in
+/// the content; the provider's pending request must then be a no-op rather than
+/// burying the cursor a level deeper.
+#[test]
+fn webbrowser_url_commit_enters_page_content() {
+    let mut h = Harness::new_with_webbrowser();
+    let wb_idx = h.provider_idx("webbrowser").expect("webbrowser not found");
+    navigate_to_provider(h.r(), wb_idx);
+    press_right(h.r()); // enter provider layer
+
+    // Navigate to the URL bar (first child, index 0)
+    let cur = h.renderer.current_id.get(1).unwrap_or(0);
+    for _ in 0..cur { press_up(h.r()); }
+
+    press(h.r(), Keycode::I);
+    type_text(h.r(), "https://example.invalid");
+    press_enter(h.r());
+
+    assert_eq!(
+        h.renderer.current_id.depth(), 3,
+        "cursor should sit inside the page content, not on the URL bar"
+    );
+    assert_eq!(h.renderer.current_id.get(0), Some(wb_idx));
+    let label = h.renderer.current_list_item().map(|it| it.label.clone()).unwrap_or_default();
+    assert!(
+        label.contains("example.invalid"),
+        "cursor should be on the loaded page's first content element, got: {label:?}"
+    );
+
+    // The provider still has an "enter the content" request pending from the
+    // commit; applying it must not descend a second time.
+    sicompass::events::run_provider_ticks(h.r());
+    assert!(
+        !sicompass::events::apply_navigation_requests(h.r()),
+        "cursor is already in the content — the request must not descend again"
+    );
+    assert_eq!(h.renderer.current_id.depth(), 3);
+
+    // A second URL entry repeats the behaviour: back out to the URL bar, type,
+    // commit, and land in the new page's content again.
+    press_left(h.r());
+    assert_eq!(h.renderer.current_id.depth(), 2);
+    press(h.r(), Keycode::I);
+    type_text(h.r(), "https://second.invalid");
+    press_enter(h.r());
+    assert_eq!(h.renderer.current_id.depth(), 3);
+    let label = h.renderer.current_list_item().map(|it| it.label.clone()).unwrap_or_default();
+    assert!(
+        label.contains("second.invalid"),
+        "second navigation should land in the new page's content, got: {label:?}"
+    );
+}
+
 /// Pressing Enter in insert mode without changing the URL should still exit
 /// insert mode and refresh — matching C's wasInput → providerRefreshCurrentDirectory.
 #[test]
@@ -10625,6 +10680,103 @@ fn background_provider_tick_does_not_signal_active_refresh() {
         active_update,
         "the active provider's tick must signal a refresh"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Provider-requested cursor moves (NavigationRequest)
+// ---------------------------------------------------------------------------
+
+/// Stands in for the web browser loading a page off the render thread: while
+/// the load runs it exposes a childless row plus a status line, and once the
+/// content lands it asks the app to move the cursor into it.
+struct SlowLoadProvider {
+    loaded: bool,
+    request: Option<sicompass_sdk::NavigationRequest>,
+}
+impl Provider for SlowLoadProvider {
+    fn name(&self) -> &str { "slowload" }
+    fn fetch(&mut self) -> Vec<FfonElement> {
+        if !self.loaded {
+            return vec![FfonElement::new_str("<input>https://x</input>"), FfonElement::new_str("Loading…")];
+        }
+        let mut page = FfonElement::new_obj("<input>https://x</input>");
+        page.as_obj_mut().unwrap().push(FfonElement::new_str("page body"));
+        vec![page]
+    }
+    fn tick(&mut self) -> bool {
+        if self.loaded || self.request.is_some() { return false; }
+        // The background load just finished.
+        self.loaded = true;
+        self.request = Some(sicompass_sdk::NavigationRequest::EnterChildren);
+        true
+    }
+    fn take_navigation_request(&mut self) -> Option<sicompass_sdk::NavigationRequest> {
+        self.request.take()
+    }
+}
+
+fn slow_load_renderer() -> AppRenderer {
+    let mut r = AppRenderer::new();
+    r.providers.push(Box::new(SlowLoadProvider { loaded: false, request: None }));
+    let mut root = FfonElement::new_obj("slowload");
+    for child in r.providers[0].fetch() {
+        root.as_obj_mut().unwrap().push(child);
+    }
+    r.ffon = vec![root];
+    r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+    sicompass::list::create_list_current_layer(&mut r);
+    r
+}
+
+/// A provider that finishes loading in the background moves the cursor from
+/// its top-level row into the content it just produced.
+#[test]
+fn navigation_request_enters_content_when_background_load_lands() {
+    let mut r = slow_load_renderer();
+    assert_eq!(r.current_id.depth(), 2, "cursor starts on the top-level row");
+
+    let (active_update, _) = sicompass::events::run_provider_ticks(&mut r);
+    assert!(active_update);
+    sicompass::provider::refresh_current_directory(&mut r);
+    sicompass::list::create_list_current_layer(&mut r);
+
+    assert!(sicompass::events::apply_navigation_requests(&mut r));
+    assert_eq!(r.current_id.depth(), 3, "cursor should be inside the loaded content");
+    assert!(
+        r.current_list_item().map_or(false, |it| it.label.contains("page body")),
+        "cursor should be on the page body, got: {:?}",
+        r.current_list_item().map(|it| it.label.clone())
+    );
+}
+
+/// The request is dropped while the user is typing — the caret must not be
+/// yanked out of a half-written line.
+#[test]
+fn navigation_request_ignored_in_insert_mode() {
+    let mut r = slow_load_renderer();
+    sicompass::events::run_provider_ticks(&mut r);
+    sicompass::provider::refresh_current_directory(&mut r);
+    sicompass::list::create_list_current_layer(&mut r);
+    r.coordinate = Coordinate::Insert;
+
+    assert!(!sicompass::events::apply_navigation_requests(&mut r));
+    assert_eq!(r.current_id.depth(), 2, "cursor must stay put while typing");
+}
+
+/// A request from a provider the user is not looking at must never move the
+/// cursor out of the view they are reading.
+#[test]
+fn navigation_request_ignored_for_background_provider() {
+    let mut r = slow_load_renderer();
+    // A second provider, and the cursor parked on it.
+    r.providers.push(Box::new(QuietProvider));
+    r.ffon.push(FfonElement::new_obj("quiet"));
+    r.current_id = { let mut id = IdArray::new(); id.push(1); id };
+    let before = r.current_id.clone();
+
+    sicompass::events::run_provider_ticks(&mut r);
+    assert!(!sicompass::events::apply_navigation_requests(&mut r));
+    assert_eq!(r.current_id, before);
 }
 
 /// Regression: navigating right into a folder must reset the viewport to the
