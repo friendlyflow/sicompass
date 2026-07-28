@@ -677,13 +677,7 @@ fn apply_undo(r: &mut AppRenderer, entry: &TimelineEntry) {
                 sicompass_sdk::timeline::FsOpKind::Delete
                     | sicompass_sdk::timeline::FsOpKind::Move
             ) {
-                let mut error = String::new();
-                if let Some(p) = r.providers.get_mut(*provider_idx) {
-                    provider_runtime().block_on(p.undo(entry, &mut error));
-                }
-                if !error.is_empty() {
-                    r.error_message = error;
-                }
+                spawn_provider_op(r, *provider_idx, entry, true);
             }
             apply_fs_op_undo(r, id, *op, before.as_ref(), after.as_ref());
         }
@@ -768,13 +762,7 @@ fn apply_redo(r: &mut AppRenderer, entry: &TimelineEntry) {
                 sicompass_sdk::timeline::FsOpKind::Delete
                     | sicompass_sdk::timeline::FsOpKind::Move
             ) {
-                let mut error = String::new();
-                if let Some(p) = r.providers.get_mut(*provider_idx) {
-                    provider_runtime().block_on(p.redo(entry, &mut error));
-                }
-                if !error.is_empty() {
-                    r.error_message = error;
-                }
+                spawn_provider_op(r, *provider_idx, entry, false);
             }
             apply_fs_op_redo(r, id, *op, before.as_ref(), after.as_ref());
         }
@@ -1031,46 +1019,86 @@ fn ensure_nav_layer_populated(r: &mut AppRenderer) {
     }
 }
 
+/// Start an async `undo`/`redo` without blocking the frame.
+///
+/// The provider is moved out of `r.providers` and handed to the task, since a
+/// borrow cannot cross an `.await`; a `PlaceholderProvider` holds the slot so
+/// indices stay valid. `drain_pending_provider_ops` puts it back.
+fn spawn_provider_op(r: &mut AppRenderer, provider_idx: usize, entry: &TimelineEntry, is_undo: bool) {
+    use sicompass_sdk::Provider;
+
+    // Already running for this provider: ignore the repeat rather than check
+    // out a placeholder and lose the real provider.
+    if r.pending_provider_ops.iter().any(|op| op.idx == provider_idx) {
+        return;
+    }
+    let Some(slot) = r.providers.get_mut(provider_idx) else { return };
+
+    let provider_name = slot.display_name().to_owned();
+    let stand_in: Box<dyn Provider> =
+        Box::new(crate::app_state::PlaceholderProvider::new(slot.name(), &provider_name));
+    let mut taken = std::mem::replace(slot, stand_in);
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let entry = entry.clone();
+    provider_runtime().spawn(async move {
+        let mut error = String::new();
+        if is_undo {
+            taken.undo(&entry, &mut error).await;
+        } else {
+            taken.redo(&entry, &mut error).await;
+        }
+        // A send failure means the app is shutting down; dropping the provider
+        // here is then the correct outcome.
+        let _ = tx.send((taken, error));
+    });
+
+    r.pending_provider_ops.push(crate::app_state::PendingProviderOp {
+        idx: provider_idx,
+        is_undo,
+        provider_name,
+        rx,
+    });
+}
+
+/// Put back any provider whose undo/redo has finished. Returns true if the
+/// active provider changed and the view should refresh.
+pub fn drain_pending_provider_ops(r: &mut AppRenderer) -> bool {
+    let mut finished = Vec::new();
+    for (i, op) in r.pending_provider_ops.iter().enumerate() {
+        if let Ok(payload) = op.rx.try_recv() {
+            finished.push((i, payload));
+        }
+    }
+    if finished.is_empty() {
+        return false;
+    }
+
+    let mut refresh = false;
+    // Descending, so removing by index does not shift the ones still to come.
+    for (i, (provider, error)) in finished.into_iter().rev() {
+        let op = r.pending_provider_ops.remove(i);
+        if let Some(slot) = r.providers.get_mut(op.idx) {
+            *slot = provider;
+        }
+        let label = if op.is_undo { "undid" } else { "redid" };
+        if !error.is_empty() {
+            r.error_message = error;
+        } else if r.current_id.get(0) == Some(op.idx) {
+            refresh = true;
+        } else {
+            r.error_message = format!("{label} on {}", op.provider_name);
+        }
+    }
+    refresh
+}
+
 fn dispatch_provider_undo(r: &mut AppRenderer, provider_idx: usize, entry: &TimelineEntry) {
-    let mut error = String::new();
-    let pname = r
-        .providers
-        .get(provider_idx)
-        .map(|p| p.display_name().to_owned());
-    if let Some(p) = r.providers.get_mut(provider_idx) {
-        provider_runtime().block_on(p.undo(entry, &mut error));
-    }
-    if !error.is_empty() {
-        r.error_message = error;
-    } else if r.current_id.get(0) == Some(provider_idx) {
-        crate::provider::refresh_current_directory(r);
-    } else {
-        r.error_message = format!(
-            "undid on {}",
-            pname.as_deref().unwrap_or("provider")
-        );
-    }
+    spawn_provider_op(r, provider_idx, entry, true);
 }
 
 fn dispatch_provider_redo(r: &mut AppRenderer, provider_idx: usize, entry: &TimelineEntry) {
-    let mut error = String::new();
-    let pname = r
-        .providers
-        .get(provider_idx)
-        .map(|p| p.display_name().to_owned());
-    if let Some(p) = r.providers.get_mut(provider_idx) {
-        provider_runtime().block_on(p.redo(entry, &mut error));
-    }
-    if !error.is_empty() {
-        r.error_message = error;
-    } else if r.current_id.get(0) == Some(provider_idx) {
-        crate::provider::refresh_current_directory(r);
-    } else {
-        r.error_message = format!(
-            "redid on {}",
-            pname.as_deref().unwrap_or("provider")
-        );
-    }
+    spawn_provider_op(r, provider_idx, entry, false);
 }
 
 // ---------------------------------------------------------------------------

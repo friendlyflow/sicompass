@@ -371,7 +371,9 @@ pub fn run_provider_ticks(
 ) -> (bool, Vec<(usize, sicompass_sdk::DashboardRequest)>) {
     use sicompass_sdk::Provider;
     let active_root = r.current_id.get(0);
-    let mut active_tick_update = false;
+    // Put back any provider whose async undo/redo finished since last frame,
+    // before ticking, so it is ticked as itself rather than as the placeholder.
+    let mut active_tick_update = crate::state::drain_pending_provider_ops(r);
     let mut dashboard_requests: Vec<(usize, sicompass_sdk::DashboardRequest)> = Vec::new();
     for (i, p) in r.providers.iter_mut().enumerate() {
         if p.tick() && Some(i) == active_root {
