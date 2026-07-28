@@ -190,6 +190,13 @@ pub struct MessageHeader {
     pub seen: bool,
     /// Whether the `\Flagged` (starred) flag is set.
     pub flagged: bool,
+    /// Message-ID header, taken from the ENVELOPE.
+    ///
+    /// Carried here so undo entries can identify a message without fetching
+    /// its body: the ENVELOPE already contains it, and the three `Trash` /
+    /// `Move` / `Archive` snapshots used to download the whole message for
+    /// this one field.
+    pub message_id: String,
 }
 
 /// A file attached to a received message.
@@ -503,6 +510,30 @@ pub struct EmailClientProvider {
     // Errors raised by background mutations, drained by `take_error`.
     bg_errors: Arc<Mutex<Vec<String>>>,
 
+    // SMTP send. Connect + TLS + auth + DATA is the slowest single operation
+    // in the provider; running it inline froze the frame for its whole
+    // duration. The send is optimistic: compose clears at once and a failure
+    // re-arms the existing outbox retry from `tick`.
+    send_inflight: Arc<AtomicBool>,
+    #[allow(clippy::type_complexity)]
+    send_result: Arc<Mutex<Option<Result<Vec<u8>, String>>>>,
+    // Draft held back so a failed background send can restore it for retry.
+    pending_send_draft: Option<Draft>,
+
+    // History view resolution. Labels are cached against the view's identity
+    // so re-rendering the same thread costs nothing.
+    #[allow(clippy::type_complexity)]
+    history_fetch_result: Arc<Mutex<Option<(String, Vec<String>)>>>,
+    history_fetch_key: Option<String>,
+    history_labels: Option<(String, Vec<String>)>,
+
+    // Envelope list fetch (opening a folder). Same handshake as the message
+    // fetch; the (folder, limit) key guards against rendering a list that
+    // arrived for a folder the user has already left.
+    #[allow(clippy::type_complexity)]
+    envelope_fetch_result: Arc<Mutex<Option<(String, usize, Result<Vec<MessageHeader>, String>)>>>,
+    envelope_fetch_key: Option<(String, usize)>,
+
     // UID THREAD map fetch. Purely an optimisation over the References-based
     // fallback, so the folder renders immediately and the map is folded into
     // `thread_cache` whenever it arrives.
@@ -533,6 +564,13 @@ pub struct EmailClientProvider {
     // Override for the settings.json path (used in tests to avoid touching
     // the real user config file).
     config_path_override: Option<std::path::PathBuf>,
+}
+
+/// One entry in the History view: either already known, or a fetch to make.
+enum HistoryItem {
+    Label(String),
+    FetchUid(u32),
+    FetchMessageId(String),
 }
 
 /// Outcome of resolving a message body for rendering.
@@ -602,6 +640,14 @@ impl EmailClientProvider {
             message_fetch_key: None,
             message_detail_folder: String::new(),
             bg_errors: Arc::new(Mutex::new(Vec::new())),
+            send_inflight: Arc::new(AtomicBool::new(false)),
+            send_result: Arc::new(Mutex::new(None)),
+            pending_send_draft: None,
+            history_fetch_result: Arc::new(Mutex::new(None)),
+            history_fetch_key: None,
+            history_labels: None,
+            envelope_fetch_result: Arc::new(Mutex::new(None)),
+            envelope_fetch_key: None,
             thread_fetch_result: Arc::new(Mutex::new(None)),
             thread_fetch_key: None,
             outbox_pending: false,
@@ -733,6 +779,25 @@ impl EmailClientProvider {
         MessageState::Loading
     }
 
+    /// Fetch a folder's envelope list in the background.
+    fn spawn_envelope_fetch(&mut self, folder: &str, limit: usize) {
+        let imap = self.bg_imap();
+        let slot = Arc::clone(&self.envelope_fetch_result);
+        let needs_refresh = Arc::clone(&self.needs_refresh_flag);
+        let folder_owned = folder.to_owned();
+
+        self.envelope_fetch_key = Some((folder_owned.clone(), limit));
+
+        crate::connection::runtime().spawn(async move {
+            let result = {
+                let mut guard = imap.lock().await;
+                guard.list_messages(&folder_owned, limit).await
+            };
+            *slot.lock().unwrap() = Some((folder_owned, limit, result));
+            needs_refresh.store(true, Ordering::Release);
+        });
+    }
+
     /// Fetch the UID THREAD map for `folder` in the background.
     ///
     /// Nothing waits on this: until it lands, History uses the References
@@ -807,6 +872,10 @@ impl EmailClientProvider {
     /// Inject an SMTP backend.
     pub fn with_smtp(mut self, backend: Box<dyn SmtpBackend>) -> Self {
         self.smtp = Some(backend);
+        // Same reason as `with_imap`: the background send path builds its own
+        // `RealSmtp` from config, so leaving it enabled would route straight
+        // past this injected backend and the test would observe nothing.
+        self.async_folder_fetch_enabled = false;
         self
     }
 
@@ -1331,6 +1400,32 @@ impl EmailClientProvider {
 
         let folder_result = if let Some(result) = prefetch {
             result
+        } else if self.bg_enabled() {
+            if self.imap.is_none() {
+                items.push(FfonElement::new_str("(no IMAP backend)".to_owned()));
+                return items;
+            }
+            // Drain a completed fetch; anything keyed to another folder or
+            // limit is dropped, since the user has navigated on since.
+            let done = self.envelope_fetch_result.lock().unwrap().take();
+            match done {
+                Some((folder, done_limit, result))
+                    if folder == real_folder && done_limit == limit =>
+                {
+                    self.envelope_fetch_key = None;
+                    result
+                }
+                _ => {
+                    let want = (real_folder.as_str(), limit);
+                    let have = self.envelope_fetch_key.as_ref().map(|(f, l)| (f.as_str(), *l));
+                    if have != Some(want) {
+                        self.spawn_envelope_fetch(&real_folder, limit);
+                    }
+                    // Returning early leaves `envelope_cache` unset, so the next
+                    // render re-enters here rather than caching the placeholder.
+                    return vec![FfonElement::new_str("Loading…".to_owned())];
+                }
+            }
         } else {
             let imap = match self.imap_mut() {
                 Some(b) => b,
@@ -1475,7 +1570,177 @@ impl EmailClientProvider {
         build_message_view(&msg)
     }
 
+    /// Identity of the current History view, used to discard results that
+    /// arrive after the user has moved to a different message.
+    fn history_key(&self) -> String {
+        format!(
+            "{}|{:?}|{}",
+            self.history_folder, self.history_uid, self.history_refs
+        )
+    }
+
+    /// Work the History view needs done, computed from local caches only.
+    ///
+    /// Anything already known (the current folder's envelopes) resolves to a
+    /// `Label` here; only the gaps become network entries, which is why the
+    /// common case of a thread inside the open folder needs no I/O at all.
+    fn history_plan(&self) -> (Vec<HistoryItem>, Vec<String>) {
+        let folder = self.history_folder.clone();
+
+        // Fast path: the IMAP THREAD map, when we have one.
+        if let Some(uid) = self.history_uid {
+            if let Some(uid_map) = self.thread_cache.get(&folder) {
+                if let Some(thread_uids) = uid_map.get(&uid).cloned() {
+                    let other_uids: Vec<u32> = thread_uids
+                        .iter()
+                        .copied()
+                        .filter(|&u| u != uid)
+                        .take(10)
+                        .collect();
+                    if !other_uids.is_empty() {
+                        let items = other_uids
+                            .into_iter()
+                            .map(|other_uid| {
+                                match self.message_cache.iter().find(|h| h.uid == other_uid) {
+                                    Some(h) => HistoryItem::Label(format!(
+                                        "From: {} — Subject: {}",
+                                        h.from, h.subject
+                                    )),
+                                    None => HistoryItem::FetchUid(other_uid),
+                                }
+                            })
+                            .collect();
+                        return (items, vec![folder]);
+                    }
+                }
+            }
+        }
+
+        // Slow path: Message-IDs from the References header, resolved by SEARCH.
+        if self.history_refs.is_empty() {
+            return (vec![], vec![]);
+        }
+
+        // Search order: \All (Gmail / archive) first; fall back to the folder.
+        let mut search_folders: Vec<String> = vec![];
+        if let Some(ref all) = self.special_folders.archive {
+            search_folders.push(all.clone());
+        }
+        if !search_folders.contains(&folder) {
+            search_folders.push(folder);
+        }
+
+        let mut items = vec![];
+        let mut count = 0;
+        let refs = self.history_refs.clone();
+        let mut p = refs.as_str();
+        while !p.is_empty() && count < 10 {
+            p = p.trim_start();
+            if !p.starts_with('<') {
+                if let Some(rest) = p.get(1..) { p = rest; } else { break; }
+                continue;
+            }
+            let end = match p.find('>') {
+                Some(i) => i,
+                None => break,
+            };
+            items.push(HistoryItem::FetchMessageId(p[..=end].to_owned()));
+            p = &p[end + 1..];
+            count += 1;
+        }
+        (items, search_folders)
+    }
+
+    /// Resolve the History view's outstanding fetches in the background.
+    fn spawn_history_fetch(&mut self, key: String) {
+        let (plan, folders) = self.history_plan();
+        let imap = self.bg_imap();
+        let slot = Arc::clone(&self.history_fetch_result);
+        let needs_refresh = Arc::clone(&self.needs_refresh_flag);
+
+        self.history_fetch_key = Some(key.clone());
+
+        crate::connection::runtime().spawn(async move {
+            let mut labels = Vec::new();
+            let mut guard = imap.lock().await;
+            for item in plan {
+                match item {
+                    HistoryItem::Label(l) => labels.push(l),
+                    HistoryItem::FetchUid(uid) => {
+                        let folder = folders.first().cloned().unwrap_or_default();
+                        if let Ok(Some(msg)) = guard.fetch_message(&folder, uid).await {
+                            labels.push(format!(
+                                "From: {} — Subject: {}",
+                                msg.from, msg.subject
+                            ));
+                        }
+                    }
+                    HistoryItem::FetchMessageId(msg_id) => {
+                        for folder in &folders {
+                            if let Ok(Some(msg)) =
+                                guard.fetch_message_by_message_id(folder, &msg_id).await
+                            {
+                                labels.push(format!(
+                                    "From: {} — Subject: {}",
+                                    msg.from, msg.subject
+                                ));
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            drop(guard);
+            *slot.lock().unwrap() = Some((key, labels));
+            needs_refresh.store(true, Ordering::Release);
+        });
+    }
+
     fn build_history(&mut self) -> Vec<FfonElement> {
+        if self.bg_enabled() {
+            let key = self.history_key();
+
+            // Fold in a completed resolve; a result for a different message is
+            // dropped, since the user has navigated on.
+            let done = self.history_fetch_result.lock().unwrap().take();
+            if let Some((done_key, labels)) = done {
+                if done_key == key {
+                    self.history_fetch_key = None;
+                    self.history_labels = Some((key.clone(), labels));
+                }
+            }
+
+            if let Some((cached_key, labels)) = &self.history_labels {
+                if *cached_key == key {
+                    if labels.is_empty() {
+                        return vec![FfonElement::new_str("(no history)".to_owned())];
+                    }
+                    return labels.iter().cloned().map(FfonElement::new_obj).collect();
+                }
+            }
+
+            // Nothing to do at all — answer without a round-trip.
+            let (plan, _) = self.history_plan();
+            if plan.is_empty() {
+                return vec![FfonElement::new_str("(no history)".to_owned())];
+            }
+            // Everything already known locally — resolve inline, no I/O.
+            if plan.iter().all(|i| matches!(i, HistoryItem::Label(_))) {
+                return plan
+                    .into_iter()
+                    .map(|i| match i {
+                        HistoryItem::Label(l) => FfonElement::new_obj(l),
+                        _ => unreachable!("checked all are labels"),
+                    })
+                    .collect();
+            }
+
+            if self.history_fetch_key.as_deref() != Some(key.as_str()) {
+                self.spawn_history_fetch(key);
+            }
+            return vec![FfonElement::new_str("Loading…".to_owned())];
+        }
+
         let folder = self.history_folder.clone();
 
         // Fast path: use the IMAP THREAD cache (single THREAD command replaces
@@ -1580,12 +1845,30 @@ impl EmailClientProvider {
             let uid = self.compose.reply_uid;
             let mode = self.compose.mode;
             let username = self.config.username.clone();
-            if let Some(ref mut imap) = self.imap {
-                if let Ok(Some(msg)) = block_on(imap.fetch_message(&folder, uid)) {
-                    prefill_compose(&mut self.compose, &msg, mode, &username);
+            if self.bg_enabled() {
+                // Reuse the message-body path: the original is nearly always
+                // the message just being viewed, so this usually resolves from
+                // cache with no round-trip. `prefilled` stays false while the
+                // fetch is in flight, so the next render fills the form in.
+                match self.resolve_message(&folder, uid) {
+                    MessageState::Ready(msg) => {
+                        prefill_compose(&mut self.compose, &msg, mode, &username);
+                        self.compose.prefilled = true;
+                    }
+                    MessageState::Loading => {
+                        return vec![FfonElement::new_str("Loading…".to_owned())];
+                    }
+                    // Original is gone; compose an empty reply rather than hang.
+                    MessageState::Missing => self.compose.prefilled = true,
                 }
+            } else {
+                if let Some(ref mut imap) = self.imap {
+                    if let Ok(Some(msg)) = block_on(imap.fetch_message(&folder, uid)) {
+                        prefill_compose(&mut self.compose, &msg, mode, &username);
+                    }
+                }
+                self.compose.prefilled = true;
             }
-            self.compose.prefilled = true;
         }
 
         let mut items = vec![];
@@ -1696,6 +1979,90 @@ impl EmailClientProvider {
             }
         }
         Ok(())
+    }
+
+    /// Send the current draft on the runtime. Returns false if one is already
+    /// in flight, so a double press cannot send twice.
+    fn spawn_send(&mut self) -> bool {
+        if self.send_inflight.load(Ordering::Acquire) {
+            return false;
+        }
+        self.ensure_fresh_token();
+
+        let config = self.config.clone();
+        let draft = self.compose.draft.clone();
+        let from = self.config.username.clone();
+        let to_v = Self::split_addrs(&draft.to);
+        let cc_v = Self::split_addrs(&draft.cc);
+        let bcc_v = Self::split_addrs(&draft.bcc);
+        let subject = draft.subject.clone();
+        let body = normalize_body_for_send(&draft.body);
+        // Read attachments here, on the render thread: it is local file I/O,
+        // and doing it in the task would need the paths to outlive the draft.
+        let attachment_data: Vec<(String, Vec<u8>)> = draft
+            .attachments
+            .iter()
+            .filter_map(|path| {
+                let bytes = std::fs::read(path).ok()?;
+                let name = std::path::Path::new(path).file_name()?.to_string_lossy().into_owned();
+                Some((name, bytes))
+            })
+            .collect();
+
+        let slot = Arc::clone(&self.send_result);
+        let inflight = Arc::clone(&self.send_inflight);
+        let needs_refresh = Arc::clone(&self.needs_refresh_flag);
+        inflight.store(true, Ordering::Release);
+        self.pending_send_draft = Some(draft);
+
+        crate::connection::runtime().spawn(async move {
+            let mut smtp = crate::net::RealSmtp::from_config(&config);
+            let to_r: Vec<&str> = to_v.iter().map(String::as_str).collect();
+            let cc_r: Vec<&str> = cc_v.iter().map(String::as_str).collect();
+            let bcc_r: Vec<&str> = bcc_v.iter().map(String::as_str).collect();
+            let attachment_refs: Vec<(&str, &[u8])> =
+                attachment_data.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect();
+            let result = smtp
+                .send(&from, &to_r, &cc_r, &bcc_r, &subject, &body, &attachment_refs)
+                .await;
+            *slot.lock().unwrap() = Some(result);
+            inflight.store(false, Ordering::Release);
+            needs_refresh.store(true, Ordering::Release);
+        });
+        true
+    }
+
+    /// Apply a finished background send. Returns true if the view should refresh.
+    fn drain_send_result(&mut self) -> bool {
+        let done = self.send_result.lock().unwrap().take();
+        let Some(result) = done else { return false };
+
+        match result {
+            Ok(raw) => {
+                self.pending_send_draft = None;
+                self.outbox_pending = false;
+                // APPEND to Sent (skip for Gmail — its SMTP server auto-saves).
+                if !self.config.smtp_url.contains("smtp.gmail.com") {
+                    if let Some(sent) = self.special_folders.sent.clone() {
+                        self.spawn_bg_op(BgOp::Append { folder: sent, message: raw });
+                    }
+                }
+            }
+            Err(e) => {
+                self.error_message = Some(format!("send failed: {e} — will retry"));
+                // Put the draft back so the outbox retry has something to send.
+                if let Some(draft) = self.pending_send_draft.take() {
+                    self.compose.draft = draft;
+                    self.compose_sent = false;
+                }
+                if let Some(drafts_folder) = self.special_folders.drafts.clone() {
+                    let bytes = build_draft_bytes(&self.compose.draft, &self.config.username);
+                    self.spawn_bg_op(BgOp::Append { folder: drafts_folder, message: bytes });
+                }
+                self.outbox_pending = true;
+            }
+        }
+        true
     }
 
     fn is_draft_non_empty(draft: &Draft) -> bool {
@@ -2608,6 +2975,14 @@ impl Provider for EmailClientProvider {
     fn on_button_press(&mut self, function_name: &str) {
         match function_name {
             "send" => {
+                if self.bg_enabled() {
+                    if self.spawn_send() {
+                        self.compose = ComposeState::default();
+                        self.compose_sent = true;
+                        self.outbox_pending = false;
+                    }
+                    return;
+                }
                 match self.send_draft() {
                     Ok(()) => {
                         self.compose = ComposeState::default();
@@ -2657,8 +3032,22 @@ impl Provider for EmailClientProvider {
     fn tick(&mut self) -> bool {
         let mut needs_refresh = false;
 
+        // Apply a background send that finished since the last tick.
+        if self.drain_send_result() {
+            needs_refresh = true;
+        }
+
         // Retry any queued outbox message.
-        if self.outbox_pending {
+        if self.outbox_pending && self.bg_enabled() {
+            // Re-arm through the same non-blocking path; `spawn_send` refuses
+            // while one is already in flight, so ticking cannot pile up sends.
+            if self.spawn_send() {
+                self.compose = ComposeState::default();
+                self.compose_sent = true;
+                self.outbox_pending = false;
+                needs_refresh = true;
+            }
+        } else if self.outbox_pending {
             match self.send_draft() {
                 Ok(()) => {
                     self.outbox_pending = false;
@@ -2889,9 +3278,10 @@ impl Provider for EmailClientProvider {
             .filter(|m| m.uid == uid)
             .map(|m| m.message_id.clone())
             .or_else(|| {
-                self.imap.as_mut()
-                    .and_then(|imap| block_on(imap.fetch_message(&from, uid)).ok().flatten())
-                    .map(|m| m.message_id)
+                self.message_cache
+                    .iter()
+                    .find(|h| h.uid == uid)
+                    .map(|h| h.message_id.clone())
             })
             .unwrap_or_default();
         if self.bg_enabled() {
@@ -3054,9 +3444,10 @@ impl Provider for EmailClientProvider {
                                 .filter(|m| m.uid == uid)
                                 .map(|m| m.message_id.clone())
                                 .or_else(|| {
-                                    self.imap.as_mut()
-                                        .and_then(|imap| block_on(imap.fetch_message(&real_folder, uid)).ok().flatten())
-                                        .map(|m| m.message_id)
+                                    self.message_cache
+                                        .iter()
+                                        .find(|h| h.uid == uid)
+                                        .map(|h| h.message_id.clone())
                                 })
                                 .unwrap_or_default();
                             if self.bg_enabled() {
@@ -3126,9 +3517,10 @@ impl Provider for EmailClientProvider {
                                 .filter(|m| m.uid == uid)
                                 .map(|m| m.message_id.clone())
                                 .or_else(|| {
-                                    self.imap.as_mut()
-                                        .and_then(|imap| block_on(imap.fetch_message(&real_folder, uid)).ok().flatten())
-                                        .map(|m| m.message_id)
+                                    self.message_cache
+                                        .iter()
+                                        .find(|h| h.uid == uid)
+                                        .map(|h| h.message_id.clone())
                                 })
                                 .unwrap_or_default();
                             if self.bg_enabled() {
@@ -3420,6 +3812,7 @@ mod tests {
             date: "2025-01-01".to_owned(),
             seen: true,
             flagged: false,
+            message_id: format!("<msg{uid}@example.com>"),
         }
     }
 
@@ -3431,6 +3824,7 @@ mod tests {
             date: "2025-01-01".to_owned(),
             seen: false,
             flagged: false,
+            message_id: format!("<msg{uid}@example.com>"),
         }
     }
 

@@ -31,7 +31,19 @@ impl EnvelopeCache {
         let conn = Connection::open(&db_path).ok()?;
         let cache = EnvelopeCache { conn };
         cache.init_schema().ok()?;
+        cache.migrate_message_id();
         Some(cache)
+    }
+
+    /// Add `message_id` to a database created before the column existed.
+    ///
+    /// `CREATE TABLE IF NOT EXISTS` leaves an existing table alone, so the
+    /// column has to be added separately. A duplicate-column error just means
+    /// the migration already ran.
+    fn migrate_message_id(&self) {
+        let _ = self
+            .conn
+            .execute("ALTER TABLE envelopes ADD COLUMN message_id TEXT NOT NULL DEFAULT ''", []);
     }
 
     fn init_schema(&self) -> rusqlite::Result<()> {
@@ -49,6 +61,7 @@ impl EnvelopeCache {
                 date      TEXT    NOT NULL,
                 seen      INTEGER NOT NULL,
                 flagged   INTEGER NOT NULL,
+                message_id TEXT   NOT NULL DEFAULT '',
                 PRIMARY KEY (folder, uid)
              );",
         )
@@ -99,7 +112,7 @@ impl EnvelopeCache {
     /// Return the `limit` most-recent envelopes (by UID descending) for `folder`.
     pub fn get_latest(&self, folder: &str, limit: usize) -> Vec<MessageHeader> {
         let mut stmt = match self.conn.prepare(
-            "SELECT uid, from_addr, subject, date, seen, flagged
+            "SELECT uid, from_addr, subject, date, seen, flagged, message_id
                FROM envelopes
               WHERE folder = ?1
            ORDER BY uid DESC
@@ -116,6 +129,7 @@ impl EnvelopeCache {
                 date: row.get(3)?,
                 seen: row.get::<_, i64>(4)? != 0,
                 flagged: row.get::<_, i64>(5)? != 0,
+                message_id: row.get(6).unwrap_or_default(),
             })
         })
         .ok()
@@ -145,14 +159,15 @@ impl EnvelopeCache {
     pub fn upsert_all(&self, folder: &str, headers: &[MessageHeader]) {
         for h in headers {
             let _ = self.conn.execute(
-                "INSERT INTO envelopes (folder, uid, from_addr, subject, date, seen, flagged)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                "INSERT INTO envelopes (folder, uid, from_addr, subject, date, seen, flagged, message_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                  ON CONFLICT(folder, uid) DO UPDATE SET
-                   from_addr = excluded.from_addr,
-                   subject   = excluded.subject,
-                   date      = excluded.date,
-                   seen      = excluded.seen,
-                   flagged   = excluded.flagged",
+                   from_addr  = excluded.from_addr,
+                   subject    = excluded.subject,
+                   date       = excluded.date,
+                   seen       = excluded.seen,
+                   flagged    = excluded.flagged,
+                   message_id = excluded.message_id",
                 params![
                     folder,
                     h.uid as i64,
@@ -161,6 +176,7 @@ impl EnvelopeCache {
                     &h.date,
                     h.seen as i64,
                     h.flagged as i64,
+                    &h.message_id,
                 ],
             );
         }
@@ -257,6 +273,7 @@ mod tests {
             date: "2025-01-01".to_owned(),
             seen: true,
             flagged: false,
+            message_id: format!("<msg{uid}@example.com>"),
         }
     }
 

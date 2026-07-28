@@ -978,7 +978,13 @@ fn parse_fetch_to_header(m: &Fetch) -> Option<MessageHeader> {
     // returned a slice.
     let seen = m.flags().any(|f| matches!(f, async_imap::types::Flag::Seen));
     let flagged = m.flags().any(|f| matches!(f, async_imap::types::Flag::Flagged));
-    Some(MessageHeader { uid, from, subject, date, seen, flagged })
+    let message_id = env
+        .message_id
+        .as_deref()
+        .and_then(|b| std::str::from_utf8(b).ok())
+        .unwrap_or("")
+        .to_owned();
+    Some(MessageHeader { uid, from, subject, date, seen, flagged, message_id })
 }
 
 fn format_address(addr: &Address<'_>) -> String {
