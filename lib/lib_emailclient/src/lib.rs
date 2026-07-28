@@ -52,6 +52,12 @@ pub mod oauth2;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+// The `Provider` trait is synchronous, so every `ImapBackend` / `SmtpBackend`
+// call is bridged here. `block_on` detects an ambient runtime and uses
+// `block_in_place` rather than panicking, which matters for the tasks spawned
+// below.
+use crate::connection::block_on;
+
 use sicompass_sdk::ffon::{FfonElement, FfonObject};
 use sicompass_sdk::localize;
 use std::sync::OnceLock as TranslationsOnce;
@@ -249,21 +255,22 @@ struct ComposeState {
 // ---------------------------------------------------------------------------
 
 /// IMAP backend — all operations used by the provider.
+#[async_trait::async_trait]
 pub trait ImapBackend: Send {
     /// List all selectable folders with their SPECIAL-USE attributes.
-    fn list_folders(&mut self) -> Result<Vec<FolderInfo>, String>;
+    async fn list_folders(&mut self) -> Result<Vec<FolderInfo>, String>;
     /// Fetch headers (including flags) for the most recent `limit` messages in `folder`.
-    fn list_messages(&mut self, folder: &str, limit: usize) -> Result<Vec<MessageHeader>, String>;
+    async fn list_messages(&mut self, folder: &str, limit: usize) -> Result<Vec<MessageHeader>, String>;
     /// Fetch the full content of a message by UID.
-    fn fetch_message(&mut self, folder: &str, uid: u32) -> Result<Option<EmailMessage>, String>;
+    async fn fetch_message(&mut self, folder: &str, uid: u32) -> Result<Option<EmailMessage>, String>;
     /// Fetch a message by its Message-ID header via IMAP SEARCH.
-    fn fetch_message_by_message_id(
+    async fn fetch_message_by_message_id(
         &mut self,
         folder: &str,
         message_id: &str,
     ) -> Result<Option<EmailMessage>, String>;
     /// Add/remove IMAP flags on a message (e.g. `\\Seen`, `\\Flagged`, `\\Deleted`).
-    fn set_flags(
+    async fn set_flags(
         &mut self,
         folder: &str,
         uid: u32,
@@ -271,25 +278,26 @@ pub trait ImapBackend: Send {
         remove: &[&str],
     ) -> Result<(), String>;
     /// Copy a message to another folder (server-side COPY).
-    fn copy_message(&mut self, folder: &str, uid: u32, dest: &str) -> Result<(), String>;
+    async fn copy_message(&mut self, folder: &str, uid: u32, dest: &str) -> Result<(), String>;
     /// Move a message to another folder (MOVE extension; falls back to COPY+DELETE+EXPUNGE).
-    fn move_message(&mut self, folder: &str, uid: u32, dest: &str) -> Result<(), String>;
+    async fn move_message(&mut self, folder: &str, uid: u32, dest: &str) -> Result<(), String>;
     /// Expunge a specific UID from a folder (UIDPLUS UID EXPUNGE).
-    fn expunge_uid(&mut self, folder: &str, uid: u32) -> Result<(), String>;
+    async fn expunge_uid(&mut self, folder: &str, uid: u32) -> Result<(), String>;
     /// Append a raw RFC 2822 message to a folder (IMAP APPEND).
-    fn append(&mut self, folder: &str, message: &[u8]) -> Result<(), String>;
+    async fn append(&mut self, folder: &str, message: &[u8]) -> Result<(), String>;
     /// Fetch the UID thread map for `folder` using the IMAP THREAD extension.
     ///
     /// Returns `Some(threads)` where each inner `Vec<u32>` is the flat list of
     /// UIDs belonging to the same thread.  Returns `None` when the server does
     /// not advertise `THREAD=REFERENCES` capability.
-    fn fetch_threads(&mut self, folder: &str) -> Result<Option<Vec<Vec<u32>>>, String>;
+    async fn fetch_threads(&mut self, folder: &str) -> Result<Option<Vec<Vec<u32>>>, String>;
 }
 
 /// SMTP backend — send an email message.
 /// Returns the raw RFC 2822 bytes of the sent message (for IMAP APPEND to Sent).
+#[async_trait::async_trait]
 pub trait SmtpBackend: Send {
-    fn send(
+    async fn send(
         &mut self,
         from: &str,
         to: &[&str],
@@ -650,9 +658,9 @@ impl EmailClientProvider {
                 } else {
                     (src_folder.as_str(), trash_folder.as_str())
                 };
-                match imap.fetch_message_by_message_id(search_in, msg_id) {
+                match block_on(imap.fetch_message_by_message_id(search_in, msg_id)) {
                     Ok(Some(msg)) => {
-                        if let Err(e) = imap.move_message(search_in, msg.uid, move_to) {
+                        if let Err(e) = block_on(imap.move_message(search_in, msg.uid, move_to)) {
                             let mut args = localize::Args::new();
                             args.set("label", label.to_owned());
                             args.set("err", e.to_string());
@@ -682,7 +690,7 @@ impl EmailClientProvider {
                 } else {
                     (&[], &["\\Seen"])
                 };
-                if let Err(e) = imap.set_flags(folder, *msg_uid, add, remove) {
+                if let Err(e) = block_on(imap.set_flags(folder, *msg_uid, add, remove)) {
                     let mut args = localize::Args::new();
                     args.set("label", label.to_owned());
                     args.set("err", e.to_string());
@@ -701,7 +709,7 @@ impl EmailClientProvider {
                 } else {
                     (&[], &["\\Flagged"])
                 };
-                if let Err(e) = imap.set_flags(folder, *msg_uid, add, remove) {
+                if let Err(e) = block_on(imap.set_flags(folder, *msg_uid, add, remove)) {
                     let mut args = localize::Args::new();
                     args.set("label", label.to_owned());
                     args.set("err", e.to_string());
@@ -950,21 +958,47 @@ impl EmailClientProvider {
         }
         self.folder_cache = Some(items.clone());
 
-        // Spawn a parallel INBOX prefetch so the first navigate-into-INBOX is
-        // instant.  Only in async mode (production); tests use injected mocks.
-        if self.async_folder_fetch_enabled {
-            let result_slot = Arc::clone(&self.inbox_prefetch_result);
-            let needs_refresh = Arc::clone(&self.needs_refresh_flag);
-            let config = self.config.clone();
-            std::thread::spawn(move || {
-                let mut imap = crate::net::RealImap::from_config(&config);
-                let result = imap.list_messages("INBOX", 50);
-                *result_slot.lock().unwrap() = Some(result);
-                needs_refresh.store(true, Ordering::Release);
-            });
-        }
+        // The INBOX prefetch used to be spawned from here, which meant it could
+        // not start until the folder list had already come back — despite the
+        // "parallel prefetch" name, the two round-trips were sequential. Both
+        // now run concurrently in `build_root`'s task; see `spawn_root_fetch`.
 
         items
+    }
+
+    /// Fetch the folder list and prefetch INBOX at the same time.
+    ///
+    /// Two separate `RealImap` values on purpose: IMAP `SELECT` is
+    /// connection-global, so listing folders and listing INBOX messages over one
+    /// session would race on which mailbox is selected. The win here is a single
+    /// runtime and genuine concurrency, not connection reuse.
+    fn spawn_root_fetch(&mut self) {
+        self.folder_fetch_inflight.store(true, Ordering::Release);
+        let inflight = Arc::clone(&self.folder_fetch_inflight);
+        let folder_slot = Arc::clone(&self.folder_fetch_result);
+        let inbox_slot = Arc::clone(&self.inbox_prefetch_result);
+        let needs_refresh = Arc::clone(&self.needs_refresh_flag);
+        let config = self.config.clone();
+
+        crate::connection::runtime().spawn(async move {
+            let mut folder_imap = crate::net::RealImap::from_config(&config);
+            let mut inbox_imap = crate::net::RealImap::from_config(&config);
+
+            // `join!` rather than `try_join!`: a failed folder list must not
+            // discard a good INBOX prefetch, and each slot carries its own
+            // `Result` for the drain logic to report.
+            let (folders, inbox) = tokio::join!(
+                folder_imap.list_folders(),
+                inbox_imap.list_messages("INBOX", 50),
+            );
+
+            *folder_slot.lock().unwrap() = Some(folders);
+            *inbox_slot.lock().unwrap() = Some(inbox);
+            // Clear inflight before raising the refresh flag, so the render
+            // thread cannot observe "done but still in flight".
+            inflight.store(false, Ordering::Release);
+            needs_refresh.store(true, Ordering::Release);
+        });
     }
 
     fn build_root(&mut self) -> Vec<FfonElement> {
@@ -1003,18 +1037,7 @@ impl EmailClientProvider {
                 // Not configured; fall through to the sync path so the
                 // "not configured" message is shown immediately.
             } else {
-                self.folder_fetch_inflight.store(true, Ordering::Release);
-                let inflight = Arc::clone(&self.folder_fetch_inflight);
-                let result_slot = Arc::clone(&self.folder_fetch_result);
-                let needs_refresh = Arc::clone(&self.needs_refresh_flag);
-                let config = self.config.clone();
-                std::thread::spawn(move || {
-                    let mut imap = crate::net::RealImap::from_config(&config);
-                    let result: Result<Vec<FolderInfo>, String> = imap.list_folders();
-                    *result_slot.lock().unwrap() = Some(result);
-                    inflight.store(false, Ordering::Release);
-                    needs_refresh.store(true, Ordering::Release);
-                });
+                self.spawn_root_fetch();
                 return vec![FfonElement::new_str("Loading…".to_owned())];
             }
         }
@@ -1032,7 +1055,7 @@ impl EmailClientProvider {
             }
         };
 
-        let folder_result = imap.list_folders();
+        let folder_result = block_on(imap.list_folders());
         self.build_root_from_folder_list(folder_result)
     }
 
@@ -1070,7 +1093,7 @@ impl EmailClientProvider {
                     return items;
                 }
             };
-            imap.list_messages(&real_folder, limit)
+            block_on(imap.list_messages(&real_folder, limit))
         };
 
         match folder_result {
@@ -1100,7 +1123,7 @@ impl EmailClientProvider {
         // Failure is non-fatal: fall back to the References-based path.
         if !self.thread_cache.contains_key(&real_folder) {
             if let Some(imap) = self.imap.as_mut() {
-                if let Ok(Some(threads)) = imap.fetch_threads(&real_folder) {
+                if let Ok(Some(threads)) = block_on(imap.fetch_threads(&real_folder)) {
                     let mut uid_to_thread: std::collections::HashMap<u32, Vec<u32>> =
                         std::collections::HashMap::new();
                     for thread in threads {
@@ -1129,7 +1152,7 @@ impl EmailClientProvider {
         };
 
         let msg = if let Some(ref mut imap) = self.imap {
-            match imap.fetch_message(&real_folder, uid) {
+            match block_on(imap.fetch_message(&real_folder, uid)) {
                 Ok(Some(m)) => {
                     self.message_detail = Some(m.clone());
                     m
@@ -1155,7 +1178,7 @@ impl EmailClientProvider {
         if let Some(h) = self.message_cache.iter_mut().find(|h| h.uid == uid) {
             if !h.seen {
                 let marked = if let Some(ref mut imap) = self.imap {
-                    imap.set_flags(&real_folder, uid, &["\\Seen"], &[]).is_ok()
+                    block_on(imap.set_flags(&real_folder, uid, &["\\Seen"], &[])).is_ok()
                 } else {
                     false
                 };
@@ -1208,7 +1231,7 @@ impl EmailClientProvider {
                             } else if let Some(ref mut imap) = self.imap {
                                 // Not in the current-folder cache — fetch by UID.
                                 let uid_str = other_uid.to_string();
-                                if let Ok(Some(msg)) = imap.fetch_message(&folder, other_uid) {
+                                if let Ok(Some(msg)) = block_on(imap.fetch_message(&folder, other_uid)) {
                                     let _ = uid_str;
                                     items.push(FfonElement::new_obj(
                                         format!("From: {} — Subject: {}", msg.from, msg.subject),
@@ -1258,7 +1281,7 @@ impl EmailClientProvider {
 
             'search: for search_folder in &search_folders {
                 if let Some(ref mut imap) = self.imap {
-                    if let Ok(Some(msg)) = imap.fetch_message_by_message_id(search_folder, msg_id) {
+                    if let Ok(Some(msg)) = block_on(imap.fetch_message_by_message_id(search_folder, msg_id)) {
                         let key = format!("From: {} — Subject: {}", msg.from, msg.subject);
                         items.push(FfonElement::new_obj(key));
                         count += 1;
@@ -1286,7 +1309,7 @@ impl EmailClientProvider {
             let mode = self.compose.mode;
             let username = self.config.username.clone();
             if let Some(ref mut imap) = self.imap {
-                if let Ok(Some(msg)) = imap.fetch_message(&folder, uid) {
+                if let Ok(Some(msg)) = block_on(imap.fetch_message(&folder, uid)) {
                     prefill_compose(&mut self.compose, &msg, mode, &username);
                 }
             }
@@ -1387,14 +1410,14 @@ impl EmailClientProvider {
             .map(|(n, b)| (n.as_str(), b.as_slice()))
             .collect();
 
-        let raw = smtp.send(&from, &to_r, &cc_r, &bcc_r, &subject, &body, &attachment_refs)?;
+        let raw = block_on(smtp.send(&from, &to_r, &cc_r, &bcc_r, &subject, &body, &attachment_refs))?;
 
         // APPEND to Sent folder (skip for Gmail — its SMTP server auto-saves).
         let skip_append = self.config.smtp_url.contains("smtp.gmail.com");
         if !skip_append {
             if let Some(sent) = self.special_folders.sent.clone() {
                 if let Some(ref mut imap) = self.imap {
-                    let _ = imap.append(&sent, &raw);
+                    let _ = block_on(imap.append(&sent, &raw));
                 }
             }
         }
@@ -1455,6 +1478,11 @@ impl EmailClientProvider {
                     self.config.oauth_access_token = access_token;
                     self.config.token_expiry = expiry;
                     self.save_oauth_tokens();
+                    // Hand the new token to the running IDLE session. It captured
+                    // the old one at start-up, so without this it would keep
+                    // reconnecting on a dead credential until the folder was
+                    // re-entered, and new mail would stop being noticed.
+                    self.idle.update_token(&self.config.oauth_access_token);
                     // Drop backends and cached folder list so the next fetch
                     // issues a fresh IMAP connection with the new token.
                     self.imap = None;
@@ -1489,7 +1517,10 @@ impl EmailClientProvider {
         let client_id = self.config.client_id.clone();
         let client_secret = self.config.client_secret.clone();
         let refresh_token_str = self.config.oauth_refresh_token.clone();
-        std::thread::spawn(move || {
+        // `oauth2::refresh_token` uses blocking reqwest and is not IMAP, so it
+        // goes on the runtime's blocking pool rather than being rewritten async.
+        // That removes the last raw thread with no behaviour change.
+        crate::connection::runtime().spawn_blocking(move || {
             let r = oauth2::refresh_token(&client_id, &client_secret, &refresh_token_str);
             let outcome = if r.success {
                 let expiry = std::time::SystemTime::now()
@@ -2200,7 +2231,7 @@ impl Provider for EmailClientProvider {
                 if let Some(drafts_folder) = self.special_folders.drafts.clone() {
                     let bytes = build_draft_bytes(&self.compose.draft, &self.config.username);
                     if let Some(ref mut imap) = self.imap {
-                        let _ = imap.append(&drafts_folder, &bytes);
+                        let _ = block_on(imap.append(&drafts_folder, &bytes));
                     }
                 }
             }
@@ -2310,7 +2341,7 @@ impl Provider for EmailClientProvider {
                         if let Some(drafts_folder) = self.special_folders.drafts.clone() {
                             let bytes = build_draft_bytes(&self.compose.draft, &self.config.username);
                             if let Some(ref mut imap) = self.imap {
-                                let _ = imap.append(&drafts_folder, &bytes);
+                                let _ = block_on(imap.append(&drafts_folder, &bytes));
                             }
                         }
                         self.outbox_pending = true;
@@ -2568,12 +2599,12 @@ impl Provider for EmailClientProvider {
             .map(|m| m.message_id.clone())
             .or_else(|| {
                 self.imap.as_mut()
-                    .and_then(|imap| imap.fetch_message(&from, uid).ok().flatten())
+                    .and_then(|imap| block_on(imap.fetch_message(&from, uid)).ok().flatten())
                     .map(|m| m.message_id)
             })
             .unwrap_or_default();
         if let Some(ref mut imap) = self.imap {
-            if let Err(e) = imap.move_message(&from, uid, &dest) {
+            if let Err(e) = block_on(imap.move_message(&from, uid, &dest)) {
                 self.error_message = Some(format!("move failed: {e}"));
                 return false;
             }
@@ -2652,7 +2683,7 @@ impl Provider for EmailClientProvider {
                         _             => (&[],            &["\\Flagged"]), // unstar
                     };
                     if let Some(ref mut imap) = self.imap {
-                        if let Err(e) = imap.set_flags(&real_folder, uid, add, remove) {
+                        if let Err(e) = block_on(imap.set_flags(&real_folder, uid, add, remove)) {
                             let mut args = localize::Args::new();
                             args.set("cmd", cmd.to_owned());
                             args.set("err", e.to_string());
@@ -2714,12 +2745,12 @@ impl Provider for EmailClientProvider {
                                 .map(|m| m.message_id.clone())
                                 .or_else(|| {
                                     self.imap.as_mut()
-                                        .and_then(|imap| imap.fetch_message(&real_folder, uid).ok().flatten())
+                                        .and_then(|imap| block_on(imap.fetch_message(&real_folder, uid)).ok().flatten())
                                         .map(|m| m.message_id)
                                 })
                                 .unwrap_or_default();
                             if let Some(ref mut imap) = self.imap {
-                                if let Err(e) = imap.move_message(&real_folder, uid, t) {
+                                if let Err(e) = block_on(imap.move_message(&real_folder, uid, t)) {
                                     let mut args = localize::Args::new();
                                     args.set("err", e.to_string());
                                     *error = localize::t_args("emailclient-error-delete-failed", &args);
@@ -2742,8 +2773,8 @@ impl Provider for EmailClientProvider {
                     };
                     if !moved_to_trash {
                         if let Some(ref mut imap) = self.imap {
-                            let _ = imap.set_flags(&real_folder, uid, &["\\Deleted"], &[]);
-                            let _ = imap.expunge_uid(&real_folder, uid);
+                            let _ = block_on(imap.set_flags(&real_folder, uid, &["\\Deleted"], &[]));
+                            let _ = block_on(imap.expunge_uid(&real_folder, uid));
                         }
                     }
                     self.envelope_cache = None;
@@ -2767,12 +2798,12 @@ impl Provider for EmailClientProvider {
                                 .map(|m| m.message_id.clone())
                                 .or_else(|| {
                                     self.imap.as_mut()
-                                        .and_then(|imap| imap.fetch_message(&real_folder, uid).ok().flatten())
+                                        .and_then(|imap| block_on(imap.fetch_message(&real_folder, uid)).ok().flatten())
                                         .map(|m| m.message_id)
                                 })
                                 .unwrap_or_default();
                             if let Some(ref mut imap) = self.imap {
-                                if let Err(e) = imap.move_message(&real_folder, uid, dest) {
+                                if let Err(e) = block_on(imap.move_message(&real_folder, uid, dest)) {
                                     let mut args = localize::Args::new();
                                     args.set("err", e.to_string());
                                     *error = localize::t_args("emailclient-error-archive-failed", &args);
@@ -2936,22 +2967,23 @@ mod tests {
         }
     }
 
+    #[async_trait::async_trait]
     impl ImapBackend for MockImap {
-        fn list_folders(&mut self) -> Result<Vec<FolderInfo>, String> {
+        async fn list_folders(&mut self) -> Result<Vec<FolderInfo>, String> {
             self.list_folders_calls += 1;
             if let Some(ref e) = self.error { return Err(e.clone()); }
             Ok(self.folders.clone())
         }
-        fn list_messages(&mut self, _folder: &str, _limit: usize) -> Result<Vec<MessageHeader>, String> {
+        async fn list_messages(&mut self, _folder: &str, _limit: usize) -> Result<Vec<MessageHeader>, String> {
             self.list_messages_calls += 1;
             if let Some(ref e) = self.error { return Err(e.clone()); }
             Ok(self.messages.clone())
         }
-        fn fetch_message(&mut self, _folder: &str, _uid: u32) -> Result<Option<EmailMessage>, String> {
+        async fn fetch_message(&mut self, _folder: &str, _uid: u32) -> Result<Option<EmailMessage>, String> {
             if let Some(ref e) = self.error { return Err(e.clone()); }
             Ok(self.detail.clone())
         }
-        fn fetch_message_by_message_id(&mut self, folder: &str, _msg_id: &str) -> Result<Option<EmailMessage>, String> {
+        async fn fetch_message_by_message_id(&mut self, folder: &str, _msg_id: &str) -> Result<Option<EmailMessage>, String> {
             self.fetch_by_msg_id_calls += 1;
             if let Some(ref e) = self.error { return Err(e.clone()); }
             if let Some(ref req) = self.by_msg_id_folder {
@@ -2959,7 +2991,7 @@ mod tests {
             }
             Ok(self.by_msg_id.clone())
         }
-        fn set_flags(&mut self, folder: &str, uid: u32, add: &[&str], remove: &[&str]) -> Result<(), String> {
+        async fn set_flags(&mut self, folder: &str, uid: u32, add: &[&str], remove: &[&str]) -> Result<(), String> {
             if let Some(ref e) = self.error { return Err(e.clone()); }
             if let Some(ref e) = self.set_flags_error { return Err(e.clone()); }
             if !add.is_empty() {
@@ -2978,27 +3010,27 @@ mod tests {
             }
             Ok(())
         }
-        fn copy_message(&mut self, folder: &str, uid: u32, dest: &str) -> Result<(), String> {
+        async fn copy_message(&mut self, folder: &str, uid: u32, dest: &str) -> Result<(), String> {
             if let Some(ref e) = self.error { return Err(e.clone()); }
             self.moved.push((folder.to_owned(), uid, dest.to_owned()));
             Ok(())
         }
-        fn move_message(&mut self, folder: &str, uid: u32, dest: &str) -> Result<(), String> {
+        async fn move_message(&mut self, folder: &str, uid: u32, dest: &str) -> Result<(), String> {
             if let Some(ref e) = self.error { return Err(e.clone()); }
             self.moved.push((folder.to_owned(), uid, dest.to_owned()));
             Ok(())
         }
-        fn expunge_uid(&mut self, folder: &str, uid: u32) -> Result<(), String> {
+        async fn expunge_uid(&mut self, folder: &str, uid: u32) -> Result<(), String> {
             if let Some(ref e) = self.error { return Err(e.clone()); }
             self.expunged.push((folder.to_owned(), uid));
             Ok(())
         }
-        fn append(&mut self, folder: &str, message: &[u8]) -> Result<(), String> {
+        async fn append(&mut self, folder: &str, message: &[u8]) -> Result<(), String> {
             if let Some(ref e) = self.error { return Err(e.clone()); }
             self.appended.push((folder.to_owned(), message.to_vec()));
             Ok(())
         }
-        fn fetch_threads(&mut self, _folder: &str) -> Result<Option<Vec<Vec<u32>>>, String> {
+        async fn fetch_threads(&mut self, _folder: &str) -> Result<Option<Vec<Vec<u32>>>, String> {
             if let Some(ref e) = self.error { return Err(e.clone()); }
             Ok(self.thread_result.clone())
         }
@@ -3021,8 +3053,9 @@ mod tests {
         }
     }
 
+    #[async_trait::async_trait]
     impl SmtpBackend for MockSmtp {
-        fn send(
+        async fn send(
             &mut self,
             from: &str,
             to: &[&str],

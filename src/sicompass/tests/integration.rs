@@ -4214,30 +4214,31 @@ fn email_renderer_inside_message() -> AppRenderer {
 
     struct StubImap { messages: Vec<MessageHeader>, removed_uids: Vec<u32> }
     #[allow(unused_variables)]
+    #[async_trait::async_trait]
     impl ImapBackend for StubImap {
-        fn list_folders(&mut self) -> Result<Vec<FolderInfo>, String> {
+        async fn list_folders(&mut self) -> Result<Vec<FolderInfo>, String> {
             Ok(vec![
                 FolderInfo { name: "INBOX".to_owned(), attributes: vec![] },
                 FolderInfo { name: "[Gmail]/Trash".to_owned(),
                              attributes: vec!["\\Trash".to_owned()] },
             ])
         }
-        fn list_messages(&mut self, _f: &str, _l: usize) -> Result<Vec<MessageHeader>, String> {
+        async fn list_messages(&mut self, _f: &str, _l: usize) -> Result<Vec<MessageHeader>, String> {
             // Exclude removed UIDs so the list reflects post-delete state.
             Ok(self.messages.iter().filter(|m| !self.removed_uids.contains(&m.uid)).cloned().collect())
         }
-        fn fetch_message(&mut self, _: &str, _: u32) -> Result<Option<EmailMessage>, String> { Ok(None) }
-        fn fetch_message_by_message_id(&mut self, _: &str, _: &str) -> Result<Option<EmailMessage>, String> { Ok(None) }
-        fn set_flags(&mut self, _: &str, _: u32, _: &[&str], _: &[&str]) -> Result<(), String> { Ok(()) }
-        fn copy_message(&mut self, _: &str, _: u32, _: &str) -> Result<(), String> { Ok(()) }
-        fn move_message(&mut self, _: &str, uid: u32, _: &str) -> Result<(), String> {
+        async fn fetch_message(&mut self, _: &str, _: u32) -> Result<Option<EmailMessage>, String> { Ok(None) }
+        async fn fetch_message_by_message_id(&mut self, _: &str, _: &str) -> Result<Option<EmailMessage>, String> { Ok(None) }
+        async fn set_flags(&mut self, _: &str, _: u32, _: &[&str], _: &[&str]) -> Result<(), String> { Ok(()) }
+        async fn copy_message(&mut self, _: &str, _: u32, _: &str) -> Result<(), String> { Ok(()) }
+        async fn move_message(&mut self, _: &str, uid: u32, _: &str) -> Result<(), String> {
             self.removed_uids.push(uid); Ok(())
         }
-        fn expunge_uid(&mut self, _: &str, uid: u32) -> Result<(), String> {
+        async fn expunge_uid(&mut self, _: &str, uid: u32) -> Result<(), String> {
             self.removed_uids.push(uid); Ok(())
         }
-        fn append(&mut self, _: &str, _: &[u8]) -> Result<(), String> { Ok(()) }
-        fn fetch_threads(&mut self, _: &str) -> Result<Option<Vec<Vec<u32>>>, String> { Ok(None) }
+        async fn append(&mut self, _: &str, _: &[u8]) -> Result<(), String> { Ok(()) }
+        async fn fetch_threads(&mut self, _: &str) -> Result<Option<Vec<Vec<u32>>>, String> { Ok(None) }
     }
 
     let msgs = vec![
@@ -4344,29 +4345,30 @@ fn ctrl_d_from_message_list_removes_message() {
 
     struct StubImap2 { messages: Vec<MessageHeader>, removed_uids: Vec<u32> }
     #[allow(unused_variables)]
+    #[async_trait::async_trait]
     impl ImapBackend for StubImap2 {
-        fn list_folders(&mut self) -> Result<Vec<FolderInfo>, String> {
+        async fn list_folders(&mut self) -> Result<Vec<FolderInfo>, String> {
             Ok(vec![
                 FolderInfo { name: "INBOX".to_owned(), attributes: vec![] },
                 FolderInfo { name: "[Gmail]/Trash".to_owned(),
                              attributes: vec!["\\Trash".to_owned()] },
             ])
         }
-        fn list_messages(&mut self, _f: &str, _l: usize) -> Result<Vec<MessageHeader>, String> {
+        async fn list_messages(&mut self, _f: &str, _l: usize) -> Result<Vec<MessageHeader>, String> {
             Ok(self.messages.iter().filter(|m| !self.removed_uids.contains(&m.uid)).cloned().collect())
         }
-        fn fetch_message(&mut self, _: &str, _: u32) -> Result<Option<EmailMessage>, String> { Ok(None) }
-        fn fetch_message_by_message_id(&mut self, _: &str, _: &str) -> Result<Option<EmailMessage>, String> { Ok(None) }
-        fn set_flags(&mut self, _: &str, _: u32, _: &[&str], _: &[&str]) -> Result<(), String> { Ok(()) }
-        fn copy_message(&mut self, _: &str, _: u32, _: &str) -> Result<(), String> { Ok(()) }
-        fn move_message(&mut self, _: &str, uid: u32, _: &str) -> Result<(), String> {
+        async fn fetch_message(&mut self, _: &str, _: u32) -> Result<Option<EmailMessage>, String> { Ok(None) }
+        async fn fetch_message_by_message_id(&mut self, _: &str, _: &str) -> Result<Option<EmailMessage>, String> { Ok(None) }
+        async fn set_flags(&mut self, _: &str, _: u32, _: &[&str], _: &[&str]) -> Result<(), String> { Ok(()) }
+        async fn copy_message(&mut self, _: &str, _: u32, _: &str) -> Result<(), String> { Ok(()) }
+        async fn move_message(&mut self, _: &str, uid: u32, _: &str) -> Result<(), String> {
             self.removed_uids.push(uid); Ok(())
         }
-        fn expunge_uid(&mut self, _: &str, uid: u32) -> Result<(), String> {
+        async fn expunge_uid(&mut self, _: &str, uid: u32) -> Result<(), String> {
             self.removed_uids.push(uid); Ok(())
         }
-        fn append(&mut self, _: &str, _: &[u8]) -> Result<(), String> { Ok(()) }
-        fn fetch_threads(&mut self, _: &str) -> Result<Option<Vec<Vec<u32>>>, String> { Ok(None) }
+        async fn append(&mut self, _: &str, _: &[u8]) -> Result<(), String> { Ok(()) }
+        async fn fetch_threads(&mut self, _: &str) -> Result<Option<Vec<Vec<u32>>>, String> { Ok(None) }
     }
 
     let msgs = vec![
