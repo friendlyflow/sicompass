@@ -15,6 +15,27 @@ use std::time::Instant;
 // ---------------------------------------------------------------------------
 
 /// Commit a task into the FFON tree, record undo history, rebuild the list.
+
+/// Runtime used to drive the async `Provider` methods (`undo` / `redo`).
+///
+/// The providers live in `AppState`, so a spawned task cannot hold `&mut` to
+/// one; driving the future here keeps ownership where it is. That means undo
+/// still occupies the frame it runs on — making it truly non-blocking needs
+/// providers to be shareable (or the poll-based split), which is a separate
+/// change. What the async signature buys today is that a provider can await
+/// real I/O internally instead of nesting a `block_on` inside the render
+/// thread, which is what used to risk a runtime-in-runtime panic.
+pub fn provider_runtime() -> &'static tokio::runtime::Runtime {
+    static RT: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
+    RT.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .thread_name("sicompass-provider")
+            .build()
+            .expect("failed to build the provider runtime")
+    })
+}
+
 pub fn update_state(r: &mut AppRenderer, task: Task, history: History) {
     // Capture position before modification (needed for undo of DELETE)
     let history_id = r.current_id.clone();
@@ -658,7 +679,7 @@ fn apply_undo(r: &mut AppRenderer, entry: &TimelineEntry) {
             ) {
                 let mut error = String::new();
                 if let Some(p) = r.providers.get_mut(*provider_idx) {
-                    p.undo(entry, &mut error);
+                    provider_runtime().block_on(p.undo(entry, &mut error));
                 }
                 if !error.is_empty() {
                     r.error_message = error;
@@ -749,7 +770,7 @@ fn apply_redo(r: &mut AppRenderer, entry: &TimelineEntry) {
             ) {
                 let mut error = String::new();
                 if let Some(p) = r.providers.get_mut(*provider_idx) {
-                    p.redo(entry, &mut error);
+                    provider_runtime().block_on(p.redo(entry, &mut error));
                 }
                 if !error.is_empty() {
                     r.error_message = error;
@@ -1017,7 +1038,7 @@ fn dispatch_provider_undo(r: &mut AppRenderer, provider_idx: usize, entry: &Time
         .get(provider_idx)
         .map(|p| p.display_name().to_owned());
     if let Some(p) = r.providers.get_mut(provider_idx) {
-        p.undo(entry, &mut error);
+        provider_runtime().block_on(p.undo(entry, &mut error));
     }
     if !error.is_empty() {
         r.error_message = error;
@@ -1038,7 +1059,7 @@ fn dispatch_provider_redo(r: &mut AppRenderer, provider_idx: usize, entry: &Time
         .get(provider_idx)
         .map(|p| p.display_name().to_owned());
     if let Some(p) = r.providers.get_mut(provider_idx) {
-        p.redo(entry, &mut error);
+        provider_runtime().block_on(p.redo(entry, &mut error));
     }
     if !error.is_empty() {
         r.error_message = error;

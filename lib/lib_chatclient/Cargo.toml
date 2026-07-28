@@ -8,6 +8,7 @@ description = "Sicompass Matrix chat client provider"
 
 [dependencies]
 sicompass-sdk = { workspace = true }
+async-trait = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

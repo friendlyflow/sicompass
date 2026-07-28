@@ -4038,6 +4038,7 @@ dependencies = [
 name = "sicompass-chatclient"
 version = "0.1.6"
 dependencies = [
+ "async-trait",
  "reqwest",
  "serde",
  "serde_json",
@@ -4082,6 +4083,7 @@ dependencies = [
 name = "sicompass-filebrowser"
 version = "0.1.6"
 dependencies = [
+ "async-trait",
  "libc",
  "natord",
  "sicompass-sdk",
@@ -4109,10 +4111,9 @@ dependencies = [
 
 [[package]]
 name = "sicompass-sdk"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9805095a9fd0ef0067d90a0bf91b7473b7c421a2711e4c19a7181f632a7c3b5b"
+version = "0.2.0"
 dependencies = [
+ "async-trait",
  "fluent",
  "fluent-langneg 0.14.2",
  "intl-memoizer",
@@ -4120,6 +4121,7 @@ dependencies = [
  "scraper",
  "serde",
  "serde_json",
+ "tokio",
  "trash",
  "unic-langid",
  "unicode-normalization",
@@ -4132,6 +4134,7 @@ dependencies = [
 name = "sicompass-settings"
 version = "0.1.6"
 dependencies = [
+ "async-trait",
  "base64 0.22.1",
  "ed25519-dalek",
  "reqwest",
@@ -4164,6 +4167,7 @@ dependencies = [
 name = "sicompass-text-editor"
 version = "0.1.6"
 dependencies = [
+ "async-trait",
  "serde_json",
  "sicompass-sdk",
  "tempfile",

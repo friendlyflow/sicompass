@@ -123,6 +123,7 @@ impl Default for FilebrowserProvider {
     }
 }
 
+#[async_trait::async_trait]
 impl Provider for FilebrowserProvider {
     fn name(&self) -> &str { "filebrowser" }
     fn display_name(&self) -> String {
@@ -241,7 +242,7 @@ impl Provider for FilebrowserProvider {
         std::mem::take(&mut self.pending_timeline_entries)
     }
 
-    fn undo(&mut self, entry: &TimelineEntry, error: &mut String) {
+    async fn undo(&mut self, entry: &TimelineEntry, error: &mut String) {
         register_translations();
         let (op, side_effect) = match entry {
             TimelineEntry::FsOp { op, side_effect, .. } => (op, side_effect),
@@ -253,7 +254,7 @@ impl Provider for FilebrowserProvider {
         sicompass_sdk::fs_trash::restore_side_effect(side_effect, error);
     }
 
-    fn redo(&mut self, entry: &TimelineEntry, error: &mut String) {
+    async fn redo(&mut self, entry: &TimelineEntry, error: &mut String) {
         register_translations();
         let (op, side_effect) = match entry {
             TimelineEntry::FsOp { op, side_effect, .. } => (op, side_effect),
@@ -1330,7 +1331,7 @@ mod tests {
 
         let entries = p.take_timeline_entries();
         let mut err = String::new();
-        p.undo(&entries[0], &mut err);
+        sicompass_sdk::block_on(p.undo(&entries[0], &mut err));
         assert!(err.is_empty(), "undo error: {err}");
         assert!(target.exists(), "file restored");
         assert_eq!(std::fs::read(&target).unwrap(), b"restore me");
@@ -1353,7 +1354,7 @@ mod tests {
 
         let entries = p.take_timeline_entries();
         let mut err = String::new();
-        p.undo(&entries[0], &mut err);
+        sicompass_sdk::block_on(p.undo(&entries[0], &mut err));
         assert!(err.is_empty(), "undo error: {err}");
         assert!(dir.exists() && dir.is_dir());
         assert_eq!(std::fs::read(dir.join("inner.txt")).unwrap(), b"nested");
@@ -1387,7 +1388,7 @@ mod tests {
         }
 
         let mut err = String::new();
-        p.undo(&entries[0], &mut err);
+        sicompass_sdk::block_on(p.undo(&entries[0], &mut err));
         assert!(err.is_empty(), "undo should auto-restore from OS trash: {err}");
         assert!(target.exists(), "oversized file restored from OS trash");
         assert_eq!(std::fs::read(&target).unwrap(), big);
@@ -1404,9 +1405,9 @@ mod tests {
         assert!(p.delete_item("doomed.txt"));
         let entries = p.take_timeline_entries();
         let mut err = String::new();
-        p.undo(&entries[0], &mut err);
+        sicompass_sdk::block_on(p.undo(&entries[0], &mut err));
         assert!(target.exists());
-        p.redo(&entries[0], &mut err);
+        sicompass_sdk::block_on(p.redo(&entries[0], &mut err));
         assert!(err.is_empty(), "redo error: {err}");
         assert!(!target.exists(), "redo deletes again");
     }

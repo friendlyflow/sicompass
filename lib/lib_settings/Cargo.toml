@@ -8,6 +8,7 @@ description = "Sicompass settings provider — reads/writes settings.json, hosts
 
 [dependencies]
 sicompass-sdk = { workspace = true }
+async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 reqwest = { workspace = true }

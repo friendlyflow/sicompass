@@ -279,6 +279,7 @@ impl Default for TextEditorProvider {
     }
 }
 
+#[async_trait::async_trait]
 impl Provider for TextEditorProvider {
     fn name(&self) -> &str { "texteditor" }
 
@@ -549,7 +550,7 @@ impl Provider for TextEditorProvider {
         std::mem::take(&mut self.pending_timeline_entries)
     }
 
-    fn undo(&mut self, entry: &TimelineEntry, error: &mut String) {
+    async fn undo(&mut self, entry: &TimelineEntry, error: &mut String) {
         register_translations();
         match entry {
             TimelineEntry::FsOp { op: FsOpKind::Delete, side_effect, .. } => {
@@ -586,7 +587,7 @@ impl Provider for TextEditorProvider {
         }
     }
 
-    fn redo(&mut self, entry: &TimelineEntry, error: &mut String) {
+    async fn redo(&mut self, entry: &TimelineEntry, error: &mut String) {
         register_translations();
         match entry {
             TimelineEntry::FsOp { op: FsOpKind::Delete, side_effect, .. } => {
@@ -1376,7 +1377,7 @@ mod tests {
 
         let entries = p.take_timeline_entries();
         let mut err = String::new();
-        p.undo(&entries[0], &mut err);
+        sicompass_sdk::block_on(p.undo(&entries[0], &mut err));
         assert!(err.is_empty(), "undo error: {err}");
         assert_eq!(std::fs::read(&target).unwrap(), b"restore me");
     }
@@ -1397,7 +1398,7 @@ mod tests {
 
         let entries = p.take_timeline_entries();
         let mut err = String::new();
-        p.undo(&entries[0], &mut err);
+        sicompass_sdk::block_on(p.undo(&entries[0], &mut err));
         assert!(err.is_empty(), "undo error: {err}");
         assert!(dir.is_dir());
         assert_eq!(std::fs::read(dir.join("inner.txt")).unwrap(), b"nested");
@@ -1414,9 +1415,9 @@ mod tests {
         assert!(p.delete_item("<input>doomed.txt</input>"));
         let entries = p.take_timeline_entries();
         let mut err = String::new();
-        p.undo(&entries[0], &mut err);
+        sicompass_sdk::block_on(p.undo(&entries[0], &mut err));
         assert!(target.exists());
-        p.redo(&entries[0], &mut err);
+        sicompass_sdk::block_on(p.redo(&entries[0], &mut err));
         assert!(err.is_empty(), "redo error: {err}");
         assert!(!target.exists(), "redo deletes the file again");
     }
@@ -1465,7 +1466,7 @@ mod tests {
 
         let entries = p.take_timeline_entries();
         let mut err = String::new();
-        p.undo(&entries[0], &mut err);
+        sicompass_sdk::block_on(p.undo(&entries[0], &mut err));
         assert!(err.is_empty(), "undo error: {err}");
         assert_eq!(
             std::fs::read_to_string(&file).unwrap(),
@@ -1486,9 +1487,9 @@ mod tests {
         assert!(p.delete_item(&name));
         let entries = p.take_timeline_entries();
         let mut err = String::new();
-        p.undo(&entries[0], &mut err);
+        sicompass_sdk::block_on(p.undo(&entries[0], &mut err));
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\nbeta\ngamma");
-        p.redo(&entries[0], &mut err);
+        sicompass_sdk::block_on(p.redo(&entries[0], &mut err));
         assert!(err.is_empty(), "redo error: {err}");
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\ngamma");
     }
@@ -1508,11 +1509,11 @@ mod tests {
 
         let entries = p.take_timeline_entries();
         let mut err = String::new();
-        p.undo(&entries[0], &mut err);
+        sicompass_sdk::block_on(p.undo(&entries[0], &mut err));
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "a\nb\nc");
-        p.redo(&entries[0], &mut err);
+        sicompass_sdk::block_on(p.redo(&entries[0], &mut err));
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "a\nc");
-        p.undo(&entries[0], &mut err);
+        sicompass_sdk::block_on(p.undo(&entries[0], &mut err));
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "a\nb\nc");
         assert!(err.is_empty(), "undo/redo error: {err}");
     }
@@ -1555,7 +1556,7 @@ mod tests {
         assert!(p.commit_edit(&old, "beta"));
         let entries = p.take_timeline_entries();
         let mut err = String::new();
-        p.undo(&entries[0], &mut err);
+        sicompass_sdk::block_on(p.undo(&entries[0], &mut err));
         assert!(err.is_empty(), "undo error: {err}");
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\ngamma");
     }
@@ -1573,9 +1574,9 @@ mod tests {
         assert!(p.commit_edit(&old, "beta"));
         let entries = p.take_timeline_entries();
         let mut err = String::new();
-        p.undo(&entries[0], &mut err);
+        sicompass_sdk::block_on(p.undo(&entries[0], &mut err));
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\ngamma");
-        p.redo(&entries[0], &mut err);
+        sicompass_sdk::block_on(p.redo(&entries[0], &mut err));
         assert!(err.is_empty(), "redo error: {err}");
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\nbeta\ngamma");
     }
@@ -1597,9 +1598,9 @@ mod tests {
 
         let entries = p.take_timeline_entries();
         let mut err = String::new();
-        p.undo(&entries[0], &mut err);
+        sicompass_sdk::block_on(p.undo(&entries[0], &mut err));
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\ngamma");
-        p.redo(&entries[0], &mut err);
+        sicompass_sdk::block_on(p.redo(&entries[0], &mut err));
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\nb1\nb2\ngamma");
         assert!(err.is_empty(), "undo/redo error: {err}");
     }
@@ -1621,9 +1622,9 @@ mod tests {
 
         let entries = p.take_timeline_entries();
         let mut err = String::new();
-        p.undo(&entries[0], &mut err);
+        sicompass_sdk::block_on(p.undo(&entries[0], &mut err));
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\ngamma\n");
-        p.redo(&entries[0], &mut err);
+        sicompass_sdk::block_on(p.redo(&entries[0], &mut err));
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "alpha\n\ngamma\n");
         assert!(err.is_empty(), "undo/redo error: {err}");
     }
@@ -1664,10 +1665,10 @@ mod tests {
         assert!(p.commit_edit("", "hello"));
         let entries = p.take_timeline_entries();
         let mut err = String::new();
-        p.undo(&entries[0], &mut err);
+        sicompass_sdk::block_on(p.undo(&entries[0], &mut err));
         assert!(err.is_empty(), "undo error: {err}");
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "");
-        p.redo(&entries[0], &mut err);
+        sicompass_sdk::block_on(p.redo(&entries[0], &mut err));
         assert!(err.is_empty(), "redo error: {err}");
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "hello");
     }

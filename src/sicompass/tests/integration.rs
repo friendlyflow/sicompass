@@ -4243,9 +4243,11 @@ fn email_renderer_inside_message() -> AppRenderer {
 
     let msgs = vec![
         MessageHeader { uid: 1, from: "alice@x.com".to_owned(),
-                        subject: "Alpha".to_owned(), date: String::new(), seen: true, flagged: false },
+                        subject: "Alpha".to_owned(), date: String::new(), seen: true, message_id: String::new(),
+            flagged: false },
         MessageHeader { uid: 2, from: "bob@x.com".to_owned(),
-                        subject: "Beta".to_owned(), date: String::new(), seen: true, flagged: false },
+                        subject: "Beta".to_owned(), date: String::new(), seen: true, message_id: String::new(),
+            flagged: false },
     ];
 
     let provider = EmailClientProvider::new()
@@ -4373,9 +4375,11 @@ fn ctrl_d_from_message_list_removes_message() {
 
     let msgs = vec![
         MessageHeader { uid: 1, from: "alice@x.com".to_owned(),
-                        subject: "Alpha".to_owned(), date: String::new(), seen: true, flagged: false },
+                        subject: "Alpha".to_owned(), date: String::new(), seen: true, message_id: String::new(),
+            flagged: false },
         MessageHeader { uid: 2, from: "bob@x.com".to_owned(),
-                        subject: "Beta".to_owned(), date: String::new(), seen: true, flagged: false },
+                        subject: "Beta".to_owned(), date: String::new(), seen: true, message_id: String::new(),
+            flagged: false },
     ];
 
     let provider = EmailClientProvider::new()
@@ -8498,13 +8502,13 @@ fn settings_checkbox_emits_provider_op_and_undoes() {
 
     // provider.undo should restore the prior value.
     let mut err = String::new();
-    p.undo(&entries[0], &mut err);
+    sicompass_sdk::block_on(p.undo(&entries[0], &mut err));
     assert!(err.is_empty(), "undo error: {}", err);
     let written = std::fs::read_to_string(tmp.path().join("settings.json")).unwrap();
     assert!(written.contains("\"test.enableFeature\": false"), "value reverted on undo: {}", written);
 
     // provider.redo should re-apply the change.
-    p.redo(&entries[0], &mut err);
+    sicompass_sdk::block_on(p.redo(&entries[0], &mut err));
     assert!(err.is_empty(), "redo error: {}", err);
     let written = std::fs::read_to_string(tmp.path().join("settings.json")).unwrap();
     assert!(written.contains("\"test.enableFeature\": true"), "value re-applied on redo: {}", written);
@@ -8526,7 +8530,7 @@ fn settings_radio_emits_provider_op_and_undoes() {
     assert!(written.contains("\"test.dir\": \"south\""), "wrote south: {}", written);
 
     let mut err = String::new();
-    p.undo(&entries[0], &mut err);
+    sicompass_sdk::block_on(p.undo(&entries[0], &mut err));
     assert!(err.is_empty(), "undo error: {}", err);
     let written = std::fs::read_to_string(tmp.path().join("settings.json")).unwrap();
     assert!(written.contains("\"test.dir\": \"north\""), "reverted on undo: {}", written);
@@ -8549,7 +8553,7 @@ fn settings_text_emits_provider_op_and_undoes() {
     assert!(written.contains("\"test.greeting\": \"bonjour\""), "wrote new value: {}", written);
 
     let mut err = String::new();
-    p.undo(&entries[0], &mut err);
+    sicompass_sdk::block_on(p.undo(&entries[0], &mut err));
     assert!(err.is_empty(), "undo error: {}", err);
     let written = std::fs::read_to_string(tmp.path().join("settings.json")).unwrap();
     assert!(written.contains("\"test.greeting\": \"hello\""), "reverted on undo: {}", written);
