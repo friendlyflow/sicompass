@@ -38,7 +38,8 @@ pub fn register_translations() {
         let _ = localize::register_bundle("de-BE", include_str!("../locales/de-BE.ftl"));
     });
 }
-use sicompass_sdk::ffon::{html_to_ffon, html_to_ffon_with_forms, html_submit_selector};
+use sicompass_sdk::ffon::{html_to_ffon_with_forms, html_submit_selector};
+#[cfg(test)] use sicompass_sdk::ffon::html_to_ffon;
 #[cfg(test)] use sicompass_sdk::ffon::html_resolve_href;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
@@ -230,8 +231,8 @@ impl WebbrowserProvider {
                 drop(guard);
 
                 match navigate_and_get_html(&page, &url_owned).await {
-                    Ok(html) => {
-                        let (elements, form_map) = html_to_ffon_with_forms(&html, &url_owned);
+                    Ok(load) => {
+                        let (elements, form_map) = page_to_ffon_with_forms(&load, &url_owned);
                         *ready.lock().unwrap() = Some((elements, form_map));
                     }
                     Err(e) => {
@@ -256,8 +257,8 @@ impl WebbrowserProvider {
         #[cfg(target_os = "windows")]
         {
             match result {
-                Ok(html) => {
-                    let (elements, form_map) = html_to_ffon_with_forms(&html, url);
+                Ok(load) => {
+                    let (elements, form_map) = page_to_ffon_with_forms(&load, url);
                     self.cached_page = Some(CachedPage { url: url.to_owned(), elements });
                     self.form_map = form_map;
                 }
@@ -532,7 +533,10 @@ impl Provider for WebbrowserProvider {
                         tokio::time::Duration::from_secs(10),
                         page.content(),
                     ).await {
-                        let (elements, form_map) = html_to_ffon_with_forms(&html, &url);
+                        // A submit can land on a bot check just as a navigation
+                        // can, so the response goes through the same renderer.
+                        let (elements, form_map) =
+                            page_to_ffon_with_forms(&PageLoad::plain(html), &url);
                         if let Ok(mut guard) = ready.lock() {
                             *guard = Some((elements, form_map));
                         }
@@ -839,7 +843,7 @@ async fn init_live_session() -> Result<LivePageSession, String> {
 
 /// Navigate an existing page to `url` and return the settled HTML.
 /// Mirrors the logic of the old `fetch_page` but reuses the caller's tab.
-async fn navigate_and_get_html(page: &chromiumoxide::Page, url: &str) -> Result<String, String> {
+async fn navigate_and_get_html(page: &chromiumoxide::Page, url: &str) -> Result<PageLoad, String> {
     let t = tokio::time::Duration::from_secs;
 
     tokio::time::timeout(t(30), page.goto(url))
@@ -879,22 +883,20 @@ async fn navigate_and_get_html(page: &chromiumoxide::Page, url: &str) -> Result<
         let post_url = tokio::time::timeout(t(5), page.url())
             .await.ok().and_then(|r| r.ok()).flatten().unwrap_or_default();
         if is_consent_wall_str(&post_url) || html_has_consent_wall(&html) {
-            return Err(
-                "Site presented a cookie-consent wall that could not be \
-                 auto-accepted. Try visiting the site in a real browser first \
-                 to accept cookies, then reload here."
-                    .to_owned(),
-            );
+            // The wall is what the site is serving, so hand it over as the page
+            // and say what it is. Its accept button is often operable from here.
+            return Ok(PageLoad {
+                html,
+                notices: vec![
+                    "Cookie-consent wall that could not be accepted automatically. \
+                     The consent page itself is shown below."
+                        .to_owned(),
+                ],
+            });
         }
     }
 
-    if is_cf_blocked_html(&html) {
-        return Err(format!(
-            "{url} blocked the request. The site may require a CAPTCHA or has \
-             restricted automated access entirely."
-        ));
-    }
-    Ok(html)
+    Ok(PageLoad::plain(html))
 }
 
 // ---------------------------------------------------------------------------
@@ -910,11 +912,11 @@ async fn navigate_and_get_html(page: &chromiumoxide::Page, url: &str) -> Result<
 /// Launch a fresh Chrome, open a tab, inject stealth, navigate to `url`,
 /// fetch HTML, and close Chrome.  Used by `load_url` on Windows.
 #[cfg(target_os = "windows")]
-async fn fetch_html_once(url: &str) -> Result<String, String> {
+async fn fetch_html_once(url: &str) -> Result<PageLoad, String> {
     let t = tokio::time::Duration::from_secs;
     let session = launch_browser().await?;
 
-    let result: Result<String, String> = async {
+    let result: Result<PageLoad, String> = async {
         let page = tokio::time::timeout(t(15), session.browser.new_page("about:blank"))
             .await
             .map_err(|_| "Chrome took >15 s to open a tab".to_owned())?
@@ -1057,13 +1059,13 @@ async fn submit_form_windows_inner(
     .map_err(|e| format!("stealth script injection failed: {e}"))?;
 
     // Re-navigate to the form URL.  Cookies from the profile dir come along.
-    let html = navigate_and_get_html(&page, url)
+    let reopened = navigate_and_get_html(&page, url)
         .await
         .map_err(|e| format!("Failed to reopen {url} for submit: {e}"))?;
 
     // Parse the fresh form so we can detect drift and look up the up-to-date
     // submit selector (form structure may have changed since the user typed).
-    let (_fresh_elements, fresh_form_map) = html_to_ffon_with_forms(&html, url);
+    let (_fresh_elements, fresh_form_map) = html_to_ffon_with_forms(&reopened.html, url);
 
     if let Err(missing) = check_form_drift(stored_values, &fresh_form_map) {
         return Err(format!(
@@ -1128,7 +1130,7 @@ async fn submit_form_windows_inner(
         .flatten()
         .unwrap_or_else(|| url.to_owned());
 
-    Ok(html_to_ffon_with_forms(&response_html, &response_url))
+    Ok(page_to_ffon_with_forms(&PageLoad::plain(response_html), &response_url))
 }
 
 // ---------------------------------------------------------------------------
@@ -1802,11 +1804,101 @@ try {
 } catch(_) {}
 "#;
 
-/// Returns true if the page body is Cloudflare's "Sorry, you have been blocked" wall.
-fn is_cf_blocked_html(html: &str) -> bool {
-    html.contains("Sorry, you have been blocked")
-        || html.contains("cf-error-1010")
-        || html.contains("cf-error-1020")
+// ---------------------------------------------------------------------------
+// Interstitials (bot checks, CAPTCHAs, consent walls)
+//
+// A CAPTCHA page is still a page.  The loader never throws its HTML away: it
+// renders like any other page so the user can read what the site says, and
+// operate whatever it offers (a checkbox, a "continue" button, a link to the
+// site's help page).  All the loader adds is a leading line naming what it
+// recognised, so the user is not left guessing why an article turned into
+// three lines of legal text.
+// ---------------------------------------------------------------------------
+
+/// Lowercased HTML markers that identify a specific bot-check vendor, with the
+/// name to put in the notice. Matched against the raw HTML, which is where the
+/// vendor's own assets and error codes live even when the visible text is bare.
+const BOT_WALL_MARKERS: &[(&str, &str)] = &[
+    ("sorry, you have been blocked", "Cloudflare"),
+    ("cf-error-1010", "Cloudflare"),
+    ("cf-error-1020", "Cloudflare"),
+    ("attention required! | cloudflare", "Cloudflare"),
+    ("checking your browser before accessing", "Cloudflare"),
+    ("/cdn-cgi/challenge-platform/", "Cloudflare"),
+    ("captcha-delivery.com", "DataDome"),
+    ("geo.captcha-delivery", "DataDome"),
+    ("_incapsula_resource", "Imperva"),
+    ("incapsula incident id", "Imperva"),
+    ("pardon our interruption", "Imperva"),
+    ("px-captcha", "PerimeterX"),
+    ("_px_captcha", "PerimeterX"),
+    ("akam-sw.js", "Akamai"),
+];
+
+/// Generic CAPTCHA widgets. These also sit on ordinary pages (a login form with
+/// a reCAPTCHA box), so they only count as an interstitial when the page has
+/// almost nothing else on it.
+const CAPTCHA_MARKERS: &[&str] = &["hcaptcha", "recaptcha", "turnstile", "captcha"];
+
+/// Below this much visible text a page carrying a CAPTCHA widget is the
+/// challenge itself rather than a page that happens to contain one.
+const INTERSTITIAL_TEXT_LIMIT: usize = 800;
+
+/// Total visible text in a rendered page, used to tell a challenge page apart
+/// from a real page with a CAPTCHA widget somewhere on it.
+fn ffon_text_len(elements: &[FfonElement]) -> usize {
+    elements.iter().map(|e| match e {
+        FfonElement::Str(s) => s.chars().count(),
+        FfonElement::Obj(o) => o.key.chars().count() + ffon_text_len(&o.children),
+    }).sum()
+}
+
+/// A one-line notice when `html` is a bot check or CAPTCHA rather than the page
+/// the user asked for, or `None` when it looks like a normal page.
+fn challenge_notice(html: &str, elements: &[FfonElement]) -> Option<String> {
+    let haystack = html.to_lowercase();
+    if let Some((_, vendor)) = BOT_WALL_MARKERS.iter().find(|(m, _)| haystack.contains(m)) {
+        return Some(format!(
+            "Bot check ({vendor}). The page it returned is shown below."
+        ));
+    }
+    if ffon_text_len(elements) < INTERSTITIAL_TEXT_LIMIT
+        && CAPTCHA_MARKERS.iter().any(|m| haystack.contains(m))
+    {
+        return Some(
+            "This looks like a CAPTCHA or bot check rather than the page itself. \
+             Its own content is shown below."
+                .to_owned(),
+        );
+    }
+    None
+}
+
+/// A page as the loader got it: the rendered HTML, plus anything the load flow
+/// itself learned along the way (e.g. a consent wall that would not accept).
+/// The HTML is always carried, never replaced by the notice.
+struct PageLoad {
+    html: String,
+    notices: Vec<String>,
+}
+
+impl PageLoad {
+    fn plain(html: String) -> Self {
+        PageLoad { html, notices: Vec::new() }
+    }
+}
+
+/// Render a loaded page to FFON, with every notice as a leading line: the ones
+/// the load flow recorded, then whatever the content itself gives away.
+fn page_to_ffon_with_forms(load: &PageLoad, url: &str) -> (Vec<FfonElement>, FormMap) {
+    let (mut elements, form_map) = html_to_ffon_with_forms(&load.html, url);
+    let notices: Vec<String> = load.notices.iter().cloned()
+        .chain(challenge_notice(&load.html, &elements))
+        .collect();
+    for (i, notice) in notices.into_iter().enumerate() {
+        elements.insert(i, FfonElement::new_str(notice));
+    }
+    (elements, form_map)
 }
 
 /// Fetch a URL via Chromium, parse the HTML, and return as FFON elements.
@@ -1816,12 +1908,12 @@ pub fn fetch_url_to_ffon(url: &str) -> Vec<FfonElement> {
         return vec![FfonElement::new_str(format!("<test-no-launch>{url}</test-no-launch>"))];
     }
     match fetch_html_chromium(url) {
-        Ok(html) => html_to_ffon(&html, url),
+        Ok(load) => page_to_ffon_with_forms(&load, url).0,
         Err(e) => vec![FfonElement::new_str(format!("Error loading {url}: {e}"))],
     }
 }
 
-fn fetch_html_chromium(url: &str) -> Result<String, String> {
+fn fetch_html_chromium(url: &str) -> Result<PageLoad, String> {
     chromium_runtime().block_on(async move {
         tokio::time::timeout(
             tokio::time::Duration::from_secs(60),
@@ -1832,7 +1924,7 @@ fn fetch_html_chromium(url: &str) -> Result<String, String> {
     })
 }
 
-async fn fetch_html_inner(url: &str) -> Result<String, String> {
+async fn fetch_html_inner(url: &str) -> Result<PageLoad, String> {
     // Launch a fresh Chrome process for this fetch.
     let session = launch_browser().await?;
 
@@ -1856,7 +1948,7 @@ async fn fetch_html_inner(url: &str) -> Result<String, String> {
 
 /// Open a tab, navigate to `url`, and return the rendered HTML.
 /// Called by `fetch_html_inner` which handles Chrome lifecycle around it.
-async fn fetch_page(session: &BrowserSession, url: &str) -> Result<String, String> {
+async fn fetch_page(session: &BrowserSession, url: &str) -> Result<PageLoad, String> {
     let t = tokio::time::Duration::from_secs;
 
     let page = tokio::time::timeout(t(15), session.browser.new_page("about:blank"))
@@ -1927,24 +2019,22 @@ async fn fetch_page(session: &BrowserSession, url: &str) -> Result<String, Strin
             eprintln!("Page snippet:\n{snippet}");
             eprintln!("=== end consent-wall debug ===");
             let _ = tokio::time::timeout(t(3), page.close()).await;
-            return Err(
-                "Site presented a cookie-consent wall that could not be \
-                 auto-accepted. Try visiting the site in a real browser first \
-                 to accept cookies, then reload here."
-                    .to_owned(),
-            );
+            // Same as `navigate_and_get_html`: the wall is the page the site
+            // served, so it is what the user gets to read and operate.
+            return Ok(PageLoad {
+                html,
+                notices: vec![
+                    "Cookie-consent wall that could not be accepted automatically. \
+                     The consent page itself is shown below."
+                        .to_owned(),
+                ],
+            });
         }
     }
 
     let _ = tokio::time::timeout(t(3), page.close()).await;
 
-    if is_cf_blocked_html(&html) {
-        return Err(format!(
-            "{url} blocked the request. The site may require a CAPTCHA or has \
-             restricted automated access entirely."
-        ));
-    }
-    Ok(html)
+    Ok(PageLoad::plain(html))
 }
 
 // ---------------------------------------------------------------------------
@@ -2889,24 +2979,85 @@ mod tests {
         assert!(result.contains(r#"\""#), "embedded quotes must be escaped: {result}");
     }
 
-    // ---- is_cf_blocked_html unit tests ----
+    // ---- Interstitial detection (bot checks, CAPTCHAs) ----
+
+    fn notice_for(html: &str) -> Option<String> {
+        let elements = html_to_ffon(html, "https://example.com");
+        challenge_notice(html, &elements)
+    }
 
     #[test]
-    fn test_is_cf_blocked_html_detects_sorry_blocked() {
+    fn challenge_notice_detects_cloudflare_block() {
         let html = r#"<html><body><h1>Sorry, you have been blocked</h1></body></html>"#;
-        assert!(is_cf_blocked_html(html));
+        let notice = notice_for(html).expect("Cloudflare block wall should be recognised");
+        assert!(notice.contains("Cloudflare"), "notice should name the vendor: {notice}");
     }
 
     #[test]
-    fn test_is_cf_blocked_html_detects_error_code() {
+    fn challenge_notice_detects_cloudflare_error_code() {
         let html = r#"<html><body><div class="cf-error-1010">Access denied</div></body></html>"#;
-        assert!(is_cf_blocked_html(html));
+        assert!(notice_for(html).is_some());
     }
 
     #[test]
-    fn test_is_cf_blocked_html_passes_normal_page() {
+    fn challenge_notice_passes_normal_page() {
         let html = r#"<html><head><title>News</title></head><body><p>Article content</p></body></html>"#;
-        assert!(!is_cf_blocked_html(html));
+        assert_eq!(notice_for(html), None);
+    }
+
+    #[test]
+    fn challenge_notice_detects_bare_captcha_page() {
+        let html = r#"<html><body><h1>Verify you are human</h1>
+            <div class="h-captcha" data-sitekey="x"></div></body></html>"#;
+        assert!(
+            notice_for(html).is_some(),
+            "a page that is nothing but a CAPTCHA widget is an interstitial"
+        );
+    }
+
+    #[test]
+    fn challenge_notice_ignores_captcha_widget_on_a_real_page() {
+        // A login page carrying a reCAPTCHA box is not an interstitial: it is
+        // the page the user asked for, and must not be labelled a bot check.
+        let body = "Sign in to your account. ".repeat(60); // well past the text limit
+        let html = format!(
+            r#"<html><body><p>{body}</p><div class="g-recaptcha"></div></body></html>"#
+        );
+        assert_eq!(notice_for(&html), None);
+    }
+
+    #[test]
+    fn interstitial_page_keeps_its_own_content() {
+        // The point of the notice: it is added *in front of* the page, never
+        // in place of it.
+        let html = r#"<html><body><h1>Sorry, you have been blocked</h1>
+            <p>You can email support@example.com to be unblocked.</p></body></html>"#;
+        let load = PageLoad::plain(html.to_owned());
+        let (elements, _) = page_to_ffon_with_forms(&load, "https://example.com");
+        assert!(
+            elements[0].as_str().map_or(false, |s| s.contains("Cloudflare")),
+            "notice should lead the page: {:?}", elements[0]
+        );
+        let rendered = format!("{elements:?}");
+        assert!(
+            rendered.contains("support@example.com"),
+            "the wall's own text must still be there: {rendered}"
+        );
+    }
+
+    #[test]
+    fn load_notices_precede_content_and_content_notices() {
+        // A consent wall the loader could not accept: its notice comes first,
+        // then anything sniffed from the content, then the page.
+        let html = r#"<html><body><h1>Sorry, you have been blocked</h1>
+            <p>Accept cookies to continue.</p></body></html>"#;
+        let load = PageLoad {
+            html: html.to_owned(),
+            notices: vec!["Cookie-consent wall".to_owned()],
+        };
+        let (elements, _) = page_to_ffon_with_forms(&load, "https://example.com");
+        assert!(elements[0].as_str().map_or(false, |s| s.contains("Cookie-consent wall")));
+        assert!(elements[1].as_str().map_or(false, |s| s.contains("Cloudflare")));
     }
 
     // Real-browser integration test — requires Chrome/Chromium and network access.
@@ -2916,9 +3067,15 @@ mod tests {
     fn test_chromium_fetches_real_cloudflare_site() {
         let result = fetch_html_chromium("https://www.gva.be");
         assert!(result.is_ok(), "fetch failed: {:?}", result.err());
-        let html = result.unwrap();
-        assert!(!is_cf_blocked_html(&html), "response is a CF block page");
-        assert!(!html.is_empty(), "expected non-empty HTML from gva.be");
+        let load = result.unwrap();
+        assert!(!load.html.is_empty(), "expected non-empty HTML from gva.be");
+        // Whether or not the site answers with a bot check, the page itself is
+        // what gets rendered; a wall only adds a leading notice.
+        let (elements, _) = page_to_ffon_with_forms(&load, "https://www.gva.be");
+        assert!(!elements.is_empty(), "expected rendered content, not an error");
+        if let Some(notice) = challenge_notice(&load.html, &elements) {
+            eprintln!("gva.be answered with an interstitial: {notice}");
+        }
     }
 
     // ---- Provider path / form helpers ----
@@ -3302,17 +3459,21 @@ mod tests {
     #[ignore]
     #[cfg(target_os = "linux")]
     fn live_google_consent_is_cleared() {
-        let html = chromium_runtime().block_on(async {
+        let loaded = chromium_runtime().block_on(async {
             let live = init_live_session().await.expect("launch chrome");
             navigate_and_get_html(&live.page, "https://www.google.com/").await
         });
-        let html = html.expect("navigate_and_get_html should not return the consent-wall error");
+        let loaded = loaded.expect("navigate_and_get_html should not fail");
         assert!(
-            !html_has_consent_wall(&html),
+            loaded.notices.is_empty(),
+            "auto-accept should have cleared the wall, got: {:?}", loaded.notices
+        );
+        assert!(
+            !html_has_consent_wall(&loaded.html),
             "consent wall should be cleared after auto-accept, but markers remain"
         );
         // Post-accept Google homepage exposes the search box (name=\"q\").
-        let (_ffon, map) = html_to_ffon_with_forms(&html, "https://www.google.com/");
+        let (_ffon, map) = html_to_ffon_with_forms(&loaded.html, "https://www.google.com/");
         assert!(
             map.keys().any(|k| k.contains("/q") || k.contains("/Zoek") || k.contains("/Search")),
             "search field not found in form map after clearing consent; keys: {:?}",
