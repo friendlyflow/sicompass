@@ -10,6 +10,7 @@ allowed-tools:
   - "Bash(cargo build:*)"
   - "Bash(cargo test:*)"
   - "Bash(cargo tree:*)"
+  - "Bash(cargo search:*)"
   - "Bash(nix flake update:*)"
   - "Bash(git status:*)"
   - "Bash(git diff:*)"
@@ -47,6 +48,7 @@ prefix every toolchain command with `nix develop -c` (the `warning: Git tree
    and tell the user — a dependency bump commit must contain nothing else.
 
 2. **Compatible updates.** `cargo update`. This touches only `Cargo.lock`.
+   This covers `sicompass-sdk` too — see step 3c.
 
 3. **Major/minor bumps** — only when `$ARGUMENTS` contains `major`:
 
@@ -59,15 +61,34 @@ prefix every toolchain command with `nix develop -c` (the `warning: Git tree
       the user first):
       - `freetype` — held at 0.7 for the bundled-FreeType Windows release build.
       - `imap-proto` — held at 0.10 to match the `imap` 2.x re-exports.
-      - `sicompass-sdk` — version-locked to the app release; owned by
-        `/release`, not by this skill.
 
-   c. Raise the requirement in `[workspace.dependencies]` in the root
+   c. **`sicompass-sdk` is in scope**, with one coordination rule. It is the
+      only `sicompass-*` crate resolved from crates.io — the rest are path
+      members that `cargo update` never touches — so step 2 already picks up
+      any compatible `0.1.x` SDK release on every run, `major` or not. Since
+      `cargo update --dry-run` only reports crates held back by a requirement,
+      confirm the newest published version with `cargo search sicompass-sdk`
+      and compare it against the `sicompass-sdk = "..."` pin in
+      `[workspace.dependencies]`.
+
+      When a release sits outside the pin, raise it. The SDK ships ahead of the
+      app, so leaving the pin above `[workspace.package] version` is expected
+      and correct — do **not** touch the workspace version to match, that is
+      `/release`'s job. If the new SDK needs a real API migration, apply the
+      step 5 rule (revert the pin, note it as held back) rather than
+      refactoring providers here.
+
+      Caveat: if the `[patch.crates-io]` block near the bottom of `Cargo.toml`
+      has been uncommented for local SDK development, the SDK resolves from
+      `../sicompass-plugin-sdk` and the pin is inert. Leave the patch as you
+      found it and say so in the report.
+
+   d. Raise the requirement in `[workspace.dependencies]` in the root
       `Cargo.toml`. A few crates pin their own versions in
       `lib/*/Cargo.toml` or `src/sicompass/Cargo.toml` — grep for the crate
       name and update every occurrence.
 
-   d. `cargo update` again to resolve the new requirements.
+   e. `cargo update` again to resolve the new requirements.
 
 4. **Flake input.** `nix flake update` to refresh `flake.lock` (nixpkgs). Skip
    this if the user asked for cargo only.
@@ -93,3 +114,6 @@ prefix every toolchain command with `nix develop -c` (the `warning: Git tree
    Never force-push, never move the work onto a branch.
 
 10. **Report** which crates moved, which were held back, and the test result.
+    Always state the `sicompass-sdk` version explicitly and whether it moved,
+    even when it did not — it is the one dependency whose staleness is easy to
+    miss, and `/release` reads that pin.
