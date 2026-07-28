@@ -42,7 +42,6 @@ use sicompass_sdk::ffon::{html_to_ffon, html_to_ffon_with_forms, html_submit_sel
 #[cfg(test)] use sicompass_sdk::ffon::html_resolve_href;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
-#[cfg(target_os = "windows")]
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
@@ -104,8 +103,14 @@ pub struct WebbrowserProvider {
     path_cache: String, // "/" or "/seg0/seg1/…", rebuilt on every push/pop
     cached_page: Option<CachedPage>,
     form_map: FormMap,
+    // Shared so the background page-load task can create and reuse the Chrome
+    // session. A cold launch is the single longest operation in the app (15s
+    // timeout) and used to run inline on the render thread.
     #[cfg(not(target_os = "windows"))]
-    live: Option<LivePageSession>,
+    live: Arc<tokio::sync::Mutex<Option<LivePageSession>>>,
+    // Guards against a second load being spawned for the same navigation.
+    #[cfg(not(target_os = "windows"))]
+    load_inflight: Arc<AtomicBool>,
     // Background thread delivers refreshed content here after form submission.
     ready_content: Arc<Mutex<Option<(Vec<FfonElement>, FormMap)>>>,
     // Typed form values, replayed into a fresh Chrome at submit time.  Source
@@ -127,12 +132,14 @@ impl WebbrowserProvider {
     pub fn new() -> Self {
         WebbrowserProvider {
             current_url: String::new(),
+            #[cfg(not(target_os = "windows"))]
+            live: Arc::new(tokio::sync::Mutex::new(None)),
+            #[cfg(not(target_os = "windows"))]
+            load_inflight: Arc::new(AtomicBool::new(false)),
             path_segments: Vec::new(),
             path_cache: "/".to_owned(),
             cached_page: None,
             form_map: FormMap::new(),
-            #[cfg(not(target_os = "windows"))]
-            live: None,
             ready_content: Arc::new(Mutex::new(None)),
             form_field_values: HashMap::new(),
             pending_error: Arc::new(Mutex::new(None)),
@@ -172,48 +179,89 @@ impl WebbrowserProvider {
             return;
         }
 
+        // Non-Windows: hand the whole load to the runtime. Launching Chrome and
+        // navigating can take seconds, and doing it here froze the frame for
+        // the duration — SDL events went unpolled, AT-SPI went unserviced, and
+        // a screen reader dropped focus tracking. `tick` already drains
+        // `ready_content` every frame, so the result lands the same way a form
+        // submit response does.
+        #[cfg(not(target_os = "windows"))]
+        {
+            if self.load_inflight.swap(true, Ordering::AcqRel) {
+                // A load is already running; the URL bar has been updated and
+                // the result will arrive through `tick`.
+                self.current_url = url.to_owned();
+                return;
+            }
+
+            let live = Arc::clone(&self.live);
+            let ready = Arc::clone(&self.ready_content);
+            let errors = Arc::clone(&self.pending_error);
+            let inflight = Arc::clone(&self.load_inflight);
+            let url_owned = url.to_owned();
+
+            chromium_runtime().spawn(async move {
+                let mut guard = live.lock().await;
+                if guard.is_none() {
+                    match init_live_session().await {
+                        Ok(session) => *guard = Some(session),
+                        Err(e) => {
+                            *errors.lock().unwrap() =
+                                Some(format!("Error launching browser: {e}"));
+                            inflight.store(false, Ordering::Release);
+                            return;
+                        }
+                    }
+                }
+                let page = guard.as_ref().expect("initialised above").page.clone();
+                // Release the session lock across the navigation so a cleanup
+                // or cookie clear is not blocked behind a slow page.
+                drop(guard);
+
+                match navigate_and_get_html(&page, &url_owned).await {
+                    Ok(html) => {
+                        let (elements, form_map) = html_to_ffon_with_forms(&html, &url_owned);
+                        *ready.lock().unwrap() = Some((elements, form_map));
+                    }
+                    Err(e) => {
+                        // Drop the session so the next attempt starts fresh.
+                        *live.lock().await = None;
+                        *ready.lock().unwrap() = Some((
+                            vec![FfonElement::new_str(format!("Error loading {url_owned}: {e}"))],
+                            FormMap::new(),
+                        ));
+                    }
+                }
+                inflight.store(false, Ordering::Release);
+            });
+
+            self.current_url = url.to_owned();
+            return;
+        }
+
         #[cfg(target_os = "windows")]
         let result = chromium_runtime().block_on(fetch_html_once(url));
 
-        #[cfg(not(target_os = "windows"))]
-        let result = {
-            // Ensure we have a live session.
-            if self.live.is_none() {
-                match chromium_runtime().block_on(init_live_session()) {
-                    Ok(live) => self.live = Some(live),
-                    Err(e) => {
-                        self.cached_page = Some(CachedPage {
-                            url: url.to_owned(),
-                            elements: vec![FfonElement::new_str(format!("Error launching browser: {e}"))],
-                        });
-                        self.current_url = url.to_owned();
-                        return;
+        #[cfg(target_os = "windows")]
+        {
+            match result {
+                Ok(html) => {
+                    let (elements, form_map) = html_to_ffon_with_forms(&html, url);
+                    self.cached_page = Some(CachedPage { url: url.to_owned(), elements });
+                    self.form_map = form_map;
+                }
+                Err(e) => {
+                    #[cfg(not(target_os = "windows"))]
+                    {
+                        // Drop the session so the next attempt starts fresh.
+                        self.live = None;
                     }
+                    self.cached_page = Some(CachedPage {
+                        url: url.to_owned(),
+                        elements: vec![FfonElement::new_str(format!("Error loading {url}: {e}"))],
+                    });
+                    self.form_map = FormMap::new();
                 }
-            }
-
-            // Clone the page handle so we can navigate without holding &self.live.
-            let page = self.live.as_ref().unwrap().page.clone();
-            chromium_runtime().block_on(navigate_and_get_html(&page, url))
-        };
-
-        match result {
-            Ok(html) => {
-                let (elements, form_map) = html_to_ffon_with_forms(&html, url);
-                self.cached_page = Some(CachedPage { url: url.to_owned(), elements });
-                self.form_map = form_map;
-            }
-            Err(e) => {
-                #[cfg(not(target_os = "windows"))]
-                {
-                    // Drop the session so the next attempt starts fresh.
-                    self.live = None;
-                }
-                self.cached_page = Some(CachedPage {
-                    url: url.to_owned(),
-                    elements: vec![FfonElement::new_str(format!("Error loading {url}: {e}"))],
-                });
-                self.form_map = FormMap::new();
             }
         }
         self.current_url = url.to_owned();
@@ -285,7 +333,10 @@ impl WebbrowserProvider {
     #[cfg(not(target_os = "windows"))]
     fn cdp_fill_field(&self, form_key: &str, value: &str) -> bool {
         let Some(node) = self.form_map.get(form_key) else { return false; };
-        let Some(live) = &self.live else { return false; };
+        // Locking here still occupies the frame, but these are single CDP
+        // round-trips, not a page load.
+        let guard = chromium_runtime().block_on(self.live.lock());
+        let Some(live) = guard.as_ref() else { return false; };
         let selector = node.css_selector.clone();
         let form_index = node.form_index;
         let match_index = node.match_index;
@@ -336,7 +387,17 @@ impl Provider for WebbrowserProvider {
             }
             result.push(page_obj);
         } else {
-            // No page yet: just the URL bar as a string
+            // No page yet: URL bar, plus a placeholder while a load is running
+            // so the view is not silently empty for the seconds Chrome takes.
+            #[cfg(not(target_os = "windows"))]
+            if self.load_inflight.load(Ordering::Acquire) {
+                let mut page_obj = FfonElement::new_obj(&url_bar);
+                if let Some(o) = page_obj.as_obj_mut() {
+                    o.push(FfonElement::new_str("Loading…".to_owned()));
+                }
+                result.push(page_obj);
+                return result;
+            }
             result.push(FfonElement::new_str(url_bar));
         }
 
@@ -412,7 +473,8 @@ impl Provider for WebbrowserProvider {
                 .map(|(_, node)| (node.css_selector.clone(), node.match_index))
                 .unwrap_or_else(|| (html_submit_selector("", ""), 0));
 
-            let Some(live) = &self.live else { return; };
+            let guard = chromium_runtime().block_on(self.live.lock());
+            let Some(live) = guard.as_ref() else { return; };
             let page = live.page.clone();
             let ready = Arc::clone(&self.ready_content);
             let url = self.current_url.clone();
@@ -475,7 +537,7 @@ impl Provider for WebbrowserProvider {
         // its own session and will close it on its own.
         #[cfg(not(target_os = "windows"))]
         {
-            if let Some(live) = self.live.take() {
+            if let Some(live) = chromium_runtime().block_on(self.live.lock()).take() {
                 use chromiumoxide::cdp::browser_protocol::browser::CloseParams;
                 let _ = chromium_runtime().block_on(async {
                     tokio::time::timeout(
@@ -524,7 +586,8 @@ impl WebbrowserProvider {
     fn clear_cookies(&mut self, error: &mut String) {
         #[cfg(not(target_os = "windows"))]
         {
-            if let Some(live) = self.live.as_ref() {
+            let guard = chromium_runtime().block_on(self.live.lock());
+            if let Some(live) = guard.as_ref() {
                 use chromiumoxide::cdp::browser_protocol::network::ClearBrowserCookiesParams;
                 let page = live.page.clone();
                 let res = chromium_runtime().block_on(async {
