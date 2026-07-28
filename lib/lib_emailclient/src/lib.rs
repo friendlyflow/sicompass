@@ -470,6 +470,47 @@ pub struct EmailClientProvider {
     // navigating into INBOX doesn't need a second cold-start round-trip.
     inbox_prefetch_result: Arc<Mutex<Option<Result<Vec<MessageHeader>, String>>>>,
 
+    // ---- Non-blocking IMAP operations ------------------------------------
+    //
+    // `Provider` is synchronous, so anything run inline blocks the render
+    // thread: SDL events go unpolled, AT-SPI goes unserviced, and a screen
+    // reader drops focus tracking on the window (see the `LONG_FRAME_MS`
+    // workaround in the app's `view.rs`). These fields move the operations
+    // that actually touch the network onto the shared email runtime, using
+    // the same inflight + result-slot + `needs_refresh_flag` handshake the
+    // folder fetch already proved out.
+    //
+    // One connection behind an async mutex, reused across operations. IMAP is
+    // strictly one command at a time per connection anyway, and reconnecting
+    // per operation would cost a TCP + TLS + login round-trip on every message
+    // open — worse than the blocking this replaces. The render thread never
+    // touches it; only spawned tasks do.
+    bg_imap: Option<Arc<tokio::sync::Mutex<crate::net::RealImap>>>,
+
+    // Message body fetch (opening a message).
+    message_fetch_inflight: Arc<AtomicBool>,
+    // (folder, uid, result) — the key travels with the result so a reply that
+    // lands after the user has navigated elsewhere is discarded, not rendered.
+    #[allow(clippy::type_complexity)]
+    message_fetch_result: Arc<Mutex<Option<(String, u32, Result<Option<EmailMessage>, String>)>>>,
+    // Which (folder, uid) the in-flight fetch is for, so re-rendering the same
+    // path each frame does not spawn a second fetch.
+    message_fetch_key: Option<(String, u32)>,
+    // Folder `message_detail` was fetched from: UIDs are only unique per
+    // mailbox, so the folder is part of the cache key.
+    message_detail_folder: String,
+
+    // Errors raised by background mutations, drained by `take_error`.
+    bg_errors: Arc<Mutex<Vec<String>>>,
+
+    // UID THREAD map fetch. Purely an optimisation over the References-based
+    // fallback, so the folder renders immediately and the map is folded into
+    // `thread_cache` whenever it arrives.
+    #[allow(clippy::type_complexity)]
+    thread_fetch_result: Arc<Mutex<Option<(String, Option<Vec<Vec<u32>>>)>>>,
+    // Folder whose THREAD fetch is in flight, so re-rendering does not respawn.
+    thread_fetch_key: Option<String>,
+
     // Outbox: set when a send fails so tick() retries on the next cycle.
     // The draft remains in self.compose.draft; this is just the retry flag.
     outbox_pending: bool,
@@ -492,6 +533,37 @@ pub struct EmailClientProvider {
     // Override for the settings.json path (used in tests to avoid touching
     // the real user config file).
     config_path_override: Option<std::path::PathBuf>,
+}
+
+/// Outcome of resolving a message body for rendering.
+enum MessageState {
+    Ready(EmailMessage),
+    /// A fetch is in flight; render a placeholder this frame.
+    Loading,
+    Missing,
+}
+
+/// A mutation dispatched to the background runtime.
+///
+/// Modelled as data rather than a closure so the spawn site stays one function
+/// and each variant carries owned arguments across the task boundary.
+enum BgOp {
+    SetFlags { folder: String, uid: u32, add: Vec<String>, remove: Vec<String> },
+    Move { folder: String, uid: u32, dest: String },
+    Expunge { folder: String, uid: u32 },
+    Append { folder: String, message: Vec<u8> },
+}
+
+impl BgOp {
+    /// Prefix for the user-facing error when the operation fails.
+    fn label(&self) -> &'static str {
+        match self {
+            BgOp::SetFlags { .. } => "flag update failed",
+            BgOp::Move { .. } => "move failed",
+            BgOp::Expunge { .. } => "delete failed",
+            BgOp::Append { .. } => "save failed",
+        }
+    }
 }
 
 impl EmailClientProvider {
@@ -524,6 +596,14 @@ impl EmailClientProvider {
             folder_fetch_result: Arc::new(Mutex::new(None)),
             async_folder_fetch_enabled: true,
             inbox_prefetch_result: Arc::new(Mutex::new(None)),
+            bg_imap: None,
+            message_fetch_inflight: Arc::new(AtomicBool::new(false)),
+            message_fetch_result: Arc::new(Mutex::new(None)),
+            message_fetch_key: None,
+            message_detail_folder: String::new(),
+            bg_errors: Arc::new(Mutex::new(Vec::new())),
+            thread_fetch_result: Arc::new(Mutex::new(None)),
+            thread_fetch_key: None,
             outbox_pending: false,
             token_refresh_inflight: Arc::new(AtomicBool::new(false)),
             token_refresh_result: Arc::new(Mutex::new(None)),
@@ -532,6 +612,171 @@ impl EmailClientProvider {
             active_login: None,
             config_path_override: None,
         }
+    }
+
+    // ---- Non-blocking IMAP plumbing -----------------------------------------
+
+    /// The shared background connection, opened on first use.
+    fn bg_imap(&mut self) -> Arc<tokio::sync::Mutex<crate::net::RealImap>> {
+        if self.bg_imap.is_none() {
+            self.bg_imap = Some(Arc::new(tokio::sync::Mutex::new(
+                crate::net::RealImap::from_config(&self.config),
+            )));
+        }
+        Arc::clone(self.bg_imap.as_ref().expect("opened above"))
+    }
+
+    /// Drop the background connection so the next operation reconnects.
+    ///
+    /// Called wherever `self.imap` is invalidated — after a token refresh or a
+    /// config change — since the open connection authenticated with the old
+    /// credentials.
+    fn reset_bg_imap(&mut self) {
+        self.bg_imap = None;
+    }
+
+    /// Whether IMAP work should run in the background.
+    ///
+    /// False when a mock backend was injected via `with_imap`, which keeps the
+    /// existing `MockImap` tests on the synchronous path: they assert on the
+    /// mock's recorded calls immediately after the call that triggers them, so
+    /// a spawned task would race them.
+    fn bg_enabled(&self) -> bool {
+        self.async_folder_fetch_enabled
+    }
+
+    /// Run `op` on the shared runtime, recording any error for `take_error`.
+    fn spawn_bg_op(&mut self, op: BgOp) {
+        let imap = self.bg_imap();
+        let errors = Arc::clone(&self.bg_errors);
+        let needs_refresh = Arc::clone(&self.needs_refresh_flag);
+
+        crate::connection::runtime().spawn(async move {
+            let mut guard = imap.lock().await;
+            let result = match &op {
+                BgOp::SetFlags { folder, uid, add, remove } => {
+                    let add_refs: Vec<&str> = add.iter().map(String::as_str).collect();
+                    let remove_refs: Vec<&str> = remove.iter().map(String::as_str).collect();
+                    guard.set_flags(folder, *uid, &add_refs, &remove_refs).await
+                }
+                BgOp::Move { folder, uid, dest } => guard.move_message(folder, *uid, dest).await,
+                BgOp::Expunge { folder, uid } => guard.expunge_uid(folder, *uid).await,
+                BgOp::Append { folder, message } => guard.append(folder, message).await,
+            };
+            if let Err(e) = result {
+                errors.lock().unwrap().push(format!("{}: {e}", op.label()));
+            }
+            // Re-render either way: on success the optimistic local state is
+            // confirmed, on failure the error needs to reach the user.
+            needs_refresh.store(true, Ordering::Release);
+        });
+    }
+
+    /// Resolve the body for `(folder, uid)`, fetching in the background.
+    ///
+    /// Returns `Loading` on the first visit; the completed fetch raises
+    /// `needs_refresh_flag`, the app re-renders, and the second call returns
+    /// `Ready`. On the synchronous path (injected mock) it fetches inline, so
+    /// the existing tests see unchanged behaviour.
+    fn resolve_message(&mut self, real_folder: &str, uid: u32) -> MessageState {
+        if !self.bg_enabled() {
+            if let Some(ref mut imap) = self.imap {
+                if let Ok(Some(m)) = block_on(imap.fetch_message(real_folder, uid)) {
+                    self.message_detail = Some(m.clone());
+                    self.message_detail_folder = real_folder.to_owned();
+                    return MessageState::Ready(m);
+                }
+            }
+            // Fall back to cached detail if available.
+            return match self.message_detail.clone() {
+                Some(m) => MessageState::Ready(m),
+                None => MessageState::Missing,
+            };
+        }
+
+        // Drain a completed fetch. A result whose key no longer matches the
+        // path being rendered is dropped: the user navigated on while it was
+        // in flight.
+        let done = self.message_fetch_result.lock().unwrap().take();
+        if let Some((folder, fetched_uid, result)) = done {
+            if folder == real_folder && fetched_uid == uid {
+                self.message_fetch_key = None;
+                match result {
+                    Ok(Some(m)) => {
+                        self.message_detail = Some(m);
+                        self.message_detail_folder = folder;
+                    }
+                    Ok(None) => return MessageState::Missing,
+                    Err(e) => {
+                        self.bg_errors.lock().unwrap().push(format!("IMAP error: {e}"));
+                        // Fall through: a stale body beats an empty screen.
+                    }
+                }
+            }
+        }
+
+        // Serve the cached body when it is the one being asked for.
+        let cached = self
+            .message_detail
+            .as_ref()
+            .filter(|m| m.uid == uid && self.message_detail_folder == real_folder)
+            .cloned();
+        if let Some(m) = cached {
+            return MessageState::Ready(m);
+        }
+
+        // Nothing usable yet — start (or keep waiting on) the fetch.
+        if self.message_fetch_key.as_ref().map(|(f, u)| (f.as_str(), *u)) != Some((real_folder, uid))
+        {
+            self.spawn_message_fetch(real_folder, uid);
+        }
+        MessageState::Loading
+    }
+
+    /// Fetch the UID THREAD map for `folder` in the background.
+    ///
+    /// Nothing waits on this: until it lands, History uses the References
+    /// fallback, exactly as it does against a server with no THREAD support.
+    fn spawn_thread_fetch(&mut self, folder: &str) {
+        let imap = self.bg_imap();
+        let slot = Arc::clone(&self.thread_fetch_result);
+        let needs_refresh = Arc::clone(&self.needs_refresh_flag);
+        let folder_owned = folder.to_owned();
+
+        self.thread_fetch_key = Some(folder_owned.clone());
+
+        crate::connection::runtime().spawn(async move {
+            let result = {
+                let mut guard = imap.lock().await;
+                guard.fetch_threads(&folder_owned).await
+            };
+            // A THREAD failure is non-fatal and already covered by the
+            // References path, so it is recorded as "no map", not an error.
+            *slot.lock().unwrap() = Some((folder_owned, result.ok().flatten()));
+            needs_refresh.store(true, Ordering::Release);
+        });
+    }
+
+    /// Fetch a message body in the background.
+    fn spawn_message_fetch(&mut self, folder: &str, uid: u32) {
+        let imap = self.bg_imap();
+        let slot = Arc::clone(&self.message_fetch_result);
+        let inflight = Arc::clone(&self.message_fetch_inflight);
+        let needs_refresh = Arc::clone(&self.needs_refresh_flag);
+        let folder_owned = folder.to_owned();
+
+        self.message_fetch_key = Some((folder_owned.clone(), uid));
+        inflight.store(true, Ordering::Release);
+
+        crate::connection::runtime().spawn(async move {
+            let result = {
+                let mut guard = imap.lock().await;
+                guard.fetch_message(&folder_owned, uid).await
+            };
+            *slot.lock().unwrap() = Some((folder_owned, uid, result));
+            inflight.store(false, Ordering::Release);
+            needs_refresh.store(true, Ordering::Release);
+        });
     }
 
     fn push_imap_op(&mut self, op: ImapOpKind) {
@@ -870,6 +1115,7 @@ impl EmailClientProvider {
         self.save_server_config();
         self.imap = None;
         self.smtp = None;
+        self.reset_bg_imap();
         self.rebuild_backends();
         self.current_path = "/".to_owned();
         self.folder_cache = None;
@@ -1121,8 +1367,28 @@ impl EmailClientProvider {
 
         // Build a UID→thread map using IMAP THREAD if supported.
         // Failure is non-fatal: fall back to the References-based path.
+        // Fold in a THREAD map that arrived since the last render.
+        let threads_done = self.thread_fetch_result.lock().unwrap().take();
+        if let Some((folder, threads)) = threads_done {
+            self.thread_fetch_key = None;
+            if let Some(threads) = threads {
+                let mut uid_to_thread: std::collections::HashMap<u32, Vec<u32>> =
+                    std::collections::HashMap::new();
+                for thread in threads {
+                    for &uid in &thread {
+                        uid_to_thread.insert(uid, thread.clone());
+                    }
+                }
+                self.thread_cache.insert(folder, uid_to_thread);
+            }
+        }
+
         if !self.thread_cache.contains_key(&real_folder) {
-            if let Some(imap) = self.imap.as_mut() {
+            if self.bg_enabled() {
+                if self.thread_fetch_key.as_deref() != Some(real_folder.as_str()) {
+                    self.spawn_thread_fetch(&real_folder);
+                }
+            } else if let Some(imap) = self.imap.as_mut() {
                 if let Ok(Some(threads)) = block_on(imap.fetch_threads(&real_folder)) {
                     let mut uid_to_thread: std::collections::HashMap<u32, Vec<u32>> =
                         std::collections::HashMap::new();
@@ -1151,41 +1417,47 @@ impl EmailClientProvider {
             }
         };
 
-        let msg = if let Some(ref mut imap) = self.imap {
-            match block_on(imap.fetch_message(&real_folder, uid)) {
-                Ok(Some(m)) => {
-                    self.message_detail = Some(m.clone());
-                    m
-                }
-                _ => {
-                    // Fall back to cached detail if available.
-                    match self.message_detail.clone() {
-                        Some(m) => m,
-                        None => {
-                            return vec![FfonElement::new_str("(message not found)".to_owned())];
-                        }
-                    }
-                }
+        let msg = match self.resolve_message(&real_folder, uid) {
+            MessageState::Ready(m) => m,
+            MessageState::Loading => {
+                return vec![FfonElement::new_str("Loading…".to_owned())];
             }
-        } else if let Some(m) = self.message_detail.clone() {
-            m
-        } else {
-            return vec![FfonElement::new_str("(message not found)".to_owned())];
+            MessageState::Missing => {
+                return vec![FfonElement::new_str("(message not found)".to_owned())];
+            }
         };
 
         // Auto-mark as read: set \Seen flag and update cache so the list
         // re-renders without the ● prefix on the next envelope fetch.
-        if let Some(h) = self.message_cache.iter_mut().find(|h| h.uid == uid) {
+        if let Some(h) = self.message_cache.iter().find(|h| h.uid == uid) {
             if !h.seen {
-                let marked = if let Some(ref mut imap) = self.imap {
-                    block_on(imap.set_flags(&real_folder, uid, &["\\Seen"], &[])).is_ok()
-                } else {
-                    false
-                };
-                if marked {
-                    h.seen = true;
-                    // Invalidate envelope cache so the list re-renders without ●.
+                if self.bg_enabled() {
+                    // Optimistic: the flag is a display detail, and the STORE is
+                    // reported through `bg_errors` if it fails. Blocking a
+                    // message open on it would be the exact stall this avoids.
+                    self.spawn_bg_op(BgOp::SetFlags {
+                        folder: real_folder.clone(),
+                        uid,
+                        add: vec!["\\Seen".to_owned()],
+                        remove: vec![],
+                    });
+                    if let Some(h) = self.message_cache.iter_mut().find(|h| h.uid == uid) {
+                        h.seen = true;
+                    }
                     self.envelope_cache = None;
+                } else {
+                    let marked = if let Some(ref mut imap) = self.imap {
+                        block_on(imap.set_flags(&real_folder, uid, &["\\Seen"], &[])).is_ok()
+                    } else {
+                        false
+                    };
+                    if marked {
+                        if let Some(h) = self.message_cache.iter_mut().find(|h| h.uid == uid) {
+                            h.seen = true;
+                        }
+                        // Invalidate envelope cache so the list re-renders without ●.
+                        self.envelope_cache = None;
+                    }
                 }
             }
         }
@@ -1416,7 +1688,9 @@ impl EmailClientProvider {
         let skip_append = self.config.smtp_url.contains("smtp.gmail.com");
         if !skip_append {
             if let Some(sent) = self.special_folders.sent.clone() {
-                if let Some(ref mut imap) = self.imap {
+                if self.bg_enabled() {
+                    self.spawn_bg_op(BgOp::Append { folder: sent, message: raw.clone() });
+                } else if let Some(ref mut imap) = self.imap {
                     let _ = block_on(imap.append(&sent, &raw));
                 }
             }
@@ -1442,6 +1716,7 @@ impl EmailClientProvider {
             // them with the new token (backends store their own config clone).
             self.imap = None;
             self.smtp = None;
+            self.reset_bg_imap();
             self.rebuild_backends();
         }
     }
@@ -1487,6 +1762,7 @@ impl EmailClientProvider {
                     // issues a fresh IMAP connection with the new token.
                     self.imap = None;
                     self.smtp = None;
+                    self.reset_bg_imap();
                     self.folder_cache = None;
                     self.rebuild_backends();
                 }
@@ -1499,6 +1775,7 @@ impl EmailClientProvider {
                     self.save_oauth_tokens();
                     self.imap = None;
                     self.smtp = None;
+                    self.reset_bg_imap();
                 }
             }
             return true;
@@ -2230,7 +2507,9 @@ impl Provider for EmailClientProvider {
             if Self::is_draft_non_empty(&self.compose.draft) {
                 if let Some(drafts_folder) = self.special_folders.drafts.clone() {
                     let bytes = build_draft_bytes(&self.compose.draft, &self.config.username);
-                    if let Some(ref mut imap) = self.imap {
+                    if self.bg_enabled() {
+                        self.spawn_bg_op(BgOp::Append { folder: drafts_folder, message: bytes });
+                    } else if let Some(ref mut imap) = self.imap {
                         let _ = block_on(imap.append(&drafts_folder, &bytes));
                     }
                 }
@@ -2340,7 +2619,9 @@ impl Provider for EmailClientProvider {
                         // Save draft to \Drafts so it survives a restart.
                         if let Some(drafts_folder) = self.special_folders.drafts.clone() {
                             let bytes = build_draft_bytes(&self.compose.draft, &self.config.username);
-                            if let Some(ref mut imap) = self.imap {
+                            if self.bg_enabled() {
+                                self.spawn_bg_op(BgOp::Append { folder: drafts_folder, message: bytes });
+                            } else if let Some(ref mut imap) = self.imap {
                                 let _ = block_on(imap.append(&drafts_folder, &bytes));
                             }
                         }
@@ -2426,7 +2707,17 @@ impl Provider for EmailClientProvider {
     }
 
     fn take_error(&mut self) -> Option<String> {
-        self.error_message.take()
+        // An inline error wins; background failures queue behind it and are
+        // surfaced one per call on subsequent frames.
+        if let Some(e) = self.error_message.take() {
+            return Some(e);
+        }
+        let mut errors = self.bg_errors.lock().unwrap();
+        if errors.is_empty() {
+            None
+        } else {
+            Some(errors.remove(0))
+        }
     }
 
     fn take_timeline_entries(&mut self) -> Vec<TimelineEntry> {
@@ -2603,7 +2894,13 @@ impl Provider for EmailClientProvider {
                     .map(|m| m.message_id)
             })
             .unwrap_or_default();
-        if let Some(ref mut imap) = self.imap {
+        if self.bg_enabled() {
+            self.spawn_bg_op(BgOp::Move {
+                folder: from.to_owned(),
+                uid,
+                dest: dest.to_owned(),
+            });
+        } else if let Some(ref mut imap) = self.imap {
             if let Err(e) = block_on(imap.move_message(&from, uid, &dest)) {
                 self.error_message = Some(format!("move failed: {e}"));
                 return false;
@@ -2649,6 +2946,7 @@ impl Provider for EmailClientProvider {
                 self.save_oauth_tokens();
                 self.imap = None;
                 self.smtp = None;
+                self.reset_bg_imap();
                 // Invalidate all session state so build_root serves the login button
                 // on the next fetch.
                 self.current_path = "/".to_owned();
@@ -2682,7 +2980,19 @@ impl Provider for EmailClientProvider {
                         "star"        => (&["\\Flagged"], &[]),
                         _             => (&[],            &["\\Flagged"]), // unstar
                     };
-                    if let Some(ref mut imap) = self.imap {
+                    if self.bg_enabled() {
+                        // A flag toggle is confirmation-free from the user's
+                        // point of view: the list updates immediately below and
+                        // a STORE failure arrives via `take_error`. Blocking the
+                        // render thread on the round-trip would stall the frame
+                        // and, with it, the screen reader.
+                        self.spawn_bg_op(BgOp::SetFlags {
+                            folder: real_folder.clone(),
+                            uid,
+                            add: add.iter().map(|s| (*s).to_owned()).collect(),
+                            remove: remove.iter().map(|s| (*s).to_owned()).collect(),
+                        });
+                    } else if let Some(ref mut imap) = self.imap {
                         if let Err(e) = block_on(imap.set_flags(&real_folder, uid, add, remove)) {
                             let mut args = localize::Args::new();
                             args.set("cmd", cmd.to_owned());
@@ -2749,7 +3059,13 @@ impl Provider for EmailClientProvider {
                                         .map(|m| m.message_id)
                                 })
                                 .unwrap_or_default();
-                            if let Some(ref mut imap) = self.imap {
+                            if self.bg_enabled() {
+                                self.spawn_bg_op(BgOp::Move {
+                                    folder: real_folder.clone(),
+                                    uid,
+                                    dest: t.clone(),
+                                });
+                            } else if let Some(ref mut imap) = self.imap {
                                 if let Err(e) = block_on(imap.move_message(&real_folder, uid, t)) {
                                     let mut args = localize::Args::new();
                                     args.set("err", e.to_string());
@@ -2772,7 +3088,20 @@ impl Provider for EmailClientProvider {
                         false // no Trash configured — hard delete
                     };
                     if !moved_to_trash {
-                        if let Some(ref mut imap) = self.imap {
+                        if self.bg_enabled() {
+                            // Queued in order on the one background connection,
+                            // so the EXPUNGE still follows the \Deleted STORE.
+                            self.spawn_bg_op(BgOp::SetFlags {
+                                folder: real_folder.clone(),
+                                uid,
+                                add: vec!["\\Deleted".to_owned()],
+                                remove: vec![],
+                            });
+                            self.spawn_bg_op(BgOp::Expunge {
+                                folder: real_folder.clone(),
+                                uid,
+                            });
+                        } else if let Some(ref mut imap) = self.imap {
                             let _ = block_on(imap.set_flags(&real_folder, uid, &["\\Deleted"], &[]));
                             let _ = block_on(imap.expunge_uid(&real_folder, uid));
                         }
@@ -2802,7 +3131,13 @@ impl Provider for EmailClientProvider {
                                         .map(|m| m.message_id)
                                 })
                                 .unwrap_or_default();
-                            if let Some(ref mut imap) = self.imap {
+                            if self.bg_enabled() {
+                                self.spawn_bg_op(BgOp::Move {
+                                    folder: real_folder.clone(),
+                                    uid,
+                                    dest: dest.clone(),
+                                });
+                            } else if let Some(ref mut imap) = self.imap {
                                 if let Err(e) = block_on(imap.move_message(&real_folder, uid, dest)) {
                                     let mut args = localize::Args::new();
                                     args.set("err", e.to_string());
@@ -2867,6 +3202,7 @@ impl Provider for EmailClientProvider {
             // Rebuild backends so they pick up the new config.
             self.imap = None;
             self.smtp = None;
+            self.reset_bg_imap();
             self.rebuild_backends();
         }
     }
@@ -3256,6 +3592,73 @@ mod tests {
         let err = p.take_error();
         assert!(err.is_some(), "expected an error message");
         assert!(err.unwrap().contains("client ID"));
+    }
+
+    // ---- Non-blocking IMAP operations ----
+
+    #[test]
+    fn test_take_error_reports_inline_error_before_background_ones() {
+        let mut p = EmailClientProvider::new();
+        p.error_message = Some("inline".to_owned());
+        p.bg_errors.lock().unwrap().push("background".to_owned());
+
+        // The inline error belongs to the command the user just issued, so it
+        // must not be queued behind an older background failure.
+        assert_eq!(p.take_error().as_deref(), Some("inline"));
+        assert_eq!(p.take_error().as_deref(), Some("background"));
+        assert_eq!(p.take_error(), None);
+    }
+
+    #[test]
+    fn test_take_error_drains_background_errors_in_order() {
+        let mut p = EmailClientProvider::new();
+        p.bg_errors.lock().unwrap().push("first".to_owned());
+        p.bg_errors.lock().unwrap().push("second".to_owned());
+
+        // One per call: take_error is polled once a frame.
+        assert_eq!(p.take_error().as_deref(), Some("first"));
+        assert_eq!(p.take_error().as_deref(), Some("second"));
+        assert_eq!(p.take_error(), None);
+    }
+
+    #[test]
+    fn test_injected_mock_keeps_operations_on_the_blocking_path() {
+        // with_imap() is the test seam; backgrounding there would race every
+        // assertion that inspects the mock right after the call.
+        let p = EmailClientProvider::new().with_imap(Box::new(MockImap::new()));
+        assert!(!p.bg_enabled());
+        assert!(EmailClientProvider::new().bg_enabled());
+    }
+
+    #[test]
+    fn test_bg_op_labels_name_the_failed_action() {
+        // These prefixes are what the user sees when a background op fails.
+        assert_eq!(
+            BgOp::SetFlags { folder: "INBOX".into(), uid: 1, add: vec![], remove: vec![] }.label(),
+            "flag update failed"
+        );
+        assert_eq!(
+            BgOp::Move { folder: "INBOX".into(), uid: 1, dest: "Trash".into() }.label(),
+            "move failed"
+        );
+        assert_eq!(BgOp::Expunge { folder: "INBOX".into(), uid: 1 }.label(), "delete failed");
+        assert_eq!(
+            BgOp::Append { folder: "Drafts".into(), message: vec![] }.label(),
+            "save failed"
+        );
+    }
+
+    #[test]
+    fn test_reset_bg_imap_forces_a_reconnect() {
+        let mut p = EmailClientProvider::new();
+        p.config.imap_url = "imaps://imap.example.com".to_owned();
+        p.config.username = "user@example.com".to_owned();
+        let _ = p.bg_imap();
+        assert!(p.bg_imap.is_some());
+
+        // The open connection authenticated with the previous credentials.
+        p.reset_bg_imap();
+        assert!(p.bg_imap.is_none());
     }
 
     #[test]
