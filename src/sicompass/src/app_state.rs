@@ -454,6 +454,15 @@ pub struct AppRenderer {
     pub ffon: Vec<FfonElement>,
     /// Providers in parallel with `ffon`.
     pub providers: Vec<Box<dyn Provider>>,
+    /// Undo/redo operations whose provider is currently checked out.
+    ///
+    /// `Provider::undo` is async, and a spawned task needs to own the provider
+    /// for the duration — a borrow out of this `Vec` cannot cross an `.await`.
+    /// Rather than wrap every provider in a lock (which would make all ~200
+    /// provider calls pay for one rare operation), the provider is moved out,
+    /// handed to the task, and put back when it finishes. A
+    /// [`PlaceholderProvider`] stands in meanwhile so indices stay stable.
+    pub pending_provider_ops: Vec<PendingProviderOp>,
 
     // ---- Navigation state --------------------------------------------------
     /// Current navigation path (depth=1 means at root, depth≥2 inside a provider).
@@ -744,6 +753,7 @@ impl AppRenderer {
         AppRenderer {
             ffon: Vec::new(),
             providers: Vec::new(),
+            pending_provider_ops: Vec::new(),
             current_id,
             previous_id: IdArray::new(),
             current_insert_id: IdArray::new(),
@@ -1734,5 +1744,51 @@ mod tests {
         r.error_message = "first".to_owned();
         r.error_message = "second".to_owned();
         assert_eq!(r.error_message, "second");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Async undo/redo: checked-out providers
+// ---------------------------------------------------------------------------
+
+/// A provider that has been moved out for an in-flight async undo/redo.
+pub struct PendingProviderOp {
+    /// Slot in `AppRenderer::providers` the provider came from.
+    pub idx: usize,
+    /// Whether this was an undo (false = redo), for the completion message.
+    pub is_undo: bool,
+    /// Display name captured before check-out, for the completion message.
+    pub provider_name: String,
+    /// Delivers the provider back, with whatever error it reported.
+    pub rx: std::sync::mpsc::Receiver<(Box<dyn Provider>, String)>,
+}
+
+/// Stands in for a provider while its undo/redo is running.
+///
+/// Only `name` and `fetch` are required by the trait; every other method keeps
+/// its default, which is exactly the inert behaviour wanted here.
+pub struct PlaceholderProvider {
+    name: String,
+    display: String,
+}
+
+impl PlaceholderProvider {
+    pub fn new(name: &str, display: &str) -> Self {
+        PlaceholderProvider { name: name.to_owned(), display: display.to_owned() }
+    }
+}
+
+#[async_trait::async_trait]
+impl Provider for PlaceholderProvider {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn display_name(&self) -> String {
+        self.display.clone()
+    }
+
+    fn fetch(&mut self) -> Vec<FfonElement> {
+        vec![FfonElement::new_str("Working…".to_owned())]
     }
 }

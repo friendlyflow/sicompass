@@ -45,6 +45,7 @@ bundled-sdl3 = ["sdl3/build-from-source-static", "sdl3-sys/no-sdl-libc"]
 
 [dependencies]
 sicompass-sdk = { workspace = true }
+async-trait = { workspace = true }
 sicompass-builtins = { workspace = true }
 sicompass-updater = { workspace = true }
 

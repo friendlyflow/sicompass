@@ -161,9 +161,11 @@ fn press(r: &mut AppRenderer, key: Keycode) {
 }
 fn press_ctrl(r: &mut AppRenderer, key: Keycode) {
     dispatch_key(r, Some(key), Mod::LCTRLMOD);
+    settle_provider_ops(r);
 }
 fn press_ctrl_shift(r: &mut AppRenderer, key: Keycode) {
     dispatch_key(r, Some(key), Mod::LCTRLMOD | Mod::LSHIFTMOD);
+    settle_provider_ops(r);
 }
 fn press_shift_left(r: &mut AppRenderer)  { dispatch_key(r, Some(Keycode::Left),  Mod::LSHIFTMOD); }
 fn press_shift_right(r: &mut AppRenderer) { dispatch_key(r, Some(Keycode::Right), Mod::LSHIFTMOD); }
@@ -7363,6 +7365,23 @@ fn root_navigation_persists_to_settings() {
 // Auto-launch dashboard on alt-screen sequence (terminal provider)
 // ---------------------------------------------------------------------------
 
+/// Wait for any async provider undo/redo to finish.
+///
+/// `Provider::undo` is async: the provider is checked out, the work runs on a
+/// runtime, and the frame loop puts it back. The real app keeps rendering, so
+/// it lands within a frame or two. Tests drive input directly, so without this
+/// they would assert against the placeholder that holds the slot meanwhile.
+fn settle_provider_ops(r: &mut AppRenderer) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !r.pending_provider_ops.is_empty() {
+        sicompass::events::run_provider_ticks(r);
+        if std::time::Instant::now() > deadline {
+            panic!("provider undo/redo did not complete within 5s");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
 /// Mirrors the tick + auto-dashboard dispatch block from `view.rs`. Tests
 /// can't run the SDL main loop, so this drains pending requests and routes
 /// them through the same handler functions the loop uses.
@@ -7894,6 +7913,7 @@ fn record_entry_truncates_redo_branch_on_new_action() {
         },
     );
     state_mod::walk_back(h.r());
+    settle_provider_ops(h.r());
     assert_eq!(h.renderer.active_timeline().position, 1);
     assert_eq!(h.renderer.active_timeline().entries.len(), 2);
 
@@ -7917,6 +7937,7 @@ fn record_entry_truncates_redo_branch_on_new_action() {
 fn walk_back_reports_nothing_to_undo_when_empty() {
     let mut h = Harness::new();
     state_mod::walk_back(h.r());
+    settle_provider_ops(h.r());
     assert_eq!(h.renderer.error_message, "No undo history");
 }
 
@@ -7935,6 +7956,7 @@ fn walk_forward_reports_nothing_to_redo_when_at_head() {
         },
     );
     state_mod::walk_forward(h.r());
+    settle_provider_ops(h.r());
     assert_eq!(h.renderer.error_message, "Nothing to redo");
 }
 
@@ -7958,9 +7980,11 @@ fn walk_back_then_forward_restores_position() {
     h.renderer.current_id = end.clone();
 
     state_mod::walk_back(h.r());
+    settle_provider_ops(h.r());
     assert_eq!(h.renderer.current_id, start);
 
     state_mod::walk_forward(h.r());
+    settle_provider_ops(h.r());
     assert_eq!(h.renderer.current_id, end);
 }
 
@@ -8249,6 +8273,7 @@ fn fscreate_file_undoes_in_one_step() {
     );
     // ...so one ctrl-Z fully reverses it.
     state_mod::walk_back(h.r());
+    settle_provider_ops(h.r());
     assert!(!path.exists(), "one walk_back should remove the created file");
     std::fs::remove_file(&path).ok();
 }
@@ -8282,6 +8307,7 @@ fn nested_create_undo_redo_keeps_list(child_prefix: &str, child_name: &str) {
     // Undo every step — each must leave a non-empty list.
     for n in 1..=depth {
         state_mod::walk_back(h.r());
+    settle_provider_ops(h.r());
         assert!(
             !h.renderer.total_list.is_empty(),
             "list went blank after walk_back {n} (current_id={:?})",
@@ -8291,6 +8317,7 @@ fn nested_create_undo_redo_keeps_list(child_prefix: &str, child_name: &str) {
     // Redo every step — each must leave a non-empty list.
     for n in 1..=depth {
         state_mod::walk_forward(h.r());
+    settle_provider_ops(h.r());
         assert!(
             !h.renderer.total_list.is_empty(),
             "list went blank after walk_forward {n} (current_id={:?})",
@@ -8343,6 +8370,7 @@ fn undo_of_filebrowser_delete_stays_in_folder() {
     // Undo: the cursor must stay inside subdir (depth 3), not jump to the
     // provider list (depth 1).
     state_mod::walk_back(h.r());
+    settle_provider_ops(h.r());
     assert_eq!(
         h.renderer.current_id.get(0),
         Some(fb_idx),
@@ -8424,11 +8452,13 @@ fn create_files_undo_redo_disk_consistency() {
     }
     // One undo removes exactly one file (the last created), not more.
     state_mod::walk_back(h.r());
+    settle_provider_ops(h.r());
     assert!(!h.tmp.path().join("dc3.txt").exists(), "undo removes dc3.txt");
     assert!(h.tmp.path().join("dc2.txt").exists(), "undo must not touch dc2.txt");
     assert!(h.tmp.path().join("dc1.txt").exists(), "undo must not touch dc1.txt");
     // Redo restores it.
     state_mod::walk_forward(h.r());
+    settle_provider_ops(h.r());
     assert!(h.tmp.path().join("dc3.txt").exists(), "redo restores dc3.txt");
     for p in files {
         std::fs::remove_file(h.tmp.path().join(p)).ok();
@@ -10650,7 +10680,9 @@ fn undo_navigate_into_child_repopulates_collapsed_subtree() {
     press_enter(h.r());
     // undo the create, then undo the navigate-out.
     state_mod::walk_back(h.r());
+    settle_provider_ops(h.r());
     state_mod::walk_back(h.r());
+    settle_provider_ops(h.r());
     // cursor is back inside subdir AND its contents are visible again.
     assert_eq!(h.renderer.current_id.depth(), 3, "cursor lands inside subdir");
     assert!(
@@ -10679,14 +10711,16 @@ fn redo_of_filebrowser_delete_removes_disk_and_ffon() {
     sicompass::handlers::handle_file_delete(h.r());
     assert!(!alpha.exists(), "delete removes alpha.txt from disk");
 
-    state_mod::walk_back(h.r()); // undo -> restored
+    state_mod::walk_back(h.r());
+    settle_provider_ops(h.r()); // undo -> restored
     assert!(alpha.exists(), "undo restores alpha.txt on disk");
     assert!(
         h.renderer.total_list.iter().any(|i| i.label.contains("alpha.txt")),
         "undo restores alpha.txt in the list"
     );
 
-    state_mod::walk_forward(h.r()); // redo -> deleted again
+    state_mod::walk_forward(h.r());
+    settle_provider_ops(h.r()); // redo -> deleted again
     assert!(!alpha.exists(), "redo deletes alpha.txt from disk again");
     assert!(
         !h.renderer.total_list.iter().any(|i| i.label.contains("alpha.txt")),
