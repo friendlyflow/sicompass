@@ -503,6 +503,15 @@ pub struct EmailClientProvider {
     // Which (folder, uid) the in-flight fetch is for, so re-rendering the same
     // path each frame does not spawn a second fetch.
     message_fetch_key: Option<(String, u32)>,
+    // Last (folder, uid) whose body fetch failed, with the error.
+    //
+    // Without this the drain clears `message_fetch_key`, nothing is cached, and
+    // the next render respawns the fetch — which raises `needs_refresh` and
+    // re-renders, hammering the server in a loop. Cleared as soon as a
+    // different message is asked for.
+    #[allow(clippy::type_complexity)]
+    message_fetch_failed: Option<((String, u32), String)>,
+
     // Folder `message_detail` was fetched from: UIDs are only unique per
     // mailbox, so the folder is part of the cache key.
     message_detail_folder: String,
@@ -574,8 +583,11 @@ enum HistoryItem {
 }
 
 /// Outcome of resolving a message body for rendering.
+#[derive(Debug)]
 enum MessageState {
     Ready(Box<EmailMessage>),
+    /// The fetch failed; render the reason rather than spin forever.
+    Failed(String),
     /// A fetch is in flight; render a placeholder this frame.
     Loading,
     Missing,
@@ -638,6 +650,7 @@ impl EmailClientProvider {
             message_fetch_inflight: Arc::new(AtomicBool::new(false)),
             message_fetch_result: Arc::new(Mutex::new(None)),
             message_fetch_key: None,
+            message_fetch_failed: None,
             message_detail_folder: String::new(),
             bg_errors: Arc::new(Mutex::new(Vec::new())),
             send_inflight: Arc::new(AtomicBool::new(false)),
@@ -755,6 +768,8 @@ impl EmailClientProvider {
                     Ok(None) => return MessageState::Missing,
                     Err(e) => {
                         self.bg_errors.lock().unwrap().push(format!("IMAP error: {e}"));
+                        self.message_fetch_failed =
+                            Some(((real_folder.to_owned(), uid), e));
                         // Fall through: a stale body beats an empty screen.
                     }
                 }
@@ -769,6 +784,16 @@ impl EmailClientProvider {
             .cloned();
         if let Some(m) = cached {
             return MessageState::Ready(Box::new(m));
+        }
+
+        // A failed fetch for this exact message reports the failure instead of
+        // being retried every frame. Asking for a different message clears it.
+        match &self.message_fetch_failed {
+            Some(((f, u), e)) if f == real_folder && *u == uid => {
+                return MessageState::Failed(e.clone());
+            }
+            Some(_) => self.message_fetch_failed = None,
+            None => {}
         }
 
         // Nothing usable yet — start (or keep waiting on) the fetch.
@@ -1466,16 +1491,19 @@ impl EmailClientProvider {
         let threads_done = self.thread_fetch_result.lock().unwrap().take();
         if let Some((folder, threads)) = threads_done {
             self.thread_fetch_key = None;
-            if let Some(threads) = threads {
-                let mut uid_to_thread: std::collections::HashMap<u32, Vec<u32>> =
-                    std::collections::HashMap::new();
-                for thread in threads {
-                    for &uid in &thread {
-                        uid_to_thread.insert(uid, thread.clone());
-                    }
+            // An empty map is cached deliberately when the server returned no
+            // thread data (no THREAD support, or the command failed). Without
+            // it `contains_key` stays false, the next render respawns the
+            // fetch, that raises `needs_refresh`, and the folder re-renders in
+            // a tight loop. History falls back to References either way.
+            let mut uid_to_thread: std::collections::HashMap<u32, Vec<u32>> =
+                std::collections::HashMap::new();
+            for thread in threads.unwrap_or_default() {
+                for &uid in &thread {
+                    uid_to_thread.insert(uid, thread.clone());
                 }
-                self.thread_cache.insert(folder, uid_to_thread);
             }
+            self.thread_cache.insert(folder, uid_to_thread);
         }
 
         if !self.thread_cache.contains_key(&real_folder) {
@@ -1519,6 +1547,9 @@ impl EmailClientProvider {
             }
             MessageState::Missing => {
                 return vec![FfonElement::new_str("(message not found)".to_owned())];
+            }
+            MessageState::Failed(e) => {
+                return vec![FfonElement::new_str(format!("IMAP error: {e}"))];
             }
         };
 
@@ -1858,8 +1889,11 @@ impl EmailClientProvider {
                     MessageState::Loading => {
                         return vec![FfonElement::new_str("Loading…".to_owned())];
                     }
-                    // Original is gone; compose an empty reply rather than hang.
-                    MessageState::Missing => self.compose.prefilled = true,
+                    // Original is gone or unreachable; compose an empty reply
+                    // rather than hang.
+                    MessageState::Missing | MessageState::Failed(_) => {
+                        self.compose.prefilled = true
+                    }
                 }
             } else {
                 if let Some(ref mut imap) = self.imap {
@@ -3990,6 +4024,49 @@ mod tests {
     }
 
     // ---- Non-blocking IMAP operations ----
+
+    /// A provider on the background path with a backend present, pointed at a
+    /// port nothing listens on so any spawned work fails fast and harmlessly.
+    /// Username stays empty, so no envelope cache touches disk.
+    fn bg_provider() -> EmailClientProvider {
+        let mut p = EmailClientProvider::new();
+        // Assigned directly rather than via with_imap(), which would switch the
+        // provider to the synchronous path.
+        p.imap = Some(Box::new(MockImap::new()));
+        p.config.imap_url = "imap://127.0.0.1:1".to_owned();
+        assert!(p.bg_enabled());
+        p
+    }
+
+    #[test]
+    fn test_failed_body_fetch_is_not_retried_every_frame() {
+        let mut p = bg_provider();
+        p.message_fetch_failed = Some((("INBOX".to_owned(), 7), "boom".to_owned()));
+
+        // Must report the failure rather than spawn again: respawning here
+        // raises needs_refresh, which re-renders, which respawns — the reload
+        // loop this guards against.
+        match p.resolve_message("INBOX", 7) {
+            MessageState::Failed(e) => assert_eq!(e, "boom"),
+            other => panic!("expected Failed, got {other:?}"),
+        }
+        assert!(
+            p.message_fetch_key.is_none(),
+            "a failed fetch must not have started another one"
+        );
+    }
+
+    #[test]
+    fn test_a_different_message_clears_an_earlier_failure() {
+        let mut p = bg_provider();
+        p.message_fetch_failed = Some((("INBOX".to_owned(), 7), "boom".to_owned()));
+
+        // Asking for a different message must still fetch.
+        let state = p.resolve_message("INBOX", 8);
+        assert!(matches!(state, MessageState::Loading));
+        assert_eq!(p.message_fetch_key, Some(("INBOX".to_owned(), 8)));
+        assert!(p.message_fetch_failed.is_none(), "stale failure must be cleared");
+    }
 
     #[test]
     fn test_take_error_reports_inline_error_before_background_ones() {
