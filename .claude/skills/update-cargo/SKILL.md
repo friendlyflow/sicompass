@@ -60,7 +60,10 @@ prefix every toolchain command with `nix develop -c` (the `warning: Git tree
       why — never remove those comments, and never bump these without asking
       the user first):
       - `freetype` — held at 0.7 for the bundled-FreeType Windows release build.
-      - `imap-proto` — held at 0.10 to match the `imap` 2.x re-exports.
+
+      There is no longer an `imap-proto` pin: `lib_emailclient` moved from the
+      `imap` 2.x crate to `async-imap`, which re-exports its own `imap-proto`,
+      so the version follows `async-imap` and is not declared directly.
 
    c. **`sicompass-sdk` is in scope**, with one coordination rule. It is the
       only `sicompass-*` crate resolved from crates.io — the rest are path

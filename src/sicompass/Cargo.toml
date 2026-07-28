@@ -108,3 +108,6 @@ sicompass-emailclient = { workspace = true }
 sicompass-remote = { workspace = true }
 mockall = { workspace = true }
 tempfile = { workspace = true }
+# The integration test injects its own `ImapBackend` stubs, which the trait
+# requires to be `#[async_trait]`.
+async-trait = { workspace = true }
