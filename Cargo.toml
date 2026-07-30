@@ -117,12 +117,9 @@ futures = "0.3"
 tokio-util = "0.7"
 rusqlite = { version = "0.40", features = ["bundled"] }
 
-# Plugin loading
-#
-# `libloading` is the legacy `dlopen` path for `PluginType::Native`. It goes away
-# once third-party plugins are WASM-only; Apple forbids executing downloaded native
-# code, so it is the reason the store build is blocked.
-libloading = "0.9"
+# Plugin validation. `wasmparser` checks a staged plugin is a well-formed
+# component without compiling it, which is all the updater needs to know.
+wasmparser = "0.254"
 
 # WASM plugin host. No compiler backend is selected here: the `sicompass` crate's
 # `jit-wasm` (default) and `no-jit-wasm` features pick `cranelift` or `pulley`, so

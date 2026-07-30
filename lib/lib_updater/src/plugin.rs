@@ -165,21 +165,46 @@ fn check_one(
         sig.sig.as_deref(),
     )?;
 
-    // Write the new plugin.json into staging — same fields as installed
-    // plus the bumped version/url. We carry through the pubkey from the
-    // installed manifest (the trust root) so the next update verifies
-    // against the same key; rotation is a follow-up.
-    let new_disk_manifest = serde_json::json!({
-        "name": installed.name,
-        "displayName": serde_json::Value::String(installed.name.clone()), // not stored in updater's view
-        "type": "script", // placeholder; the running plugin.json file is what defines this
-        "entry": entry_filename.to_string_lossy(),
-        "version": new_manifest.version,
-        "updateUrl": update_url,
-        "minAppVersion": new_manifest.min_app_version,
-        "pubkey": installed.pubkey,
-        "hotReload": installed.hot_reload,
-    });
+    // Write the new plugin.json into staging by **mutating the installed one**,
+    // rather than rebuilding it from this crate's partial view.
+    //
+    // Rebuilding was silently destructive: the updater deserializes only the fields
+    // it needs, so every other field was dropped on update. `displayName` was
+    // replaced by `name`, and `allowedHosts` and `settings` disappeared entirely —
+    // meaning a plugin that used the network lost the capability the moment it
+    // updated, and its settings section changed name underneath it. `type` was
+    // even written as a hardcoded placeholder.
+    //
+    // Editing the original keeps everything the updater has no opinion about, and
+    // only touches what an update actually changes. The pubkey is deliberately left
+    // as-is: it is the trust root, so the next update verifies against the same key
+    // (rotation is a follow-up).
+    let mut new_disk_manifest: serde_json::Value = serde_json::from_str(&data)
+        .map_err(|e| format!("re-parse installed manifest: {e}"))?;
+    {
+        let obj = new_disk_manifest
+            .as_object_mut()
+            .ok_or("installed plugin.json is not a JSON object")?;
+        obj.insert(
+            "entry".to_owned(),
+            serde_json::Value::String(entry_filename.to_string_lossy().into_owned()),
+        );
+        obj.insert(
+            "version".to_owned(),
+            serde_json::Value::String(new_manifest.version.clone()),
+        );
+        obj.insert("updateUrl".to_owned(), serde_json::Value::String(update_url.clone()));
+        match &new_manifest.min_app_version {
+            Some(min) => {
+                obj.insert("minAppVersion".to_owned(), serde_json::Value::String(min.clone()));
+            }
+            // Absent upstream means the constraint was lifted, so drop it rather
+            // than leaving a stale floor in place.
+            None => {
+                obj.remove("minAppVersion");
+            }
+        }
+    }
     // One-shot write: `fs::write` opens, writes, and closes in a single call.
     // The previous `File::create + write_all` pattern kept the handle alive
     // until end-of-scope, which on Windows blocks the directory rename at the
@@ -191,16 +216,9 @@ fn check_one(
     std::fs::write(staging.join("plugin.json"), serialized)
         .map_err(|e| format!("write staging manifest: {e}"))?;
 
-    // We deliberately don't copy the existing plugin.json verbatim because
-    // we need to bump `version` and `entry` (the staged entry filename may
-    // differ in extension). The simpler alternative — load + re-serialize
-    // the installed plugin.json with mutations — is left for later when
-    // we share the manifest type with the app.
 
-    // Test-load the new entry. On Linux/macOS this is a real dlopen via
-    // libloading; on Windows it's a file-exists check (we'd need to
-    // load the DLL from the main thread anyway). Test-load failure
-    // leaves the installed plugin completely untouched.
+    // Validate the new entry before it replaces anything. Failure leaves the
+    // installed plugin completely untouched.
     if let Err(e) = test_load(&staged_entry) {
         let _ = std::fs::remove_dir_all(&staging);
         return Err(format!("test-load failed: {e}"));
@@ -261,39 +279,28 @@ fn fetch_manifest(
     serde_json::from_slice(&buf).map_err(|e| format!("parse manifest JSON: {e}"))
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+/// Check that a staged plugin is a well-formed WASM component before it replaces
+/// the installed one.
+///
+/// This used to be a real `dlopen` on Linux and macOS and a bare file-exists check
+/// on Windows — so the one platform where a broken artifact was most likely to slip
+/// through was the one that checked least. Validating bytecode is platform-agnostic,
+/// so the same real check now runs everywhere.
+///
+/// Uses `wasmparser` rather than `wasmtime`: this only needs to know the bytes are a
+/// valid component, and validation is far cheaper than compiling one. The updater
+/// runs on a background thread and has no business spending a second in Cranelift
+/// to answer a yes/no question. The app compiles it later, once, and caches it.
 fn test_load(entry: &Path) -> Result<(), String> {
-    // Native plugins end in .so / .dylib. For everything else we just
-    // check existence — Script plugins are run as a subprocess later.
-    let ext = entry.extension().and_then(|s| s.to_str()).unwrap_or("");
-    if ext == "so" || ext == "dylib" {
-        // SAFETY: we immediately drop the library; we are not calling
-        // anything from it.
-        unsafe {
-            let lib = libloading::Library::new(entry)
-                .map_err(|e| format!("dlopen: {e}"))?;
-            drop(lib);
-        }
-    } else if !entry.exists() {
-        return Err("staged entry file missing".to_string());
+    let bytes = std::fs::read(entry).map_err(|e| format!("read staged entry: {e}"))?;
+    if bytes.is_empty() {
+        return Err("staged entry is empty".to_string());
     }
-    Ok(())
-}
-
-#[cfg(target_os = "windows")]
-fn test_load(entry: &Path) -> Result<(), String> {
-    if !entry.exists() {
-        return Err("staged entry file missing".to_string());
-    }
-    Ok(())
-}
-
-#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-fn test_load(entry: &Path) -> Result<(), String> {
-    if !entry.exists() {
-        return Err("staged entry file missing".to_string());
-    }
-    Ok(())
+    // Component-model validation is on by default in `WasmFeatures`.
+    wasmparser::Validator::new()
+        .validate_all(&bytes)
+        .map(|_| ())
+        .map_err(|e| format!("not a valid WASM component: {e}"))
 }
 
 #[cfg(test)]
@@ -317,16 +324,49 @@ mod tests {
             serde_json::json!({
                 "name": name,
                 "displayName": name,
-                "type": "script",
-                "entry": "p.ts",
+                "type": "wasm",
+                "entry": "p.wasm",
                 "version": version,
                 "updateUrl": update_url,
             })
             .to_string(),
         )
         .unwrap();
-        std::fs::write(dir.join("p.ts"), b"// old").unwrap();
+        std::fs::write(dir.join("p.wasm"), minimal_component()).unwrap();
         dir
+    }
+
+
+    /// The smallest thing `test_load` will accept: an empty but valid WASM
+    /// component — `\0asm`, version, layer. Fixtures have to be real components
+    /// now that a staged plugin is genuinely validated before it replaces the
+    /// installed one; the old check only looked at whether the file existed.
+    fn minimal_component() -> Vec<u8> {
+        vec![0x00, 0x61, 0x73, 0x6d, 0x0d, 0x00, 0x01, 0x00]
+    }
+
+    #[test]
+    fn a_staged_entry_that_is_not_a_component_is_rejected() {
+        // The old check only confirmed the file existed unless it ended in .so or
+        // .dylib, so a corrupt or truncated download reached the live directory and
+        // failed later, at load time. Validation is now real and platform-agnostic.
+        let dir = tempfile::tempdir().unwrap();
+
+        let junk = dir.path().join("junk.wasm");
+        std::fs::write(&junk, b"// not wasm at all").unwrap();
+        let err = test_load(&junk).unwrap_err();
+        assert!(err.contains("not a valid WASM component"), "got {err}");
+
+        let empty = dir.path().join("empty.wasm");
+        std::fs::write(&empty, b"").unwrap();
+        assert!(test_load(&empty).unwrap_err().contains("empty"));
+
+        let missing = dir.path().join("gone.wasm");
+        assert!(test_load(&missing).unwrap_err().contains("read staged entry"));
+
+        let good = dir.path().join("good.wasm");
+        std::fs::write(&good, minimal_component()).unwrap();
+        assert!(test_load(&good).is_ok(), "a valid component must pass");
     }
 
     #[test]
@@ -336,7 +376,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("plugin.json"),
-            r#"{"name":"foo","displayName":"foo","type":"script","entry":"p.ts","version":"0.1.0"}"#,
+            r#"{"name":"foo","displayName":"foo","type":"wasm","entry":"p.wasm","version":"0.1.0"}"#,
         )
         .unwrap();
 
@@ -397,7 +437,9 @@ mod tests {
         let pk = sk.verifying_key();
         let pk_b64 = B64.encode(pk.to_bytes());
 
-        let new_body: &[u8] = b"// new plugin entry";
+        // Must be a real component: the staged entry is validated before the swap.
+        let new_component = minimal_component();
+        let new_body: &[u8] = &new_component;
         let sig_b64 = B64.encode(sk.sign(new_body).to_bytes());
         let sha = {
             use sha2::Digest;
@@ -407,7 +449,7 @@ mod tests {
         };
 
         let server = MockServer::start().await;
-        let entry_url = format!("{}/entry.ts", server.uri());
+        let entry_url = format!("{}/entry.wasm", server.uri());
         let manifest_url = format!("{}/manifest", server.uri());
 
         let dir = plugins.path().join("foo");
@@ -416,17 +458,22 @@ mod tests {
             dir.join("plugin.json"),
             serde_json::json!({
                 "name": "foo",
-                "displayName": "foo",
-                "type": "script",
-                "entry": "p.ts",
+                // Deliberately different from `name`, and carrying fields the
+                // updater knows nothing about, so the assertions below can prove an
+                // update preserves rather than reconstructs the manifest.
+                "displayName": "Foo Display",
+                "type": "wasm",
+                "entry": "p.wasm",
                 "version": "1.0.0",
                 "updateUrl": manifest_url,
                 "pubkey": pk_b64,
+                "allowedHosts": ["api.example.com"],
+                "supportsConfigFiles": true,
             })
             .to_string(),
         )
         .unwrap();
-        std::fs::write(dir.join("p.ts"), b"// old").unwrap();
+        std::fs::write(dir.join("p.wasm"), minimal_component()).unwrap();
 
         Mock::given(method("GET"))
             .and(path("/manifest"))
@@ -442,7 +489,7 @@ mod tests {
             .mount(&server)
             .await;
         Mock::given(method("GET"))
-            .and(path("/entry.ts"))
+            .and(path("/entry.wasm"))
             .respond_with(ResponseTemplate::new(200).set_body_bytes(new_body))
             .mount(&server)
             .await;
@@ -464,8 +511,37 @@ mod tests {
         assert_eq!(results[0].new_version, semver::Version::new(1, 0, 1));
         assert!(results[0].applied);
 
-        let live = std::fs::read(plugins.path().join("foo/p.ts")).unwrap();
+        let live = std::fs::read(plugins.path().join("foo/p.wasm")).unwrap();
         assert_eq!(live, new_body);
+
+        // An update must not quietly strip fields the updater has no opinion about.
+        // Rebuilding the manifest from this crate's partial view used to drop
+        // `allowedHosts` — so a plugin lost its network capability on update — and
+        // overwrite `displayName` with `name`, which also renames the settings
+        // section its own `get_setting` reads from.
+        let updated: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(plugins.path().join("foo/plugin.json")).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(updated["version"], "1.0.1", "version should be bumped");
+        assert_eq!(updated["entry"], "p.wasm");
+        assert_eq!(updated["type"], "wasm", "the plugin type must survive an update");
+        assert_eq!(
+            updated["displayName"], "Foo Display",
+            "displayName must not be replaced by name"
+        );
+        assert_eq!(
+            updated["allowedHosts"],
+            serde_json::json!(["api.example.com"]),
+            "allowedHosts must survive, or the plugin silently loses network access"
+        );
+        assert_eq!(
+            updated["supportsConfigFiles"], true,
+            "unrelated fields must be preserved verbatim"
+        );
+        // The trust root stays put so the next update verifies against the same key.
+        assert_eq!(updated["pubkey"], pk_b64);
 
         match rx.try_recv().expect("hot reload event") {
             UpdateEvent::HotReload { plugin_name, .. } => {
@@ -478,7 +554,7 @@ mod tests {
     async fn rejects_when_sha_mismatches() {
         let plugins = tempfile::tempdir().unwrap();
         let server = MockServer::start().await;
-        let entry_url = format!("{}/entry.ts", server.uri());
+        let entry_url = format!("{}/entry.wasm", server.uri());
         let manifest_url = format!("{}/manifest", server.uri());
 
         make_installed_plugin(plugins.path(), "foo", "1.0.0", &manifest_url);
@@ -497,7 +573,7 @@ mod tests {
             .mount(&server)
             .await;
         Mock::given(method("GET"))
-            .and(path("/entry.ts"))
+            .and(path("/entry.wasm"))
             .respond_with(ResponseTemplate::new(200).set_body_bytes(b"any bytes"))
             .mount(&server)
             .await;
@@ -516,8 +592,10 @@ mod tests {
         assert_eq!(errors.len(), 1);
         assert!(errors[0].contains("sha256 mismatch"));
 
-        let live = std::fs::read(plugins.path().join("foo/p.ts")).unwrap();
-        assert_eq!(live, b"// old");
+        let live = std::fs::read(plugins.path().join("foo/p.wasm")).unwrap();
+        // Still the originally installed component: a rejected update must leave
+        // the live directory untouched.
+        assert_eq!(live, minimal_component());
     }
 
     #[tokio::test(flavor = "multi_thread")]

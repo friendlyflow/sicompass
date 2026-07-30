@@ -2,7 +2,7 @@
 
 ## Environment (NixOS)
 
-The whole toolchain (`cargo`, `rustc`, `clippy`, `rustfmt`, `bun`, `graphify`,
+The whole toolchain (`cargo`, `rustc`, `clippy`, `rustfmt`, `graphify`,
 `lld` + `wasm-tools` (for WASM plugin guests),
 `xvfb-run`, SDL3/Vulkan link paths) comes from the flake dev shell in
 [flake.nix](flake.nix). Nothing is installed system-wide.

@@ -19,29 +19,28 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum PluginType {
-    /// Sandboxed WebAssembly component. The only kind of third-party plugin that
-    /// can ship on Apple's stores, and the only one whose manifest policy is
-    /// actually enforceable — see [`crate::wasm_host`].
-    Wasm,
-    /// Native shared library (`.so` / `.dll` / `.dylib`).  The loader calls
-    /// `sicompass_plugin_init` via `libloading`.
+    /// Sandboxed WebAssembly component, and the only way to load third-party code.
     ///
-    /// Deprecated: being replaced by [`PluginType::Wasm`]. Apple forbids executing
-    /// downloaded native code, and an in-process plugin has full process
-    /// privileges, so `allowedHosts` and friends are advisory against it.
-    Native,
-    /// Script executed through `bun run` — same subcommand protocol as the
-    /// built-in TypeScript providers.
-    ///
-    /// Deprecated alongside [`PluginType::Native`]: shipping and spawning a
-    /// general-purpose interpreter is equally incompatible with a store sandbox,
-    /// and `bun` is not bundled in release archives at all.
+    /// The default, so a manifest that omits `type` gets the sandbox rather than
+    /// having to ask for it. See [`crate::wasm_host`].
     #[default]
-    Script,
+    Wasm,
     /// Instantiate a built-in factory provider by the manifest's `name` field.
     /// Mirrors C's `PLUGIN_FACTORY` in `src/sicompass/programs.c`.
+    ///
+    /// Not third-party code: this names a provider already compiled into the
+    /// binary, which is why it is not sandboxed.
     Factory,
 }
+
+/// Plugin types that used to exist, kept only to explain their absence.
+///
+/// `native` loaded a `.so`/`.dll`/`.dylib` through `dlopen`, and `script` shelled
+/// out to `bun`. Both are gone: Apple forbids executing downloaded native code and
+/// equally forbids shipping a general-purpose interpreter, and a native in-process
+/// plugin had full process privileges, so `allowedHosts` and every other manifest
+/// policy was advisory against it. Neither could be made safe or shippable.
+const RETIRED_TYPES: &[&str] = &["native", "script"];
 
 /// Kind of a per-plugin setting entry.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -128,10 +127,38 @@ fn default_hot_reload() -> bool {
 // Manifest loading
 // ---------------------------------------------------------------------------
 
-/// Parse a `plugin.json` from disk.  Returns `None` on I/O or parse error.
+/// Parse a `plugin.json` from disk. Returns `None` on I/O or parse error.
+///
+/// A manifest naming a retired plugin type is reported rather than skipped in
+/// silence. Otherwise a plugin that worked yesterday would simply stop appearing,
+/// with nothing anywhere saying why.
 pub fn load_manifest(path: &Path) -> Option<PluginManifest> {
     let data = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str(&data).ok()
+    match serde_json::from_str(&data) {
+        Ok(manifest) => Some(manifest),
+        Err(e) => {
+            explain_parse_failure(path, &data, &e);
+            None
+        }
+    }
+}
+
+/// Log why a manifest was rejected, naming a retired type if that is the reason.
+fn explain_parse_failure(path: &Path, data: &str, err: &serde_json::Error) {
+    let retired = serde_json::from_str::<serde_json::Value>(data)
+        .ok()
+        .and_then(|v| v.get("type")?.as_str().map(str::to_owned))
+        .filter(|t| RETIRED_TYPES.contains(&t.as_str()));
+
+    match retired {
+        Some(kind) => eprintln!(
+            "sicompass: ignoring {} — `\"type\": \"{kind}\"` plugins are no longer \
+             supported. Third-party plugins are now sandboxed WebAssembly \
+             components (`\"type\": \"wasm\"`); see docs/wasm-plugins.md.",
+            path.display()
+        ),
+        None => eprintln!("sicompass: ignoring {}: {err}", path.display()),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -190,23 +217,24 @@ mod tests {
     // --- load_manifest ---
 
     #[test]
-    fn load_native_manifest() {
+    fn a_full_manifest_parses() {
         let dir = tempfile::tempdir().unwrap();
         let path = write_manifest(
             &dir,
             r#"{
-                "name": "my-c-plugin",
-                "displayName": "my C plugin",
-                "type": "native",
-                "entry": "plugin.so"
+                "name": "my-plugin",
+                "displayName": "my plugin",
+                "type": "wasm",
+                "entry": "plugin.wasm",
+                "supportsConfigFiles": true
             }"#,
         );
         let m = load_manifest(&path).unwrap();
-        assert_eq!(m.name, "my-c-plugin");
-        assert_eq!(m.display_name, "my C plugin");
-        assert_eq!(m.plugin_type, PluginType::Native);
-        assert_eq!(m.entry, "plugin.so");
-        assert!(!m.supports_config_files);
+        assert_eq!(m.name, "my-plugin");
+        assert_eq!(m.display_name, "my plugin");
+        assert_eq!(m.plugin_type, PluginType::Wasm);
+        assert_eq!(m.entry, "plugin.wasm");
+        assert!(m.supports_config_files);
         assert!(m.settings.is_empty());
         assert!(m.version.is_none());
     }
@@ -219,8 +247,8 @@ mod tests {
             r#"{
                 "name": "versioned",
                 "displayName": "Versioned",
-                "type": "script",
-                "entry": "v.ts",
+                "type": "wasm",
+                "entry": "v.wasm",
                 "version": "1.2.3"
             }"#,
         );
@@ -229,21 +257,21 @@ mod tests {
     }
 
     #[test]
-    fn load_script_manifest() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = write_manifest(
-            &dir,
-            r#"{
-                "name": "my-ts-plugin",
-                "displayName": "my TS plugin",
-                "type": "script",
-                "entry": "plugin.ts",
-                "supportsConfigFiles": true
-            }"#,
-        );
-        let m = load_manifest(&path).unwrap();
-        assert_eq!(m.plugin_type, PluginType::Script);
-        assert!(m.supports_config_files);
+    fn a_retired_plugin_type_is_rejected() {
+        // `native` and `script` are gone. A manifest naming one must fail to load
+        // rather than be quietly reinterpreted as something else — silently
+        // treating a `.so` plugin as WASM would be far more confusing than a
+        // refusal, and `load_manifest` logs which type it recognised.
+        for kind in ["native", "script"] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = write_manifest(
+                &dir,
+                &format!(
+                    r#"{{"name":"old","displayName":"Old","type":"{kind}","entry":"p.bin"}}"#
+                ),
+            );
+            assert!(load_manifest(&path).is_none(), "`{kind}` should be refused");
+        }
     }
 
     #[test]
@@ -254,8 +282,8 @@ mod tests {
             r#"{
                 "name": "p",
                 "displayName": "P",
-                "type": "native",
-                "entry": "p.so",
+                "type": "wasm",
+                "entry": "p.wasm",
                 "settings": [
                     {"type": "text",     "label": "Host",    "key": "host",   "default": "localhost"},
                     {"type": "checkbox", "label": "Enabled", "key": "enabled","defaultChecked": true},
@@ -296,16 +324,16 @@ mod tests {
     }
 
     #[test]
-    fn load_manifest_missing_type_defaults_to_script() {
-        // Matches the C behavior: absent "type" field → PLUGIN_SCRIPT.
-        // Also ensures sdk/examples/typescript/plugin.json (no type) loads correctly.
+    fn load_manifest_missing_type_defaults_to_wasm() {
+        // The safe default: a manifest that says nothing gets the sandbox rather
+        // than having to ask for it.
         let dir = tempfile::tempdir().unwrap();
         let path = write_manifest(
             &dir,
-            r#"{"name":"ts-plugin","displayName":"TS Plugin","entry":"plugin.ts"}"#,
+            r#"{"name":"plugin","displayName":"Plugin","entry":"plugin.wasm"}"#,
         );
         let m = load_manifest(&path).unwrap();
-        assert_eq!(m.plugin_type, PluginType::Script);
+        assert_eq!(m.plugin_type, PluginType::Wasm);
     }
 
     // --- wasm ---
@@ -362,18 +390,18 @@ mod tests {
     }
 
     #[test]
-    fn allowed_hosts_is_ignored_for_non_wasm_types() {
-        // It parses on any manifest, but only the wasm loader consults it. A native
-        // plugin could never have been constrained by it anyway — it can open its
-        // own socket — which is precisely why native is going away.
+    fn allowed_hosts_parses_on_a_factory_manifest_but_grants_nothing() {
+        // A factory entry names a provider already compiled in, so it is not
+        // sandboxed and nothing consults its allowlist. Parsing it anyway keeps the
+        // manifest shape uniform; only the wasm loader reads the field.
         let dir = tempfile::tempdir().unwrap();
         let path = write_manifest(
             &dir,
-            r#"{"name":"n","displayName":"N","type":"native","entry":"n.so",
-                "allowedHosts":["example.com"]}"#,
+            r#"{"name":"web browser","displayName":"web browser","type":"factory",
+                "entry":"","allowedHosts":["example.com"]}"#,
         );
         let m = load_manifest(&path).unwrap();
-        assert_eq!(m.plugin_type, PluginType::Native);
+        assert_eq!(m.plugin_type, PluginType::Factory);
         assert_eq!(m.allowed_hosts, vec!["example.com".to_owned()]);
     }
 
@@ -394,21 +422,21 @@ mod tests {
     fn discover_finds_valid_plugins() {
         let plugins_root = tempfile::tempdir().unwrap();
 
-        // Plugin A
+        // Plugin A — explicit type
         let a = plugins_root.path().join("plugin-a");
         std::fs::create_dir(&a).unwrap();
         std::fs::write(
             a.join("plugin.json"),
-            r#"{"name":"a","displayName":"A","type":"script","entry":"a.ts"}"#,
+            r#"{"name":"a","displayName":"A","type":"wasm","entry":"a.wasm"}"#,
         )
         .unwrap();
 
-        // Plugin B
+        // Plugin B — omits the type, so it defaults to wasm
         let b = plugins_root.path().join("plugin-b");
         std::fs::create_dir(&b).unwrap();
         std::fs::write(
             b.join("plugin.json"),
-            r#"{"name":"b","displayName":"B","type":"native","entry":"b.so"}"#,
+            r#"{"name":"b","displayName":"B","entry":"b.wasm"}"#,
         )
         .unwrap();
 
@@ -416,14 +444,24 @@ mod tests {
         let c = plugins_root.path().join("not-a-plugin");
         std::fs::create_dir(&c).unwrap();
 
+        // A plugin still declaring a retired type — skipped, with a logged reason
+        let d = plugins_root.path().join("plugin-legacy");
+        std::fs::create_dir(&d).unwrap();
+        std::fs::write(
+            d.join("plugin.json"),
+            r#"{"name":"legacy","displayName":"Legacy","type":"native","entry":"d.so"}"#,
+        )
+        .unwrap();
+
         let mut found = discover_plugins_in(plugins_root.path());
         found.sort_by(|a, b| a.manifest.name.cmp(&b.manifest.name));
 
-        assert_eq!(found.len(), 2);
+        assert_eq!(found.len(), 2, "found {:?}", found.iter().map(|p| &p.manifest.name).collect::<Vec<_>>());
         assert_eq!(found[0].manifest.name, "a");
         assert_eq!(found[1].manifest.name, "b");
-        assert_eq!(found[0].entry_path, a.join("a.ts"));
-        assert_eq!(found[1].entry_path, b.join("b.so"));
+        assert_eq!(found[0].entry_path, a.join("a.wasm"));
+        assert_eq!(found[1].entry_path, b.join("b.wasm"));
+        assert_eq!(found[1].manifest.plugin_type, PluginType::Wasm, "absent type defaults to wasm");
     }
 
     #[test]
