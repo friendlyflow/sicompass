@@ -403,6 +403,43 @@ impl Provider for SalesDemoProvider {
         if self.at_root() { Some(&self.dashboard_image) } else { None }
     }
 
+    /// Build the element an "Add element:" button inserts.
+    ///
+    /// This is what the demo is *for*: the buttons under "Add element:" add optional
+    /// parts to a product configuration, and without this they do nothing. The
+    /// button carries `one-opt:` when the entry may be added at most once, and the
+    /// inserted node is tagged accordingly so the app knows which rule applies.
+    ///
+    /// An entry that is itself an input field is inserted as a bare tagged string;
+    /// anything else becomes a section pre-filled with the children it has in the
+    /// tree, so adding "heating" brings its options along.
+    fn create_element(&mut self, element_key: &str) -> Option<FfonElement> {
+        let (key, tagged) = match element_key.strip_prefix("one-opt:") {
+            Some(key) => (key, sicompass_sdk::tags::format_one_opt(key)),
+            None => (element_key, sicompass_sdk::tags::format_many_opt(element_key)),
+        };
+
+        if sicompass_sdk::tags::has_input(key) {
+            return Some(FfonElement::new_str(tagged));
+        }
+
+        let mut obj = FfonObject::new(tagged);
+        // Populate from the node's own position in the tree, one level below where
+        // the user currently is.
+        let mut parts = self.path_parts();
+        parts.push(key);
+        if let Some(node) = raw_at_path(&self.root, &parts) {
+            let children = match node.as_array() {
+                Some(items) => items.iter().map(|n| FfonElement::new_str(n.to_display())).collect(),
+                None => build_display_children(node),
+            };
+            for child in children {
+                obj.push(child);
+            }
+        }
+        Some(FfonElement::Obj(obj))
+    }
+
     fn supports_config_files(&self) -> bool {
         true
     }
@@ -552,6 +589,80 @@ mod tests {
             assert!(s.contains("<button>"), "got {s}");
             assert!(s.contains("</button>"), "got {s}");
         }
+    }
+
+    // --- create_element: what the "Add element:" buttons actually do ---
+
+    #[test]
+    fn adding_an_optional_element_produces_a_tagged_section_with_its_children() {
+        // This is the point of the demo: the buttons add optional parts to a product
+        // configuration. Without `create_element` they do nothing at all.
+        let mut p = provider();
+        p.root = serde_json::from_str(
+            r#"{"heating":["many opt",{"power":["one mand",["3kW","6kW"]]}]}"#,
+        )
+        .unwrap();
+
+        let elem = p.create_element("heating").expect("a button must produce an element");
+        let obj = elem.as_obj().expect("a node with children, not a bare label");
+
+        // Tagged so the app knows the cardinality rule that applies to it.
+        assert!(obj.key.contains("heating"), "got {:?}", obj.key);
+        assert_ne!(obj.key, "heating", "the key should carry a cardinality tag");
+
+        // Pre-filled from the tree, so adding "heating" brings its options along.
+        assert!(!obj.children.is_empty(), "the added node should carry its children");
+    }
+
+    #[test]
+    fn the_one_opt_prefix_selects_a_different_tag_than_many_opt() {
+        // The button label carries `one-opt:` when an entry may be added at most
+        // once; the inserted node has to reflect that or the app applies the wrong
+        // rule.
+        let mut p = provider();
+        p.root = serde_json::from_str(r#"{"roof":["one opt",{"a":["one mand","x"]}]}"#).unwrap();
+
+        let one = p.create_element("one-opt:roof").unwrap();
+        let many = p.create_element("roof").unwrap();
+
+        let one_key = &one.as_obj().unwrap().key;
+        let many_key = &many.as_obj().unwrap().key;
+        assert_ne!(one_key, many_key, "one-opt and many-opt must tag differently");
+        assert!(one_key.contains("roof") && many_key.contains("roof"));
+    }
+
+    #[test]
+    fn adding_an_element_that_is_an_input_field_yields_a_bare_string() {
+        // An entry that is itself an input has nothing to expand into.
+        let mut p = provider();
+        let elem = p.create_element("<input>serial</input>").expect("still produces an element");
+        assert!(elem.as_str().is_some(), "an input entry should be a plain string");
+    }
+
+    #[test]
+    fn adding_an_unknown_element_still_produces_a_node() {
+        // The user pressed a button; producing nothing would look like a dead key.
+        let mut p = provider();
+        let elem = p.create_element("nonexistent").expect("should not return None");
+        assert!(elem.as_obj().is_some_and(|o| o.children.is_empty()));
+    }
+
+    #[test]
+    fn adding_an_element_resolves_relative_to_the_current_path() {
+        // The buttons live at whatever depth the user is browsing, so the lookup has
+        // to start there rather than at the root.
+        let mut p = provider();
+        p.root = serde_json::from_str(
+            r#"{"unit":["one mand",{"heating":["many opt",{"power":["one mand",["3kW"]]}]}]}"#,
+        )
+        .unwrap();
+        p.set_current_path("/unit");
+
+        let obj = p.create_element("heating").unwrap();
+        assert!(
+            !obj.as_obj().unwrap().children.is_empty(),
+            "should have found `heating` under /unit"
+        );
     }
 
     #[test]
