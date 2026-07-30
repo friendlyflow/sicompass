@@ -538,6 +538,58 @@ fn a_poisoned_plugin_renders_blanks_rather_than_panicking() {
     assert!(frame.cells.iter().all(|c| c.ch == ' '));
 }
 
+/// Where startup time goes when a WASM plugin is installed.
+///
+/// Ignored by default; run deliberately:
+///
+/// ```text
+/// cargo test -p sicompass --test wasm_plugin -- --ignored --nocapture startup
+/// ```
+#[test]
+#[ignore = "manual profiling aid; prints timings instead of asserting"]
+fn profile_startup_cost() {
+    let bytes = std::fs::read(hello_wasm()).unwrap();
+
+    // Engine construction is one-off and lazy; charge it explicitly rather than
+    // letting it hide inside whichever measurement runs first.
+    let t = std::time::Instant::now();
+    let _ = wasm_host::engine();
+    println!("\n  engine init            {:>10.2?}", t.elapsed());
+
+    // Compiling the component is the expensive part: Cranelift lowers the whole
+    // module to machine code.
+    let t = std::time::Instant::now();
+    let component = wasm_host::load_component(&hello_wasm()).expect("fixture compiles");
+    let compile = t.elapsed();
+    println!("  load_component         {:>10.2?}   ({} KiB of wasm)", compile, bytes.len() / 1024);
+
+    // Instantiating an already-compiled component, plus init + describe.
+    let mut instantiate = std::time::Duration::ZERO;
+    const N: u32 = 5;
+    for _ in 0..N {
+        let t = std::time::Instant::now();
+        let p = WasmProvider::from_component(&component, "hello", "hello", &fixture_dir(), Vec::new())
+            .expect("instantiates");
+        instantiate += t.elapsed();
+        std::hint::black_box(&p);
+    }
+    println!("  instantiate (avg of {N}) {:>9.2?}", instantiate / N);
+
+    // What the app actually does today, end to end, per provider.
+    let t = std::time::Instant::now();
+    let _ = WasmProvider::open(&hello_wasm(), "hello", "hello", &fixture_dir(), Vec::new());
+    println!("  open() = compile+inst  {:>10.2?}", t.elapsed());
+
+    println!(
+        "\n  Two caches sit behind these numbers. `load_component` keeps compiled\n  \
+         components in-process, so the app's per-tab provider sets do not each pay\n  \
+         to compile the same bytes; and wasmtime's on-disk cache carries the\n  \
+         compile across runs. With a cold on-disk cache expect `load_component`\n  \
+         near 1.2s for this fixture rather than the few ms shown here — delete\n  \
+         ~/.cache/wasmtime to see it.\n"
+    );
+}
+
 /// Rough per-frame cost of crossing the boundary, printed rather than asserted.
 ///
 /// Ignored by default: timing assertions are flaky under load and in CI. Run it

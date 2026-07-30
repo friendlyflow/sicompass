@@ -26,6 +26,7 @@ pub mod host_fetch;
 pub mod limits;
 pub mod provider;
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -214,6 +215,24 @@ fn engine_config() -> Config {
     config.consume_fuel(true);
     config.epoch_interruption(true);
 
+    // Persist compiled components across runs. Compiling is what makes plugin
+    // startup expensive — ~1.2s for a 65 KiB plugin — and `load_component`'s
+    // in-process cache only removes the *repeat* cost within one launch. This
+    // removes it for every launch after the first.
+    //
+    // Wasmtime keys the cache on its own version and configuration, so a wasmtime
+    // upgrade or a backend change (Cranelift vs Pulley) invalidates it rather than
+    // handing back an artifact built for something else. A failure here is not
+    // worth refusing to start over: it costs a recompile, nothing more.
+    match wasmtime::Cache::from_file(None) {
+        Ok(cache) => {
+            config.cache(Some(cache));
+        }
+        Err(e) => {
+            tracing::debug!(target: "wasm_plugin", "no compilation cache: {e}");
+        }
+    }
+
     // Retarget Cranelift at Pulley for App Store / iOS builds. Cranelift is still
     // linked — it is what lowers wasm into Pulley bytecode — but its output is
     // interpreted rather than executed, so the process never needs writable-then-
@@ -389,15 +408,55 @@ pub fn audit_component_imports(
 // Component loading
 // ---------------------------------------------------------------------------
 
-/// Parse and validate a `.wasm` file as a component, without instantiating it.
+/// Identifies a compiled component: where it came from, and which version of it.
 ///
-/// Used by [`WasmProvider::open`] and available to the updater as a real
-/// "does this artifact load" check on every platform — the old `dlopen` test-load
-/// only worked on Linux and macOS.
+/// Modification time and length are part of the key so a plugin the updater swapped
+/// on disk is recompiled rather than silently served from the cache.
+type ComponentKey = (PathBuf, Option<std::time::SystemTime>, u64);
+
+fn component_cache() -> &'static std::sync::Mutex<HashMap<ComponentKey, Component>> {
+    static CACHE: OnceLock<std::sync::Mutex<HashMap<ComponentKey, Component>>> = OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+/// Parse, validate and compile a `.wasm` file as a component, without
+/// instantiating it.
+///
+/// Used by [`WasmProvider::open`] and available to the updater as a real "does this
+/// artifact load" check on every platform — the old `dlopen` test-load only worked
+/// on Linux and macOS.
+///
+/// # Compiled components are cached
+///
+/// `Component::new` is Cranelift lowering an entire module to machine code, and it
+/// dominates plugin startup: **1.16s for a 65 KiB plugin**, against 0.4ms to
+/// instantiate one. The app builds a fresh provider set per tab, so without a cache
+/// the same bytes are compiled once per tab and startup grows with tab count — three
+/// tabs meant roughly three and a half seconds of recompiling identical input.
+///
+/// `Component` is reference-counted and cheap to clone, and instantiating one into
+/// several independent `Store`s is exactly the intended usage: isolation lives at
+/// the store level, not the component level, so sharing the compiled artifact costs
+/// nothing in sandboxing terms.
 pub fn load_component(path: &Path) -> Result<Component, String> {
+    let meta = std::fs::metadata(path)
+        .map_err(|e| format!("read {}: {e}", path.display()))?;
+    let key: ComponentKey = (path.to_path_buf(), meta.modified().ok(), meta.len());
+
+    if let Ok(cache) = component_cache().lock()
+        && let Some(component) = cache.get(&key)
+    {
+        return Ok(component.clone());
+    }
+
     let bytes = std::fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
-    Component::new(engine(), &bytes)
-        .map_err(|e| format!("{} is not a valid WASM component: {e}", path.display()))
+    let component = Component::new(engine(), &bytes)
+        .map_err(|e| format!("{} is not a valid WASM component: {e}", path.display()))?;
+
+    if let Ok(mut cache) = component_cache().lock() {
+        cache.insert(key, component.clone());
+    }
+    Ok(component)
 }
 
 /// The import names this host is prepared to satisfy, as
@@ -529,6 +588,58 @@ mod tests {
     fn load_component_reports_a_missing_file() {
         let err = load_err(Path::new("/no/such/plugin.wasm"));
         assert!(err.starts_with("read "), "unexpected: {err}");
+    }
+
+    #[test]
+    fn a_rewritten_component_is_not_served_from_the_cache() {
+        // Compiled components are cached because `Component::new` costs ~1.16s for a
+        // 65 KiB plugin and the app builds one provider set per tab. The risk that
+        // introduces is staleness: the updater swaps a plugin's `.wasm` in place, and
+        // a cache keyed on path alone would keep running the old code. The key
+        // includes modification time and length to prevent that.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p.wasm");
+
+        std::fs::write(&path, b"not a component").unwrap();
+        let meta = std::fs::metadata(&path).unwrap();
+        let first: ComponentKey = (path.clone(), meta.modified().ok(), meta.len());
+
+        // Rewrite with different content, as an update would.
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        std::fs::write(&path, b"still not a component, but longer").unwrap();
+        let meta = std::fs::metadata(&path).unwrap();
+        let second: ComponentKey = (path.clone(), meta.modified().ok(), meta.len());
+
+        assert_ne!(first, second, "an in-place rewrite must produce a different key");
+    }
+
+    #[test]
+    fn compiling_the_same_component_twice_returns_a_cached_clone() {
+        // Not a timing assertion — those are flaky. This checks the cache is
+        // populated and hit, which is what makes the second call cheap.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/wasm/hello.wasm");
+        if !path.exists() {
+            return; // fixture not present in this checkout
+        }
+
+        let meta = std::fs::metadata(&path).unwrap();
+        let key: ComponentKey = (path.clone(), meta.modified().ok(), meta.len());
+
+        load_component(&path).expect("fixture compiles");
+        assert!(
+            component_cache().lock().unwrap().contains_key(&key),
+            "loading should have cached the compiled component"
+        );
+
+        // A second load of the same bytes must reuse that entry rather than adding
+        // another — the whole point is not paying Cranelift twice.
+        let len_after_first = component_cache().lock().unwrap().len();
+        load_component(&path).expect("fixture compiles");
+        assert_eq!(
+            component_cache().lock().unwrap().len(),
+            len_after_first,
+            "a second load of the same file must not add another entry"
+        );
     }
 
     // --- settings scoping ---
