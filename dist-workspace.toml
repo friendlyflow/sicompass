@@ -5,7 +5,7 @@ members = ["cargo:."]
 #   dist generate
 [dist]
 # The preferred dist version to use in CI (Cargo.toml SemVer syntax)
-cargo-dist-version = "0.31.0"
+cargo-dist-version = "0.32.0"
 # CI backend
 ci = "github"
 # Trigger the release from the GitHub web UI (Actions -> Release -> Run
