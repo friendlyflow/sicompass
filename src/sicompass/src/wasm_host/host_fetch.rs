@@ -249,12 +249,22 @@ fn robots_cache() -> &'static Mutex<HashMap<String, RobotsEntry>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-// Note for tests: do NOT add a "clear the whole cache" helper. The cache is
-// process-global and the `live` tests run in parallel, so clearing it wipes other
-// tests' entries mid-run — including the `last_request` timestamp the crawl-delay
-// test depends on, which made that test fail intermittently. It is not needed
-// either: every `MockServer` binds a fresh port, so each test already has its own
-// origin key and cannot collide with another's.
+/// Forget one origin's cached robots.txt. Tests only.
+///
+/// Per-origin, deliberately. Clearing the *whole* cache wipes sibling tests'
+/// entries mid-run — including the `last_request` timestamp the crawl-delay test
+/// depends on — because the `live` tests run in parallel.
+///
+/// Needed at all because origins are less unique than they look. Each `MockServer`
+/// binds a fresh port, but a dropped server releases its port for reuse, so a later
+/// test can land on the same `host:port` and inherit the earlier test's entry —
+/// typically "no restrictions", which makes a robots.txt test silently pass a
+/// request it should have blocked. The one-hour TTL means that entry never expires
+/// within a run. Rare on a developer machine, reliable in CI.
+#[cfg(test)]
+fn forget_robots(origin: &str) {
+    robots_cache().lock().unwrap().remove(origin);
+}
 
 // ---------------------------------------------------------------------------
 // Address checks
@@ -817,13 +827,17 @@ mod tests {
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
-        /// Allow this thread to reach the mock server on 127.0.0.1.
+        /// Allow this thread to reach the mock server on 127.0.0.1, and drop any
+        /// robots.txt cached for this server's origin.
         ///
-        /// Thread-local, so it cannot leak into a test that is checking the
-        /// internal-address refusal itself. The robots cache deliberately is *not*
-        /// cleared here — see the note above `robots_cache`.
-        fn arrange() {
+        /// The internal-address flag is thread-local, so it cannot leak into a test
+        /// checking that refusal itself. The cache eviction is per-origin: a port
+        /// freed by an earlier server can be handed to this one, and inheriting that
+        /// server's rules would quietly invert what the test is checking. See
+        /// `forget_robots`.
+        fn arrange(server: &MockServer) {
             ALLOW_INTERNAL_FOR_TESTS.with(|c| c.set(true));
+            forget_robots(&server.uri());
         }
 
         fn get(url: &str) -> HttpRequest {
@@ -851,8 +865,8 @@ mod tests {
 
         #[tokio::test(flavor = "multi_thread")]
         async fn an_allowed_request_succeeds_and_returns_the_body() {
-            arrange();
             let server = MockServer::start().await;
+            arrange(&server);
             serve_robots(&server, "User-agent: *\nDisallow:\n").await;
             Mock::given(method("GET"))
                 .and(path("/page"))
@@ -869,8 +883,8 @@ mod tests {
 
         #[tokio::test(flavor = "multi_thread")]
         async fn a_host_off_the_allowlist_never_reaches_the_network() {
-            arrange();
             let server = MockServer::start().await;
+            arrange(&server);
             // No mounts at all: if the allowlist failed open, the request would 404
             // rather than being refused, and the error text would differ.
             let mut p = FetchPolicy::new("demo", &["somewhere.else".to_owned()]);
@@ -880,8 +894,8 @@ mod tests {
 
         #[tokio::test(flavor = "multi_thread")]
         async fn robots_disallow_blocks_the_request() {
-            arrange();
             let server = MockServer::start().await;
+            arrange(&server);
             serve_robots(&server, "User-agent: *\nDisallow: /private\n").await;
             Mock::given(method("GET"))
                 .and(path("/private/secret"))
@@ -906,8 +920,8 @@ mod tests {
 
         #[tokio::test(flavor = "multi_thread")]
         async fn crawl_delay_refuses_a_second_request_rather_than_sleeping() {
-            arrange();
             let server = MockServer::start().await;
+            arrange(&server);
             serve_robots(&server, "User-agent: *\nCrawl-delay: 30\n").await;
             Mock::given(method("GET"))
                 .and(path("/a"))
@@ -931,8 +945,8 @@ mod tests {
 
         #[tokio::test(flavor = "multi_thread")]
         async fn a_redirect_within_the_allowlist_is_followed() {
-            arrange();
             let server = MockServer::start().await;
+            arrange(&server);
             serve_robots(&server, "User-agent: *\nDisallow:\n").await;
             Mock::given(method("GET"))
                 .and(path("/from"))
@@ -955,8 +969,8 @@ mod tests {
         async fn a_redirect_off_the_allowlist_is_refused() {
             // The reason redirects are followed by hand: reqwest's automatic
             // following would have fetched this without ever re-checking.
-            arrange();
             let server = MockServer::start().await;
+            arrange(&server);
             serve_robots(&server, "User-agent: *\nDisallow:\n").await;
             Mock::given(method("GET"))
                 .and(path("/away"))
@@ -975,8 +989,8 @@ mod tests {
 
         #[tokio::test(flavor = "multi_thread")]
         async fn an_oversized_response_is_refused() {
-            arrange();
             let server = MockServer::start().await;
+            arrange(&server);
             serve_robots(&server, "User-agent: *\nDisallow:\n").await;
             // A real oversized body, not a fabricated content-length: a mismatched
             // header makes hyper reject the response server-side, which would have
@@ -1009,8 +1023,8 @@ mod tests {
         async fn a_missing_robots_file_permits_the_request() {
             // Every crawler treats an absent robots.txt as "no restrictions"; failing
             // closed here would make most of the web unreachable to plugins.
-            arrange();
             let server = MockServer::start().await;
+            arrange(&server);
             Mock::given(method("GET"))
                 .and(path("/robots.txt"))
                 .respond_with(ResponseTemplate::new(404))
@@ -1028,8 +1042,8 @@ mod tests {
 
         #[tokio::test(flavor = "multi_thread")]
         async fn a_disallowed_method_is_refused_before_any_request() {
-            arrange();
             let server = MockServer::start().await;
+            arrange(&server);
             let mut p = policy_for(&server);
             let mut req = get(&format!("{}/x", server.uri()));
             req.method = "DELETE".to_owned();
