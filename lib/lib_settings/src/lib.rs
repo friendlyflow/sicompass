@@ -1392,6 +1392,19 @@ mod tests {
 
     #[test]
     fn onboarding_body_renders_in_sicompass_section() {
+        // Two separate hazards, both from global state.
+        //
+        // The lock: this compares `localize::t(...)` against what `fetch()` renders,
+        // and the locale tests switch the active locale on the shared localizer. Run
+        // in parallel with one of those, the two calls land in different languages
+        // and the comparison fails for no interesting reason.
+        //
+        // The registration: run alone, no bundle has been loaded, so `t` falls back
+        // to the raw key while `fetch()` renders the translated string.
+        // `register_translations` is idempotent precisely so each test can call it.
+        let _g = locale_test_lock();
+        register_translations();
+
         let body = localize::t("settings-onboarding-body");
         let mut p = headless();
         assert!(sicompass_children(&mut p).iter().any(|c| c.as_str() == Some(body.as_str())),
