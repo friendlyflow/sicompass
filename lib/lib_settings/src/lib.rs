@@ -1413,6 +1413,13 @@ mod tests {
 
     #[test]
     fn first_run_is_flagged_when_file_missing() {
+        // Reads a translated string and compares it against what `fetch()`
+        // renders. Both depend on the active locale, which the locale tests
+        // switch on the shared localizer, so without the lock the two calls can
+        // land in different languages. `register_translations` covers the case
+        // where this test runs alone and no bundle has been loaded at all.
+        let _g = locale_test_lock();
+        register_translations();
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
         let mut p = SettingsProvider::new_headless().with_config_path(path);
@@ -2449,6 +2456,13 @@ mod tests {
 
     #[test]
     fn set_section_version_renders_under_section() {
+        // Reads a translated string and compares it against what `fetch()`
+        // renders. Both depend on the active locale, which the locale tests
+        // switch on the shared localizer, so without the lock the two calls can
+        // land in different languages. `register_translations` covers the case
+        // where this test runs alone and no bundle has been loaded at all.
+        let _g = locale_test_lock();
+        register_translations();
         use sicompass_sdk::provider::Provider;
         let mut p = SettingsProvider::new_headless()
             .with_config_path(test_config_path());
@@ -2472,6 +2486,13 @@ mod tests {
 
     #[test]
     fn set_section_version_for_sicompass_renders_in_fetch() {
+        // Reads a translated string and compares it against what `fetch()`
+        // renders. Both depend on the active locale, which the locale tests
+        // switch on the shared localizer, so without the lock the two calls can
+        // land in different languages. `register_translations` covers the case
+        // where this test runs alone and no bundle has been loaded at all.
+        let _g = locale_test_lock();
+        register_translations();
         use sicompass_sdk::provider::Provider;
         let mut p = SettingsProvider::new_headless()
             .with_config_path(test_config_path());
@@ -2493,6 +2514,13 @@ mod tests {
 
     #[test]
     fn no_version_when_unset() {
+        // Reads a translated string and compares it against what `fetch()`
+        // renders. Both depend on the active locale, which the locale tests
+        // switch on the shared localizer, so without the lock the two calls can
+        // land in different languages. `register_translations` covers the case
+        // where this test runs alone and no bundle has been loaded at all.
+        let _g = locale_test_lock();
+        register_translations();
         let mut p = SettingsProvider::new_headless()
             .with_config_path(test_config_path());
         p.add_section("file browser");
