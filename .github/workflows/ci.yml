@@ -31,11 +31,9 @@ jobs:
       matrix:
         include:
           - name: cranelift (jit)
-            features: bundled-sdl3
             flags: ""
           - name: pulley (no-jit)
-            features: bundled-sdl3,no-jit-wasm
-            flags: "--no-default-features"
+            flags: "--no-default-features --features no-jit-wasm"
     steps:
       - uses: actions/checkout@v4
 
@@ -43,9 +41,8 @@ jobs:
         with:
           components: clippy
 
-      # SDL3 is too new for the Ubuntu repositories, so the `bundled-sdl3` feature
-      # builds it from source. That needs cmake and the X11/Wayland/audio headers
-      # SDL probes for.
+      # SDL3 is too new for the Ubuntu repositories, so it is built from source
+      # below. These are the headers SDL probes for.
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -59,16 +56,30 @@ jobs:
             libdrm-dev libgbm-dev libegl-dev \
             libwebp-dev
 
-      # Building SDL3 from source on every run would dominate the job.
+      # Pinned to the same SDL3 the release workflow builds. Deliberately *not*
+      # the `bundled-sdl3` feature: that pulls SDL 3.4.12, whose SDL_iostream.c
+      # uses errno/EINTR without including <errno.h>, which current GCC rejects
+      # outright. `bundled-sdl3` is still what the Windows release uses, where
+      # MSVC compiles it fine.
+      - name: Build SDL3 from source
+        run: |
+          git clone --depth 1 --branch release-3.2.28 \
+            https://github.com/libsdl-org/SDL.git SDL3
+          cmake -S SDL3 -B SDL3/build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr/local
+          cmake --build SDL3/build -j"$(nproc)"
+          sudo cmake --install SDL3/build
+          sudo ldconfig
+
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.name }}
 
       - name: Test
-        run: cargo test --workspace ${{ matrix.flags }} --features ${{ matrix.features }}
+        run: cargo test --workspace ${{ matrix.flags }}
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets ${{ matrix.flags }} --features ${{ matrix.features }}
+        run: cargo clippy --workspace --all-targets ${{ matrix.flags }}
 
   # The guest half of the SDK has to keep building for wasm, and the example plugin
   # has to keep producing a component that imports nothing beyond the host
