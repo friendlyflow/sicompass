@@ -61,9 +61,6 @@
               vulkan-headers
               glslang
 
-              # Script providers (TypeScript)
-              bun
-
               # graphify code-graph CLI is a uv-installed Python tool
               # (PyPI package `graphifyy`); uv bootstraps it in the shellHook.
               uv

@@ -14,7 +14,6 @@
 //! [`apply_pending_settings`].
 
 use crate::app_state::AppRenderer;
-use crate::plugin_loader::{NativePlugin, ScriptProvider};
 use crate::plugin_manifest::{DiscoveredPlugin, PluginManifest, PluginType, discover_user_plugins};
 use sicompass_sdk::ffon::{FfonElement, IdArray};
 use sicompass_sdk::provider::Provider;
@@ -465,13 +464,6 @@ fn instantiate_user_plugin(plugin: &DiscoveredPlugin) -> Option<Box<dyn Provider
                 }
             }
         }
-        PluginType::Native => NativePlugin::open(&plugin.entry_path)
-            .map(|p| Box::new(p) as Box<dyn Provider>),
-        PluginType::Script => Some(Box::new(ScriptProvider::new(
-            &m.name,
-            &m.display_name,
-            plugin.entry_path.clone(),
-        ).with_supports_config_files(m.supports_config_files))),
         PluginType::Factory => instantiate_builtin(&m.name),
     }
 }
@@ -2061,7 +2053,7 @@ mod tests {
         PluginManifest {
             name: name.to_owned(),
             display_name: name.to_owned(),
-            plugin_type: PluginType::Script,
+            plugin_type: PluginType::Wasm,
             entry: "plugin.ts".to_owned(),
             supports_config_files: false,
             settings: vec![],
@@ -2160,29 +2152,47 @@ mod tests {
         register_provider(&mut r, Box::new(MockProv::new("settings")));
         let len_before = r.providers.len();
         enable_provider(&mut r, "completely-unknown-plugin");
-        // No provider should be added (ScriptProvider init would fail loading
-        // /nonexistent/plugin.ts, but with an empty cache the early return fires first)
+        // Nothing is added: the empty cache makes `enable_provider` return before it
+        // ever tries to instantiate anything.
         assert_eq!(r.providers.len(), len_before);
     }
 
     #[test]
     fn disable_then_reenable_user_plugin_via_cache() {
-        // This test validates that enable_provider finds the user plugin in the cache.
-        // ScriptProvider doesn't actually run `bun` in tests (init() is a no-op,
-        // fetch() calls bun which will fail silently returning []).
+        // Checks that `enable_provider` finds a user plugin in the cache and
+        // registers it. Uses the real fixture rather than a placeholder path,
+        // because a WASM plugin either loads or does not — unlike the old
+        // ScriptProvider, which was constructed even when its script was missing and
+        // only failed later, when something called it.
         let _cache_guard = PLUGIN_CACHE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut r = AppRenderer::new();
-        let plugin = make_discovered_plugin("my-demo");
+        let plugin = make_wasm_plugin("hello", "hello.wasm", vec![]);
         _reset_user_plugin_cache(vec![plugin]);
 
         // Pre-register a settings sentinel at the end
         register_provider(&mut r, Box::new(MockProv::new("settings")));
         let before = r.providers.len();
 
-        enable_provider(&mut r, "my-demo");
-        // ScriptProvider is created (even if bun fails, the provider object is inserted)
+        enable_provider(&mut r, "hello");
         assert_eq!(r.providers.len(), before + 1);
-        assert!(r.providers.iter().any(|p| p.name() == "my-demo"));
+        assert!(r.providers.iter().any(|p| p.name() == "hello"));
+    }
+
+    #[test]
+    fn enabling_a_plugin_whose_file_is_missing_adds_nothing() {
+        // The behaviour that changed with WASM: a provider that cannot load is not
+        // registered at all, rather than registered as a shell that fails on use.
+        let _cache_guard = PLUGIN_CACHE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut r = AppRenderer::new();
+        let mut plugin = make_wasm_plugin("ghost", "hello.wasm", vec![]);
+        plugin.entry_path = PathBuf::from("/nonexistent/plugin.wasm");
+        _reset_user_plugin_cache(vec![plugin]);
+
+        register_provider(&mut r, Box::new(MockProv::new("settings")));
+        let before = r.providers.len();
+
+        enable_provider(&mut r, "ghost");
+        assert_eq!(r.providers.len(), before, "a broken plugin must not be registered");
     }
 
     // --- inject_builtin_settings registers text entries on hot-enable ---

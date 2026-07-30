@@ -16,12 +16,9 @@ sha2 = { workspace = true }
 ed25519-dalek = { workspace = true }
 base64 = { workspace = true }
 tracing = { workspace = true }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-libloading = { workspace = true }
-
-[target.'cfg(target_os = "macos")'.dependencies]
-libloading = { workspace = true }
+# Validates a staged plugin on every platform, which the old dlopen test-load
+# could only do on Linux and macOS.
+wasmparser = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { workspace = true }
