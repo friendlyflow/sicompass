@@ -1,0 +1,124 @@
+name: Publish release
+
+# Creates the GitHub Release that cargo-dist cannot create itself.
+#
+# The `friendlyflow` organisation disables write permissions for workflows, and
+# that is an org-wide ceiling — no repository setting can raise it, so
+# `secrets.GITHUB_TOKEN` is read-only here no matter what `release.yml` asks for.
+# cargo-dist builds and uploads its artifacts happily; only its final
+# `gh release create` fails, with `403 Resource not accessible by integration`.
+#
+# cargo-dist has no supported way to use a different token for a same-repo
+# release: it only wires `GH_RELEASES_TOKEN` in when publishing to an *external*
+# repo, and that path derives the target commit from a submodule we do not have.
+# `release.yml` is generated, so hand-editing it is not an option either.
+#
+# So this runs afterwards with a narrowly-scoped PAT, doing exactly what the
+# `host` job's last step would have done. The alternative is enabling write
+# permissions for every workflow in the whole organisation, which is a much
+# broader grant than one release job needs.
+#
+# ## Setup
+#
+# Create a fine-grained personal access token with **Contents: read and write**
+# scoped to `friendlyflow/sicompass` only, and store it as the repository secret
+# `RELEASE_TOKEN`. Without it this workflow logs what is missing and stops.
+#
+# ## Known wart
+#
+# The `host` job in the cargo-dist `Release` run still fails, so that run shows
+# red even when the release publishes fine. Nothing here can prevent that. Only
+# lifting the org restriction makes the whole pipeline green.
+
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+
+# Downloading another run's artifacts needs `actions: read`, which the read-only
+# default token already has. The PAT is used for exactly one command below.
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  publish:
+    name: Create the GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for the release token
+        id: token
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          if [ -z "$RELEASE_TOKEN" ]; then
+            echo "::warning::RELEASE_TOKEN is not set, so the GitHub Release cannot be created."
+            echo "::warning::Create a fine-grained PAT with Contents: write on this repo and add it as RELEASE_TOKEN."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fetch the artifacts the Release run built
+        if: steps.token.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p artifacts
+          # `artifacts-*` only, matching what cargo-dist's own host job fetches.
+          # Downloading everything would also pull `cargo-dist-cache`, and the
+          # ~30 MB `dist` binary inside it would end up attached to the release.
+          # A read-only token is enough for this.
+          if ! gh run download "${{ github.event.workflow_run.id }}" \
+                --repo "${{ github.repository }}" \
+                --pattern 'artifacts-*' --dir artifacts; then
+            echo "::notice::That Release run produced no artifacts; nothing to publish."
+            exit 0
+          fi
+          find artifacts -type f | sort
+
+      - name: Publish
+        if: steps.token.outputs.present == 'true'
+        env:
+          # The one place the elevated token is used.
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          RELEASE_COMMIT: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          manifest=$(find artifacts -name dist-manifest.json | head -1)
+          if [ -z "$manifest" ]; then
+            echo "::notice::No dist-manifest.json, so this was not a release build. Nothing to do."
+            exit 0
+          fi
+
+          tag=$(jq -r '.announcement_tag // empty' "$manifest")
+          title=$(jq -r '.announcement_title // empty' "$manifest")
+          jq -r '.announcement_github_body // ""' "$manifest" > notes.md
+          prerelease=$(jq -r 'if .announcement_is_prerelease then "--prerelease" else "" end' "$manifest")
+
+          if [ -z "$tag" ]; then
+            echo "::error::dist-manifest.json has no announcement_tag."
+            exit 1
+          fi
+
+          # Idempotent: a re-run must not fail, and must not silently skip
+          # uploading if the release exists but is missing assets.
+          if gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "::notice::Release $tag already exists; uploading any missing assets."
+            gh release upload "$tag" --repo "${{ github.repository }}" --clobber \
+              $(find artifacts -type f ! -name '*-dist-manifest.json')
+            exit 0
+          fi
+
+          # Same set cargo-dist would attach: everything except the per-target
+          # manifests, which are build scratch.
+          gh release create "$tag" \
+            --repo "${{ github.repository }}" \
+            --target "$RELEASE_COMMIT" \
+            --title "${title:-$tag}" \
+            --notes-file notes.md \
+            $prerelease \
+            $(find artifacts -type f ! -name '*-dist-manifest.json')
+
+          echo "Published $tag"
