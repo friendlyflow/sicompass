@@ -1,0 +1,119 @@
+name: CI
+
+# Runs the test suite on every push and pull request.
+#
+# The WASM plugin host is built two different ways — Cranelift for normal builds,
+# Pulley for the App Store / iOS one — and they are genuinely different code paths,
+# not a flag. A guest that traps on fuel under Cranelift trips the wall-clock
+# deadline under Pulley instead, and `Component::new` does not even exist without a
+# compiler backend. Testing one leg would leave the other untested until release.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push supersedes an in-flight run on the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: test (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      # Report both legs even when one fails: knowing whether a failure is
+      # backend-specific is most of the diagnosis.
+      fail-fast: false
+      matrix:
+        include:
+          - name: cranelift (jit)
+            features: bundled-sdl3
+            flags: ""
+          - name: pulley (no-jit)
+            features: bundled-sdl3,no-jit-wasm
+            flags: "--no-default-features"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      # SDL3 is too new for the Ubuntu repositories, so the `bundled-sdl3` feature
+      # builds it from source. That needs cmake and the X11/Wayland/audio headers
+      # SDL probes for.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential pkg-config cmake \
+            libvulkan-dev libfreetype-dev libharfbuzz-dev \
+            libwayland-dev libxkbcommon-dev \
+            libx11-dev libxext-dev libxcursor-dev libxi-dev \
+            libxrandr-dev libxss-dev \
+            libpulse-dev libasound2-dev libdbus-1-dev libatspi2.0-dev \
+            libdrm-dev libgbm-dev libegl-dev \
+            libwebp-dev
+
+      # Building SDL3 from source on every run would dominate the job.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.name }}
+
+      - name: Test
+        run: cargo test --workspace ${{ matrix.flags }} --features ${{ matrix.features }}
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets ${{ matrix.flags }} --features ${{ matrix.features }}
+
+  # The guest half of the SDK has to keep building for wasm, and the example plugin
+  # has to keep producing a component that imports nothing beyond the host
+  # interfaces. That audit is the security property in this design, so it belongs in
+  # CI rather than in a script someone remembers to run.
+  guest:
+    name: wasm guest builds and audits clean
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-tools
+        uses: bytecodealliance/actions/wasm-tools/setup@v1
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: guest
+
+      # The fixtures the host tests run against are committed, so this checks they
+      # still match what the current sources produce rather than silently drifting.
+      - name: Rebuild the example plugin and compare with the committed fixture
+        run: |
+          if [ ! -d ../sicompass-plugin-sdk ]; then
+            echo "::notice::SDK checkout not present; skipping guest rebuild."
+            exit 0
+          fi
+          cd ../sicompass-plugin-sdk && ./scripts/verify-guest.sh
+
+      # Independent of the SDK checkout: the committed fixtures must import nothing
+      # the host does not offer.
+      - name: Audit the committed fixtures
+        run: |
+          for f in src/sicompass/tests/fixtures/wasm/*.wasm; do
+            echo "== $f"
+            imports=$(wasm-tools component wit "$f" | grep -E '^\s*import' || true)
+            echo "$imports"
+            if echo "$imports" | grep -qi 'wasi:'; then
+              echo "::error::$f imports WASI, which voids the capability model"
+              exit 1
+            fi
+            if echo "$imports" | grep -vE 'sicompass:plugin/(types|host|net)@' | grep -q 'import'; then
+              echo "::error::$f imports an interface the host does not provide"
+              exit 1
+            fi
+          done

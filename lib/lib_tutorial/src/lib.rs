@@ -433,6 +433,27 @@ mod tests {
         TutorialProvider::new_headless()
     }
 
+    #[test]
+    fn the_runtime_assets_exist_where_register_looks_for_them() {
+        // These are loaded by path at runtime, not compiled in, so a rename or a
+        // packaging change can break the tutorial's images with nothing failing at
+        // build time — which is exactly what happened: the release archives shipped
+        // no assets at all for a long while, and nothing noticed.
+        //
+        // Anchored on this crate's manifest dir rather than `resolve_repo_asset`,
+        // whose `CARGO_MANIFEST_DIR` branch resolves against the *SDK* crate and
+        // whose remaining branches depend on the working directory.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for rel in ["assets/tutorial/texture.jpg", "assets/tutorial/ffon.json"] {
+            let path = root.join(rel);
+            assert!(
+                path.exists(),
+                "{rel} is missing. It must stay under the top-level assets/ tree: \
+                 that is the only directory the release archives ship."
+            );
+        }
+    }
+
     fn joined(elems: &[FfonElement]) -> String {
         elems
             .iter()
@@ -679,7 +700,7 @@ mod tests {
 /// Register the tutorial with the SDK factory and manifest registries.
 pub fn register() {
     sicompass_sdk::register_provider_factory("tutorial", || {
-        let assets = sicompass_sdk::platform::resolve_repo_asset("lib/lib_tutorial/assets");
+        let assets = sicompass_sdk::platform::resolve_repo_asset("assets/tutorial");
         Box::new(TutorialProvider::new(&assets))
     });
     sicompass_sdk::register_builtin_manifest(
