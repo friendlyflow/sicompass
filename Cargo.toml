@@ -131,6 +131,11 @@ wasmtime = { version = "47", default-features = false, features = [
     "runtime",
     "component-model",
     "std",
+    # On-disk compilation cache. Compiling a component is the dominant plugin
+    # startup cost (~1.2s for a 65 KiB plugin), and without this every launch pays
+    # it again. The cached artifact matches the backend: native code for the JIT
+    # build, Pulley bytecode for the no-JIT one.
+    "cache",
 ] }
 
 # PTY (interactive shell sessions used by sicompass-shell)
