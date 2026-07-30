@@ -26,3 +26,6 @@ pub mod shortcuts;
 pub mod state;
 pub mod text;
 pub mod unicode_search;
+/// Host for sandboxed WASM plugins — the replacement for `dlopen`ed native plugins
+/// and `bun`-spawned script plugins, neither of which can ship on Apple's stores.
+pub mod wasm_host;
