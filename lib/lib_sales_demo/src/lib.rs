@@ -26,10 +26,15 @@ use sicompass_sdk::{FfonElement, FfonObject, Provider};
 /// and a runtime failure mode. It is fixed data, so it belongs in the binary.
 const EQUIPMENT_JSON: &str = include_str!("../assets/equipment1.json");
 
-/// Repo-relative path to the diagram shown by the `d` key. Still a real file: the
-/// host loads and scales images itself, so it needs a path rather than bytes.
+/// Path to the diagram shown by the `d` key, relative to the app root.
+///
+/// Still a real file: the host loads and scales images itself, so it needs a path
+/// rather than bytes. Lives under the top-level `assets/` tree because that is the
+/// one directory the release archives ship — a per-crate `assets/` dir cannot be
+/// packaged without colliding, since cargo-dist copies `include` paths to the
+/// archive root by basename.
 const DASHBOARD_IMAGE_ASSET: &str =
-    "lib/lib_sales_demo/assets/115-Draw-through-Air-Handling-Unit-Diagram-1.webp";
+    "assets/sales-demo/115-Draw-through-Air-Handling-Unit-Diagram-1.webp";
 
 /// The cardinality vocabulary. An entry's first element is one of these; anything
 /// else means the entry is not a configuration node and is skipped.
@@ -535,7 +540,8 @@ mod tests {
         // resolves through its current-directory fallback — which points at the
         // crate directory under `cargo test -p`, not the repo root.
         let asset = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("assets/115-Draw-through-Air-Handling-Unit-Diagram-1.webp");
+            .join("../..")
+            .join(DASHBOARD_IMAGE_ASSET);
         assert!(asset.exists(), "the diagram is missing at {}", asset.display());
     }
 

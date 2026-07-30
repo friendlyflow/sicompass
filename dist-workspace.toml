@@ -28,5 +28,10 @@ installers = ["powershell", "msi"]
 # (FreeType is bundled from source automatically by freetype-sys 0.20.1, the
 # version freetype 0.7 pins — no feature flag needed.)
 features = ["bundled-sdl3"]
-# Ship the third-party attribution file inside every release archive.
-include = ["THIRD-PARTY-LICENSES.html"]
+# Ship the third-party attribution file and the runtime assets inside every
+# release archive. `include` copies each path to the archive root, so the
+# top-level `assets/` directory arrives as `assets/` — the path the tutorial and
+# sales-demo providers ask `resolve_repo_asset` for. This is also why those
+# assets live in one shared tree rather than per-crate `assets/` dirs, which
+# would collide on that basename.
+include = ["THIRD-PARTY-LICENSES.html", "assets"]

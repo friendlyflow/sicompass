@@ -25,9 +25,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Bun
-        uses: oven-sh/setup-bun@v2
-
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -229,6 +226,10 @@ jobs:
           cp build/sicompass ${PKG_DIR}/usr/share/sicompass/
           cp fonts/Consolas-Regular.ttf ${PKG_DIR}/usr/share/sicompass/fonts/
           cp shaders/*.spv ${PKG_DIR}/usr/share/sicompass/shaders/
+          # Runtime assets (tutorial images, sales-demo diagram). `resolve_repo_asset`
+          # looks beside the executable, and the wrapper below also cds here, so the
+          # tree has to keep its repo-relative shape.
+          cp -r assets ${PKG_DIR}/usr/share/sicompass/
 
           # Create wrapper script that changes to app directory
           cat > ${PKG_DIR}/usr/bin/sicompass << 'WRAPPER'
@@ -287,6 +288,7 @@ jobs:
           cp build/sicompass artifact-staging/
           cp fonts/Consolas-Regular.ttf artifact-staging/fonts/
           cp shaders/*.spv artifact-staging/shaders/
+          cp -r assets artifact-staging/
           # Use -a to preserve symlinks for SDL3
           cp -a /usr/local/lib/libSDL3.so* artifact-staging/lib/
           cp /usr/local/lib/libaccesskit.so artifact-staging/lib/
