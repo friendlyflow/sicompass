@@ -19,7 +19,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.1.7"
+version = "0.1.8"
 edition = "2024"
 license = "GPL-3.0-only"
 
@@ -28,7 +28,11 @@ license = "GPL-3.0-only"
 # plugin authors consume the same version. Local development uses the path
 # override in [patch.crates-io] below so edits in ../sicompass-plugin-sdk are
 # picked up without a publish round-trip.
-sicompass-sdk = "0.2.0"
+#
+# 0.3.0 is a hard floor, not a preference: it is the release that removed the
+# native/script plugin ABIs and added the `sicompass:plugin` WIT world. The app
+# needs `WIT_SOURCE` and would not compile against 0.2.x.
+sicompass-sdk = "0.3.0"
 sicompass-tutorial = { path = "lib/lib_tutorial" }
 sicompass-settings = { path = "lib/lib_settings" }
 sicompass-filebrowser = { path = "lib/lib_filebrowser" }
@@ -158,11 +162,16 @@ tempfile = "3"
 wiremock = "0.6"
 
 # Local override so SDK edits in the sibling repo are picked up immediately.
-# Uncomment this block during active SDK development; the CI release build
-# (cargo-dist) checks out only this repo, so a path patch pointing at a
-# missing sibling fails the build at manifest-parse time. Keeping it
-# disabled by default makes `git push <tag>` releases work without manual
-# surgery; re-enable locally when iterating on SDK changes.
+#
+# MUST STAY COMMENTED ON MAIN. The cargo-dist release build checks out only this
+# repo, so a path pointing at a sibling that is not there fails at manifest-parse
+# time — before anything is compiled, with an error that does not mention this
+# block. Uncomment it while iterating on the SDK, and re-comment it before
+# committing.
+#
+# The release flow for an SDK change is: publish the SDK first, then bump the pin
+# above. Uncommenting is a local convenience, never how a release resolves the
+# dependency.
 #
 # [patch.crates-io]
 # sicompass-sdk = { path = "../sicompass-plugin-sdk" }
