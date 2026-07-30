@@ -19,11 +19,23 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum PluginType {
+    /// Sandboxed WebAssembly component. The only kind of third-party plugin that
+    /// can ship on Apple's stores, and the only one whose manifest policy is
+    /// actually enforceable — see [`crate::wasm_host`].
+    Wasm,
     /// Native shared library (`.so` / `.dll` / `.dylib`).  The loader calls
     /// `sicompass_plugin_init` via `libloading`.
+    ///
+    /// Deprecated: being replaced by [`PluginType::Wasm`]. Apple forbids executing
+    /// downloaded native code, and an in-process plugin has full process
+    /// privileges, so `allowedHosts` and friends are advisory against it.
     Native,
     /// Script executed through `bun run` — same subcommand protocol as the
     /// built-in TypeScript providers.
+    ///
+    /// Deprecated alongside [`PluginType::Native`]: shipping and spawning a
+    /// general-purpose interpreter is equally incompatible with a store sandbox,
+    /// and `bun` is not bundled in release archives at all.
     #[default]
     Script,
     /// Instantiate a built-in factory provider by the manifest's `name` field.
@@ -92,6 +104,20 @@ pub struct PluginManifest {
     /// their own library must declare `false` and require a restart.
     #[serde(default = "default_hot_reload")]
     pub hot_reload: bool,
+    /// Hosts a `wasm` plugin may reach over the network.
+    ///
+    /// This is a capability declaration, not a hint. Absent or empty means the
+    /// network interface is **not linked into the guest at all**, so the plugin has
+    /// no reachable network function rather than a blocked one. A component that
+    /// uses the network without declaring hosts here is refused before it is
+    /// instantiated.
+    ///
+    /// Matching is exact and case-insensitive: subdomains must be listed
+    /// individually, because `evil.example.com` is not `example.com`. Listing them
+    /// here is also what shows the user, before they enable the plugin, where it
+    /// intends to connect.
+    #[serde(default)]
+    pub allowed_hosts: Vec<String>,
 }
 
 fn default_hot_reload() -> bool {
@@ -282,6 +308,75 @@ mod tests {
         assert_eq!(m.plugin_type, PluginType::Script);
     }
 
+    // --- wasm ---
+
+    #[test]
+    fn load_wasm_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_manifest(
+            &dir,
+            r#"{
+                "name": "weather",
+                "displayName": "weather",
+                "type": "wasm",
+                "entry": "plugin.wasm"
+            }"#,
+        );
+        let m = load_manifest(&path).unwrap();
+        assert_eq!(m.plugin_type, PluginType::Wasm);
+        assert_eq!(m.entry, "plugin.wasm");
+    }
+
+    #[test]
+    fn allowed_hosts_defaults_to_empty_which_means_no_network_at_all() {
+        // Absent is the safe default and must stay that way: an empty list is what
+        // makes the host leave the network interface unlinked, so a plugin that
+        // forgets to declare hosts gets no network rather than unrestricted access.
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_manifest(
+            &dir,
+            r#"{"name":"w","displayName":"W","type":"wasm","entry":"p.wasm"}"#,
+        );
+        let m = load_manifest(&path).unwrap();
+        assert!(m.allowed_hosts.is_empty());
+    }
+
+    #[test]
+    fn allowed_hosts_are_parsed_from_the_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_manifest(
+            &dir,
+            r#"{
+                "name": "weather",
+                "displayName": "weather",
+                "type": "wasm",
+                "entry": "plugin.wasm",
+                "allowedHosts": ["api.weather.example", "tiles.weather.example"]
+            }"#,
+        );
+        let m = load_manifest(&path).unwrap();
+        assert_eq!(
+            m.allowed_hosts,
+            vec!["api.weather.example".to_owned(), "tiles.weather.example".to_owned()]
+        );
+    }
+
+    #[test]
+    fn allowed_hosts_is_ignored_for_non_wasm_types() {
+        // It parses on any manifest, but only the wasm loader consults it. A native
+        // plugin could never have been constrained by it anyway — it can open its
+        // own socket — which is precisely why native is going away.
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_manifest(
+            &dir,
+            r#"{"name":"n","displayName":"N","type":"native","entry":"n.so",
+                "allowedHosts":["example.com"]}"#,
+        );
+        let m = load_manifest(&path).unwrap();
+        assert_eq!(m.plugin_type, PluginType::Native);
+        assert_eq!(m.allowed_hosts, vec!["example.com".to_owned()]);
+    }
+
     #[test]
     fn load_manifest_factory_type() {
         let dir = tempfile::tempdir().unwrap();
@@ -329,6 +424,29 @@ mod tests {
         assert_eq!(found[1].manifest.name, "b");
         assert_eq!(found[0].entry_path, a.join("a.ts"));
         assert_eq!(found[1].entry_path, b.join("b.so"));
+    }
+
+    #[test]
+    fn discover_resolves_a_wasm_entry_next_to_its_manifest() {
+        // The resolved `entry_path` is what the loader opens, and its parent is the
+        // confinement root for any path the guest hands back, so both must land
+        // inside the plugin's own directory.
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("weather");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(
+            dir.join("plugin.json"),
+            r#"{"name":"weather","displayName":"Weather","type":"wasm",
+                "entry":"plugin.wasm","allowedHosts":["api.weather.example"]}"#,
+        )
+        .unwrap();
+
+        let found = discover_plugins_in(root.path());
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].manifest.plugin_type, PluginType::Wasm);
+        assert_eq!(found[0].entry_path, dir.join("plugin.wasm"));
+        assert_eq!(found[0].entry_path.parent().unwrap(), dir);
+        assert_eq!(found[0].manifest.allowed_hosts, vec!["api.weather.example".to_owned()]);
     }
 
     #[test]

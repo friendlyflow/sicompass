@@ -31,6 +31,23 @@
               clippy
               rustfmt
 
+              # WASM plugin guests. No extra Rust target is needed: nixpkgs'
+              # rustc already ships std for wasm32-unknown-unknown, which is the
+              # target guests use. (Deliberately not a wasip2 target — wasip2's
+              # std declares wasi:* imports that the sicompass host links none
+              # of, and a guest free of WASI is what makes its import section a
+              # true capability set.)
+              #
+              # lld: nixpkgs strips rustc's bundled rust-lld, so the wasm link
+              # step needs wasm-ld from here. Without it, `cargo build --target
+              # wasm32-unknown-unknown` fails with "linker `lld` not found"
+              # (`cargo check` is unaffected, which is easy to be fooled by).
+              lld
+              # wasm-tools: `wasm-tools component new` wraps a core module as a
+              # component. No WASI adapter is involved, precisely because there
+              # are no WASI imports to adapt.
+              wasm-tools
+
               # Native libs required by Rust crates
               pkg-config
               sdl3

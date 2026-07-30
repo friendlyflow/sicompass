@@ -90,12 +90,6 @@ whatlang = "0.18"
 # Unicode
 unicode-normalization = "0.1"
 
-# Internationalization (Project Fluent)
-fluent = "0.17"
-fluent-langneg = "0.14"
-unic-langid = "0.9"
-intl-memoizer = "0.5"
-
 # Fuzzy search
 nucleo-matcher = "0.3"
 
@@ -123,14 +117,21 @@ futures = "0.3"
 tokio-util = "0.7"
 rusqlite = { version = "0.40", features = ["bundled"] }
 
-# HTML parsing
-scraper = "0.27"
-
-# URL handling
-url = "2"
-
 # Plugin loading
+#
+# `libloading` is the legacy `dlopen` path for `PluginType::Native`. It goes away
+# once third-party plugins are WASM-only; Apple forbids executing downloaded native
+# code, so it is the reason the store build is blocked.
 libloading = "0.9"
+
+# WASM plugin host. No compiler backend is selected here: the `sicompass` crate's
+# `jit-wasm` (default) and `no-jit-wasm` features pick `cranelift` or `pulley`, so
+# an App Store / iOS build can be built with no runtime code generation at all.
+wasmtime = { version = "47", default-features = false, features = [
+    "runtime",
+    "component-model",
+    "std",
+] }
 
 # PTY (interactive shell sessions used by sicompass-shell)
 portable-pty = "0.9"
@@ -168,23 +169,7 @@ wiremock = "0.6"
 # TLS/HTTP stack are 10-50x slower without optimizations.
 [profile.dev.package.chromiumoxide]
 opt-level = 2
-[profile.dev.package.chromiumoxide_cdp]
-opt-level = 2
-[profile.dev.package.async-tungstenite]
-opt-level = 2
-[profile.dev.package.html5ever]
-opt-level = 2
-[profile.dev.package.scraper]
-opt-level = 2
 [profile.dev.package.reqwest]
-opt-level = 2
-[profile.dev.package.hyper]
-opt-level = 2
-[profile.dev.package.hyper-util]
-opt-level = 2
-[profile.dev.package.rustls]
-opt-level = 2
-[profile.dev.package.ring]
 opt-level = 2
 
 # The profile that 'dist' will build with

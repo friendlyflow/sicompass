@@ -1,0 +1,463 @@
+// Sicompass plugin interface — the contract between the sicompass host and a
+// sandboxed WASM provider.
+//
+// This file is CANONICAL. `sicompass-sdk` ships it (see `WIT_SOURCE` in lib.rs)
+// so plugin authors always get the version their SDK matches, and the host repo
+// keeps a vendored copy at `src/sicompass/wit/` with a test asserting the two are
+// byte-identical.
+//
+// ---------------------------------------------------------------------------
+// The security property this file encodes
+// ---------------------------------------------------------------------------
+//
+// A WASM guest has no syscalls. Its entire ability to affect the outside world is
+// the set of functions the host links into it. So the imports below are not a
+// convenience API — they ARE the capability set, and it is deliberately tiny.
+//
+// Capabilities are split across two interfaces rather than one, because wasmtime
+// links host functions an interface at a time: `interface host` is always linked,
+// and `interface net` is linked ONLY when a plugin's `plugin.json` declares a
+// non-empty `allowedHosts`. Omit the field and a component referencing `net` fails
+// to instantiate. Not blocked by policy at call time — absent from the instance.
+//
+// Because LTO drops unused imports, a built component's import list also *reveals*
+// what it can do, so the host can compare it against the manifest's declaration and
+// reject a mismatch before instantiating anything.
+//
+// Guests target `wasm32-unknown-unknown`, NOT a `wasip2` target. wasip2's std
+// declares `wasi:*` imports (filesystem, sockets, cli, clocks) that the host links
+// none of, and tolerating them would mean `define_unknown_imports_as_traps()`,
+// which would reduce the import section from a capability set to a hint. There is
+// no WASI here at all, by design.
+//
+// ---------------------------------------------------------------------------
+// Two representation decisions worth knowing before you read on
+// ---------------------------------------------------------------------------
+//
+// 1. FFON crosses as an opaque byte blob, not a WIT record. WIT has no recursive
+//    types and `FfonElement` is a tree. Rather than invent a flattening, the blob
+//    uses the SDK's existing, already-tested binary codec
+//    (`ffon::serialize_binary` / `ffon::deserialize_binary`). Guests get the same
+//    codec from `sicompass-sdk` with `default-features = false`.
+//
+//    Deliberately NOT the JSON encoding the old `bun` script protocol used:
+//    `ffon::parse_json_value` is lossy on purpose (numbers and `null` coerce to
+//    strings), which is fine for a hand-written `.ts` file and wrong for an ABI.
+//
+// 2. Some read-only trait methods are batched rather than mirrored one-to-one.
+//    The host calls `tick` + `take-dashboard-request` + `take-navigation-request` +
+//    `needs-refresh` + `take-error` for every provider on every frame; mirroring
+//    that shape would mean 5 boundary crossings per provider at 60fps, which is
+//    the difference between viable and not (especially under the Pulley
+//    interpreter). So:
+//      - static flags  -> one `describe()` call, made once after `init`
+//      - per-frame state -> one `poll()` call, cached by the host
+//      - path mutators return the resulting path, so `current-path` needs no call
+//    The observable behaviour is identical, including the documented two-call
+//    semantics of the `take-*` requests (the host `take()`s its cached option).
+
+package sicompass:plugin@0.1.0;
+
+// ---------------------------------------------------------------------------
+// Shared data types
+// ---------------------------------------------------------------------------
+
+interface types {
+  /// A list of `FfonElement`s in the SDK's binary codec. A single element is
+  /// encoded as a one-element list, so there is exactly one codec to implement.
+  type ffon = list<u8>;
+
+  /// An item in a command's selection list (e.g. applications for "open with").
+  record list-item {
+    label: string,
+    data: string,
+  }
+
+  /// A result item from deep search (Ctrl+F).
+  record search-result {
+    /// Display label with prefix, e.g. `"- report.pdf"`, `"+ docs"`.
+    label: string,
+    /// Relative path context, e.g. `"docs > projects > "`.
+    breadcrumb: string,
+    /// Absolute navigation path for teleport.
+    nav-path: string,
+  }
+
+  /// What kind of fullscreen view the provider supports when the user presses `d`.
+  enum dashboard-kind {
+    /// Pressing `d` is a no-op.
+    none,
+    /// Static image; the host reads, scales and centers the path from
+    /// `dashboard-image-path`.
+    image,
+    /// Cell grid driven by per-frame `dashboard-render`.
+    interactive,
+  }
+
+  /// Per-cell text attributes. Only `reverse` is honoured today.
+  record cell-attrs {
+    bold: bool,
+    underline: bool,
+    reverse: bool,
+  }
+
+  /// One character cell. Colours are packed `0xRRGGBBAA`. An alpha of 0 in `bg`
+  /// means "draw no background fill".
+  record cell {
+    ch: char,
+    fg: u32,
+    bg: u32,
+    attrs: cell-attrs,
+  }
+
+  /// A snapshot of the provider's cell grid for one frame. `cells` is row-major
+  /// with length `cols * rows`; the host rejects a frame that disagrees.
+  /// `cursor` is `(col, row)`, 0-indexed; absent hides the cursor.
+  record frame {
+    cols: u16,
+    rows: u16,
+    cells: list<cell>,
+    cursor: option<tuple<u16, u16>>,
+  }
+
+  /// Keys the host maps SDL keycodes onto. Deliberately small: printable input
+  /// arrives through `dashboard-text`, and `ch` is only for when modifiers
+  /// suppress the text-input event (e.g. Ctrl+letter, stored lowercase).
+  variant keysym {
+    enter,
+    backspace,
+    tab,
+    escape,
+    up,
+    down,
+    left,
+    right,
+    home,
+    end,
+    page-up,
+    page-down,
+    insert,
+    delete,
+    %f(u8),
+    ch(char),
+    /// Anything unrecognised. Providers should generally ignore this.
+    unknown,
+  }
+
+  record key {
+    sym: keysym,
+    ctrl: bool,
+    shift: bool,
+    alt: bool,
+  }
+
+  /// A request to switch dashboard mode outside a user keypress — e.g. a terminal
+  /// noticing a child program emitted `ESC[?1049h`. Honoured only for the active
+  /// provider, so a background tab can never yank the user away.
+  enum dashboard-request {
+    enter,
+    leave,
+  }
+
+  /// A cursor move requested outside a keypress, for when background work
+  /// finishing would otherwise strand the user on a stale row.
+  enum navigation-request {
+    /// Descend into the children of the current element, as if Right were pressed.
+    enter-children,
+  }
+
+  /// A reversible action, for the unified undo/redo timeline.
+  ///
+  /// This is `TimelineEntry::ProviderOp` and only that. The typed variants
+  /// (`FsOp`, `ImapOp`, `ChatOp`, `Structural`, `TextChunk`, `Navigate`) stay
+  /// host-only: they carry side effects the host would have to replay on the
+  /// guest's behalf, and `FsSideEffect::TrashedDir` embeds a recursive directory
+  /// tree plus megabytes of file content. `provider-idx` is filled in by the host,
+  /// which is the only side that knows it.
+  record provider-op {
+    command: string,
+    payload: ffon,
+    label: string,
+  }
+
+  /// Values that do not change over a provider's lifetime. Fetched once, right
+  /// after `init`, instead of one call per accessor per use.
+  record descriptor {
+    /// Stable identifier. Must match the `name` in `plugin.json`.
+    name: string,
+    /// Localized text shown in the UI.
+    display-name: string,
+    /// Shown in the settings tree. Usually left absent, since the host prefers
+    /// `plugin.json`'s `version` field.
+    version: option<string>,
+    /// Enable Ctrl+S / Ctrl+O save and load.
+    supports-config-files: bool,
+    /// Always re-fetch on navigation.
+    no-cache: bool,
+    /// `current-path` is a real slash-separated filesystem path, so the timeline
+    /// view renders it verbatim rather than as a breadcrumb.
+    path-is-filesystem: bool,
+    /// Always label the provider root with `display-name`, regardless of depth.
+    stable-root-key: bool,
+    /// Behaves like a text editor: leaving Insert commits via `commit-edit`, and
+    /// the meta/scroll hint screens are suppressed.
+    has-editor-semantics: bool,
+    /// Whether pressing `d` may enter the dashboard. When false the dashboard can
+    /// still be entered via a `dashboard-request`.
+    manual-dashboard-entry-allowed: bool,
+    dashboard-kind: dashboard-kind,
+  }
+
+  /// Everything the host needs from a provider once per frame, in one call.
+  record poll-result {
+    /// Background state advanced; the view needs a redraw. (`tick`)
+    redraw: bool,
+    /// Cross-thread refresh signal. (`needs-refresh`)
+    needs-refresh: bool,
+    /// Work in flight the user would not want to lose by closing the tab; the
+    /// host confirms before tearing the provider down on Ctrl+W. (`is-busy`)
+    is-busy: bool,
+    /// Whether the user is still at the provider's logical root. (`at-root`)
+    at-root: bool,
+    /// A pending error to surface as a row. (`take-error`)
+    error: option<string>,
+    /// (`take-dashboard-request`)
+    dashboard-request: option<dashboard-request>,
+    /// (`take-navigation-request`)
+    navigation-request: option<navigation-request>,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Host imports — the complete capability set
+// ---------------------------------------------------------------------------
+
+/// Always linked. Nothing here grants ambient authority: no ambient filesystem, no
+/// ambient network, no way to observe or affect anything outside this plugin.
+interface host {
+  /// Write a diagnostic line to the host log, prefixed with the plugin name.
+  log: func(msg: string);
+
+  /// Read one of the settings this plugin declared in `plugin.json`. Scoped to
+  /// that plugin's own keys — not arbitrary access to the user's config.
+  get-setting: func(key: string) -> option<string>;
+
+  /// Milliseconds since the Unix epoch. Guests have no `wasi:clocks`.
+  now-millis: func() -> u64;
+
+  /// Look up a key in the host's Fluent bundles, so a plugin's user-visible text
+  /// localizes through the same path a built-in's does.
+  translate: func(key: string) -> string;
+}
+
+/// Network egress. **A separate interface from `host` on purpose.**
+///
+/// The host links this interface into a plugin only when that plugin's
+/// `plugin.json` declares a non-empty `allowedHosts`. Interface granularity is what
+/// makes that enforceable: wasmtime links host functions an interface at a time, so
+/// keeping `fetch` in `host` would have meant "link `log`" and "link `fetch`" were
+/// the same decision.
+///
+/// A component that references anything here without declaring `allowedHosts` fails
+/// to instantiate. The capability is absent, not denied at call time.
+interface net {
+  use types.{ffon};
+
+  record http-request {
+    method: string,
+    url: string,
+    headers: list<tuple<string, string>>,
+    body: option<list<u8>>,
+  }
+
+  record http-response {
+    status: u16,
+    headers: list<tuple<string, string>>,
+    body: list<u8>,
+  }
+
+  /// The ONLY network egress available to a plugin.
+  ///
+  /// The host enforces, per call: the `allowedHosts` allowlist, robots.txt
+  /// `Disallow` (block) and `Crawl-delay` (rate-limit), and per-domain request
+  /// quotas. A plugin cannot opt out of any of it, because there is no other way
+  /// out of the sandbox.
+  fetch: func(req: http-request) -> result<http-response, string>;
+
+  /// Fetch a URL and get it back as an FFON tree, reusing the host's HTML->FFON
+  /// pipeline rather than making every plugin reimplement it. Same policy checks as
+  /// `fetch`.
+  fetch-url-ffon: func(url: string) -> result<ffon, string>;
+}
+
+// ---------------------------------------------------------------------------
+// Guest exports — what a provider implements
+// ---------------------------------------------------------------------------
+
+interface provider {
+  use types.{
+    ffon, list-item, search-result, frame, key, descriptor, poll-result,
+    provider-op,
+  };
+
+  // ---- Lifecycle ---------------------------------------------------------
+
+  /// Called once before any other export.
+  init: func();
+
+  /// Constant properties. Called once, immediately after `init`, and cached by
+  /// the host for the provider's lifetime.
+  describe: func() -> descriptor;
+
+  /// Called once before the provider is dropped.
+  cleanup: func();
+
+  // ---- Data source -------------------------------------------------------
+
+  /// Children at the current path. The one genuinely required export.
+  fetch: func() -> ffon;
+
+  /// Children for the current *sub*-path, so the host can refresh one Obj's
+  /// children without rebuilding the provider root. Absent means "fall back to a
+  /// full refresh".
+  fetch-subtree-children: func() -> option<ffon>;
+
+  /// The display key for the parent Obj while inside a subtree, so the host can
+  /// update children and parent label in one pass. Queried straight after
+  /// `fetch-subtree-children` returns something.
+  fetch-subtree-parent-key: func() -> option<string>;
+
+  /// Re-sync internal compose state from the FFON body children, after a
+  /// host-level tree mutation (undo/redo of a delete) touched them.
+  sync-ffon-body-children: func(children: ffon);
+
+  // ---- Per-frame state ---------------------------------------------------
+
+  /// Everything the host needs each frame, batched. See `poll-result`.
+  poll: func() -> poll-result;
+
+  // ---- Navigation --------------------------------------------------------
+  //
+  // The mutators return the resulting path so the host can cache it; that is why
+  // there is no `current-path` export.
+
+  push-path: func(segment: string) -> string;
+  pop-path: func() -> string;
+  set-current-path: func(path: string) -> string;
+
+  // ---- Editing -----------------------------------------------------------
+
+  commit-edit: func(old: string, new: string) -> bool;
+
+  // ---- File operations ---------------------------------------------------
+
+  create-directory: func(name: string) -> bool;
+  create-file: func(name: string) -> bool;
+  delete-item: func(name: string) -> bool;
+  copy-item: func(src-dir: string, src-name: string, dest-dir: string, dest-name: string) -> bool;
+
+  // ---- Commands ----------------------------------------------------------
+
+  /// Stable command identifiers, matched on by `handle-command` and
+  /// `execute-command`.
+  commands: func() -> list<string>;
+
+  /// Localized text for a command id.
+  command-label: func(cmd: string) -> string;
+
+  /// Begin a command. Returns an optional UI element for gathering input.
+  /// Replaces the trait's `&mut String` error out-param.
+  handle-command: func(cmd: string, elem-key: string, elem-type: s32) -> result<option<ffon>, string>;
+
+  command-list-items: func(cmd: string) -> list<list-item>;
+  execute-command: func(cmd: string, selection: string) -> bool;
+
+  /// Build a new element for an "Add element:" section.
+  create-element: func(key: string) -> option<ffon>;
+
+  // ---- Interactive element callbacks -------------------------------------
+
+  on-radio-change: func(group: string, value: string);
+  on-button-press: func(function-name: string);
+  on-checkbox-change: func(label: string, checked: bool);
+
+  /// Prefill the provider's live `<input>` slot for the next `fetch`.
+  set-input-value: func(value: string);
+
+  /// One of this plugin's declared settings changed. The host drives this from the
+  /// same `(key, value)` queue that feeds built-in providers.
+  on-setting-change: func(key: string, value: string);
+
+  // ---- Timeline undo/redo ------------------------------------------------
+
+  /// Drain entries emitted since the last poll. The host calls this after every
+  /// `handle-command` / `execute-command` / `commit-edit`.
+  take-timeline-entries: func() -> list<provider-op>;
+
+  /// Reverse a previously emitted entry.
+  undo: func(entry: provider-op) -> result<_, string>;
+
+  /// Re-apply a previously emitted entry.
+  redo: func(entry: provider-op) -> result<_, string>;
+
+  // ---- Deep search -------------------------------------------------------
+
+  /// All searchable items for Ctrl+F. Absent falls back to FFON tree traversal.
+  collect-deep-search-items: func() -> option<list<search-result>>;
+
+  // ---- Persistent config -------------------------------------------------
+  //
+  // The host does the file I/O; a guest never sees a path or a descriptor.
+
+  load-config: func(contents: list<u8>) -> bool;
+  save-config: func() -> option<list<u8>>;
+
+  // ---- Dashboard ---------------------------------------------------------
+
+  /// Path to a static fullscreen image, used when `dashboard-kind` is `image`.
+  ///
+  /// Resolved by the host RELATIVE TO THIS PLUGIN'S OWN INSTALL DIRECTORY.
+  /// Absolute paths and any `..` segment are rejected: a sandboxed guest has no
+  /// legitimate business naming a host path.
+  dashboard-image-path: func() -> option<string>;
+
+  /// Render one frame of the interactive dashboard. Called every frame while this
+  /// provider owns the dashboard, so it is the most performance-sensitive export
+  /// in this file.
+  dashboard-render: func(cols: u16, rows: u16) -> frame;
+
+  /// A non-printable or modified key.
+  ///
+  /// The returned bool asks the host for a **redraw**. It does NOT mean "I consumed
+  /// this key": while an interactive dashboard is open the host forwards every key
+  /// here regardless, because a terminal emulator has to be able to receive Escape,
+  /// Tab and Ctrl+letter. A plugin therefore cannot claim an exit key — leaving the
+  /// dashboard is the host's double-Ctrl+C.
+  dashboard-key: func(k: key) -> bool;
+
+  /// Text the OS produced, with dead keys and IME already applied.
+  dashboard-text: func(text: string);
+
+  /// A clipboard paste. Distinct from `dashboard-text` so a terminal can wrap it
+  /// in bracketed-paste markers when the child program enabled `?2004`.
+  dashboard-paste: func(text: string);
+
+  /// The cell viewport resized. Called once on entry and on every later change.
+  dashboard-resize: func(rows: u16, cols: u16);
+
+  enter-dashboard: func();
+  leave-dashboard: func();
+}
+
+// ---------------------------------------------------------------------------
+// World
+// ---------------------------------------------------------------------------
+
+/// What a sicompass plugin is: it may call `host` (always) and `net` (only if its
+/// manifest declares `allowedHosts`), and it must provide `provider`. Nothing else
+/// is reachable — there is no `wasi:*` here at all.
+world plugin {
+  import host;
+  import net;
+  export provider;
+}

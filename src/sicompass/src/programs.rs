@@ -436,6 +436,35 @@ fn instantiate_user_plugin(plugin: &DiscoveredPlugin) -> Option<Box<dyn Provider
     }
 
     match m.plugin_type {
+        PluginType::Wasm => {
+            // The plugin's own directory is the confinement root for any path the
+            // guest hands back, and the manifest's `allowedHosts` decides whether
+            // the network interface is linked into it at all.
+            let plugin_dir = plugin
+                .entry_path
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."));
+
+            match crate::wasm_host::WasmProvider::open(
+                &plugin.entry_path,
+                &m.name,
+                // Settings are injected under the display name, so that is the
+                // section `get_setting` has to read back from.
+                &m.display_name,
+                plugin_dir,
+                m.allowed_hosts.clone(),
+            ) {
+                Ok(p) => Some(Box::new(p) as Box<dyn Provider>),
+                // Log here rather than leaving it to the caller's generic "failed to
+                // load" line: this error says *why* — an over-reaching capability, a
+                // malformed component, a trap during `init` — and that is the
+                // difference between a fixable report and a shrug.
+                Err(e) => {
+                    eprintln!("sicompass: plugin '{}' was not loaded: {e}", m.name);
+                    None
+                }
+            }
+        }
         PluginType::Native => NativePlugin::open(&plugin.entry_path)
             .map(|p| Box::new(p) as Box<dyn Provider>),
         PluginType::Script => Some(Box::new(ScriptProvider::new(
@@ -514,6 +543,19 @@ fn load_user_plugins(renderer: &mut AppRenderer, mut settings: Option<&mut dyn P
             Some(p) => {
                 register_provider(renderer, p);
                 if let Some(s) = settings.as_deref_mut() {
+                    // Announce the load once, on the initial pass — every later tab
+                    // instantiates its own copy, and three identical lines at startup
+                    // is noise. Naming the capabilities makes it obvious at a glance
+                    // when a manifest grants more than its author meant to.
+                    if m.plugin_type == PluginType::Wasm {
+                        let caps = if m.allowed_hosts.is_empty() {
+                            "no network".to_owned()
+                        } else {
+                            format!("network: {}", m.allowed_hosts.join(", "))
+                        };
+                        eprintln!("sicompass: loaded wasm plugin '{}' ({caps})", m.name);
+                    }
+
                     // Third-party plugin version: prefer plugin.json's `version`
                     // field; fall back to the provider's own `Provider::version()`.
                     let v: Option<String> = m.version.clone().or_else(|| {
@@ -2028,6 +2070,7 @@ mod tests {
             min_app_version: None,
             pubkey: None,
             hot_reload: true,
+            allowed_hosts: vec![],
         }
     }
 
@@ -2036,6 +2079,70 @@ mod tests {
             manifest: make_test_manifest(name),
             entry_path: PathBuf::from("/nonexistent/plugin.ts"),
         }
+    }
+
+    // --- wasm plugin instantiation ---
+
+    /// The committed `hello-plugin` component. See `tests/wasm_plugin.rs` for how to
+    /// regenerate it.
+    fn wasm_fixture(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/wasm")
+            .join(name)
+    }
+
+    fn make_wasm_plugin(name: &str, fixture: &str, allowed_hosts: Vec<String>) -> DiscoveredPlugin {
+        let mut manifest = make_test_manifest(name);
+        manifest.plugin_type = PluginType::Wasm;
+        manifest.entry = fixture.to_owned();
+        manifest.allowed_hosts = allowed_hosts;
+        DiscoveredPlugin { manifest, entry_path: wasm_fixture(fixture) }
+    }
+
+    #[test]
+    fn a_wasm_plugin_is_instantiated_from_its_manifest() {
+        let plugin = make_wasm_plugin("hello", "hello.wasm", vec![]);
+        let provider = instantiate_user_plugin(&plugin).expect("the fixture should load");
+
+        // Identity comes from the guest's `describe()`, not from the manifest, so a
+        // sensible name here means the component really was instantiated and called.
+        assert_eq!(provider.name(), "hello");
+    }
+
+    #[test]
+    fn a_wasm_plugin_reaching_the_network_without_declaring_hosts_is_refused() {
+        // The manifest is the user's only view of what a plugin will connect to, so
+        // a component that skips the declaration must not load at all.
+        let plugin = make_wasm_plugin("net-demo", "net.wasm", vec![]);
+        assert!(
+            instantiate_user_plugin(&plugin).is_none(),
+            "an undeclared network capability must block loading"
+        );
+    }
+
+    #[test]
+    fn the_same_wasm_plugin_loads_once_its_hosts_are_declared() {
+        // Confirms the refusal above is about the missing declaration rather than
+        // the fixture being unloadable.
+        let plugin =
+            make_wasm_plugin("net-demo", "net.wasm", vec!["example.com".to_owned()]);
+        assert!(instantiate_user_plugin(&plugin).is_some());
+    }
+
+    #[test]
+    fn a_missing_wasm_file_is_reported_rather_than_panicking() {
+        let mut plugin = make_wasm_plugin("ghost", "hello.wasm", vec![]);
+        plugin.entry_path = PathBuf::from("/nonexistent/plugin.wasm");
+        assert!(instantiate_user_plugin(&plugin).is_none());
+    }
+
+    #[test]
+    fn a_wasm_plugin_needing_a_newer_app_is_still_skipped() {
+        // The min-app-version gate runs before the type match, so it must apply to
+        // wasm plugins exactly as it did to native ones.
+        let mut plugin = make_wasm_plugin("futuristic", "hello.wasm", vec![]);
+        plugin.manifest.min_app_version = Some("9999.0.0".to_owned());
+        assert!(instantiate_user_plugin(&plugin).is_none());
     }
 
     /// Serializes tests that mutate the process-wide `USER_PLUGIN_CACHE`. The

@@ -28,6 +28,29 @@ license = false
 eula = false
 
 [features]
+# What the WASM plugin host compiles guests *to*.
+#
+#   cargo build --no-default-features --features no-jit-wasm,bundled-sdl3
+#
+# is the App Store / iOS build: it emits no native code at runtime, so it needs no
+# `allow-jit` entitlement. Runtime native codegen is forbidden outright on iOS.
+#
+# Both features keep Cranelift, and that is not an oversight. Pulley is an
+# *interpreter for a bytecode that Cranelift lowers wasm into*, not a replacement
+# for it — with `pulley` alone, `Component::new` does not even exist, because
+# nothing can turn a `.wasm` into anything runnable. What `no-jit-wasm` changes is
+# the Cranelift *target*: `pulley64` instead of the host ISA, so the output is
+# interpreted bytecode rather than executable machine code. No W^X pages, no JIT.
+#
+# The cost is speed: an interpreted guest is far slower than a JIT-compiled one,
+# which is why the WIT world batches per-frame reads into a single `poll()` call.
+#
+# Cargo features are additive, so a feature cannot *remove* Cranelift — hence the
+# default-on/opt-out shape rather than an opt-in `no-jit` flag.
+default = ["jit-wasm"]
+jit-wasm = ["wasmtime/cranelift"]
+no-jit-wasm = ["wasmtime/cranelift", "wasmtime/pulley"]
+
 # Build SDL3 from its vendored source and link it statically, so the resulting
 # binary is self-contained (no system SDL3 / SDL3.dll / libSDL3.dylib needed).
 # Off by default — local dev builds keep linking the system SDL3. Release
@@ -84,6 +107,7 @@ tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
 
 libloading = { workspace = true }
+wasmtime = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 accesskit_unix = { workspace = true }
@@ -112,3 +136,6 @@ tempfile = { workspace = true }
 # The integration test injects its own `ImapBackend` stubs, which the trait
 # requires to be `#[async_trait]`.
 async-trait = { workspace = true }
+wit-parser = "0.254.0"
+wit-component = "0.254.0"
+wiremock.workspace = true
