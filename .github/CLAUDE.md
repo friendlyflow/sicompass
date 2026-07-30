@@ -7,3 +7,17 @@
   uses the removed meson build and must be ported to `cargo build`.
 - `licenses.yml` verifies third-party licensing (see the `cargo about` config
   in `about.toml`).
+- `ci.yml` runs the test suite and clippy on push/PR over both wasmtime backends
+  (Cranelift and Pulley), plus an audit that the committed WASM fixtures import
+  nothing beyond the host interfaces. It builds SDL3 3.2.28 from source rather
+  than using the `bundled-sdl3` feature, whose SDL 3.4.12 does not compile under
+  current GCC.
+- `release-publish.yml` creates the GitHub Release that cargo-dist cannot. The
+  `friendlyflow` org disables write permissions for workflows org-wide — an
+  org-level ceiling no repo setting can raise — so `secrets.GITHUB_TOKEN` is
+  read-only and cargo-dist's `gh release create` fails with 403. cargo-dist only
+  supports a custom token (`GH_RELEASES_TOKEN`) when publishing to an *external*
+  repo, and that path reads the target commit from a submodule we do not have, so
+  there is no supported same-repo fix. Needs the `RELEASE_TOKEN` secret; see the
+  header of that file. Note the cargo-dist `Release` run still shows red because
+  its `host` job fails — only lifting the org restriction fixes that.
