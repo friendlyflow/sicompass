@@ -3,6 +3,7 @@
 ## Environment (NixOS)
 
 The whole toolchain (`cargo`, `rustc`, `clippy`, `rustfmt`, `bun`, `graphify`,
+`lld` + `wasm-tools` (for WASM plugin guests),
 `xvfb-run`, SDL3/Vulkan link paths) comes from the flake dev shell in
 [flake.nix](flake.nix). Nothing is installed system-wide.
 
@@ -46,7 +47,6 @@ line, and add every new string to all four locale bundles.
 - After implementing changes, always run relevant tests before finishing.
 - Rust tests: `cargo test` (workspace-wide), or `cargo test -p <crate>` (specific crate).
 - Integration tests: `src/sicompass/tests/integration.rs`
-- Bun tests (TypeScript providers): `bun test tests/lib_*/*.test.ts` (all), or `bun test tests/<module>/<name>.test.ts` (specific).
 - When adding new code, write or update tests.
 - If tests fail, fix the code — never leave a task with failing tests.
 

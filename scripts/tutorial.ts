@@ -1,1 +1,0 @@
-../lib/lib_tutorial/tutorial.ts
