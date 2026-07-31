@@ -595,10 +595,12 @@ pub static SHORTCUTS: &[Shortcut] = &[
         modes: &[Coordinate::General],
         label: "Enter  Open", is_available: avail_enter_op,
         handle: handlers::handle_enter_general },
-    // Search: Enter → commit search
+    // Search: Enter → go to the highlighted element in General mode (never
+    // activates it — a checkbox/radio is toggled by a second Enter once the
+    // cursor has landed).
     Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
         modes: SEARCH,
-        label: "Enter  Confirm", is_available: always, handle: handlers::handle_enter_search },
+        label: "Enter  Go to element", is_available: always, handle: handlers::handle_enter_search },
     // Command: Enter → execute command
     Shortcut { key: Keycode::Return, key2: Some(Keycode::KpEnter), ctrl: false, shift: false,
         modes: &[Coordinate::Command],

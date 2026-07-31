@@ -10141,6 +10141,140 @@ fn settings_text_input_commit_keeps_section_intact() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Enter in search jumps to the element — it never activates it
+// ---------------------------------------------------------------------------
+// Simple search (Tab) and extended search (Ctrl+F) both promise "jump to the
+// result". Checkboxes and radios used to be an exception: Enter toggled them
+// instead, so a search could not land on a setting without changing its value.
+// Toggling belongs to Enter in General mode, which the user presses once the
+// cursor has arrived.
+
+/// The FFON element the cursor currently points at.
+fn element_at_cursor(r: &AppRenderer) -> FfonElement {
+    sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)
+        .and_then(|a| a.get(r.current_id.last().unwrap_or(0)).cloned())
+        .expect("cursor must resolve to an element")
+}
+
+#[test]
+fn simple_search_enter_on_checkbox_jumps_without_toggling() {
+    let mut r = harness_with_silent(Box::new(SilentCheckboxStrProvider::new()));
+    // Provider root has one child, the `<checkbox>Toggle me` Str, at [0, 0].
+    set_cursor(&mut r, &[0, 0]);
+    let target = r.current_id.clone();
+    let before_count = r.active_timeline().entries.len();
+
+    press_tab(&mut r);
+    assert_eq!(r.coordinate, Coordinate::SimpleSearch);
+    type_text(&mut r, "Toggle");
+    press_enter(&mut r);
+
+    assert_eq!(r.coordinate, Coordinate::General, "Enter must leave search mode");
+    assert_eq!(r.current_id, target, "cursor must land on the checkbox");
+    assert_eq!(
+        element_at_cursor(&r),
+        FfonElement::Str("<checkbox>Toggle me".into()),
+        "Enter in search must not flip the checkbox",
+    );
+    assert!(
+        r.active_timeline().entries[before_count..]
+            .iter()
+            .all(|e| !matches!(e, sicompass_sdk::timeline::TimelineEntry::TextChunk { .. })),
+        "a jump must not record a text edit; got {:?}",
+        &r.active_timeline().entries[before_count..],
+    );
+
+    // A second Enter, now in General mode, still toggles.
+    press_enter(&mut r);
+    assert_eq!(
+        element_at_cursor(&r),
+        FfonElement::Str("<checkbox checked>Toggle me".into()),
+        "Enter in General must still toggle the checkbox",
+    );
+}
+
+#[test]
+fn extended_search_enter_on_checkbox_jumps_without_toggling() {
+    let mut r = harness_with_silent(Box::new(SilentCheckboxStrProvider::new()));
+    set_cursor(&mut r, &[0, 0]);
+    let target = r.current_id.clone();
+
+    press_ctrl(&mut r, Keycode::F);
+    assert_eq!(r.coordinate, Coordinate::ExtendedSearch);
+    type_text(&mut r, "Toggle");
+    press_enter(&mut r);
+
+    assert_eq!(r.coordinate, Coordinate::General, "Enter must leave extended search");
+    assert_eq!(r.current_id, target, "cursor must land on the checkbox");
+    assert_eq!(
+        element_at_cursor(&r),
+        FfonElement::Str("<checkbox>Toggle me".into()),
+        "Enter in extended search must not flip the checkbox",
+    );
+}
+
+#[test]
+fn simple_search_enter_on_radio_jumps_without_selecting() {
+    let mut r = harness_with_silent(Box::new(SilentRadioProvider::new()));
+    // Radio group Obj at [0, 0]; options north(checked)/south/east below it.
+    // Start on "south" so the search has to move the cursor to "east".
+    set_cursor(&mut r, &[0, 0, 1]);
+    let group_id = r.current_id.clone();
+    let before_count = r.active_timeline().entries.len();
+
+    press_tab(&mut r);
+    type_text(&mut r, "east");
+    press_enter(&mut r);
+
+    assert_eq!(r.coordinate, Coordinate::General, "Enter must leave search mode");
+    assert_eq!(r.current_id.last(), Some(2), "cursor must land on east");
+
+    let children: Vec<FfonElement> = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &group_id)
+        .map(|a| a.to_vec())
+        .unwrap();
+    assert_eq!(children[0].as_str(), Some("<checked>north"), "north stays selected");
+    assert_eq!(children[1].as_str(), Some("south"));
+    assert_eq!(children[2].as_str(), Some("east"), "east must not become checked");
+    assert!(
+        r.active_timeline().entries[before_count..]
+            .iter()
+            .all(|e| !matches!(e, sicompass_sdk::timeline::TimelineEntry::Structural { .. })),
+        "a jump must not record a radio replacement; got {:?}",
+        &r.active_timeline().entries[before_count..],
+    );
+
+    // A second Enter, now in General mode, still selects.
+    press_enter(&mut r);
+    let children: Vec<FfonElement> = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &group_id)
+        .map(|a| a.to_vec())
+        .unwrap();
+    assert_eq!(children[0].as_str(), Some("north"));
+    assert_eq!(children[2].as_str(), Some("<checked>east"),
+        "Enter in General must still select the radio option");
+}
+
+#[test]
+fn extended_search_enter_on_radio_jumps_without_selecting() {
+    let mut r = harness_with_silent(Box::new(SilentRadioProvider::new()));
+    set_cursor(&mut r, &[0, 0, 1]);
+    let group_id = r.current_id.clone();
+
+    press_ctrl(&mut r, Keycode::F);
+    assert_eq!(r.coordinate, Coordinate::ExtendedSearch);
+    type_text(&mut r, "east");
+    press_enter(&mut r);
+
+    assert_eq!(r.coordinate, Coordinate::General, "Enter must leave extended search");
+    assert_eq!(r.current_id.last(), Some(2), "cursor must land on east");
+
+    let children: Vec<FfonElement> = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &group_id)
+        .map(|a| a.to_vec())
+        .unwrap();
+    assert_eq!(children[0].as_str(), Some("<checked>north"), "north stays selected");
+    assert_eq!(children[2].as_str(), Some("east"), "east must not become checked");
+}
+
 /// A `<password>` settings field masks its value: the live FFON keeps the real
 /// value wrapped in `<password>` (so commit/persist round-trip), the rendered
 /// list label shows asterisks, the screen reader announces `*` while typing,
