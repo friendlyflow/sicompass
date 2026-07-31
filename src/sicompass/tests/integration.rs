@@ -7504,38 +7504,13 @@ fn settle_provider_ops(r: &mut AppRenderer) {
     }
 }
 
-/// Mirrors the tick + auto-dashboard dispatch block from `view.rs`. Tests
-/// can't run the SDL main loop, so this drains pending requests and routes
-/// them through the same handler functions the loop uses.
+/// Runs the tick + auto-dashboard dispatch block from `view.rs`. Tests can't
+/// run the SDL main loop, so this calls the two functions the loop calls —
+/// including the active-provider gate in `apply_dashboard_requests`, which must
+/// be exercised here rather than re-implemented.
 fn pump_tick(r: &mut AppRenderer) {
-    let mut requests: Vec<(usize, sicompass_sdk::DashboardRequest)> = Vec::new();
-    for (i, p) in r.providers.iter_mut().enumerate() {
-        let _ = p.tick();
-        if let Some(req) = p.take_dashboard_request() {
-            requests.push((i, req));
-        }
-    }
-    for (i, req) in requests {
-        if r.current_id.get(0) != Some(i) {
-            continue;
-        }
-        match req {
-            sicompass_sdk::DashboardRequest::Enter
-                if r.coordinate != Coordinate::Dashboard =>
-            {
-                // Mirror view.rs: reset to General + clear input buffer,
-                // then bypass the manual-entry guard.
-                r.coordinate = Coordinate::General;
-                r.input_buffer.clear();
-                r.cursor_position = 0;
-                sicompass::handlers::enter_dashboard_for_active(r);
-            }
-            sicompass_sdk::DashboardRequest::Leave => {
-                sicompass::handlers::handle_dashboard_leave(r);
-            }
-            _ => {}
-        }
-    }
+    let (_, requests) = sicompass::events::run_provider_ticks(r);
+    sicompass::events::apply_dashboard_requests(r, requests);
 }
 
 #[cfg(unix)]
@@ -10842,6 +10817,33 @@ impl Provider for AlwaysTickProvider {
     fn tick(&mut self) -> bool { true }
 }
 
+/// A provider that asks to be taken fullscreen the moment it is ticked, and
+/// keeps asking. Stands in for a plugin trying to grab the screen.
+struct GrabbyDashboardProvider;
+impl Provider for GrabbyDashboardProvider {
+    fn name(&self) -> &str { "grabby" }
+    fn fetch(&mut self) -> Vec<FfonElement> { vec![FfonElement::new_str("x")] }
+    fn tick(&mut self) -> bool { true }
+    fn dashboard_kind(&self) -> sicompass_sdk::DashboardKind {
+        sicompass_sdk::DashboardKind::Interactive
+    }
+    fn take_dashboard_request(&mut self) -> Option<sicompass_sdk::DashboardRequest> {
+        Some(sicompass_sdk::DashboardRequest::Enter)
+    }
+}
+
+/// A provider with an error permanently queued, for the status-line spoofing
+/// guard below.
+struct ShoutyProvider;
+impl Provider for ShoutyProvider {
+    fn name(&self) -> &str { "shouty" }
+    fn fetch(&mut self) -> Vec<FfonElement> { vec![FfonElement::new_str("x")] }
+    fn tick(&mut self) -> bool { true }
+    fn take_error(&mut self) -> Option<String> {
+        Some("Session expired, re-enter your password".to_string())
+    }
+}
+
 /// A provider whose `tick()` never reports an update.
 struct QuietProvider;
 impl Provider for QuietProvider {
@@ -10978,6 +10980,76 @@ fn navigation_request_ignored_for_background_provider() {
     sicompass::events::run_provider_ticks(&mut r);
     assert!(!sicompass::events::apply_navigation_requests(&mut r));
     assert_eq!(r.current_id, before);
+}
+
+/// A provider the user is not looking at must never be able to take the screen
+/// fullscreen. This is the anti-hijack guard for sandboxed plugins: a
+/// background plugin can ask every frame and the answer stays no, so the only
+/// way into a dashboard is the user being there already.
+#[test]
+fn dashboard_request_ignored_for_background_provider() {
+    use sicompass_sdk::ffon::IdArray;
+
+    let mut r = AppRenderer::new();
+    // index 0 = the grabby provider, index 1 = what the user is looking at.
+    r.providers.push(Box::new(GrabbyDashboardProvider));
+    r.providers.push(Box::new(QuietProvider));
+    r.ffon.push(FfonElement::new_obj("grabby"));
+    r.ffon.push(FfonElement::new_obj("quiet"));
+    r.current_id = { let mut id = IdArray::new(); id.push(1); id };
+    let before = r.current_id.clone();
+
+    // Several frames: a single ignored request is not the property under test.
+    for _ in 0..5 {
+        pump_tick(&mut r);
+    }
+
+    assert_ne!(
+        r.coordinate,
+        Coordinate::Dashboard,
+        "a background provider must not pull the user into a dashboard"
+    );
+    assert_eq!(r.current_id, before, "the cursor must not move either");
+}
+
+/// The status line is where the app's own messages appear, so a provider the
+/// user is not looking at must not be able to write it — otherwise a background
+/// plugin could spoof a system prompt.
+#[test]
+fn background_provider_error_never_reaches_the_status_line() {
+    use sicompass_sdk::ffon::IdArray;
+
+    let mut r = AppRenderer::new();
+    // index 0 = the shouty provider, index 1 = what the user is looking at.
+    r.providers.push(Box::new(ShoutyProvider));
+    r.providers.push(Box::new(QuietProvider));
+    r.ffon.push(FfonElement::new_obj("shouty"));
+    r.ffon.push(FfonElement::new_obj("quiet"));
+    r.current_id = { let mut id = IdArray::new(); id.push(1); id };
+
+    sicompass::events::drain_provider_errors(&mut r);
+    assert_eq!(r.error_message, "", "a background provider must not write the status line");
+
+    // On its own tab the very same error is legitimate, and shows.
+    r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+    sicompass::events::drain_provider_errors(&mut r);
+    assert!(r.error_message.contains("Session expired"));
+}
+
+/// The same provider, once the user is actually on it, is allowed in — the
+/// gate is about *whose* request it is, not a blanket refusal.
+#[test]
+fn dashboard_request_honored_for_active_provider() {
+    use sicompass_sdk::ffon::IdArray;
+
+    let mut r = AppRenderer::new();
+    r.providers.push(Box::new(GrabbyDashboardProvider));
+    r.ffon.push(FfonElement::new_obj("grabby"));
+    r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+
+    pump_tick(&mut r);
+
+    assert_eq!(r.coordinate, Coordinate::Dashboard);
 }
 
 /// Regression: navigating right into a folder must reset the viewport to the
