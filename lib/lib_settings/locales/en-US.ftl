@@ -43,7 +43,12 @@ settings-license-label-support = Support
 # the stored entry when the user toggles a setting.
 settings-label-store-url = Store server URL
 settings-label-license-redeem-token = License redeem token
+# Generic per-program version, shown under every non-sicompass section.
 settings-label-version = version
+# The sicompass section shows two versions and must keep them apart: the app
+# itself, and the plugin SDK this build was compiled against.
+settings-label-version-app = version (app)
+settings-label-version-sdk = version (SDK)
 settings-checkbox-maximized = maximized
 settings-checkbox-shoulder-surfing-protection = shoulder-surfing protection (blank screen)
 settings-checkbox-auto-update-check = check for app and plugin updates on startup
