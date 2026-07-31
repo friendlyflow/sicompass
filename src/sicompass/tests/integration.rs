@@ -1155,6 +1155,73 @@ fn meta_key_does_not_enter_meta_from_editor_insert() {
     assert_eq!(r.coordinate, Coordinate::Insert);
 }
 
+/// An editor buffer in Insert mode holding multi-line text, caret at the start.
+fn editor_insert_with_text(text: &str) -> AppRenderer {
+    let mut r = editor_renderer_in(Coordinate::Insert);
+    r.input_buffer = text.to_string();
+    r.cursor_position = 0;
+    r
+}
+
+const SEARCH_FIXTURE: &str = "alpha err one\nbeta err two\ngamma err three";
+
+/// Full Ctrl+F flow inside an element being edited: open search, type a query,
+/// walk to the third match, commit. The caret lands on that match and the text
+/// under edit is untouched throughout.
+#[test]
+fn input_search_walks_matches_and_commits_caret() {
+    let mut r = editor_insert_with_text(SEARCH_FIXTURE);
+
+    press_ctrl(&mut r, Keycode::F);
+    assert_eq!(r.coordinate, Coordinate::InputSearch);
+    assert_eq!(r.input_buffer, SEARCH_FIXTURE, "Ctrl+F must not touch the edit");
+
+    type_text(&mut r, "err");
+    assert_eq!(r.input_search_match_count, 3);
+    assert_eq!(r.input_search_current_match, 0);
+
+    press_down(&mut r);
+    press_down(&mut r);
+    assert_eq!(r.input_search_current_match, 2);
+
+    press_enter(&mut r);
+    assert_eq!(r.coordinate, Coordinate::Insert);
+    assert_eq!(r.input_buffer, SEARCH_FIXTURE, "search must not modify the element");
+    assert_eq!(r.cursor_position, SEARCH_FIXTURE.rfind("err").unwrap());
+    assert_eq!(r.search_string, "", "query is discarded on commit");
+}
+
+/// Escape cancels the search: back to editing, caret exactly where it started.
+#[test]
+fn input_search_escape_returns_to_insert_untouched() {
+    let mut r = editor_insert_with_text(SEARCH_FIXTURE);
+    r.cursor_position = 7;
+
+    press_ctrl(&mut r, Keycode::F);
+    type_text(&mut r, "err");
+    press_down(&mut r);
+    press_escape(&mut r);
+
+    assert_eq!(r.coordinate, Coordinate::Insert);
+    assert_eq!(r.cursor_position, 7);
+    assert_eq!(r.input_buffer, SEARCH_FIXTURE);
+    assert_eq!(r.search_string, "");
+}
+
+/// Typing in input search edits the query, never the element under the caret.
+#[test]
+fn input_search_backspace_edits_query_not_element() {
+    let mut r = editor_insert_with_text(SEARCH_FIXTURE);
+    press_ctrl(&mut r, Keycode::F);
+    type_text(&mut r, "erro");
+    assert_eq!(r.input_search_match_count, 0);
+
+    press(&mut r, Keycode::Backspace);
+    assert_eq!(r.search_string, "err");
+    assert_eq!(r.input_search_match_count, 3);
+    assert_eq!(r.input_buffer, SEARCH_FIXTURE);
+}
+
 /// Regression: Enter at the global root provider list (depth 1, a non-editor
 /// provider) must be inert — it must NOT append a stray string element.
 #[test]

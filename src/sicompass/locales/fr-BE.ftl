@@ -3,10 +3,10 @@
 hint-esc-back = Esc    Retour
 
 hint-up-previous = Up     Précédent
-hint-up-scroll-up = Up     Défiler haut
+hint-up-prev-match = Up     Corresp. préc.
 
 hint-down-next = Down   Suivant
-hint-down-scroll-dn = Down   Défiler bas
+hint-down-next-match = Down   Corresp. suiv.
 
 hint-right-open = Right  Ouvrir
 hint-right-navigate = Right  Naviguer
@@ -39,6 +39,7 @@ hint-enter-append = Enter  Ajouter
 hint-enter-open = Enter  Ouvrir
 hint-enter-follow-link = Enter  Suivre lien
 hint-enter-go-to-element = Enter  Aller à élém.
+hint-enter-go-to-match = Enter  Aller corresp.
 
 hint-tab-search = Tab    Recherche
 hint-tab-prefix-search = Tab    Préfixe

@@ -515,7 +515,17 @@ pub struct AppRenderer {
     /// band, header, and — in search sub-modes — the search bar). Cached by the
     /// renderer each frame so scroll handlers clamp to the exact visible area.
     pub text_scroll_viewport_h: i32,
-    pub input_search_scroll_offset: i32,
+
+    // ---- Input search state (Ctrl+F while editing an element) ---------------
+    /// Query hits of `search_string` inside `input_buffer`, and which one is
+    /// current. The InputSearch analogue of `scroll_search_match_count` /
+    /// `scroll_search_current_match`.
+    pub input_search_match_count: usize,
+    pub input_search_current_match: usize,
+    /// `cursor_position` at the moment Ctrl+F was pressed, restored on Escape so
+    /// a cancelled search doesn't move the caret. The InputSearch analogue of
+    /// `search_origin_id`.
+    pub input_search_origin_cursor: usize,
 
     // ---- Scroll search state -----------------------------------------------
     pub scroll_search_match_count: usize,
@@ -774,7 +784,9 @@ impl AppRenderer {
             text_scroll_offset: 0,
             text_scroll_total_height: 0,
             text_scroll_viewport_h: 0,
-            input_search_scroll_offset: 0,
+            input_search_match_count: 0,
+            input_search_current_match: 0,
+            input_search_origin_cursor: 0,
             scroll_search_match_count: 0,
             scroll_search_current_match: 0,
             scroll_search_needs_position: false,

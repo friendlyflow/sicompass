@@ -620,9 +620,6 @@ pub fn handle_page_up(r: &mut AppRenderer) {
     let page_size = ((r.window_height / line_height) - 3).max(1) as usize;
 
     match r.coordinate {
-        Coordinate::InputSearch => {
-            r.input_search_scroll_offset = (r.input_search_scroll_offset - page_size as i32).max(0);
-        }
         Coordinate::Scroll | Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch => {
             let viewport_h = r.text_scroll_viewport_h;
             r.text_scroll_offset = (r.text_scroll_offset - viewport_h).max(0);
@@ -668,10 +665,6 @@ pub fn handle_page_down(r: &mut AppRenderer) {
     let page_size = ((r.window_height / line_height) - 3).max(1) as usize;
 
     match r.coordinate {
-        Coordinate::InputSearch => {
-            r.input_search_scroll_offset += page_size as i32;
-            // No upper clamp here — renderer will clamp when it knows the line count
-        }
         Coordinate::Scroll | Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch => {
             let viewport_h = r.text_scroll_viewport_h;
             let max_offset = (r.text_scroll_total_height - viewport_h).max(0);
@@ -2706,6 +2699,17 @@ pub fn handle_escape(r: &mut AppRenderer) {
             r.scroll_search_match_count = 0;
             r.scroll_search_current_match = 0;
         }
+        Coordinate::InputSearch => {
+            // Cancel the search: back to editing with the caret exactly where
+            // Ctrl+F found it. `input_buffer` is the edit and must not be
+            // touched — only the query is discarded.
+            r.coordinate = Coordinate::Insert;
+            r.cursor_position = r.input_search_origin_cursor.min(r.input_buffer.len());
+            r.selection_anchor = None;
+            r.search_string.clear();
+            r.input_search_match_count = 0;
+            r.input_search_current_match = 0;
+        }
         Coordinate::Scroll => {
             r.coordinate = r.previous_coordinate;
             r.text_scroll_offset = 0;
@@ -2843,6 +2847,18 @@ pub fn handle_input(r: &mut AppRenderer, text: &str) {
             announce_typed_text(r, text);
             r.needs_redraw = true;
         }
+        Coordinate::InputSearch => {
+            // The query goes into `search_string`; `input_buffer` holds the
+            // element text being searched and is never modified here.
+            if has_selection(r) { delete_selection(r); }
+            let pos = r.cursor_position.min(r.search_string.len());
+            r.search_string.insert_str(pos, text);
+            r.cursor_position = pos + text.len();
+            r.caret.reset(sdl_ticks());
+            recompute_input_search_matches(r);
+            announce_typed_text(r, text);
+            r.needs_redraw = true;
+        }
         Coordinate::ExtendedSearch => {
             let pos = r.cursor_position.min(r.input_buffer.len());
             r.input_buffer.insert_str(pos, text);
@@ -2878,6 +2894,31 @@ pub fn handle_backspace(r: &mut AppRenderer) {
                 r.speak_current_element();
                 r.needs_redraw = true;
             }
+        }
+        Coordinate::InputSearch => {
+            // Deliberately not folded into the arm below: that one edits
+            // `input_buffer` and runs `apply_insert_session_chunk`, which would
+            // corrupt the edit session InputSearch is searching within.
+            let deleted = if has_selection(r) {
+                delete_selection(r);
+                None
+            } else if r.cursor_position > 0 {
+                let pos = r.cursor_position.min(r.search_string.len());
+                let before = &r.search_string[..pos];
+                let new_pos = before.char_indices().next_back().map(|(i, _)| i).unwrap_or(0);
+                let ch = r.search_string[new_pos..pos].chars().next();
+                r.search_string.replace_range(new_pos..pos, "");
+                r.cursor_position = new_pos;
+                ch
+            } else {
+                return;
+            };
+            r.caret.reset(sdl_ticks());
+            recompute_input_search_matches(r);
+            if let Some(ch) = deleted {
+                announce_char(r, ch);
+            }
+            r.needs_redraw = true;
         }
         Coordinate::Command | Coordinate::Insert | Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch | Coordinate::ExtendedSearch | Coordinate::TabSwitcher => {
             let buffer_changed = if has_selection(r) {
@@ -3712,11 +3753,7 @@ pub fn selection_range(r: &AppRenderer) -> Option<(usize, usize)> {
 /// Delete the selected text, placing cursor at the start of the deleted range.
 fn delete_selection(r: &mut AppRenderer) {
     if let Some((start, end)) = selection_range(r) {
-        if r.coordinate == Coordinate::SimpleSearch {
-            r.search_string.replace_range(start..end, "");
-        } else {
-            r.input_buffer.replace_range(start..end, "");
-        }
+        active_text_buf_mut(r).replace_range(start..end, "");
         r.cursor_position = start;
         r.selection_anchor = None;
     }
@@ -3763,12 +3800,23 @@ fn utf8_advance_n(buf: &str, from: usize, n: usize, limit: usize) -> usize {
 // ---------------------------------------------------------------------------
 
 /// Returns a reference to the active text buffer for the current coordinate.
-/// SimpleSearch edits `search_string`; all other text-edit modes use `input_buffer`.
+/// SimpleSearch and InputSearch edit `search_string` (in InputSearch,
+/// `input_buffer` holds the element text being searched, not the query); all
+/// other text-edit modes use `input_buffer`.
 fn active_text_buf(r: &AppRenderer) -> &str {
-    if r.coordinate == Coordinate::SimpleSearch {
+    if matches!(r.coordinate, Coordinate::SimpleSearch | Coordinate::InputSearch) {
         &r.search_string
     } else {
         &r.input_buffer
+    }
+}
+
+/// Mutable counterpart of [`active_text_buf`].
+fn active_text_buf_mut(r: &mut AppRenderer) -> &mut String {
+    if matches!(r.coordinate, Coordinate::SimpleSearch | Coordinate::InputSearch) {
+        &mut r.search_string
+    } else {
+        &mut r.input_buffer
     }
 }
 
@@ -3796,9 +3844,19 @@ pub(crate) fn announce_char(r: &mut AppRenderer, ch: char) {
     // cursored-over) as a masking `*` so the screen reader never speaks the
     // secret. Newlines pass through (passwords are single-line anyway).
     let ch = if r.input_is_password && ch != '\n' { '*' } else { ch };
+    announce_text(r, &ch.to_string());
+}
+
+/// Queue `text` as the next screen-reader announcement, verbatim.
+///
+/// Callers are responsible for any password masking — see [`announce_char`].
+/// Toggling `announcement_parity` (and appending the zero-width-space sentinel
+/// on odd calls) is what makes a repeat of an identical string still produce an
+/// AccessKit tree diff; screen readers ignore U+200B in speech output.
+pub(crate) fn announce_text(r: &mut AppRenderer, text: &str) {
     r.announcement_parity = !r.announcement_parity;
     let sentinel = if r.announcement_parity { "\u{200B}" } else { "" };
-    r.pending_announcement = Some(format!("{ch}{sentinel}"));
+    r.pending_announcement = Some(format!("{text}{sentinel}"));
 }
 
 /// Echo just-typed text to the screen reader. A single keypress reuses
@@ -3817,9 +3875,7 @@ pub(crate) fn announce_typed_text(r: &mut AppRenderer, text: &str) {
     } else {
         text.to_owned()
     };
-    r.announcement_parity = !r.announcement_parity;
-    let sentinel = if r.announcement_parity { "\u{200B}" } else { "" };
-    r.pending_announcement = Some(format!("{spoken}{sentinel}"));
+    announce_text(r, &spoken);
 }
 
 /// Shift+Left — extend selection one character to the left.
@@ -3880,10 +3936,12 @@ pub fn handle_home(r: &mut AppRenderer) {
             r.needs_redraw = true;
         }
         _ => {
-            // Text cursor: start of current line
-            let pos = r.cursor_position;
+            // Text cursor: start of current line, in whichever buffer this mode
+            // edits (the query in SimpleSearch/InputSearch, else the element).
+            let pos = r.cursor_position.min(active_text_buf(r).len());
             clear_selection(r);
-            r.cursor_position = find_line_start(&r.input_buffer, pos);
+            let buf = active_text_buf(r);
+            r.cursor_position = find_line_start(buf, pos);
             r.caret.reset(sdl_ticks());
             r.needs_redraw = true;
         }
@@ -3908,10 +3966,11 @@ pub fn handle_end(r: &mut AppRenderer) {
             r.needs_redraw = true;
         }
         _ => {
-            let pos = r.cursor_position;
-            let buf_len = r.input_buffer.len();
+            let buf_len = active_text_buf(r).len();
+            let pos = r.cursor_position.min(buf_len);
             clear_selection(r);
-            r.cursor_position = find_line_end(&r.input_buffer, pos).min(buf_len);
+            let buf = active_text_buf(r);
+            r.cursor_position = find_line_end(buf, pos).min(buf_len);
             r.caret.reset(sdl_ticks());
             r.needs_redraw = true;
         }
@@ -4021,10 +4080,8 @@ pub fn handle_delete_forward(r: &mut AppRenderer) {
         return;
     }
     let pos = r.cursor_position;
-    if pos < r.input_buffer.len() {
-        let ch = r.input_buffer[pos..].chars().next().unwrap();
-        r.input_buffer.remove(pos);
-        let _ = ch; // char already removed via remove() which is byte-correct
+    if pos < active_text_buf(r).len() {
+        active_text_buf_mut(r).remove(pos); // byte-correct: removes a whole char
         r.caret.reset(sdl_ticks());
         maybe_update_search(r);
         r.needs_redraw = true;
@@ -4053,6 +4110,8 @@ fn maybe_update_search(r: &mut AppRenderer) {
             r.list_index = 0;
             r.sync_current_id_from_list();
         }
+        // No list to filter — re-run the substring scan over the edited element.
+        Coordinate::InputSearch => recompute_input_search_matches(r),
         _ => {}
     }
 }
@@ -4252,6 +4311,7 @@ pub(crate) fn is_text_edit_mode(r: &AppRenderer) -> bool {
             | Coordinate::Command
             | Coordinate::ScrollSearch
             | Coordinate::ScrollPrefixSearch
+            | Coordinate::InputSearch
     )
 }
 
@@ -4645,15 +4705,9 @@ pub fn handle_ctrl_v(r: &mut AppRenderer) {
     if is_text_edit_mode(r) {
         let text = match sdl_get_clipboard() { Some(t) => t, None => return };
         if has_selection(r) { delete_selection(r); }
-        if r.coordinate == Coordinate::SimpleSearch {
-            let pos = r.cursor_position.min(r.search_string.len());
-            r.search_string.insert_str(pos, &text);
-            r.cursor_position = pos + text.len();
-        } else {
-            let pos = r.cursor_position.min(r.input_buffer.len());
-            r.input_buffer.insert_str(pos, &text);
-            r.cursor_position = pos + text.len();
-        }
+        let pos = r.cursor_position.min(active_text_buf(r).len());
+        active_text_buf_mut(r).insert_str(pos, &text);
+        r.cursor_position = pos + text.len();
         r.caret.reset(sdl_ticks());
         maybe_update_search(r);
         r.needs_redraw = true;
@@ -4692,6 +4746,112 @@ pub fn handle_ctrl_v(r: &mut AppRenderer) {
 }
 
 // ---------------------------------------------------------------------------
+// Substring search (shared by ScrollSearch rendering and InputSearch)
+// ---------------------------------------------------------------------------
+
+/// Find all case-insensitive occurrences of `query` in `text`.
+/// Returns `(byte_offset, match_len)` pairs — both are byte indices into the
+/// original `text` and always land on char boundaries (matching is done
+/// char-by-char on the original text, so multi-byte characters such as `—` do
+/// not produce invalid slice indices).
+pub(crate) fn find_matches_ci(text: &str, query: &str) -> Vec<(usize, usize)> {
+    if query.is_empty() {
+        return Vec::new();
+    }
+    // Per original char: (byte offset, byte length, lowercased form).
+    let chars: Vec<(usize, usize, String)> = text
+        .char_indices()
+        .map(|(i, c)| (i, c.len_utf8(), c.to_lowercase().collect::<String>()))
+        .collect();
+    let query_lower = query.to_lowercase();
+    let mut matches = Vec::new();
+    for start in 0..chars.len() {
+        let mut q = query_lower.as_str();
+        let mut ci = start;
+        let mut ok = true;
+        while !q.is_empty() {
+            match chars.get(ci) {
+                Some((_, _, lc)) => match q.strip_prefix(lc.as_str()) {
+                    Some(rest) => { q = rest; ci += 1; }
+                    None => { ok = false; break; }
+                },
+                None => { ok = false; break; }
+            }
+        }
+        if ok && ci > start {
+            let start_off = chars[start].0;
+            let end_off = chars[ci - 1].0 + chars[ci - 1].1;
+            matches.push((start_off, end_off - start_off));
+        }
+    }
+    matches
+}
+
+// ---------------------------------------------------------------------------
+// InputSearch — Ctrl+F within the text of the element being edited
+// ---------------------------------------------------------------------------
+
+/// Hits of the current query inside the buffer being edited.
+/// Cheap enough to recompute on demand (one element's text), so no `Vec` of
+/// matches is cached in `AppRenderer` — the renderer calls this too.
+pub(crate) fn input_search_matches(r: &AppRenderer) -> Vec<(usize, usize)> {
+    find_matches_ci(&r.input_buffer, &r.search_string)
+}
+
+/// Recompute the match count after the query changed, and pick the current
+/// match as the first hit at or after the caret position search started from.
+///
+/// This mirrors scroll search's "first match in/after the current viewport"
+/// rule: while the user is still typing, the selected hit should be the one
+/// nearest where they were, not the first one in the element.
+fn recompute_input_search_matches(r: &mut AppRenderer) {
+    let matches = input_search_matches(r);
+    r.input_search_match_count = matches.len();
+    let origin = r.input_search_origin_cursor;
+    r.input_search_current_match = matches
+        .iter()
+        .position(|&(off, _)| off >= origin)
+        .unwrap_or(0);
+}
+
+/// Announce the line of the edited buffer that holds the current match.
+///
+/// The containing line (rather than a "match N of M" phrase) is what a
+/// screen-reader user needs to judge the hit, and it adds no locale strings.
+fn announce_input_search_match(r: &mut AppRenderer) {
+    let matches = input_search_matches(r);
+    let Some(&(off, _)) = matches.get(r.input_search_current_match) else { return };
+    let buf = &r.input_buffer;
+    let off = off.min(buf.len());
+    let start = buf[..off].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let end = buf[off..].find('\n').map(|i| off + i).unwrap_or(buf.len());
+    let line = buf[start..end].to_owned();
+    announce_text(r, &line);
+}
+
+/// Enter — leave InputSearch and drop the caret at the start of the current
+/// match, so the next keystroke types there. With no matches the caret returns
+/// to where Ctrl+F was pressed.
+pub fn handle_enter_input_search(r: &mut AppRenderer) {
+    if r.coordinate != Coordinate::InputSearch {
+        return;
+    }
+    let target = input_search_matches(r)
+        .get(r.input_search_current_match)
+        .map(|&(off, _)| off)
+        .unwrap_or(r.input_search_origin_cursor);
+    r.cursor_position = target.min(r.input_buffer.len());
+    r.selection_anchor = None;
+    r.search_string.clear();
+    r.input_search_match_count = 0;
+    r.input_search_current_match = 0;
+    r.coordinate = Coordinate::Insert;
+    r.caret.reset(sdl_ticks());
+    r.speak_mode_change(None);
+    r.needs_redraw = true;
+}
+
+// ---------------------------------------------------------------------------
 // Ctrl+F — find / enter search mode
 // ---------------------------------------------------------------------------
 
@@ -4717,10 +4877,20 @@ pub fn handle_ctrl_f(r: &mut AppRenderer) {
             // noop
         }
         Coordinate::Insert => {
+            // Never search a masked field: the query and its highlights would
+            // leak the secret that `input_is_password` exists to hide.
+            if r.input_is_password {
+                return;
+            }
             r.previous_coordinate = r.coordinate;
             r.coordinate = Coordinate::InputSearch;
             r.speak_mode_change(None);
-            r.input_buffer.clear();
+            // `input_buffer` is the text being edited — it must survive. Only
+            // the query (`search_string`) and the caret move into search.
+            r.input_search_origin_cursor = r.cursor_position;
+            r.input_search_match_count = 0;
+            r.input_search_current_match = 0;
+            r.search_string.clear();
             r.cursor_position = 0;
             r.selection_anchor = None;
             r.needs_redraw = true;
@@ -5306,15 +5476,31 @@ pub fn handle_search_right(r: &mut AppRenderer) {
     }
 }
 
-/// Up in InputSearch mode — scrolls the text view up by one line.
+/// Up in InputSearch mode — select the previous match, wrapping to the last.
+/// Mirrors the ScrollSearch arm of [`handle_up`].
 pub fn handle_input_search_up(r: &mut AppRenderer) {
-    r.text_scroll_offset = (r.text_scroll_offset - 1).max(0);
+    if r.input_search_match_count > 0 {
+        if r.input_search_current_match > 0 {
+            r.input_search_current_match -= 1;
+        } else {
+            r.input_search_current_match = r.input_search_match_count - 1;
+        }
+        announce_input_search_match(r);
+    }
     r.needs_redraw = true;
 }
 
-/// Down in InputSearch mode — scrolls the text view down by one line.
+/// Down in InputSearch mode — select the next match, wrapping to the first.
+/// Mirrors the ScrollSearch arm of [`handle_down`].
 pub fn handle_input_search_down(r: &mut AppRenderer) {
-    r.text_scroll_offset += 1;
+    if r.input_search_match_count > 0 {
+        if r.input_search_current_match < r.input_search_match_count - 1 {
+            r.input_search_current_match += 1;
+        } else {
+            r.input_search_current_match = 0;
+        }
+        announce_input_search_match(r);
+    }
     r.needs_redraw = true;
 }
 
@@ -6477,6 +6663,7 @@ mod tests {
         assert_eq!(r.coordinate, Coordinate::Scroll);
     }
 
+
     #[test]
     fn escape_from_scroll_returns_to_previous() {
         let mut r = make_renderer();
@@ -6601,6 +6788,7 @@ mod tests {
         assert_eq!(r.scroll_search_current_match, 0);
     }
 
+
     #[test]
     fn scroll_search_query_supports_caret_and_selection() {
         for mode in [Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch] {
@@ -6666,6 +6854,212 @@ mod tests {
         handle_ctrl_f(&mut r);
         assert_eq!(r.coordinate, Coordinate::InputSearch);
         assert_eq!(r.previous_coordinate, Coordinate::Insert);
+    }
+
+    // -----------------------------------------------------------------------
+    // InputSearch — Ctrl+F within the element being edited
+    // -----------------------------------------------------------------------
+
+    /// Insert mode editing "the errno error handler", caret parked at 0.
+    fn make_input_search_renderer() -> AppRenderer {
+        let mut r = make_input_renderer("the errno error handler");
+        r.coordinate = Coordinate::Insert;
+        r.cursor_position = 4;
+        r
+    }
+
+    /// Enter InputSearch and type `query`.
+    fn enter_input_search(r: &mut AppRenderer, query: &str) {
+        handle_ctrl_f(r);
+        for ch in query.chars() {
+            handle_input(r, &ch.to_string());
+        }
+    }
+
+    #[test]
+    fn ctrl_f_from_insert_preserves_edit_buffer() {
+        // Regression: Ctrl+F used to clear `input_buffer`, silently discarding
+        // the text being edited.
+        let mut r = make_input_search_renderer();
+        handle_ctrl_f(&mut r);
+        assert_eq!(r.input_buffer, "the errno error handler");
+        assert_eq!(r.input_search_origin_cursor, 4);
+        assert_eq!(r.search_string, "");
+        assert_eq!(r.cursor_position, 0);
+    }
+
+    #[test]
+    fn ctrl_f_noop_on_password_field() {
+        // A masked field must never be searched: the query and its highlights
+        // would leak the secret.
+        let mut r = make_input_search_renderer();
+        r.input_is_password = true;
+        handle_ctrl_f(&mut r);
+        assert_eq!(r.coordinate, Coordinate::Insert);
+    }
+
+    #[test]
+    fn input_search_typing_builds_query_not_edit() {
+        let mut r = make_input_search_renderer();
+        enter_input_search(&mut r, "err");
+        assert_eq!(r.search_string, "err");
+        assert_eq!(r.input_buffer, "the errno error handler");
+        assert_eq!(r.input_search_match_count, 2); // "errno", "error"
+    }
+
+    #[test]
+    fn input_search_matching_is_case_insensitive() {
+        let mut r = make_input_renderer("Err err ERR");
+        r.coordinate = Coordinate::Insert;
+        enter_input_search(&mut r, "err");
+        assert_eq!(r.input_search_match_count, 3);
+    }
+
+    #[test]
+    fn input_search_starts_at_first_match_after_origin_cursor() {
+        // Mirrors scroll search picking the first match in/after the viewport:
+        // the caret was at byte 4, so "error" (byte 10) is not the first hit —
+        // "errno" (byte 4) is, since it starts exactly at the origin.
+        let mut r = make_input_search_renderer();
+        enter_input_search(&mut r, "err");
+        assert_eq!(r.input_search_current_match, 0);
+
+        let mut r = make_input_search_renderer();
+        r.cursor_position = 8; // past "errno"
+        enter_input_search(&mut r, "err");
+        assert_eq!(r.input_search_current_match, 1);
+    }
+
+    #[test]
+    fn input_search_backspace_shrinks_query() {
+        let mut r = make_input_search_renderer();
+        enter_input_search(&mut r, "errn");
+        assert_eq!(r.input_search_match_count, 1);
+        handle_backspace(&mut r);
+        assert_eq!(r.search_string, "err");
+        assert_eq!(r.input_search_match_count, 2);
+        assert_eq!(r.input_buffer, "the errno error handler");
+    }
+
+    #[test]
+    fn input_search_down_cycles_matches_with_wraparound() {
+        let mut r = make_input_search_renderer();
+        enter_input_search(&mut r, "err");
+        assert_eq!(r.input_search_current_match, 0);
+        handle_input_search_down(&mut r);
+        assert_eq!(r.input_search_current_match, 1);
+        handle_input_search_down(&mut r); // wraps
+        assert_eq!(r.input_search_current_match, 0);
+    }
+
+    #[test]
+    fn input_search_up_cycles_matches_with_wraparound() {
+        let mut r = make_input_search_renderer();
+        enter_input_search(&mut r, "err");
+        handle_input_search_up(&mut r); // wraps backwards from 0
+        assert_eq!(r.input_search_current_match, 1);
+        handle_input_search_up(&mut r);
+        assert_eq!(r.input_search_current_match, 0);
+    }
+
+    #[test]
+    fn input_search_nav_inert_with_no_matches() {
+        let mut r = make_input_search_renderer();
+        enter_input_search(&mut r, "zzz");
+        assert_eq!(r.input_search_match_count, 0);
+        handle_input_search_down(&mut r);
+        handle_input_search_up(&mut r);
+        assert_eq!(r.input_search_current_match, 0);
+    }
+
+    #[test]
+    fn input_search_announces_the_matched_line() {
+        let mut r = make_input_renderer("alpha err\nbeta err\ngamma");
+        r.coordinate = Coordinate::Insert;
+        enter_input_search(&mut r, "err");
+        handle_input_search_down(&mut r);
+        let spoken = r.pending_announcement.clone().unwrap();
+        assert!(spoken.starts_with("beta err"), "got {spoken:?}");
+    }
+
+    #[test]
+    fn enter_in_input_search_places_caret_at_match() {
+        let mut r = make_input_search_renderer();
+        enter_input_search(&mut r, "err");
+        handle_input_search_down(&mut r); // second hit: "error" at byte 10
+        handle_enter_input_search(&mut r);
+        assert_eq!(r.coordinate, Coordinate::Insert);
+        assert_eq!(r.cursor_position, 10);
+        assert_eq!(r.search_string, "");
+        assert_eq!(r.input_search_match_count, 0);
+        assert_eq!(r.input_buffer, "the errno error handler");
+    }
+
+    #[test]
+    fn enter_in_input_search_without_matches_restores_origin_cursor() {
+        let mut r = make_input_search_renderer();
+        enter_input_search(&mut r, "zzz");
+        handle_enter_input_search(&mut r);
+        assert_eq!(r.coordinate, Coordinate::Insert);
+        assert_eq!(r.cursor_position, 4);
+    }
+
+    #[test]
+    fn escape_from_input_search_restores_insert_and_cursor() {
+        // Regression: Escape used to fall through to the `_` arm and land in
+        // General, abandoning the edit.
+        let mut r = make_input_search_renderer();
+        enter_input_search(&mut r, "err");
+        handle_input_search_down(&mut r);
+        handle_escape(&mut r);
+        assert_eq!(r.coordinate, Coordinate::Insert);
+        assert_eq!(r.cursor_position, 4);
+        assert_eq!(r.search_string, "");
+        assert_eq!(r.input_search_match_count, 0);
+        assert_eq!(r.input_buffer, "the errno error handler");
+    }
+
+    #[test]
+    fn input_search_home_end_move_within_the_query() {
+        let mut r = make_input_search_renderer();
+        enter_input_search(&mut r, "err");
+        handle_home(&mut r);
+        assert_eq!(r.cursor_position, 0);
+        handle_end(&mut r);
+        assert_eq!(r.cursor_position, 3); // end of "err", not of the element
+        assert_eq!(r.input_buffer, "the errno error handler");
+    }
+
+    #[test]
+    fn input_search_delete_forward_edits_the_query() {
+        let mut r = make_input_search_renderer();
+        enter_input_search(&mut r, "err");
+        r.cursor_position = 0;
+        handle_delete_forward(&mut r);
+        assert_eq!(r.search_string, "rr");
+        assert_eq!(r.input_buffer, "the errno error handler");
+    }
+
+    // -----------------------------------------------------------------------
+    // find_matches_ci (moved here from view.rs — shared with scroll search)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn find_matches_ci_basic_and_case_insensitive() {
+        assert_eq!(find_matches_ci("Hello hello", "hello"), vec![(0, 5), (6, 5)]);
+        assert_eq!(find_matches_ci("abc", "xyz"), vec![]);
+        assert_eq!(find_matches_ci("abc", ""), vec![]);
+    }
+
+    #[test]
+    fn find_matches_ci_handles_multibyte_chars() {
+        // Regression: matching must not slice inside a multi-byte char (`—`).
+        let text = "open the view — a read-only list";
+        let m = find_matches_ci(text, "read");
+        let idx = text.find("read").unwrap();
+        assert_eq!(m, vec![(idx, 4)]);
+        // A query that scans past the em-dash must not panic.
+        assert!(find_matches_ci(text, "zzz").is_empty());
     }
 
     // -----------------------------------------------------------------------
@@ -8115,34 +8509,10 @@ mod tests {
         assert_eq!(r.text_scroll_offset, 80); // total(100) - viewport(20)
     }
 
-    #[test]
-    fn page_up_input_search_decreases_offset() {
-        let mut r = make_renderer_paged();
-        r.coordinate = Coordinate::InputSearch;
-        r.input_search_scroll_offset = 3;
-        handle_page_up(&mut r);
-        assert_eq!(r.input_search_scroll_offset, 2);
-        assert!(r.needs_redraw);
-    }
-
-    #[test]
-    fn page_up_input_search_clamps_at_zero() {
-        let mut r = make_renderer_paged();
-        r.coordinate = Coordinate::InputSearch;
-        r.input_search_scroll_offset = 0;
-        handle_page_up(&mut r);
-        assert_eq!(r.input_search_scroll_offset, 0);
-    }
-
-    #[test]
-    fn page_down_input_search_increases_offset() {
-        let mut r = make_renderer_paged();
-        r.coordinate = Coordinate::InputSearch;
-        r.input_search_scroll_offset = 0;
-        handle_page_down(&mut r);
-        assert_eq!(r.input_search_scroll_offset, 1); // page_size=1
-        assert!(r.needs_redraw);
-    }
+    // PageUp/PageDown are no longer bound in InputSearch: there is nothing to
+    // page in a single element's buffer, and `input_search_scroll_offset` (which
+    // the removed tests here covered) was never read by any renderer. Match
+    // navigation lives on Up/Down — see the InputSearch tests above.
 
     // -----------------------------------------------------------------------
     // step_back_by_lines / step_forward_by_lines + General page nav

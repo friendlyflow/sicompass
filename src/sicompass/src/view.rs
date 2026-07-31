@@ -928,13 +928,19 @@ fn update_view(app: &mut AppState) {
         app.renderer.coordinate,
         Coordinate::Insert | Coordinate::Normal | Coordinate::Visual
     );
+    // InputSearch searches within the element being edited, so that element
+    // must keep rendering as an inline editable buffer while the search bar is
+    // up. Caret and selection, however, belong to the search field — those stay
+    // keyed off `in_insert_mode`.
+    let in_input_search = app.renderer.coordinate == Coordinate::InputSearch;
+    let renders_insert_buffer = in_insert_mode || in_input_search;
     // For a `<password>` field, render the buffer as one `*` per character so
     // the secret never reaches the glyph pipeline. Cursor/selection are byte
     // offsets into the real buffer; remap them to the masked string (each
     // mask char is one byte) so the caret and highlight stay aligned. Done
     // once here so every downstream use (glyphs, caret, selection, line
     // counting) sees the same masked text.
-    let mask_password = in_insert_mode && app.renderer.input_is_password;
+    let mask_password = renders_insert_buffer && app.renderer.input_is_password;
     let (insert_buf, insert_cursor, insert_sel) = if mask_password {
         let raw = &app.renderer.input_buffer;
         let masked: String = raw.chars().map(|c| if c == '\n' { '\n' } else { '*' }).collect();
@@ -964,22 +970,27 @@ fn update_view(app: &mut AppState) {
     } else if matches!(
         app.renderer.coordinate,
         Coordinate::SimpleSearch | Coordinate::ExtendedSearch | Coordinate::Command
-            | Coordinate::TabSwitcher
+            | Coordinate::TabSwitcher | Coordinate::InputSearch
     ) {
         let (prefix, text) = match app.renderer.coordinate {
             Coordinate::Command => ("search: ", app.renderer.input_buffer.as_str()),
             Coordinate::ExtendedSearch => ("ext search: ", app.renderer.input_buffer.as_str()),
             Coordinate::TabSwitcher => ("switch tab: ", app.renderer.input_buffer.as_str()),
+            // SimpleSearch and InputSearch both type into `search_string`.
             _ => ("search: ", app.renderer.search_string.as_str()),
         };
-        // Tab (ExtendedSearch) and Ctrl-F (SimpleSearch) append a result count,
+        // Tab (SimpleSearch) and Ctrl-F (ExtendedSearch) append a result count,
         // matching the `[N items]` readout shown by scroll-mode searches; the
-        // tab switcher shows a tab count.
+        // tab switcher shows a tab count. InputSearch counts substring hits
+        // inside the element being edited, not list rows.
         let count_suffix = match app.renderer.coordinate {
             Coordinate::SimpleSearch | Coordinate::ExtendedSearch => {
                 format!(" [{} items]", list_items.len())
             }
             Coordinate::TabSwitcher => format!(" [{} tabs]", list_items.len()),
+            Coordinate::InputSearch => {
+                format!(" [{} items]", app.renderer.input_search_match_count)
+            }
             _ => String::new(),
         };
         Some(format!("{}{}{}", prefix, text, count_suffix))
@@ -1318,7 +1329,7 @@ fn update_view(app: &mut AppState) {
         if !is_selected { continue; }
         // In insert mode the highlight is deferred: only the input buffer portion
         // is highlighted (drawn in the text pass below), not the full row.
-        if in_insert_mode { continue; }
+        if renders_insert_buffer { continue; }
         let (item_y, content_start_x, lines, highlight_w) = item_metrics[i];
         if let Some(layout) = &image_layouts[i] {
             // Tight-fitting selection background around image + prefix/suffix text.
@@ -1559,7 +1570,7 @@ fn update_view(app: &mut AppState) {
                 }
             }
         } else if let Some(fr) = app.font_renderer.as_mut() {
-            if *is_selected && in_insert_mode {
+            if *is_selected && renders_insert_buffer {
                 // Render prefix (non-editable, no highlight)
                 let pfx_w = if !insert_prefix.is_empty() {
                     let w = fr.measure_text_width(&insert_prefix, scale);
@@ -1677,6 +1688,66 @@ fn update_view(app: &mut AppState) {
     app.renderer.current_element_base_x = captured_elem_base_x;
     app.renderer.current_element_y = captured_elem_y;
 
+    // ---- Input-search match highlights ---------------------------------------
+    // Drawn after the item text pass so these rects sit on top of the row's
+    // `p.selected` background (later rects win in the rect renderer). Geometry
+    // matches the caret/selection blocks below: the buffer's first line trails
+    // the non-editable prefix at `captured_elem_x`, continuation lines start at
+    // `captured_elem_base_x`.
+    if in_input_search && !app.renderer.input_is_password {
+        let matches = handlers::input_search_matches(&app.renderer);
+        let current = app.renderer.input_search_current_match;
+        let buf = insert_buf.clone();
+        let lh = line_height as f32;
+        let hl_height = lh - 2.0 * crate::text::TEXT_PADDING;
+
+        let mut line_starts: Vec<usize> = vec![0];
+        for (i, c) in buf.char_indices() {
+            if c == '\n' { line_starts.push(i + 1); }
+        }
+
+        if let Some(fr) = app.font_renderer.as_ref() {
+            let mut rects: Vec<(f32, f32, f32, f32, u32)> = Vec::new();
+            // Rects for the current match are collected separately and drawn
+            // last: overlapping hits are possible ("aa" in "aaa"), and the
+            // current one must stay visible when a later hit covers it.
+            let mut current_rects: Vec<(f32, f32, f32, f32, u32)> = Vec::new();
+            for (mi, &(off, len)) in matches.iter().enumerate() {
+                // A query containing a newline spans lines; clamp per line so
+                // each covered line gets its own rect, as the selection loop does.
+                let m_start = off.min(buf.len());
+                let m_end = (off + len).min(buf.len());
+                let start_line = line_starts.partition_point(|&s| s <= m_start).saturating_sub(1);
+                let end_line = line_starts.partition_point(|&s| s <= m_end).saturating_sub(1);
+                let color = if mi == current { p.scroll_search } else { p.ext_search };
+                for line in start_line..=end_line {
+                    let line_start_off = line_starts[line];
+                    let line_end_off = if line + 1 < line_starts.len() {
+                        line_starts[line + 1] - 1
+                    } else {
+                        buf.len()
+                    };
+                    let clamp_start = m_start.max(line_start_off);
+                    let clamp_end = m_end.min(line_end_off);
+                    if clamp_end <= clamp_start { continue; }
+                    let line_x = if line == 0 { captured_elem_x } else { captured_elem_base_x };
+                    let line_y = captured_elem_y - ascender * scale + line as f32 * lh;
+                    let x_start = line_x
+                        + fr.measure_text_width(&buf[line_start_off..clamp_start], scale);
+                    let w = fr.measure_text_width(&buf[clamp_start..clamp_end], scale).max(2.0);
+                    let target = if mi == current { &mut current_rects } else { &mut rects };
+                    target.push((x_start, line_y, w, hl_height, color));
+                }
+            }
+            rects.extend(current_rects);
+            if let Some(rr) = app.rect_renderer.as_mut() {
+                for (x, y, w, h, color) in rects {
+                    rr.prepare_rectangle(x, y, w, h, color, 3.0);
+                }
+            }
+        }
+    }
+
     // ---- Selection highlight rectangles (behind text, rendered now) ----------
     // Selection highlights for search/command/insert modes.
     let has_sel = handlers::has_selection(&app.renderer);
@@ -1699,7 +1770,9 @@ fn update_view(app: &mut AppState) {
             };
             let sel_height = line_height as f32 - 2.0 * crate::text::TEXT_PADDING;
             let search_buf;
-            let buf = if app.renderer.coordinate == Coordinate::SimpleSearch {
+            let buf = if matches!(app.renderer.coordinate,
+                Coordinate::SimpleSearch | Coordinate::InputSearch)
+            {
                 search_buf = app.renderer.search_string.clone();
                 search_buf.as_str()
             } else {
@@ -1752,6 +1825,9 @@ fn update_view(app: &mut AppState) {
         let lh = line_height as f32;
         let caret_h = lh - 2.0 * crate::text::TEXT_PADDING;
 
+        // Note: `in_insert_mode` excludes InputSearch, so an InputSearch caret
+        // falls through to the search-field branch below even though the
+        // element buffer is rendered inline behind it.
         if in_insert_mode {
             // Insert mode caret using stored element position
             let buf = insert_buf.as_str();
@@ -2127,44 +2203,6 @@ struct ScrollMatch {
     virtual_y: i32,
 }
 
-/// Find all case-insensitive occurrences of `query` in `text`.
-/// Returns `(byte_offset, match_len)` pairs — both are byte indices into the
-/// original `text` and always land on char boundaries (matching is done
-/// char-by-char on the original text, so multi-byte characters such as `—` do
-/// not produce invalid slice indices).
-fn find_matches_ci(text: &str, query: &str) -> Vec<(usize, usize)> {
-    if query.is_empty() {
-        return Vec::new();
-    }
-    // Per original char: (byte offset, byte length, lowercased form).
-    let chars: Vec<(usize, usize, String)> = text
-        .char_indices()
-        .map(|(i, c)| (i, c.len_utf8(), c.to_lowercase().collect::<String>()))
-        .collect();
-    let query_lower = query.to_lowercase();
-    let mut matches = Vec::new();
-    for start in 0..chars.len() {
-        let mut q = query_lower.as_str();
-        let mut ci = start;
-        let mut ok = true;
-        while !q.is_empty() {
-            match chars.get(ci) {
-                Some((_, _, lc)) => match q.strip_prefix(lc.as_str()) {
-                    Some(rest) => { q = rest; ci += 1; }
-                    None => { ok = false; break; }
-                },
-                None => { ok = false; break; }
-            }
-        }
-        if ok && ci > start {
-            let start_off = chars[start].0;
-            let end_off = chars[ci - 1].0 + chars[ci - 1].1;
-            matches.push((start_off, end_off - start_off));
-        }
-    }
-    matches
-}
-
 /// Render a scroll search across the flattened list. `corpus` selects whether
 /// the query matches element content (Ctrl-F) or extended prefixes (Tab).
 /// Returns computed state for write-back.
@@ -2247,7 +2285,7 @@ fn render_scroll_search_full(
     // ordered, and `find_matches_ci` returns hits left-to-right).
     let mut all_matches: Vec<ScrollMatch> = Vec::new();
     for (seg_idx, seg) in segments.iter().enumerate() {
-        for (byte_off, mlen) in find_matches_ci(&seg.text, search_query) {
+        for (byte_off, mlen) in handlers::find_matches_ci(&seg.text, search_query) {
             let li = seg.wrap.partition_point(|(_, off)| *off <= byte_off).saturating_sub(1);
             let li = li.min(seg.wrap.len().saturating_sub(1));
             let virtual_y = seg.virtual_top + li as i32 * line_height;
@@ -2679,23 +2717,8 @@ struct ImageLayout {
 mod tests {
     use super::*;
 
-    #[test]
-    fn find_matches_ci_basic_and_case_insensitive() {
-        assert_eq!(find_matches_ci("Hello hello", "hello"), vec![(0, 5), (6, 5)]);
-        assert_eq!(find_matches_ci("abc", "xyz"), vec![]);
-        assert_eq!(find_matches_ci("abc", ""), vec![]);
-    }
-
-    #[test]
-    fn find_matches_ci_handles_multibyte_chars() {
-        // Regression: matching must not slice inside a multi-byte char (`—`).
-        let text = "open the view — a read-only list";
-        let m = find_matches_ci(text, "read");
-        let idx = text.find("read").unwrap();
-        assert_eq!(m, vec![(idx, 4)]);
-        // A query that scans past the em-dash must not panic.
-        assert!(find_matches_ci(text, "zzz").is_empty());
-    }
+    // `find_matches_ci` moved to handlers.rs (shared with InputSearch); its
+    // tests moved with it.
 
     #[test]
     fn rgba_u32_to_f32_black() {

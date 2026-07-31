@@ -3,10 +3,10 @@
 hint-esc-back = Esc    Terug
 
 hint-up-previous = Up     Vorige
-hint-up-scroll-up = Up     Scrol op
+hint-up-prev-match = Up     Vorige match
 
 hint-down-next = Down   Volgende
-hint-down-scroll-dn = Down   Scrol neer
+hint-down-next-match = Down   Volgende match
 
 hint-right-open = Right  Open
 hint-right-navigate = Right  Navigeer
@@ -39,6 +39,7 @@ hint-enter-append = Enter  Voeg toe
 hint-enter-open = Enter  Open
 hint-enter-follow-link = Enter  Volg link
 hint-enter-go-to-element = Enter  Ga naar elem.
+hint-enter-go-to-match = Enter  Ga naar match
 
 hint-tab-search = Tab    Zoeken
 hint-tab-prefix-search = Tab    Voorvoegsel
