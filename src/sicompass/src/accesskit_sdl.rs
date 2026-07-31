@@ -738,7 +738,7 @@ mod tests {
         let mut r = AppRenderer::new();
         r.coordinate = crate::app_state::Coordinate::SimpleSearch;
         r.speak_mode_change(None);
-        assert_eq!(announced_text(&r).as_deref(), Some("search"));
+        assert_eq!(announced_text(&r).as_deref(), Some("search mode"));
     }
 
     #[test]
@@ -779,7 +779,7 @@ mod tests {
         let mut r = AppRenderer::new();
         r.coordinate = crate::app_state::Coordinate::Command;
         r.speak_mode_change(Some(String::new()));
-        assert_eq!(announced_text(&r).as_deref(), Some("command"));
+        assert_eq!(announced_text(&r).as_deref(), Some("command mode"));
     }
 
     #[test]
@@ -791,7 +791,7 @@ mod tests {
         r.coordinate = crate::app_state::Coordinate::Command;
         r.current_command = crate::app_state::CommandPhase::Controls;
         r.speak_mode_change(Some(String::new()));
-        assert_eq!(announced_text(&r).as_deref(), Some("controls"));
+        assert_eq!(announced_text(&r).as_deref(), Some("controls mode"));
     }
 
     #[test]
@@ -830,7 +830,7 @@ mod tests {
         let mut r = AppRenderer::new();
         r.coordinate = crate::app_state::Coordinate::ExtendedSearch;
         r.speak_mode_change(None);
-        assert_eq!(announced_text(&r).as_deref(), Some("extended search"));
+        assert_eq!(announced_text(&r).as_deref(), Some("extended search mode"));
     }
 
     #[test]
@@ -846,7 +846,7 @@ mod tests {
         let mut r = AppRenderer::new();
         r.coordinate = crate::app_state::Coordinate::Dashboard;
         r.speak_mode_change(None);
-        assert_eq!(announced_text(&r).as_deref(), Some("dashboard"));
+        assert_eq!(announced_text(&r).as_deref(), Some("dashboard mode"));
     }
 
     #[test]
@@ -854,6 +854,6 @@ mod tests {
         let mut r = AppRenderer::new();
         r.coordinate = crate::app_state::Coordinate::InputSearch;
         r.speak_mode_change(None);
-        assert_eq!(announced_text(&r).as_deref(), Some("input search"));
+        assert_eq!(announced_text(&r).as_deref(), Some("input search mode"));
     }
 }

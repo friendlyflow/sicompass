@@ -1236,7 +1236,7 @@ impl AppRenderer {
         {
             crate::shortcuts::register_translations();
             let resolved = sicompass_sdk::localize::t("mode-controls");
-            return if resolved == "mode-controls" { "controls".to_owned() } else { resolved };
+            return if resolved == "mode-controls" { "controls mode".to_owned() } else { resolved };
         }
         self.coordinate.display_label()
     }
@@ -1581,7 +1581,7 @@ mod tests {
         sicompass_sdk::localize::set_locale("en-US");
         assert_eq!(Coordinate::General.display_label(), "general mode");
         assert_eq!(Coordinate::Insert.display_label(), "insert mode");
-        assert_eq!(Coordinate::SimpleSearch.display_label(), "search");
+        assert_eq!(Coordinate::SimpleSearch.display_label(), "search mode");
         sicompass_sdk::localize::set_locale("en-US");
     }
 
