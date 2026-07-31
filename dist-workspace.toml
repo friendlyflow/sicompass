@@ -11,6 +11,11 @@ ci = "github"
 # Trigger the release from the GitHub web UI (Actions -> Release -> Run
 # workflow) instead of on a tag push / commit.
 dispatch-releases = true
+# Do not check the release process on pull requests. The default, "plan", adds a
+# `pull_request:` trigger to the generated release.yml and runs `dist plan` on
+# every PR; "skip" drops that trigger entirely. Nothing in this repository runs
+# as a side effect of a commit or a PR.
+pr-run-mode = "skip"
 # Windows only for now. macOS (aarch64 + x86_64) is parked until the
 # deployment-target / link issues are sorted; re-add the two
 # *-apple-darwin targets here and regenerate. Linux is released
