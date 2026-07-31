@@ -2698,6 +2698,14 @@ pub fn handle_escape(r: &mut AppRenderer) {
             r.coordinate = Coordinate::Scroll;
             r.scroll_search_match_count = 0;
             r.scroll_search_current_match = 0;
+            // Discard the query, matching `handle_enter_scroll`'s cleanup on the
+            // commit path. Without this the stale query survives back into
+            // Scroll and reappears the moment search is re-entered.
+            r.scroll_search_needs_position = false;
+            r.scroll_search_snap = false;
+            r.input_buffer.clear();
+            r.cursor_position = 0;
+            r.selection_anchor = None;
         }
         Coordinate::InputSearch => {
             // Cancel the search: back to editing with the caret exactly where
@@ -6663,6 +6671,38 @@ mod tests {
         assert_eq!(r.coordinate, Coordinate::Scroll);
     }
 
+    #[test]
+    fn escape_from_scroll_search_discards_the_query() {
+        // Regression: the query used to survive into Scroll mode and reappear
+        // on the next Ctrl+F.
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::ScrollSearch;
+        r.input_buffer = "item".to_string();
+        r.cursor_position = 4;
+        r.selection_anchor = Some(0);
+        handle_escape(&mut r);
+        assert_eq!(r.coordinate, Coordinate::Scroll);
+        assert_eq!(r.input_buffer, "");
+        assert_eq!(r.cursor_position, 0);
+        assert_eq!(r.selection_anchor, None);
+    }
+
+    #[test]
+    fn scroll_search_reentry_after_escape_starts_empty() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::General;
+        handle_s(&mut r);
+        handle_ctrl_f(&mut r);
+        for ch in "item".chars() {
+            handle_input(&mut r, &ch.to_string());
+        }
+        assert_eq!(r.input_buffer, "item");
+        handle_escape(&mut r);
+        handle_ctrl_f(&mut r);
+        assert_eq!(r.coordinate, Coordinate::ScrollSearch);
+        assert_eq!(r.input_buffer, "");
+        assert_eq!(r.scroll_search_match_count, 0);
+    }
 
     #[test]
     fn escape_from_scroll_returns_to_previous() {
@@ -6788,6 +6828,37 @@ mod tests {
         assert_eq!(r.scroll_search_current_match, 0);
     }
 
+    #[test]
+    fn scroll_search_nav_requests_snap_and_takes_position_control() {
+        // The renderer announces the new match only when `snap` is set, and
+        // picks the clamped match (not a viewport-relative one) once
+        // `needs_position` is cleared. Both flags are this contract.
+        for mode in [Coordinate::ScrollSearch, Coordinate::ScrollPrefixSearch] {
+            for nav in [handle_down as fn(&mut AppRenderer), handle_up] {
+                let mut r = make_renderer();
+                r.coordinate = mode;
+                r.scroll_search_match_count = 3;
+                r.scroll_search_current_match = 1;
+                r.scroll_search_needs_position = true;
+                r.scroll_search_snap = false;
+                nav(&mut r);
+                assert!(r.scroll_search_snap, "{mode:?} should request a snap");
+                assert!(!r.scroll_search_needs_position, "{mode:?} nav takes control");
+            }
+        }
+    }
+
+    #[test]
+    fn scroll_search_nav_is_inert_without_matches() {
+        let mut r = make_renderer();
+        r.coordinate = Coordinate::ScrollSearch;
+        r.scroll_search_match_count = 0;
+        r.scroll_search_needs_position = true;
+        handle_down(&mut r);
+        assert_eq!(r.scroll_search_current_match, 0);
+        assert!(!r.scroll_search_snap, "no matches — nothing to snap to");
+        assert!(r.scroll_search_needs_position);
+    }
 
     #[test]
     fn scroll_search_query_supports_caret_and_selection() {
