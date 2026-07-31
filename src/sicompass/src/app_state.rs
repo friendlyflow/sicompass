@@ -149,18 +149,18 @@ impl Coordinate {
             Coordinate::Insert => "insert mode",
             Coordinate::Normal => "normal mode",
             Coordinate::Visual => "visual mode",
-            Coordinate::SimpleSearch => "search",
-            Coordinate::ExtendedSearch => "extended search",
-            Coordinate::Command => "command",
+            Coordinate::SimpleSearch => "search mode",
+            Coordinate::ExtendedSearch => "extended search mode",
+            Coordinate::Command => "command mode",
             Coordinate::Scroll => "scroll mode",
-            Coordinate::ScrollSearch => "scroll search",
-            Coordinate::ScrollPrefixSearch => "scroll prefix search",
-            Coordinate::InputSearch => "input search",
-            Coordinate::Dashboard => "dashboard",
-            Coordinate::Meta => "meta",
-            Coordinate::TimelineView => "timeline",
-            Coordinate::ConfirmCloseTab => "confirm close tab",
-            Coordinate::TabSwitcher => "tab switcher",
+            Coordinate::ScrollSearch => "scroll search mode",
+            Coordinate::ScrollPrefixSearch => "scroll prefix search mode",
+            Coordinate::InputSearch => "input search mode",
+            Coordinate::Dashboard => "dashboard mode",
+            Coordinate::Meta => "meta mode",
+            Coordinate::TimelineView => "timeline mode",
+            Coordinate::ConfirmCloseTab => "confirm close tab mode",
+            Coordinate::TabSwitcher => "tab switcher mode",
         }
     }
 
@@ -1644,17 +1644,17 @@ mod tests {
 
     #[test]
     fn coordinate_as_str_simple_search() {
-        assert_eq!(Coordinate::SimpleSearch.as_str(), "search");
+        assert_eq!(Coordinate::SimpleSearch.as_str(), "search mode");
     }
 
     #[test]
     fn coordinate_as_str_extended_search() {
-        assert_eq!(Coordinate::ExtendedSearch.as_str(), "extended search");
+        assert_eq!(Coordinate::ExtendedSearch.as_str(), "extended search mode");
     }
 
     #[test]
     fn coordinate_as_str_command() {
-        assert_eq!(Coordinate::Command.as_str(), "command");
+        assert_eq!(Coordinate::Command.as_str(), "command mode");
     }
 
     #[test]
@@ -1664,18 +1664,18 @@ mod tests {
 
     #[test]
     fn coordinate_as_str_scroll_search() {
-        assert_eq!(Coordinate::ScrollSearch.as_str(), "scroll search");
-        assert_eq!(Coordinate::ScrollPrefixSearch.as_str(), "scroll prefix search");
+        assert_eq!(Coordinate::ScrollSearch.as_str(), "scroll search mode");
+        assert_eq!(Coordinate::ScrollPrefixSearch.as_str(), "scroll prefix search mode");
     }
 
     #[test]
     fn coordinate_as_str_input_search() {
-        assert_eq!(Coordinate::InputSearch.as_str(), "input search");
+        assert_eq!(Coordinate::InputSearch.as_str(), "input search mode");
     }
 
     #[test]
     fn coordinate_as_str_dashboard() {
-        assert_eq!(Coordinate::Dashboard.as_str(), "dashboard");
+        assert_eq!(Coordinate::Dashboard.as_str(), "dashboard mode");
     }
 
     // --- Task::as_str ---
