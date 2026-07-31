@@ -302,32 +302,9 @@ pub fn main_loop(app: &mut AppState) {
         let (active_tick_update, dashboard_requests) =
             crate::events::run_provider_ticks(&mut app.renderer);
         // Honor only requests from the *active* provider — never yank the user
-        // out of one tab into another tab's dashboard.
-        for (i, req) in dashboard_requests {
-            if app.renderer.current_id.get(0) != Some(i) {
-                continue;
-            }
-            match req {
-                sicompass_sdk::DashboardRequest::Enter
-                    if app.renderer.coordinate != Coordinate::Dashboard =>
-                {
-                    // Reset the baseline to General before entering. The user
-                    // typed a command at the input slot (likely in Insert
-                    // mode); without this, auto-leave restores Insert and
-                    // `i`/`a` would type literally instead of re-entering
-                    // Insert. Bypass the manual-entry guard — the provider
-                    // asked for this directly via take_dashboard_request.
-                    app.renderer.coordinate = Coordinate::General;
-                    app.renderer.input_buffer.clear();
-                    app.renderer.cursor_position = 0;
-                    handlers::enter_dashboard_for_active(&mut app.renderer);
-                }
-                sicompass_sdk::DashboardRequest::Leave => {
-                    handlers::handle_dashboard_leave(&mut app.renderer);
-                }
-                _ => {}
-            }
-        }
+        // out of one tab into another tab's dashboard. The gate itself lives in
+        // `events` so the loop and the tests exercise the same code.
+        crate::events::apply_dashboard_requests(&mut app.renderer, dashboard_requests);
         // Sync SDL text-input state with the coordinate after the dispatch.
         // Without this, the dashboard's text-input-enabled state lingers
         // through auto-leave; the next `i` keypress would fire BOTH the
@@ -339,13 +316,7 @@ pub fn main_loop(app: &mut AppState) {
             app._video.text_input().stop(&app.window);
         }
         if active_tick_update {
-            // Clear any stale status, then let providers re-assert their error.
-            app.renderer.error_message.clear();
-            for p in app.renderer.providers.iter_mut() {
-                if let Some(err) = p.take_error() {
-                    app.renderer.error_message = err;
-                }
-            }
+            crate::events::drain_provider_errors(&mut app.renderer);
             // Detect whether the cursor is parked on a terminal/chat-style
             // `<input></input>` slot. Streaming output (e.g. `ls` results) shifts
             // the trailing input slot's index in the rebuilt FFON; without this
@@ -424,12 +395,7 @@ pub fn main_loop(app: &mut AppState) {
                     p.clear_needs_refresh();
                 }
             }
-            app.renderer.error_message.clear();
-            for p in app.renderer.providers.iter_mut() {
-                if let Some(err) = p.take_error() {
-                    app.renderer.error_message = err;
-                }
-            }
+            crate::events::drain_provider_errors(&mut app.renderer);
             crate::provider::refresh_current_directory(&mut app.renderer);
             crate::list::create_list_current_layer(&mut app.renderer);
 

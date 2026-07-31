@@ -386,6 +386,65 @@ pub fn run_provider_ticks(
     (active_tick_update, dashboard_requests)
 }
 
+/// Clear the status line, then let the **active** provider re-assert its error.
+///
+/// Every provider is drained, so an error raised while a tab was in the
+/// background does not surface frames later when the user finally navigates
+/// there. Only the active provider may write the line: it is where the app's
+/// own messages appear, so a background provider putting text there — a
+/// sandboxed plugin included — would be able to spoof one.
+pub fn drain_provider_errors(r: &mut AppRenderer) {
+    use sicompass_sdk::Provider;
+    let active_root = r.current_id.get(0);
+    r.error_message.clear();
+    for (i, p) in r.providers.iter_mut().enumerate() {
+        if let Some(err) = p.take_error()
+            && Some(i) == active_root
+        {
+            r.error_message = err;
+        }
+    }
+}
+
+/// Apply the dashboard requests collected by [`run_provider_ticks`], honouring
+/// only the **active** provider's.
+///
+/// A background provider — including a sandboxed WASM plugin the user is not
+/// looking at — must never be able to pull the screen into its own fullscreen
+/// view. The index carried alongside each request is the host's, assigned in
+/// `run_provider_ticks`; a provider cannot name a different one.
+///
+/// Lives here rather than inline in the main loop so the gate has exactly one
+/// implementation: the loop and the test suite call this same function.
+pub fn apply_dashboard_requests(
+    r: &mut AppRenderer,
+    requests: Vec<(usize, sicompass_sdk::DashboardRequest)>,
+) {
+    for (i, req) in requests {
+        if r.current_id.get(0) != Some(i) {
+            continue;
+        }
+        match req {
+            sicompass_sdk::DashboardRequest::Enter if r.coordinate != Coordinate::Dashboard => {
+                // Reset the baseline to General before entering. The user typed
+                // a command at the input slot (likely in Insert mode); without
+                // this, auto-leave restores Insert and `i`/`a` would type
+                // literally instead of re-entering Insert. Bypass the
+                // manual-entry guard — the provider asked for this directly via
+                // take_dashboard_request.
+                r.coordinate = Coordinate::General;
+                r.input_buffer.clear();
+                r.cursor_position = 0;
+                handlers::enter_dashboard_for_active(r);
+            }
+            sicompass_sdk::DashboardRequest::Leave => {
+                handlers::handle_dashboard_leave(r);
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Drain every provider's pending cursor request and apply the **active**
 /// provider's, if any. Returns `true` when the cursor moved.
 ///
