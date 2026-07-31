@@ -1640,11 +1640,15 @@ fn update_view(app: &mut AppState) {
             } else if is_flat_list {
                 // Command/Meta: no prefix split — render the full label.
                 // Use fuzzy highlights when match positions are available.
+                let wrap_w = max_content_w.max(1.0);
                 if match_pos.is_empty() {
-                    fr.prepare_text_wrapped(label.as_str(), text_prefix_x, item_y, scale, max_content_w.max(1.0), line_height as f32, p.text);
+                    fr.prepare_text_wrapped(label.as_str(), text_prefix_x, item_y, scale, wrap_w, line_height as f32, p.text);
                 } else {
+                    // Same uniform wrap as the branch above: highlighted items
+                    // must wrap too, and the line count reserved above assumes it.
                     let rr = app.rect_renderer.as_mut();
-                    render_with_highlights(fr, rr, label.as_str(), text_prefix_x, item_y, scale, ascender, line_height as f32, p.text, p.scroll_search, &match_pos, None);
+                    render_with_highlights(fr, rr, label.as_str(), text_prefix_x, item_y, scale, ascender, line_height as f32, p.text, p.scroll_search, &match_pos,
+                        Some(WrapLayout { first_width: wrap_w, rest_x: text_prefix_x, rest_width: wrap_w }));
                 }
             } else {
                 let (prefix, content) = split_label(label.as_str());
@@ -1654,11 +1658,15 @@ fn update_view(app: &mut AppState) {
                     .filter(|&&p| p >= prefix_char_count)
                     .map(|&p| p - prefix_char_count)
                     .collect();
+                let wrap_w = max_content_w.max(1.0);
                 if content_positions.is_empty() {
-                    fr.prepare_text_wrapped(content, content_start_x, item_y, scale, max_content_w.max(1.0), line_height as f32, p.text);
+                    fr.prepare_text_wrapped(content, content_start_x, item_y, scale, wrap_w, line_height as f32, p.text);
                 } else {
+                    // Same uniform wrap as the branch above: highlighted items
+                    // must wrap too, and the line count reserved above assumes it.
                     let rr = app.rect_renderer.as_mut();
-                    render_with_highlights(fr, rr, content, content_start_x, item_y, scale, ascender, line_height as f32, p.text, p.scroll_search, &content_positions, None);
+                    render_with_highlights(fr, rr, content, content_start_x, item_y, scale, ascender, line_height as f32, p.text, p.scroll_search, &content_positions,
+                        Some(WrapLayout { first_width: wrap_w, rest_x: content_start_x, rest_width: wrap_w }));
                 }
             }
         }
@@ -2394,9 +2402,13 @@ fn collect_list_items(r: &AppRenderer) -> Vec<(String, Option<String>, bool, Vec
 
 /// Word-wrap layout for `render_with_highlights`. The first wrapped line keeps
 /// the caller's `x` and wraps at `first_width`; continuation lines start at
-/// `rest_x` and wrap at `rest_width`. Used for general-mode (ExtendedSearch)
-/// results, where line 1 trails the breadcrumb + prefix and the remaining
-/// lines run full-width below them at the left margin.
+/// `rest_x` and wrap at `rest_width`.
+///
+/// ExtendedSearch results use the hanging form, where line 1 trails the
+/// breadcrumb + prefix and the remaining lines run full-width below them at the
+/// left margin. The ordinary list (including SimpleSearch) uses the uniform
+/// form — all three fields matching the sibling `prepare_text_wrapped` call, so
+/// highlighted items break at exactly the same points as unhighlighted ones.
 struct WrapLayout {
     first_width: f32,
     rest_x: f32,
@@ -2423,34 +2435,15 @@ fn render_with_highlights(
     wrap: Option<WrapLayout>,
 ) {
     // Split `text` into segments: (byte_start, byte_end, char_start).
-    // With `wrap` set the text is word-wrapped — the first line narrowed by a
-    // preceding breadcrumb/prefix, continuation lines full-width (explicit `\n`
-    // still break lines); otherwise it splits only on `\n`.
-    let segs: Vec<(usize, usize, u32)> = if let Some(w) = &wrap {
-        fr.wrap_lines_with_offsets_hanging(text, scale, w.first_width, w.rest_width)
-            .into_iter()
-            .map(|(line, byte_start)| {
-                let byte_end = byte_start + line.len();
-                let char_start = text[..byte_start].chars().count() as u32;
-                (byte_start, byte_end, char_start)
-            })
-            .collect()
-    } else {
-        let mut segs: Vec<(usize, usize, u32)> = Vec::new();
-        let mut seg_byte_start = 0usize;
-        let mut seg_char_start = 0u32;
-        let mut char_count = 0u32;
-        for (bi, c) in text.char_indices() {
-            if c == '\n' {
-                segs.push((seg_byte_start, bi, seg_char_start));
-                seg_byte_start = bi + 1;
-                seg_char_start = char_count + 1;
-            }
-            char_count += 1;
-        }
-        segs.push((seg_byte_start, text.len(), seg_char_start));
-        segs
-    };
+    // With `wrap` set the text is word-wrapped — the first line optionally
+    // narrowed by a preceding breadcrumb/prefix, continuation lines at
+    // `rest_width` (explicit `\n` still break lines); otherwise it splits only
+    // on `\n`.
+    let segs = fr.line_segments(
+        text,
+        scale,
+        wrap.as_ref().map(|w| (w.first_width, w.rest_width)),
+    );
 
     for (n, &(byte_start, byte_end, char_start)) in segs.iter().enumerate() {
         let seg_text = &text[byte_start..byte_end];

@@ -1265,6 +1265,48 @@ impl FontRenderer {
         self.compute_wrap_lines_hanging(text, scale, first_width, rest_width)
     }
 
+    /// Split `text` into the visual line segments a renderer draws, each as
+    /// `(byte_start, byte_end, char_start)` into the original `text`.
+    ///
+    /// With `wrap` = `Some((first_width, rest_width))` the text is word-wrapped
+    /// like [`Self::wrap_lines_with_offsets_hanging`]; with `None` it breaks
+    /// only on explicit `\n`. `char_start` is the character index of the
+    /// segment's first char, so callers can map character-indexed match
+    /// positions onto each segment.
+    pub fn line_segments(
+        &self,
+        text: &str,
+        scale: f32,
+        wrap: Option<(f32, f32)>,
+    ) -> Vec<(usize, usize, u32)> {
+        if let Some((first_width, rest_width)) = wrap {
+            return self
+                .compute_wrap_lines_hanging(text, scale, first_width, rest_width)
+                .into_iter()
+                .map(|(line, byte_start)| {
+                    let byte_end = byte_start + line.len();
+                    let char_start = text[..byte_start].chars().count() as u32;
+                    (byte_start, byte_end, char_start)
+                })
+                .collect();
+        }
+
+        let mut segs: Vec<(usize, usize, u32)> = Vec::new();
+        let mut seg_byte_start = 0usize;
+        let mut seg_char_start = 0u32;
+        let mut char_count = 0u32;
+        for (bi, c) in text.char_indices() {
+            if c == '\n' {
+                segs.push((seg_byte_start, bi, seg_char_start));
+                seg_byte_start = bi + 1;
+                seg_char_start = char_count + 1;
+            }
+            char_count += 1;
+        }
+        segs.push((seg_byte_start, text.len(), seg_char_start));
+        segs
+    }
+
     /// Word-wrap `text` into lines with their starting byte offsets. The first
     /// line is wrapped at `first_width`, every subsequent line at `rest_width`
     /// (pass the same value for both for uniform wrapping). Explicit `\n` also
@@ -1351,80 +1393,16 @@ impl FontRenderer {
     }
 
     /// Split `text` into wrapped line strings given `max_width` pixels per line.
+    ///
+    /// Uniform wrapping is the `first_width == rest_width` case of
+    /// [`Self::compute_wrap_lines_hanging`]. Sharing one implementation keeps
+    /// the line count reserved by `count_wrapped_lines` identical to the
+    /// segments the highlight renderer actually draws.
     fn compute_wrap_lines(&self, text: &str, scale: f32, max_width: f32) -> Vec<String> {
-        if text.is_empty() {
-            return vec![String::new()];
-        }
-
-        // Advance of the char starting at byte `i`, decoded as one codepoint
-        // (`i` is always on a char boundary). Unknown codepoints advance like
-        // a space so wrapping still progresses.
-        let adv = |i: usize| -> f32 {
-            let ch = text[i..].chars().next().unwrap_or(' ');
-            self.advance(ch) * scale
-        };
-
-        let bytes = text.as_bytes();
-        let n = bytes.len();
-        let mut lines: Vec<String> = Vec::new();
-        let mut line_start = 0usize;
-        let mut line_width = 0.0f32;
-        let mut last_space: Option<usize> = None;
-        let mut last_fit = 0usize;
-        let mut i = 0usize;
-
-        // Returns the byte length of the UTF-8 char starting at `pos`.
-        let char_len = |b: u8| -> usize {
-            if b < 0x80 { 1 } else if b < 0xE0 { 2 } else if b < 0xF0 { 3 } else { 4 }
-        };
-
-        while i < n {
-            let b = bytes[i];
-            let clen = char_len(b);
-
-            if b == b'\n' {
-                lines.push(text[line_start..i].to_owned());
-                line_start = i + 1;
-                line_width = 0.0;
-                last_space = None;
-                last_fit = line_start;
-                i = line_start;
-                continue;
-            }
-
-            let next_width = line_width + adv(i);
-
-            if next_width > max_width && i > line_start {
-                let break_end = if let Some(sp) = last_space {
-                    sp
-                } else {
-                    // last_fit is always on a char boundary; fall back to
-                    // the end of the first char at line_start so we always
-                    // make progress without splitting a multi-byte sequence.
-                    last_fit.max(line_start + char_len(bytes[line_start]))
-                };
-                lines.push(text[line_start..break_end].to_owned());
-                line_start = break_end;
-                if line_start < n && bytes[line_start] == b' ' {
-                    line_start += 1;
-                }
-                line_width = 0.0;
-                last_space = None;
-                last_fit = line_start;
-                i = line_start;
-                continue;
-            }
-
-            if b == b' ' {
-                last_space = Some(i);
-            }
-            last_fit = i + clen;
-            line_width = next_width;
-            i += clen;
-        }
-
-        lines.push(text[line_start..].to_owned());
-        lines
+        self.compute_wrap_lines_hanging(text, scale, max_width, max_width)
+            .into_iter()
+            .map(|(line, _)| line)
+            .collect()
     }
 
     // ---- Cleanup -----------------------------------------------------------
@@ -1741,6 +1719,69 @@ mod tests {
         let hanging = fr.wrap_lines_with_offsets_hanging("hello world", 1.0, 100.0, 100.0);
         let uniform = fr.wrap_lines_with_offsets("hello world", 1.0, 100.0);
         assert_eq!(hanging, uniform);
+    }
+
+    // ---- line_segments ---
+
+    #[test]
+    fn line_segments_unwrapped_splits_only_on_newline() {
+        let fr = make_fr_uniform(10.0);
+        // 23 chars = 230px, far past 100px, but with `None` nothing wraps.
+        let text = "aaa bbb ccc ddd eee fff";
+        assert_eq!(fr.line_segments(text, 1.0, None), vec![(0, text.len(), 0)]);
+        // Explicit newlines still break: "abc" then "def".
+        assert_eq!(
+            fr.line_segments("abc\ndef", 1.0, None),
+            vec![(0, 3, 0), (4, 7, 4)],
+        );
+    }
+
+    #[test]
+    fn line_segments_wrapped_splits_long_text() {
+        let fr = make_fr_uniform(10.0);
+        // Same text as above, now wrapped at 100px (10 chars) per line.
+        let text = "aaa bbb ccc ddd eee fff";
+        let segs = fr.line_segments(text, 1.0, Some((100.0, 100.0)));
+        assert!(segs.len() > 1, "long text must wrap, got {segs:?}");
+        // Every segment slices `text` on char boundaries, and `char_start`
+        // matches its `byte_start` — the highlight renderer maps character
+        // match positions through these.
+        for &(byte_start, byte_end, char_start) in &segs {
+            assert!(text.is_char_boundary(byte_start));
+            assert!(text.is_char_boundary(byte_end));
+            assert_eq!(char_start, text[..byte_start].chars().count() as u32);
+        }
+        assert_eq!(segs[0].2, 0);
+    }
+
+    #[test]
+    fn line_segments_wrapped_count_matches_reserved_lines() {
+        let fr = make_fr_uniform(10.0);
+        // The list renderer reserves height with `count_wrapped_lines` and then
+        // draws `line_segments`; the two must never disagree.
+        for text in ["hello", "hello world", "abcdefghijk", "aaa bbb ccc ddd", "a\nbb ccc dddd"] {
+            for width in [50.0_f32, 100.0] {
+                assert_eq!(
+                    fr.line_segments(text, 1.0, Some((width, width))).len(),
+                    fr.count_wrapped_lines(text, 1.0, width),
+                    "mismatch for {text:?} at {width}px",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn line_segments_handles_multibyte_chars() {
+        let fr = make_fr_uniform(10.0);
+        // The em-dash is 3 bytes; a break must not land inside it.
+        let text = "open the view — a read-only list";
+        let segs = fr.line_segments(text, 1.0, Some((100.0, 100.0)));
+        assert!(segs.len() > 1);
+        for &(byte_start, byte_end, char_start) in &segs {
+            assert!(text.is_char_boundary(byte_start), "{byte_start} splits a char");
+            assert!(text.is_char_boundary(byte_end), "{byte_end} splits a char");
+            assert_eq!(char_start, text[..byte_start].chars().count() as u32);
+        }
     }
 
     // ---- dynamic atlas + fallback (real FreeType, no Vulkan) ---
