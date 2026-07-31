@@ -769,6 +769,14 @@ fn update_view(app: &mut AppState) {
             // Keep list_index on the current match so Enter navigates to it.
             app.renderer.list_index = result.current_item;
             app.renderer.text_scroll_offset = result.scroll_offset;
+            // Announce the match the user just moved to. `snap` is set only by
+            // the Up/Down handlers, so this fires on explicit navigation and
+            // never while the query is still being typed. The announcement has
+            // to happen here rather than in the handler: locating a match needs
+            // the wrap offsets only the renderer has.
+            if let Some(line) = result.current_match_line.as_deref().filter(|_| search_snap) {
+                handlers::announce_text(&mut app.renderer, line);
+            }
             // needs_position is cleared by Up/Down navigation (not by the renderer);
             // while the user is still typing it stays true so viewport-aware selection
             // re-fires on every frame with an updated match set.
@@ -2175,6 +2183,11 @@ struct ScrollSearchResult {
     /// List index of the item containing the current match — written back to
     /// `list_index` so Enter navigates to the right element.
     current_item: usize,
+    /// Wrapped line of text holding the current match. Matches are only locatable
+    /// here (finding them needs font metrics and wrap offsets), so the caller
+    /// announces this line on explicit Up/Down navigation — the handlers cannot.
+    /// `None` when there are no matches.
+    current_match_line: Option<String>,
     scroll_offset: i32,
 }
 
@@ -2319,6 +2332,14 @@ fn render_scroll_search_full(
     } else {
         all_matches[current_match].item_idx
     };
+    // The wrapped line holding the current match, for the screen-reader
+    // announcement on Up/Down. Same lookup the highlight pass below performs.
+    let current_match_line = all_matches.get(current_match).and_then(|m| {
+        let seg = &segments[m.seg_idx];
+        let li = seg.wrap.partition_point(|(_, off)| *off <= m.byte_off).saturating_sub(1);
+        let li = li.min(seg.wrap.len().saturating_sub(1));
+        seg.wrap.get(li).map(|(t, _)| t.clone())
+    });
 
     // Snap the viewport only on explicit Up/Down navigation.
     let max_offset = (total_height - viewport_h as i32).max(0);
@@ -2395,7 +2416,9 @@ fn render_scroll_search_full(
             text_x, content_x, max_w, clip_y, win_h, p);
     }
 
-    ScrollSearchResult { total_height, match_count, current_match, current_item, scroll_offset }
+    ScrollSearchResult {
+        total_height, match_count, current_match, current_item, current_match_line, scroll_offset,
+    }
 }
 
 /// Convert a packed 0xRRGGBBAA color to `[r, g, b, a]` floats in 0.0..=1.0.
