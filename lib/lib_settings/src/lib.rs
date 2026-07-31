@@ -10,6 +10,15 @@ use std::sync::OnceLock;
 
 mod store;
 
+/// Version of the `sicompass-sdk` crate this build links against, resolved from
+/// the workspace `Cargo.lock` by [`build.rs`](../build.rs).
+///
+/// The SDK exposes no version const of its own, so this is the only way to show
+/// it in the settings panel. It is a build fact rather than injected state,
+/// which is why the SDK version line (unlike the app version line) always
+/// renders.
+pub const SDK_VERSION: &str = env!("SICOMPASS_SDK_VERSION");
+
 /// Register this crate's translation bundles with the SDK localizer.
 /// Idempotent — safe to call from `main()` and from individual tests.
 pub fn register_translations() {
@@ -782,8 +791,21 @@ impl Provider for SettingsProvider {
         let prio = self.priority_section.clone();
         let mut entries: Vec<(String, FfonElement)> = Vec::new();
 
+        // Two version lines, deliberately labelled apart: the app version (what
+        // the user is running) and the SDK version (the plugin ABI this build
+        // was compiled against). Other sections keep the generic
+        // `settings-label-version` for their per-program version — only this
+        // section has two versions to tell apart.
         if let Some(v) = self.section_versions.get("sicompass") {
-            let line = format!("{}: {}", localize::t("settings-label-version"), v);
+            let line = format!("{}: {}", localize::t("settings-label-version-app"), v);
+            entries.push((line.clone(), FfonElement::Str(line)));
+        }
+        {
+            let line = format!(
+                "{}: {}",
+                localize::t("settings-label-version-sdk"),
+                SDK_VERSION
+            );
             entries.push((line.clone(), FfonElement::Str(line)));
         }
         // Onboarding guide: a passive read-only `Str`. The app focuses it on
@@ -2505,11 +2527,79 @@ mod tests {
             .find(|e| e.as_obj().map(|o| o.key == sc_key).unwrap_or(false))
             .and_then(|e| e.as_obj())
             .expect("sicompass section");
+        // The app line carries the app-specific label, not the generic one other
+        // sections use — that distinction is the whole point of the line.
+        let expected = format!("{}: 9.9.9", localize::t("settings-label-version-app"));
         let has_version = sc.children.iter().any(|c| match c {
-            FfonElement::Str(s) => s.contains("9.9.9"),
+            FfonElement::Str(s) => *s == expected,
             _ => false,
         });
-        assert!(has_version, "app version should appear under sicompass section");
+        assert!(has_version, "expected app version line {expected:?} under sicompass section");
+    }
+
+    #[test]
+    fn sdk_version_line_renders_in_sicompass_section() {
+        // Same locale caveat as the tests above: compares a translated string
+        // against `fetch()` output.
+        let _g = locale_test_lock();
+        register_translations();
+        let mut p = SettingsProvider::new_headless()
+            .with_config_path(test_config_path());
+
+        // No `set_section_version` call — the SDK version is a build fact, so it
+        // renders whether or not the app injected an app version.
+        let items = p.fetch();
+        let sc_key = SettingsProvider::localize_section_name("sicompass");
+        let sc = items
+            .iter()
+            .find(|e| e.as_obj().map(|o| o.key == sc_key).unwrap_or(false))
+            .and_then(|e| e.as_obj())
+            .expect("sicompass section");
+        assert!(!SDK_VERSION.is_empty(), "build.rs must resolve a non-empty SDK version");
+        let expected = format!("{}: {}", localize::t("settings-label-version-sdk"), SDK_VERSION);
+        let has_sdk = sc.children.iter().any(|c| match c {
+            FfonElement::Str(s) => *s == expected,
+            _ => false,
+        });
+        assert!(has_sdk, "expected SDK version line {expected:?} under sicompass section");
+    }
+
+    #[test]
+    fn app_and_sdk_version_labels_are_distinct() {
+        let _g = locale_test_lock();
+        register_translations();
+        for locale in ["en-US", "nl-BE", "fr-BE", "de-BE"] {
+            localize::set_locale(locale);
+            let app = localize::t("settings-label-version-app");
+            let sdk = localize::t("settings-label-version-sdk");
+            assert_ne!(app, sdk, "version labels must differ in {locale}");
+            // A missing Fluent message falls back to the message id, which would
+            // otherwise leak a raw key into the settings panel.
+            assert_ne!(app, "settings-label-version-app", "missing app label in {locale}");
+            assert_ne!(sdk, "settings-label-version-sdk", "missing SDK label in {locale}");
+        }
+        localize::set_locale("en-US");
+    }
+
+    #[test]
+    fn sdk_version_matches_the_workspace_lockfile() {
+        // Guards `build.rs`: the baked-in constant must be the version cargo
+        // actually resolved, not a stale or mis-parsed one.
+        let mut dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let lock = loop {
+            let candidate = dir.join("Cargo.lock");
+            if candidate.is_file() {
+                break candidate;
+            }
+            dir = dir.parent().expect("Cargo.lock in some ancestor of the crate dir");
+        };
+        let text = std::fs::read_to_string(&lock).expect("read Cargo.lock");
+        let expected = text
+            .lines()
+            .skip_while(|l| l.trim() != "name = \"sicompass-sdk\"")
+            .find_map(|l| l.trim().strip_prefix("version = \"")?.strip_suffix('"'))
+            .expect("sicompass-sdk entry in Cargo.lock");
+        assert_eq!(SDK_VERSION, expected);
     }
 
     #[test]
@@ -2531,13 +2621,21 @@ mod tests {
             .find(|e| e.as_obj().map(|o| o.key == section_key).unwrap_or(false))
             .and_then(|e| e.as_obj())
             .expect("file browser section");
-        // No version was set — none of the Str children should be a version line.
-        let label = sicompass_sdk::localize::t("settings-label-version");
-        let leak = section.children.iter().any(|c| match c {
-            FfonElement::Str(s) => s.starts_with(&format!("{}: ", label)),
-            _ => false,
-        });
-        assert!(!leak, "no version line should appear when set_section_version was not called");
+        // No version was set — none of the Str children should be a version
+        // line. The sicompass-only app/SDK labels must not leak here either:
+        // ordinary sections carry one generic per-program version at most.
+        for key in [
+            "settings-label-version",
+            "settings-label-version-app",
+            "settings-label-version-sdk",
+        ] {
+            let label = sicompass_sdk::localize::t(key);
+            let leak = section.children.iter().any(|c| match c {
+                FfonElement::Str(s) => s.starts_with(&format!("{}: ", label)),
+                _ => false,
+            });
+            assert!(!leak, "no {key} line should appear when set_section_version was not called");
+        }
     }
 
     #[test]
@@ -2733,3 +2831,4 @@ pub fn register() {
         Box::new(SettingsProvider::default())
     });
 }
+

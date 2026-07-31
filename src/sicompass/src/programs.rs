@@ -245,19 +245,24 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
 /// Layout contract from `SettingsProvider::fetch` (settings is the last
 /// provider): the `sicompass` section is the first child of the settings root.
 /// Its children are sorted, so the onboarding line is matched by content rather
-/// than position: it is the one untagged `Str` (not a radio/checkbox tag) that
-/// is not the "version: <ver>" line. The SDK boundary forbids importing
+/// than position: it is the `Str` whose text is exactly the rendered
+/// `settings-onboarding-body` message.
+///
+/// Matching the body positively rather than "the untagged `Str` that isn't the
+/// version line" matters — the section carries two untagged version lines (app
+/// and SDK), and any future passive line would break a negative match again.
+/// The bundle holding this message is registered by the settings provider's
+/// constructor, which has run by the time this is called, and the locale is set
+/// before any provider is built. The SDK boundary forbids importing
 /// `lib_settings`, and this degrades to the default focus if no match is found.
 pub fn focus_onboarding(renderer: &mut AppRenderer) {
     let Some(settings_idx) = renderer.ffon.len().checked_sub(1) else { return };
     let Some(root) = renderer.ffon.get(settings_idx).and_then(|e| e.as_obj()) else { return };
     // sicompass section is the first child of the settings root.
     let Some(section) = root.children.first().and_then(|e| e.as_obj()) else { return };
-    // The version line ends with the app version we passed to set_section_version;
-    // the onboarding guide is the other untagged Str.
+    let body = sicompass_sdk::localize::t("settings-onboarding-body");
     let body_idx = section.children.iter().position(|c| match c {
-        FfonElement::Str(s) =>
-            !s.starts_with('<') && !s.trim_end().ends_with(env!("CARGO_PKG_VERSION")),
+        FfonElement::Str(s) => *s == body,
         _ => false,
     });
     let Some(body_idx) = body_idx else { return };
@@ -1703,23 +1708,44 @@ mod tests {
 
     // --- focus_onboarding ---
 
+    /// The two passive version lines the real `sicompass` section carries, in
+    /// the same localized shape `SettingsProvider::fetch` renders them. Both are
+    /// untagged `Str`s, which is exactly what `focus_onboarding` must not
+    /// mistake for the onboarding body.
+    fn version_lines() -> [String; 2] {
+        sicompass_settings::register_translations();
+        [
+            format!(
+                "{}: {}",
+                sicompass_sdk::localize::t("settings-label-version-app"),
+                env!("CARGO_PKG_VERSION")
+            ),
+            format!(
+                "{}: {}",
+                sicompass_sdk::localize::t("settings-label-version-sdk"),
+                sicompass_settings::SDK_VERSION
+            ),
+        ]
+    }
+
     /// Build a renderer whose last provider mimics the settings FFON layout:
     /// settings root → sicompass section (first child) → sorted children. The
-    /// version line uses the real crate version so `focus_onboarding` can tell
-    /// it apart from the onboarding body. Order here is deliberately not
-    /// version-first, to prove the match is by content, not position.
+    /// version lines and the onboarding body are the real localized strings, so
+    /// the test tracks whatever locale is active. Order here is deliberately not
+    /// body-last-by-accident, to prove the match is by content, not position.
     fn renderer_with_settings_layout() -> AppRenderer {
         let mut r = AppRenderer::new();
         // A content provider at index 0 (settings is always last).
         r.ffon.push(FfonElement::new_obj("file browser"));
 
-        let version_line = format!("version: {}", env!("CARGO_PKG_VERSION"));
+        let [app_line, sdk_line] = version_lines();
         let mut sicompass = FfonElement::new_obj("sicompass");
         let sc = sicompass.as_obj_mut().unwrap();
         sc.push(FfonElement::Str("<checkbox>auto update".to_owned())); // #0 tagged
-        sc.push(FfonElement::Str(version_line));                       // #1 version
+        sc.push(FfonElement::Str(app_line));                           // #1 app version
+        sc.push(FfonElement::Str(sdk_line));                           // #2 SDK version
         sc.push(FfonElement::Str(
-            "Use Up and Down to move through the list.".to_owned(),    // #2 = body
+            sicompass_sdk::localize::t("settings-onboarding-body"),    // #3 = body
         ));
 
         let mut settings = FfonElement::new_obj("settings");
@@ -1732,8 +1758,10 @@ mod tests {
     fn focus_onboarding_targets_the_body_line() {
         let mut r = renderer_with_settings_layout();
         focus_onboarding(&mut r);
-        // [settings_idx = 1, sicompass = first child, body at child index 2]
-        assert_eq!(r.current_id.as_slice(), &[1, 0, 2]);
+        // [settings_idx = 1, sicompass = first child, body at child index 3] —
+        // past both untagged version lines, which a negative match would have
+        // grabbed first.
+        assert_eq!(r.current_id.as_slice(), &[1, 0, 3]);
     }
 
     #[test]
@@ -1741,10 +1769,10 @@ mod tests {
         let mut r = AppRenderer::new();
         let mut settings = FfonElement::new_obj("settings");
         let mut sicompass = FfonElement::new_obj("sicompass");
-        // Only the version line (real crate version) — no onboarding body.
-        sicompass.as_obj_mut().unwrap().push(FfonElement::Str(
-            format!("version: {}", env!("CARGO_PKG_VERSION")),
-        ));
+        // Only the two version lines — no onboarding body.
+        for line in version_lines() {
+            sicompass.as_obj_mut().unwrap().push(FfonElement::Str(line));
+        }
         settings.as_obj_mut().unwrap().push(sicompass);
         r.ffon.push(settings);
         let before = r.current_id.as_slice().to_vec();
