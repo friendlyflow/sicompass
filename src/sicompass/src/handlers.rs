@@ -1380,64 +1380,9 @@ pub fn handle_enter_search(r: &mut AppRenderer) {
         None
     };
 
-    // Checkbox toggle: stay in search mode after toggling.
-    {
-        use sicompass_sdk::ffon::{FfonElement, get_ffon_at_id};
-        let elem_clone = get_ffon_at_id(&r.ffon, &selected_id)
-            .and_then(|a| a.get(selected_id.last().unwrap_or(0)))
-            .cloned();
-        if let Some(elem) = elem_clone {
-            if let Some(new_text) = toggle_checkbox(&elem) {
-                let idx = selected_id.last().unwrap_or(0);
-                if let Some(arr) = crate::state::navigate_to_slice_pub(&mut r.ffon, &selected_id) {
-                    if let Some(e) = arr.get_mut(idx) {
-                        *e = match &elem {
-                            FfonElement::Str(_) => FfonElement::new_str(new_text.clone()),
-                            FfonElement::Obj(o) => {
-                                let mut obj = FfonElement::new_obj(new_text.clone());
-                                for c in &o.children { obj.as_obj_mut().unwrap().push(c.clone() as FfonElement); }
-                                obj
-                            }
-                        };
-                    }
-                }
-                crate::provider::notify_checkbox_changed(r, elem.clone(), &new_text);
-                let saved_index = r.list_index;
-                list::create_list_current_layer(r);
-                r.list_index = saved_index;
-                r.needs_redraw = true;
-                return;
-            }
-        }
-    }
-
-    // Radio toggle: exit search after selecting.
-    {
-        let saved_id = r.current_id.clone();
-        r.current_id = selected_id.clone();
-        let radio_parent_snapshot = snapshot_radio_parent(r);
-        if toggle_radio(r) {
-            if let Some((parent_before, parent_id)) = radio_parent_snapshot {
-                crate::provider::notify_radio_changed(r, parent_before, parent_id);
-            }
-            crate::provider::sync_inmemory_provider_path_to_cursor(r);
-            r.coordinate = r.previous_coordinate;
-            r.speak_mode_change(None);
-            r.search_string.clear();
-            list::create_list_current_layer(r);
-            r.list_index = r.current_id.last().unwrap_or(0);
-            record_search_exit_navigation(
-                r,
-                search_from_id,
-                path_before,
-                sicompass_sdk::timeline::NavKind::ArrowRight,
-            );
-            r.needs_redraw = true;
-            return;
-        }
-        r.current_id = saved_id;
-    }
-
+    // Checkboxes and radios are *not* activated here: Enter in search always
+    // means "go to this element". The user toggles it with a second Enter once
+    // the cursor has landed, in General mode (`handle_enter_general`).
     r.current_id = selected_id;
     // Search jumped the cursor deep into the tree without walking navigate_right,
     // so re-sync the in-memory provider's path to the new cursor. Otherwise the
@@ -1561,65 +1506,8 @@ fn handle_enter_extended_search(r: &mut AppRenderer) {
         }
     }
 
-    // Checkbox toggle: stay in extended search after toggling.
-    {
-        use sicompass_sdk::ffon::{FfonElement, get_ffon_at_id};
-        let elem_clone = get_ffon_at_id(&r.ffon, &selected_id)
-            .and_then(|a| a.get(selected_id.last().unwrap_or(0)))
-            .cloned();
-        if let Some(elem) = elem_clone {
-            if let Some(new_text) = toggle_checkbox(&elem) {
-                let idx = selected_id.last().unwrap_or(0);
-                if let Some(arr) = crate::state::navigate_to_slice_pub(&mut r.ffon, &selected_id) {
-                    if let Some(e) = arr.get_mut(idx) {
-                        *e = match &elem {
-                            FfonElement::Str(_) => FfonElement::new_str(new_text.clone()),
-                            FfonElement::Obj(o) => {
-                                let mut obj = FfonElement::new_obj(new_text.clone());
-                                for c in &o.children { obj.as_obj_mut().unwrap().push(c.clone() as FfonElement); }
-                                obj
-                            }
-                        };
-                    }
-                }
-                crate::provider::notify_checkbox_changed(r, elem.clone(), &new_text);
-                let saved_index = r.list_index;
-                list::create_list_extended_search(r);
-                r.list_index = saved_index;
-                r.needs_redraw = true;
-                return;
-            }
-        }
-    }
-
-    // Radio toggle: exit search after selecting.
-    {
-        let saved_id = r.current_id.clone();
-        r.current_id = selected_id.clone();
-        let radio_parent_snapshot = snapshot_radio_parent(r);
-        if toggle_radio(r) {
-            if let Some((parent_before, parent_id)) = radio_parent_snapshot {
-                crate::provider::notify_radio_changed(r, parent_before, parent_id);
-            }
-            crate::provider::sync_inmemory_provider_path_to_cursor(r);
-            r.coordinate = r.previous_coordinate;
-            r.speak_mode_change(None);
-            r.input_buffer.clear();
-            r.cursor_position = 0;
-            list::create_list_current_layer(r);
-            r.list_index = r.current_id.last().unwrap_or(0);
-            r.scroll_offset = -1;
-            record_search_exit_navigation(
-                r,
-                search_from_id,
-                path_before,
-                sicompass_sdk::timeline::NavKind::ArrowRight,
-            );
-            r.needs_redraw = true;
-            return;
-        }
-        r.current_id = saved_id;
-    }
+    // Checkboxes and radios are *not* activated here — see handle_enter_search.
+    // Enter in extended search always means "go to this element".
 
     // Deep search item: teleport via nav_path
     if let Some(ref nav_path) = item.nav_path {
