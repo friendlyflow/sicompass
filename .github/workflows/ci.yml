@@ -1,6 +1,8 @@
 name: CI
 
-# Runs the test suite on every push and pull request.
+# Runs the test suite and clippy. Manual only — start it from the GitHub web UI:
+# Actions -> CI -> Run workflow. Nothing in this repository runs as a side effect
+# of committing; every run is something someone chose to start.
 #
 # The WASM plugin host is built two different ways — Cranelift for normal builds,
 # Pulley for the App Store / iOS one — and they are genuinely different code paths,
@@ -8,11 +10,9 @@ name: CI
 # deadline under Pulley instead, and `Component::new` does not even exist without a
 # compiler backend. Testing one leg would leave the other untested until release.
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
-# A newer push supersedes an in-flight run on the same ref.
+# A newer dispatch supersedes an in-flight run on the same ref.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
