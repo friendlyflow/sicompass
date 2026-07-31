@@ -92,18 +92,19 @@ mode-general = general mode
 mode-insert = insert mode
 mode-normal = normal mode
 mode-visual = visual mode
-mode-search = search
-mode-extended-search = extended search
-mode-command = command
-mode-controls = controls
+mode-search = search mode
+mode-extended-search = extended search mode
+mode-command = command mode
+mode-controls = controls mode
 mode-scroll = scroll mode
-mode-scroll-search = scroll search
-mode-scroll-prefix-search = scroll prefix search
-mode-input-search = input search
-mode-dashboard = dashboard
-mode-meta = meta
-mode-timeline = timeline
-mode-tab-switcher = tab switcher
+mode-scroll-search = scroll search mode
+mode-scroll-prefix-search = scroll prefix search mode
+mode-input-search = input search mode
+mode-dashboard = dashboard mode
+mode-meta = meta mode
+mode-timeline = timeline mode
+mode-tab-switcher = tab switcher mode
+mode-confirm-close-tab = confirm close tab mode
 
 # Screen-reader announcements composed at runtime. Parameters:
 #   $idx, $total — 1-based position and tab count

@@ -6436,7 +6436,7 @@ mod tests {
         assert!(r.search_string.is_empty());
         // handle_tab passes the current item label as context ("minus item 0"
         // because make_renderer starts at list index 0 with label "- item 0").
-        assert_eq!(announced_text(&r).as_deref(), Some("search - minus item 0"));
+        assert_eq!(announced_text(&r).as_deref(), Some("search mode - minus item 0"));
     }
 
     #[test]
@@ -7213,7 +7213,7 @@ mod tests {
         assert_eq!(r.coordinate, Coordinate::SimpleSearch);
         assert_eq!(r.previous_coordinate, Coordinate::General);
         // handle_tab passes the current item label as context.
-        assert_eq!(announced_text(&r).as_deref(), Some("search - minus item 0"));
+        assert_eq!(announced_text(&r).as_deref(), Some("search mode - minus item 0"));
     }
 
     // -----------------------------------------------------------------------
