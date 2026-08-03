@@ -126,9 +126,19 @@ $vars = @(
     "PKG_CONFIG_PATH=$pcDir",
     "PKG_CONFIG_ALLOW_SYSTEM_LIBS=1",
     "PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1",
-    # The pkg-config crate honours this to locate the binary, so whichever
-    # implementation answered the constrained probe above is the one the build
-    # will use.
+    # THIS LINE IS THE FIX. Do not drop it on the grounds that pkg-config is
+    # already on PATH.
+    #
+    # The only pkg-config on a GitHub windows runner is Strawberry Perl's
+    # `C:\Strawberry\perl\bin\pkg-config.bat`. Rust's `Command::new(
+    # "pkg-config")` resolves names against PATH looking for an executable and
+    # does not apply PATHEXT, so it never finds a bare `.bat` and the crate's
+    # `find()` fails before running anything. Given an explicit path ending in
+    # `.bat`, Rust routes it through cmd.exe and it works.
+    #
+    # This is why every probe above passed while the build still fell back:
+    # PowerShell resolves the `.bat` via PATHEXT, and Rust does not, so the
+    # shell and the build script disagreed about whether pkg-config existed.
     "PKG_CONFIG=$pkgConfigExe"
 )
 

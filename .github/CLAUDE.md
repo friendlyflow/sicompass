@@ -80,12 +80,21 @@ Shaders and fonts are now embedded (`src/sicompass/src/shaders.rs`,
     needed for the `/MT` vs `/MD` CRT mismatch. **Do not reintroduce the
     from-source SDL step.** CI building something other than what the release
     builds is how the release broke in the first place.
-  - `libfreetype-dev` in the apt lists is load-bearing, not a leftover from the
-    C codebase. freetype-sys links the system FreeType when pkg-config finds
-    it, and otherwise builds its own copy with PNG support switched off, which
-    cannot decode NotoColorEmoji's strikes. Removing it makes every colour
-    emoji vanish, and `color_atlas_rasterizes_emoji_to_rgba` is what catches
-    it. Same reasoning applies to `libpng-dev`.
+  - `scripts/setup-freetype.sh` / `.ps1` run before any cargo invocation, in
+    CI, in `native-packages.yml`, and in the release via `build-setup.yml`.
+    They are not optional. freetype-sys links the system FreeType only when
+    pkg-config answers a *version-constrained* query, and otherwise builds its
+    own copy with PNG support switched off, which cannot decode
+    NotoColorEmoji's strikes. The failure is silent: glyphs come back
+    zero-sized rather than erroring. `color_atlas_rasterizes_emoji_to_rgba`
+    catches it on Linux, and the `--check` assertion catches it on macOS and
+    Windows. Both scripts verify their own work, so a FreeType that will be
+    ignored fails in the step that installed it.
+  - On Windows, `PKG_CONFIG` must be exported with an explicit path. The only
+    pkg-config on the runner is Strawberry Perl's `pkg-config.bat`, and Rust's
+    `Command` does not apply PATHEXT when resolving a bare name, so the build
+    script cannot find it even though every shell can. That mismatch cost
+    several CI rounds to spot.
   - The Windows leg does **not** run `cargo test`, because
     `.cargo/config.toml` sets a `runner` for `x86_64-pc-windows-msvc` pointing
     at `C:\sicompass\.cargo\run.bat`, which exists on one developer machine.
