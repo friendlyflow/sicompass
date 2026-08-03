@@ -72,7 +72,7 @@ include = [
 # Steps injected into build-local-artifacts on every runner, before anything
 # is built. Path is relative to .github/workflows/. Mainly there to resolve a
 # PNG-capable FreeType, which has to happen before cargo runs.
-github-build-setup = "build-setup.yml"
+github-build-setup = "parts/build-setup.yml"
 
 # Build .deb, .rpm, AppImage, .app and .dmg inside this same Release run, so
 # their artifacts land in the `artifacts-*` pool that release-publish.yml

@@ -52,6 +52,13 @@ Shaders and fonts are now embedded (`src/sicompass/src/shaders.rs`,
   - The custom job wiring key is `local-artifacts-jobs`, not
     `build-local-jobs`. An unknown key here is ignored in silence, and the only
     symptom is a job that never appears in the generated workflow.
+  - `github-build-setup` points at `parts/build-setup.yml`, a bare list of
+    steps injected into every runner's build job. It has to sit in a
+    subdirectory: GitHub treats every `.yml` *directly* under
+    `.github/workflows/` as a workflow, and a step list is not a valid one, so
+    it showed up in the Actions list and failed on every push. Subdirectories
+    are not scanned, and cargo-dist resolves the path relative to
+    `.github/workflows/`, so both are satisfied.
 - `native-packages.yml` builds the formats cargo-dist cannot: `.deb`, `.rpm`
   and AppImage on Linux, `.app` and `.dmg` on macOS. It is a `workflow_call`
   reusable workflow invoked **from inside the Release run** via
