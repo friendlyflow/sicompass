@@ -62,16 +62,44 @@ if ($LASTEXITCODE -ne 0) {
     throw "freetype2.pc reports $found, below the 24.3.18 floor freetype-sys checks"
 }
 
-# The pkg-config crate refuses to use system paths for a cross-ish target
-# unless told to, and every MSVC build looks cross-ish to it.
+# `--modversion` succeeding proves very little: freetype-sys calls
+# `pkg_config::Config::find()`, which runs `--libs --cflags` and fails if any
+# entry in Requires or Requires.private cannot be resolved. That failure is
+# swallowed and the build quietly takes the vendored path instead, so probe it
+# here where the error is visible.
+Write-Host "Available .pc files in ${pcDir}:"
+Get-ChildItem $pcDir -Filter *.pc | ForEach-Object { Write-Host "  $($_.Name)" }
+
+$libs = (& pkg-config --print-errors --libs --cflags freetype2) 2>&1
+$dynamicOk = ($LASTEXITCODE -eq 0)
+Write-Host "pkg-config --libs --cflags          -> exit $LASTEXITCODE : $libs"
+
+$libsStatic = (& pkg-config --print-errors --static --libs --cflags freetype2) 2>&1
+$staticOk = ($LASTEXITCODE -eq 0)
+Write-Host "pkg-config --static --libs --cflags -> exit $LASTEXITCODE : $libsStatic"
+
+if (-not $dynamicOk -and -not $staticOk) {
+    throw "pkg-config cannot produce link flags for freetype2, so freetype-sys will fall back to its vendored build"
+}
+
+# The pkg-config crate strips paths it considers system defaults unless told
+# otherwise, which on a vcpkg prefix throws away exactly the flags we need.
 $vars = @(
     "PKG_CONFIG_PATH=$pcDir",
     "PKG_CONFIG_ALLOW_SYSTEM_LIBS=1",
-    "PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1",
-    # freetype2.pc lists its dependencies under Libs.private, which pkg-config
-    # only emits for a static link.
-    "PKG_CONFIG_ALL_STATIC=1"
+    "PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1"
 )
+
+# PKG_CONFIG_ALL_STATIC is deliberately NOT set. It makes the pkg-config crate
+# pass `--static`, which additionally resolves every entry in Requires.private
+# (brotli, bzip2, libpng, zlib for vcpkg's freetype). One unresolvable entry
+# there fails the whole probe, and freetype-sys swallows that and silently
+# falls back to its vendored build. Only add it back if the static probe above
+# is shown to succeed.
+if ($staticOk -and -not $dynamicOk) {
+    Write-Host "Only the static probe works, so enabling PKG_CONFIG_ALL_STATIC"
+    $vars += "PKG_CONFIG_ALL_STATIC=1"
+}
 
 Write-Host "freetype2.pc found, exporting:"
 foreach ($v in $vars) {

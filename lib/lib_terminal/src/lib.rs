@@ -104,6 +104,15 @@ pub struct TerminalProvider {
     entries: Vec<Entry>,
     shell_program: String,
     cwd: Option<PathBuf>,
+    /// Whether the shell has produced any output since the last line was
+    /// submitted to it.
+    ///
+    /// This is the precondition `sync_shell_path(false)` needs: the live
+    /// `/proc/<pid>/cwd` is only worth preferring over the parsed `cd` target
+    /// once the child has actually run the line. Before that it still reads
+    /// the directory we just left, and trusting it sends the user back to
+    /// where they started.
+    output_since_submit: bool,
     init_attempted: bool,
     /// User name for the synthesized prompt — captured once at construction
     /// from `$USER`, falling back to `"user"`.
@@ -185,6 +194,9 @@ impl TerminalProvider {
             entries: Vec::new(),
             shell_program: default_program(),
             cwd: None,
+            // Nothing has been submitted yet, so there is no pending line the
+            // live cwd could be lagging behind.
+            output_since_submit: true,
             init_attempted: false,
             user: std::env::var("USER").unwrap_or_else(|_| "user".to_owned()),
             host: hostname_short(),
@@ -419,6 +431,8 @@ impl TerminalProvider {
             output: String::new(),
         });
         self.trim_scrollback();
+        // Same as a user-typed line: the shell has not run this `cd` yet.
+        self.output_since_submit = false;
         self.sync_shell_path(true);
     }
 
@@ -465,7 +479,12 @@ impl TerminalProvider {
     /// under that folder, and the listing the user comes back to should be the
     /// one they actually ended up in.
     fn leave_shell(&mut self) {
-        self.sync_shell_path(false);
+        // Prefer the parsed `cd` target while the shell still owes us output.
+        // Passing `false` unconditionally here was a race: Enter followed
+        // quickly enough by Escape left the live cwd pointing at the directory
+        // the user had just left, so the listing they returned to was the one
+        // they had `cd`-ed away from.
+        self.sync_shell_path(!self.output_since_submit);
         self.view = View::Browse;
         let followed = PathBuf::from(&self.shell_path);
         if followed.is_dir() {
@@ -724,6 +743,7 @@ impl Provider for TerminalProvider {
         }
         // Prefer the parsed target: the child cannot have run the line yet, so
         // the live cwd still points at the directory we just left.
+        self.output_since_submit = false;
         self.sync_shell_path(true);
         self.entries.push(Entry {
             prompt,
@@ -817,6 +837,7 @@ impl Provider for TerminalProvider {
         }
         // Output means the shell has been running, so its live cwd is now both
         // current and able to reflect a `cd` we never parsed.
+        self.output_since_submit = true;
         self.sync_shell_path(false);
         // While the user is browsing folders the scrollback is off screen.
         // Returning `true` here would make the app re-`fetch()` — and therefore
