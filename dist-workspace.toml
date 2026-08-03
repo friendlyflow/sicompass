@@ -69,6 +69,11 @@ include = [
     "fonts/LICENSE-NotoColorEmoji.txt",
 ]
 
+# Steps injected into build-local-artifacts on every runner, before anything
+# is built. Path is relative to .github/workflows/. Mainly there to resolve a
+# PNG-capable FreeType, which has to happen before cargo runs.
+github-build-setup = "build-setup.yml"
+
 # Build .deb, .rpm, AppImage, .app and .dmg inside this same Release run, so
 # their artifacts land in the `artifacts-*` pool that release-publish.yml
 # drains. See the header of that workflow for why it cannot be a separate
@@ -81,13 +86,14 @@ local-artifacts-jobs = ["./native-packages"]
 # cmake and a C toolchain: `bundled-sdl3` compiles SDL from source.
 cmake = '*'
 pkg-config = '*'
-# FreeType is deliberately taken from the system on Linux, not vendored.
-# freetype-sys 0.20.1 uses pkg-config when it finds `freetype2 >= 24.3.18` and
-# otherwise builds its own copy without FT_CONFIG_OPTION_USE_PNG, which cannot
-# decode NotoColorEmoji's PNG bitmap strikes, so every colour emoji vanishes.
-# The .deb and .rpm declare the matching runtime dependency.
-libfreetype-dev = '*'
+# What scripts/setup-freetype.sh needs to build FreeType with PNG support.
+# libfreetype-dev is deliberately NOT here: jammy's 2.11.1 reports a
+# freetype2.pc version below freetype-sys' floor and would be ignored anyway,
+# in favour of a vendored build that cannot decode NotoColorEmoji's PNG
+# strikes. The .deb and .rpm declare libpng and zlib as runtime dependencies,
+# since FreeType itself is linked statically.
 libpng-dev = '*'
+zlib1g-dev = '*'
 # SDL probes for each of these at configure time and refuses to build without
 # at least one windowing backend.
 libx11-dev = '*'

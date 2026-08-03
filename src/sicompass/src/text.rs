@@ -25,6 +25,52 @@ pub const TEXT_PADDING: f32 = 4.0;
 /// resident on the very first frame and never needs a mid-frame re-upload.
 const WARMUP_RANGE: std::ops::Range<u32> = 32..127;
 
+/// Whether this build can actually rasterise the embedded colour emoji face.
+///
+/// NotoColorEmoji stores its strikes as PNG bitmaps, so FreeType only decodes
+/// them when it was compiled with `FT_CONFIG_OPTION_USE_PNG`. freetype-sys
+/// links the system FreeType when pkg-config reports
+/// `freetype2 >= 24.3.18`, and otherwise falls back to a vendored build with
+/// PNG support switched off, in which case every emoji silently disappears.
+///
+/// This is what `--check` reports. It exists because the failure is invisible
+/// at runtime and, on Windows, cannot be caught by a test:
+/// `.cargo/config.toml` sets a `runner` that makes `cargo test` unrunnable
+/// there, so the shipped binary reporting on itself is the only signal.
+pub fn color_emoji_supported() -> bool {
+    unsafe {
+        let mut lib: ft::FT_Library = std::ptr::null_mut();
+        if ft::FT_Init_FreeType(&mut lib) != 0 {
+            return false;
+        }
+        let mut face: ft::FT_Face = std::ptr::null_mut();
+        if new_memory_face(lib, fonts::COLOR_EMOJI, &mut face) != 0 {
+            ft::FT_Done_FreeType(lib);
+            return false;
+        }
+
+        // U+1F600 grinning face, the same glyph the unit test uses.
+        let ok = (*face).num_fixed_sizes >= 1
+            && ft::FT_Select_Size(face, 0) == 0
+            && ft::FT_Load_Char(
+                face,
+                0x1F600 as ft::FT_ULong,
+                (ft::FT_LOAD_RENDER | ft::FT_LOAD_COLOR) as ft::FT_Int32,
+            ) == 0
+            && {
+                let bmp = &(*(*face).glyph).bitmap;
+                // A FreeType without PNG support returns a zero-sized bitmap
+                // rather than an error, which is exactly why this is easy to
+                // ship broken.
+                bmp.width > 0 && bmp.rows > 0 && !bmp.buffer.is_null()
+            };
+
+        ft::FT_Done_Face(face);
+        ft::FT_Done_FreeType(lib);
+        ok
+    }
+}
+
 /// Open a FreeType face over an embedded font, returning FreeType's own error
 /// code so call sites read the same as the `FT_New_Face` calls they replaced.
 ///

@@ -1,0 +1,30 @@
+# Extra steps injected into cargo-dist's `build-local-artifacts` job on every
+# runner, via `github-build-setup` in dist-workspace.toml.
+#
+# This is a bare list of steps, not a full workflow. It is inserted right after
+# the Rust toolchain is set up and before anything is built, which is exactly
+# where FreeType has to be resolved: freetype-sys does its pkg-config lookup in
+# a build script, so PKG_CONFIG_PATH must already be set by the time cargo runs.
+#
+# Without this the release binaries fall back to a vendored FreeType compiled
+# without PNG support, and every colour emoji silently disappears. See
+# scripts/setup-freetype.sh for the full explanation.
+#
+# Regenerate release.yml with `dist generate` after editing this file.
+
+- name: Provide a PNG-capable FreeType (Linux and macOS)
+  if: runner.os != 'Windows'
+  shell: bash
+  run: ./scripts/setup-freetype.sh >> "$GITHUB_ENV"
+
+- name: Provide a PNG-capable FreeType (Windows)
+  if: runner.os == 'Windows'
+  shell: pwsh
+  run: ./scripts/setup-freetype.ps1
+
+# macOS reaches its GPU through MoltenVK, which Homebrew installs outside
+# dyld's default search path on Apple Silicon.
+- name: Point ash at Homebrew MoltenVK
+  if: runner.os == 'macOS'
+  shell: bash
+  run: echo "DYLD_FALLBACK_LIBRARY_PATH=$(brew --prefix)/lib:${DYLD_FALLBACK_LIBRARY_PATH:-}" >> "$GITHUB_ENV"

@@ -77,13 +77,12 @@ jobs:
       # feature, which is what the release builds use. These are the headers
       # it probes for at configure time.
       #
-      # libfreetype-dev is load-bearing and not, as it looks, left over from
-      # the C codebase. freetype-sys 0.20.1 uses the system FreeType when
-      # pkg-config finds `freetype2 >= 24.3.18`, and only otherwise falls back
-      # to its vendored `cc` build. That fallback compiles without
-      # FT_CONFIG_OPTION_USE_PNG, so it cannot decode the PNG bitmap strikes
-      # in NotoColorEmoji, and every colour emoji silently disappears.
-      # `color_atlas_rasterizes_emoji_to_rgba` is what catches it.
+      # FreeType is deliberately NOT installed from apt. jammy ships 2.11.1,
+      # whose freetype2.pc reports libtool version 24.1.18, below the 24.3.18
+      # floor freetype-sys checks. It would be ignored in favour of a vendored
+      # build with PNG support switched off, and every colour emoji would
+      # silently vanish. scripts/setup-freetype.sh builds a new enough one, and
+      # libpng and zlib are what that build needs.
       #
       # It used to build SDL 3.2.28 from source here instead, because
       # `bundled-sdl3` failed under GCC. The cause was ours: the feature also
@@ -100,7 +99,7 @@ jobs:
           sudo apt-get install -y \
             build-essential pkg-config cmake \
             libvulkan-dev \
-            libfreetype-dev libpng-dev \
+            libpng-dev zlib1g-dev \
             libwayland-dev libxkbcommon-dev libdecor-0-dev \
             libx11-dev libxext-dev libxcursor-dev libxi-dev \
             libxrandr-dev libxss-dev libxfixes-dev libxrender-dev \
@@ -111,6 +110,17 @@ jobs:
       - name: Install system dependencies (macOS)
         if: runner.os == 'macOS'
         run: brew install cmake molten-vk
+
+      # Must come before any cargo invocation: freetype-sys resolves FreeType
+      # in its build script, so PKG_CONFIG_PATH has to be set by then.
+      - name: Provide a PNG-capable FreeType (Linux and macOS)
+        if: runner.os != 'Windows'
+        run: ./scripts/setup-freetype.sh >> "$GITHUB_ENV"
+
+      - name: Provide a PNG-capable FreeType (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/setup-freetype.ps1
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -138,11 +148,33 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets --features bundled-sdl3 ${{ matrix.flags }}
 
-      # macOS is the platform nobody here can test by hand, and "does MoltenVK
-      # actually enumerate a device" is the question that decides whether the
-      # .dmg works at all. `--check` answers it without a window or a surface,
-      # so it runs headless. Not fatal: GitHub's macOS runners virtualize
-      # Metal and a failure here is not conclusive.
+      # The shipped binary reporting on itself. This is the only emoji check
+      # that can run on Windows at all, because `.cargo/config.toml` sets a
+      # `runner` that makes `cargo test` unrunnable there, and it is the only
+      # one on macOS since the emoji test is not in the portable subset. On
+      # Linux the unit test covers it.
+      #
+      # Split from the Vulkan check below because the two have different
+      # standards of proof: a FreeType without PNG support is unambiguously
+      # broken and should fail the build, whereas Vulkan on a headless runner
+      # legitimately might not work.
+      - name: Verify colour emoji support
+        if: ${{ !matrix.full }}
+        shell: bash
+        run: |
+          set -o pipefail
+          # `--check` exits non-zero when anything is wrong, including Vulkan,
+          # so the exit code is ignored here and the emoji line is what counts.
+          ./target/release/sicompass --check 2>&1 | tee check.txt || true
+          if ! grep -q 'OK .*colour emoji' check.txt; then
+            echo "::error::FreeType was built without PNG support, so colour emoji will not render."
+            echo "::error::See scripts/setup-freetype.sh."
+            exit 1
+          fi
+
+      # "Does MoltenVK actually enumerate a device" decides whether the .dmg
+      # works at all, and nobody here has a Mac to check by hand. Not fatal:
+      # GitHub's macOS runners virtualize Metal, so a failure is inconclusive.
       - name: Vulkan smoke check (macOS)
         if: runner.os == 'macOS'
         continue-on-error: true

@@ -71,5 +71,5 @@ mkdir -p src/sicompass/wix
 cp "$OUT/sicompass.ico" src/sicompass/wix/Product.ico
 
 echo "Regenerated:"
-ls -1 "$OUT" | sed 's/^/  /'
+find "$OUT" -maxdepth 1 -type f -printf '  %f\n' | sort
 echo "  src/sicompass/wix/Product.ico"
