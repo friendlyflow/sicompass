@@ -78,8 +78,46 @@ $libsStatic = (& pkg-config --print-errors --static --libs --cflags freetype2) 2
 $staticOk = ($LASTEXITCODE -eq 0)
 Write-Host "pkg-config --static --libs --cflags -> exit $LASTEXITCODE : $libsStatic"
 
-if (-not $dynamicOk -and -not $staticOk) {
-    throw "pkg-config cannot produce link flags for freetype2, so freetype-sys will fall back to its vendored build"
+# The one that actually matters. `atleast_version` makes the pkg-config crate
+# append the constraint as a *second, space-containing argument* next to the
+# package name:
+#
+#     pkg-config --libs --cflags freetype2 "freetype2 >= 24.3.18"
+#
+# Probing without it, as above, proves nothing: those succeed today and the
+# build still falls back. Older pkg-config implementations mishandle that
+# argument form, and freetype-sys swallows the resulting error.
+function Test-Constrained {
+    param([string]$Exe)
+    $out = (& $Exe --print-errors --libs --cflags freetype2 "freetype2 >= 24.3.18") 2>&1
+    $ok = ($LASTEXITCODE -eq 0)
+    Write-Host "  $Exe (version-constrained) -> exit $LASTEXITCODE : $out"
+    return $ok
+}
+
+$pkgConfigExe = (Get-Command pkg-config).Source
+Write-Host "pkg-config in use: $pkgConfigExe"
+Write-Host "  --version: $((& pkg-config --version) 2>&1)"
+Write-Host "Probing exactly what freetype-sys runs:"
+$constrainedOk = Test-Constrained $pkgConfigExe
+
+if (-not $constrainedOk) {
+    # vcpkg ships pkgconf, a modern reimplementation, and its own ports rely on
+    # it, so it is already vendored rather than being another thing to install.
+    Write-Host "Falling back to vcpkg's pkgconf"
+    & "$vcpkg\vcpkg.exe" install "pkgconf:$triplet"
+    $pkgconf = Get-ChildItem -Path $vcpkg -Filter pkgconf.exe -Recurse -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if (-not $pkgconf) { throw "pkgconf.exe not found after installing it" }
+    Write-Host "pkgconf at $($pkgconf.FullName)"
+    if (Test-Constrained $pkgconf.FullName) {
+        $constrainedOk = $true
+        $pkgConfigExe = $pkgconf.FullName
+    }
+}
+
+if (-not $constrainedOk) {
+    throw "No pkg-config implementation can satisfy the version-constrained query freetype-sys makes, so it will fall back to its vendored build with no PNG support"
 }
 
 # The pkg-config crate strips paths it considers system defaults unless told
@@ -87,7 +125,11 @@ if (-not $dynamicOk -and -not $staticOk) {
 $vars = @(
     "PKG_CONFIG_PATH=$pcDir",
     "PKG_CONFIG_ALLOW_SYSTEM_LIBS=1",
-    "PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1"
+    "PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1",
+    # The pkg-config crate honours this to locate the binary, so whichever
+    # implementation answered the constrained probe above is the one the build
+    # will use.
+    "PKG_CONFIG=$pkgConfigExe"
 )
 
 # PKG_CONFIG_ALL_STATIC is deliberately NOT set. It makes the pkg-config crate
