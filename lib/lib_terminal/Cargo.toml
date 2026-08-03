@@ -10,6 +10,8 @@ description = "Sicompass terminal provider (Rust)"
 sicompass-sdk = { workspace = true }
 sicompass-shell = { workspace = true }
 vte = { workspace = true }
+# Natural sort for the directory-browse listing, matching the file browser.
+natord = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

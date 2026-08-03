@@ -391,6 +391,19 @@ pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
         // Empty container → seed the `i` insert placeholder so the user can
         // create children by typing (renders as "i", not "-i").
         if children.is_empty() {
+            // Except a folder inside the terminal, whose tree is read-only: an
+            // insert placeholder there offers to create something the provider
+            // always refuses. Such a folder is simply not navigable, so stay put
+            // and undo the path push made above. `:` still opens a shell in it —
+            // that never needed the folder to have contents.
+            //
+            // Only at depth >= 2, i.e. a folder *within* the provider. Depth 1 is
+            // entering the terminal itself, which must always work even if its
+            // root directory happens to hold no subdirectories at all.
+            if item_id.depth() >= 2 && is_terminal_provider(r) {
+                crate::provider::pop_path(r);
+                return false;
+            }
             children.push(FfonElement::Str(I_PLACEHOLDER.to_owned()));
         }
         let last_idx = item_id.last().unwrap_or(0);
@@ -541,6 +554,15 @@ pub fn navigate_left_raw(r: &mut AppRenderer) -> bool {
 
 /// Navigate out to the parent level (Left key).
 pub fn handle_left(r: &mut AppRenderer) {
+    // Terminal: the shell's own level is a dead end for Left — leaving is
+    // Escape's job alone. Consuming the key here is also what keeps the browse
+    // path honest: `push_path`/`pop_path` are inert in the shell view, so
+    // popping a level out of the shell would leave `browse_path` one directory
+    // deeper than the cursor and the next descent would double the segment.
+    // Deeper in (inside the input slot's history) Left is unchanged.
+    if at_terminal_shell_level(r) {
+        return;
+    }
     let pre_nav_id = r.current_id.clone();
     // Gate from_path on origin depth: at depth 1 (provider list) there is no
     // meaningful path to track. Every plugin reports its `current_path()`
@@ -907,6 +929,13 @@ pub fn handle_colon(r: &mut AppRenderer) {
     if r.current_id.depth() <= 1 {
         return;
     }
+    // The terminal's only two commands are the two halves of one view swap
+    // (folder listing ⇄ shell), so a one-item palette would be pure ceremony:
+    // `:` fires the transition directly and never enters Command mode.
+    if is_terminal_provider(r) {
+        open_terminal_shell(r);
+        return;
+    }
     r.previous_coordinate = r.coordinate;
     r.coordinate = Coordinate::Command;
     r.current_command = CommandPhase::None;
@@ -917,6 +946,134 @@ pub fn handle_colon(r: &mut AppRenderer) {
     let ctx = r.current_list_item()
         .map(|it| crate::accesskit_sdl::label_to_speech(&it.label));
     r.speak_mode_change(ctx);
+    r.needs_redraw = true;
+}
+
+/// Command id the terminal exposes to swap its list to the shell.
+pub(crate) const TERMINAL_CMD_SHELL: &str = "shell";
+/// Command id the terminal exposes to swap its list back to the folder listing.
+pub(crate) const TERMINAL_CMD_BROWSE: &str = "browse";
+
+/// True when the cursor is inside the terminal provider.
+///
+/// Matched by name rather than a trait method: `sicompass-sdk` is consumed from
+/// crates.io at a pinned version, so a new `Provider` hook would need a publish
+/// round-trip. The app already identifies the terminal this way for the live
+/// input slot, the tab-switcher label, and the redraw path.
+pub(crate) fn is_terminal_provider(r: &AppRenderer) -> bool {
+    crate::provider::get_active_provider_ref(r).map(|p| p.name()) == Some("terminal")
+}
+
+/// True when the terminal is currently showing the shell rather than folders.
+///
+/// Read off `commands()`: the provider offers `browse` only while the shell is
+/// up, so the app never has to ask it for view state directly.
+pub(crate) fn terminal_is_in_shell(r: &AppRenderer) -> bool {
+    is_terminal_provider(r)
+        && crate::provider::get_commands(r)
+            .iter()
+            .any(|c| c == TERMINAL_CMD_BROWSE)
+}
+
+/// True when the cursor sits on the shell's *own* list level — the one holding
+/// the live input slot — rather than inside that slot's history children.
+///
+/// The distinction matters for every "back out of the shell" path: swapping the
+/// view rebuilds whichever level the cursor is on, so doing it from inside the
+/// history would graft the folder listing over the history list instead.
+/// Detected by the trailing element being an `<input>` Obj, which the browse
+/// listing never produces (its directories carry no tag) and the history
+/// children never are (they are `<button>` Strs).
+pub(crate) fn at_terminal_shell_level(r: &AppRenderer) -> bool {
+    if !terminal_is_in_shell(r) {
+        return false;
+    }
+    sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)
+        .and_then(|arr| arr.last())
+        .is_some_and(|e| match e {
+            FfonElement::Obj(o) => sicompass_sdk::tags::has_input(&o.key),
+            _ => false,
+        })
+}
+
+/// `:` in the terminal — swap its list between the folder browser and the shell.
+///
+/// Direction comes from the provider's own `commands()`, which offers exactly
+/// the transition that is available right now.
+///
+/// From the folder listing, `:` opens the shell in the folder **under the
+/// cursor**, so picking a working directory costs one keypress instead of Right
+/// then `:`. It gets there by performing the Right itself: descending first
+/// leaves the cursor, the provider path, and the FFON depth in exactly the
+/// relationship a manual Right would have, which is what keeps Escape and Left
+/// consistent afterwards.
+pub(crate) fn open_terminal_shell(r: &mut AppRenderer) {
+    // Already in the shell: `:` does nothing. Escape is the one way out, so
+    // there is a single key to learn and no way to lose the shell by reflex.
+    if terminal_is_in_shell(r) {
+        return;
+    }
+    // Descend into the focused folder, then let `apply_terminal_view_command`
+    // graft the shell where that folder's own listing would have gone.
+    //
+    // Done directly rather than through `navigate_right_raw`, which would read
+    // the folder's contents only for them to be replaced a moment later, and
+    // would refuse to descend into a folder with no subfolders — a perfectly
+    // good place to open a shell.
+    if let Some(name) = focused_browse_folder(r) {
+        crate::provider::push_path(r, &name);
+        r.current_id.push(0);
+    }
+    apply_terminal_view_command(r, TERMINAL_CMD_SHELL);
+}
+
+/// Name of the folder under the cursor in the terminal's browse view, or `None`
+/// when the cursor is not on one (an empty level, or already in the shell).
+fn focused_browse_folder(r: &AppRenderer) -> Option<String> {
+    let idx = r.current_id.last()?;
+    let elem = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)?.get(idx)?;
+    match elem {
+        FfonElement::Obj(o) => Some(crate::provider::element_nav_name(&o.key)),
+        _ => None,
+    }
+}
+
+/// Fire one of the terminal's view-swap commands and rebuild the list around it.
+///
+/// `refresh_current_directory` replaces the *current level's* slice in place, so
+/// the breadcrumb above stays intact: pressing `:` inside `/home/nico/Projects`
+/// puts the scrollback where that folder's subdirectories were, and the
+/// provider's `current_path()` still reads `/home/nico/Projects` — the folder
+/// the shell is actually running in.
+fn apply_terminal_view_command(r: &mut AppRenderer, cmd: &str) {
+    crate::provider::handle_command(r, cmd, "", 0);
+
+    // Leaving the shell: the provider has just pointed `current_path()` at the
+    // folder the shell actually ended in, which a typed `cd` may have moved.
+    // Rebuild the tree down to it, so the cursor comes to rest *on* that folder
+    // inside its parent's listing and the breadcrumb above describes where the
+    // user really is. Landing on the folder rather than inside it also avoids an
+    // empty list — a folder need not have subfolders of its own.
+    if cmd == TERMINAL_CMD_BROWSE && crate::provider::rebuild_path_from_root(r) {
+        r.scroll_offset = 0;
+        list::create_list_current_layer(r);
+        r.list_index = r.current_id.last().unwrap_or(0);
+        r.speak_current_element();
+        r.needs_redraw = true;
+        return;
+    }
+
+    crate::provider::refresh_current_directory(r);
+    // The two views have unrelated lengths, so a carried-over index could point
+    // past the end of the new list. Entering the shell lands on the live input
+    // slot (bottom-anchored, ready to type); anything else lands on the first row.
+    if !snap_to_trailing_input(r) {
+        r.current_id.set_last(0);
+        r.scroll_offset = 0;
+    }
+    list::create_list_current_layer(r);
+    r.list_index = r.current_id.last().unwrap_or(0);
+    r.speak_current_element();
     r.needs_redraw = true;
 }
 
@@ -2559,6 +2716,14 @@ pub fn handle_escape(r: &mut AppRenderer) {
     // Leaving any edit clears the password-masking flag; the next field edit
     // re-derives it in `populate_input_buffer`.
     r.input_is_password = false;
+    // Terminal: Escape backs out of the shell view to the folder listing. The
+    // shell itself keeps running, so `:` resumes the same session with its
+    // scrollback intact. Only General mode — inside Insert, Escape still means
+    // "cancel this edit".
+    if r.coordinate == Coordinate::General && at_terminal_shell_level(r) {
+        apply_terminal_view_command(r, TERMINAL_CMD_BROWSE);
+        return;
+    }
     match r.coordinate {
         Coordinate::Insert => {
             // Discard any per-keystroke `<input>` edit session: restore the
@@ -5641,14 +5806,68 @@ fn insert_ffon_element(r: &mut AppRenderer, insert_idx: usize, elem: sicompass_s
 ///
 /// Stores the tab list as a JSON-encoded string so each tab can carry both
 /// its `current_id` indices and the provider path to restore on next launch.
+/// How a tab's live navigation should be written down so it can be restored.
+///
+/// `on_path` asks the restore to put the cursor **on** `path` rather than inside
+/// it, rebuilding the tree from the filesystem root to find it.
+pub struct RestorableNav {
+    pub current_id: IdArray,
+    pub path: String,
+    pub on_path: bool,
+}
+
+/// Map a tab's live navigation onto what can actually be restored next launch.
+///
+/// The terminal's shell view cannot be: the shell process dies with the app, so
+/// after a restart `fetch()` returns a folder listing where the scrollback used
+/// to be. Two things follow.
+///
+/// First, the cursor must come back on the *folder* the shell was running in,
+/// not inside it — `:` there would otherwise open a shell in one of its
+/// subfolders. That is what `on_path` asks for.
+///
+/// Second, that folder is whatever `current_path()` reports, which follows a
+/// typed `cd`. So it need not be anywhere in the tree the user browsed: `cd` can
+/// jump clean across the filesystem. Rebuilding from the root locates it by name
+/// at every level, which a simple "pop one level off the saved cursor" could not.
+///
+/// Everything else is passed through untouched.
+pub fn restorable_nav(
+    providers: &[Box<dyn sicompass_sdk::provider::Provider>],
+    current_id: &IdArray,
+    provider_path: &str,
+) -> RestorableNav {
+    let in_terminal_shell = current_id
+        .get(0)
+        .and_then(|i| providers.get(i))
+        .is_some_and(|p| {
+            p.name() == "terminal" && p.commands().iter().any(|c| c == TERMINAL_CMD_BROWSE)
+        });
+    RestorableNav {
+        current_id: current_id.clone(),
+        path: provider_path.to_owned(),
+        on_path: in_terminal_shell && current_id.depth() >= 2,
+    }
+}
+
 pub(crate) fn persist_tabs(r: &mut AppRenderer) {
-    let arr: Vec<serde_json::Value> = r.tabs.iter().map(|t| {
-        let ids: Vec<serde_json::Value> = t.current_id.as_slice().iter()
+    let arr: Vec<serde_json::Value> = r.tabs.iter().enumerate().map(|(i, t)| {
+        // The active tab's providers are the live set; the rest are parked in
+        // their own slot.
+        let providers: &[Box<dyn sicompass_sdk::provider::Provider>] =
+            if i == r.active_tab { &r.providers } else { &t.providers };
+        let nav = restorable_nav(providers, &t.current_id, &t.provider_path);
+        let ids: Vec<serde_json::Value> = nav.current_id.as_slice().iter()
             .map(|&n| serde_json::Value::from(n as u64))
             .collect();
         let mut obj = serde_json::Map::new();
         obj.insert("id".to_string(), serde_json::Value::Array(ids));
-        obj.insert("path".to_string(), serde_json::Value::String(t.provider_path.clone()));
+        obj.insert("path".to_string(), serde_json::Value::String(nav.path));
+        if nav.on_path {
+            // Absent in configs written by older builds, which is exactly the
+            // `false` default the reader applies.
+            obj.insert("onPath".to_string(), serde_json::Value::Bool(true));
+        }
         serde_json::Value::Object(obj)
     }).collect();
     let serialized = serde_json::to_string(&serde_json::Value::Array(arr))
@@ -6480,6 +6699,167 @@ mod tests {
         r.current_command = CommandPhase::Provider;
         handle_colon(&mut r);
         assert_eq!(r.current_command, CommandPhase::None);
+    }
+
+    // -----------------------------------------------------------------------
+    // Terminal `:` / Escape view swap
+    // -----------------------------------------------------------------------
+
+    /// Stands in for the terminal provider: two views, and `commands()` offers
+    /// exactly the transition that is available — the contract the app reads to
+    /// decide which way `:` should go. Kept local so these tests exercise the
+    /// app-side routing without spawning a PTY (and without the app crate
+    /// depending on `lib_terminal`, which the SDK boundary rule forbids).
+    struct TermProvider {
+        in_shell: bool,
+    }
+    impl sicompass_sdk::provider::Provider for TermProvider {
+        fn name(&self) -> &str { "terminal" }
+        fn fetch(&mut self) -> Vec<FfonElement> {
+            if self.in_shell {
+                vec![FfonElement::new_obj("host:/tmp$ <input></input>")]
+            } else {
+                vec![FfonElement::new_obj("workspace"), FfonElement::new_obj("docs")]
+            }
+        }
+        fn commands(&self) -> Vec<String> {
+            vec![if self.in_shell { "browse".to_owned() } else { "shell".to_owned() }]
+        }
+        fn handle_command(&mut self, cmd: &str, _k: &str, _t: i32, _e: &mut String) -> Option<FfonElement> {
+            match cmd {
+                "shell" => self.in_shell = true,
+                "browse" => self.in_shell = false,
+                _ => {}
+            }
+            None
+        }
+    }
+
+    fn make_renderer_with_terminal() -> AppRenderer {
+        use sicompass_sdk::provider::Provider as _;
+        let mut r = AppRenderer::new();
+        let mut prov = TermProvider { in_shell: false };
+        let mut root = FfonElement::new_obj("terminal");
+        for child in prov.fetch() {
+            root.as_obj_mut().unwrap().push(child);
+        }
+        r.ffon = vec![root];
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        r.providers.push(Box::new(prov));
+        list::create_list_current_layer(&mut r);
+        r
+    }
+
+    #[test]
+    fn colon_in_terminal_swaps_to_the_shell_instead_of_the_palette() {
+        let mut r = make_renderer_with_terminal();
+        r.coordinate = Coordinate::General;
+
+        handle_colon(&mut r);
+
+        assert_eq!(r.coordinate, Coordinate::General, "no command palette here");
+        assert_eq!(r.current_command, CommandPhase::None);
+        assert!(terminal_is_in_shell(&r));
+        // The list swapped in place, and the cursor landed on the input slot.
+        assert_eq!(r.total_list.len(), 1);
+        assert!(r.total_list[0].label.starts_with("+i "), "got {:?}", r.total_list[0].label);
+        assert_eq!(r.list_index, 0);
+    }
+
+    #[test]
+    fn colon_inside_the_terminal_shell_does_nothing() {
+        // Escape is the only way out, so `:` cannot drop the user's shell by
+        // reflex — and pressing it twice is not a toggle.
+        let mut r = make_renderer_with_terminal();
+        handle_colon(&mut r);
+        assert!(terminal_is_in_shell(&r));
+        let before = r.total_list.iter().map(|i| i.label.clone()).collect::<Vec<_>>();
+
+        handle_colon(&mut r);
+
+        assert!(terminal_is_in_shell(&r), "still in the shell");
+        assert_eq!(
+            r.total_list.iter().map(|i| i.label.clone()).collect::<Vec<_>>(),
+            before,
+        );
+    }
+
+    #[test]
+    fn restorable_nav_asks_to_land_on_the_shells_folder() {
+        // The saved path is whatever `current_path()` reports, which follows a
+        // typed `cd` — so it is saved verbatim and the restore lands *on* it.
+        let mut r = make_renderer_with_terminal();
+        handle_colon(&mut r);
+
+        let nav = restorable_nav(&r.providers, &r.current_id, "/var/log");
+
+        assert!(nav.on_path, "restore must land on the folder, not inside it");
+        assert_eq!(nav.path, "/var/log", "saved verbatim, wherever the cd went");
+        assert_eq!(nav.current_id, r.current_id);
+    }
+
+    #[test]
+    fn restorable_nav_passes_the_browse_view_through_untouched() {
+        let r = make_renderer_with_terminal();
+        let nav = restorable_nav(&r.providers, &r.current_id, "/home/nico");
+        assert!(!nav.on_path, "browsing restores the ordinary way");
+        assert_eq!(nav.current_id, r.current_id);
+        assert_eq!(nav.path, "/home/nico");
+    }
+
+    #[test]
+    fn restorable_nav_leaves_other_providers_alone() {
+        let r = make_renderer_with_cmd_provider(&[], None, vec![]);
+        let nav = restorable_nav(&r.providers, &r.current_id, "/whatever");
+        assert!(!nav.on_path);
+        assert_eq!(nav.path, "/whatever");
+    }
+
+    #[test]
+    fn left_inside_the_terminal_shell_does_nothing() {
+        let mut r = make_renderer_with_terminal();
+        handle_colon(&mut r);
+        let id = r.current_id.clone();
+
+        handle_left(&mut r);
+
+        assert!(terminal_is_in_shell(&r), "Left must not leave the shell");
+        assert_eq!(r.current_id, id, "and must not move the cursor");
+    }
+
+    #[test]
+    fn escape_in_terminal_shell_returns_to_the_folder_listing() {
+        let mut r = make_renderer_with_terminal();
+        handle_colon(&mut r);
+        assert!(terminal_is_in_shell(&r));
+
+        handle_escape(&mut r);
+
+        assert!(!terminal_is_in_shell(&r));
+        assert_eq!(r.coordinate, Coordinate::General);
+        assert_eq!(r.total_list.len(), 2);
+    }
+
+    #[test]
+    fn escape_while_browsing_the_terminal_is_the_ordinary_escape() {
+        // Only the shell view claims Escape; browsing must fall through to the
+        // normal handler so nothing else in the app changes behaviour.
+        let mut r = make_renderer_with_terminal();
+        r.coordinate = Coordinate::SimpleSearch;
+        r.previous_coordinate = Coordinate::General;
+
+        handle_escape(&mut r);
+
+        assert_eq!(r.coordinate, Coordinate::General);
+        assert!(!terminal_is_in_shell(&r));
+    }
+
+    #[test]
+    fn colon_at_root_is_still_a_no_op_in_the_terminal() {
+        let mut r = make_renderer_with_terminal();
+        r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        handle_colon(&mut r);
+        assert!(!terminal_is_in_shell(&r), "`:` needs a provider to act on");
     }
 
     // -----------------------------------------------------------------------

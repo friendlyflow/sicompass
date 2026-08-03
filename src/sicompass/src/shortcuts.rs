@@ -144,6 +144,29 @@ fn active_provider_name(r: &AppRenderer) -> Option<&str> {
         .map(|p| p.name())
 }
 
+/// True in the terminal's folder-browse view, where `:` opens a shell there.
+fn terminal_browsing(r: &AppRenderer) -> bool {
+    active_provider_name(r) == Some("terminal") && !handlers::terminal_is_in_shell(r)
+}
+
+/// True in the terminal's shell view, where `:` and Escape both go back to the
+/// folder listing.
+fn terminal_shell(r: &AppRenderer) -> bool {
+    handlers::terminal_is_in_shell(r)
+}
+
+/// True where Left steps out to the parent list. The terminal's shell level is
+/// the exception: Left is inert there, leaving is Escape's job.
+fn left_goes_back(r: &AppRenderer) -> bool {
+    not_at_root(r) && !handlers::at_terminal_shell_level(r)
+}
+
+/// True for every provider except the terminal, whose `:` opens a shell rather
+/// than the command palette.
+fn not_terminal(r: &AppRenderer) -> bool {
+    active_provider_name(r) != Some("terminal")
+}
+
 fn is_filebrowser(r: &AppRenderer) -> bool {
     active_provider_name(r) == Some("filebrowser")
 }
@@ -367,6 +390,12 @@ pub static SHORTCUTS: &[Shortcut] = &[
 
     // ---- Escape (all meaningful modes) -----------------------------------
     // Hint only inside providers; dispatch fires everywhere.
+    // In the terminal's shell view Escape returns to the folder listing rather
+    // than popping a level, so it advertises that instead of the generic "Back".
+    // Same handler either way — only the hint differs.
+    Shortcut { key: Keycode::Escape, key2: None, ctrl: false, shift: false,
+        modes: &[Coordinate::General],
+        label: "Esc    Folders", is_available: terminal_shell, handle: handlers::handle_escape },
     Shortcut { key: Keycode::Escape, key2: None, ctrl: false, shift: false,
         modes: &[Coordinate::General,
                  Coordinate::Insert, Coordinate::Normal,
@@ -440,7 +469,7 @@ pub static SHORTCUTS: &[Shortcut] = &[
     // ---- Left / H --------------------------------------------------------
     Shortcut { key: Keycode::Left, key2: Some(Keycode::H), ctrl: false, shift: false,
         modes: GENERAL,
-        label: "Left   Back", is_available: not_at_root, handle: handlers::handle_left },
+        label: "Left   Back", is_available: left_goes_back, handle: handlers::handle_left },
     Shortcut { key: Keycode::Left, key2: Some(Keycode::H), ctrl: false, shift: false,
         modes: GENERAL,
         label: "", is_available: always, handle: handlers::handle_left },
@@ -631,12 +660,23 @@ pub static SHORTCUTS: &[Shortcut] = &[
         label: "Enter  Confirm", is_available: always, handle: handlers::handle_enter_insert },
 
     // ---- Colon / Semicolon+Shift (command mode entry) --------------------
+    // `handle_colon` branches on the provider itself; these rows differ only in
+    // the hint they advertise. The terminal has no command palette — its `:`
+    // opens a shell in the focused folder — so it gets its own label. Inside the
+    // shell no row matches, so `:` does not dispatch at all: Escape is the only
+    // way back to the folders.
     Shortcut { key: Keycode::Semicolon, key2: None, ctrl: false, shift: true,
         modes: &[Coordinate::General],
-        label: ":      Command", is_available: always, handle: handlers::handle_colon },
+        label: ":      Shell", is_available: terminal_browsing, handle: handlers::handle_colon },
+    Shortcut { key: Keycode::Semicolon, key2: None, ctrl: false, shift: true,
+        modes: &[Coordinate::General],
+        label: ":      Command", is_available: not_terminal, handle: handlers::handle_colon },
     Shortcut { key: Keycode::Colon, key2: None, ctrl: false, shift: false,
         modes: &[Coordinate::General],
-        label: ":      Command", is_available: always, handle: handlers::handle_colon },
+        label: ":      Shell", is_available: terminal_browsing, handle: handlers::handle_colon },
+    Shortcut { key: Keycode::Colon, key2: None, ctrl: false, shift: false,
+        modes: &[Coordinate::General],
+        label: ":      Command", is_available: not_terminal, handle: handlers::handle_colon },
 
     // ---- I / A (enter insert/append mode) --------------------------------
     // Editor provider: i/a enter Insert so commit_edit fires on Enter → writes to disk.

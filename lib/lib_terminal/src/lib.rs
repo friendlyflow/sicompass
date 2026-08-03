@@ -1,11 +1,21 @@
 //! Sicompass terminal provider.
 //!
-//! Two views over the same underlying PTY-backed shell:
+//! Three views, in the order the user meets them:
 //!
-//! * **Scrollback list** (default). `fetch()` exposes one Obj per submitted
-//!   command with its output as children, plus a trailing `<input/>` slot.
+//! * **Directory browse** (default). `fetch()` lists the subdirectories of
+//!   `browse_path` as childless Objs, so the app's generic navigation
+//!   (`push_path` / lazy `fetch()` grafting) walks the filesystem exactly as it
+//!   does for the file browser. No shell process exists yet — a terminal tab
+//!   that is only being browsed costs no PTY.
+//!
+//! * **Scrollback list**. Entered with `:` (the app routes that key straight to
+//!   `handle_command("shell")` for this provider). `fetch()` exposes one Str per
+//!   prompt line and per output line, plus a trailing `<input/>` slot.
 //!   `commit_edit()` writes a line to the shell, `tick()` drains output into
-//!   the latest entry. Suitable for "type a command, see output" workflows.
+//!   the latest entry. The shell is spawned on first entry with its `cwd` set to
+//!   the browsed folder; entering again from a different folder reuses the same
+//!   PTY and sends a `cd`. `handle_command("browse")` returns to the listing
+//!   without disturbing the shell, scrollback, or history.
 //!
 //! * **Interactive dashboard** (Phase 2b). When `interactive_detect` spots a
 //!   full-terminal program starting (alt-screen, or a main-screen TUI enabling
@@ -46,6 +56,28 @@ pub fn register_translations() {
     });
 }
 
+/// Command id: swap from the folder listing to the shell, running in the folder
+/// the user browsed to. The app binds `:` to this for the terminal.
+pub const CMD_SHELL: &str = "shell";
+
+/// Command id: swap from the shell back to the folder listing. Idempotent, so
+/// the app can fire it without first asking which view is active.
+pub const CMD_BROWSE: &str = "browse";
+
+/// Which list the provider is currently serving from `fetch()`.
+///
+/// The text editor uses the same shape (directory view vs file-content view):
+/// one provider, one `fetch()` that branches on internal state, so the app's
+/// generic list/navigation machinery needs no special case.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum View {
+    /// Subdirectories of `browse_path`. No shell required.
+    #[default]
+    Browse,
+    /// The PTY scrollback plus the live `<input>` slot.
+    Shell,
+}
+
 /// One entry in the terminal scrollback: a submitted command and the bytes
 /// the shell has produced in response so far.
 #[derive(Debug, Clone)]
@@ -60,6 +92,14 @@ struct Entry {
 }
 
 pub struct TerminalProvider {
+    /// Which list `fetch()` serves. Starts at [`View::Browse`].
+    view: View,
+    /// Filesystem position of the directory-browse view. Rooted at `/` (like
+    /// the file browser) so every directory on the machine is reachable;
+    /// `pop_path` clamps there. Also the `cwd` the shell is spawned into /
+    /// `cd`-ed to when the user presses `:`.
+    browse_path: PathBuf,
+
     shell: Option<Shell>,
     entries: Vec<Entry>,
     shell_program: String,
@@ -95,6 +135,15 @@ pub struct TerminalProvider {
     /// Cap on `command_history` length, enforced in memory and via periodic
     /// file compaction.
     command_history_size: usize,
+    /// Where the shell is running, as a string so `current_path()` can hand out a
+    /// `&str`. Seeded when the shell is entered and re-synced whenever the child
+    /// might have moved (a parsed `cd`, or any output arriving), so it tracks
+    /// both commands we understand and ones the shell runs on its own.
+    shell_path: String,
+    /// `true` between spawning the shell and submitting the first command, while
+    /// the startup banner and the shell's own PS1 may still be in flight. See
+    /// `commit_edit`, which drains and discards them exactly once.
+    banner_pending: bool,
     /// `true` once `load_command_history()` has run for this provider.
     command_history_loaded: bool,
     /// On-disk path for the recall history. `None` → resolved at use time
@@ -128,6 +177,10 @@ pub struct TerminalProvider {
 impl TerminalProvider {
     pub fn new() -> Self {
         TerminalProvider {
+            view: View::Browse,
+            // Same root as the file browser, so every directory on the machine
+            // is reachable. On Windows this resolves to the current drive root.
+            browse_path: PathBuf::from("/"),
             shell: None,
             entries: Vec::new(),
             shell_program: default_program(),
@@ -141,6 +194,8 @@ impl TerminalProvider {
             scrollback_size: 50_000,
             command_history: Vec::new(),
             command_history_size: 50_000,
+            shell_path: String::new(),
+            banner_pending: false,
             command_history_loaded: false,
             command_history_path: None,
             appends_since_compact: 0,
@@ -181,7 +236,11 @@ impl TerminalProvider {
 
     fn handle_interactive_event(&mut self, e: InteractiveEvent) {
         match e {
-            InteractiveEvent::Enter if !self.in_dashboard => {
+            // `view == Shell` gates auto-entry: the detector is still fed every
+            // chunk while browsing (it is a stream parser — skipping bytes would
+            // desync it), but a background program flipping to the alt screen
+            // must not yank a browsing user into the interactive dashboard.
+            InteractiveEvent::Enter if !self.in_dashboard && self.view == View::Shell => {
                 self.pending_dashboard_request = Some(DashboardRequest::Enter);
                 self.auto_entered_dashboard = true;
             }
@@ -285,6 +344,168 @@ impl TerminalProvider {
         self.appends_since_compact = 0;
     }
 
+    /// Children of the browse view: the subdirectories of `browse_path`,
+    /// natural-sorted case-insensitively (the same ordering the file browser
+    /// uses for its alphabetical mode).
+    ///
+    /// Files are deliberately omitted. The browse view exists only to pick a
+    /// working directory, and leaving files out keeps a big directory short
+    /// enough to walk by ear.
+    ///
+    /// Each entry is a *bare* `Obj` with no `<input>` tag, unlike the file
+    /// browser. That renders as `+ name` rather than `+i name` (nothing here is
+    /// renameable), and it keeps a directory from matching the app's
+    /// "live input slot" check, which special-cases this provider by name and
+    /// would otherwise mistake a `+i` directory for the shell's input line.
+    fn list_subdirectories(&self) -> Vec<FfonElement> {
+        let Ok(read_dir) = std::fs::read_dir(&self.browse_path) else {
+            return Vec::new();
+        };
+        let mut names: Vec<String> = Vec::new();
+        for entry in read_dir.flatten() {
+            // `metadata()` follows symlinks, so a symlink pointing at a
+            // directory is offered as one — which is what `cd` would do too.
+            // Entries whose metadata can't be read (broken symlinks, races,
+            // permission holes) are skipped rather than shown as dead ends.
+            if entry.metadata().map(|m| m.is_dir()).unwrap_or(false) {
+                names.push(entry.file_name().to_string_lossy().into_owned());
+            }
+        }
+        names.sort_by(|a, b| natord::compare_ignore_case(a, b));
+        names.into_iter().map(|n| FfonElement::new_obj(&n)).collect()
+    }
+
+    /// Swap to the shell view, running in whichever folder the user browsed to.
+    ///
+    /// First call spawns the PTY straight into `browse_path`. Later calls reuse
+    /// the same shell and walk it over with a `cd`, so scrollback, recall
+    /// history, and any long-running program all survive a trip back out to the
+    /// folder listing.
+    fn enter_shell(&mut self) {
+        self.view = View::Shell;
+
+        if self.shell.is_none() {
+            self.cwd = Some(self.browse_path.clone());
+            self.ensure_shell();
+            // The cwd is now whichever folder the user put the cursor on, so a
+            // spawn can fail for reasons the next attempt won't share (an
+            // unreadable directory, one deleted between listing and `:`).
+            // Clear the one-shot latch so `:` in another folder can try again
+            // instead of leaving the tab permanently shell-less.
+            if self.shell.is_none() {
+                self.init_attempted = false;
+            }
+            self.sync_shell_path(true);
+            return;
+        }
+
+        let shell_cwd = self.shell_cwd();
+        if self.browse_path == Path::new(&shell_cwd) {
+            self.sync_shell_path(false);
+            return;
+        }
+        // Submitted like any other command so the user can see where the shell
+        // went, but *not* recorded in the ↑-recall history: they never typed it.
+        let line = format!("cd {}", quote_for_shell(&self.browse_path));
+        let prompt = self.current_prompt();
+        let Some(shell) = self.shell.as_mut() else { return };
+        if shell.write_line(&line).is_err() {
+            return;
+        }
+        self.cwd = Some(self.browse_path.clone());
+        self.entries.push(Entry {
+            prompt,
+            input: line,
+            output: String::new(),
+        });
+        self.trim_scrollback();
+        self.sync_shell_path(true);
+    }
+
+    /// Re-derive [`Self::shell_path`] from the best available knowledge of where
+    /// the child process is.
+    ///
+    /// Two sources disagree during a narrow window:
+    ///
+    /// * `self.cwd` — where the last `cd` we parsed asked the shell to go. Known
+    ///   the instant the line is submitted.
+    /// * `shell_cwd()` — where the child actually is. Authoritative on Linux
+    ///   (`/proc/<pid>/cwd`), but only observable once the shell has run the
+    ///   line, so it still reads the old directory right after Enter.
+    ///
+    /// `prefer_parsed` picks between them: true at submit time, when the live
+    /// value has certainly not caught up yet; false once output has arrived,
+    /// where the live value is both current and able to see a `cd` the shell
+    /// performed on its own (inside a script, an alias, `popd`) that we never
+    /// parsed. Each is used only if it is a real directory, so a `cd` to a path
+    /// that does not exist leaves the answer where it was.
+    fn sync_shell_path(&mut self, prefer_parsed: bool) {
+        let parsed = self.cwd.clone();
+        let live = Some(PathBuf::from(self.shell_cwd()));
+        let order = if prefer_parsed { [parsed, live] } else { [live, parsed] };
+        for candidate in order {
+            match candidate {
+                Some(p) if p.is_dir() => {
+                    self.shell_path = p.to_string_lossy().into_owned();
+                    return;
+                }
+                _ => {}
+            }
+        }
+        if self.shell_path.is_empty() {
+            self.shell_path = self.browse_path.to_string_lossy().into_owned();
+        }
+    }
+
+    /// Swap back to the folder listing. The shell keeps running: this is a view
+    /// change, not a teardown.
+    ///
+    /// The browse path follows the shell rather than returning to where `:` was
+    /// pressed. A `cd` typed at the prompt moves the working directory out from
+    /// under that folder, and the listing the user comes back to should be the
+    /// one they actually ended up in.
+    fn leave_shell(&mut self) {
+        self.sync_shell_path(false);
+        self.view = View::Browse;
+        let followed = PathBuf::from(&self.shell_path);
+        if followed.is_dir() {
+            self.browse_path = followed;
+        }
+    }
+
+    /// The scrollback view — one Str per prompt line and per output line, then
+    /// the live `<input>` slot. See [`Provider::fetch`].
+    fn fetch_scrollback(&mut self) -> Vec<FfonElement> {
+        // Flat layout: one Str per prompt-line (`{prompt}{cmd}`) and one Str
+        // per output-line, in chronological order. The trailing element is the
+        // live input slot — a `+i` Obj: an `<input>` prefixed with the *live*
+        // prompt (recomputed every fetch so it reflects the shell's current
+        // cwd after `cd`). Its children are the recall history as `<button>`
+        // Strs, newest first, so the user can browse and reuse past commands
+        // by navigating into the slot — Enter on a button fills the input.
+        let live_prompt = self.current_prompt();
+        let mut out: Vec<FfonElement> = Vec::new();
+        for e in &self.entries {
+            out.push(FfonElement::Str(format!("{}{}", e.prompt, e.input)));
+            for line in entry_lines(&e.input, &e.output) {
+                out.push(FfonElement::Str(line.to_owned()));
+            }
+        }
+        self.load_command_history();
+        let key = format!("{}<input>{}</input>", live_prompt, self.pending_input);
+        let mut slot = FfonElement::new_obj(key);
+        if let Some(obj) = slot.as_obj_mut() {
+            // Reversed: newest history entry on top. All entries, no dedup.
+            // Each is a `<button>` so Enter on it fills the slot's <input>.
+            for cmd in self.command_history.iter().rev() {
+                obj.children
+                    .push(FfonElement::Str(format!("<button>{cmd}</button>{cmd}")));
+            }
+        }
+        out.push(slot);
+        out
+    }
+
     fn ensure_shell(&mut self) {
         if self.shell.is_some() || self.init_attempted {
             return;
@@ -301,7 +522,10 @@ impl TerminalProvider {
             ..ShellConfig::default()
         };
         match Shell::spawn(cfg) {
-            Ok(s) => self.shell = Some(s),
+            Ok(s) => {
+                self.shell = Some(s);
+                self.banner_pending = true;
+            }
             Err(e) => self.entries.push(Entry {
                 prompt: String::new(),
                 input: format!("(failed to start `{}`)", self.shell_program),
@@ -368,8 +592,12 @@ impl Provider for TerminalProvider {
         localize::t("terminal-display-name")
     }
 
+    /// Start at the filesystem root in the browse view. The shell is *not*
+    /// spawned here — that happens on the first `:` (see `enter_shell`), so a
+    /// terminal tab the user only browses never costs a PTY.
     fn init(&mut self) {
-        self.ensure_shell();
+        self.view = View::Browse;
+        self.browse_path = PathBuf::from("/");
     }
 
     fn cleanup(&mut self) {
@@ -393,37 +621,68 @@ impl Provider for TerminalProvider {
     }
 
     fn fetch(&mut self) -> Vec<FfonElement> {
-        // Flat layout: one Str per prompt-line (`{prompt}{cmd}`) and one Str
-        // per output-line, in chronological order. The trailing element is the
-        // live input slot — a `+i` Obj: an `<input>` prefixed with the *live*
-        // prompt (recomputed every fetch so it reflects the shell's current
-        // cwd after `cd`). Its children are the recall history as `<button>`
-        // Strs, newest first, so the user can browse and reuse past commands
-        // by navigating into the slot — Enter on a button fills the input.
-        let live_prompt = self.current_prompt();
-        let mut out: Vec<FfonElement> = Vec::new();
-        for e in &self.entries {
-            out.push(FfonElement::Str(format!("{}{}", e.prompt, e.input)));
-            for line in entry_lines(&e.input, &e.output) {
-                out.push(FfonElement::Str(line.to_owned()));
-            }
+        match self.view {
+            View::Browse => self.list_subdirectories(),
+            View::Shell => self.fetch_scrollback(),
         }
-        self.load_command_history();
-        let key = format!("{}<input>{}</input>", live_prompt, self.pending_input);
-        let mut slot = FfonElement::new_obj(key);
-        if let Some(obj) = slot.as_obj_mut() {
-            // Reversed: newest history entry on top. All entries, no dedup.
-            // Each is a `<button>` so Enter on it fills the slot's <input>.
-            for cmd in self.command_history.iter().rev() {
-                obj.children
-                    .push(FfonElement::Str(format!("<button>{cmd}</button>{cmd}")));
-            }
+    }
+
+    // ---- Directory browsing ---------------------------------------------
+    //
+    // Same contract as the file browser, so the app's generic navigation does
+    // all the work: Right pushes a segment and re-`fetch()`es, Left pops. The
+    // path methods are inert in the shell view — the cursor is inside the
+    // scrollback there, and moving `browse_path` under it would send the next
+    // `:` somewhere the user never asked for.
+
+    fn push_path(&mut self, segment: &str) {
+        if self.view != View::Browse {
+            return;
         }
-        out.push(slot);
-        out
+        self.browse_path
+            .push(segment.trim_end_matches('/').trim_end_matches('\\'));
+    }
+
+    fn pop_path(&mut self) {
+        if self.view != View::Browse {
+            return;
+        }
+        if self.browse_path.parent().is_some() && self.browse_path != Path::new("/") {
+            self.browse_path.pop();
+        }
+    }
+
+    /// Where the provider currently is: the folder being listed while browsing,
+    /// and the folder the *shell* is in while it is up.
+    ///
+    /// The shell answer has to follow a typed `cd`, because this is what the app
+    /// persists on close. Reporting where `:` was pressed would restart the user
+    /// in the folder they left rather than the one they walked to.
+    fn current_path(&self) -> &str {
+        match self.view {
+            View::Browse => self.browse_path.to_str().unwrap_or("/"),
+            View::Shell => &self.shell_path,
+        }
+    }
+
+    fn set_current_path(&mut self, path: &str) {
+        self.browse_path = PathBuf::from(path);
+    }
+
+    fn path_is_filesystem(&self) -> bool {
+        true
+    }
+
+    fn at_root(&self) -> bool {
+        self.browse_path == Path::new("/")
     }
 
     fn commit_edit(&mut self, old: &str, new: &str) -> bool {
+        // Browsing is read-only: reject the `i` placeholder the app seeds into
+        // an empty directory rather than turning it into a file-creation path.
+        if self.view != View::Shell {
+            return false;
+        }
         // The handler extracts the inner value of `<input>...</input>` before
         // calling commit_edit, so for the trailing input slot we receive
         // `old == ""`. Reject any non-empty `old` (e.g. editing a past entry).
@@ -432,6 +691,19 @@ impl Provider for TerminalProvider {
         }
         self.ensure_shell();
         self.load_command_history();
+        // Discard whatever the shell produced before this first command — its
+        // startup banner and its own PS1. We synthesize the prompt ourselves, so
+        // those bytes are noise, and `tick()`'s "drop output while there are no
+        // entries" rule misses them: the shell is spawned lazily on `:`, so the
+        // banner can still be in flight when the first command is submitted and
+        // would then land in *its* output. Only once, and only before the first
+        // command, so it can never eat the tail of a previous one.
+        if self.banner_pending {
+            self.banner_pending = false;
+            if let Some(shell) = self.shell.as_mut() {
+                let _ = shell.drain_output();
+            }
+        }
         let Some(shell) = self.shell.as_mut() else {
             return false;
         };
@@ -450,6 +722,9 @@ impl Provider for TerminalProvider {
         if let Some(new_cwd) = parse_cd(new, &base) {
             self.cwd = Some(new_cwd);
         }
+        // Prefer the parsed target: the child cannot have run the line yet, so
+        // the live cwd still points at the directory we just left.
+        self.sync_shell_path(true);
         self.entries.push(Entry {
             prompt,
             input: new.to_owned(),
@@ -464,6 +739,49 @@ impl Provider for TerminalProvider {
 
     fn set_input_value(&mut self, value: &str) {
         self.pending_input = value.to_owned();
+    }
+
+    // ---- Commands --------------------------------------------------------
+    //
+    // For this provider the app routes `:` straight to `handle_command("shell")`
+    // rather than opening the command palette, so these are normally invoked
+    // without the list ever being drawn. They are still implemented properly:
+    // the WASM plugin bridge and the tests reach the terminal through the
+    // generic command path, and `commands()` is what tells the app which of the
+    // two transitions is currently available — that is how the app decides
+    // whether `:` should enter or leave the shell without querying view state.
+
+    fn commands(&self) -> Vec<String> {
+        match self.view {
+            View::Browse => vec![CMD_SHELL.to_owned()],
+            View::Shell => vec![CMD_BROWSE.to_owned()],
+        }
+    }
+
+    fn command_label(&self, cmd: &str) -> String {
+        register_translations();
+        match cmd {
+            CMD_SHELL => localize::t("terminal-command-shell"),
+            CMD_BROWSE => localize::t("terminal-command-browse"),
+            other => other.to_owned(),
+        }
+    }
+
+    fn handle_command(
+        &mut self,
+        command: &str,
+        _element_key: &str,
+        _element_type: i32,
+        _error: &mut String,
+    ) -> Option<FfonElement> {
+        match command {
+            CMD_SHELL => self.enter_shell(),
+            CMD_BROWSE => self.leave_shell(),
+            _ => {}
+        }
+        // No element to insert and no error: the app treats this as a state
+        // toggle and refreshes the current level, which is exactly the view swap.
+        None
     }
 
     fn tick(&mut self) -> bool {
@@ -497,16 +815,20 @@ impl Provider for TerminalProvider {
         if let Some(last) = self.entries.last_mut() {
             last.output.push_str(&text);
         }
-        true
+        // Output means the shell has been running, so its live cwd is now both
+        // current and able to reflect a `cd` we never parsed.
+        self.sync_shell_path(false);
+        // While the user is browsing folders the scrollback is off screen.
+        // Returning `true` here would make the app re-`fetch()` — and therefore
+        // re-read from disk — the *directory listing* on every byte the shell
+        // produces. The output is still captured above, so nothing is lost.
+        self.view == View::Shell
     }
 
     fn on_setting_change(&mut self, key: &str, value: &str) {
         match key {
             "shellProgram" if !value.is_empty() => {
                 self.shell_program = value.to_owned();
-            }
-            "initialPath" if !value.is_empty() => {
-                self.cwd = Some(expand_home(value));
             }
             "scrollbackSize" => {
                 if let Ok(n) = value.parse::<usize>() {
@@ -682,12 +1004,23 @@ impl Provider for TerminalProvider {
 ///   for input). Drop the final element of `split('\n')` to remove it; if the
 ///   output ends with `\n` instead, that final element is `""` and dropping
 ///   it is also correct.
+/// * Whatever blank lines the shell puts between the output and that prompt.
+///   They are spacing around a prompt we never render, so without this every
+///   command would leave a stray empty row in the scrollback.
+///
+/// The last point costs a command's own trailing blank lines (`printf 'a\n\n'`
+/// renders as one line, not three). That is the right trade: an empty row after
+/// *every* command is noise a screen reader has to step through, while output
+/// that deliberately ends in blanks is rare and loses nothing but spacing.
 fn entry_lines<'a>(input: &str, output: &'a str) -> Vec<&'a str> {
     let mut lines: Vec<&str> = output.split('\n').collect();
     // Drop the trailing prompt (or trailing empty string from the final \n).
     lines.pop();
     if lines.first() == Some(&input) {
         lines.remove(0);
+    }
+    while lines.last().is_some_and(|l| l.trim().is_empty()) {
+        lines.pop();
     }
     lines
 }
@@ -788,6 +1121,23 @@ fn parse_cd(line: &str, base: &Path) -> Option<PathBuf> {
         base.join(expanded)
     };
     Some(logical_normalize(&candidate))
+}
+
+/// Quote a path so a shell receives it as one word.
+///
+/// POSIX shells: single quotes, with any embedded `'` closed, escaped, and
+/// reopened (`'\''`) — the only form that needs no other escaping. `cmd.exe`
+/// and PowerShell have no single-quote-literal convention, so Windows gets
+/// double quotes; embedded `"` is dropped rather than escaped, since the two
+/// Windows shells disagree on how to escape it and a directory name containing
+/// a quote is not creatable through Explorer anyway.
+fn quote_for_shell(p: &Path) -> String {
+    let s = p.to_string_lossy();
+    if platform::is_windows() {
+        format!("\"{}\"", s.replace('"', ""))
+    } else {
+        format!("'{}'", s.replace('\'', r"'\''"))
+    }
 }
 
 /// Strip a single pair of matching surrounding quotes (single or double).
@@ -902,8 +1252,9 @@ fn decode_terminal_output(bytes: &[u8]) -> String {
 /// Register the terminal with the SDK factory and manifest registries.
 pub fn register() {
     register_provider_factory("terminal", || Box::new(TerminalProvider::new()));
-    let initial_path_default =
-        std::env::var("HOME").unwrap_or_else(|_| "~".to_owned());
+    // No "initial path" setting: the folder the user browses to before pressing
+    // `:` is what the shell is spawned into, so a configured start directory
+    // would only contradict it.
     register_builtin_manifest(
         BuiltinManifest::new("terminal", "terminal").with_settings(vec![
             SettingDecl::text(
@@ -911,12 +1262,6 @@ pub fn register() {
                 "shell program",
                 "shellProgram",
                 &default_program(),
-            ),
-            SettingDecl::text(
-                "terminal",
-                "initial path",
-                "initialPath",
-                &initial_path_default,
             ),
             SettingDecl::text(
                 "terminal",
@@ -947,6 +1292,17 @@ pub fn register() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A provider already switched to the shell view, without spawning a PTY.
+    ///
+    /// The real path there is `handle_command("shell")`, which spawns a shell;
+    /// tests that only care about how the scrollback renders set the view
+    /// directly so they stay process-free and fast.
+    fn shell_view() -> TerminalProvider {
+        let mut p = TerminalProvider::new();
+        p.view = View::Shell;
+        p
+    }
 
     #[test]
     fn build_paste_bytes_sends_raw_when_not_bracketed() {
@@ -1041,7 +1397,7 @@ mod tests {
     #[test]
     fn fetch_empty_returns_input_placeholder() {
         let dir = tempfile::tempdir().unwrap();
-        let mut p = TerminalProvider::new();
+        let mut p = shell_view();
         p.command_history_path = Some(dir.path().join("absent"));
         let elems = p.fetch();
         assert_eq!(elems.len(), 1);
@@ -1057,7 +1413,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("history");
         std::fs::write(&path, "a\nb\nc\n").unwrap();
-        let mut p = TerminalProvider::new();
+        let mut p = shell_view();
         p.command_history_path = Some(path);
         let elems = p.fetch();
         let slot = elems.last().unwrap().as_obj().unwrap();
@@ -1079,7 +1435,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("history");
         std::fs::write(&path, "ls\nls\ncd\n").unwrap();
-        let mut p = TerminalProvider::new();
+        let mut p = shell_view();
         p.command_history_path = Some(path);
         let elems = p.fetch();
         let slot = elems.last().unwrap().as_obj().unwrap();
@@ -1099,12 +1455,334 @@ mod tests {
     #[test]
     fn set_input_value_prefills_fetch_slot() {
         let dir = tempfile::tempdir().unwrap();
-        let mut p = TerminalProvider::new();
+        let mut p = shell_view();
         p.command_history_path = Some(dir.path().join("absent"));
         p.set_input_value("git status");
         let elems = p.fetch();
         let key = &elems.last().unwrap().as_obj().unwrap().key;
         assert!(key.contains("<input>git status</input>"), "got {key:?}");
+    }
+
+    // ---- Directory browsing ---------------------------------------------
+
+    #[test]
+    fn browse_is_the_default_view_and_spawns_no_shell() {
+        let mut p = TerminalProvider::new();
+        p.init();
+        assert_eq!(p.view, View::Browse);
+        assert_eq!(p.current_path(), "/");
+        assert!(p.at_root());
+        assert!(p.path_is_filesystem());
+        // The whole point of lazy spawning: browsing costs no PTY.
+        assert_eq!(p.process_id(), None);
+        assert!(p.shell.is_none());
+    }
+
+    #[test]
+    fn browse_fetch_lists_only_subdirectories_natural_sorted() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["item10", "item9", "Alpha"] {
+            std::fs::create_dir(dir.path().join(name)).unwrap();
+        }
+        for name in ["notes.txt", "zzz.md"] {
+            std::fs::write(dir.path().join(name), "x").unwrap();
+        }
+        let mut p = TerminalProvider::new();
+        p.browse_path = dir.path().to_path_buf();
+
+        let elems = p.fetch();
+        let keys: Vec<&str> = elems
+            .iter()
+            .map(|e| e.as_obj().expect("directories are Objs").key.as_str())
+            .collect();
+        // Files are omitted; `item9` sorts before `item10` (natural, not lexical).
+        assert_eq!(keys, vec!["Alpha", "item9", "item10"]);
+    }
+
+    #[test]
+    fn browse_entries_carry_no_input_tag() {
+        // A `<input>` wrapper would render `+i` and, worse, make the app's
+        // live-input-slot check mistake a directory for the shell's input line.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        let mut p = TerminalProvider::new();
+        p.browse_path = dir.path().to_path_buf();
+
+        let elems = p.fetch();
+        assert_eq!(elems.len(), 1);
+        assert_eq!(elems[0].as_obj().unwrap().key, "sub");
+    }
+
+    #[test]
+    fn browse_fetch_is_empty_for_an_unreadable_path() {
+        let mut p = TerminalProvider::new();
+        p.browse_path = PathBuf::from("/definitely/not/a/real/path");
+        assert!(p.fetch().is_empty());
+    }
+
+    #[test]
+    fn push_and_pop_path_walk_the_browse_tree() {
+        let mut p = TerminalProvider::new();
+        p.push_path("home");
+        p.push_path("nico");
+        assert_eq!(p.current_path(), "/home/nico");
+        assert!(!p.at_root());
+        p.pop_path();
+        assert_eq!(p.current_path(), "/home");
+        p.pop_path();
+        assert_eq!(p.current_path(), "/");
+        // Clamped at the root: Left out of the provider must not walk past `/`.
+        p.pop_path();
+        assert_eq!(p.current_path(), "/");
+        assert!(p.at_root());
+    }
+
+    #[test]
+    fn push_path_trims_trailing_separators() {
+        let mut p = TerminalProvider::new();
+        p.push_path("home/");
+        assert_eq!(p.current_path(), "/home");
+    }
+
+    #[test]
+    fn path_methods_are_inert_in_the_shell_view() {
+        // The cursor is inside the scrollback there, so moving `browse_path`
+        // would send the next `:` somewhere the user never navigated to.
+        // Asserted on `browse_path` directly, not through `current_path()`:
+        // in the shell view that reports where the *shell* is, which is a
+        // different question (see `current_path`).
+        let mut p = shell_view();
+        p.browse_path = PathBuf::from("/home/nico");
+        p.push_path("projects");
+        assert_eq!(p.browse_path, PathBuf::from("/home/nico"));
+        p.pop_path();
+        assert_eq!(p.browse_path, PathBuf::from("/home/nico"));
+    }
+
+    #[test]
+    fn current_path_reports_the_shell_location_while_the_shell_is_up() {
+        // This is what the app persists on close, so it has to be where the
+        // shell actually is, not where `:` was pressed.
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().canonicalize().unwrap();
+        let mut p = shell_view();
+        p.browse_path = PathBuf::from("/home/nico");
+        p.cwd = Some(target.clone());
+        p.sync_shell_path(true);
+        assert_eq!(p.current_path(), target.to_str().unwrap());
+
+        // Back in the browse view it answers about the listing again.
+        p.leave_shell();
+        assert_eq!(p.current_path(), target.to_str().unwrap());
+        p.browse_path = PathBuf::from("/etc");
+        assert_eq!(p.current_path(), "/etc");
+    }
+
+    #[test]
+    fn commit_edit_follows_a_cd_into_the_shell_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let start = dir.path().join("start");
+        let moved = dir.path().join("moved");
+        std::fs::create_dir(&start).unwrap();
+        std::fs::create_dir(&moved).unwrap();
+        let start = start.canonicalize().unwrap();
+        let moved = moved.canonicalize().unwrap();
+
+        let mut p = TerminalProvider::new();
+        p.command_history_path = Some(dir.path().join("history"));
+        p.browse_path = start.clone();
+        let mut err = String::new();
+        p.handle_command(CMD_SHELL, "", 0, &mut err);
+        assert_eq!(p.current_path(), start.to_str().unwrap());
+
+        // A typed `cd` moves it immediately — the child cannot have run the
+        // line yet, so this must not wait on the live cwd.
+        p.commit_edit("", &format!("cd {}", moved.display()));
+        assert_eq!(p.current_path(), moved.to_str().unwrap());
+    }
+
+    #[test]
+    fn commit_edit_is_rejected_while_browsing() {
+        // The app seeds an `i` placeholder into an empty directory; browsing is
+        // read-only, so committing it must not create anything.
+        let mut p = TerminalProvider::new();
+        assert!(!p.commit_edit("", "ls"));
+        assert!(p.entries.is_empty());
+        assert!(p.shell.is_none());
+    }
+
+    // ---- Entering / leaving the shell ------------------------------------
+
+    #[test]
+    fn commands_offer_the_transition_that_is_available() {
+        let mut p = TerminalProvider::new();
+        assert_eq!(p.commands(), vec![CMD_SHELL.to_owned()]);
+        p.view = View::Shell;
+        assert_eq!(p.commands(), vec![CMD_BROWSE.to_owned()]);
+    }
+
+    #[test]
+    fn shell_command_spawns_in_the_browsed_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        // `tempdir` under /tmp can sit behind a symlink (/tmp -> /private/tmp on
+        // macOS), and the shell reports the resolved path. Compare canonicalized.
+        let target = dir.path().canonicalize().unwrap();
+        let mut p = TerminalProvider::new();
+        p.command_history_path = Some(dir.path().join("history"));
+        p.browse_path = target.clone();
+
+        let mut err = String::new();
+        assert!(p.handle_command(CMD_SHELL, "", 0, &mut err).is_none());
+        assert!(err.is_empty());
+        assert_eq!(p.view, View::Shell);
+        assert!(p.shell.is_some(), "`:` is what spawns the PTY");
+        assert_eq!(p.cwd, Some(target));
+        // Nothing was typed, so the scrollback starts clean.
+        assert!(p.entries.is_empty());
+    }
+
+    #[test]
+    fn re_entering_from_another_directory_reuses_the_shell_and_cds() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join("first");
+        let second = dir.path().join("second");
+        std::fs::create_dir(&first).unwrap();
+        std::fs::create_dir(&second).unwrap();
+        let first = first.canonicalize().unwrap();
+        let second = second.canonicalize().unwrap();
+
+        let mut p = TerminalProvider::new();
+        p.command_history_path = Some(dir.path().join("history"));
+        p.browse_path = first;
+        let mut err = String::new();
+        p.handle_command(CMD_SHELL, "", 0, &mut err);
+        let pid = p.process_id();
+        assert!(pid.is_some());
+
+        // Back out to the listing, walk elsewhere, and re-enter.
+        p.handle_command(CMD_BROWSE, "", 0, &mut err);
+        assert_eq!(p.view, View::Browse);
+        p.browse_path = second.clone();
+        p.handle_command(CMD_SHELL, "", 0, &mut err);
+
+        assert_eq!(p.process_id(), pid, "same PTY, not a respawn");
+        assert_eq!(p.cwd, Some(second.clone()));
+        assert_eq!(p.entries.len(), 1, "the cd is visible in the scrollback");
+        assert!(
+            p.entries[0].input.starts_with("cd "),
+            "got {:?}",
+            p.entries[0].input
+        );
+        assert!(p.entries[0].input.contains(second.to_str().unwrap()));
+        // The user never typed it, so it must not pollute ↑-recall.
+        assert!(p.command_history.is_empty());
+    }
+
+    #[test]
+    fn re_entering_from_the_same_directory_emits_no_cd() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().canonicalize().unwrap();
+        let mut p = TerminalProvider::new();
+        p.command_history_path = Some(dir.path().join("history"));
+        p.browse_path = target;
+
+        let mut err = String::new();
+        p.handle_command(CMD_SHELL, "", 0, &mut err);
+        p.handle_command(CMD_BROWSE, "", 0, &mut err);
+        p.handle_command(CMD_SHELL, "", 0, &mut err);
+        assert!(p.entries.is_empty(), "got {:?}", p.entries);
+    }
+
+    #[test]
+    fn browse_command_keeps_the_shell_and_scrollback_alive() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = shell_view();
+        p.command_history_path = Some(dir.path().join("absent"));
+        p.entries.push(Entry {
+            prompt: "user@host:/tmp$ ".to_owned(),
+            input: "ls".to_owned(),
+            output: "ls\nfile1\n".to_owned(),
+        });
+
+        let mut err = String::new();
+        p.handle_command(CMD_BROWSE, "", 0, &mut err);
+        assert_eq!(p.view, View::Browse);
+        assert_eq!(p.entries.len(), 1, "leaving the view is not a teardown");
+
+        p.handle_command(CMD_SHELL, "", 0, &mut err);
+        assert_eq!(p.fetch().len(), 3, "scrollback resumes: cmd + output + slot");
+    }
+
+    #[test]
+    fn unknown_command_is_ignored() {
+        let mut p = TerminalProvider::new();
+        let mut err = String::new();
+        assert!(p.handle_command("nonsense", "", 0, &mut err).is_none());
+        assert_eq!(p.view, View::Browse);
+        assert!(err.is_empty());
+    }
+
+    #[test]
+    fn command_labels_are_localized() {
+        let p = TerminalProvider::new();
+        // `t()` echoes the key back when unresolved, so a resolved label proves
+        // the bundle is registered.
+        assert_eq!(p.command_label(CMD_SHELL), "shell");
+        assert_eq!(p.command_label(CMD_BROWSE), "folders");
+        assert_eq!(p.command_label("nonsense"), "nonsense");
+    }
+
+    // ---- View guards ------------------------------------------------------
+
+    #[test]
+    fn tick_requests_no_redraw_while_browsing() {
+        // Returning `true` here would make the app re-read the *directory* from
+        // disk on every byte the shell produces.
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = TerminalProvider::new();
+        p.command_history_path = Some(dir.path().join("history"));
+        p.browse_path = dir.path().canonicalize().unwrap();
+        let mut err = String::new();
+        p.handle_command(CMD_SHELL, "", 0, &mut err);
+        p.entries.push(Entry {
+            prompt: String::new(),
+            input: "echo hi".to_owned(),
+            output: String::new(),
+        });
+        p.leave_shell();
+
+        // Wait for the shell's startup banner so there is real output to drain.
+        let mut redrew = None;
+        for _ in 0..200 {
+            let r = p.tick();
+            if !p.entries[0].output.is_empty() {
+                redrew = Some(r);
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(redrew, Some(false), "output captured, but no redraw asked for");
+        assert!(!p.entries[0].output.is_empty(), "output is still captured");
+    }
+
+    #[test]
+    fn detector_does_not_auto_enter_the_dashboard_while_browsing() {
+        // A background program flipping to the alt screen must not yank a
+        // browsing user into the interactive dashboard.
+        let mut p = TerminalProvider::new();
+        p.drive_interactive_detector(b"\x1b[?1049h");
+        assert_eq!(p.take_dashboard_request(), None);
+        assert!(!p.auto_entered_dashboard);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn quote_for_shell_wraps_and_escapes() {
+        assert_eq!(quote_for_shell(Path::new("/tmp/a b")), "'/tmp/a b'");
+        assert_eq!(
+            quote_for_shell(Path::new("/tmp/it's")),
+            r"'/tmp/it'\''s'",
+        );
     }
 
     #[test]
@@ -1121,25 +1799,7 @@ mod tests {
         assert_eq!(p.shell_program, "/bin/dash");
     }
 
-    #[test]
-    fn on_setting_change_updates_initial_path() {
-        let mut p = TerminalProvider::new();
-        p.on_setting_change("initialPath", "/tmp");
-        assert_eq!(p.cwd, Some(PathBuf::from("/tmp")));
-    }
 
-    #[test]
-    fn on_setting_change_initial_path_expands_tilde() {
-        let mut p = TerminalProvider::new();
-        let home = std::env::var("HOME").unwrap_or_default();
-        if home.is_empty() {
-            return;
-        }
-        p.on_setting_change("initialPath", "~");
-        assert_eq!(p.cwd, Some(PathBuf::from(&home)));
-        p.on_setting_change("initialPath", "~/sub");
-        assert_eq!(p.cwd, Some(PathBuf::from(format!("{}/sub", home))));
-    }
 
     #[test]
     fn on_setting_change_updates_command_history_size() {
@@ -1341,6 +2001,30 @@ mod tests {
     }
 
     #[test]
+    fn entry_lines_strips_the_blank_line_shells_put_before_the_prompt() {
+        // What bash actually emits for `echo hi`: echo, output, a blank line,
+        // then the next prompt. Without the trailing-blank trim every command
+        // leaves an empty row in the scrollback for the user to step through.
+        let lines = entry_lines("echo hi", "echo hi\nhi\n\nuser@host ~ $ ");
+        assert_eq!(lines, vec!["hi"]);
+    }
+
+    #[test]
+    fn entry_lines_strips_several_trailing_blanks() {
+        // A multi-chunk read can leave more than one.
+        let lines = entry_lines("ls", "ls\nfile1\n\n \n\nuser@host ~ $ ");
+        assert_eq!(lines, vec!["file1"]);
+    }
+
+    #[test]
+    fn entry_lines_keeps_blank_lines_inside_the_output() {
+        // Only *trailing* blanks are spacing around the prompt — a blank line
+        // between two real output lines is content.
+        let lines = entry_lines("cat f", "cat f\na\n\nb\nuser@host ~ $ ");
+        assert_eq!(lines, vec!["a", "", "b"]);
+    }
+
+    #[test]
     fn entry_lines_strips_trailing_empty_string_when_output_ends_with_newline() {
         // No prompt yet (still streaming), but output ends with \n.
         let lines = entry_lines("ls", "ls\nfile1\n");
@@ -1365,7 +2049,7 @@ mod tests {
         // No shell spawned, no entries — the trailing element is the `+i`
         // live input slot, an Obj whose key embeds the synthesized prompt.
         let dir = tempfile::tempdir().unwrap();
-        let mut p = TerminalProvider::new();
+        let mut p = shell_view();
         p.command_history_path = Some(dir.path().join("absent"));
         let elems = p.fetch();
         assert_eq!(elems.len(), 1);
@@ -1379,7 +2063,7 @@ mod tests {
     fn fetch_uses_synthesized_prompt_for_input_slot_windows() {
         // Windows convention: `cwd> <input></input>` with no user@host.
         let dir = tempfile::tempdir().unwrap();
-        let mut p = TerminalProvider::new();
+        let mut p = shell_view();
         p.command_history_path = Some(dir.path().join("absent"));
         let elems = p.fetch();
         assert_eq!(elems.len(), 1);
@@ -1392,7 +2076,7 @@ mod tests {
     #[test]
     fn fetch_uses_entry_prompt_for_past_commands() {
         let dir = tempfile::tempdir().unwrap();
-        let mut p = TerminalProvider::new();
+        let mut p = shell_view();
         p.command_history_path = Some(dir.path().join("absent"));
         p.entries.push(Entry {
             prompt: "user@host:/tmp$ ".to_owned(),
@@ -1577,7 +2261,7 @@ mod tests {
 
     #[test]
     fn detector_emits_enter_request_from_scrollback() {
-        let mut p = TerminalProvider::new();
+        let mut p = shell_view();
         // Not in dashboard, default-on: feeding alt-screen-enter bytes
         // should produce an Enter request.
         p.drive_interactive_detector(b"\x1b[?1049h");
@@ -1595,7 +2279,7 @@ mod tests {
     fn detector_emits_enter_for_main_screen_tui() {
         // `claude` and other main-screen TUIs never touch the alternate
         // screen; they announce themselves via focus tracking (`?1004h`).
-        let mut p = TerminalProvider::new();
+        let mut p = shell_view();
         p.drive_interactive_detector(b"\x1b[?2026h\x1b[?25l\x1b[?2004h\x1b[?1004h");
         assert_eq!(p.take_dashboard_request(), Some(DashboardRequest::Enter));
         assert!(p.auto_entered_dashboard);
@@ -1605,7 +2289,7 @@ mod tests {
     fn detector_emits_leave_request_only_when_auto_entered() {
         // Auto-entered: the detector observes the enter (so its mode set is
         // non-empty and `auto_entered_dashboard` is set), then the leave.
-        let mut p = TerminalProvider::new();
+        let mut p = shell_view();
         p.drive_interactive_detector(b"\x1b[?1049h");
         assert_eq!(p.take_dashboard_request(), Some(DashboardRequest::Enter));
         p.in_dashboard = true;
@@ -1614,7 +2298,7 @@ mod tests {
 
         // Not auto-entered: even when the detector sees the same leave, the
         // request is suppressed (manual entries exit only on Esc).
-        let mut q = TerminalProvider::new();
+        let mut q = shell_view();
         q.drive_interactive_detector(b"\x1b[?1049h");
         let _ = q.take_dashboard_request();
         q.in_dashboard = true;
@@ -1652,7 +2336,7 @@ mod tests {
 
     #[test]
     fn detector_resumes_across_chunk_boundaries_in_provider() {
-        let mut p = TerminalProvider::new();
+        let mut p = shell_view();
         p.drive_interactive_detector(b"\x1b[");
         p.drive_interactive_detector(b"?10");
         p.drive_interactive_detector(b"49h");

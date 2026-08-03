@@ -165,7 +165,9 @@ pub fn refresh_current_directory(renderer: &mut AppRenderer) {
         renderer.error_message = err;
     }
     // Empty container → seed the `i` insert placeholder, matching navigate-right.
-    if children.is_empty() {
+    // The terminal is exempt: its folder tree is read-only, so the placeholder
+    // would offer a create the provider always refuses (see `navigate_right_raw`).
+    if children.is_empty() && renderer.providers[idx].name() != "terminal" {
         children.push(FfonElement::Str(
             sicompass_sdk::placeholders::I_PLACEHOLDER.to_owned(),
         ));
@@ -267,6 +269,97 @@ fn locate_child_by_name(
 ) -> Option<usize> {
     sicompass_sdk::ffon::get_ffon_at_id(ffon, id)
         .and_then(|slice| slice.iter().position(|e| element_nav_name(elem_raw(e)) == name))
+}
+
+/// Rebuild a filesystem provider's tree from the filesystem root down to its
+/// `current_path()`, leaving the cursor on that directory inside its parent's
+/// listing.
+///
+/// Where [`refresh_visible_path`] re-walks the path the cursor already took,
+/// this walks to a path the user never browsed. The terminal needs it when the
+/// shell closes: a `cd` typed at the prompt moves the working directory
+/// somewhere else entirely, so every level has to be re-read for the breadcrumb
+/// above the cursor to describe where the user now is.
+///
+/// A path with no components (the filesystem root itself) leaves the cursor at
+/// the top of the provider's own listing — there is no parent to show it in.
+///
+/// Returns `false` when a level cannot be walked, e.g. a directory removed while
+/// the shell was open. The tree is not rolled back: every level rebuilt so far
+/// is a real listing of a real directory, and the cursor is left at the deepest
+/// one reached, which is a better place to land than an unrelated stale tree.
+pub(crate) fn rebuild_path_from_root(renderer: &mut AppRenderer) -> bool {
+    use sicompass_sdk::ffon::{FfonElement, IdArray};
+    use std::path::Component;
+
+    let Some(idx) = renderer.current_id.get(0) else { return false };
+    if idx >= renderer.providers.len() || idx >= renderer.ffon.len() {
+        return false;
+    }
+
+    let target = std::path::PathBuf::from(renderer.providers[idx].current_path());
+    // Components below the filesystem root. The last is where the cursor lands;
+    // the ones before it are levels to descend through.
+    let mut names: Vec<String> = target
+        .components()
+        .filter_map(|c| match c {
+            Component::Normal(s) => Some(s.to_string_lossy().into_owned()),
+            _ => None,
+        })
+        .collect();
+    let leaf = names.pop();
+
+    // Level 2: the provider root's children are the filesystem root's folders.
+    // Walk from the *target's own* root so a Windows path keeps its drive
+    // (`C:\`) rather than being rebuilt against whatever `/` currently means.
+    let root: std::path::PathBuf = target
+        .components()
+        .take_while(|c| matches!(c, Component::Prefix(_) | Component::RootDir))
+        .collect();
+    let root = if root.as_os_str().is_empty() {
+        "/".to_owned()
+    } else {
+        root.to_string_lossy().into_owned()
+    };
+    renderer.providers[idx].set_current_path(&root);
+    let children = renderer.providers[idx].fetch();
+    let key = renderer.providers[idx].display_name();
+    let mut root = FfonElement::new_obj(&key);
+    root.as_obj_mut().unwrap().children = children;
+    renderer.ffon[idx] = root;
+
+    let mut id = IdArray::new();
+    id.push(idx);
+    id.push(0);
+
+    for name in &names {
+        let Some(pos) = locate_child_by_name(&renderer.ffon, &id, name) else {
+            renderer.current_id = id;
+            return false;
+        };
+        id.set_last(pos);
+        renderer.providers[idx].push_path(name);
+        let kids = renderer.providers[idx].fetch();
+        let last = id.last().unwrap_or(0);
+        if let Some(slice) = get_ffon_at_id_mut(&mut renderer.ffon, &id) {
+            if let Some(obj) = slice.get_mut(last).and_then(|e| e.as_obj_mut()) {
+                obj.children = kids;
+            }
+        }
+        id.push(0);
+    }
+
+    if let Some(leaf) = leaf {
+        match locate_child_by_name(&renderer.ffon, &id, &leaf) {
+            Some(pos) => id.set_last(pos),
+            None => {
+                renderer.current_id = id;
+                return false;
+            }
+        }
+    }
+    renderer.current_id = id;
+    true
 }
 
 /// Re-fetch every materialized directory level along the current navigation

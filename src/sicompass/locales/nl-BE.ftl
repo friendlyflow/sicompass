@@ -1,6 +1,7 @@
 # Keyboard-hint labels — Belgian Dutch (Flemish).
 
 hint-esc-back = Esc    Terug
+hint-esc-folders = Esc    Mappen
 
 hint-up-previous = Up     Vorige
 hint-up-prev-match = Up     Vorige match
@@ -59,6 +60,7 @@ hint-a-append = A      Voeg toe
 hint-d-dashboard = D      Dashboard
 hint-s-scroll = S      Scrollen
 hint-command = :      Commando
+hint-shell = :      Shell
 
 hint-ctrl-a-insert-after = Ctrl+A Voeg na in
 hint-ctrl-a-select-all = Ctrl+A Sel. alles

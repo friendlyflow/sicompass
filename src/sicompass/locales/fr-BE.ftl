@@ -1,6 +1,7 @@
 # Keyboard-hint labels — Belgian French.
 
 hint-esc-back = Esc    Retour
+hint-esc-folders = Esc    Dossiers
 
 hint-up-previous = Up     Précédent
 hint-up-prev-match = Up     Corresp. préc.
@@ -59,6 +60,7 @@ hint-a-append = A      Ajouter
 hint-d-dashboard = D      Tableau de bord
 hint-s-scroll = S      Défiler
 hint-command = :      Commande
+hint-shell = :      Shell
 
 hint-ctrl-a-insert-after = Ctrl+A Insérer après
 hint-ctrl-a-select-all = Ctrl+A Tout sél.
