@@ -7922,6 +7922,14 @@ fn terminal_restart_follows_a_cd_typed_before_closing() {
 fn terminal_escape_follows_a_cd_typed_in_the_shell() {
     // `cd` moves the working directory out from under the folder `:` was
     // pressed on, so the listing Escape returns to has to follow it.
+    //
+    // Escape comes immediately after Enter here, before the shell has produced
+    // any output, which is the case `leave_shell` gets wrong if it trusts
+    // `/proc/<pid>/cwd`: the child has not run the `cd` yet, so the live value
+    // still reads the directory being left. Do not add a sleep to "stabilise"
+    // this test. The absence of a wait is the point, and a real PTY is needed
+    // because without a spawned shell `shell_cwd()` falls back to the parsed
+    // value and the two sources cannot disagree.
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().canonicalize().unwrap();
     let ws = root.join("workspace");
