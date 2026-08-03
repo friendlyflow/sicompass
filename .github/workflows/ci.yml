@@ -39,22 +39,33 @@ jobs:
             os: ubuntu-22.04
             flags: "--no-default-features --features no-jit-wasm"
             full: true
-          # macOS and Windows compile and lint only. The full suite reaches
-          # the network and wants a display, which is flaky on those runners,
-          # but a compile-and-link check is what actually catches the porting
-          # breakage that used to only surface during a release.
+          # macOS and Windows compile and lint rather than running the full
+          # suite, which reaches the network and wants a display. The
+          # compile-and-link check is what catches the porting breakage that
+          # used to only surface during a release.
+          #
+          # `subset` additionally runs the deterministic, offline tests. It is
+          # off on Windows because `.cargo/config.toml` sets a `runner` for
+          # x86_64-pc-windows-msvc pointing at C:\sicompass\.cargo\run.bat,
+          # which exists on one developer machine and not on a runner, so
+          # `cargo test` fails with "The system cannot find the path
+          # specified" before any test executes. Removing or scoping that
+          # runner would let Windows run these too.
           - name: macos aarch64
             os: macos-14
             flags: ""
             full: false
+            subset: true
           - name: macos x86_64
             os: macos-15-intel
             flags: ""
             full: false
+            subset: true
           - name: windows x86_64
             os: windows-2022
             flags: ""
             full: false
+            subset: false
     steps:
       - uses: actions/checkout@v4
 
@@ -65,6 +76,14 @@ jobs:
       # SDL3 is compiled from its vendored source by the `bundled-sdl3`
       # feature, which is what the release builds use. These are the headers
       # it probes for at configure time.
+      #
+      # libfreetype-dev is load-bearing and not, as it looks, left over from
+      # the C codebase. freetype-sys 0.20.1 uses the system FreeType when
+      # pkg-config finds `freetype2 >= 24.3.18`, and only otherwise falls back
+      # to its vendored `cc` build. That fallback compiles without
+      # FT_CONFIG_OPTION_USE_PNG, so it cannot decode the PNG bitmap strikes
+      # in NotoColorEmoji, and every colour emoji silently disappears.
+      # `color_atlas_rasterizes_emoji_to_rgba` is what catches it.
       #
       # It used to build SDL 3.2.28 from source here instead, because
       # `bundled-sdl3` failed under GCC. The cause was ours: the feature also
@@ -81,6 +100,7 @@ jobs:
           sudo apt-get install -y \
             build-essential pkg-config cmake \
             libvulkan-dev \
+            libfreetype-dev libpng-dev \
             libwayland-dev libxkbcommon-dev libdecor-0-dev \
             libx11-dev libxext-dev libxcursor-dev libxi-dev \
             libxrandr-dev libxss-dev libxfixes-dev libxrender-dev \
@@ -101,14 +121,14 @@ jobs:
         run: cargo test --workspace --features bundled-sdl3 ${{ matrix.flags }}
 
       # The deterministic, offline part of the suite: the embedded shader and
-      # font checks, and the resource-root probe. Cheap, and the one thing
-      # worth running cross-platform since `resources.rs` is all about path
-      # layout differences.
+      # font checks, and the resource-root probe. Cheap, and worth running
+      # cross-platform since `resources.rs` is entirely about path layout.
+      #
       # Quoted, and the filters go after `--`: cargo takes at most one
       # positional TESTNAME itself, and an unquoted `::` reads as a YAML
       # mapping.
       - name: Test (portable subset)
-        if: ${{ !matrix.full }}
+        if: matrix.subset
         run: "cargo test -p sicompass --lib --features bundled-sdl3 -- shaders:: fonts:: resources::"
 
       - name: Build

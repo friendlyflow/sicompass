@@ -111,7 +111,11 @@ target = "licenses/THIRD-PARTY-LICENSES.html"
 # dependency and has to be declared. at-spi2-core is what accesskit_unix talks
 # to over D-Bus: without it the app runs but is silent to screen readers,
 # which for this application is a complete failure.
-depends = ["libvulkan1", "at-spi2-core", "libssl3"]
+#
+# libfreetype6 is a real link dependency on Linux: freetype-sys uses the system
+# FreeType when pkg-config finds it, and the release build makes sure it does,
+# because its vendored fallback cannot decode NotoColorEmoji's PNG strikes.
+depends = ["libvulkan1", "at-spi2-core", "libssl3", "libfreetype6"]
 
 # Key is the SOURCE, value is the path inside the package. That is the
 # opposite of what cargo-packager's own documentation says, but it is what
@@ -165,7 +169,7 @@ summary = "Use your whole computer from the keyboard, with no mouse needed"
 license = "GPL-3.0-only"
 url = "https://github.com/friendlyflow/sicompass"
 # Same reasoning as the .deb `depends` above.
-requires = { vulkan-loader = "*", at-spi2-core = "*", openssl-libs = "*" }
+requires = { vulkan-loader = "*", at-spi2-core = "*", openssl-libs = "*", freetype = "*" }
 
 assets = [
     { source = "target/release/sicompass", dest = "/usr/bin/sicompass", mode = "755" },

@@ -81,6 +81,13 @@ local-artifacts-jobs = ["./native-packages"]
 # cmake and a C toolchain: `bundled-sdl3` compiles SDL from source.
 cmake = '*'
 pkg-config = '*'
+# FreeType is deliberately taken from the system on Linux, not vendored.
+# freetype-sys 0.20.1 uses pkg-config when it finds `freetype2 >= 24.3.18` and
+# otherwise builds its own copy without FT_CONFIG_OPTION_USE_PNG, which cannot
+# decode NotoColorEmoji's PNG bitmap strikes, so every colour emoji vanishes.
+# The .deb and .rpm declare the matching runtime dependency.
+libfreetype-dev = '*'
+libpng-dev = '*'
 # SDL probes for each of these at configure time and refuses to build without
 # at least one windowing backend.
 libx11-dev = '*'
