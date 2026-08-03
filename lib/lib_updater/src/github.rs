@@ -37,6 +37,36 @@ struct AssetJson {
     browser_download_url: String,
 }
 
+/// Choose the release asset to download for this platform, or `None` if there
+/// is nothing to download.
+///
+/// On Windows that is the `.msi`, preferring one whose name carries `arch`. A
+/// release carries a dozen assets, so matching on extension alone would hand
+/// an aarch64 user an x86_64 installer the moment a second MSI appears, on the
+/// strength of nothing but GitHub's asset ordering. The plain extension match
+/// stays as a fallback so a release with one differently-named MSI still
+/// updates.
+///
+/// Everywhere else this is always `None`, because there is no apply path and
+/// deliberately should not be. See [`crate::UpdateChecker::apply_app_update`].
+///
+/// `arch` is a parameter rather than read from [`std::env::consts::ARCH`] so
+/// the selection can be tested for architectures other than the test runner's.
+fn select_asset<'a>(assets: &'a [AssetJson], arch: &str) -> Option<&'a AssetJson> {
+    #[cfg(target_os = "windows")]
+    let is_installer = |n: &str| n.to_ascii_lowercase().ends_with(".msi");
+    #[cfg(not(target_os = "windows"))]
+    let is_installer = |_: &str| false;
+
+    // `arch` is unused off Windows, where nothing is ever selected.
+    let _ = arch;
+
+    assets
+        .iter()
+        .find(|a| is_installer(&a.name) && a.name.contains(arch))
+        .or_else(|| assets.iter().find(|a| is_installer(&a.name)))
+}
+
 /// Query GitHub for the latest release and decide whether it's newer than
 /// `current`. Returns `Ok(None)` when up-to-date, `Ok(Some(_))` with the
 /// MSI staged in `%TEMP%` (or system tmp) when newer, `Err` on any
@@ -81,15 +111,7 @@ pub fn check_app_update(
         return Ok(None);
     }
 
-    // Pick the platform-appropriate asset. On Windows we want `*.msi`; on
-    // other platforms we currently have no apply path, so we return the
-    // release URL and skip the download.
-    #[cfg(target_os = "windows")]
-    let asset_name_filter: fn(&str) -> bool = |n| n.to_ascii_lowercase().ends_with(".msi");
-    #[cfg(not(target_os = "windows"))]
-    let asset_name_filter: fn(&str) -> bool = |_| false;
-
-    let asset = release.assets.iter().find(|a| asset_name_filter(&a.name));
+    let asset = select_asset(&release.assets, std::env::consts::ARCH);
 
     let staged = if let Some(asset) = asset {
         let dest = std::env::temp_dir().join(format!(
@@ -170,6 +192,69 @@ mod tests {
     use super::*;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn assets(names: &[&str]) -> Vec<AssetJson> {
+        names
+            .iter()
+            .map(|n| AssetJson {
+                name: (*n).to_string(),
+                browser_download_url: format!("https://example.com/{n}"),
+            })
+            .collect()
+    }
+
+    /// Non-Windows platforms have no apply path, so nothing is ever selected
+    /// and the caller falls back to opening the release page. This is
+    /// deliberate: see `UpdateChecker::apply_app_update`.
+    #[test]
+    #[cfg(not(target_os = "windows"))]
+    fn no_asset_is_selected_off_windows() {
+        let a = assets(&[
+            "sicompass_0.1.9_amd64.deb",
+            "sicompass-x86_64-apple-darwin.dmg",
+            "sicompass-x86_64-pc-windows-msvc.msi",
+        ]);
+        assert!(select_asset(&a, "x86_64").is_none());
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn the_msi_matching_this_arch_wins() {
+        // Deliberately listed with the wrong arch first: matching on
+        // extension alone would pick that one, and the user would install an
+        // installer for the other architecture.
+        let a = assets(&[
+            "sicompass-aarch64-pc-windows-msvc.msi",
+            "sicompass-x86_64-pc-windows-msvc.msi",
+        ]);
+        assert_eq!(
+            select_asset(&a, "x86_64").map(|a| a.name.as_str()),
+            Some("sicompass-x86_64-pc-windows-msvc.msi")
+        );
+    }
+
+    /// Today's releases carry one MSI whose name does contain the arch, but a
+    /// rename upstream must not silently stop updates working.
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn a_single_msi_is_used_even_without_an_arch_in_its_name() {
+        let a = assets(&["sicompass.msi", "sicompass.zip"]);
+        assert_eq!(
+            select_asset(&a, "x86_64").map(|a| a.name.as_str()),
+            Some("sicompass.msi")
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn non_installer_assets_are_never_selected() {
+        let a = assets(&[
+            "sicompass-x86_64-pc-windows-msvc.zip",
+            "source.tar.gz",
+            "sha256.sum",
+        ]);
+        assert!(select_asset(&a, "x86_64").is_none());
+    }
 
     fn release_json(tag: &str, draft: bool, prerelease: bool, assets: &[(&str, &str)]) -> String {
         let assets_json: Vec<_> = assets

@@ -19,7 +19,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.1.8"
+version = "0.1.9"
 edition = "2024"
 license = "GPL-3.0-only"
 
@@ -153,8 +153,11 @@ tracing-appender = "0.2"
 # System
 libc = "0.2"
 
-# Windows .exe icon embedding (build-time only)
-winres = "0.1"
+# Windows .exe icon and version-resource embedding (build-time only).
+# `winresource` is the maintained fork of the abandoned `winres`. It is a
+# build-dependency, which `about.toml` ignores, so it does not appear in
+# THIRD-PARTY-LICENSES.html.
+winresource = "0.1"
 
 # Test dependencies
 mockall = "0.15"

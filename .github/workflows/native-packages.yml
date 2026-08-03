@@ -1,0 +1,199 @@
+name: Native packages
+
+# Builds the package formats cargo-dist cannot: .deb, .rpm and AppImage on
+# Linux, .app and .dmg on macOS.
+#
+# ## Why this is a reusable workflow and not a top-level one
+#
+# `release-publish.yml` triggers on `workflow_run` of the workflow named
+# "Release" and downloads the `artifacts-*` from *that run*. A separate
+# top-level workflow would produce its artifacts in a different run, and there
+# would be no supported way to attach them to the same release.
+#
+# So cargo-dist calls this one from inside the Release run, via
+# `build-local-jobs = ["./native-packages"]` in dist-workspace.toml. Anything
+# uploaded here under a name starting with `artifacts-` is picked up by
+# release-publish.yml with no changes on its side.
+#
+# ## Constraints worth knowing before editing
+#
+#   - Every uploaded file must sit flat in `out/` with no spaces in its name.
+#     release-publish.yml globs with an unquoted `$(find ...)`, so a space
+#     breaks the upload and a stray file gets attached to the release.
+#   - Both macOS legs produce the same filename, so the .dmg is renamed to its
+#     target triple before upload or the two collide.
+#   - Nothing here runs on a commit or a pull request. It only ever runs as
+#     part of a Release, which is itself dispatch-triggered.
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        description: The dist plan for this release, passed by cargo-dist.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Pinned so a new upstream release cannot change what a rebuild of an old
+  # tag produces.
+  CARGO_PACKAGER_VERSION: "0.11.8"
+  CARGO_GENERATE_RPM_VERSION: "0.21.0"
+
+jobs:
+  linux:
+    name: .deb, .rpm and AppImage
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install build dependencies
+        # Mirrors [dist.dependencies.apt] in dist-workspace.toml. SDL3 is
+        # compiled from source by the `bundled-sdl3` feature and probes for
+        # each windowing, audio and DRM backend at configure time.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake pkg-config \
+            libx11-dev libxext-dev libxcursor-dev libxi-dev libxrandr-dev \
+            libxss-dev libxfixes-dev libxrender-dev libxtst-dev libxcb1-dev \
+            libwayland-dev libxkbcommon-dev libdecor-0-dev \
+            libegl-dev libgbm-dev libdrm-dev \
+            libpulse-dev libasound2-dev \
+            libdbus-1-dev libatspi2.0-dev libssl-dev \
+            desktop-file-utils file
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install packaging tools
+        run: |
+          cargo install cargo-packager --locked --version "$CARGO_PACKAGER_VERSION"
+          cargo install cargo-generate-rpm --locked --version "$CARGO_GENERATE_RPM_VERSION"
+
+      - name: Build
+        run: cargo build --release --features bundled-sdl3 -p sicompass
+
+      - name: Sanity check the binary before packaging it
+        # Catches a binary that cannot find its own resources before that
+        # becomes three broken packages. There is no GPU on the runner, so
+        # Vulkan is expected to fail; the resource lines are what matter.
+        run: ./target/release/sicompass --check || true
+
+      - name: Build .deb and AppImage
+        # GitHub runners have no FUSE, so appimagetool cannot mount its own
+        # AppImage. APPIMAGE_EXTRACT_AND_RUN makes it extract and exec instead.
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: cargo packager --release --formats deb,appimage -p sicompass --verbose
+
+      - name: Build .rpm
+        # Run from the workspace root: the `assets` source paths in
+        # [package.metadata.generate-rpm] are relative to the working
+        # directory, not to the manifest.
+        run: cargo generate-rpm -p src/sicompass
+
+      - name: Stage artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          find target/packages target/generate-rpm -type f \
+            \( -name '*.deb' -o -name '*.AppImage' -o -name '*.rpm' \) \
+            -exec cp {} out/ \;
+          # Fail loudly rather than uploading an empty artifact that only
+          # shows up as a missing download on the release page.
+          test -n "$(ls -A out)" || { echo "::error::no Linux packages were produced"; exit 1; }
+          cd out && sha256sum * > SHA256SUMS-linux.txt
+          ls -la
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: artifacts-native-linux
+          path: out/*
+          if-no-files-found: error
+
+  macos:
+    name: .app and .dmg (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            arch: aarch64
+            triple: aarch64-apple-darwin
+          - runner: macos-15-intel
+            arch: x86_64
+            triple: x86_64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install build dependencies
+        # molten-vk is the Vulkan implementation on macOS. It is both a build
+        # input (it gets bundled into the .app) and what makes the app able to
+        # render at all.
+        run: brew install cmake molten-vk create-dmg
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-packager
+        run: cargo install cargo-packager --locked --version "$CARGO_PACKAGER_VERSION"
+
+      - name: Point the packager at this runner's MoltenVK
+        # Homebrew's prefix is /opt/homebrew on Apple Silicon and /usr/local on
+        # Intel, and the Cargo.toml can only hold one of them.
+        run: |
+          set -euo pipefail
+          PREFIX="$(brew --prefix)"
+          test -f "$PREFIX/lib/libMoltenVK.dylib" \
+            || { echo "::error::libMoltenVK.dylib not found under $PREFIX"; exit 1; }
+          sed -i '' "s#/opt/homebrew/lib/libMoltenVK.dylib#$PREFIX/lib/libMoltenVK.dylib#" \
+            src/sicompass/Cargo.toml
+
+      - name: Build
+        run: cargo build --release --features bundled-sdl3 -p sicompass
+
+      - name: Build .app and .dmg
+        run: cargo packager --release --formats app,dmg -p sicompass --verbose
+
+      - name: Ad-hoc sign
+        # Bundling MoltenVK rewrites install names inside the .app, which
+        # invalidates whatever signature the linker produced. Apple Silicon
+        # refuses to execute an unsigned binary outright, so this is required
+        # just to make the app launchable. It does NOT satisfy Gatekeeper:
+        # users still need to clear the quarantine attribute until there is a
+        # Developer ID to notarize with.
+        run: |
+          set -euo pipefail
+          APP="$(find target/packages -maxdepth 1 -name '*.app' | head -1)"
+          test -n "$APP" || { echo "::error::no .app bundle was produced"; exit 1; }
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict "$APP"
+
+      - name: Stage artifacts
+        # Rename to the target triple: both legs otherwise emit the same
+        # filename and would overwrite each other on the release.
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          DMG="$(find target/packages -maxdepth 1 -name '*.dmg' | head -1)"
+          test -n "$DMG" || { echo "::error::no .dmg was produced"; exit 1; }
+          cp "$DMG" "out/sicompass-${{ matrix.triple }}.dmg"
+          cd out && shasum -a 256 * > "SHA256SUMS-${{ matrix.triple }}.txt"
+          ls -la
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: artifacts-native-macos-${{ matrix.arch }}
+          path: out/*
+          if-no-files-found: error

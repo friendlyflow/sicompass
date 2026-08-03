@@ -4,7 +4,9 @@
 //! crate (servo-style low-level bindings) exactly as the C code uses FreeType.
 
 use crate::app_state::{SiError, MAX_FRAMES_IN_FLIGHT};
+use crate::fonts;
 use crate::render;
+use crate::shaders;
 use ash::vk;
 use freetype::freetype as ft;
 use std::cell::{Cell, RefCell};
@@ -19,19 +21,32 @@ pub const MAX_TEXT_VERTICES: usize = 1_048_576;
 pub const FONT_SIZE_PT: f32 = 12.0;
 pub const TEXT_PADDING: f32 = 4.0;
 
-/// Fallback font files tried, in order, after the primary `Consolas-Regular`
-/// face for any codepoint the primary lacks. DejaVu covers Latin Extended,
-/// Greek, Cyrillic, box-drawing, arrows and math symbols. (CJK is not covered
-/// by these fonts — bundle e.g. Noto Sans Mono CJK and add it here to enable
-/// it.)
-const FALLBACK_FONTS: &[&str] = &[
-    "fonts/DejaVuSansMono.ttf",
-    "fonts/DejaVuSans.ttf",
-];
-
 /// Glyphs warmed into the atlas at startup so the common case (ASCII) is
 /// resident on the very first frame and never needs a mid-frame re-upload.
 const WARMUP_RANGE: std::ops::Range<u32> = 32..127;
+
+/// Open a FreeType face over an embedded font, returning FreeType's own error
+/// code so call sites read the same as the `FT_New_Face` calls they replaced.
+///
+/// # Safety
+///
+/// `bytes` must outlive the resulting face. Every caller passes `'static`
+/// data from [`crate::fonts`], which satisfies that unconditionally.
+unsafe fn new_memory_face(
+    library: ft::FT_Library,
+    bytes: &'static [u8],
+    face: *mut ft::FT_Face,
+) -> ft::FT_Error {
+    unsafe {
+        ft::FT_New_Memory_Face(
+            library,
+            bytes.as_ptr(),
+            bytes.len() as ft::FT_Long,
+            0,
+            face,
+        )
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -337,10 +352,9 @@ impl ColorAtlas {
         atlas_size: u32,
         raster_em_px: f32,
     ) -> Option<ColorAtlas> { unsafe {
-        let path = std::ffi::CString::new("fonts/NotoColorEmoji.ttf").ok()?;
         let mut face: ft::FT_Face = std::ptr::null_mut();
-        if ft::FT_New_Face(ft_library, path.as_ptr(), 0, &mut face) != 0 {
-            eprintln!("text.rs: color emoji font 'fonts/NotoColorEmoji.ttf' not loaded; emoji disabled");
+        if new_memory_face(ft_library, fonts::COLOR_EMOJI, &mut face) != 0 {
+            eprintln!("text.rs: embedded color emoji font could not be parsed; emoji disabled");
             return None;
         }
         // Bitmap-only color fonts have fixed strikes; pick the first.
@@ -528,12 +542,8 @@ unsafe fn build_color_pipeline(
     render_pass: vk::RenderPass,
     pipeline_layout: vk::PipelineLayout,
 ) -> Result<vk::Pipeline, SiError> { unsafe {
-    let vert_code = std::fs::read("shaders/text_vert.spv")
-        .map_err(|e| SiError::Other(format!("text_vert.spv: {e}")))?;
-    let frag_code = std::fs::read("shaders/text_color_frag.spv")
-        .map_err(|e| SiError::Other(format!("text_color_frag.spv: {e}")))?;
-    let vert_module = render::create_shader_module(device, &vert_code)?;
-    let frag_module = render::create_shader_module(device, &frag_code)?;
+    let vert_module = render::create_shader_module(device, shaders::TEXT_VERT)?;
+    let frag_module = render::create_shader_module(device, shaders::TEXT_COLOR_FRAG)?;
 
     let entry = std::ffi::CString::new("main").unwrap();
     let stages = [
@@ -624,25 +634,23 @@ impl FontRenderer {
 
         let mut faces: Vec<ft::FT_Face> = Vec::new();
 
-        // Primary face — its absence is fatal (everything falls back to it).
-        let primary_path = std::ffi::CString::new("fonts/Consolas-Regular.ttf")
-            .map_err(|e| SiError::Other(e.to_string()))?;
+        // Primary face — its failure is fatal (everything falls back to it).
+        // The face borrows the embedded bytes for its whole lifetime, which
+        // `'static` satisfies.
         let mut primary: ft::FT_Face = std::ptr::null_mut();
-        if ft::FT_New_Face(ft_library, primary_path.as_ptr(), 0, &mut primary) != 0 {
+        if new_memory_face(ft_library, fonts::PRIMARY, &mut primary) != 0 {
             ft::FT_Done_FreeType(ft_library);
-            return Err(SiError::Other("Failed to load font 'fonts/Consolas-Regular.ttf'".into()));
+            return Err(SiError::Other("Failed to parse the embedded primary font".into()));
         }
         faces.push(primary);
 
-        // Fallback faces — optional: a missing fallback only narrows coverage.
-        for path in FALLBACK_FONTS {
-            let cpath = std::ffi::CString::new(*path)
-                .map_err(|e| SiError::Other(e.to_string()))?;
+        // Fallback faces — optional: a failure only narrows coverage.
+        for (i, bytes) in fonts::FALLBACKS.iter().enumerate() {
             let mut face: ft::FT_Face = std::ptr::null_mut();
-            if ft::FT_New_Face(ft_library, cpath.as_ptr(), 0, &mut face) == 0 {
+            if new_memory_face(ft_library, bytes, &mut face) == 0 {
                 faces.push(face);
             } else {
-                eprintln!("text.rs: optional fallback font '{path}' could not be loaded");
+                eprintln!("text.rs: embedded fallback font {i} could not be parsed");
             }
         }
 
@@ -811,12 +819,8 @@ impl FontRenderer {
         // ----------------------------------------------------------------
         // 7. Graphics pipeline
         // ----------------------------------------------------------------
-        let vert_code = std::fs::read("shaders/text_vert.spv")
-            .map_err(|e| SiError::Other(format!("text_vert.spv: {e}")))?;
-        let frag_code = std::fs::read("shaders/text_frag.spv")
-            .map_err(|e| SiError::Other(format!("text_frag.spv: {e}")))?;
-        let vert_module = render::create_shader_module(device, &vert_code)?;
-        let frag_module = render::create_shader_module(device, &frag_code)?;
+        let vert_module = render::create_shader_module(device, shaders::TEXT_VERT)?;
+        let frag_module = render::create_shader_module(device, shaders::TEXT_FRAG)?;
 
         let entry = std::ffi::CString::new("main").unwrap();
         let stages = [
@@ -1786,17 +1790,16 @@ mod tests {
 
     // ---- dynamic atlas + fallback (real FreeType, no Vulkan) ---
 
-    /// Load the primary + fallback faces from the repo's bundled fonts using an
-    /// absolute path (tests run with CWD = crate dir, not the repo root).
+    /// Build the same primary + fallback face chain the renderer uses, from
+    /// the embedded fonts. Exercises the real `FT_New_Memory_Face` path, so a
+    /// broken embed fails here rather than at startup.
     unsafe fn load_test_faces() -> (ft::FT_Library, Vec<ft::FT_Face>) { unsafe {
         let mut lib: ft::FT_Library = std::ptr::null_mut();
         assert_eq!(ft::FT_Init_FreeType(&mut lib), 0, "FreeType init failed");
-        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
         let mut faces = Vec::new();
-        for name in ["Consolas-Regular.ttf", "DejaVuSansMono.ttf", "DejaVuSans.ttf"] {
-            let p = std::ffi::CString::new(format!("{root}/fonts/{name}")).unwrap();
+        for bytes in std::iter::once(&fonts::PRIMARY).chain(fonts::FALLBACKS.iter()) {
             let mut face: ft::FT_Face = std::ptr::null_mut();
-            if ft::FT_New_Face(lib, p.as_ptr(), 0, &mut face) == 0 {
+            if new_memory_face(lib, bytes, &mut face) == 0 {
                 assert_eq!(ft::FT_Set_Char_Size(face, 0, 64 * 64, 96, 96), 0);
                 faces.push(face);
             }
@@ -1842,13 +1845,10 @@ mod tests {
         unsafe {
             let mut lib: ft::FT_Library = std::ptr::null_mut();
             assert_eq!(ft::FT_Init_FreeType(&mut lib), 0);
-            let path = std::ffi::CString::new(concat!(
-                env!("CARGO_MANIFEST_DIR"), "/../../fonts/NotoColorEmoji.ttf"
-            )).unwrap();
             let mut face: ft::FT_Face = std::ptr::null_mut();
-            if ft::FT_New_Face(lib, path.as_ptr(), 0, &mut face) != 0 {
+            if new_memory_face(lib, fonts::COLOR_EMOJI, &mut face) != 0 {
                 ft::FT_Done_FreeType(lib);
-                panic!("bundled NotoColorEmoji.ttf not found");
+                panic!("embedded NotoColorEmoji.ttf could not be parsed");
             }
             assert!((*face).num_fixed_sizes >= 1, "emoji font has no bitmap strike");
             assert_eq!(ft::FT_Select_Size(face, 0), 0);

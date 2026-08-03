@@ -195,6 +195,18 @@ impl UpdateChecker {
     /// Apply a staged app update. On Windows this spawns `msiexec` and
     /// exits the process; on other platforms it returns an error and the
     /// caller should open `release_url` in the browser.
+    ///
+    /// The non-Windows path is a deliberate end state, not a gap. Since 0.1.9
+    /// there are macOS and Linux packages, but self-applying them is the wrong
+    /// thing to do: a `.deb` or `.rpm` belongs to the system package manager,
+    /// which owns the dependency graph and the user's trust decisions, and an
+    /// AppImage is a file the user placed somewhere themselves. Replacing a
+    /// mounted `.app` from inside the process running out of it is a separate
+    /// project involving a helper binary and re-signing.
+    ///
+    /// Opening the release page is the correct behaviour on those platforms,
+    /// and it now leads somewhere useful: before 0.1.9 that page had only a
+    /// Windows build on it.
     #[allow(unused_variables)] // path arg is unused on non-Windows
     pub fn apply_app_update(&self, update: &AppUpdate) -> std::io::Result<()> {
         #[cfg(target_os = "windows")]

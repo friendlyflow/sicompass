@@ -102,23 +102,37 @@ jobs:
             exit 1
           fi
 
+          # Same set cargo-dist would attach: everything except the per-target
+          # manifests, which are build scratch.
+          #
+          # Collected with -print0 into an array rather than interpolated
+          # unquoted. Since native-packages.yml started contributing .deb,
+          # .rpm, .AppImage and .dmg files, this list is no longer a handful of
+          # names this repository fully controls, and one space in a filename
+          # would split a path into two nonexistent ones.
+          mapfile -d '' -t files < <(
+            find artifacts -type f ! -name '*-dist-manifest.json' -print0
+          )
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::No artifacts to attach to $tag."
+            exit 1
+          fi
+          printf 'attaching %s\n' "${files[@]}"
+
           # Idempotent: a re-run must not fail, and must not silently skip
           # uploading if the release exists but is missing assets.
           if gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             echo "::notice::Release $tag already exists; uploading any missing assets."
-            gh release upload "$tag" --repo "${{ github.repository }}" --clobber \
-              $(find artifacts -type f ! -name '*-dist-manifest.json')
+            gh release upload "$tag" --repo "${{ github.repository }}" --clobber "${files[@]}"
             exit 0
           fi
 
-          # Same set cargo-dist would attach: everything except the per-target
-          # manifests, which are build scratch.
           gh release create "$tag" \
             --repo "${{ github.repository }}" \
             --target "$RELEASE_COMMIT" \
             --title "${title:-$tag}" \
             --notes-file notes.md \
             $prerelease \
-            $(find artifacts -type f ! -name '*-dist-manifest.json')
+            "${files[@]}"
 
           echo "Published $tag"

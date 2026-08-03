@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <title>Silicon's Compass</title>
+  <desc>Four arrow keys in the inverted-T layout, simplified for small sizes.</desc>
+
+  <!--
+    Small-size variant of sicompass.svg, used by scripts/gen-icons.sh for the
+    16, 22, 24 and 32 pixel PNGs. The full-detail version is used from 48 up.
+    Both are the same layout, so the icon does not appear to change shape as
+    it scales, only to gain detail.
+
+    Why a second file: at 16x16 a 7-unit outline is well under a pixel, so the
+    outlined keys of the main artwork grey out into an unreadable smudge. Here
+    the keys are solid and the arrows are knocked out of them in the plate
+    colour, which turns the same silhouette into a high-contrast shape that
+    survives to 16x16. Arrows are also fattened, since a knocked-out shape
+    needs more width than a drawn one to read at the same size.
+  -->
+
+  <rect x="0" y="0" width="128" height="128" rx="24" fill="#f7f7f5"/>
+
+  <!-- Solid keys, same geometry as the full-detail artwork. -->
+  <g fill="#1b1b1f">
+    <rect x="46.5" y="27" width="35" height="35" rx="8"/>
+    <rect x="7.5" y="66" width="35" height="35" rx="8"/>
+    <rect x="46.5" y="66" width="35" height="35" rx="8"/>
+    <rect x="85.5" y="66" width="35" height="35" rx="8"/>
+  </g>
+
+  <!-- Arrows knocked out in the plate colour, fattened for small sizes. -->
+  <g fill="#f7f7f5">
+    <!-- up, centre (64, 44.5) -->
+    <path d="M 64 32 L 75 44 L 68.5 44 L 68.5 57 L 59.5 57 L 59.5 44 L 53 44 Z"/>
+    <!-- left, centre (25, 83.5) -->
+    <path d="M 12.5 83.5 L 24.5 72.5 L 24.5 79 L 37.5 79 L 37.5 88 L 24.5 88 L 24.5 94.5 Z"/>
+    <!-- down, centre (64, 83.5) -->
+    <path d="M 64 96 L 75 84 L 68.5 84 L 68.5 71 L 59.5 71 L 59.5 84 L 53 84 Z"/>
+    <!-- right, centre (103, 83.5) -->
+    <path d="M 115.5 83.5 L 103.5 72.5 L 103.5 79 L 90.5 79 L 90.5 88 L 103.5 88 L 103.5 94.5 Z"/>
+  </g>
+</svg>

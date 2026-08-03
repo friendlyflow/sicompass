@@ -15,6 +15,11 @@
       ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
       nixpkgsFor = forAllSystems (system: import nixpkgs { inherit system; });
+
+      # Single source of truth for the version. Reading it here means
+      # `nix build` cannot drift from `cargo build` when the workspace version
+      # is bumped for a release.
+      version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
     in
     {
       devShells = forAllSystems (system:
@@ -55,11 +60,31 @@
               libwebp
               curl
 
+              # cmake: several -sys crates drive a CMake build. sdl3-sys needs
+              # it for the `bundled-sdl3` feature (which compiles the vendored
+              # SDL 3.4.12 from source), and aws-lc-sys and libsqlite3-sys need
+              # it unconditionally. Without it `cargo build --features
+              # bundled-sdl3` dies in sdl3-sys' build script with
+              # "is `cmake` not installed?".
+              cmake
+
               # Vulkan (used via ash crate)
               spirv-tools
               vulkan-loader
               vulkan-headers
               glslang
+
+              # Icon generation (scripts/gen-icons.sh). Not needed to build or
+              # run sicompass, only to regenerate assets/icons/* from the two
+              # master SVGs, which happens about once a year.
+              #   librsvg   -> rsvg-convert, SVG to PNG at each size
+              #   imagemagick -> magick, PNG touch-up and previews
+              #   icoutils  -> icotool, the multi-resolution Windows .ico
+              #   libicns   -> png2icns, the macOS .icns
+              librsvg
+              imagemagick
+              icoutils
+              libicns
 
               # graphify code-graph CLI is a uv-installed Python tool
               # (PyPI package `graphifyy`); uv bootstraps it in the shellHook.
@@ -78,6 +103,34 @@
               wayland-scanner
               wayland-protocols
               libxkbcommon
+
+              # SDL3's own build dependencies, needed only by the
+              # `bundled-sdl3` feature, which compiles the vendored SDL from
+              # source. SDL's CMake aborts configure with "could not find X11
+              # or Wayland development libraries" unless it can see at least
+              # one windowing backend, and it probes for the audio and DRM
+              # backends the same way. The release build uses this feature, so
+              # the dev shell has to be able to reproduce it. Mirrors the apt
+              # list in `[dist.dependencies.apt]`.
+              libx11
+              libxext
+              libxcursor
+              libxi
+              libxrandr
+              libxscrnsaver
+              libxfixes
+              libxrender
+              libxtst
+              # xcb: SDL's bundled vulkan.h includes <xcb/xcb.h> for the
+              # VK_USE_PLATFORM_XCB_KHR surface path.
+              libxcb
+              libdecor
+              libGL
+              libdrm
+              mesa
+              alsa-lib
+              libpulseaudio
+
               # Accessibility (accesskit_unix)
               at-spi2-core
               dbus
@@ -124,5 +177,130 @@
             '';
           };
         });
+
+      # `nix build`, `nix run github:friendlyflow/sicompass`, and
+      # `nix profile install`. This is the fourth Linux package format,
+      # alongside the .deb, .rpm and AppImage that native-packages.yml builds.
+      packages = forAllSystems (system:
+        let
+          pkgs = nixpkgsFor.${system};
+        in
+        {
+          default = pkgs.rustPlatform.buildRustPackage {
+            pname = "sicompass";
+            inherit version;
+            src = ./.;
+
+            # Cargo.lock has no git sources, so the lock file alone is enough
+            # and there is no cargoHash to keep up to date.
+            cargoLock.lockFile = ./Cargo.lock;
+
+            # Only the app crate. The lib_* crates come in transitively.
+            cargoBuildFlags = [ "-p" "sicompass" ];
+
+            # The workspace suite wants a network and a display. It is run by
+            # ci.yml instead, where both can be arranged.
+            doCheck = false;
+
+            nativeBuildInputs = with pkgs; [
+              pkg-config
+              # aws-lc-sys and libsqlite3-sys both drive a CMake build.
+              cmake
+              rustPlatform.bindgenHook
+              makeWrapper
+              copyDesktopItems
+            ];
+
+            buildInputs = with pkgs; [
+              # System SDL3, not the `bundled-sdl3` feature: inside a Nix
+              # build there is no reason to compile a vendored copy when the
+              # real dependency can be declared.
+              sdl3
+              freetype
+              libwebp
+              curl
+            ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+              # openssl-sys is in the graph on Linux only (lettre and
+              # async-native-tls). macOS uses Security.framework.
+              openssl
+              libxkbcommon
+              wayland
+              at-spi2-core
+              dbus
+            ];
+
+            # No glslang and no fonts here: shaders and fonts are compiled
+            # into the binary. `assets/` is the only runtime tree left.
+            postInstall = ''
+              mkdir -p $out/share/sicompass
+              cp -r assets $out/share/sicompass/assets
+
+              install -Dm644 assets/icons/sicompass.svg \
+                $out/share/icons/hicolor/scalable/apps/sicompass.svg
+              for s in 16 22 24 32 48 64 128 256 512; do
+                install -Dm644 "assets/icons/''${s}x''${s}.png" \
+                  "$out/share/icons/hicolor/''${s}x''${s}/apps/sicompass.png"
+              done
+
+              # The font licenses have to travel with the binary, since the
+              # fonts themselves are inside it.
+              install -Dm644 fonts/LICENSE-DejaVu.txt \
+                $out/share/doc/sicompass/LICENSE-DejaVu.txt
+              install -Dm644 fonts/LICENSE-NotoColorEmoji.txt \
+                $out/share/doc/sicompass/LICENSE-NotoColorEmoji.txt
+              install -Dm644 THIRD-PARTY-LICENSES.html \
+                $out/share/doc/sicompass/THIRD-PARTY-LICENSES.html
+
+              # SICOMPASS_RESOURCE_DIR is the first thing
+              # `resources::resource_root()` checks, so the derivation states
+              # where its assets are rather than relying on a layout guess.
+              #
+              # vulkan-loader on LD_LIBRARY_PATH is what lets
+              # `ash::Entry::load()` dlopen libvulkan.so.1. Deliberately no
+              # VK_ICD_FILENAMES: on NixOS the drivers live in
+              # /run/opengl-driver and the loader finds them itself, and
+              # pinning a path that does not exist makes it report zero ICDs.
+              wrapProgram $out/bin/sicompass \
+                --set SICOMPASS_RESOURCE_DIR $out/share/sicompass \
+                --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath (with pkgs; [
+                  vulkan-loader
+                  libxkbcommon
+                  wayland
+                  sdl3
+                ])}"
+            '';
+
+            desktopItems = [
+              (pkgs.makeDesktopItem {
+                name = "sicompass";
+                desktopName = "Silicon's Compass";
+                genericName = "Keyboard Navigator";
+                comment = "Use your whole computer from the keyboard, with no mouse needed";
+                exec = "sicompass %F";
+                icon = "sicompass";
+                categories = [ "Utility" "Accessibility" ];
+                keywords = [ "accessibility" "screenreader" "keyboard" "navigator" "a11y" ];
+                startupWMClass = "sicompass";
+                startupNotify = true;
+              })
+            ];
+
+            meta = with pkgs.lib; {
+              description = "Use your whole computer from the keyboard, with no mouse needed";
+              homepage = "https://github.com/friendlyflow/sicompass";
+              license = licenses.gpl3Only;
+              mainProgram = "sicompass";
+              platforms = platforms.unix;
+            };
+          };
+        });
+
+      apps = forAllSystems (system: {
+        default = {
+          type = "app";
+          program = "${self.packages.${system}.default}/bin/sicompass";
+          meta = self.packages.${system}.default.meta;
+        };
+      });
     };
 }

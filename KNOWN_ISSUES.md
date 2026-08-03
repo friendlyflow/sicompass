@@ -1,5 +1,35 @@
 # Known Issues
 
+## macOS downloads are not notarized
+
+**Issue**: macOS refuses to open the `.dmg` on first launch and reports that
+the application is damaged.
+
+**Root Cause**: The app is ad-hoc signed but not notarized by Apple, which
+needs a paid Developer ID. Gatekeeper quarantines anything downloaded from a
+browser that it cannot verify.
+
+**Workaround**: clear the quarantine attribute once after installing.
+
+```bash
+xattr -dr com.apple.quarantine /Applications/sicompass.app
+```
+
+**Fix**: obtain an Apple Developer ID and set `macos.signing-identity`,
+`signing-certificate`, `signing-certificate-password` and
+`notarization-credentials` for cargo-packager. All four are secrets, not
+config-file values.
+
+## macOS rendering is unverified
+
+**Issue**: nobody has run sicompass on real Mac hardware.
+
+CI verifies that macOS compiles and links, and runs `sicompass --check` to
+confirm MoltenVK loads and enumerates a device. What is not verified is whether
+the swapchain formats MoltenVK reports match what `create_swapchain` expects,
+and whether the AccessKit Cocoa adapter actually talks to VoiceOver. Reports
+from Mac users are welcome.
+
 ## Window Maximize Not Working (Cinnamon Desktop)
 
 **Issue**: The maximize button does not properly resize the Vulkan rendering surface on Cinnamon desktop environment.

@@ -4,6 +4,7 @@
 
 use crate::app_state::SiError;
 use crate::render;
+use crate::shaders;
 use ash::vk;
 
 // ---------------------------------------------------------------------------
@@ -58,12 +59,8 @@ impl RectangleRenderer {
         )?;
 
         // ---- Pipeline ------------------------------------------------------
-        let vert_code = std::fs::read("shaders/rectangle_vert.spv")
-            .map_err(|e| SiError::Other(format!("rectangle_vert.spv: {e}")))?;
-        let frag_code = std::fs::read("shaders/rectangle_frag.spv")
-            .map_err(|e| SiError::Other(format!("rectangle_frag.spv: {e}")))?;
-        let vert_module = render::create_shader_module(device, &vert_code)?;
-        let frag_module = render::create_shader_module(device, &frag_code)?;
+        let vert_module = render::create_shader_module(device, shaders::RECTANGLE_VERT)?;
+        let frag_module = render::create_shader_module(device, shaders::RECTANGLE_FRAG)?;
 
         let entry = std::ffi::CString::new("main").unwrap();
         let stages = [

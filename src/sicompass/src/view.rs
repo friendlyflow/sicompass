@@ -521,8 +521,7 @@ fn draw_window_controls(app: &mut AppState) {
         return;
     };
     // All three icons are drawn as strokes (no font glyph), so they look
-    // consistent and don't depend on the font's glyph coverage (Consolas has
-    // no square/✕ glyphs at all).
+    // consistent at any size and don't depend on the font's glyph coverage.
     for (i, &(bx, by, bw, bh)) in rects.iter().enumerate() {
         let px = bx * device_scale;
         let py = by * device_scale;

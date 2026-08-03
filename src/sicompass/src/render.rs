@@ -228,36 +228,218 @@ const VALIDATION_LAYERS: &[&CStr] = &[];
 const DEVICE_EXTENSIONS: &[&CStr] = &[ash::khr::swapchain::NAME];
 
 // ---------------------------------------------------------------------------
-// Runtime file check
+// Vulkan loader
 // ---------------------------------------------------------------------------
 
-/// Check that all required shader / font files exist.
+/// Load the Vulkan entry points.
+///
+/// On Linux and Windows this is just `ash::Entry::load()`, which dlopens
+/// `libvulkan.so.1` / `vulkan-1.dll`.
+///
+/// macOS needs more. `ash::Entry::load()` asks for `libvulkan.dylib`, and a
+/// stock Mac has no such file: there is no system Vulkan, only MoltenVK
+/// translating to Metal, which arrives either with the LunarG SDK or with
+/// `brew install molten-vk`. Worse, `/opt/homebrew/lib` is not on dyld's
+/// default search path on Apple Silicon, so even an installed Homebrew
+/// MoltenVK is invisible to a bare `dlopen("libMoltenVK.dylib")`. So try the
+/// copy bundled in the .app first, then the loader, then MoltenVK directly,
+/// then the two Homebrew prefixes by absolute path.
+///
+/// Loading MoltenVK as the driver rather than going through the loader is
+/// fine, it exports the Vulkan entry points itself. The cost is no validation
+/// layers on macOS.
+///
+/// # Safety
+///
+/// Loads a shared library and reads function pointers out of it, so the caller
+/// must ensure no other thread is unloading a Vulkan library concurrently. The
+/// returned [`ash::Entry`] borrows nothing and is safe to keep for the life of
+/// the process.
+pub unsafe fn load_vulkan_entry() -> Result<ash::Entry, String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        unsafe { ash::Entry::load().map_err(|e| format!("{e}")) }
+    }
+
+    #[cfg(target_os = "macos")]
+    unsafe {
+        let mut tried = Vec::new();
+
+        // Inside a .app bundle: Contents/MacOS/sicompass ->
+        // Contents/Frameworks/libMoltenVK.dylib, which cargo-packager puts
+        // there so the .dmg needs nothing installed.
+        if let Ok(exe) = std::env::current_exe()
+            && let Some(dir) = exe.parent()
+        {
+            let bundled = dir.join("../Frameworks/libMoltenVK.dylib");
+            match ash::Entry::load_from(&bundled) {
+                Ok(entry) => return Ok(entry),
+                Err(e) => tried.push(format!("{}: {e}", bundled.display())),
+            }
+        }
+
+        for name in [
+            "libvulkan.1.dylib",
+            "libvulkan.dylib",
+            "libMoltenVK.dylib",
+            "/opt/homebrew/lib/libMoltenVK.dylib",
+            "/usr/local/lib/libMoltenVK.dylib",
+        ] {
+            match ash::Entry::load_from(std::path::Path::new(name)) {
+                Ok(entry) => return Ok(entry),
+                Err(e) => tried.push(format!("{name}: {e}")),
+            }
+        }
+
+        Err(format!(
+            "no Vulkan driver found. macOS has no system Vulkan, so sicompass needs MoltenVK. \
+             Install it with `brew install molten-vk`, or install the LunarG Vulkan SDK, or use \
+             the .dmg, which bundles it. Tried:\n  {}",
+            tried.join("\n  ")
+        ))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Startup diagnostic (--check)
+// ---------------------------------------------------------------------------
+
+/// Report what the binary found on this machine: where its resources resolved
+/// to, and whether Vulkan is usable.
+///
+/// This used to check for `shaders/*.spv` and `fonts/*.ttf` on disk. Both are
+/// compiled into the binary now, so the only things that can still go wrong at
+/// startup are a missing `assets/` tree and a Vulkan loader or driver that
+/// cannot be reached, which is exactly what this reports.
+///
+/// The report goes to stdout *and* the rolling log, because release Windows
+/// builds are linked against the `windows` subsystem and have no console.
+///
 /// Returns `EXIT_SUCCESS` (0) or `EXIT_FAILURE` (1).
 pub fn check_runtime_files() -> i32 {
-    const REQUIRED: &[&str] = &[
-        "fonts/Consolas-Regular.ttf",
-        "shaders/text_vert.spv",
-        "shaders/text_frag.spv",
-        "shaders/rectangle_vert.spv",
-        "shaders/rectangle_frag.spv",
-        "shaders/image_vert.spv",
-        "shaders/image_frag.spv",
-    ];
-    let mut missing = 0;
-    for path in REQUIRED {
-        if std::path::Path::new(path).exists() {
-            println!("OK: {path}");
+    let mut report = String::new();
+    let mut problems = 0;
+
+    report.push_str(&format!(
+        "sicompass {} ({} {})\n",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    ));
+
+    // ---- Resources ----
+    let root = crate::resources::resource_root();
+    report.push_str(&format!("\nResource root: {}\n", root.display()));
+    if let Some(dir) = std::env::var_os(crate::resources::RESOURCE_DIR_ENV) {
+        report.push_str(&format!(
+            "  ({} is set to {})\n",
+            crate::resources::RESOURCE_DIR_ENV,
+            std::path::Path::new(&dir).display()
+        ));
+    }
+    for sub in ["assets", "assets/tutorial", "assets/sales-demo"] {
+        if root.join(sub).is_dir() {
+            report.push_str(&format!("  OK       {sub}\n"));
         } else {
-            eprintln!("MISSING: {path}");
-            missing += 1;
+            report.push_str(&format!("  MISSING  {sub}\n"));
+            problems += 1;
         }
     }
-    if missing > 0 {
-        eprintln!("\n{missing} file(s) missing");
-        1
+
+    // ---- Embedded resources ----
+    report.push_str(&format!(
+        "\nEmbedded: {} shaders, {} fonts\n",
+        7,
+        1 + crate::fonts::FALLBACKS.len() + 1
+    ));
+
+    // ---- Vulkan ----
+    report.push_str("\nVulkan:\n");
+    match unsafe { load_vulkan_entry() } {
+        Err(e) => {
+            report.push_str(&format!("  MISSING  loader: {e}\n"));
+            problems += 1;
+        }
+        Ok(entry) => {
+            report.push_str("  OK       loader\n");
+            match unsafe { enumerate_devices_for_diagnostic(&entry) } {
+                Err(e) => {
+                    report.push_str(&format!("  MISSING  device enumeration: {e}\n"));
+                    problems += 1;
+                }
+                Ok(names) if names.is_empty() => {
+                    report.push_str("  MISSING  no Vulkan device found\n");
+                    problems += 1;
+                }
+                Ok(names) => {
+                    for name in names {
+                        report.push_str(&format!("  OK       device: {name}\n"));
+                    }
+                }
+            }
+        }
+    }
+
+    if problems > 0 {
+        report.push_str(&format!("\n{problems} problem(s) found\n"));
     } else {
-        println!("\nAll runtime files present");
-        0
+        report.push_str("\nAll checks passed\n");
+    }
+
+    print!("{report}");
+    tracing::info!(target: "sicompass::check", "{report}");
+
+    i32::from(problems > 0)
+}
+
+/// Create a bare instance and list the physical devices, for [`check_runtime_files`].
+///
+/// Deliberately separate from the renderer's own instance creation: this must
+/// work with no window and no surface, so it can run over SSH or in CI.
+unsafe fn enumerate_devices_for_diagnostic(entry: &ash::Entry) -> Result<Vec<String>, String> {
+    unsafe {
+        let app_info = vk::ApplicationInfo::default().api_version(vk::API_VERSION_1_0);
+
+        // macOS reaches its GPU through MoltenVK, which only appears as a
+        // portability driver. Without these an instance is created happily and
+        // then enumerates nothing at all.
+        #[allow(unused_mut)]
+        let mut ext_names: Vec<*const std::ffi::c_char> = Vec::new();
+        #[allow(unused_mut)]
+        let mut flags = vk::InstanceCreateFlags::empty();
+        #[cfg(target_os = "macos")]
+        {
+            ext_names.push(ash::khr::portability_enumeration::NAME.as_ptr());
+            ext_names.push(ash::khr::get_physical_device_properties2::NAME.as_ptr());
+            flags |= vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR;
+        }
+
+        let info = vk::InstanceCreateInfo::default()
+            .application_info(&app_info)
+            .enabled_extension_names(&ext_names)
+            .flags(flags);
+
+        let instance = entry
+            .create_instance(&info, None)
+            .map_err(|e| format!("create_instance: {e}"))?;
+
+        let result = instance
+            .enumerate_physical_devices()
+            .map_err(|e| format!("enumerate_physical_devices: {e}"))
+            .map(|devices| {
+                devices
+                    .into_iter()
+                    .map(|pd| {
+                        let props = instance.get_physical_device_properties(pd);
+                        CStr::from_ptr(props.device_name.as_ptr())
+                            .to_string_lossy()
+                            .into_owned()
+                    })
+                    .collect()
+            });
+
+        instance.destroy_instance(None);
+        result
     }
 }
 
@@ -619,8 +801,8 @@ pub fn build_app() -> Result<AppState, SiError> {
 
     let event_pump = sdl.event_pump().map_err(|e| SiError::Sdl(e.to_string()))?;
 
-    // ---- ash Entry (loads libvulkan.so / vulkan-1.dll) ----------------------
-    let entry = unsafe { ash::Entry::load()? };
+    // ---- ash Entry (loads libvulkan.so / vulkan-1.dll / MoltenVK) -----------
+    let entry = unsafe { load_vulkan_entry().map_err(SiError::Other)? };
 
     // ---- Vulkan instance ----------------------------------------------------
     let app_name = CString::new(WINDOW_TITLE).unwrap();
@@ -647,6 +829,24 @@ pub fn build_app() -> Result<AppState, SiError> {
         ext_names_raw.push(ash::ext::debug_utils::NAME.as_ptr());
     }
 
+    // On macOS the GPU is reached through MoltenVK, which the loader only
+    // exposes as a "portability" driver. Without ENUMERATE_PORTABILITY_KHR and
+    // its extension, `create_instance` succeeds and then
+    // `enumerate_physical_devices` returns an empty list, which reads as "no
+    // GPU" rather than "wrong instance flags".
+    //
+    // VK_KHR_get_physical_device_properties2 is required by
+    // VK_KHR_portability_enumeration on a 1.0 instance. Staying at 1.0 rather
+    // than bumping to 1.1 keeps this to the MoltenVK path that is best tested.
+    #[allow(unused_mut)]
+    let mut instance_flags = vk::InstanceCreateFlags::empty();
+    #[cfg(target_os = "macos")]
+    {
+        ext_names_raw.push(ash::khr::portability_enumeration::NAME.as_ptr());
+        ext_names_raw.push(ash::khr::get_physical_device_properties2::NAME.as_ptr());
+        instance_flags |= vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR;
+    }
+
     let layer_names_raw: Vec<*const i8> = VALIDATION_LAYERS
         .iter()
         .map(|s| s.as_ptr())
@@ -655,7 +855,8 @@ pub fn build_app() -> Result<AppState, SiError> {
     let instance_info = vk::InstanceCreateInfo::default()
         .application_info(&app_info)
         .enabled_extension_names(&ext_names_raw)
-        .enabled_layer_names(&layer_names_raw);
+        .enabled_layer_names(&layer_names_raw)
+        .flags(instance_flags);
 
     let instance = unsafe { entry.create_instance(&instance_info, None)? };
 
@@ -699,13 +900,23 @@ pub fn build_app() -> Result<AppState, SiError> {
 
     // ---- Physical device ----------------------------------------------------
     let physical_device = unsafe {
-        instance
-            .enumerate_physical_devices()?
+        let devices = instance.enumerate_physical_devices()?;
+        let total = devices.len();
+        devices
             .into_iter()
             .find(|&pd| {
                 is_device_suitable(&instance, &surface_loader, pd, surface)
             })
-            .ok_or_else(|| SiError::Other("No suitable Vulkan GPU found".into()))?
+            // Report how many devices were seen. "None at all" (a driver or
+            // loader problem) and "some, but none usable" (a capability
+            // problem) need completely different fixes, and the old message
+            // could not tell them apart from a user's log.
+            .ok_or_else(|| {
+                SiError::Other(format!(
+                    "No suitable Vulkan GPU found ({total} device(s) enumerated). \
+                     Run `sicompass --check` for details."
+                ))
+            })?
     };
 
     let queue_families = unsafe {
@@ -730,7 +941,22 @@ pub fn build_app() -> Result<AppState, SiError> {
         })
         .collect();
 
-    let ext_names: Vec<*const i8> = DEVICE_EXTENSIONS.iter().map(|s| s.as_ptr()).collect();
+    #[allow(unused_mut)]
+    let mut ext_names: Vec<*const i8> = DEVICE_EXTENSIONS.iter().map(|s| s.as_ptr()).collect();
+
+    // VK_KHR_portability_subset *must* be enabled when the device advertises
+    // it, which MoltenVK always does, and must *not* be enabled otherwise. So
+    // gate on the advertisement rather than on the platform.
+    #[cfg(target_os = "macos")]
+    {
+        let props = unsafe { instance.enumerate_device_extension_properties(physical_device)? };
+        let advertised = props.iter().any(|p| unsafe {
+            CStr::from_ptr(p.extension_name.as_ptr()) == ash::khr::portability_subset::NAME
+        });
+        if advertised {
+            ext_names.push(ash::khr::portability_subset::NAME.as_ptr());
+        }
+    }
 
     let device_features = vk::PhysicalDeviceFeatures::default();
     let device_info = vk::DeviceCreateInfo::default()
