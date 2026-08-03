@@ -6,6 +6,13 @@
 # where FreeType has to be resolved: freetype-sys does its pkg-config lookup in
 # a build script, so PKG_CONFIG_PATH must already be set by the time cargo runs.
 #
+# It lives in `parts/` rather than directly in `.github/workflows/` because
+# GitHub treats every .yml *directly* in that directory as a workflow. A bare
+# step list is not a valid workflow, so it appeared in the Actions list and
+# failed on every push. GitHub does not scan subdirectories, and cargo-dist
+# resolves `github-build-setup` relative to `.github/workflows/`, so a
+# `parts/` prefix satisfies both.
+#
 # Without this the release binaries fall back to a vendored FreeType compiled
 # without PNG support, and every colour emoji silently disappears. See
 # scripts/setup-freetype.sh for the full explanation.
