@@ -122,9 +122,14 @@ jobs:
         shell: pwsh
         run: ./scripts/setup-freetype.ps1
 
+      # The FreeType setup is part of the cache key on purpose. freetype-sys
+      # only emits `rerun-if-env-changed=PKG_CONFIG_PATH` when it actually
+      # takes the pkg-config path; a cached build that took the vendored
+      # fallback never emitted it, so cargo would happily reuse that stale
+      # artifact no matter what PKG_CONFIG_PATH later says.
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.name }}
+          key: ${{ matrix.name }}-ft${{ hashFiles('scripts/setup-freetype.sh', 'scripts/setup-freetype.ps1') }}
 
       - name: Test
         if: matrix.full
@@ -158,14 +163,24 @@ jobs:
       # standards of proof: a FreeType without PNG support is unambiguously
       # broken and should fail the build, whereas Vulkan on a headless runner
       # legitimately might not work.
+      # Read from SICOMPASS_CHECK_FILE rather than stdout. Two reasons, both
+      # learned the hard way: the release Windows binary has no console, so
+      # stdout is empty there however well it ran; and MoltenVK can abort the
+      # process during the Vulkan probe, which would take buffered stdout with
+      # it. The file is written section by section, so the font findings
+      # survive either.
       - name: Verify colour emoji support
         if: ${{ !matrix.full }}
         shell: bash
+        env:
+          SICOMPASS_CHECK_FILE: check.txt
         run: |
-          set -o pipefail
           # `--check` exits non-zero when anything is wrong, including Vulkan,
-          # so the exit code is ignored here and the emoji line is what counts.
-          ./target/release/sicompass --check 2>&1 | tee check.txt || true
+          # which is expected on a headless runner. The emoji line is what
+          # this step judges.
+          ./target/release/sicompass --check || true
+          echo "--- check report ---"
+          cat check.txt || true
           if ! grep -q 'OK .*colour emoji' check.txt; then
             echo "::error::FreeType was built without PNG support, so colour emoji will not render."
             echo "::error::See scripts/setup-freetype.sh."

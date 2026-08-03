@@ -40,7 +40,26 @@ if (-not (Get-Command pkg-config -ErrorAction SilentlyContinue)) {
 
 $pcDir = "$vcpkg\installed\$triplet\lib\pkgconfig"
 if (-not (Test-Path "$pcDir\freetype2.pc")) {
+    Write-Host "Contents of $vcpkg\installed\$triplet\lib :"
+    Get-ChildItem "$vcpkg\installed\$triplet\lib" -ErrorAction SilentlyContinue | Format-Table
     throw "freetype2.pc not found at $pcDir"
+}
+
+# Fail here rather than letting the build quietly take the vendored path and
+# produce a binary with no colour emoji, which is what this script exists to
+# prevent. freetype2.pc carries a libtool version, so the floor reads much
+# higher than the release number it corresponds to.
+$env:PKG_CONFIG_PATH = $pcDir
+$env:PKG_CONFIG_ALLOW_SYSTEM_LIBS = "1"
+$env:PKG_CONFIG_ALLOW_SYSTEM_CFLAGS = "1"
+$found = (& pkg-config --modversion freetype2) 2>&1
+if ($LASTEXITCODE -ne 0) {
+    throw "pkg-config could not read freetype2 from $pcDir : $found"
+}
+Write-Host "freetype2.pc reports $found (floor 24.3.18)"
+& pkg-config --atleast-version=24.3.18 freetype2
+if ($LASTEXITCODE -ne 0) {
+    throw "freetype2.pc reports $found, below the 24.3.18 floor freetype-sys checks"
 }
 
 # The pkg-config crate refuses to use system paths for a cross-ish target

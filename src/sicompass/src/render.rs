@@ -304,6 +304,14 @@ pub unsafe fn load_vulkan_entry() -> Result<ash::Entry, String> {
 // Startup diagnostic (--check)
 // ---------------------------------------------------------------------------
 
+/// Set this to a path and `--check` writes its report there as well as to
+/// stdout.
+///
+/// Exists because stdout is not always available or complete: release Windows
+/// builds have no console, and a driver that aborts the process takes any
+/// buffered output with it.
+pub const CHECK_FILE_ENV: &str = "SICOMPASS_CHECK_FILE";
+
 /// Report what the binary found on this machine: where its resources resolved
 /// to, and whether Vulkan is usable.
 ///
@@ -312,11 +320,31 @@ pub unsafe fn load_vulkan_entry() -> Result<ash::Entry, String> {
 /// startup are a missing `assets/` tree and a Vulkan loader or driver that
 /// cannot be reached, which is exactly what this reports.
 ///
-/// The report goes to stdout *and* the rolling log, because release Windows
-/// builds are linked against the `windows` subsystem and have no console.
+/// The report goes to stdout, the rolling log, and, when
+/// [`CHECK_FILE_ENV`] is set, that file. The file is not a convenience:
+///
+///   - Release Windows builds link against the `windows` subsystem and have
+///     no console at all, so stdout is discarded.
+///   - The report is written out section by section, so a hard abort during
+///     the Vulkan probe (MoltenVK has been seen to abort the process rather
+///     than return an error) still leaves the resource and font findings on
+///     disk. Buffering the whole report until the end loses exactly the
+///     information you need when something crashes.
 ///
 /// Returns `EXIT_SUCCESS` (0) or `EXIT_FAILURE` (1).
 pub fn check_runtime_files() -> i32 {
+    let out = std::env::var_os(CHECK_FILE_ENV).map(std::path::PathBuf::from);
+    // Start clean: a stale file from a previous run would otherwise be read as
+    // this run's result.
+    if let Some(ref p) = out {
+        let _ = std::fs::write(p, "");
+    }
+    let flush = |report: &str| {
+        if let Some(ref p) = out {
+            let _ = std::fs::write(p, report);
+        }
+    };
+
     let mut report = String::new();
     let mut problems = 0;
 
@@ -363,6 +391,10 @@ pub fn check_runtime_files() -> i32 {
         problems += 1;
     }
 
+    // Everything above this point is cheap and cannot crash. Get it on disk
+    // before touching a graphics driver.
+    flush(&report);
+
     // ---- Vulkan ----
     report.push_str("\nVulkan:\n");
     match unsafe { load_vulkan_entry() } {
@@ -396,6 +428,7 @@ pub fn check_runtime_files() -> i32 {
         report.push_str("\nAll checks passed\n");
     }
 
+    flush(&report);
     print!("{report}");
     tracing::info!(target: "sicompass::check", "{report}");
 

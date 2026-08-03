@@ -48,13 +48,39 @@ PREFIX="${FREETYPE_PREFIX:-$HOME/.local/freetype}"
 
 log() { echo "$@" >&2; }
 
+# freetype2.pc carries a libtool version, so this is FreeType 2.11.3-ish and
+# not, as it reads, some far-future release. Kept in one place because it is
+# the number freetype-sys actually checks.
+FLOOR="24.3.18"
+
+# Fail here rather than letting the build quietly take the vendored path and
+# produce a binary with no colour emoji, which is the failure this whole
+# script exists to prevent.
+verify() {
+    local path="$1"
+    if ! PKG_CONFIG_PATH="$path" pkg-config --exists freetype2 2>/dev/null; then
+        log "error: pkg-config cannot see freetype2 under $path"
+        log "       (is pkg-config itself installed?)"
+        exit 1
+    fi
+    local found
+    found="$(PKG_CONFIG_PATH="$path" pkg-config --modversion freetype2)"
+    if ! PKG_CONFIG_PATH="$path" pkg-config --atleast-version="$FLOOR" freetype2; then
+        log "error: freetype2.pc reports $found, below the $FLOOR floor freetype-sys checks."
+        log "       It would be ignored in favour of a vendored build without PNG support."
+        exit 1
+    fi
+    log "freetype2.pc at $path reports $found (floor $FLOOR): OK"
+}
+
 case "$(uname -s)" in
     Darwin)
         # Homebrew's freetype is 2.13+ and is built against its libpng.
         brew list freetype >/dev/null 2>&1 || brew install freetype
-        brew list pkgconf >/dev/null 2>&1 || brew install pkgconf
+        command -v pkg-config >/dev/null 2>&1 || brew install pkgconf
         ft_prefix="$(brew --prefix freetype)"
         log "Using Homebrew FreeType at $ft_prefix"
+        verify "$ft_prefix/lib/pkgconfig"
         echo "PKG_CONFIG_PATH=$ft_prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
         ;;
 
@@ -109,7 +135,7 @@ case "$(uname -s)" in
 
         pc="$PREFIX/lib/pkgconfig/freetype2.pc"
         [ -f "$pc" ] || { log "error: $pc was not produced"; exit 1; }
-        log "freetype2.pc version: $(PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" pkg-config --modversion freetype2)"
+        verify "$PREFIX/lib/pkgconfig"
         echo "PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
         ;;
 
