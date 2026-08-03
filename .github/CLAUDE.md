@@ -108,12 +108,19 @@ Shaders and fonts are now embedded (`src/sicompass/src/shaders.rs`,
     `cargo test` there fails with "The system cannot find the path specified"
     before a single test runs. Scoping or removing that runner would let
     Windows run the portable subset the macOS legs already do.
-- `release-publish.yml` creates the GitHub Release that cargo-dist cannot. The
-  `friendlyflow` org disables write permissions for workflows org-wide — an
-  org-level ceiling no repo setting can raise — so `secrets.GITHUB_TOKEN` is
-  read-only and cargo-dist's `gh release create` fails with 403. cargo-dist only
-  supports a custom token (`GH_RELEASES_TOKEN`) when publishing to an *external*
-  repo, and that path reads the target commit from a submodule we do not have, so
-  there is no supported same-repo fix. Needs the `RELEASE_TOKEN` secret; see the
-  header of that file. Note the cargo-dist `Release` run still shows red because
-  its `host` job fails — only lifting the org restriction fixes that.
+- `release-publish.yml` is a **dormant fallback**. It was written on the belief
+  that cargo-dist's own `gh release create` could not work here, because the
+  repo's `default_workflow_permissions` is `read`. The v0.1.9 release disproved
+  that: the `host` job succeeded and created the release itself. A `read`
+  *default* does not stop a workflow that asks for more, and the generated
+  `release.yml` declares `permissions: contents: write` at the top.
+
+  It also does not fire. Its `workflow_run` trigger has never once run, because
+  `release-on-tag.yml` dispatches `release.yml` on the **tag** ref and
+  `workflow_run` does not deliver for runs on non-branch refs.
+
+  So: do not expect a red `Release` run, and do not expect this workflow to
+  rescue one. If cargo-dist's `host` job ever does start failing with a 403,
+  this file is the escape hatch, but it would need a `workflow_dispatch`
+  trigger taking a run id before it could actually be used. It needs the
+  `RELEASE_TOKEN` secret, which does now exist.

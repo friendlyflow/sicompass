@@ -84,6 +84,12 @@ have. If yours does not, install your vendor's Vulkan package, for example
 `mesa-vulkan-drivers` on Debian and Ubuntu. A screen reader also needs
 `at-spi2-core` running, which the `.deb` and `.rpm` pull in for you.
 
+The `.deb`, `.rpm` and AppImage handle their own dependencies. The plain
+archive and the `curl ... | sh` installer cannot, so they additionally need
+`libpng16`, `zlib` and OpenSSL 3 present, which is the normal state of any
+desktop Linux. If sicompass exits with a message about a missing shared
+library, install those and try again.
+
 ### Checking that it worked
 
 ```bash

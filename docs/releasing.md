@@ -48,19 +48,23 @@ on `workflow_run` of the workflow named "Release" and downloads the
 `artifacts-*` from *that run*. Artifacts produced in any other run could not be
 attached to the same release.
 
-## Two things that look broken and are not
+## What actually publishes the release
 
-**The `host` job always fails.** The `friendlyflow` organisation disables write
-permissions for workflows org-wide, which no repository setting can raise, so
-`secrets.GITHUB_TOKEN` is read-only and cargo-dist's `gh release create` returns
-`403 Resource not accessible by integration`. `release-publish.yml` then does
-that final step with a scoped PAT. The Release run stays red even when
-everything worked. Only lifting the org restriction changes that.
+cargo-dist's own `host` job does, via `gh release create`. It works despite the
+repo's `default_workflow_permissions` being `read`, because that is only the
+*default*: the generated `release.yml` declares `permissions: contents: write`
+at the top and is granted it.
 
-**`RELEASE_TOKEN` must exist.** A fine-grained PAT with **Contents: read and
-write** scoped to `friendlyflow/sicompass`, stored as a repository secret.
-Without it `release-publish.yml` logs a warning and stops, and no release
-appears at all.
+`release-publish.yml` exists as a fallback for a 403 that does not currently
+happen, and it has never run. Its `workflow_run` trigger does not fire, because
+`release-on-tag.yml` dispatches `release.yml` on the **tag** ref, and
+`workflow_run` does not deliver for runs on non-branch refs. If the `host` job
+ever does start failing, that file would first need a `workflow_dispatch`
+trigger taking a run id.
+
+Earlier revisions of this document claimed the `Release` run always goes red
+and that `release-publish.yml` does the real work. The v0.1.9 release disproved
+both. Judge a release by the Releases page and the asset count either way.
 
 ## Pre-release checklist
 
