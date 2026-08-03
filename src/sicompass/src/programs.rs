@@ -803,19 +803,22 @@ pub fn apply_tabs_section(
 
     // Parse the persisted nav entries (id + active provider path) per tab,
     // dropping any whose provider index no longer exists.
-    let parsed: Vec<(IdArray, String)> = sec.get("tabs").and_then(|v| v.as_str())
+    let parsed: Vec<(IdArray, String, bool)> = sec.get("tabs").and_then(|v| v.as_str())
         .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
         .and_then(|v| match v { serde_json::Value::Array(a) => Some(a), _ => None })
         .map(|arr| arr.into_iter().filter_map(|v| {
             let obj = v.as_object()?;
             let ids = obj.get("id")?.as_array()?;
             let path = obj.get("path")?.as_str()?.to_owned();
+            // Absent in configs written by older builds — the `false` default is
+            // the ordinary "descend into the saved path" restore.
+            let on_path = obj.get("onPath").and_then(|v| v.as_bool()).unwrap_or(false);
             let mut id = IdArray::new();
             for n in ids {
                 id.push(n.as_u64()? as usize);
             }
             match id.get(0) {
-                Some(pi) if pi < provider_count && id.depth() > 0 => Some((id, path)),
+                Some(pi) if pi < provider_count && id.depth() > 0 => Some((id, path, on_path)),
                 _ => None,
             }
         }).collect())
@@ -835,17 +838,24 @@ pub fn apply_tabs_section(
         // built fresh. For each we attach the set, rebuild its saved provider
         // path, then park it back out into the tab record.
         let mut tabs: Vec<TabSnapshot> = Vec::with_capacity(parsed.len());
-        for (i, (id, path)) in parsed.into_iter().enumerate() {
+        for (i, (id, path, on_path)) in parsed.into_iter().enumerate() {
             let (cp, cf) = if i == 0 {
                 r.detach_content()
             } else {
                 build_content_set_from_names(r, &content_names)
             };
             r.attach_content(cp, cf);
-            r.rebuild_and_clamp(&path, id);
+            if on_path {
+                r.rebuild_on_path(&path, id);
+            } else {
+                r.rebuild_and_clamp(&path, id);
+            }
             let current_id = r.current_id.clone();
+            // `rebuild_on_path` moves the provider to the parent of `path`, so
+            // read the live value back rather than re-storing what was saved.
+            let provider_path = crate::app_state::active_provider_path(r);
             let (cp, cf) = r.detach_content();
-            tabs.push(TabSnapshot { current_id, provider_path: path, providers: cp, ffon: cf });
+            tabs.push(TabSnapshot { current_id, provider_path, providers: cp, ffon: cf });
         }
         r.tabs = tabs;
         // Keep `tab_timelines` parallel to `tabs` (invariant relied on by

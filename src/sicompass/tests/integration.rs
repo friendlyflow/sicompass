@@ -172,10 +172,54 @@ fn press_shift_right(r: &mut AppRenderer) { dispatch_key(r, Some(Keycode::Right)
 
 fn press_down(r: &mut AppRenderer)   { press(r, Keycode::Down); }
 fn press_up(r: &mut AppRenderer)     { press(r, Keycode::Up); }
+/// Register a terminal provider and swap it into its shell view.
+///
+/// The terminal opens on a folder listing; `:` is what turns the list into the
+/// shell. Tests take that real path rather than poking provider internals,
+/// because pressing `:` is also what spawns the PTY and therefore what makes
+/// the `+i` live input slot exist at all.
+///
+/// `:` opens the shell in the folder under the cursor, so this descends one
+/// level past the provider root. Returns the id of the live input slot, which
+/// is where the cursor is left.
+fn register_terminal_in_shell(renderer: &mut AppRenderer) -> sicompass_sdk::ffon::IdArray {
+    register(renderer, sicompass_sdk::create_provider_by_name("terminal").unwrap());
+    sicompass::list::create_list_current_layer(renderer);
+    press_right(renderer);
+    sicompass::handlers::handle_colon(renderer);
+    renderer.current_id.clone()
+}
+
+/// Read the live input slot's key (the synthesized prompt plus its `<input>`).
+fn slot_key_at(renderer: &AppRenderer, slot_id: &sicompass_sdk::ffon::IdArray) -> String {
+    let idx = slot_id.last().unwrap();
+    sicompass_sdk::ffon::get_ffon_at_id(&renderer.ffon, slot_id)
+        .and_then(|arr| arr.get(idx))
+        .and_then(|e| e.as_obj())
+        .expect("slot id should resolve to the +i Obj")
+        .key
+        .clone()
+}
+
+/// Replace the live input slot's children (the real on-disk recall history is
+/// unpredictable in tests) with the given `<button>` entries.
+fn set_history_buttons(renderer: &mut AppRenderer, slot_id: &sicompass_sdk::ffon::IdArray, cmds: &[&str]) {
+    let idx = slot_id.last().unwrap();
+    let slot = sicompass::state::navigate_to_slice_pub(&mut renderer.ffon, slot_id)
+        .and_then(|arr| arr.get_mut(idx))
+        .and_then(|e| e.as_obj_mut())
+        .expect("cursor should be on the +i slot");
+    slot.children.clear();
+    for cmd in cmds {
+        slot.children.push(FfonElement::new_str(format!("<button>{cmd}</button>{cmd}")));
+    }
+}
+
 fn press_right(r: &mut AppRenderer)  { press(r, Keycode::Right); }
 fn press_left(r: &mut AppRenderer)   { press(r, Keycode::Left); }
 fn press_enter(r: &mut AppRenderer)  { press(r, Keycode::Return); }
 fn press_escape(r: &mut AppRenderer) { press(r, Keycode::Escape); }
+fn press_colon(r: &mut AppRenderer)  { press(r, Keycode::Colon); }
 fn press_tab(r: &mut AppRenderer)    { press(r, Keycode::Tab); }
 
 fn type_text(r: &mut AppRenderer, text: &str) {
@@ -7521,7 +7565,7 @@ fn terminal_auto_enters_and_leaves_dashboard_on_alt_screen() {
 
     ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register(&mut renderer, sicompass_sdk::create_provider_by_name("terminal").unwrap());
+    register_terminal_in_shell(&mut renderer);
     sicompass::list::create_list_current_layer(&mut renderer);
 
     // Sanity: terminal is the active provider (idx 0) and we're not in dashboard.
@@ -7578,7 +7622,7 @@ fn auto_leave_lands_in_general_mode_even_if_user_was_in_insert() {
 
     ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register(&mut renderer, sicompass_sdk::create_provider_by_name("terminal").unwrap());
+    register_terminal_in_shell(&mut renderer);
     sicompass::list::create_list_current_layer(&mut renderer);
 
     // Simulate "user was in Insert mode with a stale buffer".
@@ -7631,7 +7675,7 @@ fn terminal_manual_d_keypress_is_blocked() {
     // forwarded to the program).
     ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register(&mut renderer, sicompass_sdk::create_provider_by_name("terminal").unwrap());
+    register_terminal_in_shell(&mut renderer);
     sicompass::list::create_list_current_layer(&mut renderer);
 
     let term_idx = renderer.providers.iter().position(|p| p.name() == "terminal").unwrap();
@@ -7652,7 +7696,7 @@ fn esc_in_interactive_dashboard_does_not_exit() {
     // dashboard must stay open so the program receives the byte.
     ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register(&mut renderer, sicompass_sdk::create_provider_by_name("terminal").unwrap());
+    register_terminal_in_shell(&mut renderer);
     sicompass::list::create_list_current_layer(&mut renderer);
 
     let term_idx = renderer.providers.iter().position(|p| p.name() == "terminal").unwrap();
@@ -7678,7 +7722,7 @@ fn ctrl_c_in_interactive_dashboard_does_not_exit() {
     // failed silently.
     ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register(&mut renderer, sicompass_sdk::create_provider_by_name("terminal").unwrap());
+    register_terminal_in_shell(&mut renderer);
     sicompass::list::create_list_current_layer(&mut renderer);
 
     let term_idx = renderer.providers.iter().position(|p| p.name() == "terminal").unwrap();
@@ -7695,6 +7739,397 @@ fn ctrl_c_in_interactive_dashboard_does_not_exit() {
 }
 
 // ---------------------------------------------------------------------------
+// Terminal: browse folders, then `:` for a shell in the folder you picked
+// ---------------------------------------------------------------------------
+
+/// Register a terminal whose browse view is re-rooted at `path`, so the listing
+/// is a known set of directories instead of whatever `/` happens to hold.
+fn register_terminal_rooted_at(renderer: &mut AppRenderer, path: &std::path::Path) {
+    register(renderer, sicompass_sdk::create_provider_by_name("terminal").unwrap());
+    renderer.providers[0].set_current_path(path.to_str().unwrap());
+    let children = renderer.providers[0].fetch();
+    renderer.ffon[0].as_obj_mut().unwrap().children = children;
+    sicompass::list::create_list_current_layer(renderer);
+}
+
+#[test]
+fn terminal_opens_on_a_folder_listing() {
+    // The provider root's children are directories, not scrollback — and no
+    // shell has been started, because `:` is what spawns it.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    std::fs::create_dir(root.join("workspace")).unwrap();
+    std::fs::write(root.join("notes.txt"), "x").unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_terminal_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+
+    let labels: Vec<&str> = renderer.total_list.iter().map(|i| i.label.as_str()).collect();
+    // Directories render as plain `+` (navigable, not renameable); the file is
+    // not listed at all.
+    assert_eq!(labels, vec!["+ workspace"], "got {labels:?}");
+    assert_eq!(renderer.providers[0].process_id(), None, "browsing spawns no PTY");
+}
+
+#[test]
+fn terminal_colon_opens_a_shell_in_the_focused_folder() {
+    // One keypress: put the cursor on a folder and press `:`. No Right first.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let ws = root.join("workspace");
+    std::fs::create_dir(&ws).unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_terminal_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);              // into the provider, cursor on `workspace`
+    assert_eq!(renderer.providers[0].current_path(), root.to_str().unwrap());
+
+    press_colon(&mut renderer);
+
+    // `:` is a view swap, never the command palette, for this provider.
+    assert_eq!(renderer.coordinate, Coordinate::General);
+    assert_eq!(
+        renderer.providers[0].current_path(),
+        ws.to_str().unwrap(),
+        "`:` descends into the focused folder on the way in",
+    );
+    let last = renderer.total_list.last().expect("shell list should not be empty");
+    assert!(last.label.starts_with("+i "), "expected the input slot; got {:?}", last.label);
+    assert!(
+        last.label.contains("workspace$ ") || last.label.contains("workspace> "),
+        "prompt should sit in the focused folder; got {:?}",
+        last.label,
+    );
+    assert!(renderer.providers[0].process_id().is_some(), "`:` spawns the PTY");
+}
+
+/// Close and cold-start: map the live navigation through the real persistence
+/// rules, then replay it against a freshly constructed provider set.
+fn restart_terminal(renderer: &AppRenderer) -> AppRenderer {
+    let nav = sicompass::handlers::restorable_nav(
+        &renderer.providers,
+        &renderer.current_id,
+        renderer.providers[0].current_path(),
+    );
+    let mut restarted = AppRenderer::new();
+    register(
+        &mut restarted,
+        sicompass_sdk::create_provider_by_name("terminal").unwrap(),
+    );
+    if nav.on_path {
+        restarted.rebuild_on_path(&nav.path, nav.current_id);
+    } else {
+        restarted.rebuild_and_clamp(&nav.path, nav.current_id);
+    }
+    sicompass::list::create_list_current_layer(&mut restarted);
+    restarted
+}
+
+#[test]
+fn terminal_restart_with_a_shell_open_lands_on_the_focused_folder() {
+    // Closing the app in the shell view and reopening used to come back with
+    // the cursor *inside* the folder the shell ran in, so `:` reopened a shell
+    // in one of its subfolders. The shell view is not restorable (the process
+    // dies with the app), so what comes back is the folder entry itself.
+    //
+    // `workspace` deliberately has a subfolder: without one the restore clamp
+    // would collapse the level anyway and hide the bug.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let ws = root.join("workspace");
+    std::fs::create_dir(&ws).unwrap();
+    std::fs::create_dir(ws.join("inner")).unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_terminal_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    press_colon(&mut renderer);
+    assert_eq!(renderer.providers[0].current_path(), ws.to_str().unwrap());
+
+    let restarted = restart_terminal(&renderer);
+    assert!(!restarted.total_list.is_empty(), "must not land on an empty list");
+    assert_eq!(
+        restarted.total_list.get(restarted.list_index).map(|i| i.label.as_str()),
+        Some("+ workspace"),
+        "back on the folder the shell was running in",
+    );
+    assert_eq!(
+        restarted.providers[0].current_path(),
+        root.to_str().unwrap(),
+        "path in step with the cursor",
+    );
+
+    // And `:` reopens the shell where it was, not in a subfolder of it.
+    let mut restarted = restarted;
+    press_colon(&mut restarted);
+    assert_eq!(
+        restarted.providers[0].current_path(),
+        ws.to_str().unwrap(),
+        "`:` after a restart reopens the shell in the same folder",
+    );
+}
+
+#[test]
+fn terminal_restart_follows_a_cd_typed_before_closing() {
+    // The saved folder is wherever the shell ended up, not where `:` was
+    // pressed — and `cd` can jump clean across the filesystem, to somewhere the
+    // user never browsed, so the restore has to find it from the root by name.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let ws = root.join("workspace");
+    let other = root.join("elsewhere");
+    std::fs::create_dir(&ws).unwrap();
+    std::fs::create_dir(&other).unwrap();
+    std::fs::create_dir(other.join("inner")).unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_terminal_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    press_down(&mut renderer);   // sorted: `elsewhere` leads, `workspace` follows
+    press_colon(&mut renderer);
+    assert_eq!(renderer.providers[0].current_path(), ws.to_str().unwrap());
+
+    // Walk the shell somewhere else, then close without leaving the shell.
+    sicompass::handlers::handle_i(&mut renderer);
+    type_text(&mut renderer, &format!("cd {}", other.display()));
+    press_enter(&mut renderer);
+    assert_eq!(
+        renderer.providers[0].current_path(),
+        other.to_str().unwrap(),
+        "the saved path follows the cd",
+    );
+
+    let mut restarted = restart_terminal(&renderer);
+    assert_eq!(
+        restarted.total_list.get(restarted.list_index).map(|i| i.label.as_str()),
+        Some("+ elsewhere"),
+        "restart lands on the folder the shell was left in",
+    );
+
+    press_colon(&mut restarted);
+    assert_eq!(
+        restarted.providers[0].current_path(),
+        other.to_str().unwrap(),
+        "`:` reopens the shell there, not in the folder it started in",
+    );
+}
+#[test]
+fn terminal_escape_follows_a_cd_typed_in_the_shell() {
+    // `cd` moves the working directory out from under the folder `:` was
+    // pressed on, so the listing Escape returns to has to follow it.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let ws = root.join("workspace");
+    let other = root.join("elsewhere");
+    std::fs::create_dir(&ws).unwrap();
+    std::fs::create_dir(&other).unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_terminal_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    // The listing is sorted, so `elsewhere` leads and `workspace` follows.
+    press_down(&mut renderer);
+    press_colon(&mut renderer);
+    assert_eq!(renderer.providers[0].current_path(), ws.to_str().unwrap());
+
+    // Type a `cd` at the prompt and run it, as the user would.
+    sicompass::handlers::handle_i(&mut renderer);
+    type_text(&mut renderer, &format!("cd {}", other.display()));
+    press_enter(&mut renderer);
+
+    press_escape(&mut renderer);
+
+    assert_eq!(
+        renderer.providers[0].current_path(),
+        root.to_str().unwrap(),
+        "back in the parent of where the shell ended up",
+    );
+    assert_eq!(
+        renderer.total_list.get(renderer.list_index).map(|i| i.label.as_str()),
+        Some("+ elsewhere"),
+        "cursor follows the cd, not the folder `:` was pressed on",
+    );
+}
+
+#[test]
+fn terminal_folder_without_subfolders_shows_no_insert_placeholder() {
+    // The folder tree is read-only, so an `i` placeholder would offer a create
+    // the provider always refuses. Such a folder is simply not navigable.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let ws = root.join("workspace");
+    std::fs::create_dir(&ws).unwrap();
+    std::fs::write(ws.join("notes.txt"), "x").unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_terminal_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);              // into the provider
+    let before = renderer.current_id.clone();
+
+    press_right(&mut renderer);              // `workspace` has no subfolders
+
+    assert_eq!(renderer.current_id, before, "Right on it does nothing");
+    let labels: Vec<&str> = renderer.total_list.iter().map(|i| i.label.as_str()).collect();
+    assert_eq!(labels, vec!["+ workspace"], "no `i` placeholder anywhere");
+    assert_eq!(
+        renderer.providers[0].current_path(),
+        root.to_str().unwrap(),
+        "the refused descent must not leave the path pushed",
+    );
+
+    // `:` still opens a shell in it — that never needed the folder to have contents.
+    press_colon(&mut renderer);
+    assert_eq!(renderer.providers[0].current_path(), ws.to_str().unwrap());
+    assert!(renderer.total_list.last().unwrap().label.starts_with("+i "));
+}
+
+#[test]
+fn terminal_colon_on_an_empty_folder_opens_a_shell_where_it_stands() {
+    // Nothing to descend into (the app seeds an `i` placeholder), so the shell
+    // opens in the directory being listed rather than doing nothing.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_terminal_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    assert_eq!(renderer.total_list.len(), 1, "empty dir shows the `i` placeholder");
+
+    press_colon(&mut renderer);
+
+    assert_eq!(renderer.providers[0].current_path(), root.to_str().unwrap());
+    assert!(renderer.total_list.last().unwrap().label.starts_with("+i "));
+}
+
+#[test]
+fn terminal_escape_returns_to_the_folder_listing() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let ws = root.join("workspace");
+    std::fs::create_dir(&ws).unwrap();
+    std::fs::create_dir(ws.join("sub")).unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_terminal_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    press_colon(&mut renderer);              // shell, running in `workspace`
+    assert!(renderer.total_list.last().unwrap().label.starts_with("+i "));
+    let pid = renderer.providers[0].process_id();
+
+    press_escape(&mut renderer);
+
+    // Escape undoes the `:`: back to the listing `:` was pressed in, with the
+    // cursor on the folder itself — not inside it, where there may be nothing.
+    let labels: Vec<&str> = renderer.total_list.iter().map(|i| i.label.as_str()).collect();
+    assert_eq!(labels, vec!["+ workspace"], "Escape backs out to the folder");
+    assert_eq!(
+        renderer.total_list.get(renderer.list_index).map(|i| i.label.as_str()),
+        Some("+ workspace"),
+        "cursor lands back on the folder the shell was opened from",
+    );
+    assert_eq!(renderer.providers[0].current_path(), root.to_str().unwrap());
+    assert_eq!(
+        renderer.providers[0].process_id(),
+        pid,
+        "leaving the view keeps the shell running",
+    );
+
+    // And `:` on it again returns to the same session, not a new shell.
+    press_colon(&mut renderer);
+    assert!(renderer.total_list.last().unwrap().label.starts_with("+i "));
+    assert_eq!(renderer.providers[0].process_id(), pid);
+    assert_eq!(renderer.providers[0].current_path(), ws.to_str().unwrap());
+}
+
+#[test]
+fn terminal_left_is_inert_in_the_shell_and_escape_pops_the_path() {
+    // Left must not leave the shell — that is Escape's job alone. Consuming it
+    // is also what keeps the browse path honest: `pop_path` is inert in the
+    // shell view, so popping a level would strand `browse_path` one directory
+    // deep and the next descent would double the segment (`/a/ws/ws`).
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let ws = root.join("workspace");
+    std::fs::create_dir(&ws).unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_terminal_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);              // into the provider, cursor on `workspace`
+    press_colon(&mut renderer);              // descends + shell, running in `workspace`
+    assert_eq!(renderer.providers[0].current_path(), ws.to_str().unwrap());
+    let in_shell = renderer.current_id.clone();
+
+    press_left(&mut renderer);
+
+    assert_eq!(renderer.current_id, in_shell, "Left is a no-op in the shell");
+    assert_eq!(renderer.providers[0].current_path(), ws.to_str().unwrap());
+    assert!(renderer.total_list.last().unwrap().label.starts_with("+i "));
+
+    // Escape is what leaves, and the path pops with it.
+    press_escape(&mut renderer);
+    assert_eq!(renderer.providers[0].current_path(), root.to_str().unwrap());
+    let labels: Vec<&str> = renderer.total_list.iter().map(|i| i.label.as_str()).collect();
+    assert_eq!(labels, vec!["+ workspace"]);
+
+    // And `:` again lands on the real directory, not a doubled one.
+    press_colon(&mut renderer);
+    assert_eq!(renderer.providers[0].current_path(), ws.to_str().unwrap());
+}
+#[test]
+fn terminal_history_children_are_still_reachable_and_escapable() {
+    // Inside the input slot's history the "back out of the shell" shortcuts must
+    // stand down, or Left would exit the shell instead of returning to the input
+    // line the history belongs to.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    std::fs::create_dir(root.join("workspace")).unwrap();
+
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register_terminal_rooted_at(&mut renderer, &root);
+    press_right(&mut renderer);
+    press_colon(&mut renderer);
+    let slot_id = renderer.current_id.clone();
+
+    // Give the slot a history button so descending is possible.
+    set_history_buttons(&mut renderer, &slot_id, &["ls"]);
+    press_right(&mut renderer);
+    assert_eq!(renderer.current_id.depth(), slot_id.depth() + 1);
+    assert_eq!(renderer.total_list.len(), 1, "inside the history list");
+
+    press_left(&mut renderer);
+    assert_eq!(renderer.current_id, slot_id, "back to the input line");
+    assert!(
+        renderer.total_list.last().unwrap().label.starts_with("+i "),
+        "still in the shell view",
+    );
+}
+
+#[test]
+fn colon_still_opens_the_command_palette_for_other_providers() {
+    // The terminal branch in `handle_colon` must not leak to anyone else.
+    ensure_builtins();
+    let mut renderer = AppRenderer::new();
+    register(&mut renderer, sicompass_sdk::create_provider_by_name("filebrowser").unwrap());
+    sicompass::list::create_list_current_layer(&mut renderer);
+    press_right(&mut renderer);
+
+    press_colon(&mut renderer);
+
+    assert_eq!(renderer.coordinate, Coordinate::Command);
+}
+
+// ---------------------------------------------------------------------------
 // `+i` terminal live input slot with `<button>` history children
 // ---------------------------------------------------------------------------
 
@@ -7705,10 +8140,8 @@ fn terminal_input_slot_renders_as_plus_i() {
     // the `+i` prefix.
     ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register(&mut renderer, sicompass_sdk::create_provider_by_name("terminal").unwrap());
-    sicompass::list::create_list_current_layer(&mut renderer);
-    // Descend into the terminal provider.
-    press_right(&mut renderer);
+    // Descend into the terminal provider and press `:` to reach the shell.
+    register_terminal_in_shell(&mut renderer);
 
     let last = renderer.total_list.last().expect("terminal list should not be empty");
     assert!(last.label.starts_with("+i "),
@@ -7722,34 +8155,21 @@ fn enter_on_history_button_fills_input() {
     // re-fetch (the provider persists it as `pending_input`).
     ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register(&mut renderer, sicompass_sdk::create_provider_by_name("terminal").unwrap());
+    let slot_id = register_terminal_in_shell(&mut renderer);
+    set_history_buttons(&mut renderer, &slot_id, &["git status"]);
 
-    // Replace the `+i` slot's children (real on-disk recall history is
-    // unpredictable here) with a single known `<button>` entry at index 0.
-    {
-        let term = renderer.ffon[0].as_obj_mut().unwrap();
-        let slot = term.children.last_mut().unwrap().as_obj_mut()
-            .expect("trailing terminal element is the +i Obj");
-        slot.children.clear();
-        slot.children.push(FfonElement::new_str(
-            "<button>git status</button>git status",
-        ));
-    }
-    // Focus that child: [terminal, +i slot 0, child 0].
-    let mut id = sicompass_sdk::ffon::IdArray::new();
-    id.push(0);
-    id.push(0);
+    // Focus that child, one level inside the slot.
+    let mut id = slot_id.clone();
     id.push(0);
     renderer.current_id = id;
     sicompass::list::create_list_current_layer(&mut renderer);
 
     sicompass::handlers::handle_enter_general(&mut renderer);
 
-    // Focus moved onto the `+i` slot itself (depth 2), still General mode.
-    assert_eq!(renderer.current_id.depth(), 2);
+    // Focus moved back onto the `+i` slot itself, still General mode.
+    assert_eq!(renderer.current_id, slot_id);
     assert_eq!(renderer.coordinate, Coordinate::General);
-    let slot_key = renderer.ffon[0].as_obj().unwrap()
-        .children[0].as_obj().unwrap().key.clone();
+    let slot_key = slot_key_at(&renderer, &slot_id);
     assert!(slot_key.contains("<input>git status</input>"),
         "slot <input> should hold the picked command; got {slot_key:?}");
 
@@ -7766,23 +8186,16 @@ fn general_enter_on_live_input_slot_does_not_descend_into_history() {
     // navigate into the history buttons (that is what Right arrow does).
     ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register(&mut renderer, sicompass_sdk::create_provider_by_name("terminal").unwrap());
-
+    let slot_id = register_terminal_in_shell(&mut renderer);
     // Give the slot a history button so descending *would* be possible.
-    {
-        let term = renderer.ffon[0].as_obj_mut().unwrap();
-        term.children.last_mut().unwrap().as_obj_mut().unwrap()
-            .children.push(FfonElement::new_str("<button>ls</button>ls"));
-    }
-    let mut id = sicompass_sdk::ffon::IdArray::new();
-    id.push(0);
-    id.push(0);
-    renderer.current_id = id;
+    set_history_buttons(&mut renderer, &slot_id, &["ls"]);
     sicompass::list::create_list_current_layer(&mut renderer);
 
     sicompass::handlers::handle_enter_general(&mut renderer);
 
-    assert_eq!(renderer.current_id.depth(), 2,
+    // Depth, not the exact id: committing appends a scrollback entry, which
+    // shifts the slot's index within its own level.
+    assert_eq!(renderer.current_id.depth(), slot_id.depth(),
         "General-mode Enter on the +i slot must not descend into history");
 }
 
@@ -7792,19 +8205,11 @@ fn search_enter_on_history_button_fills_input() {
     // behaves like General-mode Enter: it fills the slot's <input>.
     ensure_builtins();
     let mut renderer = AppRenderer::new();
-    register(&mut renderer, sicompass_sdk::create_provider_by_name("terminal").unwrap());
+    let slot_id = register_terminal_in_shell(&mut renderer);
+    set_history_buttons(&mut renderer, &slot_id, &["git log"]);
 
-    {
-        let term = renderer.ffon[0].as_obj_mut().unwrap();
-        let slot = term.children.last_mut().unwrap().as_obj_mut()
-            .expect("trailing terminal element is the +i Obj");
-        slot.children.clear();
-        slot.children.push(FfonElement::new_str("<button>git log</button>git log"));
-    }
     // Focus the history button and build its list layer.
-    let mut id = sicompass_sdk::ffon::IdArray::new();
-    id.push(0);
-    id.push(0);
+    let mut id = slot_id.clone();
     id.push(0);
     renderer.current_id = id;
     sicompass::list::create_list_current_layer(&mut renderer);
@@ -7817,9 +8222,8 @@ fn search_enter_on_history_button_fills_input() {
     press_enter(&mut renderer);
 
     assert_eq!(renderer.coordinate, Coordinate::General, "search mode should exit");
-    assert_eq!(renderer.current_id.depth(), 2, "focus moved onto the +i slot");
-    let slot_key = renderer.ffon[0].as_obj().unwrap()
-        .children[0].as_obj().unwrap().key.clone();
+    assert_eq!(renderer.current_id, slot_id, "focus moved onto the +i slot");
+    let slot_key = slot_key_at(&renderer, &slot_id);
     assert!(slot_key.contains("<input>git log</input>"),
         "search Enter should fill the +i <input>; got {slot_key:?}");
 }

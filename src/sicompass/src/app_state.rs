@@ -943,6 +943,31 @@ impl AppRenderer {
         self.rebuild_and_clamp(&provider_path, current_id);
     }
 
+    /// Restore a tab by putting the cursor **on** `path` rather than inside it,
+    /// rebuilding the tree from the filesystem root to locate it by name.
+    ///
+    /// Used for a terminal saved with a shell open. The shell level cannot come
+    /// back, and the folder it was running in need not be anywhere in the tree
+    /// the user browsed — a `cd` can jump clean across the filesystem — so the
+    /// ordinary "descend the saved path" restore has nothing to work from.
+    ///
+    /// Falls back to [`Self::rebuild_and_clamp`] if the path cannot be walked,
+    /// e.g. a directory removed between sessions.
+    pub fn rebuild_on_path(&mut self, path: &str, current_id: IdArray) {
+        self.current_id = current_id;
+        if let Some(pi) = self.current_id.get(0) {
+            if pi < self.providers.len() && pi < self.ffon.len() {
+                self.providers[pi].set_current_path(path);
+                if crate::provider::rebuild_path_from_root(self) {
+                    self.list_index = self.current_id.last().unwrap_or(0);
+                    return;
+                }
+            }
+        }
+        let id = self.current_id.clone();
+        self.rebuild_and_clamp(path, id);
+    }
+
     /// Deep-rebuild the provider tree at `provider_path` (if it differs from the
     /// provider's current path) and set `self.current_id` to `current_id`
     /// clamped to the rebuilt tree.
@@ -971,15 +996,45 @@ impl AppRenderer {
         // `current_id.last()` into `list_index` (see view.rs after a tick)
         // would leave focus on a non-existent row.
         let mut current_id = current_id;
+        let restored_provider = current_id.get(0);
+        let restored_depth = current_id.depth();
         // Pop trailing indices while the path no longer resolves through the
         // rebuilt FFON tree — handles providers whose tree shrinks at any
         // depth after restart, e.g. the webbrowser, which does not persist
         // its loaded page so a cursor saved inside the previous page tree
         // must collapse back onto the URL bar.
+        //
+        // A level that resolves but is *empty* is popped too. It would leave
+        // the cursor on a list with no rows, which renders blank and announces
+        // nothing — the user lands in a void with no way to tell where they
+        // are. Popping puts them on the parent entry they were inside, which
+        // is always a real, speakable row. The terminal reaches this every time
+        // it is closed with a shell open: the shell view is not persisted, so
+        // the saved cursor comes back pointing inside a folder that may have no
+        // subfolders to list.
         while current_id.depth() > 0
-            && sicompass_sdk::ffon::get_ffon_at_id(&self.ffon, &current_id).is_none()
+            && sicompass_sdk::ffon::get_ffon_at_id(&self.ffon, &current_id)
+                .is_none_or(|slice| slice.is_empty())
         {
             current_id.pop();
+        }
+        // Keep the provider path in step with the cursor. `deep_rebuild_provider_tree`
+        // deliberately leaves it at the full saved path to match the *saved* depth,
+        // so every level the clamp just dropped is a path segment with no level
+        // left in the tree. Leaving them on desyncs the two: the next descent
+        // pushes a segment that is already there, and the terminal would open a
+        // shell in `…/workspace/workspace` — which does not exist, so the shell
+        // falls back to the home directory.
+        //
+        // Only for providers whose path segments map one-to-one onto tree levels
+        // (`path_is_filesystem`). Others build their path by other rules, and
+        // popping it here would be guesswork.
+        if let Some(pi) = restored_provider {
+            if pi < self.providers.len() && self.providers[pi].path_is_filesystem() {
+                for _ in 0..restored_depth.saturating_sub(current_id.depth()) {
+                    self.providers[pi].pop_path();
+                }
+            }
         }
         if let Some(parent_slice) =
             sicompass_sdk::ffon::get_ffon_at_id(&self.ffon, &current_id)

@@ -3,6 +3,7 @@
 # keep the chord literal (keys names don't translate) and only swap the verb.
 
 hint-esc-back = Esc    Back
+hint-esc-folders = Esc    Folders
 
 hint-up-previous = Up     Previous
 hint-up-prev-match = Up     Prev match
@@ -61,6 +62,7 @@ hint-a-append = A      Append
 hint-d-dashboard = D      Dashboard
 hint-s-scroll = S      Scroll
 hint-command = :      Command
+hint-shell = :      Shell
 
 hint-ctrl-a-insert-after = Ctrl+A Insert after
 hint-ctrl-a-select-all = Ctrl+A Select all

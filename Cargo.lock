@@ -4518,6 +4518,7 @@ dependencies = [
 name = "sicompass-terminal"
 version = "0.1.8"
 dependencies = [
+ "natord",
  "sicompass-sdk",
  "sicompass-shell",
  "tempfile",
