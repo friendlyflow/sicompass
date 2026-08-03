@@ -51,16 +51,23 @@ jobs:
           # `cargo test` fails with "The system cannot find the path
           # specified" before any test executes. Removing or scoping that
           # runner would let Windows run these too.
+          # `triple` makes the build pass an explicit `--target`, matching how
+          # cargo-dist builds the release. Without it CI built for the host and
+          # missed a macOS link failure that only appears with `--target`, which
+          # then surfaced during an actual release. CI has to build the way the
+          # release does or it is not testing the release.
           - name: macos aarch64
             os: macos-14
             flags: ""
             full: false
             subset: true
+            triple: aarch64-apple-darwin
           - name: macos x86_64
             os: macos-15-intel
             flags: ""
             full: false
             subset: true
+            triple: x86_64-apple-darwin
           - name: windows x86_64
             os: windows-2022
             flags: ""
@@ -146,9 +153,20 @@ jobs:
         if: matrix.subset
         run: "cargo test -p sicompass --lib --features bundled-sdl3 -- shaders:: fonts:: resources::"
 
+      # `--target` where the matrix names one, so this matches the release.
+      # It is the host triple in both macOS cases, so nothing needs installing,
+      # but passing it explicitly is what reproduces the release's link line.
       - name: Build
         if: ${{ !matrix.full }}
-        run: cargo build -p sicompass --release --features bundled-sdl3
+        shell: bash
+        run: |
+          if [ -n "${{ matrix.triple }}" ]; then
+            cargo build -p sicompass --release --features bundled-sdl3 --target "${{ matrix.triple }}"
+            echo "SICOMPASS_BIN=target/${{ matrix.triple }}/release/sicompass" >> "$GITHUB_ENV"
+          else
+            cargo build -p sicompass --release --features bundled-sdl3
+            echo "SICOMPASS_BIN=target/release/sicompass" >> "$GITHUB_ENV"
+          fi
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets --features bundled-sdl3 ${{ matrix.flags }}
@@ -178,7 +196,7 @@ jobs:
           # `--check` exits non-zero when anything is wrong, including Vulkan,
           # which is expected on a headless runner. The emoji line is what
           # this step judges.
-          ./target/release/sicompass --check || true
+          "$SICOMPASS_BIN" --check || true
           echo "--- check report ---"
           cat check.txt || true
           if ! grep -q 'OK .*colour emoji' check.txt; then
@@ -193,7 +211,9 @@ jobs:
       - name: Vulkan smoke check (macOS)
         if: runner.os == 'macOS'
         continue-on-error: true
-        run: ./target/release/sicompass --check
+        shell: bash
+        run: |
+          "$SICOMPASS_BIN" --check
 
   # A stale generated release.yml is currently only discovered during a tag
   # push, which is the worst possible moment.
