@@ -90,9 +90,15 @@ have. If yours does not, install your vendor's Vulkan package, for example
 sicompass --check
 ```
 
-That reports where sicompass found its resources and which graphics devices it
-can see. It is the first thing to run, and to paste into a bug report, if the
-app does not start.
+That reports where sicompass found its resources, whether colour emoji can
+render, and which graphics devices it can see. It is the first thing to run,
+and to paste into a bug report, if the app does not start.
+
+On Windows the app has no console, so send the report to a file instead:
+
+```powershell
+$env:SICOMPASS_CHECK_FILE="check.txt"; sicompass --check; type check.txt
+```
 
 Every release also ships `SHA256SUMS` files next to the packages, so you can
 verify a download before installing it.

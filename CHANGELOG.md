@@ -45,6 +45,15 @@ even after loading.
   flag once after downloading: `xattr -dr com.apple.quarantine
   /Applications/sicompass.app`
 
+### Colour emoji now render
+
+Emoji in chat and email content were silently invisible on every shipped
+build. FreeType only decodes Noto Color Emoji's PNG bitmap strikes when it is
+compiled with PNG support, and the release builds were falling back to a
+vendored FreeType that is not, so glyphs came back zero-sized rather than as
+an error. All three platforms now build against a PNG-capable FreeType, and
+`sicompass --check` reports whether yours does.
+
 ### Changed
 
 - The default monospace face is now DejaVu Sans Mono. The previous face was
@@ -53,9 +62,12 @@ even after loading.
   interface was already being drawn from the DejaVu fallback.
 - The application has an icon, on every platform.
 - Windows release builds no longer open a console window behind the app.
-- `sicompass --check` now reports where resources resolved to and which Vulkan
-  devices are visible, instead of checking for files that no longer exist on
-  disk. It is the first thing to run when the app will not start.
+- `sicompass --check` now reports where resources resolved to, whether colour
+  emoji can render, and which Vulkan devices are visible, instead of checking
+  for files that no longer exist on disk. It is the first thing to run when
+  the app will not start. Set `SICOMPASS_CHECK_FILE` to also write the report
+  to a file, which is the only way to read it on Windows, where the app has no
+  console.
 - `No suitable Vulkan GPU found` now says how many devices were enumerated,
   which distinguishes a driver problem from a capability problem.
 
