@@ -11,7 +11,7 @@ name: Native packages
 # would be no supported way to attach them to the same release.
 #
 # So cargo-dist calls this one from inside the Release run, via
-# `build-local-jobs = ["./native-packages"]` in dist-workspace.toml. Anything
+# `local-artifacts-jobs = ["./native-packages"]` in dist-workspace.toml. Anything
 # uploaded here under a name starting with `artifacts-` is picked up by
 # release-publish.yml with no changes on its side.
 #
@@ -77,6 +77,8 @@ jobs:
         run: ./scripts/setup-freetype.sh >> "$GITHUB_ENV"
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ft${{ hashFiles('scripts/setup-freetype.sh') }}
 
       - name: Install packaging tools
         run: |
@@ -90,10 +92,14 @@ jobs:
         # Catches a binary that cannot find its own resources, or was built
         # against a FreeType without PNG support, before that becomes three
         # broken packages. There is no GPU on the runner, so Vulkan is
-        # expected to fail and the exit code is ignored.
+        # expected to fail and the exit code is ignored. The report is read
+        # from a file rather than stdout so a driver that aborts the process
+        # does not take the findings with it.
+        env:
+          SICOMPASS_CHECK_FILE: check.txt
         run: |
-          set -o pipefail
-          ./target/release/sicompass --check 2>&1 | tee check.txt || true
+          ./target/release/sicompass --check || true
+          cat check.txt || true
           grep -q 'OK .*colour emoji' check.txt \
             || { echo "::error::built without PNG-capable FreeType"; exit 1; }
 
@@ -159,6 +165,8 @@ jobs:
         run: ./scripts/setup-freetype.sh >> "$GITHUB_ENV"
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ft${{ hashFiles('scripts/setup-freetype.sh') }}
 
       - name: Install cargo-packager
         run: cargo install cargo-packager --locked --version "$CARGO_PACKAGER_VERSION"
