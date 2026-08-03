@@ -130,6 +130,18 @@ jobs:
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
             echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           fi
+      - name: "Provide a PNG-capable FreeType (Linux and macOS)"
+        if: "runner.os != 'Windows'"
+        run: "./scripts/setup-freetype.sh >> \"$GITHUB_ENV\""
+        shell: "bash"
+      - name: "Provide a PNG-capable FreeType (Windows)"
+        if: "runner.os == 'Windows'"
+        run: "./scripts/setup-freetype.ps1"
+        shell: "pwsh"
+      - name: "Point ash at Homebrew MoltenVK"
+        if: "runner.os == 'macOS'"
+        run: "echo \"DYLD_FALLBACK_LIBRARY_PATH=$(brew --prefix)/lib:${DYLD_FALLBACK_LIBRARY_PATH:-}\" >> \"$GITHUB_ENV\""
+        shell: "bash"
       - name: Install dist
         run: ${{ matrix.install_dist.run }}
       # Get the dist-manifest

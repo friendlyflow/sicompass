@@ -62,6 +62,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             cmake pkg-config \
+            libpng-dev zlib1g-dev \
             libx11-dev libxext-dev libxcursor-dev libxi-dev libxrandr-dev \
             libxss-dev libxfixes-dev libxrender-dev libxtst-dev libxcb1-dev \
             libwayland-dev libxkbcommon-dev libdecor-0-dev \
@@ -69,6 +70,11 @@ jobs:
             libpulse-dev libasound2-dev \
             libdbus-1-dev libatspi2.0-dev libssl-dev \
             desktop-file-utils file
+
+      # Before any cargo invocation. Without it the packaged binary falls back
+      # to a FreeType without PNG support and renders no colour emoji.
+      - name: Provide a PNG-capable FreeType
+        run: ./scripts/setup-freetype.sh >> "$GITHUB_ENV"
 
       - uses: Swatinem/rust-cache@v2
 
@@ -81,10 +87,15 @@ jobs:
         run: cargo build --release --features bundled-sdl3 -p sicompass
 
       - name: Sanity check the binary before packaging it
-        # Catches a binary that cannot find its own resources before that
-        # becomes three broken packages. There is no GPU on the runner, so
-        # Vulkan is expected to fail; the resource lines are what matter.
-        run: ./target/release/sicompass --check || true
+        # Catches a binary that cannot find its own resources, or was built
+        # against a FreeType without PNG support, before that becomes three
+        # broken packages. There is no GPU on the runner, so Vulkan is
+        # expected to fail and the exit code is ignored.
+        run: |
+          set -o pipefail
+          ./target/release/sicompass --check 2>&1 | tee check.txt || true
+          grep -q 'OK .*colour emoji' check.txt \
+            || { echo "::error::built without PNG-capable FreeType"; exit 1; }
 
       - name: Build .deb and AppImage
         # GitHub runners have no FUSE, so appimagetool cannot mount its own
@@ -143,6 +154,9 @@ jobs:
         # input (it gets bundled into the .app) and what makes the app able to
         # render at all.
         run: brew install cmake molten-vk create-dmg
+
+      - name: Provide a PNG-capable FreeType
+        run: ./scripts/setup-freetype.sh >> "$GITHUB_ENV"
 
       - uses: Swatinem/rust-cache@v2
 

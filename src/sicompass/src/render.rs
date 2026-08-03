@@ -352,6 +352,16 @@ pub fn check_runtime_files() -> i32 {
         7,
         1 + crate::fonts::FALLBACKS.len() + 1
     ));
+    // Reported rather than assumed: whether colour emoji render depends on
+    // how FreeType was built, which varies by platform and is otherwise
+    // invisible until a user notices missing glyphs. See
+    // `text::color_emoji_supported`.
+    if crate::text::color_emoji_supported() {
+        report.push_str("  OK       colour emoji\n");
+    } else {
+        report.push_str("  MISSING  colour emoji (FreeType built without PNG support)\n");
+        problems += 1;
+    }
 
     // ---- Vulkan ----
     report.push_str("\nVulkan:\n");
