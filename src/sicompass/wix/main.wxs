@@ -128,10 +128,85 @@
                                 Source='$(var.CargoTargetBinDir)\sicompass.exe'
                                 KeyPath='yes'/>
                         </Component>
+
+                        <!--
+                          Runtime assets.
+
+                          Shaders and fonts are compiled into the .exe, but the
+                          `assets/` tree is read from disk at runtime. `include`
+                          in dist-workspace.toml only populates the .zip, so
+                          without these components the MSI would install an .exe
+                          that cannot find its tutorial or demo content.
+
+                          The files land beside sicompass.exe, which is the
+                          first candidate `resources::resource_root()` probes.
+
+                          The `..\..\..` in each Source walks up from
+                          CargoTargetBinDir to the workspace root. cargo-dist
+                          always builds with an explicit target triple, so that
+                          directory is `target\TRIPLE\PROFILE`, three levels
+                          down. If the MSI job is ever changed to build for the
+                          host without naming a triple, these become `..\..`.
+                        -->
+                        <Directory Id='AssetsDir' Name='assets'>
+                            <Directory Id='AssetsTutorialDir' Name='tutorial'>
+                                <Component Id='assetTutorialFfon' Guid='*'>
+                                    <File Id='assetTutorialFfonFile' Name='ffon.json' DiskId='1'
+                                          Source='$(var.CargoTargetBinDir)\..\..\..\assets\tutorial\ffon.json'
+                                          KeyPath='yes'/>
+                                </Component>
+                                <Component Id='assetTutorialTexture' Guid='*'>
+                                    <File Id='assetTutorialTextureFile' Name='texture.jpg' DiskId='1'
+                                          Source='$(var.CargoTargetBinDir)\..\..\..\assets\tutorial\texture.jpg'
+                                          KeyPath='yes'/>
+                                </Component>
+                            </Directory>
+                            <Directory Id='AssetsSalesDemoDir' Name='sales-demo'>
+                                <Component Id='assetSalesDemoDiagram' Guid='*'>
+                                    <File Id='assetSalesDemoDiagramFile'
+                                          Name='115-Draw-through-Air-Handling-Unit-Diagram-1.webp' DiskId='1'
+                                          Source='$(var.CargoTargetBinDir)\..\..\..\assets\sales-demo\115-Draw-through-Air-Handling-Unit-Diagram-1.webp'
+                                          KeyPath='yes'/>
+                                </Component>
+                            </Directory>
+                        </Directory>
                     </Directory>
                 </Directory>
             </Directory>
+
+            <!--
+              Start Menu entry. Without it the MSI puts a binary on PATH and
+              nothing else, so the app is invisible to anyone who does not use
+              a terminal.
+
+              It lives in its own component with an HKCU registry key as the
+              KeyPath. A non-advertised shortcut cannot use a file in another
+              directory as its KeyPath, and ICE43 rejects a shortcut component
+              without a per-user KeyPath. Target uses `[#exe0]`, the formatted
+              reference to the File above, so it stays correct wherever the
+              user redirects APPLICATIONFOLDER.
+            -->
+            <Directory Id='ProgramMenuFolder'/>
         </Directory>
+
+        <DirectoryRef Id='ProgramMenuFolder'>
+            <Component Id='StartMenuShortcut' Guid='*'>
+                <Shortcut
+                    Id='AppStartMenuShortcut'
+                    Name="Silicon's Compass"
+                    Description='Use your whole computer from the keyboard'
+                    Target='[#exe0]'
+                    WorkingDirectory='Bin'
+                    Icon='ProductICO'/>
+                <RegistryValue
+                    Root='HKCU'
+                    Key='Software\friendlyflow\sicompass'
+                    Name='StartMenuShortcut'
+                    Type='integer'
+                    Value='1'
+                    KeyPath='yes'/>
+            </Component>
+        </DirectoryRef>
 
         <Feature
             Id='Binaries'
@@ -150,6 +225,10 @@
             <!--<ComponentRef Id='License'/>-->
 
             <ComponentRef Id='binary0'/>
+            <ComponentRef Id='StartMenuShortcut'/>
+            <ComponentRef Id='assetTutorialFfon'/>
+            <ComponentRef Id='assetTutorialTexture'/>
+            <ComponentRef Id='assetSalesDemoDiagram'/>
 
             <Feature
                 Id='Environment'
@@ -165,13 +244,12 @@
 
         
         <!--
-          Uncomment the following `Icon` and `Property` tags to change the product icon.
-
-          The product icon is the graphic that appears in the Add/Remove
-          Programs control panel for the application.
+          Product icon: the graphic shown in Add/Remove Programs, and the icon
+          used by the Start Menu shortcut above. Product.ico is generated from
+          assets/icons/sicompass.svg by scripts/gen-icons.sh.
         -->
-        <!--<Icon Id='ProductICO' SourceFile='wix\Product.ico'/>-->
-        <!--<Property Id='ARPPRODUCTICON' Value='ProductICO' />-->
+        <Icon Id='ProductICO' SourceFile='wix\Product.ico'/>
+        <Property Id='ARPPRODUCTICON' Value='ProductICO' />
 
         <Property Id='ARPHELPLINK' Value='https://github.com/friendlyflow/sicompass'/>
         

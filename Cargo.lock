@@ -4327,7 +4327,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "sicompass"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -4367,7 +4367,7 @@ dependencies = [
  "wasmtime",
  "whatlang",
  "windows 0.62.2",
- "winres",
+ "winresource",
  "wiremock",
  "wit-component",
  "wit-parser 0.254.0",
@@ -4375,7 +4375,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-builtins"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "sicompass-chatclient",
  "sicompass-claude",
@@ -4393,7 +4393,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-chatclient"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "async-trait",
  "reqwest",
@@ -4407,7 +4407,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-claude"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "serde",
  "serde_json",
@@ -4417,7 +4417,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-emailclient"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "async-imap",
  "async-native-tls",
@@ -4438,7 +4438,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-filebrowser"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "async-trait",
  "libc",
@@ -4450,7 +4450,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-remote"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "reqwest",
  "serde_json",
@@ -4461,7 +4461,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-sales-demo"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "async-trait",
  "serde",
@@ -4493,7 +4493,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-settings"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -4509,14 +4509,14 @@ dependencies = [
 
 [[package]]
 name = "sicompass-shell"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "portable-pty",
 ]
 
 [[package]]
 name = "sicompass-terminal"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "natord",
  "sicompass-sdk",
@@ -4527,7 +4527,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-text-editor"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "async-trait",
  "serde_json",
@@ -4538,7 +4538,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-tutorial"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "serde_json",
  "sicompass-sdk",
@@ -4547,7 +4547,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-updater"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
@@ -4567,7 +4567,7 @@ dependencies = [
 
 [[package]]
 name = "sicompass-webbrowser"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "chromiumoxide",
  "futures",
@@ -5024,15 +5024,6 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.5.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4f7f0dd8d50a853a531c426359045b1998f04219d88799810762cd4ad314234"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "toml"
 version = "0.9.12+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf92845e79fc2e2def6a5d828f0801e29a2f8acc037becc5ab08595c7d5e9863"
@@ -5044,6 +5035,21 @@ dependencies = [
  "toml_parser",
  "toml_writer",
  "winnow 0.7.15",
+]
+
+[[package]]
+name = "toml"
+version = "1.1.4+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3aace63f4bbcdfc2c965b059de67119c89c4017a70d633be6c104910f67056f5"
+dependencies = [
+ "indexmap",
+ "serde_core",
+ "serde_spanned",
+ "toml_datetime 1.1.1+spec-1.1.0",
+ "toml_parser",
+ "toml_writer",
+ "winnow 1.0.4",
 ]
 
 [[package]]
@@ -6213,12 +6219,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "winres"
-version = "0.1.12"
+name = "winresource"
+version = "0.1.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b68db261ef59e9e52806f688020631e987592bd83619edccda9c47d42cde4f6c"
+checksum = "0986a8b1d586b7d3e4fe3d9ea39fb451ae22869dcea4aa109d287a374d866087"
 dependencies = [
- "toml 0.5.11",
+ "toml 1.1.4+spec-1.1.0",
+ "version_check",
 ]
 
 [[package]]

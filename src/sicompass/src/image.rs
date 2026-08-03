@@ -10,6 +10,7 @@
 
 use crate::app_state::SiError;
 use crate::render;
+use crate::shaders;
 use ash::vk;
 use std::ptr;
 
@@ -136,12 +137,8 @@ impl ImageRenderer {
         let descriptor_sets = device.allocate_descriptor_sets(&alloc_info)?;
 
         // ---- Pipeline --------------------------------------------------------
-        let vert_code = std::fs::read("shaders/image_vert.spv")
-            .map_err(|e| SiError::Other(format!("image_vert.spv: {e}")))?;
-        let frag_code = std::fs::read("shaders/image_frag.spv")
-            .map_err(|e| SiError::Other(format!("image_frag.spv: {e}")))?;
-        let vert_module = render::create_shader_module(device, &vert_code)?;
-        let frag_module = render::create_shader_module(device, &frag_code)?;
+        let vert_module = render::create_shader_module(device, shaders::IMAGE_VERT)?;
+        let frag_module = render::create_shader_module(device, shaders::IMAGE_FRAG)?;
 
         let entry = std::ffi::CString::new("main").unwrap();
         let stages = [

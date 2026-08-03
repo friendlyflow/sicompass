@@ -16,27 +16,102 @@ dispatch-releases = true
 # every PR; "skip" drops that trigger entirely. Nothing in this repository runs
 # as a side effect of a commit or a PR.
 pr-run-mode = "skip"
-# Windows only for now. macOS (aarch64 + x86_64) is parked until the
-# deployment-target / link issues are sorted; re-add the two
-# *-apple-darwin targets here and regenerate. Linux is released
-# separately by release-linux.yml.
+
 targets = [
     "x86_64-pc-windows-msvc",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
 ]
-# End-user installers: a PowerShell script and an MSI package (Windows).
-# The curl|sh "shell" installer is macOS/Linux only, so it is dropped
-# until the macOS targets come back.
-installers = ["powershell", "msi"]
+
+# End-user installers.
+#   shell      -> sicompass-installer.sh, the `curl ... | sh` one. macOS and
+#                 Linux only, which is why it was dropped while those targets
+#                 were parked.
+#   powershell -> sicompass-installer.ps1, the `irm ... | iex` one (Windows).
+#   msi        -> a real Windows installer, with a Start Menu entry.
+installers = ["shell", "powershell", "msi"]
+
+# `src/sicompass/wix/main.wxs` is hand-edited: it installs the `assets/` tree,
+# adds a Start Menu shortcut, and sets the product icon, none of which dist's
+# template does. Without this, `dist plan` reports the file as out of date and
+# `dist init` would silently revert all three.
+#
+# The cost is that dist will never refresh that file, so when upgrading
+# cargo-dist, diff its new template against ours by hand.
+allow-dirty = ["msi"]
+
 # Build with the bundled-sdl3 feature so SDL3 is compiled from source and
 # statically linked — the release binaries are self-contained, with no system
 # SDL3 / SDL3.dll / libSDL3.dylib and nothing for the user to install.
 # (FreeType is bundled from source automatically by freetype-sys 0.20.1, the
 # version freetype 0.7 pins — no feature flag needed.)
 features = ["bundled-sdl3"]
-# Ship the third-party attribution file and the runtime assets inside every
-# release archive. `include` copies each path to the archive root, so the
-# top-level `assets/` directory arrives as `assets/` — the path the tutorial and
-# sales-demo providers ask `resolve_repo_asset` for. This is also why those
-# assets live in one shared tree rather than per-crate `assets/` dirs, which
-# would collide on that basename.
-include = ["THIRD-PARTY-LICENSES.html", "assets"]
+
+# What travels next to the binary in the archives.
+#
+# Shaders and fonts are NOT here: they are compiled into the binary. That is
+# deliberate and load-bearing, because `include` populates the archives only.
+# The shell installer, the PowerShell installer and the MSI copy binaries and
+# nothing else, so anything the app needs at startup has to be embedded, or
+# added explicitly to wix/main.wxs and to the cargo-packager `resources` list.
+#
+# `assets/` is the exception: it is read from disk at runtime, and
+# `resources::resource_root()` probes for it beside the executable, which is
+# where `include` puts it.
+#
+# The font license texts ship because the fonts themselves are inside the
+# binary. cargo-about cannot know about them, since they are not Rust crates.
+include = [
+    "THIRD-PARTY-LICENSES.html",
+    "assets",
+    "fonts/LICENSE-DejaVu.txt",
+    "fonts/LICENSE-NotoColorEmoji.txt",
+]
+
+# Build .deb, .rpm, AppImage, .app and .dmg inside this same Release run, so
+# their artifacts land in the `artifacts-*` pool that release-publish.yml
+# drains. See the header of that workflow for why it cannot be a separate
+# top-level workflow.
+local-artifacts-jobs = ["./native-packages"]
+
+# System packages installed on each runner before the build. Only the block
+# matching the runner's OS applies, so no per-target gymnastics are needed.
+[dist.dependencies.apt]
+# cmake and a C toolchain: `bundled-sdl3` compiles SDL from source.
+cmake = '*'
+pkg-config = '*'
+# SDL probes for each of these at configure time and refuses to build without
+# at least one windowing backend.
+libx11-dev = '*'
+libxext-dev = '*'
+libxcursor-dev = '*'
+libxi-dev = '*'
+libxrandr-dev = '*'
+libxss-dev = '*'
+libxfixes-dev = '*'
+libxrender-dev = '*'
+libxtst-dev = '*'
+libxcb1-dev = '*'
+libwayland-dev = '*'
+libxkbcommon-dev = '*'
+libdecor-0-dev = '*'
+libegl-dev = '*'
+libgbm-dev = '*'
+libdrm-dev = '*'
+libpulse-dev = '*'
+libasound2-dev = '*'
+# accesskit_unix talks to AT-SPI over D-Bus.
+libdbus-1-dev = '*'
+# Quoted: TOML would read the dot in this package name as a key separator and
+# silently install a package called "libatspi2" instead.
+"libatspi2.0-dev" = '*'
+# openssl-sys is in the graph on Linux only (lettre / async-native-tls).
+# macOS uses Security.framework and Windows uses schannel.
+libssl-dev = '*'
+
+[dist.dependencies.homebrew]
+cmake = '*'
+# macOS has no system Vulkan. MoltenVK is what the app renders through, and
+# what the .dmg bundles.
+molten-vk = '*'

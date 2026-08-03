@@ -1,3 +1,14 @@
+// Release builds on Windows link against the "windows" subsystem so launching
+// sicompass does not also open a console window behind it. Debug builds keep
+// the console, because that is where panics and `RUST_LOG` output go during
+// development. The release-build consequence is that `eprintln!` and the
+// `--check` report have nowhere to appear, which is why `--check` also writes
+// itself to the rolling log in `platform::log_dir()`.
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
+
 // All modules are declared in lib.rs; the binary just re-uses them.
 use sicompass::app_state;
 use sicompass::render;
@@ -16,6 +27,23 @@ fn main() {
     // Register all built-in providers with the SDK factory and manifest registries.
     // Must happen before load_programs() so create_provider_by_name() resolves them.
     sicompass_builtins::register_all();
+
+    // Point the process at its own resources.
+    //
+    // `assets/` is reached through `sicompass_sdk::platform::resolve_repo_asset`,
+    // whose last candidate is the working directory. The SDK is a published
+    // crate, so it cannot be taught about .app/.deb/AppImage layouts without a
+    // release. Setting the working directory to the resolved resource root
+    // makes that last candidate correct on every platform, which is what lets
+    // every package format ship without a wrapper script that `cd`s first.
+    //
+    // Nothing in the workspace depends on the inherited working directory:
+    // subprocess spawners set `current_dir` explicitly and the file browser
+    // starts from the home directory.
+    //
+    // TODO: drop this once `resolve_repo_asset` honours SICOMPASS_RESOURCE_DIR,
+    // and have callers use `resources::resource_root()` directly.
+    let _ = std::env::set_current_dir(sicompass::resources::resource_root());
 
     // Set up dual logging: always write debug to a log file, optionally stderr via RUST_LOG.
     let log_dir = sicompass_sdk::platform::log_dir()

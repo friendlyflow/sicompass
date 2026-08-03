@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <title>Silicon's Compass</title>
+  <desc>Four arrow keys in the inverted-T layout: up on top, left, down and right below.</desc>
+
+  <!--
+    Original artwork. Do not replace this with a stock image: the whole icon
+    set is generated from this one file by scripts/gen-icons.sh, and it ships
+    inside the .exe, the .msi, the .app, the .dmg, the .deb, the .rpm and the
+    AppImage, so it has to be ours to redistribute.
+
+    Design notes, mostly about surviving 16x16:
+      - The plate is opaque. The keys are dark, so a transparent background
+        would make the icon vanish against a dark dock or task bar.
+      - Strokes are 7 units at 128, i.e. a little under a pixel at 16x16.
+        Thinner than this and the key outlines break up entirely.
+      - Arrows are solid rather than outlined. Outlining them, as the source
+        artwork did, turns to mush below about 32x32.
+      - Each arrow is written out as an explicit path rather than one shape
+        rotated four times. Rotation plus translation composes in an order
+        that is easy to get subtly wrong, and the failure mode is an arrow
+        drawn outside its key.
+
+    Geometry: keys are 35x35 with a 4 gap, so the bottom row spans 113 and
+    sits in a 7.5 margin. Key centres are (64,44.5) top, then (25,83.5),
+    (64,83.5) and (103,83.5) along the bottom.
+  -->
+
+  <!-- Plate. Carries its own background so the icon reads on any desktop. -->
+  <rect x="0" y="0" width="128" height="128" rx="24" fill="#f7f7f5"/>
+
+  <g fill="none" stroke="#1b1b1f" stroke-width="7" stroke-linejoin="round">
+    <!-- Top row: up -->
+    <rect x="46.5" y="27" width="35" height="35" rx="8"/>
+    <!-- Bottom row: left, down, right -->
+    <rect x="7.5" y="66" width="35" height="35" rx="8"/>
+    <rect x="46.5" y="66" width="35" height="35" rx="8"/>
+    <rect x="85.5" y="66" width="35" height="35" rx="8"/>
+  </g>
+
+  <g fill="#1b1b1f">
+    <!-- up -->
+    <path d="M 64 32.5 L 73.5 43 L 68 43 L 68 56.5 L 60 56.5 L 60 43 L 54.5 43 Z"/>
+    <!-- left -->
+    <path d="M 13 83.5 L 23.5 74 L 23.5 79.5 L 37 79.5 L 37 87.5 L 23.5 87.5 L 23.5 93 Z"/>
+    <!-- down -->
+    <path d="M 64 95.5 L 73.5 85 L 68 85 L 68 71.5 L 60 71.5 L 60 85 L 54.5 85 Z"/>
+    <!-- right -->
+    <path d="M 115 83.5 L 104.5 74 L 104.5 79.5 L 91 79.5 L 91 87.5 L 104.5 87.5 L 104.5 93 Z"/>
+  </g>
+</svg>

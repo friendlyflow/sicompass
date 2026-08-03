@@ -503,9 +503,10 @@ fn check_parent_has_radio(renderer: &AppRenderer) -> bool {
 /// HEAD (next Ctrl+Z target) adds a `">"` positioner (`"- > "`, announced as
 /// "minus current") and entries in the redo branch (already undone) add a `"·"`
 /// positioner (`"- \u{00B7} "`, "minus undone"); older history below the cursor
-/// stays at the bare `"- "`. ASCII `>` is used (vs
-/// the more decorative U+25B6 ▶) because the bundled Consolas font's
-/// rasteriser only covers codepoints 32..256.
+/// stays at the bare `"- "`. ASCII `>` is used (vs the more decorative
+/// U+25B6 ▶) because it reads unambiguously in every screen reader and needs
+/// no fallback face. The embedded DejaVu faces do cover ▶, so this is now a
+/// legibility choice rather than a glyph-coverage constraint.
 fn build_timeline_list(renderer: &mut AppRenderer) {
     renderer.list_index = 0;
 
@@ -722,8 +723,7 @@ pub struct TimelineProviderInfo {
 /// `/` and replaces remaining slashes with ` > ` so the user reads
 /// "Available programs: > Email" instead of "/Available programs:/Email".
 /// Filesystem paths are passed through verbatim. ASCII `>` matches the
-/// ExtendedSearch (Ctrl+F) breadcrumb and stays within the Consolas
-/// glyph range covered by the text rasteriser.
+/// ExtendedSearch (Ctrl+F) breadcrumb.
 fn render_nav_path(path: &str, is_fs: bool, fallback: &str) -> String {
     if is_fs {
         return path.to_owned();

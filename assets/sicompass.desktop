@@ -1,8 +1,12 @@
 [Desktop Entry]
-Name=SiCompass
-Comment=Modal UI navigator
+Name=Silicon's Compass
+GenericName=Keyboard Navigator
+Comment=Use your whole computer from the keyboard, with no mouse needed
 Icon=sicompass
-Exec=sicompass
+Exec=sicompass %F
 Type=Application
-Categories=Utility;
+Terminal=false
+Categories=Utility;Accessibility;
+Keywords=accessibility;screenreader;keyboard;navigator;a11y;
 StartupWMClass=sicompass
+StartupNotify=true

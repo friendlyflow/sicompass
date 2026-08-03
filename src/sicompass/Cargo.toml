@@ -27,6 +27,167 @@ path-guid = "3D255495-2455-4CAB-8782-168EF8D5E8A7"
 license = false
 eula = false
 
+# ---------------------------------------------------------------------------
+# Native packages (cargo-packager)
+# ---------------------------------------------------------------------------
+#
+# cargo-dist builds the archives, the curl|sh and PowerShell installers, and
+# the .msi. It cannot produce .deb, .rpm, AppImage, .app or .dmg, so
+# cargo-packager builds those, driven by .github/workflows/native-packages.yml.
+#
+# `product-name` deliberately has no spaces and no apostrophes: the artifact
+# names derived from it are passed through an unquoted `$(find ...)` in
+# release-publish.yml, so a space would silently break the upload.
+#
+# Paths are relative to this file, hence the `../../` to reach the workspace
+# root.
+[package.metadata.packager]
+product-name = "sicompass"
+identifier = "com.friendlyflow.sicompass"
+description = "Use your whole computer from the keyboard, with no mouse needed"
+long-description = """
+Silicon's Compass presents every screen as a tree of lists and lets you move \
+through it entirely from the keyboard. Files, settings, email and any other \
+data are navigated the same way, with native screen reader support on Linux, \
+macOS and Windows.
+"""
+homepage = "https://github.com/friendlyflow/sicompass"
+authors = ["Nico Verrijdt <nico@friendlyflow.com>"]
+license-file = "../../LICENSE"
+out-dir = "../../target/packages"
+
+# cargo-packager runs this itself, so `cargo packager` works standalone from a
+# clean checkout. In CI the build has already happened and this is a no-op.
+before-packaging-command = "cargo build --release --features bundled-sdl3 -p sicompass"
+
+# Generated from assets/icons/sicompass.svg by scripts/gen-icons.sh. The PNGs
+# become /usr/share/icons/hicolor/<size>/apps/sicompass.png in the .deb and
+# AppImage; the .icns becomes the .app bundle icon.
+icons = [
+    "../../assets/icons/16x16.png",
+    "../../assets/icons/32x32.png",
+    "../../assets/icons/48x48.png",
+    "../../assets/icons/64x64.png",
+    "../../assets/icons/128x128.png",
+    "../../assets/icons/128x128@2x.png",
+    "../../assets/icons/256x256.png",
+    "../../assets/icons/512x512.png",
+    "../../assets/icons/sicompass.icns",
+]
+
+[[package.metadata.packager.binaries]]
+path = "sicompass"
+main = true
+
+# Shaders and fonts are compiled into the binary, so `assets/` is the only
+# runtime tree left. cargo-packager places it at Contents/Resources/assets in
+# the .app and /usr/lib/sicompass/assets in the .deb and AppImage, both of
+# which `resources::resource_root()` already probes for.
+[[package.metadata.packager.resources]]
+src = "../../assets/tutorial"
+target = "assets/tutorial"
+
+[[package.metadata.packager.resources]]
+src = "../../assets/sales-demo"
+target = "assets/sales-demo"
+
+# The fonts are embedded in the binary, so their license texts have to travel
+# with it. This is a real obligation, not bookkeeping: cargo-about only sees
+# Rust crates and will never list them.
+[[package.metadata.packager.resources]]
+src = "../../fonts/LICENSE-DejaVu.txt"
+target = "licenses/LICENSE-DejaVu.txt"
+
+[[package.metadata.packager.resources]]
+src = "../../fonts/LICENSE-NotoColorEmoji.txt"
+target = "licenses/LICENSE-NotoColorEmoji.txt"
+
+[[package.metadata.packager.resources]]
+src = "../../THIRD-PARTY-LICENSES.html"
+target = "licenses/THIRD-PARTY-LICENSES.html"
+
+[package.metadata.packager.deb]
+# Vulkan is dlopened, never linked, so libvulkan1 does not show up as an ELF
+# dependency and has to be declared. at-spi2-core is what accesskit_unix talks
+# to over D-Bus: without it the app runs but is silent to screen readers,
+# which for this application is a complete failure.
+depends = ["libvulkan1", "at-spi2-core", "libssl3"]
+
+# Key is the SOURCE, value is the path inside the package. That is the
+# opposite of what cargo-packager's own documentation says, but it is what
+# `copy_custom_files` does: `for (src, target) in files.iter()`. Getting it
+# backwards fails with an I/O error naming the absolute target path, which
+# reads like a permissions problem and is not.
+[package.metadata.packager.deb.files]
+"../../assets/sicompass.desktop" = "/usr/share/applications/sicompass.desktop"
+"../../assets/icons/sicompass.svg" = "/usr/share/icons/hicolor/scalable/apps/sicompass.svg"
+
+[package.metadata.packager.appimage]
+# linuxdeploy bundles every shared library it can find, which is exactly wrong
+# for a dlopened Vulkan loader: a bundled libvulkan.so.1 shadows the host's and
+# then cannot see the host's ICD files, so the AppImage finds no GPU on a
+# machine where the app otherwise works. The graphics and windowing stack has
+# to come from the host.
+excluded-libraries = [
+    "libvulkan*",
+    "libGL*",
+    "libEGL*",
+    "libgbm*",
+    "libdrm*",
+    "libwayland*",
+    "libxkbcommon*",
+]
+
+[package.metadata.packager.macos]
+# Must stay equal to MACOSX_DEPLOYMENT_TARGET in .cargo/config.toml, or the
+# Info.plist advertises a floor the binary was not built for.
+minimum-system-version = "11.0"
+# macOS has no system Vulkan. Bundling MoltenVK is what makes the .dmg work
+# with nothing else installed. `render::load_vulkan_entry` looks in
+# Contents/Frameworks first for exactly this file.
+#
+# The path is rewritten per runner by native-packages.yml, because Homebrew's
+# prefix differs between Apple Silicon (/opt/homebrew) and Intel (/usr/local).
+frameworks = ["/opt/homebrew/lib/libMoltenVK.dylib"]
+
+# ---------------------------------------------------------------------------
+# RPM (cargo-generate-rpm)
+# ---------------------------------------------------------------------------
+#
+# cargo-packager has no RPM format (its PackageFormat is App, Dmg, Wix, Nsis,
+# Deb, AppImage, Pacman), so the .rpm is built separately. cargo-generate-rpm
+# is pure Rust and needs no rpmbuild, so it runs on the same ubuntu runner.
+#
+# Source paths here are relative to the invocation directory, and
+# native-packages.yml runs it from the workspace root.
+[package.metadata.generate-rpm]
+summary = "Use your whole computer from the keyboard, with no mouse needed"
+license = "GPL-3.0-only"
+url = "https://github.com/friendlyflow/sicompass"
+# Same reasoning as the .deb `depends` above.
+requires = { vulkan-loader = "*", at-spi2-core = "*", openssl-libs = "*" }
+
+assets = [
+    { source = "target/release/sicompass", dest = "/usr/bin/sicompass", mode = "755" },
+    { source = "assets/tutorial/*", dest = "/usr/lib/sicompass/assets/tutorial/", mode = "644" },
+    { source = "assets/sales-demo/*", dest = "/usr/lib/sicompass/assets/sales-demo/", mode = "644" },
+    { source = "assets/sicompass.desktop", dest = "/usr/share/applications/sicompass.desktop", mode = "644" },
+    { source = "assets/icons/sicompass.svg", dest = "/usr/share/icons/hicolor/scalable/apps/sicompass.svg", mode = "644" },
+    { source = "assets/icons/16x16.png", dest = "/usr/share/icons/hicolor/16x16/apps/sicompass.png", mode = "644" },
+    { source = "assets/icons/22x22.png", dest = "/usr/share/icons/hicolor/22x22/apps/sicompass.png", mode = "644" },
+    { source = "assets/icons/24x24.png", dest = "/usr/share/icons/hicolor/24x24/apps/sicompass.png", mode = "644" },
+    { source = "assets/icons/32x32.png", dest = "/usr/share/icons/hicolor/32x32/apps/sicompass.png", mode = "644" },
+    { source = "assets/icons/48x48.png", dest = "/usr/share/icons/hicolor/48x48/apps/sicompass.png", mode = "644" },
+    { source = "assets/icons/64x64.png", dest = "/usr/share/icons/hicolor/64x64/apps/sicompass.png", mode = "644" },
+    { source = "assets/icons/128x128.png", dest = "/usr/share/icons/hicolor/128x128/apps/sicompass.png", mode = "644" },
+    { source = "assets/icons/256x256.png", dest = "/usr/share/icons/hicolor/256x256/apps/sicompass.png", mode = "644" },
+    { source = "assets/icons/512x512.png", dest = "/usr/share/icons/hicolor/512x512/apps/sicompass.png", mode = "644" },
+    { source = "LICENSE", dest = "/usr/share/doc/sicompass/LICENSE", mode = "644" },
+    { source = "THIRD-PARTY-LICENSES.html", dest = "/usr/share/doc/sicompass/THIRD-PARTY-LICENSES.html", mode = "644" },
+    { source = "fonts/LICENSE-DejaVu.txt", dest = "/usr/share/doc/sicompass/LICENSE-DejaVu.txt", mode = "644" },
+    { source = "fonts/LICENSE-NotoColorEmoji.txt", dest = "/usr/share/doc/sicompass/LICENSE-NotoColorEmoji.txt", mode = "644" },
+]
+
 [features]
 # What the WASM plugin host compiles guests *to*.
 #
@@ -57,14 +218,12 @@ no-jit-wasm = ["wasmtime/cranelift", "wasmtime/pulley"]
 # builds enable it (see `[workspace.metadata.dist] features` in the root
 # Cargo.toml). Building from source needs `cmake` and a C compiler on PATH.
 #
-# `no-sdl-libc` makes SDL3 use its own SDL_atof/SDL_sinf/etc. implementations
-# instead of calling into the C runtime. Required on Windows MSVC: the bundled
-# sdl3-sys + cmake 0.1.58 stack doesn't propagate Rust's static-CRT choice to
-# SDL3's CMake build, so SDL3 ends up compiled with /MD (dynamic CRT) while
-# rustc links /MT (static CRT). The resulting `__imp_atof`-style unresolved
-# externals break the release link. Cutting SDL's libc dependency sidesteps
-# the mismatch and keeps the binary truly standalone (no vcruntime140.dll).
-bundled-sdl3 = ["sdl3/build-from-source-static", "sdl3-sys/no-sdl-libc"]
+#
+# `no-sdl-libc` is deliberately NOT part of this feature — it is enabled only on
+# Windows, via the `[target.'cfg(target_os = "windows")'.dependencies]` block
+# below. See the comment there for why enabling it everywhere broke the Linux
+# build.
+bundled-sdl3 = ["sdl3/build-from-source-static"]
 
 [dependencies]
 sicompass-sdk = { workspace = true }
@@ -87,9 +246,9 @@ image = { workspace = true }
 base64 = { workspace = true }
 
 sdl3 = { workspace = true }
-# Pulled in transitively by `sdl3`; declared here so the `bundled-sdl3`
-# feature can flip its `no-sdl-libc` knob (see the feature comment above).
-# Version constraint matches `sdl3`'s own pin so Cargo unifies to one copy.
+# Pulled in transitively by `sdl3`; declared here so the Windows-only
+# `no-sdl-libc` knob below has something to attach to. Version constraint
+# matches `sdl3`'s own pin so Cargo unifies to one copy.
 sdl3-sys = "0.6.7"
 
 accesskit = { workspace = true }
@@ -114,12 +273,27 @@ accesskit_unix = { workspace = true }
 [target.'cfg(target_os = "windows")'.dependencies]
 accesskit_windows = { workspace = true }
 windows = { workspace = true }
+# `no-sdl-libc` makes SDL3 use its own SDL_atof/SDL_sinf/etc. implementations
+# instead of calling into the C runtime. It is needed on Windows MSVC: the
+# bundled sdl3-sys + cmake stack doesn't propagate Rust's static-CRT choice to
+# SDL3's CMake build, so SDL3 ends up compiled with /MD (dynamic CRT) while
+# rustc links /MT (static CRT). The resulting `__imp_atof`-style unresolved
+# externals break the release link. Cutting SDL's libc dependency sidesteps
+# the mismatch and keeps the binary truly standalone (no vcruntime140.dll).
+#
+# It must stay Windows-only. sdl3-sys forwards it to CMake as `-DSDL_LIBC=OFF`,
+# which un-defines `HAVE_STDIO_H`, which is the guard around the
+# `#include <errno.h>` in SDL's `src/io/SDL_iostream.c`. That file then uses
+# `errno`/`EINTR` undeclared and GCC rejects it. That, not SDL 3.4.12 itself,
+# is why `bundled-sdl3` used to fail on Linux and why ci.yml built SDL 3.2.28
+# from source instead. Do not move this back into the feature.
+sdl3-sys = { version = "0.6.7", features = ["no-sdl-libc"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 accesskit_macos = { workspace = true }
 
-[build-dependencies]
-winres = { workspace = true }
+[target.'cfg(target_os = "windows")'.build-dependencies]
+winresource = { workspace = true }
 
 [dev-dependencies]
 sicompass-builtins = { workspace = true }

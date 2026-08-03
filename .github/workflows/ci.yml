@@ -23,17 +23,38 @@ env:
 jobs:
   test:
     name: test (${{ matrix.name }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
-      # Report both legs even when one fails: knowing whether a failure is
-      # backend-specific is most of the diagnosis.
+      # Report every leg even when one fails: knowing whether a failure is
+      # backend- or platform-specific is most of the diagnosis.
       fail-fast: false
       matrix:
         include:
-          - name: cranelift (jit)
+          # Linux runs the full suite over both wasmtime backends.
+          - name: linux cranelift (jit)
+            os: ubuntu-22.04
             flags: ""
-          - name: pulley (no-jit)
+            full: true
+          - name: linux pulley (no-jit)
+            os: ubuntu-22.04
             flags: "--no-default-features --features no-jit-wasm"
+            full: true
+          # macOS and Windows compile and lint only. The full suite reaches
+          # the network and wants a display, which is flaky on those runners,
+          # but a compile-and-link check is what actually catches the porting
+          # breakage that used to only surface during a release.
+          - name: macos aarch64
+            os: macos-14
+            flags: ""
+            full: false
+          - name: macos x86_64
+            os: macos-15-intel
+            flags: ""
+            full: false
+          - name: windows x86_64
+            os: windows-2022
+            flags: ""
+            full: false
     steps:
       - uses: actions/checkout@v4
 
@@ -41,45 +62,96 @@ jobs:
         with:
           components: clippy
 
-      # SDL3 is too new for the Ubuntu repositories, so it is built from source
-      # below. These are the headers SDL probes for.
-      - name: Install system dependencies
+      # SDL3 is compiled from its vendored source by the `bundled-sdl3`
+      # feature, which is what the release builds use. These are the headers
+      # it probes for at configure time.
+      #
+      # It used to build SDL 3.2.28 from source here instead, because
+      # `bundled-sdl3` failed under GCC. The cause was ours: the feature also
+      # set `sdl3-sys/no-sdl-libc`, which becomes `-DSDL_LIBC=OFF`, which
+      # un-defines HAVE_STDIO_H, which is the guard around the
+      # `#include <errno.h>` in SDL's SDL_iostream.c. That flag is now
+      # Windows-only, where it is actually needed. Do not reintroduce the
+      # from-source SDL step: CI building something other than what the
+      # release builds is exactly how the release broke.
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             build-essential pkg-config cmake \
-            libvulkan-dev libfreetype-dev libharfbuzz-dev \
-            libwayland-dev libxkbcommon-dev \
+            libvulkan-dev \
+            libwayland-dev libxkbcommon-dev libdecor-0-dev \
             libx11-dev libxext-dev libxcursor-dev libxi-dev \
-            libxrandr-dev libxss-dev \
+            libxrandr-dev libxss-dev libxfixes-dev libxrender-dev \
+            libxtst-dev libxcb1-dev \
             libpulse-dev libasound2-dev libdbus-1-dev libatspi2.0-dev \
-            libdrm-dev libgbm-dev libegl-dev \
-            libwebp-dev
+            libdrm-dev libgbm-dev libegl-dev libssl-dev
 
-      # Pinned to the same SDL3 the release workflow builds. Deliberately *not*
-      # the `bundled-sdl3` feature: that pulls SDL 3.4.12, whose SDL_iostream.c
-      # uses errno/EINTR without including <errno.h>, which current GCC rejects
-      # outright. `bundled-sdl3` is still what the Windows release uses, where
-      # MSVC compiles it fine.
-      - name: Build SDL3 from source
-        run: |
-          git clone --depth 1 --branch release-3.2.28 \
-            https://github.com/libsdl-org/SDL.git SDL3
-          cmake -S SDL3 -B SDL3/build -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX=/usr/local
-          cmake --build SDL3/build -j"$(nproc)"
-          sudo cmake --install SDL3/build
-          sudo ldconfig
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmake molten-vk
 
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.name }}
 
       - name: Test
-        run: cargo test --workspace ${{ matrix.flags }}
+        if: matrix.full
+        run: cargo test --workspace --features bundled-sdl3 ${{ matrix.flags }}
+
+      # The deterministic, offline part of the suite: the embedded shader and
+      # font checks, and the resource-root probe. Cheap, and the one thing
+      # worth running cross-platform since `resources.rs` is all about path
+      # layout differences.
+      # Quoted, and the filters go after `--`: cargo takes at most one
+      # positional TESTNAME itself, and an unquoted `::` reads as a YAML
+      # mapping.
+      - name: Test (portable subset)
+        if: ${{ !matrix.full }}
+        run: "cargo test -p sicompass --lib --features bundled-sdl3 -- shaders:: fonts:: resources::"
+
+      - name: Build
+        if: ${{ !matrix.full }}
+        run: cargo build -p sicompass --release --features bundled-sdl3
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets ${{ matrix.flags }}
+        run: cargo clippy --workspace --all-targets --features bundled-sdl3 ${{ matrix.flags }}
+
+      # macOS is the platform nobody here can test by hand, and "does MoltenVK
+      # actually enumerate a device" is the question that decides whether the
+      # .dmg works at all. `--check` answers it without a window or a surface,
+      # so it runs headless. Not fatal: GitHub's macOS runners virtualize
+      # Metal and a failure here is not conclusive.
+      - name: Vulkan smoke check (macOS)
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        run: ./target/release/sicompass --check
+
+  # A stale generated release.yml is currently only discovered during a tag
+  # push, which is the worst possible moment.
+  release-config:
+    name: release config is in sync
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: dist
+
+      # Must be the exact pinned version: a different one regenerates the
+      # workflow for itself, silently, and the output still looks plausible.
+      - name: Install the pinned dist
+        run: |
+          V=$(grep -oP 'cargo-dist-version = "\K[^"]+' dist-workspace.toml)
+          cargo install cargo-dist --version "$V" --locked
+
+      - name: Check the generated workflow matches dist-workspace.toml
+        run: dist generate --check
+
+      - name: Show the release plan
+        run: dist plan
 
   # The guest half of the SDK has to keep building for wasm, and the example plugin
   # has to keep producing a component that imports nothing beyond the host

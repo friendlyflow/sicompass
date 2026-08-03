@@ -8,10 +8,94 @@ You navigate everything the same way, your files, settings, email, and any other
 
 ## Download
 
-Prebuilt packages are published on the [Releases page](../../releases/latest).
+Prebuilt packages for Windows, macOS and Linux are on the
+[Releases page](../../releases/latest). Pick the one for your system below.
 
-- **Windows**: download the latest packaged build from Releases
-- **macOS** and **Linux**: build from source for now (packaged releases planned)
+Every download is self-contained. Fonts and shaders are compiled into the
+binary, so there is nothing to install alongside it.
+
+### Windows
+
+```powershell
+irm https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-installer.ps1 | iex
+```
+
+Or download `sicompass-x86_64-pc-windows-msvc.msi` from the Releases page and
+double-click it. The installer adds a Start Menu entry and puts sicompass on
+your PATH.
+
+### macOS
+
+Download the disk image for your Mac, `aarch64` for Apple Silicon and `x86_64`
+for Intel, then drag sicompass to your Applications folder.
+
+```bash
+curl -LO https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-aarch64-apple-darwin.dmg
+```
+
+The disk image bundles MoltenVK, so there is nothing else to install.
+
+The app is not yet notarized by Apple, so macOS refuses to open it the first
+time and reports that it is damaged. Clear the download quarantine flag once
+and it starts normally after that.
+
+```bash
+xattr -dr com.apple.quarantine /Applications/sicompass.app
+```
+
+### Linux
+
+Debian, Ubuntu and Mint:
+
+```bash
+curl -LO https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass_0.1.9_amd64.deb
+sudo apt install ./sicompass_0.1.9_amd64.deb
+```
+
+Fedora, RHEL and openSUSE:
+
+```bash
+curl -LO https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-0.1.9-1.x86_64.rpm
+sudo dnf install ./sicompass-0.1.9-1.x86_64.rpm
+```
+
+Any distribution, no root needed:
+
+```bash
+curl -LO https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass_0.1.9_x86_64.AppImage
+chmod +x sicompass_0.1.9_x86_64.AppImage
+./sicompass_0.1.9_x86_64.AppImage
+```
+
+Nix and NixOS:
+
+```bash
+nix run github:friendlyflow/sicompass
+```
+
+Or install just the binary into `~/.local/bin`, which also works on macOS:
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/friendlyflow/sicompass/releases/latest/download/sicompass-installer.sh | sh
+```
+
+You need a working Vulkan driver, which most desktop distributions already
+have. If yours does not, install your vendor's Vulkan package, for example
+`mesa-vulkan-drivers` on Debian and Ubuntu. A screen reader also needs
+`at-spi2-core` running, which the `.deb` and `.rpm` pull in for you.
+
+### Checking that it worked
+
+```bash
+sicompass --check
+```
+
+That reports where sicompass found its resources and which graphics devices it
+can see. It is the first thing to run, and to paste into a bug report, if the
+app does not start.
+
+Every release also ships `SHA256SUMS` files next to the packages, so you can
+verify a download before installing it.
 
 ## Getting Started
 
@@ -28,13 +112,19 @@ cargo build --release
 cargo run --release
 ```
 
+Nix users can also build the packaged version with `nix build`.
+
+Shaders are compiled by `scripts/gen-shaders.sh` and committed, so building
+needs no shader toolchain. Rerun that script if you change anything under
+`shaders/`, and `scripts/gen-icons.sh` if you change the icon.
+
 ## Key Features
 
 - **Unambiguous Focus**: You always know where the focus is, no guessing
 - **Flat Interface**: No popups, dialogs, or overlays, everything is navigated inline within the tree
 - **Keyboard-First**: Your hands never leave the keyboard, with tabbed workspaces and letter-driven command palettes
 - **Native Accessibility**: Built-in screen reader support on Linux, macOS, and Windows
-- **Cross-Platform**: Tested on Ubuntu today, with paths, shells, and PTYs routed through platform helpers
+- **Cross-Platform**: Packaged for Windows, macOS, and Linux, with paths, shells, and PTYs routed through platform helpers
 - **High-Performance Rendering**: Vulkan graphics with a FreeType2 glyph atlas
 - **Extensible**: Provider-based plugin system with a built-in store for hot enable/disable
 

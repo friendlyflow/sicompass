@@ -5,51 +5,107 @@ disable-model-invocation: true
 model: sonnet
 ---
 
-Cut a new sicompass release. The release pipeline is triggered entirely by
-pushing a `vX.Y.Z` tag: `release-on-tag.yml` bridges the tag push to the
-cargo-dist `release.yml` (Windows installers) and `release-linux.yml` runs
-separately. There is no manual GitHub-UI step.
+Cut a new sicompass release.
+
+Pushing a `vX.Y.Z` tag is the only trigger: `release-on-tag.yml` bridges the tag
+push to the cargo-dist `release.yml`, which builds all four targets and calls
+`native-packages.yml` for the `.deb`, `.rpm`, AppImage, `.app` and `.dmg`.
+There is no manual GitHub-UI step.
+
+**This publishes to the world.** The tag push is the point of no return, so
+everything before it is checking, and step 1 is not optional.
+
+Full background is in [docs/releasing.md](../../../docs/releasing.md). Read it
+before running this the first time.
 
 **IMPORTANT: The shell's working directory persists between Bash calls. Prefix
 every command with `cd PROJECT_ROOT &&` (the actual absolute project root).**
 
 ## Steps
 
-1. **Verify clean state.** `git status --short` (must be empty) and confirm
-   `main` is in sync with origin: `git rev-list --left-right --count origin/main...main`
-   should print `0  0`. If not clean / not synced, stop and tell the user.
+1. **Run the checks by hand.** Nothing in this repository runs on commit, so
+   nothing has been verified unless someone asked for it.
 
-2. **Determine the next version.** Read the current `version` under
-   `[workspace.package]` in `Cargo.toml` (line ~22) and the latest tag
-   (`git tag --sort=-creatordate | head`). Default to a **patch** bump
-   (e.g. `0.1.3` → `0.1.4`), matching release history, unless the user asks
-   for minor/major. Also check the `sicompass-sdk = "..."` pin in
-   `[workspace.dependencies]` — it usually already points at the target
-   version (the SDK is released ahead of the app). If the SDK pin is behind
-   the new version, bump it to match in the same edit.
+   ```sh
+   gh workflow run ci.yml && gh workflow run licenses.yml
+   gh run list --workflow=ci.yml --limit 1
+   ```
 
-3. **Bump `Cargo.toml`.** Set `[workspace.package] version` to the new
-   version (and the `sicompass-sdk` pin if it lagged).
+   Wait for CI to go green before continuing. It covers Linux, macOS and
+   Windows, and includes `dist generate --check`. If you skip this, the first
+   time anyone finds out that a platform does not build is during the release.
 
-4. **Sync `Cargo.lock`.** `cargo update --workspace --offline` — this rewrites
-   the version of all ~15 workspace member crates without touching external
-   deps. Confirm only `Cargo.toml` and `Cargo.lock` changed.
+2. **Verify clean state.** `git status --short` must be empty, and
+   `git rev-list --left-right --count origin/main...main` must print `0  0`.
+   If not, stop and tell the user — use `/commit-and-push` first.
 
-5. **Commit and push `main`.**
-   `git add Cargo.toml Cargo.lock && git commit -m "Release: bump version to X.Y.Z" && git push origin main`
-   (plain message, no co-author trailer).
+3. **Determine the version.** Read `version` under `[workspace.package]` in
+   `Cargo.toml` (line ~22) and compare it with `git tag --sort=-v:refname | head -1`.
 
-6. **Tag and push the tag.**
-   `git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z`
-   The tag push fires `release-on-tag.yml`, which dispatches the cargo-dist
-   `Release` workflow.
+   - **If that version has no tag yet**, it was already bumped in a previous
+     commit. That is the version being released. **Skip steps 4 and 5.**
+   - **If it matches the latest tag**, bump it. Default to a patch bump
+     (`0.1.3` -> `0.1.4`), matching release history, unless the user asks for
+     minor or major.
 
-7. **Report.** Give the user the Actions URL to monitor the build:
+   Either way, check the `sicompass-sdk = "..."` pin in
+   `[workspace.dependencies]`. The SDK is released ahead of the app, so the pin
+   usually already points at the target version. If it lags, bump it to match
+   in the same edit.
+
+4. **Bump `Cargo.toml`.** Set `[workspace.package] version`, and the
+   `sicompass-sdk` pin if it lagged. `flake.nix` reads the version from there,
+   so there is nothing else to bump.
+
+5. **Add the `CHANGELOG.md` section** for the new version. cargo-dist parses
+   this file and uses the matching section as the GitHub Release body, so it is
+   what users read on the download page. Without an entry the notes are generic
+   boilerplate.
+
+6. **Sync `Cargo.lock`.** `cargo update --workspace --offline` rewrites the
+   version of the ~15 workspace member crates without touching external deps.
+   Confirm only `Cargo.toml` and `Cargo.lock` changed.
+
+7. **Commit and push `main`** (skip if steps 4 to 6 were all skipped).
+
+   ```sh
+   git add Cargo.toml Cargo.lock CHANGELOG.md
+   git commit -m "Release: bump version to X.Y.Z"
+   git push origin HEAD:main
+   ```
+
+   Plain message, no co-author trailer.
+
+8. **Tag and push the tag.**
+
+   ```sh
+   git tag -a vX.Y.Z -m "Release vX.Y.Z"
+   git push origin vX.Y.Z
+   ```
+
+9. **Report.** Give the user the Actions URL:
    https://github.com/friendlyflow/sicompass/actions
-   (`gh` may not be available in this environment to poll run status.)
+
+10. **Smoke test after the artifacts appear.** The pipeline has published
+    unrunnable binaries before. At minimum, download one package and run
+    `sicompass --check`: it reports where resources resolved to and which
+    Vulkan devices it sees, which is the whole class of failure that used to
+    only surface on a user's machine. The per-platform list is in
+    `docs/releasing.md`.
 
 ## Notes
+
+- **A red `Release` run does not mean the release failed.** Its `host` job
+  always fails with `403`, because the org disables workflow write permissions
+  org-wide. `release-publish.yml` then creates the actual release with the
+  `RELEASE_TOKEN` secret. Check the Releases page, not the run status.
+- `RELEASE_TOKEN` must exist as a repository secret (fine-grained PAT,
+  **Contents: read and write**, scoped to this repo). Without it nothing is
+  published and the only signal is a warning in the logs.
 - `release.yml` is generated by cargo-dist — never hand-edit it. Change
-  `dist-workspace.toml` and run `dist generate` instead.
-- `release-linux.yml` is currently parked (still references the removed meson
-  build); the live release artifacts come from the cargo-dist Windows pipeline.
+  `dist-workspace.toml` and run `dist generate`. The exception is
+  `src/sicompass/wix/main.wxs`, which is hand-edited and protected by
+  `allow-dirty = ["msi"]`.
+- A release should carry roughly 25 assets across the four targets. If it has
+  only the Windows ones, `custom-native-packages` failed inside the Release run
+  and its logs are in the same run.

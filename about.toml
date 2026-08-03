@@ -9,8 +9,15 @@
 # or another license incompatible with the proprietary arm of the dual license.
 
 # Only consider licenses for the platforms we actually ship binaries for.
+# These must stay in step with `targets` in dist-workspace.toml, or the
+# attribution file will omit crates that only appear in one platform's tree
+# (the `windows-*` crates, `objc2-*` and `security-framework` on macOS,
+# `accesskit_unix` and its zbus stack on Linux).
 targets = [
     "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
 ]
 
 # Build-only dependencies are not distributed in the binary.
