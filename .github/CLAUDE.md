@@ -80,6 +80,18 @@ Shaders and fonts are now embedded (`src/sicompass/src/shaders.rs`,
     needed for the `/MT` vs `/MD` CRT mismatch. **Do not reintroduce the
     from-source SDL step.** CI building something other than what the release
     builds is how the release broke in the first place.
+  - `libfreetype-dev` in the apt lists is load-bearing, not a leftover from the
+    C codebase. freetype-sys links the system FreeType when pkg-config finds
+    it, and otherwise builds its own copy with PNG support switched off, which
+    cannot decode NotoColorEmoji's strikes. Removing it makes every colour
+    emoji vanish, and `color_atlas_rasterizes_emoji_to_rgba` is what catches
+    it. Same reasoning applies to `libpng-dev`.
+  - The Windows leg does **not** run `cargo test`, because
+    `.cargo/config.toml` sets a `runner` for `x86_64-pc-windows-msvc` pointing
+    at `C:\sicompass\.cargo\run.bat`, which exists on one developer machine.
+    `cargo test` there fails with "The system cannot find the path specified"
+    before a single test runs. Scoping or removing that runner would let
+    Windows run the portable subset the macOS legs already do.
 - `release-publish.yml` creates the GitHub Release that cargo-dist cannot. The
   `friendlyflow` org disables write permissions for workflows org-wide — an
   org-level ceiling no repo setting can raise — so `secrets.GITHUB_TOKEN` is

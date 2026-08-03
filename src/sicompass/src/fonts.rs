@@ -44,6 +44,20 @@ pub const FALLBACKS: &[&[u8]] = &[include_bytes!(concat!(
 /// Noto Color Emoji, under the SIL Open Font License
 /// (`fonts/LICENSE-NotoColorEmoji.txt`). Optional at runtime: if the face
 /// fails to parse, emoji are simply disabled.
+///
+/// # This needs a FreeType built with PNG support
+///
+/// The strikes in this font are PNG bitmaps, so FreeType can only rasterise
+/// them when it was compiled with `FT_CONFIG_OPTION_USE_PNG`. freetype-sys
+/// 0.20.1 links the system FreeType when pkg-config finds
+/// `freetype2 >= 24.3.18`, and otherwise falls back to a vendored `cc` build
+/// that has PNG support switched off. So on Linux, `libfreetype-dev` at build
+/// time and `libfreetype6` at run time are functional requirements, not
+/// leftovers, and both `ci.yml` and `dist-workspace.toml` install them
+/// deliberately.
+///
+/// `text::tests::color_atlas_rasterizes_emoji_to_rgba` is what catches a
+/// build that lost it. The symptom otherwise is emoji silently disappearing.
 pub const COLOR_EMOJI: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../fonts/NotoColorEmoji.ttf"
