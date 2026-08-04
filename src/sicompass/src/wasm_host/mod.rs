@@ -107,7 +107,15 @@ impl HostState {
     /// `dashboard-image-path`, where the *host* opens the file the guest names.
     pub fn confine(&self, rel: &str) -> Result<PathBuf, String> {
         let candidate = Path::new(rel);
-        if candidate.is_absolute() {
+        // `is_absolute()` alone is not enough, because it is platform-dependent:
+        // on Windows `/etc/passwd` is *not* absolute (it carries no drive prefix)
+        // and would otherwise fall through. A prefix or root component means the
+        // guest named a host location whichever platform we are on, so check the
+        // components too and report both the same way.
+        let rooted = candidate.components().any(|c| {
+            matches!(c, std::path::Component::Prefix(_) | std::path::Component::RootDir)
+        });
+        if candidate.is_absolute() || rooted {
             return Err(format!("`{rel}` is absolute; plugin paths must be relative"));
         }
         if candidate
@@ -115,13 +123,6 @@ impl HostState {
             .any(|c| matches!(c, std::path::Component::ParentDir))
         {
             return Err(format!("`{rel}` escapes the plugin directory"));
-        }
-        // Reject Windows prefixes and root components too; only plain names and
-        // separators are allowed through.
-        if candidate.components().any(|c| {
-            matches!(c, std::path::Component::Prefix(_) | std::path::Component::RootDir)
-        }) {
-            return Err(format!("`{rel}` is not a plain relative path"));
         }
         Ok(self.plugin_dir.join(candidate))
     }

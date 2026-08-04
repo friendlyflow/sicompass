@@ -47,12 +47,21 @@ use sicompass_emailclient::{EmailClientConfig, ImapBackend, MailBody};
 /// Point the SQLite envelope cache at a scratch directory.
 ///
 /// `EnvelopeCache::open` resolves its DB path through
-/// `sicompass_sdk::platform::cache_home()`, which honours `XDG_CACHE_HOME` on
-/// Linux. Without this the tests would read and write the developer's real
-/// email cache, and results would depend on previous runs.
+/// `sicompass_sdk::platform::cache_home()`. Without this the tests would read
+/// and write the developer's real email cache, and results would depend on
+/// previous runs.
 ///
 /// The DB file is keyed on the username, so each test additionally uses a
 /// unique one (see [`unique_user`]) and therefore its own cache file.
+///
+/// Which variable to set is platform-specific, because `cache_home()` only
+/// consults `XDG_CACHE_HOME` on Linux: Windows resolves `%LOCALAPPDATA%` and
+/// macOS derives `~/Library/Caches` from `$HOME`. Setting the XDG one alone
+/// isolated Linux and left the other two writing to the real cache, which is
+/// both the pollution this function exists to prevent and a source of failures
+/// that look like flakes: a warm cache lets `list_messages` answer from SQLite
+/// without issuing the FETCH the tests assert on, so a suite that passed on a
+/// clean machine failed on the second run.
 fn isolate_cache() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
@@ -60,7 +69,14 @@ fn isolate_cache() {
         std::fs::create_dir_all(&dir).expect("create scratch cache dir");
         // Safety: single-threaded initialisation guarded by `Once`, run before
         // any test touches the cache.
-        unsafe { std::env::set_var("XDG_CACHE_HOME", &dir) };
+        unsafe {
+            #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+            std::env::set_var("XDG_CACHE_HOME", &dir);
+            #[cfg(target_os = "windows")]
+            std::env::set_var("LOCALAPPDATA", &dir);
+            #[cfg(target_os = "macos")]
+            std::env::set_var("HOME", &dir);
+        }
     });
 }
 

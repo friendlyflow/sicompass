@@ -24,7 +24,38 @@ fn fixture(name: &str) -> PathBuf {
 #[test]
 fn a_plugin_installed_on_disk_is_discovered_and_loads() {
     let config_home = tempfile::tempdir().expect("temp config home");
-    let plugin_dir = config_home.path().join("sicompass/plugins/hello");
+
+    // SAFETY: single-threaded at this point, and this binary contains one test, so
+    // nothing else can observe the environment mid-change.
+    //
+    // Which variable to set is platform-specific, because `config_home()` only
+    // consults `XDG_CONFIG_HOME` on Linux: Windows reads `%APPDATA%` and macOS
+    // derives the path from `$HOME`. Setting only the XDG one sandboxes Linux and
+    // silently lets the other two scan the developer's real config directory,
+    // where they find nothing.
+    unsafe {
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        std::env::set_var("XDG_CONFIG_HOME", config_home.path());
+        #[cfg(target_os = "windows")]
+        std::env::set_var("APPDATA", config_home.path());
+        #[cfg(target_os = "macos")]
+        std::env::set_var("HOME", config_home.path());
+    }
+
+    // Only the *root* differs per platform; the `sicompass/plugins/<name>` layout
+    // below it is the same everywhere, and is what this test is really pinning.
+    let config_root = {
+        #[cfg(target_os = "macos")]
+        {
+            config_home.path().join("Library").join("Application Support")
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            config_home.path().to_path_buf()
+        }
+    };
+
+    let plugin_dir = config_root.join("sicompass/plugins/hello");
     std::fs::create_dir_all(&plugin_dir).unwrap();
     std::fs::copy(fixture("hello.wasm"), plugin_dir.join("plugin.wasm")).unwrap();
     std::fs::write(
@@ -41,13 +72,7 @@ fn a_plugin_installed_on_disk_is_discovered_and_loads() {
 
     // Also install something that is not a plugin, so "discovered 1" means the scan
     // is selective rather than counting directories.
-    std::fs::create_dir_all(config_home.path().join("sicompass/plugins/not-a-plugin")).unwrap();
-
-    // SAFETY: single-threaded at this point, and this binary contains one test, so
-    // nothing else can observe the environment mid-change.
-    unsafe {
-        std::env::set_var("XDG_CONFIG_HOME", config_home.path());
-    }
+    std::fs::create_dir_all(config_root.join("sicompass/plugins/not-a-plugin")).unwrap();
 
     let discovered = discover_user_plugins();
     let hello = discovered
