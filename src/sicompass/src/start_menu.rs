@@ -261,56 +261,84 @@ pub use imp::register;
 mod tests {
     use super::*;
 
+    /// A `C:\`-rooted path, assembled from components so the separators are
+    /// the host's.
+    ///
+    /// The layouts below are Windows ones, but [`decide`] is compiled on every
+    /// platform and so are these tests. A backslash is an ordinary character
+    /// on Unix, so `Path::new(r"C:\Program Files\sicompass\bin\sicompass.exe")`
+    /// is one opaque component there and the `starts_with` in [`decide`] can
+    /// never match, whatever the policy says. Joining component by component
+    /// gives a real rooted path on Windows and an equivalent one everywhere
+    /// else, which keeps the Program Files rule under test on all four CI
+    /// runners rather than only the Windows one.
+    fn win(parts: &[&str]) -> PathBuf {
+        let mut path = PathBuf::from(r"C:\");
+        path.extend(parts);
+        path
+    }
+
     fn pf() -> Vec<PathBuf> {
-        vec![PathBuf::from(r"C:\Program Files")]
+        vec![win(&["Program Files"])]
     }
 
     #[test]
     fn installs_for_a_release_build_outside_program_files() {
-        let exe = Path::new(r"C:\Users\a\.cargo\bin\sicompass.exe");
-        assert_eq!(decide(exe, &pf(), false, false, false), Decision::Install);
+        let exe = win(&["Users", "a", ".cargo", "bin", "sicompass.exe"]);
+        assert_eq!(decide(&exe, &pf(), false, false, false), Decision::Install);
     }
 
     /// The whole point of the module: the PowerShell installer's layout has to
     /// be the case that gets a shortcut.
     #[test]
     fn installs_for_the_powershell_installer_layout() {
-        let exe = Path::new(r"C:\Users\a\AppData\Local\sicompass\bin\sicompass.exe");
-        assert_eq!(decide(exe, &pf(), false, false, false), Decision::Install);
+        let exe = win(&[
+            "Users",
+            "a",
+            "AppData",
+            "Local",
+            "sicompass",
+            "bin",
+            "sicompass.exe",
+        ]);
+        assert_eq!(decide(&exe, &pf(), false, false, false), Decision::Install);
     }
 
     /// An MSI install already has a per-machine shortcut. A second, per-user
     /// one would show the app twice.
     #[test]
     fn skips_when_installed_under_program_files() {
-        let exe = Path::new(r"C:\Program Files\sicompass\bin\sicompass.exe");
+        let exe = win(&["Program Files", "sicompass", "bin", "sicompass.exe"]);
         assert_eq!(
-            decide(exe, &pf(), false, false, false),
+            decide(&exe, &pf(), false, false, false),
             Decision::ManagedByInstaller
         );
     }
 
     #[test]
     fn skips_when_the_shortcut_is_already_there() {
-        let exe = Path::new(r"C:\Users\a\.cargo\bin\sicompass.exe");
+        let exe = win(&["Users", "a", ".cargo", "bin", "sicompass.exe"]);
         assert_eq!(
-            decide(exe, &pf(), true, false, false),
+            decide(&exe, &pf(), true, false, false),
             Decision::AlreadyPresent
         );
     }
 
     #[test]
     fn skips_debug_builds_so_cargo_run_stays_invisible() {
-        let exe = Path::new(r"C:\sicompass\target\debug\sicompass.exe");
-        assert_eq!(decide(exe, &pf(), false, false, true), Decision::DebugBuild);
+        let exe = win(&["sicompass", "target", "debug", "sicompass.exe"]);
+        assert_eq!(
+            decide(&exe, &pf(), false, false, true),
+            Decision::DebugBuild
+        );
     }
 
     /// The opt-out has to win over everything, including a missing shortcut in
     /// an otherwise perfectly installable layout.
     #[test]
     fn the_env_var_wins_over_every_other_condition() {
-        let exe = Path::new(r"C:\Users\a\.cargo\bin\sicompass.exe");
-        assert_eq!(decide(exe, &pf(), false, true, false), Decision::Disabled);
+        let exe = win(&["Users", "a", ".cargo", "bin", "sicompass.exe"]);
+        assert_eq!(decide(&exe, &pf(), false, true, false), Decision::Disabled);
     }
 
     #[test]
@@ -338,7 +366,7 @@ mod tests {
 
     #[test]
     fn shortcut_lands_in_the_per_user_programs_directory() {
-        let path = shortcut_path(&programs_dir(Path::new(r"C:\Users\a\AppData\Roaming")));
+        let path = shortcut_path(&programs_dir(&win(&["Users", "a", "AppData", "Roaming"])));
         assert!(path.ends_with(format!("{SHORTCUT_NAME}.lnk")));
         assert!(path.to_string_lossy().contains("Start Menu"));
     }
@@ -403,7 +431,7 @@ mod tests {
     #[test]
     fn registers_nothing_for_an_install_under_program_files() {
         let appdata = temp_dir("msi");
-        let program_files = PathBuf::from(r"C:\Program Files");
+        let program_files = win(&["Program Files"]);
         let exe = program_files.join(r"sicompass\bin\sicompass.exe");
 
         let result = super::imp::register_at(&exe, &appdata, &[program_files], false, false)
