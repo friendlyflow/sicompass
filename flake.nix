@@ -154,20 +154,64 @@
               # 2.42), adding /usr/lib/x86_64-linux-gnu bricks the shell: sh, rm
               # and uname all die with "version `GLIBC_2.42' not found".
               #
-              # The system Mesa ICD does not need it. radeon_icd.json names its
-              # driver relatively ("libvulkan_radeon.so"), but ldconfig indexes
-              # that lib, so the loader's dlopen finds it via ld.so.cache.
+              # The system Mesa ICDs cannot make up for it either, see the
+              # VK_ICD_FILENAMES block below.
               export LD_LIBRARY_PATH="${libwebp}/lib:${freetype}/lib:${vulkan-loader}/lib:${vulkan-validation-layers}/lib:${curl}/lib:${sdl3}/lib:${libxkbcommon}/lib:${wayland}/lib";
               export VULKAN_SDK="${vulkan-headers}";
               export VK_LAYER_PATH="${vulkan-validation-layers}/share/vulkan/explicit_layer.d";
 
-              # Point the Vulkan loader at system drivers on non-NixOS distros.
+              # Vulkan ICD discovery on non-NixOS distros.
+              #
+              # /usr/share/vulkan/icd.d is no use to us. Every manifest there
+              # names its driver relatively ("libvulkan_intel.so",
+              # "libGLX_nvidia.so.0"), and nixpkgs' glibc ships no
+              # ld.so.cache, so the loader's dlopen has nothing but
+              # LD_LIBRARY_PATH to search and resolves none of them. The app
+              # then dies with SDL's "Vulkan doesn't implement the
+              # VK_KHR_surface extension", which is what zero usable ICDs
+              # looks like from the outside. Symlinking the drivers onto the
+              # path does not rescue it: they fail on their own dependencies
+              # (libdrm.so.2, libLLVM.so.20.1) for the same reason. Adding
+              # /usr/lib/x86_64-linux-gnu would resolve every one of them and
+              # brick the shell, per the note above.
+              #
+              # nixpkgs' Mesa carries absolute store paths in its manifests,
+              # so Intel, AMD (radv) and the llvmpipe software fallback all
+              # load with no system library involved. Prefer it.
+              #
+              # Mesa also ships nouveau, but that does not amount to NVIDIA
+              # support: nouveau is the open reimplementation, and on a
+              # machine running the proprietary driver it is blacklisted and
+              # never binds the card. NVIDIA is handled separately below.
+              #
               # On NixOS the drivers live in /run/opengl-driver and the loader
-              # finds them on its own, so leave VK_ICD_FILENAMES unset there:
-              # setting it to a missing path makes the loader report zero ICDs
-              # and SDL fails with "Vulkan doesn't implement VK_KHR_surface".
-              if [ -e /usr/share/vulkan/icd.d/radeon_icd.json ]; then
-                export VK_ICD_FILENAMES="/usr/share/vulkan/icd.d/radeon_icd.json";
+              # finds them unaided, so leave VK_ICD_FILENAMES unset there:
+              # pointing it at a missing path makes the loader report zero
+              # ICDs and produces exactly the same SDL failure.
+              if [ ! -d /run/opengl-driver ]; then
+                _icd=$(ls ${mesa}/share/vulkan/icd.d/*.json 2>/dev/null | tr '\n' ':' | sed 's/:$//');
+
+                # Proprietary NVIDIA is the one driver nixpkgs cannot stand in
+                # for: it has to match the running kernel module, so it can
+                # only come from the host. Unlike Mesa it has no dependency
+                # fan-out beyond libc, so a symlink farm of just libGLX_nvidia
+                # and libnvidia-* is enough for dlopen to resolve it without
+                # putting the system glibc on the path. Listed ahead of Mesa
+                # so it wins on a machine that has both.
+                if [ -e /usr/share/vulkan/icd.d/nvidia_icd.json ]; then
+                  _farm="$HOME/.cache/sicompass/vk-nvidia";
+                  mkdir -p "$_farm";
+                  for _lib in /usr/lib/x86_64-linux-gnu/libGLX_nvidia.so.* \
+                              /usr/lib/x86_64-linux-gnu/libnvidia-*.so.*; do
+                    [ -e "$_lib" ] && ln -sfn "$_lib" "$_farm/$(basename "$_lib")";
+                  done
+                  export LD_LIBRARY_PATH="$_farm:$LD_LIBRARY_PATH";
+                  _icd="/usr/share/vulkan/icd.d/nvidia_icd.json:$_icd";
+                  unset _farm _lib;
+                fi
+
+                [ -n "$_icd" ] && export VK_ICD_FILENAMES="$_icd";
+                unset _icd;
               fi
 
               # graphify: uv installs the `graphifyy` package's binaries into
