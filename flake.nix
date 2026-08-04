@@ -3,9 +3,17 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+
+    # Intel macOS only. nixpkgs 26.11 dropped x86_64-darwin outright, and it
+    # does not merely stop building: `import nixpkgs { system =
+    # "x86_64-darwin"; }` throws, so a single-input flake that lists the system
+    # fails to evaluate on *every* platform, not just that one. 26.05 is the
+    # last branch carrying it, and it gets security fixes until the end of
+    # 2026. Retire this input, and the system below, when that runs out.
+    nixpkgs-x86-darwin.url = "github:NixOS/nixpkgs/nixpkgs-26.05-darwin";
   };
 
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs, nixpkgs-x86-darwin }:
     let
       supportedSystems = [
         "aarch64-linux"
@@ -13,8 +21,15 @@
         "x86_64-linux"
         "x86_64-darwin"
       ];
+
+      # Which nixpkgs a given system is built from. Everything tracks unstable
+      # except Intel macOS, which unstable no longer has, per the input note.
+      nixpkgsInputFor = system:
+        if system == "x86_64-darwin" then nixpkgs-x86-darwin else nixpkgs;
+
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
-      nixpkgsFor = forAllSystems (system: import nixpkgs { inherit system; });
+      nixpkgsFor = forAllSystems (system:
+        import (nixpkgsInputFor system) { inherit system; });
 
       # Single source of truth for the version. Reading it here means
       # `nix build` cannot drift from `cargo build` when the workspace version
@@ -135,14 +150,31 @@
               at-spi2-core
               dbus
               accerciser
+            ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
+              # MoltenVK is the only Vulkan driver on macOS: it implements
+              # Vulkan on top of Metal, and vulkan-loader enumerates zero ICDs
+              # without it. Nothing on the Linux list has a macOS counterpart
+              # to add here, because SDL and accesskit both go through Cocoa:
+              # no Wayland, no X11, no xkb, no D-Bus, no Mesa.
+              moltenvk
             ];
 
+            # The hook is split three ways because macOS shares almost none of
+            # the Linux graphics stack. `wayland` does not merely fail to
+            # build on darwin, it fails to *evaluate* (nixpkgs marks
+            # aarch64-darwin in its meta.badPlatforms), so an unconditional
+            # reference to it here took down `nix develop` on macOS at eval
+            # time, before any package was fetched.
             shellHook = with pkgs; ''
               # Rust stdlib source for rust-analyzer
               export RUST_SRC_PATH="${pkgs.rustc}/lib/rustlib/src/rust/library";
 
-              # SDL3 + deps pkg-config / link path (needed by sdl3-rs / cargo build)
-              export PKG_CONFIG_PATH="${sdl3}/lib/pkgconfig:${libxkbcommon.dev}/lib/pkgconfig:$PKG_CONFIG_PATH";
+              # SDL3 pkg-config / link path (needed by sdl3-rs / cargo build)
+              export PKG_CONFIG_PATH="${sdl3}/lib/pkgconfig:$PKG_CONFIG_PATH";
+              export VULKAN_SDK="${vulkan-headers}";
+            ''
+            + lib.optionalString stdenv.isLinux ''
+              export PKG_CONFIG_PATH="${libxkbcommon.dev}/lib/pkgconfig:$PKG_CONFIG_PATH";
               export LIBRARY_PATH="${sdl3}/lib:${libxkbcommon}/lib:${wayland}/lib:$LIBRARY_PATH";
 
               # Library path for Vulkan and other runtime deps.
@@ -156,8 +188,10 @@
               #
               # The system Mesa ICDs cannot make up for it either, see the
               # VK_ICD_FILENAMES block below.
-              export LD_LIBRARY_PATH="${libwebp}/lib:${freetype}/lib:${vulkan-loader}/lib:${vulkan-validation-layers}/lib:${curl}/lib:${sdl3}/lib:${libxkbcommon}/lib:${wayland}/lib";
-              export VULKAN_SDK="${vulkan-headers}";
+              # curl.out, not curl: curl's *default* output is `bin`, which
+              # holds no lib directory at all, so a bare ${curl}/lib here was
+              # a path that has never existed.
+              export LD_LIBRARY_PATH="${libwebp}/lib:${freetype}/lib:${vulkan-loader}/lib:${vulkan-validation-layers}/lib:${curl.out}/lib:${sdl3}/lib:${libxkbcommon}/lib:${wayland}/lib";
               export VK_LAYER_PATH="${vulkan-validation-layers}/share/vulkan/explicit_layer.d";
 
               # Vulkan ICD discovery on non-NixOS distros.
@@ -213,7 +247,32 @@
                 [ -n "$_icd" ] && export VK_ICD_FILENAMES="$_icd";
                 unset _icd;
               fi
+            ''
+            + lib.optionalString stdenv.isDarwin ''
+              export LIBRARY_PATH="${sdl3}/lib:$LIBRARY_PATH";
 
+              # dyld, not ld.so. Nix's darwin linker bakes an absolute store
+              # path into each dylib's install name, so anything cargo *links*
+              # resolves with no search path at all. This is here for what the
+              # app dlopens instead: `ash::Entry::load()` asks for
+              # libvulkan.1.dylib by bare name, and MoltenVK is loaded in turn
+              # by the loader, so neither is reachable without it.
+              #
+              # FALLBACK rather than DYLD_LIBRARY_PATH: the fallback list is
+              # consulted last, so it cannot shadow a system framework the way
+              # the Linux LD_LIBRARY_PATH note warns about. (Note that System
+              # Integrity Protection strips DYLD_* across an exec of any
+              # protected binary, e.g. /bin/sh. The shell `nix develop` drops
+              # you into is a store bash, so the variable survives for
+              # anything launched from here.)
+              export DYLD_FALLBACK_LIBRARY_PATH="${vulkan-loader}/lib:${moltenvk}/lib:${sdl3}/lib:${freetype}/lib:${libwebp}/lib:${curl.out}/lib:$HOME/lib:/usr/local/lib:/usr/lib";
+
+              # One ICD, always present, and its manifest carries an absolute
+              # store path. So unlike the Linux branch there is nothing to
+              # probe for and no symlink farm to build: point at it and stop.
+              export VK_ICD_FILENAMES="${moltenvk}/share/vulkan/icd.d/MoltenVK_icd.json";
+            ''
+            + ''
               # graphify: uv installs the `graphifyy` package's binaries into
               # ~/.local/bin. Put it on PATH and bootstrap the tool if missing
               # so `graphify` works out of the box in this shell.
@@ -239,22 +298,93 @@
               # overcommits badly on a small machine while a browser and an
               # editor are also resident. One job per 2 GB, never above nproc.
               # A no-op on any machine with enough RAM to cover its cores.
-              if [ -r /proc/meminfo ] && [ -z "$CARGO_BUILD_JOBS" ]; then
-                _gb=$(awk '/MemTotal/{printf "%d", $2/1048576}' /proc/meminfo);
-                _cap=$((_gb / 2));
-                [ "$_cap" -lt 1 ] && _cap=1;
-                if [ "$_cap" -lt "$(nproc)" ]; then
-                  export CARGO_BUILD_JOBS="$_cap";
+              #
+              # The probe is the platform-specific part: macOS has neither
+              # /proc/meminfo nor nproc, so it answers the same two questions
+              # through sysctl. The cap itself is shared.
+              if [ -z "$CARGO_BUILD_JOBS" ]; then
+                if [ -r /proc/meminfo ]; then
+                  _gb=$(awk '/MemTotal/{printf "%d", $2/1048576}' /proc/meminfo);
+                  _cores=$(nproc);
+                elif command -v sysctl >/dev/null 2>&1; then
+                  _gb=$(( $(sysctl -n hw.memsize) / 1073741824 ));
+                  _cores=$(sysctl -n hw.ncpu);
                 fi
-                unset _gb _cap;
+                if [ -n "$_gb" ]; then
+                  _cap=$((_gb / 2));
+                  [ "$_cap" -lt 1 ] && _cap=1;
+                  if [ "$_cap" -lt "$_cores" ]; then
+                    export CARGO_BUILD_JOBS="$_cap";
+                  fi
+                  unset _cap;
+                fi
+                unset _gb _cores;
               fi
 
-              # Drop into fish for interactive shells only. `nix develop -c <cmd>`
-              # and tooling (Claude Code's Bash tool, CI) get no tty; exec'ing
-              # fish there would replace the process and silently discard the
-              # command, which exits 0 with no output.
+              # Hand interactive sessions to whatever shell the user actually
+              # uses. `nix develop` always starts bash, which is correct for
+              # `nix develop -c <cmd>` but not what a person wants to be typing
+              # into.
+              #
+              # The user's login shell rather than a hardcoded name: this used
+              # to be a bare `exec fish`, which drops any machine without fish
+              # installed straight into "fish: command not found" the moment
+              # `nix develop` finishes, with no shell left to type into. fish
+              # is not in buildInputs and deliberately still is not, because
+              # the point is to honour the user's choice, not to ship a second
+              # one. Set SICOMPASS_DEV_SHELL to override; set it to `bash` to
+              # stay in the bash that nix develop provides.
+              #
+              # Do NOT reach for $SHELL here, however obvious it looks: `nix
+              # develop` overwrites it with its own store bash before this hook
+              # runs, so it reports bash on every machine and this block
+              # silently never fires. The login shell has to come from the OS
+              # user database, and that is the platform-specific part, so it is
+              # asked three ways and the first hit wins.
+              #
+              # The [ -t 0 ] guard is load-bearing and must stay. `nix develop
+              # -c <cmd>` and tooling (Claude Code's Bash tool, CI) get no tty;
+              # exec'ing a shell there replaces the process and silently
+              # discards the command, which exits 0 with no output.
+              #
+              # Note the absence of a login flag. `exec "$_sh"` starts a
+              # non-login shell on purpose: on macOS a login shell sources
+              # /etc/zprofile, which runs path_helper, which reorders PATH to
+              # put /usr/bin ahead of everything and would bury this shell's
+              # toolchain behind the system one.
               if [ -t 0 ]; then
-                exec fish
+                _sh="$SICOMPASS_DEV_SHELL";
+                _me=$(id -un);
+
+                # getent is glibc's nsswitch front end, so it is the only one
+                # of the three that also answers for LDAP/SSSD accounts with
+                # no local passwd line. Linux-only, and not reliably on PATH
+                # inside a nix shell (it lives in glibc's `bin` output, which
+                # is not a build input here), hence the plain-file read next.
+                if [ -z "$_sh" ] && command -v getent >/dev/null 2>&1; then
+                  _sh=$(getent passwd "$_me" 2>/dev/null | cut -d: -f7);
+                fi
+
+                # /etc/passwd needs no binary at all, which is what makes it
+                # the dependable path on Linux, NixOS included: NixOS
+                # generates a real passwd file for local users. Harmlessly
+                # empty on macOS, where this file lists only system accounts.
+                if [ -z "$_sh" ] && [ -r /etc/passwd ]; then
+                  _sh=$(awk -F: -v u="$_me" '$1 == u { print $7 }' /etc/passwd);
+                fi
+
+                # macOS keeps local accounts in Directory Service instead.
+                if [ -z "$_sh" ] && command -v dscl >/dev/null 2>&1; then
+                  _sh=$(dscl . -read "/Users/$_me" UserShell 2>/dev/null \
+                        | sed 's/^UserShell: *//');
+                fi
+                unset _me;
+                case "''${_sh##*/}" in
+                  # Already in bash, and nix's bash is set up for this shell.
+                  bash | "") ;;
+                  *) command -v "$_sh" >/dev/null 2>&1 && exec "$_sh" ;;
+                esac
+                unset _sh;
               fi
             '';
           };
@@ -290,6 +420,10 @@
               cmake
               rustPlatform.bindgenHook
               makeWrapper
+            ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+              # .desktop files are a freedesktop concept. macOS discovers apps
+              # through an .app bundle's Info.plist instead, which is built by
+              # the packaging pipeline in docs/releasing.md, not here.
               copyDesktopItems
             ];
 
@@ -309,6 +443,11 @@
               wayland
               at-spi2-core
               dbus
+            ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
+              # Vulkan-on-Metal. Same reason as the dev shell: without an ICD
+              # the loader enumerates no devices and SDL reports the missing
+              # VK_KHR_surface extension.
+              moltenvk
             ];
 
             # No glslang and no fonts here: shaders and fonts are compiled
@@ -316,13 +455,6 @@
             postInstall = ''
               mkdir -p $out/share/sicompass
               cp -r assets $out/share/sicompass/assets
-
-              install -Dm644 assets/icons/sicompass.svg \
-                $out/share/icons/hicolor/scalable/apps/sicompass.svg
-              for s in 16 22 24 32 48 64 128 256 512; do
-                install -Dm644 "assets/icons/''${s}x''${s}.png" \
-                  "$out/share/icons/hicolor/''${s}x''${s}/apps/sicompass.png"
-              done
 
               # The font licenses have to travel with the binary, since the
               # fonts themselves are inside it.
@@ -332,6 +464,18 @@
                 $out/share/doc/sicompass/LICENSE-NotoColorEmoji.txt
               install -Dm644 THIRD-PARTY-LICENSES.html \
                 $out/share/doc/sicompass/THIRD-PARTY-LICENSES.html
+            ''
+            + pkgs.lib.optionalString pkgs.stdenv.isLinux ''
+              # The hicolor theme is where freedesktop desktops look for an
+              # app icon, and it pairs with the .desktop item below. macOS
+              # reads the icon out of the .app bundle instead, so this tree
+              # would be dead weight there.
+              install -Dm644 assets/icons/sicompass.svg \
+                $out/share/icons/hicolor/scalable/apps/sicompass.svg
+              for s in 16 22 24 32 48 64 128 256 512; do
+                install -Dm644 "assets/icons/''${s}x''${s}.png" \
+                  "$out/share/icons/hicolor/''${s}x''${s}/apps/sicompass.png"
+              done
 
               # SICOMPASS_RESOURCE_DIR is the first thing
               # `resources::resource_root()` checks, so the derivation states
@@ -356,9 +500,33 @@
                   wayland
                   sdl3
                 ])}"
+            ''
+            + pkgs.lib.optionalString pkgs.stdenv.isDarwin ''
+              # Same three jobs as the Linux wrapper, minus the one that has no
+              # macOS meaning. dyld reads DYLD_FALLBACK_LIBRARY_PATH, not
+              # LD_LIBRARY_PATH, and again this is only for what the app
+              # dlopens: libvulkan.1.dylib by bare name.
+              #
+              # VK_ICD_FILENAMES *is* set here, unlike on Linux, because the
+              # objection there does not apply: MoltenVK is a store path this
+              # derivation depends on, so it cannot be missing at runtime, and
+              # macOS has no /run/opengl-driver for the loader to find on its
+              # own.
+              #
+              # No xvfb-run: X11 is not how anything on macOS displays, and
+              # the web browser provider's headed-Chrome path does not go
+              # through a virtual X server there.
+              wrapProgram $out/bin/sicompass \
+                --set SICOMPASS_RESOURCE_DIR $out/share/sicompass \
+                --set VK_ICD_FILENAMES "${pkgs.moltenvk}/share/vulkan/icd.d/MoltenVK_icd.json" \
+                --prefix DYLD_FALLBACK_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath (with pkgs; [
+                  vulkan-loader
+                  moltenvk
+                  sdl3
+                ])}"
             '';
 
-            desktopItems = [
+            desktopItems = pkgs.lib.optionals pkgs.stdenv.isLinux [
               (pkgs.makeDesktopItem {
                 name = "sicompass";
                 desktopName = "Sicompass";

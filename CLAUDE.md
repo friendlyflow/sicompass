@@ -1,6 +1,6 @@
 # Project Instructions
 
-## Environment (NixOS)
+## Environment (Nix: NixOS, other Linux, and macOS)
 
 The whole toolchain (`cargo`, `rustc`, `clippy`, `rustfmt`, `graphify`,
 `lld` + `wasm-tools` (for WASM plugin guests),
@@ -27,6 +27,23 @@ produce the installable Linux package. It reads the version from
   `sicompass-<x>` (exception: `lib/lib_texteditor` is `sicompass-text-editor`).
   Crates under `src/` keep their directory name. `cargo test -p` takes the
   package name.
+- The dev shell is platform-split. `aarch64-darwin` gets MoltenVK,
+  `DYLD_FALLBACK_LIBRARY_PATH` and a `sysctl` job cap; Linux gets Wayland/X11,
+  Mesa ICD discovery, `LD_LIBRARY_PATH` and xvfb. Anything added to the shared
+  part of the `shellHook` has to hold on both. In particular, never reference a
+  Linux-only package (`wayland`, `mesa`, `at-spi2-core`) outside the
+  `lib.optionalString stdenv.isLinux` branch: nixpkgs marks `wayland` bad on
+  darwin, so a stray reference breaks `nix develop` at *eval* time on macOS,
+  before anything is fetched.
+- `x86_64-darwin` builds from a **second** nixpkgs input pinned to
+  `nixpkgs-26.05-darwin`, selected by `nixpkgsInputFor`. Unstable (26.11)
+  dropped Intel macOS and now *throws* on `import nixpkgs` for it, which would
+  take down every eval of the flake on every platform, so it cannot simply be
+  listed against the main input. That branch is supported until the end of 2026.
+- `nix develop` overwrites `$SHELL` with its own store bash before the
+  `shellHook` runs, so `$SHELL` is useless for detecting the user's shell there.
+  The hook reads the OS user database instead (`getent`, then `/etc/passwd`,
+  then `dscl` on macOS).
 
 ## Code Style
 
