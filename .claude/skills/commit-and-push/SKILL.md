@@ -1,7 +1,6 @@
 ---
 name: commit-and-push
 description: Commit all changes with a message and push to remote main via gh
-disable-model-invocation: true
 model: sonnet
 ---
 
