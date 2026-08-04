@@ -100,165 +100,181 @@ impl ImageRenderer {
         command_pool: vk::CommandPool,
         queue: vk::Queue,
         render_pass: vk::RenderPass,
-    ) -> Result<Self, SiError> { unsafe {
-        // ---- Vertex buffer (host-visible, host-coherent) ----------------------
-        let vb_size = (std::mem::size_of::<ImageVertex>() * MAX_IMAGE_VERTICES) as vk::DeviceSize;
-        let (vertex_buffer, vertex_buffer_memory) = render::create_buffer(
-            device, instance, physical_device,
-            vb_size,
-            vk::BufferUsageFlags::VERTEX_BUFFER,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        )?;
+    ) -> Result<Self, SiError> {
+        unsafe {
+            // ---- Vertex buffer (host-visible, host-coherent) ----------------------
+            let vb_size =
+                (std::mem::size_of::<ImageVertex>() * MAX_IMAGE_VERTICES) as vk::DeviceSize;
+            let (vertex_buffer, vertex_buffer_memory) = render::create_buffer(
+                device,
+                instance,
+                physical_device,
+                vb_size,
+                vk::BufferUsageFlags::VERTEX_BUFFER,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            )?;
 
-        // ---- Descriptor set layout -------------------------------------------
-        let sampler_binding = vk::DescriptorSetLayoutBinding::default()
-            .binding(0)
-            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-            .descriptor_count(1)
-            .stage_flags(vk::ShaderStageFlags::FRAGMENT);
-        let dsl_info = vk::DescriptorSetLayoutCreateInfo::default()
-            .bindings(std::slice::from_ref(&sampler_binding));
-        let descriptor_set_layout = device.create_descriptor_set_layout(&dsl_info, None)?;
+            // ---- Descriptor set layout -------------------------------------------
+            let sampler_binding = vk::DescriptorSetLayoutBinding::default()
+                .binding(0)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::FRAGMENT);
+            let dsl_info = vk::DescriptorSetLayoutCreateInfo::default()
+                .bindings(std::slice::from_ref(&sampler_binding));
+            let descriptor_set_layout = device.create_descriptor_set_layout(&dsl_info, None)?;
 
-        // ---- Descriptor pool (one set per cache slot) -------------------------
-        let pool_size = vk::DescriptorPoolSize::default()
-            .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-            .descriptor_count(MAX_CACHED_IMAGES as u32);
-        let pool_info = vk::DescriptorPoolCreateInfo::default()
-            .max_sets(MAX_CACHED_IMAGES as u32)
-            .pool_sizes(std::slice::from_ref(&pool_size));
-        let descriptor_pool = device.create_descriptor_pool(&pool_info, None)?;
+            // ---- Descriptor pool (one set per cache slot) -------------------------
+            let pool_size = vk::DescriptorPoolSize::default()
+                .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .descriptor_count(MAX_CACHED_IMAGES as u32);
+            let pool_info = vk::DescriptorPoolCreateInfo::default()
+                .max_sets(MAX_CACHED_IMAGES as u32)
+                .pool_sizes(std::slice::from_ref(&pool_size));
+            let descriptor_pool = device.create_descriptor_pool(&pool_info, None)?;
 
-        // Allocate all sets upfront
-        let layouts = vec![descriptor_set_layout; MAX_CACHED_IMAGES];
-        let alloc_info = vk::DescriptorSetAllocateInfo::default()
-            .descriptor_pool(descriptor_pool)
-            .set_layouts(&layouts);
-        let descriptor_sets = device.allocate_descriptor_sets(&alloc_info)?;
+            // Allocate all sets upfront
+            let layouts = vec![descriptor_set_layout; MAX_CACHED_IMAGES];
+            let alloc_info = vk::DescriptorSetAllocateInfo::default()
+                .descriptor_pool(descriptor_pool)
+                .set_layouts(&layouts);
+            let descriptor_sets = device.allocate_descriptor_sets(&alloc_info)?;
 
-        // ---- Pipeline --------------------------------------------------------
-        let vert_module = render::create_shader_module(device, shaders::IMAGE_VERT)?;
-        let frag_module = render::create_shader_module(device, shaders::IMAGE_FRAG)?;
+            // ---- Pipeline --------------------------------------------------------
+            let vert_module = render::create_shader_module(device, shaders::IMAGE_VERT)?;
+            let frag_module = render::create_shader_module(device, shaders::IMAGE_FRAG)?;
 
-        let entry = std::ffi::CString::new("main").unwrap();
-        let stages = [
-            vk::PipelineShaderStageCreateInfo::default()
-                .stage(vk::ShaderStageFlags::VERTEX)
-                .module(vert_module)
-                .name(&entry),
-            vk::PipelineShaderStageCreateInfo::default()
-                .stage(vk::ShaderStageFlags::FRAGMENT)
-                .module(frag_module)
-                .name(&entry),
-        ];
+            let entry = std::ffi::CString::new("main").unwrap();
+            let stages = [
+                vk::PipelineShaderStageCreateInfo::default()
+                    .stage(vk::ShaderStageFlags::VERTEX)
+                    .module(vert_module)
+                    .name(&entry),
+                vk::PipelineShaderStageCreateInfo::default()
+                    .stage(vk::ShaderStageFlags::FRAGMENT)
+                    .module(frag_module)
+                    .name(&entry),
+            ];
 
-        let stride = std::mem::size_of::<ImageVertex>() as u32;
-        let binding_desc = vk::VertexInputBindingDescription::default()
-            .binding(0).stride(stride).input_rate(vk::VertexInputRate::VERTEX);
-        // pos@0(8B), texCoord@8(8B)
-        let attr_descs = [
-            vk::VertexInputAttributeDescription::default()
-                .location(0).binding(0).format(vk::Format::R32G32_SFLOAT).offset(0),
-            vk::VertexInputAttributeDescription::default()
-                .location(1).binding(0).format(vk::Format::R32G32_SFLOAT).offset(8),
-        ];
+            let stride = std::mem::size_of::<ImageVertex>() as u32;
+            let binding_desc = vk::VertexInputBindingDescription::default()
+                .binding(0)
+                .stride(stride)
+                .input_rate(vk::VertexInputRate::VERTEX);
+            // pos@0(8B), texCoord@8(8B)
+            let attr_descs = [
+                vk::VertexInputAttributeDescription::default()
+                    .location(0)
+                    .binding(0)
+                    .format(vk::Format::R32G32_SFLOAT)
+                    .offset(0),
+                vk::VertexInputAttributeDescription::default()
+                    .location(1)
+                    .binding(0)
+                    .format(vk::Format::R32G32_SFLOAT)
+                    .offset(8),
+            ];
 
-        let vertex_input = vk::PipelineVertexInputStateCreateInfo::default()
-            .vertex_binding_descriptions(std::slice::from_ref(&binding_desc))
-            .vertex_attribute_descriptions(&attr_descs);
+            let vertex_input = vk::PipelineVertexInputStateCreateInfo::default()
+                .vertex_binding_descriptions(std::slice::from_ref(&binding_desc))
+                .vertex_attribute_descriptions(&attr_descs);
 
-        let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::default()
-            .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
+            let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::default()
+                .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
 
-        let viewport_state = vk::PipelineViewportStateCreateInfo::default()
-            .viewport_count(1).scissor_count(1);
+            let viewport_state = vk::PipelineViewportStateCreateInfo::default()
+                .viewport_count(1)
+                .scissor_count(1);
 
-        let rasterizer = vk::PipelineRasterizationStateCreateInfo::default()
-            .polygon_mode(vk::PolygonMode::FILL)
-            .line_width(1.0)
-            .cull_mode(vk::CullModeFlags::NONE)
-            .front_face(vk::FrontFace::COUNTER_CLOCKWISE);
+            let rasterizer = vk::PipelineRasterizationStateCreateInfo::default()
+                .polygon_mode(vk::PolygonMode::FILL)
+                .line_width(1.0)
+                .cull_mode(vk::CullModeFlags::NONE)
+                .front_face(vk::FrontFace::COUNTER_CLOCKWISE);
 
-        let multisampling = vk::PipelineMultisampleStateCreateInfo::default()
-            .rasterization_samples(vk::SampleCountFlags::TYPE_1);
+            let multisampling = vk::PipelineMultisampleStateCreateInfo::default()
+                .rasterization_samples(vk::SampleCountFlags::TYPE_1);
 
-        let depth_stencil = vk::PipelineDepthStencilStateCreateInfo::default()
-            .depth_test_enable(false)
-            .depth_write_enable(false)
-            .depth_compare_op(vk::CompareOp::ALWAYS);
+            let depth_stencil = vk::PipelineDepthStencilStateCreateInfo::default()
+                .depth_test_enable(false)
+                .depth_write_enable(false)
+                .depth_compare_op(vk::CompareOp::ALWAYS);
 
-        let blend_attachment = vk::PipelineColorBlendAttachmentState::default()
-            .color_write_mask(
-                vk::ColorComponentFlags::R | vk::ColorComponentFlags::G
-                | vk::ColorComponentFlags::B | vk::ColorComponentFlags::A,
-            )
-            .blend_enable(true)
-            .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
-            .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
-            .color_blend_op(vk::BlendOp::ADD)
-            .src_alpha_blend_factor(vk::BlendFactor::ONE)
-            .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
-            .alpha_blend_op(vk::BlendOp::ADD);
+            let blend_attachment = vk::PipelineColorBlendAttachmentState::default()
+                .color_write_mask(
+                    vk::ColorComponentFlags::R
+                        | vk::ColorComponentFlags::G
+                        | vk::ColorComponentFlags::B
+                        | vk::ColorComponentFlags::A,
+                )
+                .blend_enable(true)
+                .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
+                .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
+                .color_blend_op(vk::BlendOp::ADD)
+                .src_alpha_blend_factor(vk::BlendFactor::ONE)
+                .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
+                .alpha_blend_op(vk::BlendOp::ADD);
 
-        let blend_state = vk::PipelineColorBlendStateCreateInfo::default()
-            .attachments(std::slice::from_ref(&blend_attachment));
+            let blend_state = vk::PipelineColorBlendStateCreateInfo::default()
+                .attachments(std::slice::from_ref(&blend_attachment));
 
-        let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
-        let dynamic_state = vk::PipelineDynamicStateCreateInfo::default()
-            .dynamic_states(&dynamic_states);
+            let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
+            let dynamic_state =
+                vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
 
-        // Push constant: screenWidth, screenHeight (vec2 in vertex shader)
-        let push_range = vk::PushConstantRange::default()
-            .stage_flags(vk::ShaderStageFlags::VERTEX)
-            .offset(0)
-            .size(std::mem::size_of::<[f32; 2]>() as u32);
+            // Push constant: screenWidth, screenHeight (vec2 in vertex shader)
+            let push_range = vk::PushConstantRange::default()
+                .stage_flags(vk::ShaderStageFlags::VERTEX)
+                .offset(0)
+                .size(std::mem::size_of::<[f32; 2]>() as u32);
 
-        let set_layouts = [descriptor_set_layout];
-        let pl_info = vk::PipelineLayoutCreateInfo::default()
-            .set_layouts(&set_layouts)
-            .push_constant_ranges(std::slice::from_ref(&push_range));
-        let pipeline_layout = device.create_pipeline_layout(&pl_info, None)?;
+            let set_layouts = [descriptor_set_layout];
+            let pl_info = vk::PipelineLayoutCreateInfo::default()
+                .set_layouts(&set_layouts)
+                .push_constant_ranges(std::slice::from_ref(&push_range));
+            let pipeline_layout = device.create_pipeline_layout(&pl_info, None)?;
 
-        let pipeline_info = vk::GraphicsPipelineCreateInfo::default()
-            .stages(&stages)
-            .vertex_input_state(&vertex_input)
-            .input_assembly_state(&input_assembly)
-            .viewport_state(&viewport_state)
-            .rasterization_state(&rasterizer)
-            .multisample_state(&multisampling)
-            .depth_stencil_state(&depth_stencil)
-            .color_blend_state(&blend_state)
-            .dynamic_state(&dynamic_state)
-            .layout(pipeline_layout)
-            .render_pass(render_pass)
-            .subpass(0);
+            let pipeline_info = vk::GraphicsPipelineCreateInfo::default()
+                .stages(&stages)
+                .vertex_input_state(&vertex_input)
+                .input_assembly_state(&input_assembly)
+                .viewport_state(&viewport_state)
+                .rasterization_state(&rasterizer)
+                .multisample_state(&multisampling)
+                .depth_stencil_state(&depth_stencil)
+                .color_blend_state(&blend_state)
+                .dynamic_state(&dynamic_state)
+                .layout(pipeline_layout)
+                .render_pass(render_pass)
+                .subpass(0);
 
-        let pipeline = device
-            .create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None)
-            .map_err(|(_, e)| SiError::Vulkan(e))?[0];
+            let pipeline = device
+                .create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None)
+                .map_err(|(_, e)| SiError::Vulkan(e))?[0];
 
-        device.destroy_shader_module(vert_module, None);
-        device.destroy_shader_module(frag_module, None);
+            device.destroy_shader_module(vert_module, None);
+            device.destroy_shader_module(frag_module, None);
 
-        Ok(ImageRenderer {
-            device: device.clone(),
-            instance: instance.clone(),
-            physical_device,
-            command_pool,
-            queue,
-            vertex_buffer,
-            vertex_buffer_memory,
-            descriptor_pool,
-            descriptor_set_layout,
-            descriptor_sets,
-            pipeline_layout,
-            pipeline,
-            cache: (0..MAX_CACHED_IMAGES).map(|_| None).collect(),
-            draws: Vec::new(),
-            vertices: Vec::with_capacity(MAX_IMAGE_VERTICES),
-            current_frame: 0,
-        })
-    }}
+            Ok(ImageRenderer {
+                device: device.clone(),
+                instance: instance.clone(),
+                physical_device,
+                command_pool,
+                queue,
+                vertex_buffer,
+                vertex_buffer_memory,
+                descriptor_pool,
+                descriptor_set_layout,
+                descriptor_sets,
+                pipeline_layout,
+                pipeline,
+                cache: (0..MAX_CACHED_IMAGES).map(|_| None).collect(),
+                draws: Vec::new(),
+                vertices: Vec::with_capacity(MAX_IMAGE_VERTICES),
+                current_frame: 0,
+            })
+        }
+    }
 
     // ---- Frame helpers -------------------------------------------------------
 
@@ -270,42 +286,65 @@ impl ImageRenderer {
     }
 
     /// Return `(width, height)` of the cached/loaded texture, or `None` on failure.
-    pub unsafe fn texture_size(&mut self, path: &str) -> Option<(u32, u32)> { unsafe {
-        let slot = self.find_or_load(path)?;
-        let tex = self.cache[slot].as_ref()?;
-        Some((tex.width, tex.height))
-    }}
+    pub unsafe fn texture_size(&mut self, path: &str) -> Option<(u32, u32)> {
+        unsafe {
+            let slot = self.find_or_load(path)?;
+            let tex = self.cache[slot].as_ref()?;
+            Some((tex.width, tex.height))
+        }
+    }
 
     /// Schedule a textured quad at (x, y, w, h).
     ///
     /// If `path` is already cached the texture is reused; otherwise the image
     /// file is loaded, uploaded to the GPU, and placed in the least-recently-
     /// used cache slot.
-    pub unsafe fn prepare_image(
-        &mut self,
-        path: &str,
-        x: f32, y: f32, width: f32, height: f32,
-    ) { unsafe {
-        if self.draws.len() >= MAX_CACHED_IMAGES { return; }
+    pub unsafe fn prepare_image(&mut self, path: &str, x: f32, y: f32, width: f32, height: f32) {
+        unsafe {
+            if self.draws.len() >= MAX_CACHED_IMAGES {
+                return;
+            }
 
-        let slot = match self.find_or_load(path) {
-            Some(s) => s,
-            None => return,
-        };
+            let slot = match self.find_or_load(path) {
+                Some(s) => s,
+                None => return,
+            };
 
-        let vertex_offset = self.vertices.len() as u32;
+            let vertex_offset = self.vertices.len() as u32;
 
-        let (x0, y0, x1, y1) = (x, y, x + width, y + height);
-        // Two triangles covering the quad, UV (0,0)→(1,1)
-        self.vertices.push(ImageVertex { pos: [x0, y0], tex_coord: [0.0, 0.0] });
-        self.vertices.push(ImageVertex { pos: [x1, y0], tex_coord: [1.0, 0.0] });
-        self.vertices.push(ImageVertex { pos: [x1, y1], tex_coord: [1.0, 1.0] });
-        self.vertices.push(ImageVertex { pos: [x0, y0], tex_coord: [0.0, 0.0] });
-        self.vertices.push(ImageVertex { pos: [x1, y1], tex_coord: [1.0, 1.0] });
-        self.vertices.push(ImageVertex { pos: [x0, y1], tex_coord: [0.0, 1.0] });
+            let (x0, y0, x1, y1) = (x, y, x + width, y + height);
+            // Two triangles covering the quad, UV (0,0)→(1,1)
+            self.vertices.push(ImageVertex {
+                pos: [x0, y0],
+                tex_coord: [0.0, 0.0],
+            });
+            self.vertices.push(ImageVertex {
+                pos: [x1, y0],
+                tex_coord: [1.0, 0.0],
+            });
+            self.vertices.push(ImageVertex {
+                pos: [x1, y1],
+                tex_coord: [1.0, 1.0],
+            });
+            self.vertices.push(ImageVertex {
+                pos: [x0, y0],
+                tex_coord: [0.0, 0.0],
+            });
+            self.vertices.push(ImageVertex {
+                pos: [x1, y1],
+                tex_coord: [1.0, 1.0],
+            });
+            self.vertices.push(ImageVertex {
+                pos: [x0, y1],
+                tex_coord: [0.0, 1.0],
+            });
 
-        self.draws.push(ImageDraw { slot, vertex_offset });
-    }}
+            self.draws.push(ImageDraw {
+                slot,
+                vertex_offset,
+            });
+        }
+    }
 
     /// Like `prepare_image`, but clips the quad vertically to the screen range
     /// `[clip_top, clip_bottom]`, cropping the texture (adjusting UVs) rather
@@ -314,36 +353,69 @@ impl ImageRenderer {
     pub unsafe fn prepare_image_clipped(
         &mut self,
         path: &str,
-        x: f32, y: f32, width: f32, height: f32,
-        clip_top: f32, clip_bottom: f32,
-    ) { unsafe {
-        if self.draws.len() >= MAX_CACHED_IMAGES { return; }
-        if height <= 0.0 { return; }
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        clip_top: f32,
+        clip_bottom: f32,
+    ) {
+        unsafe {
+            if self.draws.len() >= MAX_CACHED_IMAGES {
+                return;
+            }
+            if height <= 0.0 {
+                return;
+            }
 
-        let vis_top = y.max(clip_top);
-        let vis_bottom = (y + height).min(clip_bottom);
-        if vis_bottom <= vis_top { return; } // fully clipped away
+            let vis_top = y.max(clip_top);
+            let vis_bottom = (y + height).min(clip_bottom);
+            if vis_bottom <= vis_top {
+                return;
+            } // fully clipped away
 
-        let slot = match self.find_or_load(path) {
-            Some(s) => s,
-            None => return,
-        };
+            let slot = match self.find_or_load(path) {
+                Some(s) => s,
+                None => return,
+            };
 
-        let vertex_offset = self.vertices.len() as u32;
+            let vertex_offset = self.vertices.len() as u32;
 
-        // Crop UVs to the visible vertical band.
-        let v0 = ((vis_top - y) / height).clamp(0.0, 1.0);
-        let v1 = ((vis_bottom - y) / height).clamp(0.0, 1.0);
-        let (x0, y0, x1, y1) = (x, vis_top, x + width, vis_bottom);
-        self.vertices.push(ImageVertex { pos: [x0, y0], tex_coord: [0.0, v0] });
-        self.vertices.push(ImageVertex { pos: [x1, y0], tex_coord: [1.0, v0] });
-        self.vertices.push(ImageVertex { pos: [x1, y1], tex_coord: [1.0, v1] });
-        self.vertices.push(ImageVertex { pos: [x0, y0], tex_coord: [0.0, v0] });
-        self.vertices.push(ImageVertex { pos: [x1, y1], tex_coord: [1.0, v1] });
-        self.vertices.push(ImageVertex { pos: [x0, y1], tex_coord: [0.0, v1] });
+            // Crop UVs to the visible vertical band.
+            let v0 = ((vis_top - y) / height).clamp(0.0, 1.0);
+            let v1 = ((vis_bottom - y) / height).clamp(0.0, 1.0);
+            let (x0, y0, x1, y1) = (x, vis_top, x + width, vis_bottom);
+            self.vertices.push(ImageVertex {
+                pos: [x0, y0],
+                tex_coord: [0.0, v0],
+            });
+            self.vertices.push(ImageVertex {
+                pos: [x1, y0],
+                tex_coord: [1.0, v0],
+            });
+            self.vertices.push(ImageVertex {
+                pos: [x1, y1],
+                tex_coord: [1.0, v1],
+            });
+            self.vertices.push(ImageVertex {
+                pos: [x0, y0],
+                tex_coord: [0.0, v0],
+            });
+            self.vertices.push(ImageVertex {
+                pos: [x1, y1],
+                tex_coord: [1.0, v1],
+            });
+            self.vertices.push(ImageVertex {
+                pos: [x0, y1],
+                tex_coord: [0.0, v1],
+            });
 
-        self.draws.push(ImageDraw { slot, vertex_offset });
-    }}
+            self.draws.push(ImageDraw {
+                slot,
+                vertex_offset,
+            });
+        }
+    }
 
     /// Upload vertices and issue one draw call per queued image.
     pub unsafe fn draw_images(
@@ -351,111 +423,128 @@ impl ImageRenderer {
         device: &ash::Device,
         cb: vk::CommandBuffer,
         extent: vk::Extent2D,
-    ) { unsafe {
-        if self.draws.is_empty() { return; }
+    ) {
+        unsafe {
+            if self.draws.is_empty() {
+                return;
+            }
 
-        let upload_size = (std::mem::size_of::<ImageVertex>() * self.vertices.len()) as vk::DeviceSize;
-        let ptr = device
-            .map_memory(self.vertex_buffer_memory, 0, upload_size, vk::MemoryMapFlags::empty())
-            .unwrap() as *mut ImageVertex;
-        ptr::copy_nonoverlapping(self.vertices.as_ptr(), ptr, self.vertices.len());
-        device.unmap_memory(self.vertex_buffer_memory);
+            let upload_size =
+                (std::mem::size_of::<ImageVertex>() * self.vertices.len()) as vk::DeviceSize;
+            let ptr = device
+                .map_memory(
+                    self.vertex_buffer_memory,
+                    0,
+                    upload_size,
+                    vk::MemoryMapFlags::empty(),
+                )
+                .unwrap() as *mut ImageVertex;
+            ptr::copy_nonoverlapping(self.vertices.as_ptr(), ptr, self.vertices.len());
+            device.unmap_memory(self.vertex_buffer_memory);
 
-        let screen = [extent.width as f32, extent.height as f32];
-        device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
-        device.cmd_push_constants(
-            cb,
-            self.pipeline_layout,
-            vk::ShaderStageFlags::VERTEX,
-            0,
-            std::slice::from_raw_parts(screen.as_ptr() as *const u8, 8),
-        );
-
-        let bufs = [self.vertex_buffer];
-        let offs = [0u64];
-        device.cmd_bind_vertex_buffers(cb, 0, &bufs, &offs);
-
-        for draw in &self.draws {
-            device.cmd_bind_descriptor_sets(
+            let screen = [extent.width as f32, extent.height as f32];
+            device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
+            device.cmd_push_constants(
                 cb,
-                vk::PipelineBindPoint::GRAPHICS,
                 self.pipeline_layout,
+                vk::ShaderStageFlags::VERTEX,
                 0,
-                &[self.descriptor_sets[draw.slot]],
-                &[],
+                std::slice::from_raw_parts(screen.as_ptr() as *const u8, 8),
             );
-            device.cmd_draw(cb, VERTS_PER_QUAD as u32, 1, draw.vertex_offset, 0);
+
+            let bufs = [self.vertex_buffer];
+            let offs = [0u64];
+            device.cmd_bind_vertex_buffers(cb, 0, &bufs, &offs);
+
+            for draw in &self.draws {
+                device.cmd_bind_descriptor_sets(
+                    cb,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    self.pipeline_layout,
+                    0,
+                    &[self.descriptor_sets[draw.slot]],
+                    &[],
+                );
+                device.cmd_draw(cb, VERTS_PER_QUAD as u32, 1, draw.vertex_offset, 0);
+            }
         }
-    }}
+    }
 
     // ---- Cleanup -------------------------------------------------------------
 
-    pub unsafe fn cleanup(&mut self) { unsafe {
-        for slot in self.cache.iter_mut() {
-            if let Some(tex) = slot.take() {
-                self.device.destroy_sampler(tex.sampler, None);
-                self.device.destroy_image_view(tex.view, None);
-                self.device.destroy_image(tex.image, None);
-                self.device.free_memory(tex.memory, None);
+    pub unsafe fn cleanup(&mut self) {
+        unsafe {
+            for slot in self.cache.iter_mut() {
+                if let Some(tex) = slot.take() {
+                    self.device.destroy_sampler(tex.sampler, None);
+                    self.device.destroy_image_view(tex.view, None);
+                    self.device.destroy_image(tex.image, None);
+                    self.device.free_memory(tex.memory, None);
+                }
             }
+            self.device.destroy_pipeline(self.pipeline, None);
+            self.device
+                .destroy_pipeline_layout(self.pipeline_layout, None);
+            self.device
+                .destroy_descriptor_pool(self.descriptor_pool, None);
+            self.device
+                .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
+            self.device.destroy_buffer(self.vertex_buffer, None);
+            self.device.free_memory(self.vertex_buffer_memory, None);
         }
-        self.device.destroy_pipeline(self.pipeline, None);
-        self.device.destroy_pipeline_layout(self.pipeline_layout, None);
-        self.device.destroy_descriptor_pool(self.descriptor_pool, None);
-        self.device.destroy_descriptor_set_layout(self.descriptor_set_layout, None);
-        self.device.destroy_buffer(self.vertex_buffer, None);
-        self.device.free_memory(self.vertex_buffer_memory, None);
-    }}
+    }
 
     // ---- Internal helpers ----------------------------------------------------
 
     /// Return the cache slot index for `path`, loading the texture if needed.
-    unsafe fn find_or_load(&mut self, path: &str) -> Option<usize> { unsafe {
-        // Check if already cached
-        for (i, slot) in self.cache.iter_mut().enumerate() {
-            if let Some(tex) = slot {
-                if tex.path == path {
-                    tex.last_used_frame = self.current_frame;
-                    return Some(i);
+    unsafe fn find_or_load(&mut self, path: &str) -> Option<usize> {
+        unsafe {
+            // Check if already cached
+            for (i, slot) in self.cache.iter_mut().enumerate() {
+                if let Some(tex) = slot {
+                    if tex.path == path {
+                        tex.last_used_frame = self.current_frame;
+                        return Some(i);
+                    }
+                }
+            }
+
+            // Find a free slot or the LRU slot
+            let evict_slot = self.find_evict_slot();
+
+            // Evict existing texture if necessary
+            if let Some(old) = self.cache[evict_slot].take() {
+                self.device.destroy_sampler(old.sampler, None);
+                self.device.destroy_image_view(old.view, None);
+                self.device.destroy_image(old.image, None);
+                self.device.free_memory(old.memory, None);
+            }
+
+            // Load new texture
+            match self.load_texture(path) {
+                Ok(tex) => {
+                    // Update the pre-allocated descriptor set for this slot
+                    let image_info = vk::DescriptorImageInfo::default()
+                        .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+                        .image_view(tex.view)
+                        .sampler(tex.sampler);
+                    let write = vk::WriteDescriptorSet::default()
+                        .dst_set(self.descriptor_sets[evict_slot])
+                        .dst_binding(0)
+                        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                        .image_info(std::slice::from_ref(&image_info));
+                    self.device.update_descriptor_sets(&[write], &[]);
+
+                    self.cache[evict_slot] = Some(tex);
+                    Some(evict_slot)
+                }
+                Err(e) => {
+                    eprintln!("sicompass: image load failed for '{path}': {e}");
+                    None
                 }
             }
         }
-
-        // Find a free slot or the LRU slot
-        let evict_slot = self.find_evict_slot();
-
-        // Evict existing texture if necessary
-        if let Some(old) = self.cache[evict_slot].take() {
-            self.device.destroy_sampler(old.sampler, None);
-            self.device.destroy_image_view(old.view, None);
-            self.device.destroy_image(old.image, None);
-            self.device.free_memory(old.memory, None);
-        }
-
-        // Load new texture
-        match self.load_texture(path) {
-            Ok(tex) => {
-                // Update the pre-allocated descriptor set for this slot
-                let image_info = vk::DescriptorImageInfo::default()
-                    .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                    .image_view(tex.view)
-                    .sampler(tex.sampler);
-                let write = vk::WriteDescriptorSet::default()
-                    .dst_set(self.descriptor_sets[evict_slot])
-                    .dst_binding(0)
-                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                    .image_info(std::slice::from_ref(&image_info));
-                self.device.update_descriptor_sets(&[write], &[]);
-
-                self.cache[evict_slot] = Some(tex);
-                Some(evict_slot)
-            }
-            Err(e) => {
-                eprintln!("sicompass: image load failed for '{path}': {e}");
-                None
-            }
-        }
-    }}
+    }
 
     /// Choose the slot to evict: prefer empty slots, then pick the LRU.
     fn find_evict_slot(&self) -> usize {
@@ -463,101 +552,115 @@ impl ImageRenderer {
     }
 
     /// Decode an image file and upload it to a new `VkImage`.
-    unsafe fn load_texture(&self, path: &str) -> Result<CachedTexture, SiError> { unsafe {
-        // Decode via the `image` crate (supports PNG, JPEG, WebP, …)
-        let dyn_img = img_crate::open(path)
-            .map_err(|e| SiError::Other(format!("image decode: {e}")))?;
-        let (width, height) = dyn_img.dimensions();
-        let rgba = dyn_img.into_rgba8();
-        let pixel_bytes: &[u8] = &rgba;
+    unsafe fn load_texture(&self, path: &str) -> Result<CachedTexture, SiError> {
+        unsafe {
+            // Decode via the `image` crate (supports PNG, JPEG, WebP, …)
+            let dyn_img =
+                img_crate::open(path).map_err(|e| SiError::Other(format!("image decode: {e}")))?;
+            let (width, height) = dyn_img.dimensions();
+            let rgba = dyn_img.into_rgba8();
+            let pixel_bytes: &[u8] = &rgba;
 
-        // Staging buffer
-        let buf_size = pixel_bytes.len() as vk::DeviceSize;
-        let (staging_buf, staging_mem) = render::create_buffer(
-            &self.device,
-            &self.instance,
-            self.physical_device,
-            buf_size,
-            vk::BufferUsageFlags::TRANSFER_SRC,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        )?;
-        let ptr = self.device
-            .map_memory(staging_mem, 0, buf_size, vk::MemoryMapFlags::empty())?
-            as *mut u8;
-        ptr::copy_nonoverlapping(pixel_bytes.as_ptr(), ptr, pixel_bytes.len());
-        self.device.unmap_memory(staging_mem);
+            // Staging buffer
+            let buf_size = pixel_bytes.len() as vk::DeviceSize;
+            let (staging_buf, staging_mem) = render::create_buffer(
+                &self.device,
+                &self.instance,
+                self.physical_device,
+                buf_size,
+                vk::BufferUsageFlags::TRANSFER_SRC,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            )?;
+            let ptr =
+                self.device
+                    .map_memory(staging_mem, 0, buf_size, vk::MemoryMapFlags::empty())?
+                    as *mut u8;
+            ptr::copy_nonoverlapping(pixel_bytes.as_ptr(), ptr, pixel_bytes.len());
+            self.device.unmap_memory(staging_mem);
 
-        // Device-local VkImage (R8G8B8A8_SRGB)
-        let (image, memory) = render::create_image_helper(
-            &self.device,
-            &self.instance,
-            self.physical_device,
-            width,
-            height,
-            vk::Format::R8G8B8A8_SRGB,
-            vk::ImageTiling::OPTIMAL,
-            vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-        )?;
+            // Device-local VkImage (R8G8B8A8_SRGB)
+            let (image, memory) = render::create_image_helper(
+                &self.device,
+                &self.instance,
+                self.physical_device,
+                width,
+                height,
+                vk::Format::R8G8B8A8_SRGB,
+                vk::ImageTiling::OPTIMAL,
+                vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+                vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            )?;
 
-        // Transition → copy → transition
-        render::transition_image_layout(
-            &self.device, self.command_pool, self.queue,
-            image,
-            vk::ImageLayout::UNDEFINED,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-        );
-        render::copy_buffer_to_image(
-            &self.device, self.command_pool, self.queue,
-            staging_buf, image, width, height,
-        );
-        render::transition_image_layout(
-            &self.device, self.command_pool, self.queue,
-            image,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-        );
-
-        // Staging buffer no longer needed
-        self.device.destroy_buffer(staging_buf, None);
-        self.device.free_memory(staging_mem, None);
-
-        // Image view
-        let view_info = vk::ImageViewCreateInfo::default()
-            .image(image)
-            .view_type(vk::ImageViewType::TYPE_2D)
-            .format(vk::Format::R8G8B8A8_SRGB)
-            .subresource_range(
-                vk::ImageSubresourceRange::default()
-                    .aspect_mask(vk::ImageAspectFlags::COLOR)
-                    .base_mip_level(0).level_count(1)
-                    .base_array_layer(0).layer_count(1),
+            // Transition → copy → transition
+            render::transition_image_layout(
+                &self.device,
+                self.command_pool,
+                self.queue,
+                image,
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             );
-        let view = self.device.create_image_view(&view_info, None)?;
+            render::copy_buffer_to_image(
+                &self.device,
+                self.command_pool,
+                self.queue,
+                staging_buf,
+                image,
+                width,
+                height,
+            );
+            render::transition_image_layout(
+                &self.device,
+                self.command_pool,
+                self.queue,
+                image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            );
 
-        // Sampler (linear filter, clamp to edge)
-        let sampler_info = vk::SamplerCreateInfo::default()
-            .mag_filter(vk::Filter::LINEAR)
-            .min_filter(vk::Filter::LINEAR)
-            .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
-            .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-            .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-            .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-            .anisotropy_enable(false)
-            .unnormalized_coordinates(false);
-        let sampler = self.device.create_sampler(&sampler_info, None)?;
+            // Staging buffer no longer needed
+            self.device.destroy_buffer(staging_buf, None);
+            self.device.free_memory(staging_mem, None);
 
-        Ok(CachedTexture {
-            image,
-            memory,
-            view,
-            sampler,
-            path: path.to_owned(),
-            width,
-            height,
-            last_used_frame: self.current_frame,
-        })
-    }}
+            // Image view
+            let view_info = vk::ImageViewCreateInfo::default()
+                .image(image)
+                .view_type(vk::ImageViewType::TYPE_2D)
+                .format(vk::Format::R8G8B8A8_SRGB)
+                .subresource_range(
+                    vk::ImageSubresourceRange::default()
+                        .aspect_mask(vk::ImageAspectFlags::COLOR)
+                        .base_mip_level(0)
+                        .level_count(1)
+                        .base_array_layer(0)
+                        .layer_count(1),
+                );
+            let view = self.device.create_image_view(&view_info, None)?;
+
+            // Sampler (linear filter, clamp to edge)
+            let sampler_info = vk::SamplerCreateInfo::default()
+                .mag_filter(vk::Filter::LINEAR)
+                .min_filter(vk::Filter::LINEAR)
+                .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
+                .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+                .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+                .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+                .anisotropy_enable(false)
+                .unnormalized_coordinates(false);
+            let sampler = self.device.create_sampler(&sampler_info, None)?;
+
+            Ok(CachedTexture {
+                image,
+                memory,
+                view,
+                sampler,
+                path: path.to_owned(),
+                width,
+                height,
+                last_used_frame: self.current_frame,
+            })
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -69,7 +69,10 @@ pub struct PluginUpdate {
 pub enum UpdateEvent {
     /// A plugin's directory has been atomically swapped; the running
     /// provider must be torn down and re-instantiated from the new files.
-    HotReload { plugin_name: String, new_entry_path: PathBuf },
+    HotReload {
+        plugin_name: String,
+        new_entry_path: PathBuf,
+    },
 }
 
 // ---------------------------------------------------------------------------

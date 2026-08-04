@@ -18,7 +18,9 @@ use sicompass::wasm_host::WasmProvider;
 use sicompass_sdk::Provider;
 
 fn fixture(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/wasm").join(name)
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/wasm")
+        .join(name)
 }
 
 #[test]
@@ -47,7 +49,10 @@ fn a_plugin_installed_on_disk_is_discovered_and_loads() {
     let config_root = {
         #[cfg(target_os = "macos")]
         {
-            config_home.path().join("Library").join("Application Support")
+            config_home
+                .path()
+                .join("Library")
+                .join("Application Support")
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -102,5 +107,8 @@ fn a_plugin_installed_on_disk_is_discovered_and_loads() {
     .expect("the discovered plugin should instantiate");
 
     assert_eq!(provider.name(), "hello");
-    assert!(!provider.fetch().is_empty(), "the loaded plugin should return content");
+    assert!(
+        !provider.fetch().is_empty(),
+        "the loaded plugin should return content"
+    );
 }

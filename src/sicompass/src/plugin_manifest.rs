@@ -192,7 +192,10 @@ pub fn discover_user_plugins() -> Vec<DiscoveredPlugin> {
         if let Some(manifest) = load_manifest(&manifest_path) {
             // Resolve entry relative to the manifest's directory.
             let entry_path = entry.path().join(&manifest.entry);
-            found.push(DiscoveredPlugin { manifest, entry_path });
+            found.push(DiscoveredPlugin {
+                manifest,
+                entry_path,
+            });
         }
     }
     found
@@ -266,9 +269,7 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let path = write_manifest(
                 &dir,
-                &format!(
-                    r#"{{"name":"old","displayName":"Old","type":"{kind}","entry":"p.bin"}}"#
-                ),
+                &format!(r#"{{"name":"old","displayName":"Old","type":"{kind}","entry":"p.bin"}}"#),
             );
             assert!(load_manifest(&path).is_none(), "`{kind}` should be refused");
         }
@@ -385,7 +386,10 @@ mod tests {
         let m = load_manifest(&path).unwrap();
         assert_eq!(
             m.allowed_hosts,
-            vec!["api.weather.example".to_owned(), "tiles.weather.example".to_owned()]
+            vec![
+                "api.weather.example".to_owned(),
+                "tiles.weather.example".to_owned()
+            ]
         );
     }
 
@@ -456,12 +460,21 @@ mod tests {
         let mut found = discover_plugins_in(plugins_root.path());
         found.sort_by(|a, b| a.manifest.name.cmp(&b.manifest.name));
 
-        assert_eq!(found.len(), 2, "found {:?}", found.iter().map(|p| &p.manifest.name).collect::<Vec<_>>());
+        assert_eq!(
+            found.len(),
+            2,
+            "found {:?}",
+            found.iter().map(|p| &p.manifest.name).collect::<Vec<_>>()
+        );
         assert_eq!(found[0].manifest.name, "a");
         assert_eq!(found[1].manifest.name, "b");
         assert_eq!(found[0].entry_path, a.join("a.wasm"));
         assert_eq!(found[1].entry_path, b.join("b.wasm"));
-        assert_eq!(found[1].manifest.plugin_type, PluginType::Wasm, "absent type defaults to wasm");
+        assert_eq!(
+            found[1].manifest.plugin_type,
+            PluginType::Wasm,
+            "absent type defaults to wasm"
+        );
     }
 
     #[test]
@@ -484,7 +497,10 @@ mod tests {
         assert_eq!(found[0].manifest.plugin_type, PluginType::Wasm);
         assert_eq!(found[0].entry_path, dir.join("plugin.wasm"));
         assert_eq!(found[0].entry_path.parent().unwrap(), dir);
-        assert_eq!(found[0].manifest.allowed_hosts, vec!["api.weather.example".to_owned()]);
+        assert_eq!(
+            found[0].manifest.allowed_hosts,
+            vec!["api.weather.example".to_owned()]
+        );
     }
 
     #[test]
@@ -510,7 +526,10 @@ pub fn discover_plugins_in(plugins_dir: &Path) -> Vec<DiscoveredPlugin> {
         let manifest_path = entry.path().join("plugin.json");
         if let Some(manifest) = load_manifest(&manifest_path) {
             let entry_path = entry.path().join(&manifest.entry);
-            found.push(DiscoveredPlugin { manifest, entry_path });
+            found.push(DiscoveredPlugin {
+                manifest,
+                entry_path,
+            });
         }
     }
     found

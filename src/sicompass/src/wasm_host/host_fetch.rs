@@ -96,7 +96,10 @@ impl FetchPolicy {
     pub fn new(plugin_name: &str, allowed_hosts: &[String]) -> Self {
         FetchPolicy {
             plugin_name: plugin_name.to_owned(),
-            allowed_hosts: allowed_hosts.iter().map(|h| h.trim().to_lowercase()).collect(),
+            allowed_hosts: allowed_hosts
+                .iter()
+                .map(|h| h.trim().to_lowercase())
+                .collect(),
             recent: HashMap::new(),
         }
     }
@@ -111,7 +114,10 @@ impl FetchPolicy {
     fn take_quota(&mut self, host: &str) -> Result<(), String> {
         let now = Instant::now();
         let slot = self.recent.entry(host.to_owned()).or_default();
-        while slot.front().is_some_and(|t| now.duration_since(*t) > QUOTA_WINDOW) {
+        while slot
+            .front()
+            .is_some_and(|t| now.duration_since(*t) > QUOTA_WINDOW)
+        {
             slot.pop_front();
         }
         if slot.len() >= QUOTA_REQUESTS {
@@ -211,9 +217,7 @@ pub fn parse_robots(body: &str) -> Robots {
         }
         expecting_agents = false;
 
-        for (active, target) in
-            [(in_wildcard, &mut wildcard), (in_specific, &mut specific)]
-        {
+        for (active, target) in [(in_wildcard, &mut wildcard), (in_specific, &mut specific)] {
             if !active {
                 continue;
             }
@@ -335,11 +339,16 @@ pub fn is_internal_host(host: &str) -> bool {
 
 /// Everything checkable about a URL before a connection is made.
 fn vet_url(policy: &FetchPolicy, url: &str) -> Result<(reqwest::Url, String, String), String> {
-    let parsed = reqwest::Url::parse(url).map_err(|e| format!("`{url}` is not a valid URL: {e}"))?;
+    let parsed =
+        reqwest::Url::parse(url).map_err(|e| format!("`{url}` is not a valid URL: {e}"))?;
 
     match parsed.scheme() {
         "http" | "https" => {}
-        other => return Err(format!("scheme `{other}` is not permitted; use http or https")),
+        other => {
+            return Err(format!(
+                "scheme `{other}` is not permitted; use http or https"
+            ));
+        }
     }
 
     let host = parsed
@@ -388,7 +397,11 @@ fn check_robots(origin: &str, path: &str) -> Result<(), String> {
         };
         robots_cache().lock().unwrap().insert(
             origin.to_owned(),
-            RobotsEntry { robots, fetched: now, last_request: None },
+            RobotsEntry {
+                robots,
+                fetched: now,
+                last_request: None,
+            },
         );
     }
 
@@ -517,7 +530,11 @@ pub fn perform(policy: &mut FetchPolicy, req: HttpRequest) -> Result<HttpRespons
             }
             // Not a redirect, or a redirect with no Location: hand it back as-is.
             _ => {
-                return Ok(HttpResponse { status, headers: resp_headers, body: resp_body });
+                return Ok(HttpResponse {
+                    status,
+                    headers: resp_headers,
+                    body: resp_body,
+                });
             }
         }
     }
@@ -549,7 +566,9 @@ fn send_once(
             builder = builder.body(b);
         }
 
-        let resp = builder.send().map_err(|e| format!("request to {url} failed: {e}"))?;
+        let resp = builder
+            .send()
+            .map_err(|e| format!("request to {url} failed: {e}"))?;
         let status = resp.status().as_u16();
 
         let location = resp
@@ -572,10 +591,16 @@ fn send_once(
         let out_headers: Vec<(String, String)> = resp
             .headers()
             .iter()
-            .filter_map(|(k, v)| v.to_str().ok().map(|v| (k.as_str().to_owned(), v.to_owned())))
+            .filter_map(|(k, v)| {
+                v.to_str()
+                    .ok()
+                    .map(|v| (k.as_str().to_owned(), v.to_owned()))
+            })
             .collect();
 
-        let bytes = resp.bytes().map_err(|e| format!("reading {url} failed: {e}"))?;
+        let bytes = resp
+            .bytes()
+            .map_err(|e| format!("reading {url} failed: {e}"))?;
         if bytes.len() as u64 > MAX_RESPONSE_BYTES {
             return Err(format!(
                 "response is {} bytes, over the {MAX_RESPONSE_BYTES}-byte limit",
@@ -626,7 +651,11 @@ mod tests {
     #[test]
     fn non_http_schemes_are_refused() {
         let p = policy(&["example.com"]);
-        for url in ["file:///etc/passwd", "ftp://example.com/x", "data:text/plain,hi"] {
+        for url in [
+            "file:///etc/passwd",
+            "ftp://example.com/x",
+            "data:text/plain,hi",
+        ] {
             let err = vet_url(&p, url).unwrap_err();
             assert!(
                 err.contains("not permitted") || err.contains("not a valid URL"),
@@ -662,7 +691,10 @@ mod tests {
             "[fc00::1]",
             "[::ffff:127.0.0.1]",
         ] {
-            assert!(is_internal_host(host), "{host} should be treated as internal");
+            assert!(
+                is_internal_host(host),
+                "{host} should be treated as internal"
+            );
         }
     }
 
@@ -698,7 +730,10 @@ mod tests {
             "User-agent: *\nDisallow: /\n\nUser-agent: sicompass\nDisallow: /secret\n",
         );
         assert_eq!(r.disallow, vec!["/secret".to_owned()]);
-        assert!(r.allows("/anything"), "the wildcard group should not apply to us");
+        assert!(
+            r.allows("/anything"),
+            "the wildcard group should not apply to us"
+        );
         assert!(!r.allows("/secret/x"));
     }
 
@@ -738,7 +773,10 @@ mod tests {
             parse_robots("User-agent: *\nCrawl-delay: 999999\n").crawl_delay,
             Some(Duration::from_secs(3600))
         );
-        assert_eq!(parse_robots("User-agent: *\nCrawl-delay: soon\n").crawl_delay, None);
+        assert_eq!(
+            parse_robots("User-agent: *\nCrawl-delay: soon\n").crawl_delay,
+            None
+        );
     }
 
     #[test]
@@ -767,7 +805,11 @@ mod tests {
 
         // `Host` would let a request address somewhere other than the vetted URL.
         assert!(!names.iter().any(|n| n.eq_ignore_ascii_case("host")));
-        assert!(!names.iter().any(|n| n.eq_ignore_ascii_case("content-length")));
+        assert!(
+            !names
+                .iter()
+                .any(|n| n.eq_ignore_ascii_case("content-length"))
+        );
         assert!(!names.iter().any(|n| n.eq_ignore_ascii_case("connection")));
         assert!(!names.iter().any(|n| n.to_lowercase().starts_with("proxy-")));
 
@@ -782,7 +824,8 @@ mod tests {
     fn the_quota_is_per_host_and_refuses_when_spent() {
         let mut p = policy(&["a.test", "b.test"]);
         for i in 0..QUOTA_REQUESTS {
-            p.take_quota("a.test").unwrap_or_else(|e| panic!("request {i} refused: {e}"));
+            p.take_quota("a.test")
+                .unwrap_or_else(|e| panic!("request {i} refused: {e}"));
         }
         let err = p.take_quota("a.test").unwrap_err();
         assert!(err.contains("request budget"), "{err}");
@@ -851,7 +894,11 @@ mod tests {
 
         /// A policy allowing the mock server's host.
         fn policy_for(server: &MockServer) -> FetchPolicy {
-            let host = reqwest::Url::parse(&server.uri()).unwrap().host_str().unwrap().to_owned();
+            let host = reqwest::Url::parse(&server.uri())
+                .unwrap()
+                .host_str()
+                .unwrap()
+                .to_owned();
             FetchPolicy::new("demo", &[host])
         }
 
@@ -904,8 +951,8 @@ mod tests {
                 .await;
 
             let mut p = policy_for(&server);
-            let err = perform(&mut p, get(&format!("{}/private/secret", server.uri())))
-                .unwrap_err();
+            let err =
+                perform(&mut p, get(&format!("{}/private/secret", server.uri()))).unwrap_err();
             assert!(err.contains("robots.txt disallows"), "{err}");
 
             // And a permitted path on the same origin still works, so this is the
@@ -984,7 +1031,10 @@ mod tests {
             let mut p = policy_for(&server);
             let err = perform(&mut p, get(&format!("{}/away", server.uri()))).unwrap_err();
             assert!(err.contains("allowedHosts"), "{err}");
-            assert!(err.contains("evil.test"), "the error should name the target: {err}");
+            assert!(
+                err.contains("evil.test"),
+                "the error should name the target: {err}"
+            );
         }
 
         #[tokio::test(flavor = "multi_thread")]
@@ -997,10 +1047,11 @@ mod tests {
             // this test passing for the wrong reason.
             Mock::given(method("GET"))
                 .and(path("/huge"))
-                .respond_with(
-                    ResponseTemplate::new(200)
-                        .set_body_bytes(vec![b'x'; (MAX_RESPONSE_BYTES + 1) as usize]),
-                )
+                .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![
+                    b'x';
+                    (MAX_RESPONSE_BYTES + 1)
+                        as usize
+                ]))
                 .mount(&server)
                 .await;
 

@@ -72,33 +72,33 @@ pub enum PaletteTheme {
 /// Mirrors C `ColorPalette` struct.
 #[derive(Debug, Clone, Copy)]
 pub struct ColorPalette {
-    pub background:      u32,
-    pub text:            u32,
-    pub header_sep:      u32,
-    pub selected:        u32,
-    pub ext_search:      u32,
-    pub scroll_search:   u32,
-    pub error:           u32,
+    pub background: u32,
+    pub text: u32,
+    pub header_sep: u32,
+    pub selected: u32,
+    pub ext_search: u32,
+    pub scroll_search: u32,
+    pub error: u32,
 }
 
 pub const PALETTE_DARK: ColorPalette = ColorPalette {
-    background:    0x000000FF,
-    text:          0xFFFFFFFF,
-    header_sep:    0x333333FF,
-    selected:      0x2D4A28FF,
-    ext_search:    0x696969FF,
+    background: 0x000000FF,
+    text: 0xFFFFFFFF,
+    header_sep: 0x333333FF,
+    selected: 0x2D4A28FF,
+    ext_search: 0x696969FF,
     scroll_search: 0x264F78FF,
-    error:         0xFF0000FF,
+    error: 0xFF0000FF,
 };
 
 pub const PALETTE_LIGHT: ColorPalette = ColorPalette {
-    background:    0xFFFFFFFF,
-    text:          0x000000FF,
-    header_sep:    0xE0E0E0FF,
-    selected:      0xC0ECB8FF,
-    ext_search:    0x333333FF,
+    background: 0xFFFFFFFF,
+    text: 0x000000FF,
+    header_sep: 0xE0E0E0FF,
+    selected: 0xC0ECB8FF,
+    ext_search: 0x333333FF,
     scroll_search: 0xA8C7FAFF,
-    error:         0xFF0000FF,
+    error: 0xFF0000FF,
 };
 
 // ---------------------------------------------------------------------------
@@ -189,7 +189,11 @@ impl Coordinate {
             Coordinate::TabSwitcher => "mode-tab-switcher",
         };
         let resolved = sicompass_sdk::localize::t(key);
-        if resolved == key { self.as_str().to_owned() } else { resolved }
+        if resolved == key {
+            self.as_str().to_owned()
+        } else {
+            resolved
+        }
     }
 }
 
@@ -317,11 +321,20 @@ pub const fn controls_on_left() -> bool {
 /// in logical points; `on_left` selects the left/right corner.
 pub fn window_button_rects(win_w_pt: f32, on_left: bool) -> [(f32, f32, f32, f32); 3] {
     let strip_w = WINDOW_BUTTON_W * 3.0;
-    let start_x = if on_left { 0.0 } else { (win_w_pt - strip_w).max(0.0) };
+    let start_x = if on_left {
+        0.0
+    } else {
+        (win_w_pt - strip_w).max(0.0)
+    };
     let mut rects = [(0.0, 0.0, 0.0, 0.0); 3];
     let mut i = 0;
     while i < 3 {
-        rects[i] = (start_x + WINDOW_BUTTON_W * i as f32, 0.0, WINDOW_BUTTON_W, WINDOW_BUTTON_H);
+        rects[i] = (
+            start_x + WINDOW_BUTTON_W * i as f32,
+            0.0,
+            WINDOW_BUTTON_W,
+            WINDOW_BUTTON_H,
+        );
         i += 1;
     }
     rects
@@ -742,13 +755,19 @@ impl TabSnapshot {
     /// providers (used for the tab that is about to become active, whose
     /// providers live in `AppRenderer`).
     pub fn nav_only(current_id: IdArray, provider_path: String) -> Self {
-        TabSnapshot { current_id, provider_path, providers: Vec::new(), ffon: Vec::new() }
+        TabSnapshot {
+            current_id,
+            provider_path,
+            providers: Vec::new(),
+            ffon: Vec::new(),
+        }
     }
 }
 
 /// `current_path()` of the active provider (`current_id[0]`) in `r`, or empty.
 pub fn active_provider_path(r: &AppRenderer) -> String {
-    r.current_id.get(0)
+    r.current_id
+        .get(0)
         .and_then(|i| r.providers.get(i))
         .map(|p| p.current_path().to_owned())
         .unwrap_or_default()
@@ -865,8 +884,12 @@ impl AppRenderer {
         let settings_f = self.ffon.pop();
         let content_p = std::mem::take(&mut self.providers);
         let content_f = std::mem::take(&mut self.ffon);
-        if let Some(p) = settings_p { self.providers.push(p); }
-        if let Some(f) = settings_f { self.ffon.push(f); }
+        if let Some(p) = settings_p {
+            self.providers.push(p);
+        }
+        if let Some(f) = settings_f {
+            self.ffon.push(f);
+        }
         (content_p, content_f)
     }
 
@@ -881,8 +904,12 @@ impl AppRenderer {
     ) {
         let settings_p = self.providers.pop();
         let settings_f = self.ffon.pop();
-        if let Some(p) = settings_p { content_p.push(p); }
-        if let Some(f) = settings_f { content_f.push(f); }
+        if let Some(p) = settings_p {
+            content_p.push(p);
+        }
+        if let Some(f) = settings_f {
+            content_f.push(f);
+        }
         self.providers = content_p;
         self.ffon = content_f;
     }
@@ -896,7 +923,9 @@ impl AppRenderer {
     /// user-driven tab switches so `tab_mru[0]` tracks the active tab. No-op for
     /// an out-of-range index.
     pub fn touch_mru(&mut self, idx: usize) {
-        if idx >= self.tabs.len() { return; }
+        if idx >= self.tabs.len() {
+            return;
+        }
         self.tab_mru.retain(|&x| x != idx);
         self.tab_mru.insert(0, idx);
     }
@@ -907,15 +936,21 @@ impl AppRenderer {
     /// exists yet.
     pub fn reset_mru_default(&mut self, active: usize) {
         let mut mru = Vec::with_capacity(self.tabs.len());
-        if active < self.tabs.len() { mru.push(active); }
+        if active < self.tabs.len() {
+            mru.push(active);
+        }
         for i in 0..self.tabs.len() {
-            if i != active { mru.push(i); }
+            if i != active {
+                mru.push(i);
+            }
         }
         self.tab_mru = mru;
     }
 
     pub fn switch_to_tab(&mut self, target: usize) {
-        if target >= self.tabs.len() || target == self.active_tab { return; }
+        if target >= self.tabs.len() || target == self.active_tab {
+            return;
+        }
         let active = self.active_tab;
         // Save outgoing navigation, then park its content providers.
         self.tabs[active].current_id = self.current_id.clone();
@@ -980,11 +1015,7 @@ impl AppRenderer {
                 && !provider_path.is_empty()
                 && self.providers[provider_idx].current_path() != provider_path
             {
-                self.deep_rebuild_provider_tree(
-                    provider_idx,
-                    provider_path,
-                    current_id.depth(),
-                );
+                self.deep_rebuild_provider_tree(provider_idx, provider_path, current_id.depth());
             }
         }
 
@@ -1036,9 +1067,7 @@ impl AppRenderer {
                 }
             }
         }
-        if let Some(parent_slice) =
-            sicompass_sdk::ffon::get_ffon_at_id(&self.ffon, &current_id)
-        {
+        if let Some(parent_slice) = sicompass_sdk::ffon::get_ffon_at_id(&self.ffon, &current_id) {
             let last_idx = current_id.last().unwrap_or(0);
             let max_idx = parent_slice.len().saturating_sub(1);
             if last_idx > max_idx {
@@ -1109,12 +1138,13 @@ impl AppRenderer {
             let mut buf = PathBuf::from(path);
             let mut leaf: Vec<String> = Vec::with_capacity(navigated_count);
             for _ in 0..navigated_count {
-                let Some(name) = buf
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                else { break };
+                let Some(name) = buf.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+                    break;
+                };
                 leaf.push(name);
-                if !buf.pop() { break; }
+                if !buf.pop() {
+                    break;
+                }
             }
             leaf.reverse();
             (buf.to_string_lossy().into_owned(), leaf)
@@ -1127,7 +1157,11 @@ impl AppRenderer {
             let n = navigated_count.min(all.len());
             let split = all.len() - n;
             let joined = all[..split].join("/");
-            let root = if joined.is_empty() { "/".to_owned() } else { format!("/{joined}") };
+            let root = if joined.is_empty() {
+                "/".to_owned()
+            } else {
+                format!("/{joined}")
+            };
             (root, all[split..].to_vec())
         };
 
@@ -1141,9 +1175,10 @@ impl AppRenderer {
         let mut indices: Vec<usize> = Vec::with_capacity(segments.len());
         let mut prefix = root_prefix.clone();
         for seg in &segments {
-            let found = levels.last().unwrap().iter().position(|e| {
-                matches!(e, FfonElement::Obj(o) if strip_display(&o.key) == *seg)
-            });
+            let found =
+                levels.last().unwrap().iter().position(
+                    |e| matches!(e, FfonElement::Obj(o) if strip_display(&o.key) == *seg),
+                );
             let idx = match found {
                 Some(i) => i,
                 None => break, // can't descend further — graft what matched
@@ -1202,7 +1237,11 @@ impl AppRenderer {
             text
         };
         self.announcement_parity = !self.announcement_parity;
-        let sentinel = if self.announcement_parity { "\u{200B}" } else { "" };
+        let sentinel = if self.announcement_parity {
+            "\u{200B}"
+        } else {
+            ""
+        };
         self.pending_announcement = Some(format!("{text}{sentinel}"));
     }
 
@@ -1222,9 +1261,7 @@ impl AppRenderer {
         // Never speak a password field's value: mask the spoken context so the
         // screen reader announces asterisks, not the secret.
         let context = match context {
-            Some(ctx) if self.input_is_password => {
-                Some(sicompass_sdk::tags::mask_password(&ctx))
-            }
+            Some(ctx) if self.input_is_password => Some(sicompass_sdk::tags::mask_password(&ctx)),
             other => other,
         };
         let text = match context {
@@ -1232,7 +1269,11 @@ impl AppRenderer {
             _ => mode,
         };
         self.announcement_parity = !self.announcement_parity;
-        let sentinel = if self.announcement_parity { "\u{200B}" } else { "" };
+        let sentinel = if self.announcement_parity {
+            "\u{200B}"
+        } else {
+            ""
+        };
         self.pending_announcement = Some(format!("{text}{sentinel}"));
     }
 
@@ -1252,7 +1293,11 @@ impl AppRenderer {
             resolved
         };
         self.announcement_parity = !self.announcement_parity;
-        let sentinel = if self.announcement_parity { "\u{200B}" } else { "" };
+        let sentinel = if self.announcement_parity {
+            "\u{200B}"
+        } else {
+            ""
+        };
         self.pending_announcement = Some(format!("{text}{sentinel}"));
     }
 
@@ -1271,7 +1316,11 @@ impl AppRenderer {
         }
         self.last_spoken_error = self.error_message.clone();
         self.announcement_parity = !self.announcement_parity;
-        let sentinel = if self.announcement_parity { "\u{200B}" } else { "" };
+        let sentinel = if self.announcement_parity {
+            "\u{200B}"
+        } else {
+            ""
+        };
         self.pending_announcement = Some(format!("{}{sentinel}", self.error_message));
     }
 
@@ -1284,10 +1333,16 @@ impl AppRenderer {
     /// Toggles `announcement_parity` so back-to-back identical items still
     /// produce an AccessKit tree diff.
     pub fn speak_current_element(&mut self) {
-        let Some(item) = self.current_list_item() else { return; };
+        let Some(item) = self.current_list_item() else {
+            return;
+        };
         let text = crate::accesskit_sdl::label_to_speech(&item.label);
         self.announcement_parity = !self.announcement_parity;
-        let sentinel = if self.announcement_parity { "\u{200B}" } else { "" };
+        let sentinel = if self.announcement_parity {
+            "\u{200B}"
+        } else {
+            ""
+        };
         self.pending_announcement = Some(format!("{text}{sentinel}"));
     }
 
@@ -1298,12 +1353,15 @@ impl AppRenderer {
     /// `current_command`, so the colon command palette (`CommandPhase::None`)
     /// is unaffected.
     pub(crate) fn mode_display_label(&self) -> String {
-        if self.coordinate == Coordinate::Command
-            && self.current_command == CommandPhase::Controls
+        if self.coordinate == Coordinate::Command && self.current_command == CommandPhase::Controls
         {
             crate::shortcuts::register_translations();
             let resolved = sicompass_sdk::localize::t("mode-controls");
-            return if resolved == "mode-controls" { "controls mode".to_owned() } else { resolved };
+            return if resolved == "mode-controls" {
+                "controls mode".to_owned()
+            } else {
+                resolved
+            };
         }
         self.coordinate.display_label()
     }
@@ -1340,7 +1398,11 @@ impl AppRenderer {
             format!("{header}, {path}")
         };
         self.announcement_parity = !self.announcement_parity;
-        let sentinel = if self.announcement_parity { "\u{200B}" } else { "" };
+        let sentinel = if self.announcement_parity {
+            "\u{200B}"
+        } else {
+            ""
+        };
         self.pending_announcement = Some(format!("{text}{sentinel}"));
     }
 
@@ -1480,7 +1542,8 @@ pub struct AppState {
     /// `set_hit_test` callback (which is `'static` and gets no window handle).
     /// The main loop writes the new size on every resize so the draggable strip
     /// and resize borders track the window.
-    pub hit_test_win_pt: std::sync::Arc<(std::sync::atomic::AtomicI32, std::sync::atomic::AtomicI32)>,
+    pub hit_test_win_pt:
+        std::sync::Arc<(std::sync::atomic::AtomicI32, std::sync::atomic::AtomicI32)>,
 }
 
 impl AppState {
@@ -1496,9 +1559,7 @@ impl AppState {
             .and_then(|d| d.get_content_scale())
             .unwrap_or(1.0);
         let font_scale = crate::programs::read_font_scale();
-        let effective_dpi = (96.0_f32 * content_scale * font_scale)
-            .round()
-            .max(48.0) as u32;
+        let effective_dpi = (96.0_f32 * content_scale * font_scale).round().max(48.0) as u32;
 
         // Initialise rendering sub-systems
         unsafe {
@@ -1589,7 +1650,9 @@ mod tests {
     // locale; serialize them to avoid racing other tests in the binary.
     fn locale_test_lock() -> std::sync::MutexGuard<'static, ()> {
         static L: OnceLock<Mutex<()>> = OnceLock::new();
-        L.get_or_init(|| Mutex::new(())).lock().unwrap_or_else(|e| e.into_inner())
+        L.get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
     }
 
     // --- Custom titlebar button geometry ---
@@ -1634,7 +1697,11 @@ mod tests {
 
     #[test]
     fn window_action_key_roundtrips() {
-        for a in [WindowAction::Minimize, WindowAction::MaximizeToggle, WindowAction::Close] {
+        for a in [
+            WindowAction::Minimize,
+            WindowAction::MaximizeToggle,
+            WindowAction::Close,
+        ] {
             assert_eq!(WindowAction::from_key(a.key()), Some(a));
         }
         assert_eq!(WindowAction::from_key("bogus"), None);
@@ -1732,7 +1799,10 @@ mod tests {
     #[test]
     fn coordinate_as_str_scroll_search() {
         assert_eq!(Coordinate::ScrollSearch.as_str(), "scroll search mode");
-        assert_eq!(Coordinate::ScrollPrefixSearch.as_str(), "scroll prefix search mode");
+        assert_eq!(
+            Coordinate::ScrollPrefixSearch.as_str(),
+            "scroll prefix search mode"
+        );
     }
 
     #[test]
@@ -1748,46 +1818,74 @@ mod tests {
     // --- Task::as_str ---
 
     #[test]
-    fn task_as_str_none() { assert_eq!(Task::None.as_str(), "none"); }
+    fn task_as_str_none() {
+        assert_eq!(Task::None.as_str(), "none");
+    }
 
     #[test]
-    fn task_as_str_input() { assert_eq!(Task::Input.as_str(), "input"); }
+    fn task_as_str_input() {
+        assert_eq!(Task::Input.as_str(), "input");
+    }
 
     #[test]
-    fn task_as_str_append() { assert_eq!(Task::Append.as_str(), "append"); }
+    fn task_as_str_append() {
+        assert_eq!(Task::Append.as_str(), "append");
+    }
 
     #[test]
-    fn task_as_str_append_append() { assert_eq!(Task::AppendAppend.as_str(), "append append"); }
+    fn task_as_str_append_append() {
+        assert_eq!(Task::AppendAppend.as_str(), "append append");
+    }
 
     #[test]
-    fn task_as_str_insert() { assert_eq!(Task::Insert.as_str(), "insert"); }
+    fn task_as_str_insert() {
+        assert_eq!(Task::Insert.as_str(), "insert");
+    }
 
     #[test]
-    fn task_as_str_insert_insert() { assert_eq!(Task::InsertInsert.as_str(), "insert insert"); }
+    fn task_as_str_insert_insert() {
+        assert_eq!(Task::InsertInsert.as_str(), "insert insert");
+    }
 
     #[test]
-    fn task_as_str_delete() { assert_eq!(Task::Delete.as_str(), "delete"); }
+    fn task_as_str_delete() {
+        assert_eq!(Task::Delete.as_str(), "delete");
+    }
 
     #[test]
-    fn task_as_str_arrow_up() { assert_eq!(Task::ArrowUp.as_str(), "up"); }
+    fn task_as_str_arrow_up() {
+        assert_eq!(Task::ArrowUp.as_str(), "up");
+    }
 
     #[test]
-    fn task_as_str_arrow_down() { assert_eq!(Task::ArrowDown.as_str(), "down"); }
+    fn task_as_str_arrow_down() {
+        assert_eq!(Task::ArrowDown.as_str(), "down");
+    }
 
     #[test]
-    fn task_as_str_arrow_left() { assert_eq!(Task::ArrowLeft.as_str(), "left"); }
+    fn task_as_str_arrow_left() {
+        assert_eq!(Task::ArrowLeft.as_str(), "left");
+    }
 
     #[test]
-    fn task_as_str_arrow_right() { assert_eq!(Task::ArrowRight.as_str(), "right"); }
+    fn task_as_str_arrow_right() {
+        assert_eq!(Task::ArrowRight.as_str(), "right");
+    }
 
     #[test]
-    fn task_as_str_cut() { assert_eq!(Task::Cut.as_str(), "cut"); }
+    fn task_as_str_cut() {
+        assert_eq!(Task::Cut.as_str(), "cut");
+    }
 
     #[test]
-    fn task_as_str_copy() { assert_eq!(Task::Copy.as_str(), "copy"); }
+    fn task_as_str_copy() {
+        assert_eq!(Task::Copy.as_str(), "copy");
+    }
 
     #[test]
-    fn task_as_str_paste() { assert_eq!(Task::Paste.as_str(), "paste"); }
+    fn task_as_str_paste() {
+        assert_eq!(Task::Paste.as_str(), "paste");
+    }
 
     // --- AppRenderer.error_message ---
 
@@ -1841,7 +1939,10 @@ pub struct PlaceholderProvider {
 
 impl PlaceholderProvider {
     pub fn new(name: &str, display: &str) -> Self {
-        PlaceholderProvider { name: name.to_owned(), display: display.to_owned() }
+        PlaceholderProvider {
+            name: name.to_owned(),
+            display: display.to_owned(),
+        }
     }
 }
 

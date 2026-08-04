@@ -17,11 +17,12 @@ pub fn run_msi(installer: &Path) -> std::io::Result<()> {
     // just for one numeric value.
     const DETACHED_PROCESS: u32 = 0x00000008;
 
-    let installer = installer
-        .to_str()
-        .ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, "installer path is not UTF-8")
-        })?;
+    let installer = installer.to_str().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "installer path is not UTF-8",
+        )
+    })?;
 
     // /passive shows a progress dialog without prompting; /norestart keeps
     // us from triggering a reboot.

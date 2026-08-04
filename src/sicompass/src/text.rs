@@ -3,7 +3,7 @@
 //! Mirrors `text.c` / `text.h` from the C source.  Uses the raw `freetype`
 //! crate (servo-style low-level bindings) exactly as the C code uses FreeType.
 
-use crate::app_state::{SiError, MAX_FRAMES_IN_FLIGHT};
+use crate::app_state::{MAX_FRAMES_IN_FLIGHT, SiError};
 use crate::fonts;
 use crate::render;
 use crate::shaders;
@@ -83,15 +83,7 @@ unsafe fn new_memory_face(
     bytes: &'static [u8],
     face: *mut ft::FT_Face,
 ) -> ft::FT_Error {
-    unsafe {
-        ft::FT_New_Memory_Face(
-            library,
-            bytes.as_ptr(),
-            bytes.len() as ft::FT_Long,
-            0,
-            face,
-        )
-    }
+    unsafe { ft::FT_New_Memory_Face(library, bytes.as_ptr(), bytes.len() as ft::FT_Long, 0, face) }
 }
 
 // ---------------------------------------------------------------------------
@@ -100,9 +92,9 @@ unsafe fn new_memory_face(
 
 #[derive(Clone, Copy)]
 pub struct GlyphInfo {
-    pub size: [f32; 2],      // bitmap width, height
-    pub bearing: [f32; 2],   // bitmap_left, bitmap_top
-    pub advance: f32,         // horizontal advance (pixels at atlas size)
+    pub size: [f32; 2],    // bitmap width, height
+    pub bearing: [f32; 2], // bitmap_left, bitmap_top
+    pub advance: f32,      // horizontal advance (pixels at atlas size)
     pub uv_min: [f32; 2],
     pub uv_max: [f32; 2],
     // True when the glyph lives in the RGBA color atlas (emoji) rather than the
@@ -113,8 +105,12 @@ pub struct GlyphInfo {
 impl Default for GlyphInfo {
     fn default() -> Self {
         GlyphInfo {
-            size: [0.0; 2], bearing: [0.0; 2], advance: 0.0,
-            uv_min: [0.0; 2], uv_max: [0.0; 2], is_color: false,
+            size: [0.0; 2],
+            bearing: [0.0; 2],
+            advance: 0.0,
+            uv_min: [0.0; 2],
+            uv_max: [0.0; 2],
+            is_color: false,
         }
     }
 }
@@ -237,65 +233,71 @@ unsafe fn rasterize_glyph(
     pen_y: &mut i32,
     row_height: &mut i32,
     cp: u32,
-) -> Option<GlyphInfo> { unsafe {
-    let face = faces.iter().copied().find(|&f| {
-        !f.is_null() && ft::FT_Get_Char_Index(f, cp as ft::FT_ULong) != 0
-    })?;
-    if ft::FT_Load_Char(face, cp as ft::FT_ULong, ft::FT_LOAD_RENDER as ft::FT_Int32) != 0 {
-        return None;
-    }
-    let slot = (*face).glyph;
-    let bmp = &(*slot).bitmap;
-    let bw = bmp.width as i32;
-    let bh = bmp.rows as i32;
-    let asz = atlas_size as i32;
+) -> Option<GlyphInfo> {
+    unsafe {
+        let face = faces
+            .iter()
+            .copied()
+            .find(|&f| !f.is_null() && ft::FT_Get_Char_Index(f, cp as ft::FT_ULong) != 0)?;
+        if ft::FT_Load_Char(face, cp as ft::FT_ULong, ft::FT_LOAD_RENDER as ft::FT_Int32) != 0 {
+            return None;
+        }
+        let slot = (*face).glyph;
+        let bmp = &(*slot).bitmap;
+        let bw = bmp.width as i32;
+        let bh = bmp.rows as i32;
+        let asz = atlas_size as i32;
 
-    // Advance to a new shelf row when the glyph would overrun the right edge.
-    if *pen_x + bw >= asz {
-        *pen_x = 0;
-        *pen_y += *row_height;
-        *row_height = 0;
-    }
-    if *pen_y + bh > asz {
-        eprintln!(
-            "text.rs: glyph atlas overflow for cp {cp:#x} at pen_y={}, atlas_size={atlas_size}",
-            *pen_y
-        );
-        return None;
-    }
+        // Advance to a new shelf row when the glyph would overrun the right edge.
+        if *pen_x + bw >= asz {
+            *pen_x = 0;
+            *pen_y += *row_height;
+            *row_height = 0;
+        }
+        if *pen_y + bh > asz {
+            eprintln!(
+                "text.rs: glyph atlas overflow for cp {cp:#x} at pen_y={}, atlas_size={atlas_size}",
+                *pen_y
+            );
+            return None;
+        }
 
-    if !bmp.buffer.is_null() && bw > 0 && bh > 0 {
-        let stride = atlas_size as usize;
-        for row in 0..bh {
-            for col in 0..bw {
-                let x = *pen_x + col;
-                let y = *pen_y + row;
-                if x < asz && y < asz {
-                    atlas_data[(y as usize) * stride + (x as usize)] =
-                        *bmp.buffer.add((row * bw + col) as usize);
+        if !bmp.buffer.is_null() && bw > 0 && bh > 0 {
+            let stride = atlas_size as usize;
+            for row in 0..bh {
+                for col in 0..bw {
+                    let x = *pen_x + col;
+                    let y = *pen_y + row;
+                    if x < asz && y < asz {
+                        atlas_data[(y as usize) * stride + (x as usize)] =
+                            *bmp.buffer.add((row * bw + col) as usize);
+                    }
                 }
             }
         }
-    }
 
-    let gi = GlyphInfo {
-        size: [bw as f32, bh as f32],
-        bearing: [(*slot).bitmap_left as f32, (*slot).bitmap_top as f32],
-        advance: ((*slot).advance.x >> 6) as f32,
-        uv_min: [*pen_x as f32 / atlas_size as f32, *pen_y as f32 / atlas_size as f32],
-        uv_max: [
-            (*pen_x + bw) as f32 / atlas_size as f32,
-            (*pen_y + bh) as f32 / atlas_size as f32,
-        ],
-        is_color: false,
-    };
+        let gi = GlyphInfo {
+            size: [bw as f32, bh as f32],
+            bearing: [(*slot).bitmap_left as f32, (*slot).bitmap_top as f32],
+            advance: ((*slot).advance.x >> 6) as f32,
+            uv_min: [
+                *pen_x as f32 / atlas_size as f32,
+                *pen_y as f32 / atlas_size as f32,
+            ],
+            uv_max: [
+                (*pen_x + bw) as f32 / atlas_size as f32,
+                (*pen_y + bh) as f32 / atlas_size as f32,
+            ],
+            is_color: false,
+        };
 
-    *pen_x += bw + 1;
-    if bh > *row_height {
-        *row_height = bh;
+        *pen_x += bw + 1;
+        if bh > *row_height {
+            *row_height = bh;
+        }
+        Some(gi)
     }
-    Some(gi)
-}}
+}
 
 /// Rasterize color glyph `cp` (emoji) into the RGBA `atlas_data`, converting
 /// FreeType's premultiplied BGRA to premultiplied RGBA. Metrics are scaled by
@@ -311,74 +313,79 @@ unsafe fn rasterize_color_glyph(
     pen_y: &mut i32,
     row_height: &mut i32,
     cp: u32,
-) -> Option<GlyphInfo> { unsafe {
-    if ft::FT_Get_Char_Index(face, cp as ft::FT_ULong) == 0 {
-        return None;
-    }
-    let flags = (ft::FT_LOAD_RENDER | ft::FT_LOAD_COLOR) as ft::FT_Int32;
-    if ft::FT_Load_Char(face, cp as ft::FT_ULong, flags) != 0 {
-        return None;
-    }
-    let slot = (*face).glyph;
-    let bmp = &(*slot).bitmap;
-    let bw = bmp.width as i32;
-    let bh = bmp.rows as i32;
-    let asz = atlas_size as i32;
-    if bw <= 0 || bh <= 0 || bmp.buffer.is_null() {
-        return None;
-    }
-
-    if *pen_x + bw >= asz {
-        *pen_x = 0;
-        *pen_y += *row_height;
-        *row_height = 0;
-    }
-    if *pen_y + bh > asz {
-        eprintln!(
-            "text.rs: color atlas overflow for cp {cp:#x} at pen_y={}, atlas_size={atlas_size}",
-            *pen_y
-        );
-        return None;
-    }
-
-    let stride = atlas_size as usize * 4;
-    let pitch = bmp.pitch; // bytes per source row; negative if bottom-up
-    for row in 0..bh {
-        // Map dest row to source row honoring pitch direction.
-        let src_row = if pitch >= 0 { row } else { bh - 1 - row };
-        let src_base = (src_row * pitch.abs()) as usize;
-        for col in 0..bw {
-            let src = bmp.buffer.add(src_base + (col * 4) as usize);
-            let (b, g, r, a) = (*src, *src.add(1), *src.add(2), *src.add(3));
-            let di = (*pen_y + row) as usize * stride + (*pen_x + col) as usize * 4;
-            atlas_data[di] = r;
-            atlas_data[di + 1] = g;
-            atlas_data[di + 2] = b;
-            atlas_data[di + 3] = a;
+) -> Option<GlyphInfo> {
+    unsafe {
+        if ft::FT_Get_Char_Index(face, cp as ft::FT_ULong) == 0 {
+            return None;
         }
-    }
+        let flags = (ft::FT_LOAD_RENDER | ft::FT_LOAD_COLOR) as ft::FT_Int32;
+        if ft::FT_Load_Char(face, cp as ft::FT_ULong, flags) != 0 {
+            return None;
+        }
+        let slot = (*face).glyph;
+        let bmp = &(*slot).bitmap;
+        let bw = bmp.width as i32;
+        let bh = bmp.rows as i32;
+        let asz = atlas_size as i32;
+        if bw <= 0 || bh <= 0 || bmp.buffer.is_null() {
+            return None;
+        }
 
-    let gi = GlyphInfo {
-        size: [bw as f32 * strike_scale, bh as f32 * strike_scale],
-        bearing: [
-            (*slot).bitmap_left as f32 * strike_scale,
-            (*slot).bitmap_top as f32 * strike_scale,
-        ],
-        advance: ((*slot).advance.x >> 6) as f32 * strike_scale,
-        uv_min: [*pen_x as f32 / atlas_size as f32, *pen_y as f32 / atlas_size as f32],
-        uv_max: [
-            (*pen_x + bw) as f32 / atlas_size as f32,
-            (*pen_y + bh) as f32 / atlas_size as f32,
-        ],
-        is_color: true,
-    };
+        if *pen_x + bw >= asz {
+            *pen_x = 0;
+            *pen_y += *row_height;
+            *row_height = 0;
+        }
+        if *pen_y + bh > asz {
+            eprintln!(
+                "text.rs: color atlas overflow for cp {cp:#x} at pen_y={}, atlas_size={atlas_size}",
+                *pen_y
+            );
+            return None;
+        }
 
-    *pen_x += bw + 1;
-    if bh > *row_height {
-        *row_height = bh;
+        let stride = atlas_size as usize * 4;
+        let pitch = bmp.pitch; // bytes per source row; negative if bottom-up
+        for row in 0..bh {
+            // Map dest row to source row honoring pitch direction.
+            let src_row = if pitch >= 0 { row } else { bh - 1 - row };
+            let src_base = (src_row * pitch.abs()) as usize;
+            for col in 0..bw {
+                let src = bmp.buffer.add(src_base + (col * 4) as usize);
+                let (b, g, r, a) = (*src, *src.add(1), *src.add(2), *src.add(3));
+                let di = (*pen_y + row) as usize * stride + (*pen_x + col) as usize * 4;
+                atlas_data[di] = r;
+                atlas_data[di + 1] = g;
+                atlas_data[di + 2] = b;
+                atlas_data[di + 3] = a;
+            }
+        }
+
+        let gi = GlyphInfo {
+            size: [bw as f32 * strike_scale, bh as f32 * strike_scale],
+            bearing: [
+                (*slot).bitmap_left as f32 * strike_scale,
+                (*slot).bitmap_top as f32 * strike_scale,
+            ],
+            advance: ((*slot).advance.x >> 6) as f32 * strike_scale,
+            uv_min: [
+                *pen_x as f32 / atlas_size as f32,
+                *pen_y as f32 / atlas_size as f32,
+            ],
+            uv_max: [
+                (*pen_x + bw) as f32 / atlas_size as f32,
+                (*pen_y + bh) as f32 / atlas_size as f32,
+            ],
+            is_color: true,
+        };
+
+        *pen_x += bw + 1;
+        if bh > *row_height {
+            *row_height = bh;
+        }
+        Some(gi)
     }
-    Some(gi)
-}}
+}
 
 impl ColorAtlas {
     /// Build the color atlas + pipeline from the bundled emoji font. Returns
@@ -397,129 +404,175 @@ impl ColorAtlas {
         ft_library: ft::FT_Library,
         atlas_size: u32,
         raster_em_px: f32,
-    ) -> Option<ColorAtlas> { unsafe {
-        let mut face: ft::FT_Face = std::ptr::null_mut();
-        if new_memory_face(ft_library, fonts::COLOR_EMOJI, &mut face) != 0 {
-            eprintln!("text.rs: embedded color emoji font could not be parsed; emoji disabled");
-            return None;
-        }
-        // Bitmap-only color fonts have fixed strikes; pick the first.
-        if (*face).num_fixed_sizes < 1 || ft::FT_Select_Size(face, 0) != 0 {
-            eprintln!("text.rs: color emoji font has no usable strike; emoji disabled");
-            ft::FT_Done_Face(face);
-            return None;
-        }
-        let strike_ppem = (*(*face).size).metrics.y_ppem as f32;
-        let strike_scale = if strike_ppem > 0.0 { raster_em_px / strike_ppem } else { 1.0 };
+    ) -> Option<ColorAtlas> {
+        unsafe {
+            let mut face: ft::FT_Face = std::ptr::null_mut();
+            if new_memory_face(ft_library, fonts::COLOR_EMOJI, &mut face) != 0 {
+                eprintln!("text.rs: embedded color emoji font could not be parsed; emoji disabled");
+                return None;
+            }
+            // Bitmap-only color fonts have fixed strikes; pick the first.
+            if (*face).num_fixed_sizes < 1 || ft::FT_Select_Size(face, 0) != 0 {
+                eprintln!("text.rs: color emoji font has no usable strike; emoji disabled");
+                ft::FT_Done_Face(face);
+                return None;
+            }
+            let strike_ppem = (*(*face).size).metrics.y_ppem as f32;
+            let strike_scale = if strike_ppem > 0.0 {
+                raster_em_px / strike_ppem
+            } else {
+                1.0
+            };
 
-        let atlas_bytes = (atlas_size as usize * atlas_size as usize * 4) as vk::DeviceSize;
-        let atlas_data = vec![0u8; atlas_bytes as usize];
+            let atlas_bytes = (atlas_size as usize * atlas_size as usize * 4) as vk::DeviceSize;
+            let atlas_data = vec![0u8; atlas_bytes as usize];
 
-        let (staging_buffer, staging_memory) = render::create_buffer(
-            device, instance, physical_device, atlas_bytes,
-            vk::BufferUsageFlags::TRANSFER_SRC,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        ).ok()?;
-        {
-            let ptr = device.map_memory(staging_memory, 0, atlas_bytes, vk::MemoryMapFlags::empty()).ok()? as *mut u8;
-            std::ptr::copy_nonoverlapping(atlas_data.as_ptr(), ptr, atlas_bytes as usize);
-            device.unmap_memory(staging_memory);
-        }
+            let (staging_buffer, staging_memory) = render::create_buffer(
+                device,
+                instance,
+                physical_device,
+                atlas_bytes,
+                vk::BufferUsageFlags::TRANSFER_SRC,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            )
+            .ok()?;
+            {
+                let ptr = device
+                    .map_memory(staging_memory, 0, atlas_bytes, vk::MemoryMapFlags::empty())
+                    .ok()? as *mut u8;
+                std::ptr::copy_nonoverlapping(atlas_data.as_ptr(), ptr, atlas_bytes as usize);
+                device.unmap_memory(staging_memory);
+            }
 
-        let (image, memory) = render::create_image_helper(
-            device, instance, physical_device, atlas_size, atlas_size,
-            vk::Format::R8G8B8A8_UNORM, vk::ImageTiling::OPTIMAL,
-            vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-        ).ok()?;
-        render::transition_image_layout(device, command_pool, graphics_queue, image,
-            vk::ImageLayout::UNDEFINED, vk::ImageLayout::TRANSFER_DST_OPTIMAL);
-        render::copy_buffer_to_image(device, command_pool, graphics_queue, staging_buffer, image, atlas_size, atlas_size);
-        render::transition_image_layout(device, command_pool, graphics_queue, image,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
-
-        let view_info = vk::ImageViewCreateInfo::default()
-            .image(image)
-            .view_type(vk::ImageViewType::TYPE_2D)
-            .format(vk::Format::R8G8B8A8_UNORM)
-            .subresource_range(
-                vk::ImageSubresourceRange::default()
-                    .aspect_mask(vk::ImageAspectFlags::COLOR)
-                    .base_mip_level(0).level_count(1)
-                    .base_array_layer(0).layer_count(1),
+            let (image, memory) = render::create_image_helper(
+                device,
+                instance,
+                physical_device,
+                atlas_size,
+                atlas_size,
+                vk::Format::R8G8B8A8_UNORM,
+                vk::ImageTiling::OPTIMAL,
+                vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+                vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            )
+            .ok()?;
+            render::transition_image_layout(
+                device,
+                command_pool,
+                graphics_queue,
+                image,
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             );
-        let view = device.create_image_view(&view_info, None).ok()?;
+            render::copy_buffer_to_image(
+                device,
+                command_pool,
+                graphics_queue,
+                staging_buffer,
+                image,
+                atlas_size,
+                atlas_size,
+            );
+            render::transition_image_layout(
+                device,
+                command_pool,
+                graphics_queue,
+                image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            );
 
-        let sampler_info = vk::SamplerCreateInfo::default()
-            .mag_filter(vk::Filter::LINEAR)
-            .min_filter(vk::Filter::LINEAR)
-            .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-            .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-            .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-            .border_color(vk::BorderColor::INT_OPAQUE_BLACK)
-            .unnormalized_coordinates(false)
-            .mipmap_mode(vk::SamplerMipmapMode::LINEAR);
-        let sampler = device.create_sampler(&sampler_info, None).ok()?;
+            let view_info = vk::ImageViewCreateInfo::default()
+                .image(image)
+                .view_type(vk::ImageViewType::TYPE_2D)
+                .format(vk::Format::R8G8B8A8_UNORM)
+                .subresource_range(
+                    vk::ImageSubresourceRange::default()
+                        .aspect_mask(vk::ImageAspectFlags::COLOR)
+                        .base_mip_level(0)
+                        .level_count(1)
+                        .base_array_layer(0)
+                        .layer_count(1),
+                );
+            let view = device.create_image_view(&view_info, None).ok()?;
 
-        // Descriptor pool + sets bound to the color atlas.
-        let pool_size = vk::DescriptorPoolSize::default()
-            .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-            .descriptor_count(MAX_FRAMES_IN_FLIGHT as u32);
-        let pool_info = vk::DescriptorPoolCreateInfo::default()
-            .pool_sizes(std::slice::from_ref(&pool_size))
-            .max_sets(MAX_FRAMES_IN_FLIGHT as u32);
-        let descriptor_pool = device.create_descriptor_pool(&pool_info, None).ok()?;
-        let layouts: Vec<vk::DescriptorSetLayout> = vec![descriptor_set_layout; MAX_FRAMES_IN_FLIGHT];
-        let alloc_info = vk::DescriptorSetAllocateInfo::default()
-            .descriptor_pool(descriptor_pool)
-            .set_layouts(&layouts);
-        let descriptor_sets = device.allocate_descriptor_sets(&alloc_info).ok()?;
-        let image_info = vk::DescriptorImageInfo::default()
-            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-            .image_view(view)
-            .sampler(sampler);
-        for &ds in &descriptor_sets {
-            let write = vk::WriteDescriptorSet::default()
-                .dst_set(ds).dst_binding(0)
-                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .image_info(std::slice::from_ref(&image_info));
-            device.update_descriptor_sets(&[write], &[]);
+            let sampler_info = vk::SamplerCreateInfo::default()
+                .mag_filter(vk::Filter::LINEAR)
+                .min_filter(vk::Filter::LINEAR)
+                .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+                .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+                .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+                .border_color(vk::BorderColor::INT_OPAQUE_BLACK)
+                .unnormalized_coordinates(false)
+                .mipmap_mode(vk::SamplerMipmapMode::LINEAR);
+            let sampler = device.create_sampler(&sampler_info, None).ok()?;
+
+            // Descriptor pool + sets bound to the color atlas.
+            let pool_size = vk::DescriptorPoolSize::default()
+                .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .descriptor_count(MAX_FRAMES_IN_FLIGHT as u32);
+            let pool_info = vk::DescriptorPoolCreateInfo::default()
+                .pool_sizes(std::slice::from_ref(&pool_size))
+                .max_sets(MAX_FRAMES_IN_FLIGHT as u32);
+            let descriptor_pool = device.create_descriptor_pool(&pool_info, None).ok()?;
+            let layouts: Vec<vk::DescriptorSetLayout> =
+                vec![descriptor_set_layout; MAX_FRAMES_IN_FLIGHT];
+            let alloc_info = vk::DescriptorSetAllocateInfo::default()
+                .descriptor_pool(descriptor_pool)
+                .set_layouts(&layouts);
+            let descriptor_sets = device.allocate_descriptor_sets(&alloc_info).ok()?;
+            let image_info = vk::DescriptorImageInfo::default()
+                .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+                .image_view(view)
+                .sampler(sampler);
+            for &ds in &descriptor_sets {
+                let write = vk::WriteDescriptorSet::default()
+                    .dst_set(ds)
+                    .dst_binding(0)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .image_info(std::slice::from_ref(&image_info));
+                device.update_descriptor_sets(&[write], &[]);
+            }
+
+            // Color pipeline: same vertex format as text, premultiplied-alpha blend.
+            let pipeline = build_color_pipeline(device, render_pass, pipeline_layout).ok()?;
+
+            // Per-frame color vertex buffer (same capacity as the text buffer).
+            let vb_size = (std::mem::size_of::<TextVertex>() * MAX_TEXT_VERTICES) as vk::DeviceSize;
+            let (vertex_buffer, vertex_buffer_memory) = render::create_buffer(
+                device,
+                instance,
+                physical_device,
+                vb_size,
+                vk::BufferUsageFlags::VERTEX_BUFFER,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            )
+            .ok()?;
+
+            Some(ColorAtlas {
+                face,
+                strike_scale,
+                glyphs: RefCell::new(HashMap::new()),
+                atlas_size,
+                atlas_data: RefCell::new(atlas_data),
+                pen_x: Cell::new(0),
+                pen_y: Cell::new(0),
+                row_height: Cell::new(0),
+                dirty: Cell::new(false),
+                image,
+                memory,
+                view,
+                sampler,
+                staging_buffer,
+                staging_memory,
+                descriptor_pool,
+                descriptor_sets,
+                pipeline,
+                vertex_buffer,
+                vertex_buffer_memory,
+            })
         }
-
-        // Color pipeline: same vertex format as text, premultiplied-alpha blend.
-        let pipeline = build_color_pipeline(device, render_pass, pipeline_layout).ok()?;
-
-        // Per-frame color vertex buffer (same capacity as the text buffer).
-        let vb_size = (std::mem::size_of::<TextVertex>() * MAX_TEXT_VERTICES) as vk::DeviceSize;
-        let (vertex_buffer, vertex_buffer_memory) = render::create_buffer(
-            device, instance, physical_device, vb_size,
-            vk::BufferUsageFlags::VERTEX_BUFFER,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        ).ok()?;
-
-        Some(ColorAtlas {
-            face,
-            strike_scale,
-            glyphs: RefCell::new(HashMap::new()),
-            atlas_size,
-            atlas_data: RefCell::new(atlas_data),
-            pen_x: Cell::new(0),
-            pen_y: Cell::new(0),
-            row_height: Cell::new(0),
-            dirty: Cell::new(false),
-            image,
-            memory,
-            view,
-            sampler,
-            staging_buffer,
-            staging_memory,
-            descriptor_pool,
-            descriptor_sets,
-            pipeline,
-            vertex_buffer,
-            vertex_buffer_memory,
-        })
-    }}
+    }
 
     /// Return `cp`'s color glyph, rasterizing it on first use.
     fn ensure(&self, cp: u32) -> Option<GlyphInfo> {
@@ -532,7 +585,16 @@ impl ColorAtlas {
         let result = {
             let mut data = self.atlas_data.borrow_mut();
             unsafe {
-                rasterize_color_glyph(self.face, self.strike_scale, &mut data, self.atlas_size, &mut px, &mut py, &mut rh, cp)
+                rasterize_color_glyph(
+                    self.face,
+                    self.strike_scale,
+                    &mut data,
+                    self.atlas_size,
+                    &mut px,
+                    &mut py,
+                    &mut rh,
+                    cp,
+                )
             }
         };
         self.pen_x.set(px);
@@ -546,38 +608,70 @@ impl ColorAtlas {
     }
 
     /// Re-upload the RGBA atlas if dirty (see `FontRenderer::flush_atlas`).
-    unsafe fn flush(&self, device: &ash::Device, command_pool: vk::CommandPool, queue: vk::Queue) { unsafe {
-        if !self.dirty.get() {
-            return;
+    unsafe fn flush(&self, device: &ash::Device, command_pool: vk::CommandPool, queue: vk::Queue) {
+        unsafe {
+            if !self.dirty.get() {
+                return;
+            }
+            let atlas_bytes =
+                (self.atlas_size as usize * self.atlas_size as usize * 4) as vk::DeviceSize;
+            {
+                let data = self.atlas_data.borrow();
+                let ptr = device
+                    .map_memory(
+                        self.staging_memory,
+                        0,
+                        atlas_bytes,
+                        vk::MemoryMapFlags::empty(),
+                    )
+                    .unwrap() as *mut u8;
+                std::ptr::copy_nonoverlapping(data.as_ptr(), ptr, atlas_bytes as usize);
+                device.unmap_memory(self.staging_memory);
+            }
+            render::transition_image_layout(
+                device,
+                command_pool,
+                queue,
+                self.image,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            );
+            render::copy_buffer_to_image(
+                device,
+                command_pool,
+                queue,
+                self.staging_buffer,
+                self.image,
+                self.atlas_size,
+                self.atlas_size,
+            );
+            render::transition_image_layout(
+                device,
+                command_pool,
+                queue,
+                self.image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            );
+            self.dirty.set(false);
         }
-        let atlas_bytes = (self.atlas_size as usize * self.atlas_size as usize * 4) as vk::DeviceSize;
-        {
-            let data = self.atlas_data.borrow();
-            let ptr = device.map_memory(self.staging_memory, 0, atlas_bytes, vk::MemoryMapFlags::empty()).unwrap() as *mut u8;
-            std::ptr::copy_nonoverlapping(data.as_ptr(), ptr, atlas_bytes as usize);
-            device.unmap_memory(self.staging_memory);
-        }
-        render::transition_image_layout(device, command_pool, queue, self.image,
-            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL, vk::ImageLayout::TRANSFER_DST_OPTIMAL);
-        render::copy_buffer_to_image(device, command_pool, queue, self.staging_buffer, self.image, self.atlas_size, self.atlas_size);
-        render::transition_image_layout(device, command_pool, queue, self.image,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
-        self.dirty.set(false);
-    }}
+    }
 
-    unsafe fn destroy(&self, device: &ash::Device) { unsafe {
-        device.destroy_pipeline(self.pipeline, None);
-        device.destroy_descriptor_pool(self.descriptor_pool, None);
-        device.destroy_buffer(self.vertex_buffer, None);
-        device.free_memory(self.vertex_buffer_memory, None);
-        device.destroy_sampler(self.sampler, None);
-        device.destroy_image_view(self.view, None);
-        device.destroy_image(self.image, None);
-        device.free_memory(self.memory, None);
-        device.destroy_buffer(self.staging_buffer, None);
-        device.free_memory(self.staging_memory, None);
-        ft::FT_Done_Face(self.face);
-    }}
+    unsafe fn destroy(&self, device: &ash::Device) {
+        unsafe {
+            device.destroy_pipeline(self.pipeline, None);
+            device.destroy_descriptor_pool(self.descriptor_pool, None);
+            device.destroy_buffer(self.vertex_buffer, None);
+            device.free_memory(self.vertex_buffer_memory, None);
+            device.destroy_sampler(self.sampler, None);
+            device.destroy_image_view(self.view, None);
+            device.destroy_image(self.image, None);
+            device.free_memory(self.memory, None);
+            device.destroy_buffer(self.staging_buffer, None);
+            device.free_memory(self.staging_memory, None);
+            ft::FT_Done_Face(self.face);
+        }
+    }
 }
 
 /// Build the color-glyph pipeline: identical to the text pipeline except for
@@ -587,286 +681,10 @@ unsafe fn build_color_pipeline(
     device: &ash::Device,
     render_pass: vk::RenderPass,
     pipeline_layout: vk::PipelineLayout,
-) -> Result<vk::Pipeline, SiError> { unsafe {
-    let vert_module = render::create_shader_module(device, shaders::TEXT_VERT)?;
-    let frag_module = render::create_shader_module(device, shaders::TEXT_COLOR_FRAG)?;
-
-    let entry = std::ffi::CString::new("main").unwrap();
-    let stages = [
-        vk::PipelineShaderStageCreateInfo::default()
-            .stage(vk::ShaderStageFlags::VERTEX).module(vert_module).name(&entry),
-        vk::PipelineShaderStageCreateInfo::default()
-            .stage(vk::ShaderStageFlags::FRAGMENT).module(frag_module).name(&entry),
-    ];
-
-    let stride = std::mem::size_of::<TextVertex>() as u32;
-    let binding_desc = vk::VertexInputBindingDescription::default()
-        .binding(0).stride(stride).input_rate(vk::VertexInputRate::VERTEX);
-    let attr_descs = [
-        vk::VertexInputAttributeDescription::default().location(0).binding(0).format(vk::Format::R32G32B32_SFLOAT).offset(0),
-        vk::VertexInputAttributeDescription::default().location(1).binding(0).format(vk::Format::R32G32_SFLOAT).offset(12),
-        vk::VertexInputAttributeDescription::default().location(2).binding(0).format(vk::Format::R32G32B32_SFLOAT).offset(20),
-    ];
-    let vertex_input = vk::PipelineVertexInputStateCreateInfo::default()
-        .vertex_binding_descriptions(std::slice::from_ref(&binding_desc))
-        .vertex_attribute_descriptions(&attr_descs);
-    let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::default()
-        .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
-    let viewport_state = vk::PipelineViewportStateCreateInfo::default().viewport_count(1).scissor_count(1);
-    let rasterizer = vk::PipelineRasterizationStateCreateInfo::default()
-        .polygon_mode(vk::PolygonMode::FILL).line_width(1.0)
-        .cull_mode(vk::CullModeFlags::NONE).front_face(vk::FrontFace::COUNTER_CLOCKWISE);
-    let multisampling = vk::PipelineMultisampleStateCreateInfo::default()
-        .rasterization_samples(vk::SampleCountFlags::TYPE_1);
-    let depth_stencil = vk::PipelineDepthStencilStateCreateInfo::default()
-        .depth_test_enable(false).depth_write_enable(false).depth_compare_op(vk::CompareOp::ALWAYS);
-
-    // Premultiplied-alpha blend: src factor ONE (texels already premultiplied).
-    let blend_attachment = vk::PipelineColorBlendAttachmentState::default()
-        .color_write_mask(vk::ColorComponentFlags::R | vk::ColorComponentFlags::G | vk::ColorComponentFlags::B | vk::ColorComponentFlags::A)
-        .blend_enable(true)
-        .src_color_blend_factor(vk::BlendFactor::ONE)
-        .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
-        .color_blend_op(vk::BlendOp::ADD)
-        .src_alpha_blend_factor(vk::BlendFactor::ONE)
-        .dst_alpha_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
-        .alpha_blend_op(vk::BlendOp::ADD);
-    let blend_state = vk::PipelineColorBlendStateCreateInfo::default()
-        .attachments(std::slice::from_ref(&blend_attachment));
-
-    let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
-    let dynamic_state = vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
-
-    let pipeline_info = vk::GraphicsPipelineCreateInfo::default()
-        .stages(&stages)
-        .vertex_input_state(&vertex_input)
-        .input_assembly_state(&input_assembly)
-        .viewport_state(&viewport_state)
-        .rasterization_state(&rasterizer)
-        .multisample_state(&multisampling)
-        .depth_stencil_state(&depth_stencil)
-        .color_blend_state(&blend_state)
-        .dynamic_state(&dynamic_state)
-        .layout(pipeline_layout)
-        .render_pass(render_pass)
-        .subpass(0);
-    let pipeline = device
-        .create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None)
-        .map_err(|(_, e)| SiError::Vulkan(e))?[0];
-
-    device.destroy_shader_module(vert_module, None);
-    device.destroy_shader_module(frag_module, None);
-    Ok(pipeline)
-}}
-
-impl FontRenderer {
-    /// Build the full font renderer: FreeType, glyph atlas, Vulkan pipeline.
-    pub unsafe fn new(
-        device: &ash::Device,
-        instance: &ash::Instance,
-        physical_device: vk::PhysicalDevice,
-        command_pool: vk::CommandPool,
-        graphics_queue: vk::Queue,
-        render_pass: vk::RenderPass,
-        dpi: u32,
-    ) -> Result<Self, SiError> { unsafe {
-        // ----------------------------------------------------------------
-        // 1. Init FreeType + load the primary face and the fallback chain
-        // ----------------------------------------------------------------
-        let mut ft_library: ft::FT_Library = std::ptr::null_mut();
-        if ft::FT_Init_FreeType(&mut ft_library) != 0 {
-            return Err(SiError::Other("FreeType init failed".into()));
-        }
-
-        let mut faces: Vec<ft::FT_Face> = Vec::new();
-
-        // Primary face — its failure is fatal (everything falls back to it).
-        // The face borrows the embedded bytes for its whole lifetime, which
-        // `'static` satisfies.
-        let mut primary: ft::FT_Face = std::ptr::null_mut();
-        if new_memory_face(ft_library, fonts::PRIMARY, &mut primary) != 0 {
-            ft::FT_Done_FreeType(ft_library);
-            return Err(SiError::Other("Failed to parse the embedded primary font".into()));
-        }
-        faces.push(primary);
-
-        // Fallback faces — optional: a failure only narrows coverage.
-        for (i, bytes) in fonts::FALLBACKS.iter().enumerate() {
-            let mut face: ft::FT_Face = std::ptr::null_mut();
-            if new_memory_face(ft_library, bytes, &mut face) == 0 {
-                faces.push(face);
-            } else {
-                eprintln!("text.rs: embedded fallback font {i} could not be parsed");
-            }
-        }
-
-        // 64pt rasterised at the supplied DPI (typically 96 × content_scale × font_scale)
-        for &face in &faces {
-            if ft::FT_Set_Char_Size(face, 0, 64 * 64, dpi, dpi) != 0 {
-                return Err(SiError::Other("FT_Set_Char_Size failed".into()));
-            }
-        }
-
-        // Scale the atlas with DPI so glyphs always fit.  At 96 DPI the atlas
-        // is 1024² (baseline, unchanged).  Each doubling of DPI doubles both
-        // glyph dimensions, so we need 4× the area — i.e. 2× the linear size.
-        // Use round() not ceil() so small DPI bumps (e.g. 97 at 100% scale)
-        // don't prematurely jump to 2048², quadrupling startup cost.
-        let atlas_ratio = ((dpi as f32) / 96.0).round().max(1.0) as u32;
-        let font_atlas_size: u32 = (1024 * atlas_ratio).min(8192);
-
-        // Line metrics come from the primary face.
-        let size_metrics = (*(*faces[0]).size).metrics;
-        let ascender = size_metrics.ascender as f32 / 64.0;
-        let descender = size_metrics.descender as f32 / 64.0;
-        let line_height = ascender - descender;
-
-        // ----------------------------------------------------------------
-        // 2. Build the (initially ASCII-warmed) glyph atlas. Glyphs outside
-        //    the warmup range are rasterized lazily by `ensure_glyph` and the
-        //    dirty atlas re-uploaded by `flush_atlas`.
-        // ----------------------------------------------------------------
-        let atlas_sz = font_atlas_size as usize;
-        let mut atlas_data = vec![0u8; atlas_sz * atlas_sz];
-        let mut glyphs: HashMap<u32, GlyphInfo> = HashMap::new();
-
-        let mut pen_x = 0i32;
-        let mut pen_y = 0i32;
-        let mut row_height = 0i32;
-
-        for c in WARMUP_RANGE {
-            if let Some(g) = rasterize_glyph(
-                &faces, &mut atlas_data, font_atlas_size,
-                &mut pen_x, &mut pen_y, &mut row_height, c,
-            ) {
-                glyphs.insert(c, g);
-            }
-        }
-
-        // ----------------------------------------------------------------
-        // 3. Upload atlas to Vulkan (R8_UNORM). The staging buffer is kept
-        //    around so `flush_atlas` can re-upload newly rasterized glyphs.
-        // ----------------------------------------------------------------
-        let atlas_bytes = (atlas_sz * atlas_sz) as vk::DeviceSize;
-        let (atlas_staging_buffer, atlas_staging_memory) = render::create_buffer(
-            device, instance, physical_device,
-            atlas_bytes,
-            vk::BufferUsageFlags::TRANSFER_SRC,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        )?;
-        {
-            let ptr = device.map_memory(atlas_staging_memory, 0, atlas_bytes, vk::MemoryMapFlags::empty())? as *mut u8;
-            std::ptr::copy_nonoverlapping(atlas_data.as_ptr(), ptr, atlas_bytes as usize);
-            device.unmap_memory(atlas_staging_memory);
-        }
-
-        let (font_atlas_image, font_atlas_memory) = render::create_image_helper(
-            device, instance, physical_device,
-            font_atlas_size, font_atlas_size,
-            vk::Format::R8_UNORM,
-            vk::ImageTiling::OPTIMAL,
-            vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-        )?;
-
-        render::transition_image_layout(
-            device, command_pool, graphics_queue,
-            font_atlas_image,
-            vk::ImageLayout::UNDEFINED, vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-        );
-        render::copy_buffer_to_image(
-            device, command_pool, graphics_queue,
-            atlas_staging_buffer, font_atlas_image, font_atlas_size, font_atlas_size,
-        );
-        render::transition_image_layout(
-            device, command_pool, graphics_queue,
-            font_atlas_image,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-        );
-
-        // ----------------------------------------------------------------
-        // 4. Image view + sampler
-        // ----------------------------------------------------------------
-        let view_info = vk::ImageViewCreateInfo::default()
-            .image(font_atlas_image)
-            .view_type(vk::ImageViewType::TYPE_2D)
-            .format(vk::Format::R8_UNORM)
-            .subresource_range(
-                vk::ImageSubresourceRange::default()
-                    .aspect_mask(vk::ImageAspectFlags::COLOR)
-                    .base_mip_level(0).level_count(1)
-                    .base_array_layer(0).layer_count(1),
-            );
-        let font_atlas_view = device.create_image_view(&view_info, None)?;
-
-        let sampler_info = vk::SamplerCreateInfo::default()
-            .mag_filter(vk::Filter::LINEAR)
-            .min_filter(vk::Filter::LINEAR)
-            .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-            .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-            .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-            .anisotropy_enable(false)
-            .border_color(vk::BorderColor::INT_OPAQUE_BLACK)
-            .unnormalized_coordinates(false)
-            .compare_enable(false)
-            .mipmap_mode(vk::SamplerMipmapMode::LINEAR);
-        let font_atlas_sampler = device.create_sampler(&sampler_info, None)?;
-
-        // ----------------------------------------------------------------
-        // 5. Vertex buffer (host-visible, host-coherent)
-        // ----------------------------------------------------------------
-        let vb_size = (std::mem::size_of::<TextVertex>() * MAX_TEXT_VERTICES) as vk::DeviceSize;
-        let (vertex_buffer, vertex_buffer_memory) = render::create_buffer(
-            device, instance, physical_device,
-            vb_size,
-            vk::BufferUsageFlags::VERTEX_BUFFER,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        )?;
-
-        // ----------------------------------------------------------------
-        // 6. Descriptor set layout + pool + sets
-        // ----------------------------------------------------------------
-        let sampler_binding = vk::DescriptorSetLayoutBinding::default()
-            .binding(0)
-            .descriptor_count(1)
-            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-            .stage_flags(vk::ShaderStageFlags::FRAGMENT);
-        let ds_layout_info = vk::DescriptorSetLayoutCreateInfo::default()
-            .bindings(std::slice::from_ref(&sampler_binding));
-        let descriptor_set_layout = device.create_descriptor_set_layout(&ds_layout_info, None)?;
-
-        let pool_size = vk::DescriptorPoolSize::default()
-            .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-            .descriptor_count(MAX_FRAMES_IN_FLIGHT as u32);
-        let pool_info = vk::DescriptorPoolCreateInfo::default()
-            .pool_sizes(std::slice::from_ref(&pool_size))
-            .max_sets(MAX_FRAMES_IN_FLIGHT as u32);
-        let descriptor_pool = device.create_descriptor_pool(&pool_info, None)?;
-
-        let layouts: Vec<vk::DescriptorSetLayout> = vec![descriptor_set_layout; MAX_FRAMES_IN_FLIGHT];
-        let alloc_info = vk::DescriptorSetAllocateInfo::default()
-            .descriptor_pool(descriptor_pool)
-            .set_layouts(&layouts);
-        let descriptor_sets = device.allocate_descriptor_sets(&alloc_info)?;
-
-        let image_info = vk::DescriptorImageInfo::default()
-            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-            .image_view(font_atlas_view)
-            .sampler(font_atlas_sampler);
-        for &ds in &descriptor_sets {
-            let write = vk::WriteDescriptorSet::default()
-                .dst_set(ds)
-                .dst_binding(0)
-                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .image_info(std::slice::from_ref(&image_info));
-            device.update_descriptor_sets(&[write], &[]);
-        }
-
-        // ----------------------------------------------------------------
-        // 7. Graphics pipeline
-        // ----------------------------------------------------------------
+) -> Result<vk::Pipeline, SiError> {
+    unsafe {
         let vert_module = render::create_shader_module(device, shaders::TEXT_VERT)?;
-        let frag_module = render::create_shader_module(device, shaders::TEXT_FRAG)?;
+        let frag_module = render::create_shader_module(device, shaders::TEXT_COLOR_FRAG)?;
 
         let entry = std::ffi::CString::new("main").unwrap();
         let stages = [
@@ -882,70 +700,67 @@ impl FontRenderer {
 
         let stride = std::mem::size_of::<TextVertex>() as u32;
         let binding_desc = vk::VertexInputBindingDescription::default()
-            .binding(0).stride(stride).input_rate(vk::VertexInputRate::VERTEX);
-        // Offsets: pos@0 (12B), texCoord@12 (8B), color@20 (12B)
+            .binding(0)
+            .stride(stride)
+            .input_rate(vk::VertexInputRate::VERTEX);
         let attr_descs = [
             vk::VertexInputAttributeDescription::default()
-                .location(0).binding(0).format(vk::Format::R32G32B32_SFLOAT).offset(0),
+                .location(0)
+                .binding(0)
+                .format(vk::Format::R32G32B32_SFLOAT)
+                .offset(0),
             vk::VertexInputAttributeDescription::default()
-                .location(1).binding(0).format(vk::Format::R32G32_SFLOAT).offset(12),
+                .location(1)
+                .binding(0)
+                .format(vk::Format::R32G32_SFLOAT)
+                .offset(12),
             vk::VertexInputAttributeDescription::default()
-                .location(2).binding(0).format(vk::Format::R32G32B32_SFLOAT).offset(20),
+                .location(2)
+                .binding(0)
+                .format(vk::Format::R32G32B32_SFLOAT)
+                .offset(20),
         ];
-
         let vertex_input = vk::PipelineVertexInputStateCreateInfo::default()
             .vertex_binding_descriptions(std::slice::from_ref(&binding_desc))
             .vertex_attribute_descriptions(&attr_descs);
-
         let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::default()
             .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
-
         let viewport_state = vk::PipelineViewportStateCreateInfo::default()
-            .viewport_count(1).scissor_count(1);
-
+            .viewport_count(1)
+            .scissor_count(1);
         let rasterizer = vk::PipelineRasterizationStateCreateInfo::default()
             .polygon_mode(vk::PolygonMode::FILL)
             .line_width(1.0)
             .cull_mode(vk::CullModeFlags::NONE)
             .front_face(vk::FrontFace::COUNTER_CLOCKWISE);
-
         let multisampling = vk::PipelineMultisampleStateCreateInfo::default()
             .rasterization_samples(vk::SampleCountFlags::TYPE_1);
-
         let depth_stencil = vk::PipelineDepthStencilStateCreateInfo::default()
             .depth_test_enable(false)
             .depth_write_enable(false)
             .depth_compare_op(vk::CompareOp::ALWAYS);
 
+        // Premultiplied-alpha blend: src factor ONE (texels already premultiplied).
         let blend_attachment = vk::PipelineColorBlendAttachmentState::default()
             .color_write_mask(
-                vk::ColorComponentFlags::R | vk::ColorComponentFlags::G
-                | vk::ColorComponentFlags::B | vk::ColorComponentFlags::A,
+                vk::ColorComponentFlags::R
+                    | vk::ColorComponentFlags::G
+                    | vk::ColorComponentFlags::B
+                    | vk::ColorComponentFlags::A,
             )
             .blend_enable(true)
-            .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
+            .src_color_blend_factor(vk::BlendFactor::ONE)
             .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
             .color_blend_op(vk::BlendOp::ADD)
             .src_alpha_blend_factor(vk::BlendFactor::ONE)
-            .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
+            .dst_alpha_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
             .alpha_blend_op(vk::BlendOp::ADD);
-
         let blend_state = vk::PipelineColorBlendStateCreateInfo::default()
             .attachments(std::slice::from_ref(&blend_attachment));
 
         let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
-        let dynamic_state = vk::PipelineDynamicStateCreateInfo::default()
-            .dynamic_states(&dynamic_states);
-
-        let push_range = vk::PushConstantRange::default()
-            .stage_flags(vk::ShaderStageFlags::VERTEX)
-            .offset(0)
-            .size(std::mem::size_of::<[f32; 2]>() as u32);
-
-        let pl_info = vk::PipelineLayoutCreateInfo::default()
-            .set_layouts(std::slice::from_ref(&descriptor_set_layout))
-            .push_constant_ranges(std::slice::from_ref(&push_range));
-        let pipeline_layout = device.create_pipeline_layout(&pl_info, None)?;
+        let dynamic_state =
+            vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
 
         let pipeline_info = vk::GraphicsPipelineCreateInfo::default()
             .stages(&stages)
@@ -960,80 +775,451 @@ impl FontRenderer {
             .layout(pipeline_layout)
             .render_pass(render_pass)
             .subpass(0);
-
         let pipeline = device
             .create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None)
             .map_err(|(_, e)| SiError::Vulkan(e))?[0];
 
         device.destroy_shader_module(vert_module, None);
         device.destroy_shader_module(frag_module, None);
+        Ok(pipeline)
+    }
+}
 
-        // Optional color-glyph atlas (emoji). Failure disables emoji, not text.
-        let raster_em_px = 64.0 * dpi as f32 / 72.0;
-        let color = ColorAtlas::new(
-            device, instance, physical_device, command_pool, graphics_queue,
-            render_pass, descriptor_set_layout, pipeline_layout, ft_library,
-            font_atlas_size, raster_em_px,
-        );
+impl FontRenderer {
+    /// Build the full font renderer: FreeType, glyph atlas, Vulkan pipeline.
+    pub unsafe fn new(
+        device: &ash::Device,
+        instance: &ash::Instance,
+        physical_device: vk::PhysicalDevice,
+        command_pool: vk::CommandPool,
+        graphics_queue: vk::Queue,
+        render_pass: vk::RenderPass,
+        dpi: u32,
+    ) -> Result<Self, SiError> {
+        unsafe {
+            // ----------------------------------------------------------------
+            // 1. Init FreeType + load the primary face and the fallback chain
+            // ----------------------------------------------------------------
+            let mut ft_library: ft::FT_Library = std::ptr::null_mut();
+            if ft::FT_Init_FreeType(&mut ft_library) != 0 {
+                return Err(SiError::Other("FreeType init failed".into()));
+            }
 
-        Ok(FontRenderer {
-            ft_library,
-            faces,
-            glyphs: RefCell::new(glyphs),
-            missing: RefCell::new(std::collections::HashSet::new()),
-            line_height,
-            ascender,
-            descender,
-            dpi: dpi as f32,
-            atlas_size: font_atlas_size,
-            atlas_data: RefCell::new(atlas_data),
-            pen_x: Cell::new(pen_x),
-            pen_y: Cell::new(pen_y),
-            row_height: Cell::new(row_height),
-            dirty: Cell::new(false),
-            font_atlas_image,
-            font_atlas_memory,
-            font_atlas_view,
-            font_atlas_sampler,
-            atlas_staging_buffer,
-            atlas_staging_memory,
-            vertex_buffer,
-            vertex_buffer_memory,
-            descriptor_set_layout,
-            descriptor_pool,
-            descriptor_sets,
-            pipeline_layout,
-            pipeline,
-            vertices: Vec::with_capacity(8192),
-            color,
-            color_vertices: Vec::new(),
-        })
-    }}
+            let mut faces: Vec<ft::FT_Face> = Vec::new();
+
+            // Primary face — its failure is fatal (everything falls back to it).
+            // The face borrows the embedded bytes for its whole lifetime, which
+            // `'static` satisfies.
+            let mut primary: ft::FT_Face = std::ptr::null_mut();
+            if new_memory_face(ft_library, fonts::PRIMARY, &mut primary) != 0 {
+                ft::FT_Done_FreeType(ft_library);
+                return Err(SiError::Other(
+                    "Failed to parse the embedded primary font".into(),
+                ));
+            }
+            faces.push(primary);
+
+            // Fallback faces — optional: a failure only narrows coverage.
+            for (i, bytes) in fonts::FALLBACKS.iter().enumerate() {
+                let mut face: ft::FT_Face = std::ptr::null_mut();
+                if new_memory_face(ft_library, bytes, &mut face) == 0 {
+                    faces.push(face);
+                } else {
+                    eprintln!("text.rs: embedded fallback font {i} could not be parsed");
+                }
+            }
+
+            // 64pt rasterised at the supplied DPI (typically 96 × content_scale × font_scale)
+            for &face in &faces {
+                if ft::FT_Set_Char_Size(face, 0, 64 * 64, dpi, dpi) != 0 {
+                    return Err(SiError::Other("FT_Set_Char_Size failed".into()));
+                }
+            }
+
+            // Scale the atlas with DPI so glyphs always fit.  At 96 DPI the atlas
+            // is 1024² (baseline, unchanged).  Each doubling of DPI doubles both
+            // glyph dimensions, so we need 4× the area — i.e. 2× the linear size.
+            // Use round() not ceil() so small DPI bumps (e.g. 97 at 100% scale)
+            // don't prematurely jump to 2048², quadrupling startup cost.
+            let atlas_ratio = ((dpi as f32) / 96.0).round().max(1.0) as u32;
+            let font_atlas_size: u32 = (1024 * atlas_ratio).min(8192);
+
+            // Line metrics come from the primary face.
+            let size_metrics = (*(*faces[0]).size).metrics;
+            let ascender = size_metrics.ascender as f32 / 64.0;
+            let descender = size_metrics.descender as f32 / 64.0;
+            let line_height = ascender - descender;
+
+            // ----------------------------------------------------------------
+            // 2. Build the (initially ASCII-warmed) glyph atlas. Glyphs outside
+            //    the warmup range are rasterized lazily by `ensure_glyph` and the
+            //    dirty atlas re-uploaded by `flush_atlas`.
+            // ----------------------------------------------------------------
+            let atlas_sz = font_atlas_size as usize;
+            let mut atlas_data = vec![0u8; atlas_sz * atlas_sz];
+            let mut glyphs: HashMap<u32, GlyphInfo> = HashMap::new();
+
+            let mut pen_x = 0i32;
+            let mut pen_y = 0i32;
+            let mut row_height = 0i32;
+
+            for c in WARMUP_RANGE {
+                if let Some(g) = rasterize_glyph(
+                    &faces,
+                    &mut atlas_data,
+                    font_atlas_size,
+                    &mut pen_x,
+                    &mut pen_y,
+                    &mut row_height,
+                    c,
+                ) {
+                    glyphs.insert(c, g);
+                }
+            }
+
+            // ----------------------------------------------------------------
+            // 3. Upload atlas to Vulkan (R8_UNORM). The staging buffer is kept
+            //    around so `flush_atlas` can re-upload newly rasterized glyphs.
+            // ----------------------------------------------------------------
+            let atlas_bytes = (atlas_sz * atlas_sz) as vk::DeviceSize;
+            let (atlas_staging_buffer, atlas_staging_memory) = render::create_buffer(
+                device,
+                instance,
+                physical_device,
+                atlas_bytes,
+                vk::BufferUsageFlags::TRANSFER_SRC,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            )?;
+            {
+                let ptr = device.map_memory(
+                    atlas_staging_memory,
+                    0,
+                    atlas_bytes,
+                    vk::MemoryMapFlags::empty(),
+                )? as *mut u8;
+                std::ptr::copy_nonoverlapping(atlas_data.as_ptr(), ptr, atlas_bytes as usize);
+                device.unmap_memory(atlas_staging_memory);
+            }
+
+            let (font_atlas_image, font_atlas_memory) = render::create_image_helper(
+                device,
+                instance,
+                physical_device,
+                font_atlas_size,
+                font_atlas_size,
+                vk::Format::R8_UNORM,
+                vk::ImageTiling::OPTIMAL,
+                vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+                vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            )?;
+
+            render::transition_image_layout(
+                device,
+                command_pool,
+                graphics_queue,
+                font_atlas_image,
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            );
+            render::copy_buffer_to_image(
+                device,
+                command_pool,
+                graphics_queue,
+                atlas_staging_buffer,
+                font_atlas_image,
+                font_atlas_size,
+                font_atlas_size,
+            );
+            render::transition_image_layout(
+                device,
+                command_pool,
+                graphics_queue,
+                font_atlas_image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            );
+
+            // ----------------------------------------------------------------
+            // 4. Image view + sampler
+            // ----------------------------------------------------------------
+            let view_info = vk::ImageViewCreateInfo::default()
+                .image(font_atlas_image)
+                .view_type(vk::ImageViewType::TYPE_2D)
+                .format(vk::Format::R8_UNORM)
+                .subresource_range(
+                    vk::ImageSubresourceRange::default()
+                        .aspect_mask(vk::ImageAspectFlags::COLOR)
+                        .base_mip_level(0)
+                        .level_count(1)
+                        .base_array_layer(0)
+                        .layer_count(1),
+                );
+            let font_atlas_view = device.create_image_view(&view_info, None)?;
+
+            let sampler_info = vk::SamplerCreateInfo::default()
+                .mag_filter(vk::Filter::LINEAR)
+                .min_filter(vk::Filter::LINEAR)
+                .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+                .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+                .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+                .anisotropy_enable(false)
+                .border_color(vk::BorderColor::INT_OPAQUE_BLACK)
+                .unnormalized_coordinates(false)
+                .compare_enable(false)
+                .mipmap_mode(vk::SamplerMipmapMode::LINEAR);
+            let font_atlas_sampler = device.create_sampler(&sampler_info, None)?;
+
+            // ----------------------------------------------------------------
+            // 5. Vertex buffer (host-visible, host-coherent)
+            // ----------------------------------------------------------------
+            let vb_size = (std::mem::size_of::<TextVertex>() * MAX_TEXT_VERTICES) as vk::DeviceSize;
+            let (vertex_buffer, vertex_buffer_memory) = render::create_buffer(
+                device,
+                instance,
+                physical_device,
+                vb_size,
+                vk::BufferUsageFlags::VERTEX_BUFFER,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            )?;
+
+            // ----------------------------------------------------------------
+            // 6. Descriptor set layout + pool + sets
+            // ----------------------------------------------------------------
+            let sampler_binding = vk::DescriptorSetLayoutBinding::default()
+                .binding(0)
+                .descriptor_count(1)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .stage_flags(vk::ShaderStageFlags::FRAGMENT);
+            let ds_layout_info = vk::DescriptorSetLayoutCreateInfo::default()
+                .bindings(std::slice::from_ref(&sampler_binding));
+            let descriptor_set_layout =
+                device.create_descriptor_set_layout(&ds_layout_info, None)?;
+
+            let pool_size = vk::DescriptorPoolSize::default()
+                .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .descriptor_count(MAX_FRAMES_IN_FLIGHT as u32);
+            let pool_info = vk::DescriptorPoolCreateInfo::default()
+                .pool_sizes(std::slice::from_ref(&pool_size))
+                .max_sets(MAX_FRAMES_IN_FLIGHT as u32);
+            let descriptor_pool = device.create_descriptor_pool(&pool_info, None)?;
+
+            let layouts: Vec<vk::DescriptorSetLayout> =
+                vec![descriptor_set_layout; MAX_FRAMES_IN_FLIGHT];
+            let alloc_info = vk::DescriptorSetAllocateInfo::default()
+                .descriptor_pool(descriptor_pool)
+                .set_layouts(&layouts);
+            let descriptor_sets = device.allocate_descriptor_sets(&alloc_info)?;
+
+            let image_info = vk::DescriptorImageInfo::default()
+                .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+                .image_view(font_atlas_view)
+                .sampler(font_atlas_sampler);
+            for &ds in &descriptor_sets {
+                let write = vk::WriteDescriptorSet::default()
+                    .dst_set(ds)
+                    .dst_binding(0)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .image_info(std::slice::from_ref(&image_info));
+                device.update_descriptor_sets(&[write], &[]);
+            }
+
+            // ----------------------------------------------------------------
+            // 7. Graphics pipeline
+            // ----------------------------------------------------------------
+            let vert_module = render::create_shader_module(device, shaders::TEXT_VERT)?;
+            let frag_module = render::create_shader_module(device, shaders::TEXT_FRAG)?;
+
+            let entry = std::ffi::CString::new("main").unwrap();
+            let stages = [
+                vk::PipelineShaderStageCreateInfo::default()
+                    .stage(vk::ShaderStageFlags::VERTEX)
+                    .module(vert_module)
+                    .name(&entry),
+                vk::PipelineShaderStageCreateInfo::default()
+                    .stage(vk::ShaderStageFlags::FRAGMENT)
+                    .module(frag_module)
+                    .name(&entry),
+            ];
+
+            let stride = std::mem::size_of::<TextVertex>() as u32;
+            let binding_desc = vk::VertexInputBindingDescription::default()
+                .binding(0)
+                .stride(stride)
+                .input_rate(vk::VertexInputRate::VERTEX);
+            // Offsets: pos@0 (12B), texCoord@12 (8B), color@20 (12B)
+            let attr_descs = [
+                vk::VertexInputAttributeDescription::default()
+                    .location(0)
+                    .binding(0)
+                    .format(vk::Format::R32G32B32_SFLOAT)
+                    .offset(0),
+                vk::VertexInputAttributeDescription::default()
+                    .location(1)
+                    .binding(0)
+                    .format(vk::Format::R32G32_SFLOAT)
+                    .offset(12),
+                vk::VertexInputAttributeDescription::default()
+                    .location(2)
+                    .binding(0)
+                    .format(vk::Format::R32G32B32_SFLOAT)
+                    .offset(20),
+            ];
+
+            let vertex_input = vk::PipelineVertexInputStateCreateInfo::default()
+                .vertex_binding_descriptions(std::slice::from_ref(&binding_desc))
+                .vertex_attribute_descriptions(&attr_descs);
+
+            let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::default()
+                .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
+
+            let viewport_state = vk::PipelineViewportStateCreateInfo::default()
+                .viewport_count(1)
+                .scissor_count(1);
+
+            let rasterizer = vk::PipelineRasterizationStateCreateInfo::default()
+                .polygon_mode(vk::PolygonMode::FILL)
+                .line_width(1.0)
+                .cull_mode(vk::CullModeFlags::NONE)
+                .front_face(vk::FrontFace::COUNTER_CLOCKWISE);
+
+            let multisampling = vk::PipelineMultisampleStateCreateInfo::default()
+                .rasterization_samples(vk::SampleCountFlags::TYPE_1);
+
+            let depth_stencil = vk::PipelineDepthStencilStateCreateInfo::default()
+                .depth_test_enable(false)
+                .depth_write_enable(false)
+                .depth_compare_op(vk::CompareOp::ALWAYS);
+
+            let blend_attachment = vk::PipelineColorBlendAttachmentState::default()
+                .color_write_mask(
+                    vk::ColorComponentFlags::R
+                        | vk::ColorComponentFlags::G
+                        | vk::ColorComponentFlags::B
+                        | vk::ColorComponentFlags::A,
+                )
+                .blend_enable(true)
+                .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
+                .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
+                .color_blend_op(vk::BlendOp::ADD)
+                .src_alpha_blend_factor(vk::BlendFactor::ONE)
+                .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
+                .alpha_blend_op(vk::BlendOp::ADD);
+
+            let blend_state = vk::PipelineColorBlendStateCreateInfo::default()
+                .attachments(std::slice::from_ref(&blend_attachment));
+
+            let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
+            let dynamic_state =
+                vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
+
+            let push_range = vk::PushConstantRange::default()
+                .stage_flags(vk::ShaderStageFlags::VERTEX)
+                .offset(0)
+                .size(std::mem::size_of::<[f32; 2]>() as u32);
+
+            let pl_info = vk::PipelineLayoutCreateInfo::default()
+                .set_layouts(std::slice::from_ref(&descriptor_set_layout))
+                .push_constant_ranges(std::slice::from_ref(&push_range));
+            let pipeline_layout = device.create_pipeline_layout(&pl_info, None)?;
+
+            let pipeline_info = vk::GraphicsPipelineCreateInfo::default()
+                .stages(&stages)
+                .vertex_input_state(&vertex_input)
+                .input_assembly_state(&input_assembly)
+                .viewport_state(&viewport_state)
+                .rasterization_state(&rasterizer)
+                .multisample_state(&multisampling)
+                .depth_stencil_state(&depth_stencil)
+                .color_blend_state(&blend_state)
+                .dynamic_state(&dynamic_state)
+                .layout(pipeline_layout)
+                .render_pass(render_pass)
+                .subpass(0);
+
+            let pipeline = device
+                .create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None)
+                .map_err(|(_, e)| SiError::Vulkan(e))?[0];
+
+            device.destroy_shader_module(vert_module, None);
+            device.destroy_shader_module(frag_module, None);
+
+            // Optional color-glyph atlas (emoji). Failure disables emoji, not text.
+            let raster_em_px = 64.0 * dpi as f32 / 72.0;
+            let color = ColorAtlas::new(
+                device,
+                instance,
+                physical_device,
+                command_pool,
+                graphics_queue,
+                render_pass,
+                descriptor_set_layout,
+                pipeline_layout,
+                ft_library,
+                font_atlas_size,
+                raster_em_px,
+            );
+
+            Ok(FontRenderer {
+                ft_library,
+                faces,
+                glyphs: RefCell::new(glyphs),
+                missing: RefCell::new(std::collections::HashSet::new()),
+                line_height,
+                ascender,
+                descender,
+                dpi: dpi as f32,
+                atlas_size: font_atlas_size,
+                atlas_data: RefCell::new(atlas_data),
+                pen_x: Cell::new(pen_x),
+                pen_y: Cell::new(pen_y),
+                row_height: Cell::new(row_height),
+                dirty: Cell::new(false),
+                font_atlas_image,
+                font_atlas_memory,
+                font_atlas_view,
+                font_atlas_sampler,
+                atlas_staging_buffer,
+                atlas_staging_memory,
+                vertex_buffer,
+                vertex_buffer_memory,
+                descriptor_set_layout,
+                descriptor_pool,
+                descriptor_sets,
+                pipeline_layout,
+                pipeline,
+                vertices: Vec::with_capacity(8192),
+                color,
+                color_vertices: Vec::new(),
+            })
+        }
+    }
 
     /// Free all Vulkan and FreeType resources.
     /// The caller must ensure the device is idle before calling this
     /// (e.g. `device.device_wait_idle().unwrap()`).
-    pub unsafe fn destroy(&self, device: &ash::Device) { unsafe {
-        device.destroy_pipeline(self.pipeline, None);
-        device.destroy_pipeline_layout(self.pipeline_layout, None);
-        device.destroy_descriptor_pool(self.descriptor_pool, None);
-        device.destroy_descriptor_set_layout(self.descriptor_set_layout, None);
-        device.destroy_buffer(self.vertex_buffer, None);
-        device.free_memory(self.vertex_buffer_memory, None);
-        device.destroy_sampler(self.font_atlas_sampler, None);
-        device.destroy_image_view(self.font_atlas_view, None);
-        device.destroy_image(self.font_atlas_image, None);
-        device.free_memory(self.font_atlas_memory, None);
-        device.destroy_buffer(self.atlas_staging_buffer, None);
-        device.free_memory(self.atlas_staging_memory, None);
-        if let Some(ca) = &self.color {
-            ca.destroy(device);
+    pub unsafe fn destroy(&self, device: &ash::Device) {
+        unsafe {
+            device.destroy_pipeline(self.pipeline, None);
+            device.destroy_pipeline_layout(self.pipeline_layout, None);
+            device.destroy_descriptor_pool(self.descriptor_pool, None);
+            device.destroy_descriptor_set_layout(self.descriptor_set_layout, None);
+            device.destroy_buffer(self.vertex_buffer, None);
+            device.free_memory(self.vertex_buffer_memory, None);
+            device.destroy_sampler(self.font_atlas_sampler, None);
+            device.destroy_image_view(self.font_atlas_view, None);
+            device.destroy_image(self.font_atlas_image, None);
+            device.free_memory(self.font_atlas_memory, None);
+            device.destroy_buffer(self.atlas_staging_buffer, None);
+            device.free_memory(self.atlas_staging_memory, None);
+            if let Some(ca) = &self.color {
+                ca.destroy(device);
+            }
+            for &face in &self.faces {
+                ft::FT_Done_Face(face);
+            }
+            ft::FT_Done_FreeType(self.ft_library);
         }
-        for &face in &self.faces {
-            ft::FT_Done_Face(face);
-        }
-        ft::FT_Done_FreeType(self.ft_library);
-    }}
+    }
 
     // ---- Dynamic glyph atlas ----------------------------------------------
 
@@ -1065,7 +1251,15 @@ impl FontRenderer {
         let result = {
             let mut data = self.atlas_data.borrow_mut();
             unsafe {
-                rasterize_glyph(&self.faces, &mut data, self.atlas_size, &mut px, &mut py, &mut rh, cp)
+                rasterize_glyph(
+                    &self.faces,
+                    &mut data,
+                    self.atlas_size,
+                    &mut px,
+                    &mut py,
+                    &mut rh,
+                    cp,
+                )
             }
         };
         self.pen_x.set(px);
@@ -1094,7 +1288,9 @@ impl FontRenderer {
                 return g.advance;
             }
         }
-        self.ensure_glyph(' ' as u32).map(|g| g.advance).unwrap_or(0.0)
+        self.ensure_glyph(' ' as u32)
+            .map(|g| g.advance)
+            .unwrap_or(0.0)
     }
 
     /// Re-upload the CPU atlas to the GPU image if glyphs were added since the
@@ -1105,36 +1301,57 @@ impl FontRenderer {
         device: &ash::Device,
         command_pool: vk::CommandPool,
         queue: vk::Queue,
-    ) { unsafe {
-        if self.dirty.get() {
-            let atlas_bytes = (self.atlas_size as usize * self.atlas_size as usize) as vk::DeviceSize;
-            {
-                let data = self.atlas_data.borrow();
-                let ptr = device
-                    .map_memory(self.atlas_staging_memory, 0, atlas_bytes, vk::MemoryMapFlags::empty())
-                    .unwrap() as *mut u8;
-                std::ptr::copy_nonoverlapping(data.as_ptr(), ptr, atlas_bytes as usize);
-                device.unmap_memory(self.atlas_staging_memory);
+    ) {
+        unsafe {
+            if self.dirty.get() {
+                let atlas_bytes =
+                    (self.atlas_size as usize * self.atlas_size as usize) as vk::DeviceSize;
+                {
+                    let data = self.atlas_data.borrow();
+                    let ptr = device
+                        .map_memory(
+                            self.atlas_staging_memory,
+                            0,
+                            atlas_bytes,
+                            vk::MemoryMapFlags::empty(),
+                        )
+                        .unwrap() as *mut u8;
+                    std::ptr::copy_nonoverlapping(data.as_ptr(), ptr, atlas_bytes as usize);
+                    device.unmap_memory(self.atlas_staging_memory);
+                }
+                render::transition_image_layout(
+                    device,
+                    command_pool,
+                    queue,
+                    self.font_atlas_image,
+                    vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                );
+                render::copy_buffer_to_image(
+                    device,
+                    command_pool,
+                    queue,
+                    self.atlas_staging_buffer,
+                    self.font_atlas_image,
+                    self.atlas_size,
+                    self.atlas_size,
+                );
+                render::transition_image_layout(
+                    device,
+                    command_pool,
+                    queue,
+                    self.font_atlas_image,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                );
+                self.dirty.set(false);
             }
-            render::transition_image_layout(
-                device, command_pool, queue, self.font_atlas_image,
-                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL, vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            );
-            render::copy_buffer_to_image(
-                device, command_pool, queue,
-                self.atlas_staging_buffer, self.font_atlas_image, self.atlas_size, self.atlas_size,
-            );
-            render::transition_image_layout(
-                device, command_pool, queue, self.font_atlas_image,
-                vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            );
-            self.dirty.set(false);
-        }
 
-        if let Some(ca) = &self.color {
-            ca.flush(device, command_pool, queue);
+            if let Some(ca) = &self.color {
+                ca.flush(device, command_pool, queue);
+            }
         }
-    }}
+    }
 
     // ---- Frame helpers -----------------------------------------------------
 
@@ -1145,14 +1362,24 @@ impl FontRenderer {
     }
 
     /// Append text quads to the CPU vertex buffer.
-    pub fn prepare_text_for_rendering(&mut self, text: &str, x: f32, y: f32, scale: f32, color: u32) {
+    pub fn prepare_text_for_rendering(
+        &mut self,
+        text: &str,
+        x: f32,
+        y: f32,
+        scale: f32,
+        color: u32,
+    ) {
         let r = ((color >> 24) & 0xFF) as f32 / 255.0;
         let g = ((color >> 16) & 0xFF) as f32 / 255.0;
-        let b = ((color >>  8) & 0xFF) as f32 / 255.0;
+        let b = ((color >> 8) & 0xFF) as f32 / 255.0;
         let col = [r, g, b];
 
         let mut cx = x;
-        let space_adv = self.ensure_glyph(' ' as u32).map(|g| g.advance).unwrap_or(0.0);
+        let space_adv = self
+            .ensure_glyph(' ' as u32)
+            .map(|g| g.advance)
+            .unwrap_or(0.0);
         for ch in text.chars() {
             // Rasterize on demand; an unsupported codepoint advances like a space.
             let gi = match self.ensure_glyph(ch as u32) {
@@ -1173,15 +1400,43 @@ impl FontRenderer {
                 let [u1, v1] = gi.uv_max;
 
                 // Color glyphs (emoji) go to the separate RGBA pipeline.
-                let buf = if gi.is_color { &mut self.color_vertices } else { &mut self.vertices };
+                let buf = if gi.is_color {
+                    &mut self.color_vertices
+                } else {
+                    &mut self.vertices
+                };
                 if buf.len() + 6 <= MAX_TEXT_VERTICES {
                     // Two clockwise triangles (bottom-left origin, Y grows down)
-                    buf.push(TextVertex { pos: [xpos,     ypos + h, 0.0], tex_coord: [u0, v1], color: col });
-                    buf.push(TextVertex { pos: [xpos,     ypos,     0.0], tex_coord: [u0, v0], color: col });
-                    buf.push(TextVertex { pos: [xpos + w, ypos,     0.0], tex_coord: [u1, v0], color: col });
-                    buf.push(TextVertex { pos: [xpos,     ypos + h, 0.0], tex_coord: [u0, v1], color: col });
-                    buf.push(TextVertex { pos: [xpos + w, ypos,     0.0], tex_coord: [u1, v0], color: col });
-                    buf.push(TextVertex { pos: [xpos + w, ypos + h, 0.0], tex_coord: [u1, v1], color: col });
+                    buf.push(TextVertex {
+                        pos: [xpos, ypos + h, 0.0],
+                        tex_coord: [u0, v1],
+                        color: col,
+                    });
+                    buf.push(TextVertex {
+                        pos: [xpos, ypos, 0.0],
+                        tex_coord: [u0, v0],
+                        color: col,
+                    });
+                    buf.push(TextVertex {
+                        pos: [xpos + w, ypos, 0.0],
+                        tex_coord: [u1, v0],
+                        color: col,
+                    });
+                    buf.push(TextVertex {
+                        pos: [xpos, ypos + h, 0.0],
+                        tex_coord: [u0, v1],
+                        color: col,
+                    });
+                    buf.push(TextVertex {
+                        pos: [xpos + w, ypos, 0.0],
+                        tex_coord: [u1, v0],
+                        color: col,
+                    });
+                    buf.push(TextVertex {
+                        pos: [xpos + w, ypos + h, 0.0],
+                        tex_coord: [u1, v1],
+                        color: col,
+                    });
                 }
             }
 
@@ -1196,56 +1451,89 @@ impl FontRenderer {
         cb: vk::CommandBuffer,
         frame: usize,
         extent: vk::Extent2D,
-    ) { unsafe {
-        let screen = [extent.width as f32, extent.height as f32];
+    ) {
+        unsafe {
+            let screen = [extent.width as f32, extent.height as f32];
 
-        // Monochrome text pass.
-        if !self.vertices.is_empty() {
-            let upload_size = (std::mem::size_of::<TextVertex>() * self.vertices.len()) as vk::DeviceSize;
-            let ptr = device
-                .map_memory(self.vertex_buffer_memory, 0, upload_size, vk::MemoryMapFlags::empty())
-                .unwrap() as *mut TextVertex;
-            std::ptr::copy_nonoverlapping(self.vertices.as_ptr(), ptr, self.vertices.len());
-            device.unmap_memory(self.vertex_buffer_memory);
-
-            device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
-            device.cmd_push_constants(
-                cb, self.pipeline_layout, vk::ShaderStageFlags::VERTEX, 0,
-                std::slice::from_raw_parts(screen.as_ptr() as *const u8, 8),
-            );
-            device.cmd_bind_descriptor_sets(
-                cb, vk::PipelineBindPoint::GRAPHICS, self.pipeline_layout, 0,
-                &[self.descriptor_sets[frame % self.descriptor_sets.len()]], &[],
-            );
-            device.cmd_bind_vertex_buffers(cb, 0, &[self.vertex_buffer], &[0]);
-            device.cmd_draw(cb, self.vertices.len() as u32, 1, 0, 0);
-        }
-
-        // Color-glyph (emoji) pass — shares the pipeline layout, uses the RGBA
-        // pipeline + descriptor set bound to the color atlas.
-        if let Some(ca) = &self.color {
-            if !self.color_vertices.is_empty() {
-                let upload_size = (std::mem::size_of::<TextVertex>() * self.color_vertices.len()) as vk::DeviceSize;
+            // Monochrome text pass.
+            if !self.vertices.is_empty() {
+                let upload_size =
+                    (std::mem::size_of::<TextVertex>() * self.vertices.len()) as vk::DeviceSize;
                 let ptr = device
-                    .map_memory(ca.vertex_buffer_memory, 0, upload_size, vk::MemoryMapFlags::empty())
+                    .map_memory(
+                        self.vertex_buffer_memory,
+                        0,
+                        upload_size,
+                        vk::MemoryMapFlags::empty(),
+                    )
                     .unwrap() as *mut TextVertex;
-                std::ptr::copy_nonoverlapping(self.color_vertices.as_ptr(), ptr, self.color_vertices.len());
-                device.unmap_memory(ca.vertex_buffer_memory);
+                std::ptr::copy_nonoverlapping(self.vertices.as_ptr(), ptr, self.vertices.len());
+                device.unmap_memory(self.vertex_buffer_memory);
 
-                device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, ca.pipeline);
+                device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
                 device.cmd_push_constants(
-                    cb, self.pipeline_layout, vk::ShaderStageFlags::VERTEX, 0,
+                    cb,
+                    self.pipeline_layout,
+                    vk::ShaderStageFlags::VERTEX,
+                    0,
                     std::slice::from_raw_parts(screen.as_ptr() as *const u8, 8),
                 );
                 device.cmd_bind_descriptor_sets(
-                    cb, vk::PipelineBindPoint::GRAPHICS, self.pipeline_layout, 0,
-                    &[ca.descriptor_sets[frame % ca.descriptor_sets.len()]], &[],
+                    cb,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    self.pipeline_layout,
+                    0,
+                    &[self.descriptor_sets[frame % self.descriptor_sets.len()]],
+                    &[],
                 );
-                device.cmd_bind_vertex_buffers(cb, 0, &[ca.vertex_buffer], &[0]);
-                device.cmd_draw(cb, self.color_vertices.len() as u32, 1, 0, 0);
+                device.cmd_bind_vertex_buffers(cb, 0, &[self.vertex_buffer], &[0]);
+                device.cmd_draw(cb, self.vertices.len() as u32, 1, 0, 0);
+            }
+
+            // Color-glyph (emoji) pass — shares the pipeline layout, uses the RGBA
+            // pipeline + descriptor set bound to the color atlas.
+            if let Some(ca) = &self.color {
+                if !self.color_vertices.is_empty() {
+                    let upload_size = (std::mem::size_of::<TextVertex>()
+                        * self.color_vertices.len())
+                        as vk::DeviceSize;
+                    let ptr = device
+                        .map_memory(
+                            ca.vertex_buffer_memory,
+                            0,
+                            upload_size,
+                            vk::MemoryMapFlags::empty(),
+                        )
+                        .unwrap() as *mut TextVertex;
+                    std::ptr::copy_nonoverlapping(
+                        self.color_vertices.as_ptr(),
+                        ptr,
+                        self.color_vertices.len(),
+                    );
+                    device.unmap_memory(ca.vertex_buffer_memory);
+
+                    device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, ca.pipeline);
+                    device.cmd_push_constants(
+                        cb,
+                        self.pipeline_layout,
+                        vk::ShaderStageFlags::VERTEX,
+                        0,
+                        std::slice::from_raw_parts(screen.as_ptr() as *const u8, 8),
+                    );
+                    device.cmd_bind_descriptor_sets(
+                        cb,
+                        vk::PipelineBindPoint::GRAPHICS,
+                        self.pipeline_layout,
+                        0,
+                        &[ca.descriptor_sets[frame % ca.descriptor_sets.len()]],
+                        &[],
+                    );
+                    device.cmd_bind_vertex_buffers(cb, 0, &[ca.vertex_buffer], &[0]);
+                    device.cmd_draw(cb, self.color_vertices.len() as u32, 1, 0, 0);
+                }
             }
         }
-    }}
+    }
 
     // ---- Font metric helpers (mirrors C text.c) ----------------------------
 
@@ -1262,7 +1550,10 @@ impl FontRenderer {
 
     /// Width of the 'M' character in pixels at the given scale (em width).
     pub fn get_width_em(&self, scale: f32) -> f32 {
-        self.ensure_glyph('M' as u32).map(|g| g.advance).unwrap_or(0.0) * scale
+        self.ensure_glyph('M' as u32)
+            .map(|g| g.advance)
+            .unwrap_or(0.0)
+            * scale
     }
 
     /// Pixel width of `text` at `scale` (sum of glyph advances).
@@ -1297,7 +1588,12 @@ impl FontRenderer {
     }
 
     /// Word-wrap `text`, returning each line with its starting byte offset in the original text.
-    pub fn wrap_lines_with_offsets(&self, text: &str, scale: f32, max_width: f32) -> Vec<(String, usize)> {
+    pub fn wrap_lines_with_offsets(
+        &self,
+        text: &str,
+        scale: f32,
+        max_width: f32,
+    ) -> Vec<(String, usize)> {
         self.compute_wrap_lines_hanging(text, scale, max_width, max_width)
     }
 
@@ -1390,7 +1686,15 @@ impl FontRenderer {
         let mut i = 0usize;
 
         let char_len = |b: u8| -> usize {
-            if b < 0x80 { 1 } else if b < 0xE0 { 2 } else if b < 0xF0 { 3 } else { 4 }
+            if b < 0x80 {
+                1
+            } else if b < 0xE0 {
+                2
+            } else if b < 0xF0 {
+                3
+            } else {
+                4
+            }
         };
 
         while i < n {
@@ -1398,7 +1702,11 @@ impl FontRenderer {
             let clen = char_len(b);
             // The first line is narrowed by the breadcrumb/prefix; the rest
             // use the full content width.
-            let max_width = if lines.is_empty() { first_width } else { rest_width };
+            let max_width = if lines.is_empty() {
+                first_width
+            } else {
+                rest_width
+            };
 
             if b == b'\n' {
                 lines.push((text[line_start..i].to_owned(), line_start));
@@ -1457,27 +1765,29 @@ impl FontRenderer {
 
     // ---- Cleanup -----------------------------------------------------------
 
-    pub unsafe fn cleanup(&self, device: &ash::Device) { unsafe {
-        device.destroy_pipeline(self.pipeline, None);
-        device.destroy_pipeline_layout(self.pipeline_layout, None);
-        device.destroy_descriptor_pool(self.descriptor_pool, None);
-        device.destroy_descriptor_set_layout(self.descriptor_set_layout, None);
-        device.destroy_buffer(self.vertex_buffer, None);
-        device.free_memory(self.vertex_buffer_memory, None);
-        device.destroy_sampler(self.font_atlas_sampler, None);
-        device.destroy_image_view(self.font_atlas_view, None);
-        device.destroy_image(self.font_atlas_image, None);
-        device.free_memory(self.font_atlas_memory, None);
-        device.destroy_buffer(self.atlas_staging_buffer, None);
-        device.free_memory(self.atlas_staging_memory, None);
-        if let Some(ca) = &self.color {
-            ca.destroy(device);
+    pub unsafe fn cleanup(&self, device: &ash::Device) {
+        unsafe {
+            device.destroy_pipeline(self.pipeline, None);
+            device.destroy_pipeline_layout(self.pipeline_layout, None);
+            device.destroy_descriptor_pool(self.descriptor_pool, None);
+            device.destroy_descriptor_set_layout(self.descriptor_set_layout, None);
+            device.destroy_buffer(self.vertex_buffer, None);
+            device.free_memory(self.vertex_buffer_memory, None);
+            device.destroy_sampler(self.font_atlas_sampler, None);
+            device.destroy_image_view(self.font_atlas_view, None);
+            device.destroy_image(self.font_atlas_image, None);
+            device.free_memory(self.font_atlas_memory, None);
+            device.destroy_buffer(self.atlas_staging_buffer, None);
+            device.free_memory(self.atlas_staging_memory, None);
+            if let Some(ca) = &self.color {
+                ca.destroy(device);
+            }
+            for &face in &self.faces {
+                ft::FT_Done_Face(face);
+            }
+            ft::FT_Done_FreeType(self.ft_library);
         }
-        for &face in &self.faces {
-            ft::FT_Done_Face(face);
-        }
-        ft::FT_Done_FreeType(self.ft_library);
-    }}
+    }
 }
 
 #[cfg(test)]
@@ -1524,7 +1834,13 @@ mod tests {
 
     fn make_fr(dpi: f32, line_height: f32, m_advance: f32) -> FontRenderer {
         let mut glyphs = HashMap::new();
-        glyphs.insert('M' as u32, GlyphInfo { advance: m_advance, ..GlyphInfo::default() });
+        glyphs.insert(
+            'M' as u32,
+            GlyphInfo {
+                advance: m_advance,
+                ..GlyphInfo::default()
+            },
+        );
         fr_from_glyphs(dpi, line_height, glyphs)
     }
 
@@ -1641,7 +1957,13 @@ mod tests {
     fn make_fr_uniform(advance: f32) -> FontRenderer {
         let mut glyphs = HashMap::new();
         for cp in 32u32..256 {
-            glyphs.insert(cp, GlyphInfo { advance, ..GlyphInfo::default() });
+            glyphs.insert(
+                cp,
+                GlyphInfo {
+                    advance,
+                    ..GlyphInfo::default()
+                },
+            );
         }
         fr_from_glyphs(96.0, 20.0, glyphs)
     }
@@ -1809,7 +2131,13 @@ mod tests {
         let fr = make_fr_uniform(10.0);
         // The list renderer reserves height with `count_wrapped_lines` and then
         // draws `line_segments`; the two must never disagree.
-        for text in ["hello", "hello world", "abcdefghijk", "aaa bbb ccc ddd", "a\nbb ccc dddd"] {
+        for text in [
+            "hello",
+            "hello world",
+            "abcdefghijk",
+            "aaa bbb ccc ddd",
+            "a\nbb ccc dddd",
+        ] {
             for width in [50.0_f32, 100.0] {
                 assert_eq!(
                     fr.line_segments(text, 1.0, Some((width, width))).len(),
@@ -1828,7 +2156,10 @@ mod tests {
         let segs = fr.line_segments(text, 1.0, Some((100.0, 100.0)));
         assert!(segs.len() > 1);
         for &(byte_start, byte_end, char_start) in &segs {
-            assert!(text.is_char_boundary(byte_start), "{byte_start} splits a char");
+            assert!(
+                text.is_char_boundary(byte_start),
+                "{byte_start} splits a char"
+            );
             assert!(text.is_char_boundary(byte_end), "{byte_end} splits a char");
             assert_eq!(char_start, text[..byte_start].chars().count() as u32);
         }
@@ -1839,45 +2170,72 @@ mod tests {
     /// Build the same primary + fallback face chain the renderer uses, from
     /// the embedded fonts. Exercises the real `FT_New_Memory_Face` path, so a
     /// broken embed fails here rather than at startup.
-    unsafe fn load_test_faces() -> (ft::FT_Library, Vec<ft::FT_Face>) { unsafe {
-        let mut lib: ft::FT_Library = std::ptr::null_mut();
-        assert_eq!(ft::FT_Init_FreeType(&mut lib), 0, "FreeType init failed");
-        let mut faces = Vec::new();
-        for bytes in std::iter::once(&fonts::PRIMARY).chain(fonts::FALLBACKS.iter()) {
-            let mut face: ft::FT_Face = std::ptr::null_mut();
-            if new_memory_face(lib, bytes, &mut face) == 0 {
-                assert_eq!(ft::FT_Set_Char_Size(face, 0, 64 * 64, 96, 96), 0);
-                faces.push(face);
+    unsafe fn load_test_faces() -> (ft::FT_Library, Vec<ft::FT_Face>) {
+        unsafe {
+            let mut lib: ft::FT_Library = std::ptr::null_mut();
+            assert_eq!(ft::FT_Init_FreeType(&mut lib), 0, "FreeType init failed");
+            let mut faces = Vec::new();
+            for bytes in std::iter::once(&fonts::PRIMARY).chain(fonts::FALLBACKS.iter()) {
+                let mut face: ft::FT_Face = std::ptr::null_mut();
+                if new_memory_face(lib, bytes, &mut face) == 0 {
+                    assert_eq!(ft::FT_Set_Char_Size(face, 0, 64 * 64, 96, 96), 0);
+                    faces.push(face);
+                }
             }
+            (lib, faces)
         }
-        (lib, faces)
-    }}
+    }
 
     #[test]
     fn dynamic_atlas_rasterizes_ascii_extended_and_fallback() {
         unsafe {
             let (lib, faces) = load_test_faces();
-            assert!(!faces.is_empty(), "bundled test fonts not found under fonts/");
+            assert!(
+                !faces.is_empty(),
+                "bundled test fonts not found under fonts/"
+            );
 
             let atlas_size = 1024u32;
             let mut atlas = vec![0u8; (atlas_size * atlas_size) as usize];
             let (mut px, mut py, mut rh) = (0i32, 0i32, 0i32);
 
             // ASCII 'A' from the primary face: rasterized with a real bitmap.
-            let a = rasterize_glyph(&faces, &mut atlas, atlas_size, &mut px, &mut py, &mut rh, 'A' as u32);
-            assert!(a.is_some_and(|g| g.size[0] > 0.0 && g.size[1] > 0.0), "ascii 'A' not rasterized");
+            let a = rasterize_glyph(
+                &faces, &mut atlas, atlas_size, &mut px, &mut py, &mut rh, 'A' as u32,
+            );
+            assert!(
+                a.is_some_and(|g| g.size[0] > 0.0 && g.size[1] > 0.0),
+                "ascii 'A' not rasterized"
+            );
 
             // Box-drawing vertical bar and Greek alpha: codepoints outside
             // Latin-1, covered via the DejaVu fallback faces.
-            let bar = rasterize_glyph(&faces, &mut atlas, atlas_size, &mut px, &mut py, &mut rh, 0x2502);
-            assert!(bar.is_some_and(|g| g.advance > 0.0), "box-drawing glyph missing");
-            let alpha = rasterize_glyph(&faces, &mut atlas, atlas_size, &mut px, &mut py, &mut rh, 0x03B1);
-            assert!(alpha.is_some_and(|g| g.size[0] > 0.0 && g.size[1] > 0.0), "Greek alpha missing");
+            let bar = rasterize_glyph(
+                &faces, &mut atlas, atlas_size, &mut px, &mut py, &mut rh, 0x2502,
+            );
+            assert!(
+                bar.is_some_and(|g| g.advance > 0.0),
+                "box-drawing glyph missing"
+            );
+            let alpha = rasterize_glyph(
+                &faces, &mut atlas, atlas_size, &mut px, &mut py, &mut rh, 0x03B1,
+            );
+            assert!(
+                alpha.is_some_and(|g| g.size[0] > 0.0 && g.size[1] > 0.0),
+                "Greek alpha missing"
+            );
 
             // The shelf packer advances: each glyph lands at distinct UVs, and
             // coverage was actually blitted into the atlas.
-            assert_ne!(a.unwrap().uv_min, alpha.unwrap().uv_min, "glyphs overlap in atlas");
-            assert!(atlas.iter().any(|&b| b != 0), "no coverage written to atlas");
+            assert_ne!(
+                a.unwrap().uv_min,
+                alpha.unwrap().uv_min,
+                "glyphs overlap in atlas"
+            );
+            assert!(
+                atlas.iter().any(|&b| b != 0),
+                "no coverage written to atlas"
+            );
 
             for f in faces {
                 ft::FT_Done_Face(f);
@@ -1896,7 +2254,10 @@ mod tests {
                 ft::FT_Done_FreeType(lib);
                 panic!("embedded NotoColorEmoji.ttf could not be parsed");
             }
-            assert!((*face).num_fixed_sizes >= 1, "emoji font has no bitmap strike");
+            assert!(
+                (*face).num_fixed_sizes >= 1,
+                "emoji font has no bitmap strike"
+            );
             assert_eq!(ft::FT_Select_Size(face, 0), 0);
             let strike_ppem = (*(*face).size).metrics.y_ppem as f32;
             // Map the strike to a ~16px raster em (12pt @ 96dpi ≈ 16px).
@@ -1907,15 +2268,33 @@ mod tests {
             let (mut px, mut py, mut rh) = (0i32, 0i32, 0i32);
 
             // 😀 U+1F600 grinning face — a pictographic emoji.
-            let g = rasterize_color_glyph(face, strike_scale, &mut atlas, atlas_size, &mut px, &mut py, &mut rh, 0x1F600);
-            assert!(g.is_some_and(|g| g.is_color && g.size[0] > 0.0 && g.size[1] > 0.0),
-                "emoji not rasterized as a color glyph");
+            let g = rasterize_color_glyph(
+                face,
+                strike_scale,
+                &mut atlas,
+                atlas_size,
+                &mut px,
+                &mut py,
+                &mut rh,
+                0x1F600,
+            );
+            assert!(
+                g.is_some_and(|g| g.is_color && g.size[0] > 0.0 && g.size[1] > 0.0),
+                "emoji not rasterized as a color glyph"
+            );
             // The bitmap was scaled down toward the text size, not left at the
             // full strike resolution.
-            assert!(g.unwrap().size[1] < strike_ppem, "emoji not scaled into text space");
+            assert!(
+                g.unwrap().size[1] < strike_ppem,
+                "emoji not scaled into text space"
+            );
             // Color (non-alpha) channels were written, not just coverage.
-            assert!(atlas.chunks(4).any(|px| px[0] != 0 || px[1] != 0 || px[2] != 0),
-                "no RGB color written to the emoji atlas");
+            assert!(
+                atlas
+                    .chunks(4)
+                    .any(|px| px[0] != 0 || px[1] != 0 || px[2] != 0),
+                "no RGB color written to the emoji atlas"
+            );
 
             ft::FT_Done_Face(face);
             ft::FT_Done_FreeType(lib);

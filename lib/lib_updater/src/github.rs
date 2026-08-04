@@ -6,7 +6,7 @@
 //! the dep keeps the transitive tree lean (self_update pulls in zip,
 //! semver, hyper-rustls variants we don't otherwise need).
 
-use crate::{parse_version, AppUpdate};
+use crate::{AppUpdate, parse_version};
 use serde::Deserialize;
 use std::io::Write;
 use std::path::PathBuf;
@@ -98,15 +98,15 @@ pub fn check_app_update(
     }
 
     let body = read_capped(resp, MAX_JSON_BYTES)?;
-    let release: ReleaseJson = serde_json::from_slice(&body)
-        .map_err(|e| format!("parse releases JSON: {e}"))?;
+    let release: ReleaseJson =
+        serde_json::from_slice(&body).map_err(|e| format!("parse releases JSON: {e}"))?;
 
     if release.draft || release.prerelease {
         return Ok(None);
     }
 
-    let new_version =
-        parse_version(&release.tag_name).map_err(|e| format!("parse tag {}: {e}", release.tag_name))?;
+    let new_version = parse_version(&release.tag_name)
+        .map_err(|e| format!("parse tag {}: {e}", release.tag_name))?;
     if new_version <= *current {
         return Ok(None);
     }
@@ -114,10 +114,8 @@ pub fn check_app_update(
     let asset = select_asset(&release.assets, std::env::consts::ARCH);
 
     let staged = if let Some(asset) = asset {
-        let dest = std::env::temp_dir().join(format!(
-            "sicompass-update-{}-{}",
-            new_version, asset.name
-        ));
+        let dest =
+            std::env::temp_dir().join(format!("sicompass-update-{}-{}", new_version, asset.name));
         match download_to(&client, &asset.browser_download_url, &dest) {
             Ok(()) => Some(dest),
             Err(e) => {
@@ -139,7 +137,9 @@ pub fn check_app_update(
 fn read_capped(resp: reqwest::blocking::Response, cap: u64) -> Result<Vec<u8>, String> {
     use std::io::Read;
     let mut buf = Vec::new();
-    resp.take(cap).read_to_end(&mut buf).map_err(|e| format!("read body: {e}"))?;
+    resp.take(cap)
+        .read_to_end(&mut buf)
+        .map_err(|e| format!("read body: {e}"))?;
     Ok(buf)
 }
 
@@ -163,9 +163,12 @@ pub fn download_to(
             return Err(format!("{url}: installer too large ({len} bytes)"));
         }
     }
-    let parent = dest.parent().ok_or_else(|| "dest has no parent".to_string())?;
+    let parent = dest
+        .parent()
+        .ok_or_else(|| "dest has no parent".to_string())?;
     std::fs::create_dir_all(parent).map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
-    let mut f = std::fs::File::create(dest).map_err(|e| format!("create {}: {e}", dest.display()))?;
+    let mut f =
+        std::fs::File::create(dest).map_err(|e| format!("create {}: {e}", dest.display()))?;
     let mut buf = [0u8; 64 * 1024];
     let mut total: u64 = 0;
     loop {
@@ -177,7 +180,8 @@ pub fn download_to(
         if total > MAX_INSTALLER_BYTES {
             return Err(format!("{url}: installer exceeded cap"));
         }
-        f.write_all(&buf[..n]).map_err(|e| format!("write {}: {e}", dest.display()))?;
+        f.write_all(&buf[..n])
+            .map_err(|e| format!("write {}: {e}", dest.display()))?;
     }
     Ok(())
 }
@@ -259,9 +263,7 @@ mod tests {
     fn release_json(tag: &str, draft: bool, prerelease: bool, assets: &[(&str, &str)]) -> String {
         let assets_json: Vec<_> = assets
             .iter()
-            .map(|(name, url)| {
-                serde_json::json!({"name": name, "browser_download_url": url})
-            })
+            .map(|(name, url)| serde_json::json!({"name": name, "browser_download_url": url}))
             .collect();
         serde_json::json!({
             "tag_name": tag,
@@ -285,15 +287,17 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/repos/o/r/releases/latest"))
             .respond_with(ResponseTemplate::new(200).set_body_string(release_json(
-                "v0.1.0", false, false, &[],
+                "v0.1.0",
+                false,
+                false,
+                &[],
             )))
             .mount(&server)
             .await;
 
         let url = format!("{}/repos/o/r/releases/latest", server.uri());
-        let body = tokio::task::block_in_place(|| {
-            reqwest::blocking::get(&url).unwrap().text().unwrap()
-        });
+        let body =
+            tokio::task::block_in_place(|| reqwest::blocking::get(&url).unwrap().text().unwrap());
         let r: ReleaseJson = serde_json::from_str(&body).unwrap();
         let v = parse_version(&r.tag_name).unwrap();
         assert_eq!(v, semver::Version::new(0, 1, 0));
@@ -307,14 +311,16 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/release"))
             .respond_with(ResponseTemplate::new(200).set_body_string(release_json(
-                "v9.9.9", true, false, &[],
+                "v9.9.9",
+                true,
+                false,
+                &[],
             )))
             .mount(&server)
             .await;
         let url = format!("{}/release", server.uri());
-        let body = tokio::task::block_in_place(|| {
-            reqwest::blocking::get(&url).unwrap().text().unwrap()
-        });
+        let body =
+            tokio::task::block_in_place(|| reqwest::blocking::get(&url).unwrap().text().unwrap());
         let r: ReleaseJson = serde_json::from_str(&body).unwrap();
         assert!(r.draft);
     }

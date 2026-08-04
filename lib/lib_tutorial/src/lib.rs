@@ -23,7 +23,10 @@ pub fn register_translations() {
 /// A node in the tutorial content tree.
 enum Node {
     Leaf(&'static str),
-    Branch { key: &'static str, children: &'static [Node] },
+    Branch {
+        key: &'static str,
+        children: &'static [Node],
+    },
 }
 
 use Node::{Branch, Leaf};
@@ -95,14 +98,15 @@ fn lorem_ipsum() -> &'static str {
 static SECTIONS: &[Node] = &[
     // 1. Getting Started: a guided do-and-confirm path. Each step asks for one
     //    keypress and relies on the screen-reader announcement as confirmation.
-    Branch { key: "tutorial-sec-getting-started",
+    Branch {
+        key: "tutorial-sec-getting-started",
         children: &[
             Leaf("tutorial-gs-intro"),
             Leaf("tutorial-gs-moved"),
-            Branch { key: "tutorial-gs-step", children: &[
-                Leaf("tutorial-gs-inside"),
-                Leaf("tutorial-gs-back"),
-            ]},
+            Branch {
+                key: "tutorial-gs-step",
+                children: &[Leaf("tutorial-gs-inside"), Leaf("tutorial-gs-back")],
+            },
             Leaf("tutorial-gs-checkbox-intro"),
             Leaf("tutorial-gs-checkbox"),
             Leaf("tutorial-gs-input-intro"),
@@ -113,50 +117,67 @@ static SECTIONS: &[Node] = &[
     },
     // 2. Shortcuts at a glance: the single source for every key, grouped by mode.
     //    Every leaf leads with the key so the screen reader speaks it first.
-    Branch { key: "tutorial-sec-shortcuts",
+    Branch {
+        key: "tutorial-sec-shortcuts",
         children: &[
             Leaf("tutorial-sc-intro"),
-            Branch { key: "tutorial-sc-general", children: &[
-                Leaf("tutorial-sc-gen-updown"),
-                Leaf("tutorial-sc-gen-rightleft"),
-                Leaf("tutorial-sc-gen-enter"),
-                Leaf("tutorial-sc-gen-escape"),
-                Leaf("tutorial-sc-gen-page"),
-                Leaf("tutorial-sc-gen-f5"),
-                Leaf("tutorial-sc-gen-whereami"),
-                Leaf("tutorial-sc-gen-meta"),
-                Leaf("tutorial-sc-gen-dashboard"),
-            ]},
-            Branch { key: "tutorial-sc-insert", children: &[
-                Leaf("tutorial-sc-in-i"),
-                Leaf("tutorial-sc-in-a"),
-                Leaf("tutorial-sc-in-enter"),
-                Leaf("tutorial-sc-in-backspace"),
-            ]},
-            Branch { key: "tutorial-sc-command", children: &[
-                Leaf("tutorial-sc-cmd-colon"),
-                Leaf("tutorial-sc-cmd-tab"),
-                Leaf("tutorial-sc-cmd-ctrlf"),
-                Leaf("tutorial-sc-cmd-scroll"),
-                Leaf("tutorial-sc-cmd-history"),
-            ]},
-            Branch { key: "tutorial-sc-tabs", children: &[
-                Leaf("tutorial-sc-tab-new"),
-                Leaf("tutorial-sc-tab-mru"),
-                Leaf("tutorial-sc-tab-number"),
-                Leaf("tutorial-sc-tab-palette"),
-                Leaf("tutorial-sc-tab-controls"),
-            ]},
-            Branch { key: "tutorial-sc-files", children: &[
-                Leaf("tutorial-sc-file-undo"),
-                Leaf("tutorial-sc-file-clipboard"),
-                Leaf("tutorial-sc-file-save"),
-                Leaf("tutorial-sc-file-update"),
-            ]},
+            Branch {
+                key: "tutorial-sc-general",
+                children: &[
+                    Leaf("tutorial-sc-gen-updown"),
+                    Leaf("tutorial-sc-gen-rightleft"),
+                    Leaf("tutorial-sc-gen-enter"),
+                    Leaf("tutorial-sc-gen-escape"),
+                    Leaf("tutorial-sc-gen-page"),
+                    Leaf("tutorial-sc-gen-f5"),
+                    Leaf("tutorial-sc-gen-whereami"),
+                    Leaf("tutorial-sc-gen-meta"),
+                    Leaf("tutorial-sc-gen-dashboard"),
+                ],
+            },
+            Branch {
+                key: "tutorial-sc-insert",
+                children: &[
+                    Leaf("tutorial-sc-in-i"),
+                    Leaf("tutorial-sc-in-a"),
+                    Leaf("tutorial-sc-in-enter"),
+                    Leaf("tutorial-sc-in-backspace"),
+                ],
+            },
+            Branch {
+                key: "tutorial-sc-command",
+                children: &[
+                    Leaf("tutorial-sc-cmd-colon"),
+                    Leaf("tutorial-sc-cmd-tab"),
+                    Leaf("tutorial-sc-cmd-ctrlf"),
+                    Leaf("tutorial-sc-cmd-scroll"),
+                    Leaf("tutorial-sc-cmd-history"),
+                ],
+            },
+            Branch {
+                key: "tutorial-sc-tabs",
+                children: &[
+                    Leaf("tutorial-sc-tab-new"),
+                    Leaf("tutorial-sc-tab-mru"),
+                    Leaf("tutorial-sc-tab-number"),
+                    Leaf("tutorial-sc-tab-palette"),
+                    Leaf("tutorial-sc-tab-controls"),
+                ],
+            },
+            Branch {
+                key: "tutorial-sc-files",
+                children: &[
+                    Leaf("tutorial-sc-file-undo"),
+                    Leaf("tutorial-sc-file-clipboard"),
+                    Leaf("tutorial-sc-file-save"),
+                    Leaf("tutorial-sc-file-update"),
+                ],
+            },
         ],
     },
     // 3. How it works: the mental model, lean. No key dumps (those live above).
-    Branch { key: "tutorial-sec-how-it-works",
+    Branch {
+        key: "tutorial-sec-how-it-works",
         children: &[
             Leaf("tutorial-hiw-tree"),
             Leaf("tutorial-hiw-programs"),
@@ -168,7 +189,8 @@ static SECTIONS: &[Node] = &[
         ],
     },
     // 4. The programs: one short leaf each.
-    Branch { key: "tutorial-sec-programs",
+    Branch {
+        key: "tutorial-sec-programs",
         children: &[
             Leaf("tutorial-prog-intro"),
             Leaf("tutorial-prog-filebrowser"),
@@ -185,30 +207,38 @@ static SECTIONS: &[Node] = &[
     },
     // 5. Interactive playground: hands-on element types. Asset placeholders are
     //    filled in at runtime by TutorialProvider.
-    Branch { key: "tutorial-sec-playground",
+    Branch {
+        key: "tutorial-sec-playground",
         children: &[
             Leaf("tutorial-play-intro"),
             Leaf("tutorial-play-checkbox"),
             Leaf("tutorial-play-button"),
             Leaf("tutorial-play-input"),
             Leaf("tutorial-play-radio-intro"),
-            Branch { key: "tutorial-play-radio", children: &[
-                Leaf("tutorial-play-radio-blue"),
-                Leaf("tutorial-play-radio-green"),
-                Leaf("tutorial-play-radio-red"),
-            ]},
+            Branch {
+                key: "tutorial-play-radio",
+                children: &[
+                    Leaf("tutorial-play-radio-blue"),
+                    Leaf("tutorial-play-radio-green"),
+                    Leaf("tutorial-play-radio-red"),
+                ],
+            },
             Leaf("tutorial-play-image-intro"),
             Leaf("tutorial-play-image"),
             // A navigable Obj (empty children) whose key carries the <link> tag.
             // Pressing Right lazy-loads the linked file's contents as children
             // (see resolve_link_to_elements). A Str leaf would not be navigable.
-            Branch { key: "tutorial-play-link", children: &[] },
+            Branch {
+                key: "tutorial-play-link",
+                children: &[],
+            },
             Leaf("tutorial-play-scroll"),
             Leaf("tutorial-play-lorem"),
         ],
     },
     // 6. Settings and config.
-    Branch { key: "tutorial-sec-config",
+    Branch {
+        key: "tutorial-sec-config",
         children: &[
             Leaf("tutorial-cfg-file"),
             Leaf("tutorial-cfg-logs"),
@@ -218,11 +248,9 @@ static SECTIONS: &[Node] = &[
         ],
     },
     // 7. Extending Sicompass: a pointer to the real docs, not an inline manual.
-    Branch { key: "tutorial-sec-extending",
-        children: &[
-            Leaf("tutorial-ext-build"),
-            Leaf("tutorial-ext-docs"),
-        ],
+    Branch {
+        key: "tutorial-sec-extending",
+        children: &[Leaf("tutorial-ext-build"), Leaf("tutorial-ext-docs")],
     },
 ];
 
@@ -231,10 +259,7 @@ static SECTIONS: &[Node] = &[
 // ---------------------------------------------------------------------------
 
 /// Returns the children slice for `path_parts` within `nodes`, or `None` if not found.
-fn get_children_at_path<'a>(
-    nodes: &'a [Node],
-    path_parts: &[&str],
-) -> Option<&'a [Node]> {
+fn get_children_at_path<'a>(nodes: &'a [Node], path_parts: &[&str]) -> Option<&'a [Node]> {
     if path_parts.is_empty() {
         return Some(nodes);
     }
@@ -266,7 +291,11 @@ fn node_to_ffon(node: &Node, texture_jpg: &str, ffon_json: &str) -> FfonElement 
             // substitution on the resolved value (sentinels like __TEXTURE_JPG__
             // live in the FTL value).
             let translated = translate_node_string(s);
-            FfonElement::Str(apply_asset_placeholders(&translated, texture_jpg, ffon_json))
+            FfonElement::Str(apply_asset_placeholders(
+                &translated,
+                texture_jpg,
+                ffon_json,
+            ))
         }
         Node::Branch { key, children } => {
             let translated = translate_node_string(key);
@@ -314,7 +343,10 @@ fn apply_asset_placeholders(s: &str, texture_jpg: &str, ffon_json: &str) -> Stri
 }
 
 fn nodes_to_ffon(nodes: &[Node], texture_jpg: &str, ffon_json: &str) -> Vec<FfonElement> {
-    nodes.iter().map(|n| node_to_ffon(n, texture_jpg, ffon_json)).collect()
+    nodes
+        .iter()
+        .map(|n| node_to_ffon(n, texture_jpg, ffon_json))
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -337,8 +369,14 @@ pub struct TutorialProvider {
 impl TutorialProvider {
     /// Create with explicit asset directory.
     pub fn new(assets_dir: &Path) -> Self {
-        let texture_jpg = assets_dir.join("texture.jpg").to_string_lossy().replace('\\', "/");
-        let ffon_json = assets_dir.join("ffon.json").to_string_lossy().replace('\\', "/");
+        let texture_jpg = assets_dir
+            .join("texture.jpg")
+            .to_string_lossy()
+            .replace('\\', "/");
+        let ffon_json = assets_dir
+            .join("ffon.json")
+            .to_string_lossy()
+            .replace('\\', "/");
         TutorialProvider {
             current_path: "/".to_owned(),
             texture_jpg,
@@ -361,13 +399,18 @@ impl TutorialProvider {
         if self.current_path == "/" {
             vec![]
         } else {
-            self.current_path.split('/').filter(|s| !s.is_empty()).collect()
+            self.current_path
+                .split('/')
+                .filter(|s| !s.is_empty())
+                .collect()
         }
     }
 }
 
 impl Provider for TutorialProvider {
-    fn name(&self) -> &str { "tutorial" }
+    fn name(&self) -> &str {
+        "tutorial"
+    }
 
     fn display_name(&self) -> String {
         register_translations();
@@ -401,7 +444,9 @@ impl Provider for TutorialProvider {
         }
     }
 
-    fn current_path(&self) -> &str { &self.current_path }
+    fn current_path(&self) -> &str {
+        &self.current_path
+    }
 
     fn set_current_path(&mut self, path: &str) {
         self.current_path = path.to_owned();
@@ -479,12 +524,22 @@ mod tests {
         p.on_button_press("demo");
 
         // It confirms with a spoken line (drained once)...
-        let msg = p.take_error().expect("demo button must announce a confirmation");
+        let msg = p
+            .take_error()
+            .expect("demo button must announce a confirmation");
         assert!(!msg.is_empty());
         assert!(p.take_error().is_none(), "announcement must be one-shot");
         // ...and otherwise leaves the path and rendered list untouched.
-        assert_eq!(p.current_path(), path_before, "button press must not navigate");
-        assert_eq!(joined(&p.fetch()), joined(&before), "button press must not mutate the list");
+        assert_eq!(
+            p.current_path(),
+            path_before,
+            "button press must not navigate"
+        );
+        assert_eq!(
+            joined(&p.fetch()),
+            joined(&before),
+            "button press must not mutate the list"
+        );
     }
 
     const SECTION_NAMES: [&str; 7] = [
@@ -502,12 +557,23 @@ mod tests {
         let mut p = provider();
         let elems = p.fetch();
         let keys = section_keys(&elems);
-        assert_eq!(keys.len(), 7, "expected exactly 7 top-level sections, got: {keys:?}");
-        assert!(keys[0].starts_with("Getting Started"), "Getting Started must be first, got: {:?}", keys[0]);
+        assert_eq!(
+            keys.len(),
+            7,
+            "expected exactly 7 top-level sections, got: {keys:?}"
+        );
+        assert!(
+            keys[0].starts_with("Getting Started"),
+            "Getting Started must be first, got: {:?}",
+            keys[0]
+        );
         // The Getting Started heading carries a "go right to visit" hint, so it
         // is matched by prefix; the others match exactly.
         for name in SECTION_NAMES {
-            assert!(keys.iter().any(|k| k.starts_with(name)), "missing section {name}, got: {keys:?}");
+            assert!(
+                keys.iter().any(|k| k.starts_with(name)),
+                "missing section {name}, got: {keys:?}"
+            );
         }
     }
 
@@ -519,10 +585,18 @@ mod tests {
         p.push_path(&gs_key);
         let elems = p.fetch();
         let text = joined(&elems);
-        assert!(text.contains("<checkbox>"), "Getting Started must contain a checkbox to toggle");
-        assert!(text.contains("<input>"), "Getting Started must contain an input to edit");
         assert!(
-            section_keys(&elems).iter().any(|k| k.starts_with("Step inside")),
+            text.contains("<checkbox>"),
+            "Getting Started must contain a checkbox to toggle"
+        );
+        assert!(
+            text.contains("<input>"),
+            "Getting Started must contain an input to edit"
+        );
+        assert!(
+            section_keys(&elems)
+                .iter()
+                .any(|k| k.starts_with("Step inside")),
             "Getting Started must contain a sub-branch to step into"
         );
     }
@@ -539,7 +613,10 @@ mod tests {
             "Tabs and window",
             "Files, undo, and save",
         ] {
-            assert!(keys.iter().any(|k| k == group), "missing shortcut group {group}, got: {keys:?}");
+            assert!(
+                keys.iter().any(|k| k == group),
+                "missing shortcut group {group}, got: {keys:?}"
+            );
         }
     }
 
@@ -549,11 +626,17 @@ mod tests {
         p.set_current_path("/Shortcuts at a glance/General mode");
         let elems = p.fetch();
         for line in elems.iter().filter_map(|e| e.as_str()) {
-            assert!(line.contains(':'), "every shortcut line must lead with a key then ':', got: {line}");
+            assert!(
+                line.contains(':'),
+                "every shortcut line must lead with a key then ':', got: {line}"
+            );
         }
         let text = joined(&elems);
         for token in ["Right", "Left", "Enter", "Escape", "w:", "m:"] {
-            assert!(text.contains(token), "general shortcuts must mention {token}, got:\n{text}");
+            assert!(
+                text.contains(token),
+                "general shortcuts must mention {token}, got:\n{text}"
+            );
         }
     }
 
@@ -563,10 +646,19 @@ mod tests {
         p.set_current_path("/Shortcuts at a glance/Tabs and window");
         let elems = p.fetch();
         // The tab switcher (t) and window controls (c) each get their own line.
-        let has_t = elems.iter().filter_map(|e| e.as_str()).any(|s| s.starts_with("t:"));
-        let has_c = elems.iter().filter_map(|e| e.as_str()).any(|s| s.starts_with("c:"));
+        let has_t = elems
+            .iter()
+            .filter_map(|e| e.as_str())
+            .any(|s| s.starts_with("t:"));
+        let has_c = elems
+            .iter()
+            .filter_map(|e| e.as_str())
+            .any(|s| s.starts_with("c:"));
         assert!(has_t, "tabs group must have a dedicated t: line");
-        assert!(has_c, "tabs group must have a dedicated c: window-controls line");
+        assert!(
+            has_c,
+            "tabs group must have a dedicated c: window-controls line"
+        );
     }
 
     #[test]
@@ -574,7 +666,10 @@ mod tests {
         let mut p = provider();
         p.push_path("How it works");
         let text = joined(&p.fetch()).to_lowercase();
-        assert!(text.contains("tree of lists"), "must explain the tree-of-lists model");
+        assert!(
+            text.contains("tree of lists"),
+            "must explain the tree-of-lists model"
+        );
         assert!(text.contains("undo"), "must mention undo");
         assert!(
             text.contains("4 mib") || text.contains("redact"),
@@ -587,8 +682,19 @@ mod tests {
         let mut p = provider();
         p.push_path("The programs");
         let text = joined(&p.fetch());
-        for token in ["File browser", "Text editor", "Web browser", "Terminal", "Chat", "Email", "Settings"] {
-            assert!(text.contains(token), "programs section must mention {token}, got:\n{text}");
+        for token in [
+            "File browser",
+            "Text editor",
+            "Web browser",
+            "Terminal",
+            "Chat",
+            "Email",
+            "Settings",
+        ] {
+            assert!(
+                text.contains(token),
+                "programs section must mention {token}, got:\n{text}"
+            );
         }
     }
 
@@ -599,9 +705,18 @@ mod tests {
         let text = joined(&p.fetch());
         // The Gmail setup leaf must call out the mail scope (the actual fix) and
         // the recovery colon commands.
-        assert!(text.contains("https://mail.google.com/"), "must name the mail scope, got:\n{text}");
-        assert!(text.contains(":refresh"), "must mention the :refresh colon command");
-        assert!(text.contains(":logout"), "must mention re-authorizing via :logout");
+        assert!(
+            text.contains("https://mail.google.com/"),
+            "must name the mail scope, got:\n{text}"
+        );
+        assert!(
+            text.contains(":refresh"),
+            "must mention the :refresh colon command"
+        );
+        assert!(
+            text.contains(":logout"),
+            "must mention re-authorizing via :logout"
+        );
     }
 
     #[test]
@@ -610,11 +725,17 @@ mod tests {
         p.push_path("Interactive playground");
         let elems = p.fetch();
         let text = joined(&elems);
-        assert!(text.contains("<checkbox checked>"), "must contain a checked checkbox");
+        assert!(
+            text.contains("<checkbox checked>"),
+            "must contain a checked checkbox"
+        );
         assert!(text.contains("<button>"), "must contain a button");
         assert!(text.contains("<input>"), "must contain an input");
         assert!(text.contains("<image>"), "must contain an inline image");
-        assert!(text.contains("Lorem ipsum"), "must contain the long passage for scroll practice");
+        assert!(
+            text.contains("Lorem ipsum"),
+            "must contain the long passage for scroll practice"
+        );
         // The link must be a navigable Obj (key carries <link>), not a Str leaf,
         // otherwise pressing Right cannot lazy-load its contents.
         assert!(
@@ -622,7 +743,9 @@ mod tests {
             "must contain a navigable link Obj"
         );
         assert!(
-            section_keys(&elems).iter().any(|k| k.starts_with("<radio>")),
+            section_keys(&elems)
+                .iter()
+                .any(|k| k.starts_with("<radio>")),
             "must contain a radio group"
         );
         // The image must carry text before and after it, so a screen reader
@@ -634,8 +757,14 @@ mod tests {
             .expect("an image leaf");
         let before = &image_line[..image_line.find("<image>").unwrap()];
         let after = &image_line[image_line.find("</image>").unwrap() + "</image>".len()..];
-        assert!(!before.trim().is_empty(), "image must have prefix text, got: {image_line}");
-        assert!(!after.trim().is_empty(), "image must have suffix text, got: {image_line}");
+        assert!(
+            !before.trim().is_empty(),
+            "image must have prefix text, got: {image_line}"
+        );
+        assert!(
+            !after.trim().is_empty(),
+            "image must have suffix text, got: {image_line}"
+        );
     }
 
     #[test]
@@ -643,12 +772,27 @@ mod tests {
         let mut p = provider();
         p.push_path("Settings and config");
         let text = joined(&p.fetch());
-        assert!(text.contains("sicompass.log"), "config section must document the log file");
-        assert!(text.contains("RUST_LOG"), "config section must mention RUST_LOG for stderr logging");
+        assert!(
+            text.contains("sicompass.log"),
+            "config section must document the log file"
+        );
+        assert!(
+            text.contains("RUST_LOG"),
+            "config section must mention RUST_LOG for stderr logging"
+        );
         // All three platform log locations must be documented.
-        assert!(text.contains(".local/state"), "must give the Linux log path");
-        assert!(text.contains("Library/Logs"), "must give the macOS log path");
-        assert!(text.contains("LOCALAPPDATA"), "must give the Windows log path");
+        assert!(
+            text.contains(".local/state"),
+            "must give the Linux log path"
+        );
+        assert!(
+            text.contains("Library/Logs"),
+            "must give the macOS log path"
+        );
+        assert!(
+            text.contains("LOCALAPPDATA"),
+            "must give the Windows log path"
+        );
     }
 
     #[test]
@@ -656,7 +800,10 @@ mod tests {
         let mut p = provider();
         p.push_path("Extending Sicompass");
         let text = joined(&p.fetch());
-        assert!(text.contains("lib/lib_sales_demo/"), "must point to the reference program");
+        assert!(
+            text.contains("lib/lib_sales_demo/"),
+            "must point to the reference program"
+        );
         assert!(
             text.contains("Rust") && text.contains("TypeScript") && text.contains("ProviderOps"),
             "must mention Rust (the standard), TypeScript, and C/ProviderOps plugin kinds"
@@ -680,7 +827,10 @@ mod tests {
         p.set_current_path("/Shortcuts at a glance/General mode");
         let elems = p.fetch();
         assert!(!elems.is_empty());
-        assert!(elems.iter().all(|e| e.is_str()), "General mode holds only shortcut leaves");
+        assert!(
+            elems.iter().all(|e| e.is_str()),
+            "General mode holds only shortcut leaves"
+        );
     }
 
     #[test]

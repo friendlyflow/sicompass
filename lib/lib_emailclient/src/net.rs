@@ -9,7 +9,7 @@
 //! then went silent would block the caller forever.
 
 use crate::cache::EnvelopeCache;
-use crate::connection::{connect_imap, ImapSession, RawImap};
+use crate::connection::{ImapSession, RawImap, connect_imap};
 use crate::{
     EmailAttachment, EmailClientConfig, EmailMessage, FolderInfo, ImapBackend, MailBody,
     MessageHeader, SmtpBackend,
@@ -105,17 +105,23 @@ impl RealImap {
         self.ensure_session().await?;
         let session = self.session_mut();
 
-        let stream = session.list(None, Some("*")).await.map_err(|e| e.to_string())?;
-        let names: Vec<async_imap::types::Name> =
-            Box::pin(stream).try_collect().await.map_err(|e| e.to_string())?;
+        let stream = session
+            .list(None, Some("*"))
+            .await
+            .map_err(|e| e.to_string())?;
+        let names: Vec<async_imap::types::Name> = Box::pin(stream)
+            .try_collect()
+            .await
+            .map_err(|e| e.to_string())?;
 
         let folders: Vec<FolderInfo> = names
             .iter()
             .filter_map(|n| {
                 // Skip \Noselect folders (containers).
-                if n.attributes().iter().any(|a| {
-                    matches!(a, async_imap::types::NameAttribute::NoSelect)
-                }) {
+                if n.attributes()
+                    .iter()
+                    .any(|a| matches!(a, async_imap::types::NameAttribute::NoSelect))
+                {
                     return None;
                 }
                 // Collect SPECIAL-USE and system attributes as raw strings.
@@ -131,21 +137,21 @@ impl RealImap {
                     .map(|a| {
                         use async_imap::types::NameAttribute as NA;
                         match a {
-                            NA::NoInferiors  => "\\Noinferiors".to_owned(),
-                            NA::NoSelect     => "\\Noselect".to_owned(),
-                            NA::Marked       => "\\Marked".to_owned(),
-                            NA::Unmarked     => "\\Unmarked".to_owned(),
-                            NA::All          => "\\All".to_owned(),
-                            NA::Archive      => "\\Archive".to_owned(),
-                            NA::Drafts       => "\\Drafts".to_owned(),
-                            NA::Flagged      => "\\Flagged".to_owned(),
-                            NA::Junk         => "\\Junk".to_owned(),
-                            NA::Sent         => "\\Sent".to_owned(),
-                            NA::Trash        => "\\Trash".to_owned(),
+                            NA::NoInferiors => "\\Noinferiors".to_owned(),
+                            NA::NoSelect => "\\Noselect".to_owned(),
+                            NA::Marked => "\\Marked".to_owned(),
+                            NA::Unmarked => "\\Unmarked".to_owned(),
+                            NA::All => "\\All".to_owned(),
+                            NA::Archive => "\\Archive".to_owned(),
+                            NA::Drafts => "\\Drafts".to_owned(),
+                            NA::Flagged => "\\Flagged".to_owned(),
+                            NA::Junk => "\\Junk".to_owned(),
+                            NA::Sent => "\\Sent".to_owned(),
+                            NA::Trash => "\\Trash".to_owned(),
                             // Already carries its leading backslash.
                             NA::Extension(s) => s.to_string(),
                             // `NameAttribute` is #[non_exhaustive].
-                            other            => format!("{other:?}"),
+                            other => format!("{other:?}"),
                         }
                     })
                     .collect();
@@ -227,12 +233,9 @@ impl RealImap {
                     .uid_fetch(&new_uid_range, "(UID ENVELOPE FLAGS)")
                     .await
                     .map_err(|e| e.to_string())?;
-                let fetched: Vec<Fetch> =
-                    stream.try_collect().await.map_err(|e| e.to_string())?;
-                let new_headers: Vec<MessageHeader> = fetched
-                    .iter()
-                    .filter_map(parse_fetch_to_header)
-                    .collect();
+                let fetched: Vec<Fetch> = stream.try_collect().await.map_err(|e| e.to_string())?;
+                let new_headers: Vec<MessageHeader> =
+                    fetched.iter().filter_map(parse_fetch_to_header).collect();
 
                 let c = cache.as_ref().expect("Incremental implies a cache");
                 if !new_headers.is_empty() {
@@ -255,10 +258,8 @@ impl RealImap {
             .await
             .map_err(|e| e.to_string())?;
 
-        let mut headers: Vec<MessageHeader> = fetched
-            .iter()
-            .filter_map(parse_fetch_to_header)
-            .collect();
+        let mut headers: Vec<MessageHeader> =
+            fetched.iter().filter_map(parse_fetch_to_header).collect();
 
         headers.reverse(); // Most-recent-first.
 
@@ -307,7 +308,10 @@ impl RealImap {
 
         session.select(folder).await.map_err(|e| e.to_string())?;
         let search = format!("HEADER Message-ID {message_id}");
-        let uids = session.uid_search(&search).await.map_err(|e| e.to_string())?;
+        let uids = session
+            .uid_search(&search)
+            .await
+            .map_err(|e| e.to_string())?;
         Ok(uids.iter().next().copied())
     }
 
@@ -571,7 +575,9 @@ pub struct RealSmtp {
 
 impl RealSmtp {
     pub fn from_config(config: &EmailClientConfig) -> Self {
-        RealSmtp { config: config.clone() }
+        RealSmtp {
+            config: config.clone(),
+        }
     }
 }
 
@@ -585,7 +591,11 @@ fn parse_smtp_url(url: &str) -> Option<(String, u16)> {
         let port: u16 = rest[colon + 1..].parse().ok()?;
         Some((host, port))
     } else {
-        let port = if url.starts_with("smtps://") { 465 } else { 587 };
+        let port = if url.starts_with("smtps://") {
+            465
+        } else {
+            587
+        };
         Some((rest.to_owned(), port))
     }
 }
@@ -608,23 +618,33 @@ impl SmtpBackend for RealSmtp {
         if to.is_empty() {
             return Err("no recipients".to_owned());
         }
-        let mut builder = Message::builder()
-            .from(from.parse().map_err(|e: lettre::address::AddressError| e.to_string())?);
+        let mut builder = Message::builder().from(
+            from.parse()
+                .map_err(|e: lettre::address::AddressError| e.to_string())?,
+        );
         for addr in to {
-            builder = builder.to(addr.parse().map_err(|e: lettre::address::AddressError| e.to_string())?);
+            builder = builder.to(addr
+                .parse()
+                .map_err(|e: lettre::address::AddressError| e.to_string())?);
         }
         for addr in cc {
-            builder = builder.cc(addr.parse().map_err(|e: lettre::address::AddressError| e.to_string())?);
+            builder = builder.cc(addr
+                .parse()
+                .map_err(|e: lettre::address::AddressError| e.to_string())?);
         }
         for addr in bcc {
-            builder = builder.bcc(addr.parse().map_err(|e: lettre::address::AddressError| e.to_string())?);
+            builder = builder.bcc(
+                addr.parse()
+                    .map_err(|e: lettre::address::AddressError| e.to_string())?,
+            );
         }
         let builder = builder.subject(subject);
 
         let body_str = match body {
             MailBody::Text(s) => s.clone(),
-            MailBody::Ffon(elems) => sicompass_sdk::ffon::to_json_string(elems)
-                .map_err(|e| e.to_string())?,
+            MailBody::Ffon(elems) => {
+                sicompass_sdk::ffon::to_json_string(elems).map_err(|e| e.to_string())?
+            }
         };
 
         let email = if attachments.is_empty() {
@@ -642,8 +662,7 @@ impl SmtpBackend for RealSmtp {
                     .parse::<ContentType>()
                     .map_err(|e| e.to_string())?;
                 mp = mp.singlepart(
-                    LettreAttachment::new(filename.to_string())
-                        .body(bytes.to_vec(), ct),
+                    LettreAttachment::new(filename.to_string()).body(bytes.to_vec(), ct),
                 );
             }
             builder.multipart(mp).map_err(|e| e.to_string())?
@@ -653,10 +672,8 @@ impl SmtpBackend for RealSmtp {
 
         let transport: AsyncSmtpTransport<Tokio1Executor> =
             if self.config.oauth_access_token.is_empty() {
-                let creds = Credentials::new(
-                    self.config.username.clone(),
-                    self.config.password.clone(),
-                );
+                let creds =
+                    Credentials::new(self.config.username.clone(), self.config.password.clone());
                 AsyncSmtpTransport::<Tokio1Executor>::relay(&host)
                     .map_err(|e| e.to_string())?
                     .port(port)
@@ -725,22 +742,33 @@ fn parse_rfc2822(uid: u32, raw: &[u8]) -> EmailMessage {
     while let Some(line) = lines.next() {
         // Unfold continuation lines (lines starting with whitespace).
         let mut value = line.to_owned();
-        while lines.peek().map_or(false, |l| l.starts_with(' ') || l.starts_with('\t')) {
+        while lines
+            .peek()
+            .map_or(false, |l| l.starts_with(' ') || l.starts_with('\t'))
+        {
             if let Some(cont) = lines.next() {
                 value.push(' ');
                 value.push_str(cont.trim());
             }
         }
         let lc = value.to_ascii_lowercase();
-        if lc.starts_with("from: ") { from = value[6..].to_owned(); }
-        else if lc.starts_with("to: ") { to = value[4..].to_owned(); }
-        else if lc.starts_with("subject: ") { subject = value[9..].to_owned(); }
-        else if lc.starts_with("date: ") { date = value[6..].to_owned(); }
-        else if lc.starts_with("message-id: ") { message_id = value[12..].to_owned(); }
-        else if lc.starts_with("in-reply-to: ") { in_reply_to = value[13..].to_owned(); }
-        else if lc.starts_with("references: ") { references = value[12..].to_owned(); }
-        else if lc.starts_with("content-type: ") { content_type = value[14..].to_owned(); }
-        else if lc.starts_with("content-transfer-encoding: ") {
+        if lc.starts_with("from: ") {
+            from = value[6..].to_owned();
+        } else if lc.starts_with("to: ") {
+            to = value[4..].to_owned();
+        } else if lc.starts_with("subject: ") {
+            subject = value[9..].to_owned();
+        } else if lc.starts_with("date: ") {
+            date = value[6..].to_owned();
+        } else if lc.starts_with("message-id: ") {
+            message_id = value[12..].to_owned();
+        } else if lc.starts_with("in-reply-to: ") {
+            in_reply_to = value[13..].to_owned();
+        } else if lc.starts_with("references: ") {
+            references = value[12..].to_owned();
+        } else if lc.starts_with("content-type: ") {
+            content_type = value[14..].to_owned();
+        } else if lc.starts_with("content-transfer-encoding: ") {
             content_transfer_encoding = value[27..].trim().to_ascii_lowercase();
         }
     }
@@ -748,7 +776,18 @@ fn parse_rfc2822(uid: u32, raw: &[u8]) -> EmailMessage {
     let body = parse_body_part(raw_body, &content_type, &content_transfer_encoding);
     let attachments = parse_attachments(raw_body, &content_type);
 
-    EmailMessage { uid, from, to, subject, date, body, message_id, in_reply_to, references, attachments }
+    EmailMessage {
+        uid,
+        from,
+        to,
+        subject,
+        date,
+        body,
+        message_id,
+        in_reply_to,
+        references,
+        attachments,
+    }
 }
 
 /// Walk a MIME body looking for attachment parts (Content-Disposition: attachment
@@ -768,7 +807,9 @@ fn parse_attachments(raw_body: &str, content_type: &str) -> Vec<EmailAttachment>
 
     for chunk in raw_body.split(&delimiter) {
         let chunk = chunk.trim_start_matches('-').trim();
-        if chunk.is_empty() { continue; }
+        if chunk.is_empty() {
+            continue;
+        }
 
         let (part_headers, part_body) = if let Some(pos) = chunk.find("\r\n\r\n") {
             (&chunk[..pos], &chunk[pos + 4..])
@@ -796,7 +837,9 @@ fn parse_attachments(raw_body: &str, content_type: &str) -> Vec<EmailAttachment>
                     let p = param.trim();
                     let pl = p.to_ascii_lowercase();
                     if pl.starts_with("filename=") || pl.starts_with("filename*=") {
-                        filename = p.splitn(2, '=').nth(1)
+                        filename = p
+                            .splitn(2, '=')
+                            .nth(1)
                             .unwrap_or("")
                             .trim_matches('"')
                             .to_owned();
@@ -806,7 +849,12 @@ fn parse_attachments(raw_body: &str, content_type: &str) -> Vec<EmailAttachment>
         }
 
         let is_attachment = disposition.trim_start().starts_with("attachment");
-        let part_mime = part_ct.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+        let part_mime = part_ct
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
         let is_non_text = !part_mime.is_empty()
             && !part_mime.starts_with("text/")
             && !part_mime.starts_with("multipart/");
@@ -816,14 +864,17 @@ fn parse_attachments(raw_body: &str, content_type: &str) -> Vec<EmailAttachment>
             let data: Vec<u8> = match part_cte.as_str() {
                 "base64" => {
                     use base64::Engine as _;
-                    let compact: String = part_body.chars().filter(|c| !c.is_whitespace()).collect();
+                    let compact: String =
+                        part_body.chars().filter(|c| !c.is_whitespace()).collect();
                     base64::engine::general_purpose::STANDARD
                         .decode(compact.as_bytes())
                         .unwrap_or_default()
                 }
                 _ => part_body.as_bytes().to_vec(),
             };
-            if filename.is_empty() { filename = "attachment".to_owned(); }
+            if filename.is_empty() {
+                filename = "attachment".to_owned();
+            }
             attachments.push(EmailAttachment {
                 filename,
                 content_type: part_mime,
@@ -920,7 +971,9 @@ fn parse_multipart(raw: &str, boundary: &str) -> MailBody {
 
     for chunk in raw.split(&delimiter) {
         let chunk = chunk.trim_start_matches('-').trim();
-        if chunk.is_empty() { continue; }
+        if chunk.is_empty() {
+            continue;
+        }
 
         // Split chunk into its own headers and body.
         let (part_headers, part_body) = if let Some(pos) = chunk.find("\r\n\r\n") {
@@ -935,8 +988,9 @@ fn parse_multipart(raw: &str, boundary: &str) -> MailBody {
         let mut part_cte = String::new();
         for line in part_headers.lines() {
             let lc = line.to_ascii_lowercase();
-            if lc.starts_with("content-type: ") { part_ct = line[14..].to_owned(); }
-            else if lc.starts_with("content-transfer-encoding: ") {
+            if lc.starts_with("content-type: ") {
+                part_ct = line[14..].to_owned();
+            } else if lc.starts_with("content-transfer-encoding: ") {
                 part_cte = line[27..].trim().to_ascii_lowercase();
             }
         }
@@ -945,8 +999,12 @@ fn parse_multipart(raw: &str, boundary: &str) -> MailBody {
 
     // Pick in preference order: Ffon > Text.
     let ffon = parts.iter().find(|p| matches!(p, MailBody::Ffon(_)));
-    if let Some(f) = ffon { return f.clone(); }
-    parts.into_iter().find(|p| matches!(p, MailBody::Text(_)))
+    if let Some(f) = ffon {
+        return f.clone();
+    }
+    parts
+        .into_iter()
+        .find(|p| matches!(p, MailBody::Text(_)))
         .unwrap_or_else(|| MailBody::Text(String::new()))
 }
 
@@ -976,15 +1034,27 @@ fn parse_fetch_to_header(m: &Fetch) -> Option<MessageHeader> {
         .to_owned();
     // `flags()` yields an iterator in async-imap, where the blocking crate
     // returned a slice.
-    let seen = m.flags().any(|f| matches!(f, async_imap::types::Flag::Seen));
-    let flagged = m.flags().any(|f| matches!(f, async_imap::types::Flag::Flagged));
+    let seen = m
+        .flags()
+        .any(|f| matches!(f, async_imap::types::Flag::Seen));
+    let flagged = m
+        .flags()
+        .any(|f| matches!(f, async_imap::types::Flag::Flagged));
     let message_id = env
         .message_id
         .as_deref()
         .and_then(|b| std::str::from_utf8(b).ok())
         .unwrap_or("")
         .to_owned();
-    Some(MessageHeader { uid, from, subject, date, seen, flagged, message_id })
+    Some(MessageHeader {
+        uid,
+        from,
+        subject,
+        date,
+        seen,
+        flagged,
+        message_id,
+    })
 }
 
 fn format_address(addr: &Address<'_>) -> String {
@@ -1237,12 +1307,17 @@ mod tests {
         config.password = password;
 
         let mut backend = RealImap::from_config(&config);
-        let folders = crate::connection::block_on(backend.list_folders())
-            .expect("list_folders failed");
+        let folders =
+            crate::connection::block_on(backend.list_folders()).expect("list_folders failed");
         assert!(!folders.is_empty(), "expected at least one folder");
-        println!("folders: {:?}", folders.iter().map(|f| &f.name).collect::<Vec<_>>());
+        println!(
+            "folders: {:?}",
+            folders.iter().map(|f| &f.name).collect::<Vec<_>>()
+        );
 
-        let inbox = folders.iter().find(|f| f.name.to_uppercase() == "INBOX")
+        let inbox = folders
+            .iter()
+            .find(|f| f.name.to_uppercase() == "INBOX")
             .expect("INBOX not found");
         let headers = crate::connection::block_on(backend.list_messages(&inbox.name, 5))
             .expect("list_messages failed");

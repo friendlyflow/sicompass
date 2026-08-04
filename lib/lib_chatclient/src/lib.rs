@@ -34,11 +34,11 @@
 //! - `chatUserId`       — Our own MXID (set on login/register, used for m.direct)
 //! Note: `chatPassword` is intentionally NOT persisted to disk.
 
-mod sync;
 mod auth;
 mod members;
 mod messages;
 mod rooms;
+mod sync;
 
 use sicompass_sdk::ffon::FfonElement;
 use sicompass_sdk::localize;
@@ -148,12 +148,24 @@ fn parse_auth_response(resp: serde_json::Value) -> AuthResult {
 #[derive(Debug)]
 enum PendingAction {
     JoinRoom,
-    CreateRoom { encrypted: bool, is_space: bool, is_public: bool },
+    CreateRoom {
+        encrypted: bool,
+        is_space: bool,
+        is_public: bool,
+    },
     CreateDm,
     SearchPublicRooms,
-    InviteUser { room_id: String },
-    KickMember { room_id: String, member_id: String },
-    BanMember { room_id: String, member_id: String },
+    InviteUser {
+        room_id: String,
+    },
+    KickMember {
+        room_id: String,
+        member_id: String,
+    },
+    BanMember {
+        room_id: String,
+        member_id: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -256,7 +268,9 @@ impl ChatClientProvider {
 
     fn save_setting(&self, key: &str, value: &str) {
         use serde_json::{Map, Value};
-        let Some(path) = self.config_path() else { return };
+        let Some(path) = self.config_path() else {
+            return;
+        };
         let _guard = self.file_guard();
         // See `sync::persist_next_batch`: abort on read/parse failure rather
         // than starting from an empty map, which would wipe every other section
@@ -365,19 +379,26 @@ impl ChatClientProvider {
         for inv in invites {
             let mut item = FfonElement::new_obj(format!("[invite] {}", inv.display_name));
             if !inv.inviter.is_empty() {
-                item.as_obj_mut().unwrap().children.push(
-                    FfonElement::new_str(format!("from {}", inv.inviter))
-                );
+                item.as_obj_mut()
+                    .unwrap()
+                    .children
+                    .push(FfonElement::new_str(format!("from {}", inv.inviter)));
             }
             items.push(item);
         }
 
         // Spaces.
-        let mut spaces: Vec<&sync::RoomState> =
-            cache.rooms.values().filter(|r| r.kind == sync::RoomKind::Space).collect();
+        let mut spaces: Vec<&sync::RoomState> = cache
+            .rooms
+            .values()
+            .filter(|r| r.kind == sync::RoomKind::Space)
+            .collect();
         spaces.sort_by(|a, b| a.display_name.cmp(&b.display_name));
         for space in spaces {
-            items.push(FfonElement::new_obj(format!("[space] {}", space.display_name)));
+            items.push(FfonElement::new_obj(format!(
+                "[space] {}",
+                space.display_name
+            )));
         }
 
         // DM rooms.
@@ -386,7 +407,10 @@ impl ChatClientProvider {
             .values()
             .filter(|r| r.is_dm && r.kind == sync::RoomKind::Room)
             .filter_map(|r| {
-                cache.direct_room_to_user.get(&r.room_id).map(|u| (r, format!("[dm] {u}")))
+                cache
+                    .direct_room_to_user
+                    .get(&r.room_id)
+                    .map(|u| (r, format!("[dm] {u}")))
             })
             .collect();
         dm_rooms.sort_by(|(_, a), (_, b)| a.cmp(b));
@@ -487,7 +511,9 @@ impl ChatClientProvider {
                 "leave" => 2,
                 _ => 3,
             };
-            order(&a.membership).cmp(&order(&b.membership)).then(a.user_id.cmp(&b.user_id))
+            order(&a.membership)
+                .cmp(&order(&b.membership))
+                .then(a.user_id.cmp(&b.user_id))
         });
         members
             .into_iter()
@@ -513,7 +539,11 @@ impl ChatClientProvider {
     }
 
     fn fetch_public_room_detail(&self, display_key: &str) -> Vec<FfonElement> {
-        match self.public_rooms_cache.iter().find(|(d, _)| d == display_key) {
+        match self
+            .public_rooms_cache
+            .iter()
+            .find(|(d, _)| d == display_key)
+        {
             Some((_, room_id)) => vec![
                 FfonElement::new_str(format!("room id: {room_id}")),
                 FfonElement::new_str("<button>join-public-room</button>Join this room".to_owned()),
@@ -525,8 +555,11 @@ impl ChatClientProvider {
     // ---- Matrix API calls ---------------------------------------------------
 
     fn build_register_form(&self) -> Vec<FfonElement> {
-        let homeserver =
-            if self.homeserver.is_empty() { "https://matrix.org" } else { &self.homeserver };
+        let homeserver = if self.homeserver.is_empty() {
+            "https://matrix.org"
+        } else {
+            &self.homeserver
+        };
         let mut items = Vec::new();
         if let Some(err) = &self.register_error {
             items.push(FfonElement::new_str(format!("Error: {err}")));
@@ -538,7 +571,10 @@ impl ChatClientProvider {
             "Username: <input>{}</input>",
             self.username
         )));
-        items.push(FfonElement::new_str(format!("Email: <input>{}</input>", self.email)));
+        items.push(FfonElement::new_str(format!(
+            "Email: <input>{}</input>",
+            self.email
+        )));
         items.push(FfonElement::new_str(format!(
             "Password: <input>{}</input>",
             self.password
@@ -559,8 +595,11 @@ impl ChatClientProvider {
     }
 
     fn build_login_form(&self) -> Vec<FfonElement> {
-        let homeserver =
-            if self.homeserver.is_empty() { "https://matrix.org" } else { &self.homeserver };
+        let homeserver = if self.homeserver.is_empty() {
+            "https://matrix.org"
+        } else {
+            &self.homeserver
+        };
         let mut items = Vec::new();
         if let Some(err) = &self.last_error {
             items.push(FfonElement::new_str(format!("Error: {err}")));
@@ -626,7 +665,9 @@ impl ChatClientProvider {
                 let segs = self.current_path_segments();
                 if segs.len() >= 2 && segs[0] == "[public]" {
                     let display_key = segs[1].clone();
-                    let room_id = self.public_rooms_cache.iter()
+                    let room_id = self
+                        .public_rooms_cache
+                        .iter()
                         .find(|(d, _)| d == &display_key)
                         .map(|(_, id)| id.clone());
                     if let Some(id) = room_id {
@@ -642,7 +683,9 @@ impl ChatClientProvider {
     }
 
     fn take_error(&mut self) -> Option<String> {
-        self.register_error.take().or_else(|| self.last_error.take())
+        self.register_error
+            .take()
+            .or_else(|| self.last_error.take())
     }
 
     fn on_setting_change(&mut self, key: &str, value: &str) {
@@ -688,28 +731,28 @@ impl ChatClientProvider {
                     false
                 }
             },
-            PendingAction::CreateRoom { encrypted, is_space, is_public } => {
-                match self.do_create_room(text, encrypted, is_space, is_public) {
-                    Ok(_) => true,
-                    Err(e) => {
-                        let mut args = localize::Args::new();
-                        args.set("err", e.to_string());
-                        *error = localize::t_args("chatclient-error-create-room-failed", &args);
-                        false
-                    }
+            PendingAction::CreateRoom {
+                encrypted,
+                is_space,
+                is_public,
+            } => match self.do_create_room(text, encrypted, is_space, is_public) {
+                Ok(_) => true,
+                Err(e) => {
+                    let mut args = localize::Args::new();
+                    args.set("err", e.to_string());
+                    *error = localize::t_args("chatclient-error-create-room-failed", &args);
+                    false
                 }
-            }
-            PendingAction::InviteUser { room_id } => {
-                match self.do_invite_user(&room_id, text) {
-                    Ok(()) => true,
-                    Err(e) => {
-                        let mut args = localize::Args::new();
-                        args.set("err", e.to_string());
-                        *error = localize::t_args("chatclient-error-invite-failed", &args);
-                        false
-                    }
+            },
+            PendingAction::InviteUser { room_id } => match self.do_invite_user(&room_id, text) {
+                Ok(()) => true,
+                Err(e) => {
+                    let mut args = localize::Args::new();
+                    args.set("err", e.to_string());
+                    *error = localize::t_args("chatclient-error-invite-failed", &args);
+                    false
                 }
-            }
+            },
             PendingAction::SearchPublicRooms => match self.do_public_rooms(text) {
                 Ok(lines) => {
                     let count = lines.len();
@@ -718,7 +761,8 @@ impl ChatClientProvider {
                     if count == 0 {
                         let mut args = localize::Args::new();
                         args.set("text", format!("{:?}", text));
-                        *error = localize::t_args("chatclient-error-no-public-rooms-matching", &args);
+                        *error =
+                            localize::t_args("chatclient-error-no-public-rooms-matching", &args);
                     }
                     true
                 }
@@ -741,7 +785,11 @@ impl ChatClientProvider {
             PendingAction::KickMember { room_id, member_id } => {
                 match self.do_kick_member(&room_id, &member_id, text) {
                     Ok(()) => {
-                        let reason = if text.is_empty() { None } else { Some(text.to_owned()) };
+                        let reason = if text.is_empty() {
+                            None
+                        } else {
+                            Some(text.to_owned())
+                        };
                         self.push_chat_op(ChatOpKind::KickMember {
                             room_id: room_id.clone(),
                             user_id: member_id.clone(),
@@ -760,7 +808,11 @@ impl ChatClientProvider {
             PendingAction::BanMember { room_id, member_id } => {
                 match self.do_ban_member(&room_id, &member_id, text) {
                     Ok(()) => {
-                        let reason = if text.is_empty() { None } else { Some(text.to_owned()) };
+                        let reason = if text.is_empty() {
+                            None
+                        } else {
+                            Some(text.to_owned())
+                        };
                         self.push_chat_op(ChatOpKind::BanMember {
                             room_id: room_id.clone(),
                             user_id: member_id.clone(),
@@ -778,7 +830,6 @@ impl ChatClientProvider {
             }
         }
     }
-
 }
 
 impl Default for ChatClientProvider {
@@ -925,7 +976,9 @@ impl Provider for ChatClientProvider {
         }
 
         let segs = self.current_path_segments();
-        let Some(first) = segs.first().cloned() else { return false };
+        let Some(first) = segs.first().cloned() else {
+            return false;
+        };
 
         // Form field edit (login or register form) — path segment is the field label.
         if self.access_token.is_empty() {
@@ -1034,7 +1087,10 @@ impl Provider for ChatClientProvider {
                     self.save_access_token(&result.access_token);
                     self.save_user_id(&result.user_id);
                     self.maybe_start_sync();
-                    Some(FfonElement::new_str(format!("logged in as {}", result.user_id)))
+                    Some(FfonElement::new_str(format!(
+                        "logged in as {}",
+                        result.user_id
+                    )))
                 } else {
                     let mut args = localize::Args::new();
                     args.set("err", result.error.clone());
@@ -1064,7 +1120,10 @@ impl Provider for ChatClientProvider {
                     self.save_user_id(&result.user_id);
                     self.uia_session.clear();
                     self.maybe_start_sync();
-                    Some(FfonElement::new_str(format!("registered as {}", result.user_id)))
+                    Some(FfonElement::new_str(format!(
+                        "registered as {}",
+                        result.user_id
+                    )))
                 } else if result.requires_auth && !result.session.is_empty() {
                     self.uia_session = result.session.clone();
                     self.register_mode = true;
@@ -1104,7 +1163,10 @@ impl Provider for ChatClientProvider {
                     self.save_user_id(&result.user_id);
                     self.uia_session.clear();
                     self.maybe_start_sync();
-                    Some(FfonElement::new_str(format!("registered as {}", result.user_id)))
+                    Some(FfonElement::new_str(format!(
+                        "registered as {}",
+                        result.user_id
+                    )))
                 } else if result.requires_auth && !result.session.is_empty() {
                     self.uia_session = result.session.clone();
                     #[cfg(not(test))]
@@ -1136,14 +1198,20 @@ impl Provider for ChatClientProvider {
             }
 
             "create private room" => {
-                self.pending_action =
-                    Some(PendingAction::CreateRoom { encrypted: false, is_space: false, is_public: false });
+                self.pending_action = Some(PendingAction::CreateRoom {
+                    encrypted: false,
+                    is_space: false,
+                    is_public: false,
+                });
                 Some(FfonElement::new_str("<input></input>".to_owned()))
             }
 
             "create public room" => {
-                self.pending_action =
-                    Some(PendingAction::CreateRoom { encrypted: false, is_space: false, is_public: true });
+                self.pending_action = Some(PendingAction::CreateRoom {
+                    encrypted: false,
+                    is_space: false,
+                    is_public: true,
+                });
                 Some(FfonElement::new_str("<input></input>".to_owned()))
             }
 
@@ -1153,8 +1221,11 @@ impl Provider for ChatClientProvider {
             }
 
             "create space" => {
-                self.pending_action =
-                    Some(PendingAction::CreateRoom { encrypted: false, is_space: true, is_public: false });
+                self.pending_action = Some(PendingAction::CreateRoom {
+                    encrypted: false,
+                    is_space: true,
+                    is_public: false,
+                });
                 Some(FfonElement::new_str("<input></input>".to_owned()))
             }
 
@@ -1177,7 +1248,9 @@ impl Provider for ChatClientProvider {
                         if let Some(topic) = &r.topic {
                             parts.push(format!("topic: {topic}"));
                         }
-                        let member_count = r.members.values()
+                        let member_count = r
+                            .members
+                            .values()
                             .filter(|m| m.membership == "join")
                             .count();
                         if member_count > 0 {
@@ -1272,10 +1345,7 @@ impl Provider for ChatClientProvider {
                     *error = localize::t("chatclient-error-navigate-into-room-first");
                     return None;
                 };
-                if room_key.starts_with("[space] ")
-                    || room_key == "[public]"
-                    || segs.len() > 1
-                {
+                if room_key.starts_with("[space] ") || room_key == "[public]" || segs.len() > 1 {
                     *error = localize::t("chatclient-error-navigate-into-room-first");
                     return None;
                 }
@@ -1375,18 +1445,28 @@ impl Provider for ChatClientProvider {
 
             "join public room" => {
                 // elem_key is the display label of the focused public room.
-                let room_id = self.public_rooms_cache.iter()
+                let room_id = self
+                    .public_rooms_cache
+                    .iter()
                     .find(|(d, _)| d == elem_key)
                     .map(|(_, id)| id.clone());
                 match room_id {
-                    None => { *error = localize::t("chatclient-error-select-public-room"); None }
+                    None => {
+                        *error = localize::t("chatclient-error-select-public-room");
+                        None
+                    }
                     Some(id) => match self.do_join(&id) {
                         Ok(_) => {
                             self.current_path = "/".to_owned();
                             Some(FfonElement::new_str(format!("joined {elem_key}")))
                         }
-                        Err(e) => { let mut args = localize::Args::new(); args.set("err", e.to_string()); *error = localize::t_args("chatclient-error-join-failed", &args); None }
-                    }
+                        Err(e) => {
+                            let mut args = localize::Args::new();
+                            args.set("err", e.to_string());
+                            *error = localize::t_args("chatclient-error-join-failed", &args);
+                            None
+                        }
+                    },
                 }
             }
 
@@ -1422,8 +1502,7 @@ impl Provider for ChatClientProvider {
                         return None;
                     }
                 };
-                self.pending_action =
-                    Some(PendingAction::KickMember { room_id, member_id });
+                self.pending_action = Some(PendingAction::KickMember { room_id, member_id });
                 Some(FfonElement::new_str(
                     "<input>reason (optional)</input>".to_owned(),
                 ))
@@ -1449,8 +1528,7 @@ impl Provider for ChatClientProvider {
                         return None;
                     }
                 };
-                self.pending_action =
-                    Some(PendingAction::BanMember { room_id, member_id });
+                self.pending_action = Some(PendingAction::BanMember { room_id, member_id });
                 Some(FfonElement::new_str(
                     "<input>reason (optional)</input>".to_owned(),
                 ))
@@ -1497,7 +1575,10 @@ impl Provider for ChatClientProvider {
                 match self.do_fetch_older_messages(&room_key) {
                     Ok(0) => Some(FfonElement::new_str("no earlier messages".to_owned())),
                     Ok(n) => Some(FfonElement::new_str(format!("loaded {n} earlier messages"))),
-                    Err(e) => { *error = e; None }
+                    Err(e) => {
+                        *error = e;
+                        None
+                    }
                 }
             }
 
@@ -1529,12 +1610,12 @@ impl Provider for ChatClientProvider {
                 ChatOpKind::AcceptInvite { room_id } | ChatOpKind::RejectInvite { room_id } => {
                     self.do_leave(room_id)
                 }
-                ChatOpKind::KickMember { room_id, user_id, .. } => {
-                    self.do_invite_user(room_id, user_id)
-                }
-                ChatOpKind::BanMember { room_id, user_id, .. } => {
-                    self.do_unban_member(room_id, user_id)
-                }
+                ChatOpKind::KickMember {
+                    room_id, user_id, ..
+                } => self.do_invite_user(room_id, user_id),
+                ChatOpKind::BanMember {
+                    room_id, user_id, ..
+                } => self.do_unban_member(room_id, user_id),
                 ChatOpKind::PostMessage { .. } => {
                     // Redact-on-undo path is deferred — see plan step 9.
                     *error = localize::t("chatclient-error-post-message-undo-not-implemented");
@@ -1560,12 +1641,16 @@ impl Provider for ChatClientProvider {
                 ChatOpKind::LeaveRoom { room_id } => self.do_leave(room_id),
                 ChatOpKind::AcceptInvite { room_id } => self.do_join(room_id).map(|_| ()),
                 ChatOpKind::RejectInvite { room_id } => self.do_leave(room_id),
-                ChatOpKind::KickMember { room_id, user_id, reason } => {
-                    self.do_kick_member(room_id, user_id, reason.as_deref().unwrap_or(""))
-                }
-                ChatOpKind::BanMember { room_id, user_id, reason } => {
-                    self.do_ban_member(room_id, user_id, reason.as_deref().unwrap_or(""))
-                }
+                ChatOpKind::KickMember {
+                    room_id,
+                    user_id,
+                    reason,
+                } => self.do_kick_member(room_id, user_id, reason.as_deref().unwrap_or("")),
+                ChatOpKind::BanMember {
+                    room_id,
+                    user_id,
+                    reason,
+                } => self.do_ban_member(room_id, user_id, reason.as_deref().unwrap_or("")),
                 ChatOpKind::PostMessage { .. } => {
                     *error = localize::t("chatclient-error-post-message-redo-not-implemented");
                     return;
@@ -1668,11 +1753,14 @@ impl ChatClientProvider {
                 ..Default::default()
             },
         );
-        cache.display_to_id.insert(display_name.to_owned(), room_id.to_owned());
+        cache
+            .display_to_id
+            .insert(display_name.to_owned(), room_id.to_owned());
     }
 
     pub fn test_set_needs_refresh(&self) {
-        self.needs_refresh_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.needs_refresh_flag
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn test_clear_register_mode(&mut self) {
@@ -1736,7 +1824,9 @@ mod tests {
                 ..Default::default()
             },
         );
-        cache.display_to_id.insert(display_name.to_owned(), room_id.to_owned());
+        cache
+            .display_to_id
+            .insert(display_name.to_owned(), room_id.to_owned());
     }
 
     fn seed_room_with_events(
@@ -1765,7 +1855,9 @@ mod tests {
                 ..Default::default()
             },
         );
-        cache.display_to_id.insert(display_name.to_owned(), room_id.to_owned());
+        cache
+            .display_to_id
+            .insert(display_name.to_owned(), room_id.to_owned());
     }
 
     // ---- original tests (adapted) ------------------------------------------
@@ -1775,7 +1867,8 @@ mod tests {
         let mut p = ChatClientProvider::new();
         let items = p.fetch();
         assert!(items.iter().any(|e| {
-            e.as_str().map_or(false, |s| s.contains("<button>login</button>"))
+            e.as_str()
+                .map_or(false, |s| s.contains("<button>login</button>"))
         }));
     }
 
@@ -1786,7 +1879,8 @@ mod tests {
         p.username = "alice".to_owned();
         let items = p.fetch();
         assert!(items.iter().any(|e| {
-            e.as_str().map_or(false, |s| s.contains("<input>alice</input>"))
+            e.as_str()
+                .map_or(false, |s| s.contains("<input>alice</input>"))
         }));
     }
 
@@ -1797,7 +1891,8 @@ mod tests {
         p.username = "alice".to_owned();
         let items = p.fetch();
         assert!(items.iter().any(|e| {
-            e.as_str().map_or(false, |s| s.contains("<button>login</button>"))
+            e.as_str()
+                .map_or(false, |s| s.contains("<button>login</button>"))
         }));
     }
 
@@ -1808,7 +1903,11 @@ mod tests {
         p.access_token = "tok".to_owned();
         p.sync_cache.lock().unwrap().next_batch = "s1".to_owned();
         let items = p.fetch();
-        assert!(items.iter().any(|e| { e.as_str().map_or(false, |s| s.contains("no rooms found")) }));
+        assert!(
+            items
+                .iter()
+                .any(|e| { e.as_str().map_or(false, |s| s.contains("no rooms found")) })
+        );
     }
 
     #[test]
@@ -1818,7 +1917,11 @@ mod tests {
         p.access_token = "tok".to_owned();
         seed_room(&mut p, "!abc:example.com", "!abc:example.com");
         let items = p.fetch();
-        assert!(items.iter().any(|e| e.is_obj() && e.as_obj().map_or(false, |o| o.key != "meta")));
+        assert!(
+            items
+                .iter()
+                .any(|e| e.is_obj() && e.as_obj().map_or(false, |o| o.key != "meta"))
+        );
     }
 
     #[test]
@@ -1828,7 +1931,11 @@ mod tests {
         p.access_token = "tok".to_owned();
         seed_room(&mut p, "!abc:example.com", "General");
         let items = p.fetch();
-        assert!(items.iter().any(|e| { e.as_obj().map_or(false, |o| o.key == "General") }));
+        assert!(
+            items
+                .iter()
+                .any(|e| { e.as_obj().map_or(false, |o| o.key == "General") })
+        );
     }
 
     #[test]
@@ -1883,8 +1990,11 @@ mod tests {
         );
         p.push_path("General");
         let items = p.fetch();
-        let msg_items: Vec<_> =
-            items.iter().filter_map(|e| e.as_str()).filter(|s| s.contains(": ")).collect();
+        let msg_items: Vec<_> = items
+            .iter()
+            .filter_map(|e| e.as_str())
+            .filter(|s| s.contains(": "))
+            .collect();
         assert_eq!(msg_items.len(), 2);
         assert!(msg_items[0].contains("first"));
         assert!(msg_items[1].contains("second"));
@@ -1910,7 +2020,11 @@ mod tests {
         seed_room(&mut p, "!abc:x", "General");
         p.push_path("General");
         let items = p.fetch();
-        assert!(items.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "[members]")));
+        assert!(
+            items
+                .iter()
+                .any(|e| e.as_obj().map_or(false, |o| o.key == "[members]"))
+        );
     }
 
     #[test]
@@ -1920,7 +2034,11 @@ mod tests {
         p.access_token = "tok".to_owned();
         p.push_path("NoSuchRoom");
         let items = p.fetch();
-        assert!(items.iter().any(|e| { e.as_str().map_or(false, |s| s.contains("room not found")) }));
+        assert!(
+            items
+                .iter()
+                .any(|e| { e.as_str().map_or(false, |s| s.contains("room not found")) })
+        );
     }
 
     #[test]
@@ -2030,8 +2148,7 @@ mod tests {
             &rt,
             &server,
             Mock::given(method("PUT")).respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(serde_json::json!({ "event_id": "$abc" })),
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "event_id": "$abc" })),
             ),
         );
         let mut p = provider_for(&server);
@@ -2055,8 +2172,7 @@ mod tests {
             &rt,
             &server,
             Mock::given(method("PUT")).respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(serde_json::json!({ "event_id": "$xyz" })),
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "event_id": "$xyz" })),
             ),
         );
         let mut p = provider_for(&server);
@@ -2097,7 +2213,12 @@ mod tests {
         let mut err = String::new();
         let result = p.handle_command("send message", "", 0, &mut err);
         assert!(result.is_some());
-        assert!(result.unwrap().as_str().map_or(false, |s| s.contains("<input>")));
+        assert!(
+            result
+                .unwrap()
+                .as_str()
+                .map_or(false, |s| s.contains("<input>"))
+        );
     }
 
     #[test]
@@ -2124,7 +2245,11 @@ mod tests {
         let elem = p.handle_command("login", "", 0, &mut err);
         assert!(err.is_empty(), "no error on success, got: {err}");
         assert!(elem.is_some());
-        assert!(elem.unwrap().as_str().map_or(false, |s| s.contains("@alice:server.org")));
+        assert!(
+            elem.unwrap()
+                .as_str()
+                .map_or(false, |s| s.contains("@alice:server.org"))
+        );
         assert_eq!(p.user_id, "@alice:server.org");
         drop(rt);
     }
@@ -2136,7 +2261,10 @@ mod tests {
         let mut err = String::new();
         let result = p.handle_command("register", "", 0, &mut err);
         assert!(result.is_none());
-        assert!(err.is_empty(), "mode switch should not produce an error, got: {err}");
+        assert!(
+            err.is_empty(),
+            "mode switch should not produce an error, got: {err}"
+        );
         assert!(p.register_mode);
     }
 
@@ -2176,7 +2304,11 @@ mod tests {
         let elem = p.handle_command("register", "", 0, &mut err);
         assert!(err.is_empty(), "no error on success, got: {err}");
         assert!(elem.is_some());
-        assert!(elem.unwrap().as_str().map_or(false, |s| s.contains("@newuser:server.org")));
+        assert!(
+            elem.unwrap()
+                .as_str()
+                .map_or(false, |s| s.contains("@newuser:server.org"))
+        );
         assert_eq!(p.access_token, "reg_token_abc");
         assert!(p.uia_session.is_empty());
         drop(rt);
@@ -2203,9 +2335,16 @@ mod tests {
         p.password = "pass".to_owned();
         let mut err = String::new();
         let elem = p.handle_command("register", "", 0, &mut err);
-        assert!(err.is_empty(), "UIA requires-auth is not an error, got: {err}");
+        assert!(
+            err.is_empty(),
+            "UIA requires-auth is not an error, got: {err}"
+        );
         assert!(elem.is_some());
-        assert!(elem.unwrap().as_str().map_or(false, |s| s.contains("m.login.recaptcha")));
+        assert!(
+            elem.unwrap()
+                .as_str()
+                .map_or(false, |s| s.contains("m.login.recaptcha"))
+        );
         assert_eq!(p.uia_session, "uia_session_xyz");
         drop(rt);
     }
@@ -2247,7 +2386,11 @@ mod tests {
         let elem = p.handle_command("complete registration", "", 0, &mut err);
         assert!(err.is_empty(), "no error on success, got: {err}");
         assert!(elem.is_some());
-        assert!(elem.unwrap().as_str().map_or(false, |s| s.contains("@alice:server.org")));
+        assert!(
+            elem.unwrap()
+                .as_str()
+                .map_or(false, |s| s.contains("@alice:server.org"))
+        );
         assert_eq!(p.access_token, "final_token");
         assert!(p.uia_session.is_empty());
         drop(rt);
@@ -2281,8 +2424,7 @@ mod tests {
             &rt,
             &server,
             Mock::given(method("PUT")).respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(serde_json::json!({ "event_id": "$e" })),
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "event_id": "$e" })),
             ),
         );
         let mut p = provider_for(&server);
@@ -2372,7 +2514,10 @@ mod tests {
         assert_eq!(p.homeserver, "https://matrix.org");
         assert_eq!(p.access_token, "syt_test_token");
         assert_eq!(p.username, "alice");
-        assert!(p.password.is_empty(), "password must not be loaded from disk");
+        assert!(
+            p.password.is_empty(),
+            "password must not be loaded from disk"
+        );
     }
 
     #[test]
@@ -2385,7 +2530,8 @@ mod tests {
         assert!(p.access_token.is_empty());
         let items = p.fetch();
         assert!(items.iter().any(|e| {
-            e.as_str().map_or(false, |s| s.contains("<button>login</button>"))
+            e.as_str()
+                .map_or(false, |s| s.contains("<button>login</button>"))
         }));
     }
 
@@ -2441,8 +2587,9 @@ mod tests {
                 }
             }),
         );
-        let mut p =
-            ChatClientProvider::new().with_config_path(cfg).with_sync_disabled();
+        let mut p = ChatClientProvider::new()
+            .with_config_path(cfg)
+            .with_sync_disabled();
         p.init();
         assert!(
             p.sync_cache.lock().unwrap().next_batch.is_empty(),
@@ -2505,7 +2652,11 @@ mod tests {
         p.homeserver = "https://matrix.org".to_owned();
         p.access_token = "tok".to_owned();
         let items = p.fetch();
-        assert!(items.iter().any(|e| { e.as_str().map_or(false, |s| s.contains("Loading")) }));
+        assert!(
+            items
+                .iter()
+                .any(|e| { e.as_str().map_or(false, |s| s.contains("Loading")) })
+        );
     }
 
     #[test]
@@ -2513,7 +2664,8 @@ mod tests {
         let mut p = ChatClientProvider::new();
         let items = p.fetch();
         assert!(items.iter().any(|e| {
-            e.as_str().map_or(false, |s| s.contains("https://matrix.org"))
+            e.as_str()
+                .map_or(false, |s| s.contains("https://matrix.org"))
         }));
     }
 
@@ -2522,11 +2674,14 @@ mod tests {
         let mut p = ChatClientProvider::new();
         p.test_set_register_mode();
         let items = p.fetch();
-        let inputs =
-            items.iter().filter(|e| e.as_str().map_or(false, |s| s.contains("<input>"))).count();
+        let inputs = items
+            .iter()
+            .filter(|e| e.as_str().map_or(false, |s| s.contains("<input>")))
+            .count();
         assert_eq!(inputs, 4);
         assert!(items.iter().any(|e| {
-            e.as_str().map_or(false, |s| s.contains("<button>register</button>"))
+            e.as_str()
+                .map_or(false, |s| s.contains("<button>register</button>"))
         }));
     }
 
@@ -2538,11 +2693,13 @@ mod tests {
         p.email = "2friendlyflow@gmail.com".to_owned();
         let items = p.fetch();
         assert!(items.iter().any(|e| {
-            e.as_str().map_or(false, |s| s.contains("<input>friendlyflow</input>"))
+            e.as_str()
+                .map_or(false, |s| s.contains("<input>friendlyflow</input>"))
         }));
         assert!(items.iter().any(|e| {
-            e.as_str()
-                .map_or(false, |s| s.contains("<input>2friendlyflow@gmail.com</input>"))
+            e.as_str().map_or(false, |s| {
+                s.contains("<input>2friendlyflow@gmail.com</input>")
+            })
         }));
     }
 
@@ -2553,7 +2710,9 @@ mod tests {
         p.uia_session = "sess123".to_owned();
         let items = p.fetch();
         assert!(items.iter().any(|e| {
-            e.as_str().map_or(false, |s| s.contains("<button>complete-registration</button>"))
+            e.as_str().map_or(false, |s| {
+                s.contains("<button>complete-registration</button>")
+            })
         }));
     }
 
@@ -2569,7 +2728,10 @@ mod tests {
         assert_eq!(p.username, "friendlyflow");
         let saved: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
-        assert_eq!(saved["chat client"]["chatUsername"].as_str(), Some("friendlyflow"));
+        assert_eq!(
+            saved["chat client"]["chatUsername"].as_str(),
+            Some("friendlyflow")
+        );
     }
 
     #[test]
@@ -2601,8 +2763,9 @@ mod tests {
         );
         let dir = tempfile::tempdir().unwrap();
         let cfg = dir.path().join("settings.json");
-        let mut p =
-            ChatClientProvider::new().with_config_path(cfg).with_sync_disabled();
+        let mut p = ChatClientProvider::new()
+            .with_config_path(cfg)
+            .with_sync_disabled();
         p.homeserver = server.uri();
         p.username = "friendlyflow".to_owned();
         p.password = "secret".to_owned();
@@ -2629,8 +2792,9 @@ mod tests {
         );
         let dir = tempfile::tempdir().unwrap();
         let cfg = dir.path().join("settings.json");
-        let mut p =
-            ChatClientProvider::new().with_config_path(cfg).with_sync_disabled();
+        let mut p = ChatClientProvider::new()
+            .with_config_path(cfg)
+            .with_sync_disabled();
         p.homeserver = server.uri();
         p.username = "friendlyflow".to_owned();
         p.password = "secret".to_owned();
@@ -2661,7 +2825,9 @@ mod tests {
         assert_eq!(p.uia_session, "uia_sess");
         let items = p.fetch();
         assert!(items.iter().any(|e| {
-            e.as_str().map_or(false, |s| s.contains("<button>complete-registration</button>"))
+            e.as_str().map_or(false, |s| {
+                s.contains("<button>complete-registration</button>")
+            })
         }));
         drop(rt);
     }
@@ -2677,7 +2843,11 @@ mod tests {
         let elem = p.handle_command("join room", "", 0, &mut err);
         assert!(err.is_empty());
         assert!(elem.is_some());
-        assert!(elem.unwrap().as_str().map_or(false, |s| s.contains("<input>")));
+        assert!(
+            elem.unwrap()
+                .as_str()
+                .map_or(false, |s| s.contains("<input>"))
+        );
         assert!(p.pending_action.is_some());
     }
 
@@ -2753,9 +2923,10 @@ mod tests {
             &server,
             Mock::given(method("POST"))
                 .and(wiremock::matchers::path_regex("/_matrix/client/v3/join/.*"))
-                .respond_with(ResponseTemplate::new(200).set_body_json(
-                    serde_json::json!({ "room_id": "!abc:server" }),
-                )),
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(serde_json::json!({ "room_id": "!abc:server" })),
+                ),
         );
         let mut p = provider_for(&server);
         let mut err = String::new();
@@ -2773,9 +2944,10 @@ mod tests {
             &server,
             Mock::given(method("POST"))
                 .and(wiremock::matchers::path("/_matrix/client/v3/createRoom"))
-                .respond_with(ResponseTemplate::new(200).set_body_json(
-                    serde_json::json!({ "room_id": "!new:server" }),
-                )),
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(serde_json::json!({ "room_id": "!new:server" })),
+                ),
         );
         let mut p = provider_for(&server);
         let mut err = String::new();
@@ -2792,7 +2964,9 @@ mod tests {
             &rt,
             &server,
             Mock::given(method("POST"))
-                .and(wiremock::matchers::path_regex("/_matrix/client/v3/rooms/.*/invite"))
+                .and(wiremock::matchers::path_regex(
+                    "/_matrix/client/v3/rooms/.*/invite",
+                ))
                 .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({}))),
         );
         let mut p = provider_for(&server);
@@ -2823,9 +2997,10 @@ mod tests {
             &server,
             Mock::given(method("POST"))
                 .and(wiremock::matchers::path("/_matrix/client/v3/createRoom"))
-                .respond_with(ResponseTemplate::new(200).set_body_json(
-                    serde_json::json!({ "room_id": "!pub:server" }),
-                )),
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(serde_json::json!({ "room_id": "!pub:server" })),
+                ),
         );
         mount(
             &rt,
@@ -2851,7 +3026,9 @@ mod tests {
             &rt,
             &server,
             Mock::given(method("POST"))
-                .and(wiremock::matchers::path_regex("/_matrix/client/v3/rooms/.*/leave"))
+                .and(wiremock::matchers::path_regex(
+                    "/_matrix/client/v3/rooms/.*/leave",
+                ))
                 .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({}))),
         );
         let mut p = provider_for(&server);
@@ -2884,9 +3061,10 @@ mod tests {
             &server,
             Mock::given(method("POST"))
                 .and(wiremock::matchers::path_regex("/_matrix/client/v3/join/.*"))
-                .respond_with(ResponseTemplate::new(200).set_body_json(
-                    serde_json::json!({ "room_id": "!inv:server" }),
-                )),
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(serde_json::json!({ "room_id": "!inv:server" })),
+                ),
         );
         let mut p = provider_for(&server);
         {
@@ -2924,7 +3102,9 @@ mod tests {
                     ..Default::default()
                 },
             );
-            cache.display_to_id.insert("Zzz".to_owned(), "!r:s".to_owned());
+            cache
+                .display_to_id
+                .insert("Zzz".to_owned(), "!r:s".to_owned());
             cache.invites.insert(
                 "!inv:s".to_owned(),
                 sync::InviteState {
@@ -2932,14 +3112,22 @@ mod tests {
                     inviter: String::new(),
                 },
             );
-            cache.invite_display_to_id.insert("[invite] Aaa".to_owned(), "!inv:s".to_owned());
+            cache
+                .invite_display_to_id
+                .insert("[invite] Aaa".to_owned(), "!inv:s".to_owned());
         }
         let items = p.fetch();
-        let keys: Vec<&str> = items.iter().filter_map(|e| e.as_obj().map(|o| o.key.as_str())).collect();
+        let keys: Vec<&str> = items
+            .iter()
+            .filter_map(|e| e.as_obj().map(|o| o.key.as_str()))
+            .collect();
         let invite_pos = keys.iter().position(|k| k.starts_with("[invite]"));
         let room_pos = keys.iter().position(|k| *k == "Zzz");
         assert!(invite_pos.is_some() && room_pos.is_some());
-        assert!(invite_pos.unwrap() < room_pos.unwrap(), "invites should appear before rooms");
+        assert!(
+            invite_pos.unwrap() < room_pos.unwrap(),
+            "invites should appear before rooms"
+        );
     }
 
     #[test]
@@ -2967,12 +3155,20 @@ mod tests {
                     ..Default::default()
                 },
             );
-            cache.display_to_id.insert("[space] Work".to_owned(), "!space:s".to_owned());
-            cache.display_to_id.insert("general".to_owned(), "!general:s".to_owned());
+            cache
+                .display_to_id
+                .insert("[space] Work".to_owned(), "!space:s".to_owned());
+            cache
+                .display_to_id
+                .insert("general".to_owned(), "!general:s".to_owned());
         }
         p.push_path("[space] Work");
         let items = p.fetch();
-        assert!(items.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "general")));
+        assert!(
+            items
+                .iter()
+                .any(|e| e.as_obj().map_or(false, |o| o.key == "general"))
+        );
     }
 
     #[test]
@@ -3000,12 +3196,18 @@ mod tests {
                     ..Default::default()
                 },
             );
-            cache.display_to_id.insert("General".to_owned(), "!r:s".to_owned());
+            cache
+                .display_to_id
+                .insert("General".to_owned(), "!r:s".to_owned());
         }
         p.push_path("General");
         p.push_path("[members]");
         let items = p.fetch();
-        assert!(items.iter().any(|e| e.as_obj().map_or(false, |o| o.key.contains("@alice:s"))));
+        assert!(
+            items
+                .iter()
+                .any(|e| e.as_obj().map_or(false, |o| o.key.contains("@alice:s")))
+        );
     }
 
     // ---- room_list_item badge helper -----------------------------------------
@@ -3015,7 +3217,10 @@ mod tests {
         let item = room_list_item("General".to_owned(), 0, 0);
         let obj = item.as_obj().unwrap();
         assert_eq!(obj.key, "General");
-        assert!(obj.children.is_empty(), "no badge child expected when counts are zero");
+        assert!(
+            obj.children.is_empty(),
+            "no badge child expected when counts are zero"
+        );
     }
 
     #[test]
@@ -3050,7 +3255,9 @@ mod tests {
                     ..Default::default()
                 },
             );
-            cache.display_to_id.insert("Noisy".to_owned(), "!r:s".to_owned());
+            cache
+                .display_to_id
+                .insert("Noisy".to_owned(), "!r:s".to_owned());
             cache.next_batch = "tok".to_owned();
         }
         let items = p.fetch();
@@ -3103,10 +3310,13 @@ mod tests {
         let mut p = ChatClientProvider::new().with_sync_disabled();
         p.access_token = "tok".to_owned();
         seed_room(&mut p, "!r:s", "General");
-        p.drafts.insert("General".to_owned(), "hello draft".to_owned());
+        p.drafts
+            .insert("General".to_owned(), "hello draft".to_owned());
         p.push_path("General");
         let items = p.fetch();
-        let input = items.iter().find(|e| e.as_str().map_or(false, |s| s.contains("<input>")));
+        let input = items
+            .iter()
+            .find(|e| e.as_str().map_or(false, |s| s.contains("<input>")));
         assert!(input.is_some(), "input bar must be present");
         assert!(
             input.unwrap().as_str().unwrap().contains("hello draft"),
@@ -3121,8 +3331,7 @@ mod tests {
             &rt,
             &server,
             Mock::given(method("PUT")).respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(serde_json::json!({ "event_id": "$abc" })),
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "event_id": "$abc" })),
             ),
         );
         let mut p = provider_for(&server);
@@ -3131,7 +3340,10 @@ mod tests {
         p.push_path("General");
         let ok = p.commit_edit("", "Hello!");
         assert!(ok, "send must succeed");
-        assert!(p.drafts.get("General").is_none(), "draft must be cleared after successful send");
+        assert!(
+            p.drafts.get("General").is_none(),
+            "draft must be cleared after successful send"
+        );
         drop(rt);
     }
 
@@ -3140,18 +3352,23 @@ mod tests {
     #[test]
     fn fetch_public_room_detail_shows_room_id_and_join_button() {
         let mut p = ChatClientProvider::new().with_sync_disabled();
-        p.public_rooms_cache = vec![
-            ("#general:matrix.org — Chat (42 members)".to_owned(), "!abc:matrix.org".to_owned()),
-        ];
+        p.public_rooms_cache = vec![(
+            "#general:matrix.org — Chat (42 members)".to_owned(),
+            "!abc:matrix.org".to_owned(),
+        )];
         p.push_path("[public]");
         p.push_path("#general:matrix.org — Chat (42 members)");
         let items = p.fetch();
         assert!(
-            items.iter().any(|e| e.as_str().map_or(false, |s| s.contains("!abc:matrix.org"))),
+            items
+                .iter()
+                .any(|e| e.as_str().map_or(false, |s| s.contains("!abc:matrix.org"))),
             "must show room_id"
         );
         assert!(
-            items.iter().any(|e| e.as_str().map_or(false, |s| s.contains("<button>join-public-room</button>"))),
+            items.iter().any(|e| e
+                .as_str()
+                .map_or(false, |s| s.contains("<button>join-public-room</button>"))),
             "must show join button"
         );
     }
@@ -3163,7 +3380,11 @@ mod tests {
         p.push_path("[public]");
         p.push_path("nonexistent");
         let items = p.fetch();
-        assert!(items.iter().any(|e| e.as_str().map_or(false, |s| s.contains("not found"))));
+        assert!(
+            items
+                .iter()
+                .any(|e| e.as_str().map_or(false, |s| s.contains("not found")))
+        );
     }
 
     // -- ChatOp unified-timeline emission tests -----------------------------
@@ -3175,7 +3396,9 @@ mod tests {
             &rt,
             &server,
             Mock::given(method("POST"))
-                .and(wiremock::matchers::path_regex("/_matrix/client/v3/rooms/.*/leave"))
+                .and(wiremock::matchers::path_regex(
+                    "/_matrix/client/v3/rooms/.*/leave",
+                ))
                 .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({}))),
         );
         let mut p = provider_for(&server);
@@ -3186,7 +3409,10 @@ mod tests {
         let entries = p.take_timeline_entries();
         assert_eq!(entries.len(), 1, "one ChatOp emitted");
         match &entries[0] {
-            TimelineEntry::ChatOp { op: ChatOpKind::LeaveRoom { room_id }, .. } => {
+            TimelineEntry::ChatOp {
+                op: ChatOpKind::LeaveRoom { room_id },
+                ..
+            } => {
                 assert_eq!(room_id, "!abc:x");
             }
             other => panic!("expected ChatOp::LeaveRoom, got {:?}", other),
@@ -3273,9 +3499,7 @@ mod tests {
 
 /// Register the chat client with the SDK factory and manifest registries.
 pub fn register() {
-    sicompass_sdk::register_provider_factory("chatclient", || {
-        Box::new(ChatClientProvider::new())
-    });
+    sicompass_sdk::register_provider_factory("chatclient", || Box::new(ChatClientProvider::new()));
     sicompass_sdk::register_builtin_manifest(
         sicompass_sdk::BuiltinManifest::new("chatclient", "chat client").with_settings(vec![
             sicompass_sdk::SettingDecl::text(
@@ -3290,18 +3514,8 @@ pub fn register() {
                 "chatAccessToken",
                 "",
             ),
-            sicompass_sdk::SettingDecl::text(
-                "chat client",
-                "username",
-                "chatUsername",
-                "",
-            ),
-            sicompass_sdk::SettingDecl::password(
-                "chat client",
-                "password",
-                "chatPassword",
-                "",
-            ),
+            sicompass_sdk::SettingDecl::text("chat client", "username", "chatUsername", ""),
+            sicompass_sdk::SettingDecl::password("chat client", "password", "chatPassword", ""),
             sicompass_sdk::SettingDecl::text("chat client", "email", "chatEmail", ""),
         ]),
     );

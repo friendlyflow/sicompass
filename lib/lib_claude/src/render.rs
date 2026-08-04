@@ -22,7 +22,10 @@ pub struct ToolUseRec {
 #[derive(Debug, Clone)]
 pub enum Turn {
     /// An assistant message: prose plus any tools it asked to run.
-    Assistant { texts: Vec<String>, tools: Vec<ToolUseRec> },
+    Assistant {
+        texts: Vec<String>,
+        tools: Vec<ToolUseRec>,
+    },
     /// A user message we sent into the session.
     User { text: String },
     /// The result of a tool the assistant ran.
@@ -77,7 +80,9 @@ impl Conversation {
     /// the event stream — the stream echoes our input back as a `user` event,
     /// which [`apply`](Self::apply) deliberately ignores to avoid double-render.
     pub fn push_user(&mut self, text: &str) {
-        self.turns.push(Turn::User { text: text.to_owned() });
+        self.turns.push(Turn::User {
+            text: text.to_owned(),
+        });
         self.busy = true;
         self.partial.clear();
     }
@@ -141,12 +146,8 @@ impl Conversation {
             StreamEvent::Partial(p) => match p.event {
                 PartialInner::ContentBlockStart { content_block } => {
                     self.partial.active = true;
-                    if content_block.get("type").and_then(|t| t.as_str())
-                        == Some("tool_use")
-                    {
-                        if let Some(name) =
-                            content_block.get("name").and_then(|n| n.as_str())
-                        {
+                    if content_block.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
+                        if let Some(name) = content_block.get("name").and_then(|n| n.as_str()) {
                             self.partial.tools.push(name.to_owned());
                         }
                     }
@@ -305,8 +306,7 @@ pub fn build(convo: &Conversation, history: &[String], pending_input: &str) -> V
                 is_error,
             } => {
                 let suffix = if *is_error { "  [error]" } else { "" };
-                let mut obj =
-                    FfonElement::new_obj(format!("tool result: {tool_name}{suffix}"));
+                let mut obj = FfonElement::new_obj(format!("tool result: {tool_name}{suffix}"));
                 if let Some(o) = obj.as_obj_mut() {
                     push_capped_lines(o, summary);
                 }
@@ -336,7 +336,11 @@ pub fn build(convo: &Conversation, history: &[String], pending_input: &str) -> V
         let turns = r.num_turns.unwrap_or(0);
         let secs = r.duration_ms.unwrap_or(0) as f64 / 1000.0;
         let cost = r.total_cost_usd.unwrap_or(0.0);
-        let label = if r.is_error { "result (error)" } else { "result" };
+        let label = if r.is_error {
+            "result (error)"
+        } else {
+            "result"
+        };
         out.push(FfonElement::new_str(format!(
             "{label}: {} — {} turns, {:.1}s, ${:.4}",
             r.subtype, turns, secs, cost
@@ -352,11 +356,12 @@ pub fn build(convo: &Conversation, history: &[String], pending_input: &str) -> V
     // --- live input slot (a `+i` Obj: an <input> whose children are the
     // recall history as <button> Strs, newest first — Enter on a button
     // fills the input). ---------------------------------------------------
-    let mut slot =
-        FfonElement::new_obj(format!("send to claude<input>{pending_input}</input>"));
+    let mut slot = FfonElement::new_obj(format!("send to claude<input>{pending_input}</input>"));
     if let Some(obj) = slot.as_obj_mut() {
         for prompt in history.iter().rev() {
-            obj.push(FfonElement::new_str(format!("<button>{prompt}</button>{prompt}")));
+            obj.push(FfonElement::new_str(format!(
+                "<button>{prompt}</button>{prompt}"
+            )));
         }
     }
     out.push(slot);
@@ -367,7 +372,7 @@ pub fn build(convo: &Conversation, history: &[String], pending_input: &str) -> V
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::{parse_lines, ContentField};
+    use crate::events::{ContentField, parse_lines};
 
     fn convo_from(lines: &[&str]) -> Conversation {
         let mut c = Conversation::default();
@@ -412,7 +417,11 @@ mod tests {
         ]);
         let last = c.turns.last().unwrap();
         match last {
-            Turn::ToolResult { tool_name, summary, is_error } => {
+            Turn::ToolResult {
+                tool_name,
+                summary,
+                is_error,
+            } => {
                 assert_eq!(tool_name, "Grep");
                 assert_eq!(summary, "3 matches");
                 assert!(!is_error);
@@ -457,7 +466,12 @@ mod tests {
             r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"line one\nline two"}]}}"#,
             r#"{"type":"result","subtype":"success","num_turns":1,"duration_ms":1200,"total_cost_usd":0.002}"#,
         ]);
-        c.turns.insert(0, Turn::User { text: "hello".to_owned() });
+        c.turns.insert(
+            0,
+            Turn::User {
+                text: "hello".to_owned(),
+            },
+        );
         let history = vec!["older".to_owned(), "hello".to_owned()];
         let out = build(&c, &history, "draft");
 
@@ -476,8 +490,14 @@ mod tests {
         assert!(slot.key.contains("<input>draft</input>"));
         assert!(!slot.key.contains("<radio>"));
         // history newest-first, each a `<button>` Str
-        assert_eq!(slot.children[0].as_str(), Some("<button>hello</button>hello"));
-        assert_eq!(slot.children[1].as_str(), Some("<button>older</button>older"));
+        assert_eq!(
+            slot.children[0].as_str(),
+            Some("<button>hello</button>hello")
+        );
+        assert_eq!(
+            slot.children[1].as_str(),
+            Some("<button>older</button>older")
+        );
     }
 
     #[test]
@@ -513,13 +533,22 @@ mod tests {
         let out = build(&c, &[], "");
         let res = out[0].as_obj().unwrap();
         assert_eq!(res.children.len(), TOOL_RESULT_LINE_CAP + 1);
-        assert!(res.children.last().unwrap().as_str().unwrap().contains("more lines"));
+        assert!(
+            res.children
+                .last()
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .contains("more lines")
+        );
     }
 
     #[test]
     fn stringify_content_handles_string_array_and_value() {
         assert_eq!(stringify_content(&Value::String("hi".into())), "hi");
-        let arr: Value = serde_json::from_str(r#"[{"type":"text","text":"a"},{"type":"text","text":"b"}]"#).unwrap();
+        let arr: Value =
+            serde_json::from_str(r#"[{"type":"text","text":"a"},{"type":"text","text":"b"}]"#)
+                .unwrap();
         assert_eq!(stringify_content(&arr), "a\nb");
         assert_eq!(stringify_content(&Value::Null), "");
     }

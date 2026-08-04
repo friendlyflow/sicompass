@@ -73,9 +73,7 @@ pub fn register_translations() {
         let _ = localize::register_bundle("de-BE", include_str!("../locales/de-BE.ftl"));
     });
 }
-use sicompass_sdk::placeholders::{
-    new_obj_with_i_placeholder, seed_i_placeholders, I_PLACEHOLDER,
-};
+use sicompass_sdk::placeholders::{I_PLACEHOLDER, new_obj_with_i_placeholder, seed_i_placeholders};
 use sicompass_sdk::platform;
 use sicompass_sdk::provider::Provider;
 use sicompass_sdk::timeline::{ImapOpKind, TimelineEntry};
@@ -107,9 +105,7 @@ impl MailBody {
     pub fn as_plain(&self) -> String {
         match self {
             MailBody::Text(s) => s.clone(),
-            MailBody::Ffon(elems) => {
-                sicompass_sdk::ffon::to_json_string(elems).unwrap_or_default()
-            }
+            MailBody::Ffon(elems) => sicompass_sdk::ffon::to_json_string(elems).unwrap_or_default(),
         }
     }
 }
@@ -120,11 +116,15 @@ pub(crate) fn flatten_ffon_to_text(elems: &[FfonElement]) -> String {
     for elem in elems {
         match elem {
             FfonElement::Str(s) => {
-                if !out.is_empty() { out.push('\n'); }
+                if !out.is_empty() {
+                    out.push('\n');
+                }
                 out.push_str(s);
             }
             FfonElement::Obj(o) => {
-                if !out.is_empty() { out.push('\n'); }
+                if !out.is_empty() {
+                    out.push('\n');
+                }
                 out.push_str(&o.key);
                 let children_text = flatten_ffon_to_text(&o.children);
                 if !children_text.is_empty() {
@@ -267,9 +267,17 @@ pub trait ImapBackend: Send {
     /// List all selectable folders with their SPECIAL-USE attributes.
     async fn list_folders(&mut self) -> Result<Vec<FolderInfo>, String>;
     /// Fetch headers (including flags) for the most recent `limit` messages in `folder`.
-    async fn list_messages(&mut self, folder: &str, limit: usize) -> Result<Vec<MessageHeader>, String>;
+    async fn list_messages(
+        &mut self,
+        folder: &str,
+        limit: usize,
+    ) -> Result<Vec<MessageHeader>, String>;
     /// Fetch the full content of a message by UID.
-    async fn fetch_message(&mut self, folder: &str, uid: u32) -> Result<Option<EmailMessage>, String>;
+    async fn fetch_message(
+        &mut self,
+        folder: &str,
+        uid: u32,
+    ) -> Result<Option<EmailMessage>, String>;
     /// Fetch a message by its Message-ID header via IMAP SEARCH.
     async fn fetch_message_by_message_id(
         &mut self,
@@ -342,19 +350,29 @@ fn load_settings_json(path: &std::path::Path) -> Option<serde_json::Value> {
     }
 }
 
-fn ensure_email_section(root: &mut serde_json::Value) -> &mut serde_json::Map<String, serde_json::Value> {
+fn ensure_email_section(
+    root: &mut serde_json::Value,
+) -> &mut serde_json::Map<String, serde_json::Value> {
     let obj = root.as_object_mut().expect("settings root is object");
     if !obj.contains_key("email client") {
-        obj.insert("email client".to_owned(), serde_json::Value::Object(Default::default()));
+        obj.insert(
+            "email client".to_owned(),
+            serde_json::Value::Object(Default::default()),
+        );
     }
-    obj.get_mut("email client").expect("just inserted").as_object_mut().expect("email client is object")
+    obj.get_mut("email client")
+        .expect("just inserted")
+        .as_object_mut()
+        .expect("email client is object")
 }
 
 /// Write `value` as pretty JSON to `path` atomically. Routes through the SDK's
 /// `atomic_write`, whose temp file is PID-keyed, so concurrent writers (e.g.
 /// one email provider instance per tab) don't collide on a shared `.tmp` path.
 fn atomic_write_json(path: &std::path::Path, value: &serde_json::Value) {
-    let Ok(json) = serde_json::to_string_pretty(value) else { return };
+    let Ok(json) = serde_json::to_string_pretty(value) else {
+        return;
+    };
     let _ = platform::atomic_write(path, &json);
 }
 
@@ -610,10 +628,25 @@ enum MessageState {
 /// Modelled as data rather than a closure so the spawn site stays one function
 /// and each variant carries owned arguments across the task boundary.
 enum BgOp {
-    SetFlags { folder: String, uid: u32, add: Vec<String>, remove: Vec<String> },
-    Move { folder: String, uid: u32, dest: String },
-    Expunge { folder: String, uid: u32 },
-    Append { folder: String, message: Vec<u8> },
+    SetFlags {
+        folder: String,
+        uid: u32,
+        add: Vec<String>,
+        remove: Vec<String>,
+    },
+    Move {
+        folder: String,
+        uid: u32,
+        dest: String,
+    },
+    Expunge {
+        folder: String,
+        uid: u32,
+    },
+    Append {
+        folder: String,
+        message: Vec<u8>,
+    },
 }
 
 impl BgOp {
@@ -726,7 +759,12 @@ impl EmailClientProvider {
         crate::connection::runtime().spawn(async move {
             let mut guard = imap.lock().await;
             let result = match &op {
-                BgOp::SetFlags { folder, uid, add, remove } => {
+                BgOp::SetFlags {
+                    folder,
+                    uid,
+                    add,
+                    remove,
+                } => {
                     let add_refs: Vec<&str> = add.iter().map(String::as_str).collect();
                     let remove_refs: Vec<&str> = remove.iter().map(String::as_str).collect();
                     guard.set_flags(folder, *uid, &add_refs, &remove_refs).await
@@ -780,9 +818,11 @@ impl EmailClientProvider {
                     }
                     Ok(None) => return MessageState::Missing,
                     Err(e) => {
-                        self.bg_errors.lock().unwrap().push(format!("IMAP error: {e}"));
-                        self.message_fetch_failed =
-                            Some(((real_folder.to_owned(), uid), e));
+                        self.bg_errors
+                            .lock()
+                            .unwrap()
+                            .push(format!("IMAP error: {e}"));
+                        self.message_fetch_failed = Some(((real_folder.to_owned(), uid), e));
                         // Fall through: a stale body beats an empty screen.
                     }
                 }
@@ -810,7 +850,11 @@ impl EmailClientProvider {
         }
 
         // Nothing usable yet — start (or keep waiting on) the fetch.
-        if self.message_fetch_key.as_ref().map(|(f, u)| (f.as_str(), *u)) != Some((real_folder, uid))
+        if self
+            .message_fetch_key
+            .as_ref()
+            .map(|(f, u)| (f.as_str(), *u))
+            != Some((real_folder, uid))
         {
             self.spawn_message_fetch(real_folder, uid);
         }
@@ -897,7 +941,9 @@ impl EmailClientProvider {
     }
 
     fn config_path(&self) -> Option<std::path::PathBuf> {
-        self.config_path_override.clone().or_else(|| platform::main_config_path())
+        self.config_path_override
+            .clone()
+            .or_else(|| platform::main_config_path())
     }
 
     /// Inject an IMAP backend (used in tests and production setup).
@@ -969,7 +1015,11 @@ impl EmailClientProvider {
     /// because the current path may still carry old tags after a flag change updates the cache.
     fn lookup_uid(&self, label: &str) -> Option<u32> {
         // Fast path: exact label match.
-        if let Some(h) = self.message_cache.iter().find(|h| message_label(h) == label) {
+        if let Some(h) = self
+            .message_cache
+            .iter()
+            .find(|h| message_label(h) == label)
+        {
             return Some(h.uid);
         }
         // Fallback: compare against the bare "Subject — From" body, ignoring tag prefixes.
@@ -1002,9 +1052,21 @@ impl EmailClientProvider {
         };
         let label = if is_undo { "undo" } else { "redo" };
         match op {
-            ImapOpKind::Trash { msg_id, src_folder, trash_folder }
-            | ImapOpKind::Archive { msg_id, src_folder, archive_folder: trash_folder }
-            | ImapOpKind::Move { msg_id, src_folder, dst_folder: trash_folder } => {
+            ImapOpKind::Trash {
+                msg_id,
+                src_folder,
+                trash_folder,
+            }
+            | ImapOpKind::Archive {
+                msg_id,
+                src_folder,
+                archive_folder: trash_folder,
+            }
+            | ImapOpKind::Move {
+                msg_id,
+                src_folder,
+                dst_folder: trash_folder,
+            } => {
                 let (search_in, move_to): (&str, &str) = if is_undo {
                     (trash_folder.as_str(), src_folder.as_str())
                 } else {
@@ -1023,7 +1085,8 @@ impl EmailClientProvider {
                         let mut args = localize::Args::new();
                         args.set("label", label.to_owned());
                         args.set("searchin", search_in.to_owned());
-                        *error = localize::t_args("emailclient-error-imap-move-no-longer-in", &args);
+                        *error =
+                            localize::t_args("emailclient-error-imap-move-no-longer-in", &args);
                     }
                     Err(e) => {
                         let mut args = localize::Args::new();
@@ -1035,7 +1098,12 @@ impl EmailClientProvider {
                 self.envelope_cache = None;
                 self.message_cache.clear();
             }
-            ImapOpKind::SetSeen { msg_uid, folder, prev, new } => {
+            ImapOpKind::SetSeen {
+                msg_uid,
+                folder,
+                prev,
+                new,
+            } => {
                 let target = if is_undo { *prev } else { *new };
                 let (add, remove): (&[&str], &[&str]) = if target {
                     (&["\\Seen"], &[])
@@ -1054,7 +1122,12 @@ impl EmailClientProvider {
                     self.envelope_cache = None;
                 }
             }
-            ImapOpKind::SetFlagged { msg_uid, folder, prev, new } => {
+            ImapOpKind::SetFlagged {
+                msg_uid,
+                folder,
+                prev,
+                new,
+            } => {
                 let target = if is_undo { *prev } else { *new };
                 let (add, remove): (&[&str], &[&str]) = if target {
                     (&["\\Flagged"], &[])
@@ -1075,7 +1148,6 @@ impl EmailClientProvider {
             }
         }
     }
-
 
     /// Return the (real_folder, uid) for the message identified by `elem_key`.
     ///
@@ -1145,23 +1217,49 @@ impl EmailClientProvider {
 
     /// Persist server connection fields (IMAP URL, SMTP URL, username) to settings.json.
     fn save_server_config(&self) {
-        let Some(path) = self.config_path() else { return };
-        let Some(mut root) = load_settings_json(&path) else { return };
+        let Some(path) = self.config_path() else {
+            return;
+        };
+        let Some(mut root) = load_settings_json(&path) else {
+            return;
+        };
         let section = ensure_email_section(&mut root);
-        section.insert("emailImapUrl".to_owned(), self.config.imap_url.clone().into());
-        section.insert("emailSmtpUrl".to_owned(), self.config.smtp_url.clone().into());
-        section.insert("emailUsername".to_owned(), self.config.username.clone().into());
+        section.insert(
+            "emailImapUrl".to_owned(),
+            self.config.imap_url.clone().into(),
+        );
+        section.insert(
+            "emailSmtpUrl".to_owned(),
+            self.config.smtp_url.clone().into(),
+        );
+        section.insert(
+            "emailUsername".to_owned(),
+            self.config.username.clone().into(),
+        );
         atomic_write_json(&path, &root);
     }
 
     /// Persist OAuth tokens to settings.json.
     fn save_oauth_tokens(&self) {
-        let Some(path) = self.config_path() else { return };
-        let Some(mut root) = load_settings_json(&path) else { return };
+        let Some(path) = self.config_path() else {
+            return;
+        };
+        let Some(mut root) = load_settings_json(&path) else {
+            return;
+        };
         let section = ensure_email_section(&mut root);
-        section.insert("emailOAuthAccessToken".to_owned(), self.config.oauth_access_token.clone().into());
-        section.insert("emailOAuthRefreshToken".to_owned(), self.config.oauth_refresh_token.clone().into());
-        section.insert("emailTokenExpiry".to_owned(), self.config.token_expiry.into());
+        section.insert(
+            "emailOAuthAccessToken".to_owned(),
+            self.config.oauth_access_token.clone().into(),
+        );
+        section.insert(
+            "emailOAuthRefreshToken".to_owned(),
+            self.config.oauth_refresh_token.clone().into(),
+        );
+        section.insert(
+            "emailTokenExpiry".to_owned(),
+            self.config.token_expiry.into(),
+        );
         atomic_write_json(&path, &root);
     }
 
@@ -1296,7 +1394,8 @@ impl EmailClientProvider {
                 let mut compose_inserted = false;
                 for info in real_infos {
                     let display = folder_display_name(&info.name).to_owned();
-                    self.folder_mappings.push((display.clone(), info.name.clone()));
+                    self.folder_mappings
+                        .push((display.clone(), info.name.clone()));
                     items.push(FfonElement::new_obj(display.clone()));
                     // Insert compose right after INBOX.
                     if !compose_inserted && info.name.to_uppercase() == "INBOX" {
@@ -1431,7 +1530,10 @@ impl EmailClientProvider {
 
         // Use the parallel INBOX prefetch result when available.
         let prefetch = if real_folder == "INBOX" {
-            self.inbox_prefetch_result.lock().ok().and_then(|mut g| g.take())
+            self.inbox_prefetch_result
+                .lock()
+                .ok()
+                .and_then(|mut g| g.take())
         } else {
             None
         };
@@ -1455,7 +1557,10 @@ impl EmailClientProvider {
                 }
                 _ => {
                     let want = (real_folder.as_str(), limit);
-                    let have = self.envelope_fetch_key.as_ref().map(|(f, l)| (f.as_str(), *l));
+                    let have = self
+                        .envelope_fetch_key
+                        .as_ref()
+                        .map(|(f, l)| (f.as_str(), *l));
                     if have != Some(want) {
                         self.spawn_envelope_fetch(&real_folder, limit);
                     }
@@ -1681,7 +1786,11 @@ impl EmailClientProvider {
         while !p.is_empty() && count < 10 {
             p = p.trim_start();
             if !p.starts_with('<') {
-                if let Some(rest) = p.get(1..) { p = rest; } else { break; }
+                if let Some(rest) = p.get(1..) {
+                    p = rest;
+                } else {
+                    break;
+                }
                 continue;
             }
             let end = match p.find('>') {
@@ -1713,10 +1822,7 @@ impl EmailClientProvider {
                     HistoryItem::FetchUid(uid) => {
                         let folder = folders.first().cloned().unwrap_or_default();
                         if let Ok(Some(msg)) = guard.fetch_message(&folder, uid).await {
-                            labels.push(format!(
-                                "From: {} — Subject: {}",
-                                msg.from, msg.subject
-                            ));
+                            labels.push(format!("From: {} — Subject: {}", msg.from, msg.subject));
                         }
                     }
                     HistoryItem::FetchMessageId(msg_id) => {
@@ -1724,10 +1830,8 @@ impl EmailClientProvider {
                             if let Ok(Some(msg)) =
                                 guard.fetch_message_by_message_id(folder, &msg_id).await
                             {
-                                labels.push(format!(
-                                    "From: {} — Subject: {}",
-                                    msg.from, msg.subject
-                                ));
+                                labels
+                                    .push(format!("From: {} — Subject: {}", msg.from, msg.subject));
                                 break;
                             }
                         }
@@ -1812,11 +1916,14 @@ impl EmailClientProvider {
                             } else if let Some(ref mut imap) = self.imap {
                                 // Not in the current-folder cache — fetch by UID.
                                 let uid_str = other_uid.to_string();
-                                if let Ok(Some(msg)) = block_on(imap.fetch_message(&folder, other_uid)) {
+                                if let Ok(Some(msg)) =
+                                    block_on(imap.fetch_message(&folder, other_uid))
+                                {
                                     let _ = uid_str;
-                                    items.push(FfonElement::new_obj(
-                                        format!("From: {} — Subject: {}", msg.from, msg.subject),
-                                    ));
+                                    items.push(FfonElement::new_obj(format!(
+                                        "From: {} — Subject: {}",
+                                        msg.from, msg.subject
+                                    )));
                                 }
                             }
                         }
@@ -1850,7 +1957,11 @@ impl EmailClientProvider {
         while !p.is_empty() && count < 10 {
             p = p.trim_start();
             if !p.starts_with('<') {
-                if let Some(rest) = p.get(1..) { p = rest; } else { break; }
+                if let Some(rest) = p.get(1..) {
+                    p = rest;
+                } else {
+                    break;
+                }
                 continue;
             }
             let end = match p.find('>') {
@@ -1862,7 +1973,9 @@ impl EmailClientProvider {
 
             'search: for search_folder in &search_folders {
                 if let Some(ref mut imap) = self.imap {
-                    if let Ok(Some(msg)) = block_on(imap.fetch_message_by_message_id(search_folder, msg_id)) {
+                    if let Ok(Some(msg)) =
+                        block_on(imap.fetch_message_by_message_id(search_folder, msg_id))
+                    {
                         let key = format!("From: {} — Subject: {}", msg.from, msg.subject);
                         items.push(FfonElement::new_obj(key));
                         count += 1;
@@ -1920,7 +2033,10 @@ impl EmailClientProvider {
 
         let mut items = vec![];
         // Static "From:" line.
-        items.push(FfonElement::new_str(format!("From: {}", self.config.username)));
+        items.push(FfonElement::new_str(format!(
+            "From: {}",
+            self.config.username
+        )));
         items.push(FfonElement::new_str(format!(
             "To: <input>{}</input>",
             self.compose.draft.to
@@ -1939,7 +2055,11 @@ impl EmailClientProvider {
         )));
 
         // Attachments: list current files, then an empty input for adding more.
-        let mut attach_children: Vec<FfonElement> = self.compose.draft.attachments.iter()
+        let mut attach_children: Vec<FfonElement> = self
+            .compose
+            .draft
+            .attachments
+            .iter()
             .map(|p| FfonElement::new_str(p.clone()))
             .collect();
         attach_children.push(FfonElement::new_str("<input></input>".to_owned()));
@@ -1959,8 +2079,10 @@ impl EmailClientProvider {
         items.push(FfonElement::new_str("<button>send</button>Send".to_owned()));
 
         // Add History link for reply/reply-all if there are refs.
-        if matches!(self.compose.mode, ComposeMode::Reply | ComposeMode::ReplyAll)
-            && !self.history_refs.is_empty()
+        if matches!(
+            self.compose.mode,
+            ComposeMode::Reply | ComposeMode::ReplyAll
+        ) && !self.history_refs.is_empty()
         {
             items.push(FfonElement::new_obj("History"));
         }
@@ -1981,7 +2103,10 @@ impl EmailClientProvider {
     }
 
     fn split_addrs(s: &str) -> Vec<String> {
-        s.split(',').map(|a| a.trim().to_owned()).filter(|a| !a.is_empty()).collect()
+        s.split(',')
+            .map(|a| a.trim().to_owned())
+            .filter(|a| !a.is_empty())
+            .collect()
     }
 
     fn send_draft(&mut self) -> Result<(), String> {
@@ -2000,26 +2125,44 @@ impl EmailClientProvider {
         let body = normalize_body_for_send(&self.compose.draft.body);
 
         // Read attachment files. Files that cannot be read are silently skipped.
-        let attachment_data: Vec<(String, Vec<u8>)> = self.compose.draft.attachments.iter()
+        let attachment_data: Vec<(String, Vec<u8>)> = self
+            .compose
+            .draft
+            .attachments
+            .iter()
             .filter_map(|path| {
                 let bytes = std::fs::read(path).ok()?;
                 let name = std::path::Path::new(path)
-                    .file_name()?.to_string_lossy().into_owned();
+                    .file_name()?
+                    .to_string_lossy()
+                    .into_owned();
                 Some((name, bytes))
             })
             .collect();
-        let attachment_refs: Vec<(&str, &[u8])> = attachment_data.iter()
+        let attachment_refs: Vec<(&str, &[u8])> = attachment_data
+            .iter()
             .map(|(n, b)| (n.as_str(), b.as_slice()))
             .collect();
 
-        let raw = block_on(smtp.send(&from, &to_r, &cc_r, &bcc_r, &subject, &body, &attachment_refs))?;
+        let raw = block_on(smtp.send(
+            &from,
+            &to_r,
+            &cc_r,
+            &bcc_r,
+            &subject,
+            &body,
+            &attachment_refs,
+        ))?;
 
         // APPEND to Sent folder (skip for Gmail — its SMTP server auto-saves).
         let skip_append = self.config.smtp_url.contains("smtp.gmail.com");
         if !skip_append {
             if let Some(sent) = self.special_folders.sent.clone() {
                 if self.bg_enabled() {
-                    self.spawn_bg_op(BgOp::Append { folder: sent, message: raw.clone() });
+                    self.spawn_bg_op(BgOp::Append {
+                        folder: sent,
+                        message: raw.clone(),
+                    });
                 } else if let Some(ref mut imap) = self.imap {
                     let _ = block_on(imap.append(&sent, &raw));
                 }
@@ -2051,7 +2194,10 @@ impl EmailClientProvider {
             .iter()
             .filter_map(|path| {
                 let bytes = std::fs::read(path).ok()?;
-                let name = std::path::Path::new(path).file_name()?.to_string_lossy().into_owned();
+                let name = std::path::Path::new(path)
+                    .file_name()?
+                    .to_string_lossy()
+                    .into_owned();
                 Some((name, bytes))
             })
             .collect();
@@ -2067,10 +2213,20 @@ impl EmailClientProvider {
             let to_r: Vec<&str> = to_v.iter().map(String::as_str).collect();
             let cc_r: Vec<&str> = cc_v.iter().map(String::as_str).collect();
             let bcc_r: Vec<&str> = bcc_v.iter().map(String::as_str).collect();
-            let attachment_refs: Vec<(&str, &[u8])> =
-                attachment_data.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect();
+            let attachment_refs: Vec<(&str, &[u8])> = attachment_data
+                .iter()
+                .map(|(n, b)| (n.as_str(), b.as_slice()))
+                .collect();
             let result = smtp
-                .send(&from, &to_r, &cc_r, &bcc_r, &subject, &body, &attachment_refs)
+                .send(
+                    &from,
+                    &to_r,
+                    &cc_r,
+                    &bcc_r,
+                    &subject,
+                    &body,
+                    &attachment_refs,
+                )
                 .await;
             *slot.lock().unwrap() = Some(result);
             inflight.store(false, Ordering::Release);
@@ -2091,7 +2247,10 @@ impl EmailClientProvider {
                 // APPEND to Sent (skip for Gmail — its SMTP server auto-saves).
                 if !self.config.smtp_url.contains("smtp.gmail.com") {
                     if let Some(sent) = self.special_folders.sent.clone() {
-                        self.spawn_bg_op(BgOp::Append { folder: sent, message: raw });
+                        self.spawn_bg_op(BgOp::Append {
+                            folder: sent,
+                            message: raw,
+                        });
                     }
                 }
             }
@@ -2104,7 +2263,10 @@ impl EmailClientProvider {
                 }
                 if let Some(drafts_folder) = self.special_folders.drafts.clone() {
                     let bytes = build_draft_bytes(&self.compose.draft, &self.config.username);
-                    self.spawn_bg_op(BgOp::Append { folder: drafts_folder, message: bytes });
+                    self.spawn_bg_op(BgOp::Append {
+                        folder: drafts_folder,
+                        message: bytes,
+                    });
                 }
                 self.outbox_pending = true;
             }
@@ -2258,10 +2420,18 @@ impl EmailClientProvider {
 fn build_draft_bytes(draft: &Draft, from: &str) -> Vec<u8> {
     let mut msg = String::new();
     msg.push_str(&format!("From: {}\r\n", from));
-    if !draft.to.is_empty() { msg.push_str(&format!("To: {}\r\n", draft.to)); }
-    if !draft.cc.is_empty() { msg.push_str(&format!("Cc: {}\r\n", draft.cc)); }
-    if !draft.bcc.is_empty() { msg.push_str(&format!("Bcc: {}\r\n", draft.bcc)); }
-    if !draft.subject.is_empty() { msg.push_str(&format!("Subject: {}\r\n", draft.subject)); }
+    if !draft.to.is_empty() {
+        msg.push_str(&format!("To: {}\r\n", draft.to));
+    }
+    if !draft.cc.is_empty() {
+        msg.push_str(&format!("Cc: {}\r\n", draft.cc));
+    }
+    if !draft.bcc.is_empty() {
+        msg.push_str(&format!("Bcc: {}\r\n", draft.bcc));
+    }
+    if !draft.subject.is_empty() {
+        msg.push_str(&format!("Subject: {}\r\n", draft.subject));
+    }
     msg.push_str("MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n");
     let body_text = match &draft.body {
         MailBody::Text(s) => s.clone(),
@@ -2280,12 +2450,19 @@ fn build_draft_bytes(draft: &Draft, from: &str) -> Vec<u8> {
 /// Plain `"alice@example.com"` → `"alice@example.com"`.
 fn extract_email_addr(s: &str) -> &str {
     if let (Some(lt), Some(gt)) = (s.find('<'), s.rfind('>')) {
-        if lt < gt { return s[lt + 1..gt].trim(); }
+        if lt < gt {
+            return s[lt + 1..gt].trim();
+        }
     }
     s.trim()
 }
 
-fn prefill_compose(compose: &mut ComposeState, msg: &EmailMessage, mode: ComposeMode, username: &str) {
+fn prefill_compose(
+    compose: &mut ComposeState,
+    msg: &EmailMessage,
+    mode: ComposeMode,
+    username: &str,
+) {
     match mode {
         ComposeMode::Reply | ComposeMode::ReplyAll => {
             if matches!(mode, ComposeMode::Reply) {
@@ -2321,9 +2498,8 @@ fn prefill_compose(compose: &mut ComposeState, msg: &EmailMessage, mode: Compose
                 // FFON-origin: preserve structure. Flat I_PLACEHOLDER +
                 // attribution leaf + seeded original elements.
                 MailBody::Ffon(orig) => {
-                    let attribution = format!(
-                        "<input>On {} <{}> wrote:</input>", msg.date, msg.from
-                    );
+                    let attribution =
+                        format!("<input>On {} <{}> wrote:</input>", msg.date, msg.from);
                     let mut elems = vec![
                         FfonElement::new_str(I_PLACEHOLDER.to_owned()),
                         FfonElement::new_str(attribution),
@@ -2350,14 +2526,18 @@ fn prefill_compose(compose: &mut ComposeState, msg: &EmailMessage, mode: Compose
                         "---------- Forwarded message ----------\nFrom: {}\nTo: {}\nDate: {}\nSubject: {}\n\n{}",
                         msg.from, msg.to, msg.date, msg.subject, s
                     );
-                    if !draft.ends_with('\n') { draft.push('\n'); }
+                    if !draft.ends_with('\n') {
+                        draft.push('\n');
+                    }
                     MailBody::Text(draft)
                 }
                 // FFON-origin: preserve structure. Flat I_PLACEHOLDER +
                 // forwarded-header leaves + seeded original elements.
                 MailBody::Ffon(orig) => {
                     let fwd_header: Vec<FfonElement> = vec![
-                        FfonElement::new_str("<input>---------- Forwarded message ----------</input>".to_owned()),
+                        FfonElement::new_str(
+                            "<input>---------- Forwarded message ----------</input>".to_owned(),
+                        ),
                         FfonElement::new_str(format!("<input>From: {}</input>", msg.from)),
                         FfonElement::new_str(format!("<input>To: {}</input>", msg.to)),
                         FfonElement::new_str(format!("<input>Date: {}</input>", msg.date)),
@@ -2402,11 +2582,17 @@ fn build_message_view(msg: &EmailMessage) -> Vec<FfonElement> {
     if !msg.attachments.is_empty() {
         let mut attach_obj = FfonElement::new_obj("Attachments");
         if let Some(obj) = attach_obj.as_obj_mut() {
-            obj.children = msg.attachments.iter()
-                .map(|a| FfonElement::new_str(format!(
-                    "{} ({}, {} bytes)",
-                    a.filename, a.content_type, a.data.len()
-                )))
+            obj.children = msg
+                .attachments
+                .iter()
+                .map(|a| {
+                    FfonElement::new_str(format!(
+                        "{} ({}, {} bytes)",
+                        a.filename,
+                        a.content_type,
+                        a.data.len()
+                    ))
+                })
                 .collect();
         }
         items.push(attach_obj);
@@ -2450,8 +2636,9 @@ fn body_from_ffon_children(children: &[FfonElement]) -> MailBody {
 
 fn body_to_compose_children(body: &MailBody) -> Vec<FfonElement> {
     match body {
-        MailBody::Text(s) if !s.is_empty() =>
-            vec![FfonElement::new_str(format!("<input>{s}</input>"))],
+        MailBody::Text(s) if !s.is_empty() => {
+            vec![FfonElement::new_str(format!("<input>{s}</input>"))]
+        }
         MailBody::Text(_) => vec![],
         MailBody::Ffon(elems) => elems.clone(),
     }
@@ -2486,12 +2673,16 @@ fn update_body_elems(elems: &mut Vec<FfonElement>, old_content: &str, new_conten
         if let Some(idx) = pos {
             elems[idx] = new_obj_with_i_placeholder(format!("<input>{obj_key}</input>"));
         } else {
-            elems.push(new_obj_with_i_placeholder(format!("<input>{obj_key}</input>")));
+            elems.push(new_obj_with_i_placeholder(format!(
+                "<input>{obj_key}</input>"
+            )));
         }
     } else if let Some(idx) = pos {
         elems[idx] = FfonElement::new_str(format!("<input>{new_content}</input>"));
     } else {
-        elems.push(FfonElement::new_str(format!("<input>{new_content}</input>")));
+        elems.push(FfonElement::new_str(format!(
+            "<input>{new_content}</input>"
+        )));
     }
 }
 
@@ -2574,7 +2765,9 @@ fn update_body_leaf(body: &mut MailBody, old_content: &str, new_content: &str) {
                 } else {
                     vec![FfonElement::new_str(format!("<input>{existing}</input>"))]
                 };
-                elems.push(new_obj_with_i_placeholder(format!("<input>{obj_key}</input>")));
+                elems.push(new_obj_with_i_placeholder(format!(
+                    "<input>{obj_key}</input>"
+                )));
                 *body = MailBody::Ffon(elems);
             } else if old_content.is_empty() && !s.is_empty() {
                 // A new element is being inserted alongside existing content — upgrade to Ffon.
@@ -2618,7 +2811,8 @@ fn remove_at(elems: &mut Vec<FfonElement>, path: &[usize]) -> bool {
             Some(FfonElement::Obj(o)) => {
                 let removed = remove_at(&mut o.children, rest);
                 if removed && o.children.is_empty() {
-                    o.children.push(FfonElement::new_str(I_PLACEHOLDER.to_owned()));
+                    o.children
+                        .push(FfonElement::new_str(I_PLACEHOLDER.to_owned()));
                 }
                 removed
             }
@@ -2694,7 +2888,9 @@ fn normalize_body_for_send(body: &MailBody) -> MailBody {
             // Try FFON detection.
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(s) {
                 if sicompass_sdk::ffon::is_ffon(&v) {
-                    if let Ok(elems) = serde_json::from_value::<Vec<sicompass_sdk::ffon::FfonElement>>(v) {
+                    if let Ok(elems) =
+                        serde_json::from_value::<Vec<sicompass_sdk::ffon::FfonElement>>(v)
+                    {
                         return MailBody::Ffon(elems);
                     }
                 }
@@ -2766,13 +2962,17 @@ impl Default for EmailClientProvider {
 
 #[async_trait::async_trait]
 impl Provider for EmailClientProvider {
-    fn name(&self) -> &str { "emailclient" }
+    fn name(&self) -> &str {
+        "emailclient"
+    }
     fn display_name(&self) -> String {
         register_translations();
         localize::t("emailclient-display-name")
     }
 
-    fn no_cache(&self) -> bool { true }
+    fn no_cache(&self) -> bool {
+        true
+    }
 
     fn needs_refresh(&self) -> bool {
         self.needs_refresh_flag.load(Ordering::Relaxed)
@@ -2791,10 +2991,18 @@ impl Provider for EmailClientProvider {
         self.envelope_cache_folder.clear();
 
         // Load config from ~/.config/sicompass/settings.json.
-        let Some(path) = self.config_path() else { return };
-        let Ok(content) = std::fs::read_to_string(&path) else { return };
-        let Ok(root) = serde_json::from_str::<serde_json::Value>(&content) else { return };
-        let Some(section) = root.get("email client").and_then(|v| v.as_object()) else { return };
+        let Some(path) = self.config_path() else {
+            return;
+        };
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            return;
+        };
+        let Ok(root) = serde_json::from_str::<serde_json::Value>(&content) else {
+            return;
+        };
+        let Some(section) = root.get("email client").and_then(|v| v.as_object()) else {
+            return;
+        };
 
         macro_rules! load_str {
             ($key:literal, $field:expr_2021) => {
@@ -2829,11 +3037,17 @@ impl Provider for EmailClientProvider {
         if !self.ensure_fresh_token_async() {
             return vec![FfonElement::new_str("Loading…".to_owned())];
         }
-        let segs = self.path_segments().iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let segs = self
+            .path_segments()
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>();
 
         // If the last path segment is "Body:" (possibly with content) and we're in a compose
         // context, return the body children directly — any other routing would misroute.
-        let in_compose = segs.iter().any(|s| matches!(s.as_str(), "compose" | "reply" | "reply all" | "forward"));
+        let in_compose = segs
+            .iter()
+            .any(|s| matches!(s.as_str(), "compose" | "reply" | "reply all" | "forward"));
         if in_compose && segs.last().map_or(false, |s| s.starts_with("Body:")) {
             return body_to_compose_children(&self.compose.draft.body);
         }
@@ -2851,7 +3065,10 @@ impl Provider for EmailClientProvider {
             2 => {
                 let folder = segs[0].clone();
                 let msg_label = segs[1].clone();
-                if matches!(msg_label.as_str(), "compose" | "reply" | "reply all" | "forward") {
+                if matches!(
+                    msg_label.as_str(),
+                    "compose" | "reply" | "reply all" | "forward"
+                ) {
                     self.build_compose_view()
                 } else {
                     self.build_message(&folder, &msg_label)
@@ -2880,7 +3097,11 @@ impl Provider for EmailClientProvider {
             "reply" | "reply all" | "forward" if segs_len == 2 => {
                 // /folder/message → /folder/message/reply
                 // Store context for pre-fill.
-                let segs = self.path_segments().iter().map(|s| s.to_string()).collect::<Vec<_>>();
+                let segs = self
+                    .path_segments()
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>();
                 let folder_display = segs[0].clone();
                 let msg_label = segs[1].clone();
                 let real_folder = self.lookup_folder(&folder_display).to_owned();
@@ -2923,7 +3144,10 @@ impl Provider for EmailClientProvider {
                 if let Some(drafts_folder) = self.special_folders.drafts.clone() {
                     let bytes = build_draft_bytes(&self.compose.draft, &self.config.username);
                     if self.bg_enabled() {
-                        self.spawn_bg_op(BgOp::Append { folder: drafts_folder, message: bytes });
+                        self.spawn_bg_op(BgOp::Append {
+                            folder: drafts_folder,
+                            message: bytes,
+                        });
                     } else if let Some(ref mut imap) = self.imap {
                         let _ = block_on(imap.append(&drafts_folder, &bytes));
                     }
@@ -2939,7 +3163,9 @@ impl Provider for EmailClientProvider {
         }
     }
 
-    fn current_path(&self) -> &str { &self.current_path }
+    fn current_path(&self) -> &str {
+        &self.current_path
+    }
 
     fn set_current_path(&mut self, path: &str) {
         self.current_path = path.to_owned();
@@ -2947,7 +3173,8 @@ impl Provider for EmailClientProvider {
 
     fn commit_edit(&mut self, old_content: &str, new_content: &str) -> bool {
         // Collect path segments as owned strings so we can freely mutate `self` later.
-        let segs: Vec<String> = self.current_path
+        let segs: Vec<String> = self
+            .current_path
             .trim_start_matches('/')
             .split('/')
             .filter(|s| !s.is_empty())
@@ -2993,9 +3220,8 @@ impl Provider for EmailClientProvider {
                     // Top-level body edit — same as before.
                     update_body_leaf(&mut self.compose.draft.body, old_content, new_content);
                     // Live format detection — one-way promotion only (never collapses Ffon).
-                    let promoted = detect_body_format_live(
-                        std::mem::take(&mut self.compose.draft.body),
-                    );
+                    let promoted =
+                        detect_body_format_live(std::mem::take(&mut self.compose.draft.body));
                     self.compose.draft.body = promoted;
                     // Re-sync variant with structural shape.
                     renormalize_body_variant(&mut self.compose.draft.body);
@@ -3005,12 +3231,9 @@ impl Provider for EmailClientProvider {
                     // and apply the mutation there.  No format promotion / label sync:
                     // the body is already Ffon (you can only navigate into nested Objs when
                     // the body is Ffon), and the path label doesn't change.
-                    let sub_segs_ref: Vec<&str> =
-                        sub_segs.iter().map(|s| s.as_str()).collect();
+                    let sub_segs_ref: Vec<&str> = sub_segs.iter().map(|s| s.as_str()).collect();
                     if let MailBody::Ffon(ref mut elems) = self.compose.draft.body {
-                        if let Some(target) =
-                            body_elems_at_sub_path_mut(elems, &sub_segs_ref)
-                        {
+                        if let Some(target) = body_elems_at_sub_path_mut(elems, &sub_segs_ref) {
                             update_body_elems(target, old_content, new_content);
                         }
                     }
@@ -3041,9 +3264,13 @@ impl Provider for EmailClientProvider {
                         self.error_message = Some(format!("send failed: {e} — will retry"));
                         // Save draft to \Drafts so it survives a restart.
                         if let Some(drafts_folder) = self.special_folders.drafts.clone() {
-                            let bytes = build_draft_bytes(&self.compose.draft, &self.config.username);
+                            let bytes =
+                                build_draft_bytes(&self.compose.draft, &self.config.username);
                             if self.bg_enabled() {
-                                self.spawn_bg_op(BgOp::Append { folder: drafts_folder, message: bytes });
+                                self.spawn_bg_op(BgOp::Append {
+                                    folder: drafts_folder,
+                                    message: bytes,
+                                });
                             } else if let Some(ref mut imap) = self.imap {
                                 let _ = block_on(imap.append(&drafts_folder, &bytes));
                             }
@@ -3131,7 +3358,9 @@ impl Provider for EmailClientProvider {
         let mut results = Vec::new();
         for h in &self.message_cache {
             // Look up the folder display name via the reverse of folder_mappings.
-            let folder_display = self.folder_mappings.iter()
+            let folder_display = self
+                .folder_mappings
+                .iter()
                 .find(|(_, real)| real == &self.envelope_cache_folder)
                 .map(|(d, _)| d.as_str())
                 .unwrap_or(&self.envelope_cache_folder);
@@ -3183,15 +3412,16 @@ impl Provider for EmailClientProvider {
 
     fn fetch_subtree_parent_key(&mut self) -> Option<String> {
         // Collect as owned strings to avoid borrow conflicts with self.compose.
-        let segs: Vec<String> = self.current_path
+        let segs: Vec<String> = self
+            .current_path
             .trim_start_matches('/')
             .split('/')
             .filter(|s| !s.is_empty())
             .map(|s| s.to_owned())
             .collect();
-        let in_compose = segs.iter().any(|s| {
-            matches!(s.as_str(), "compose" | "reply" | "reply all" | "forward")
-        });
+        let in_compose = segs
+            .iter()
+            .any(|s| matches!(s.as_str(), "compose" | "reply" | "reply all" | "forward"));
         if !in_compose {
             // Folder message-list case: the parent Obj key must match the folder
             // display name (e.g. "INBOX").  The flat FFON root may currently hold
@@ -3219,15 +3449,16 @@ impl Provider for EmailClientProvider {
         // at the correct nesting depth instead of doing a full provider re-fetch.
         // Check for a compose-root token anywhere in the path so that reply/forward
         // entered from a message (/INBOX/msg/reply/Body:…) also gets a targeted refresh.
-        let segs: Vec<String> = self.current_path
+        let segs: Vec<String> = self
+            .current_path
             .trim_start_matches('/')
             .split('/')
             .filter(|s| !s.is_empty())
             .map(|s| s.to_owned())
             .collect();
-        let in_compose = segs.iter().any(|s| {
-            matches!(s.as_str(), "compose" | "reply" | "reply all" | "forward")
-        });
+        let in_compose = segs
+            .iter()
+            .any(|s| matches!(s.as_str(), "compose" | "reply" | "reply all" | "forward"));
         if !in_compose {
             // Folder message-list case: exactly one path segment means we're inside a
             // folder (e.g. `/INBOX`).  Return the envelope list so that
@@ -3248,8 +3479,7 @@ impl Provider for EmailClientProvider {
             // Nested body: walk the Ffon tree to the target Obj's children.
             match &self.compose.draft.body {
                 MailBody::Ffon(elems) => {
-                    body_elems_at_sub_path(elems, &sub_segs)
-                        .map(|children| children.to_vec())
+                    body_elems_at_sub_path(elems, &sub_segs).map(|children| children.to_vec())
                 }
                 MailBody::Text(_) => Some(vec![]),
             }
@@ -3275,8 +3505,7 @@ impl Provider for EmailClientProvider {
         // selected (path has ≥ 2 segments: folder + message label) AND the UID
         // is resolvable from the label in the cache.
         let segs = self.path_segments();
-        let at_message = segs.len() >= 2
-            && self.lookup_uid(segs[1]).is_some();
+        let at_message = segs.len() >= 2 && self.lookup_uid(segs[1]).is_some();
         if at_message {
             cmds.extend([
                 "mark-read".to_owned(),
@@ -3324,7 +3553,9 @@ impl Provider for EmailClientProvider {
             .map(|(_, r)| r.clone())
             .unwrap_or_else(|| selection.to_owned());
         // Capture Message-ID before moving (for undo support).
-        let msg_id = self.message_detail.as_ref()
+        let msg_id = self
+            .message_detail
+            .as_ref()
             .filter(|m| m.uid == uid)
             .map(|m| m.message_id.clone())
             .or_else(|| {
@@ -3404,21 +3635,22 @@ impl Provider for EmailClientProvider {
                 self.history_refs.clear();
                 self.history_uid = None;
                 self.thread_cache.clear();
-                None  // triggers state-toggle refresh in handlers.rs
+                None // triggers state-toggle refresh in handlers.rs
             }
             "mark-read" | "mark-unread" | "star" | "unstar" => {
                 if let Some((real_folder, uid)) = self.current_message_uid(elem_key) {
                     // Capture previous flag state for undo before mutation.
-                    let (prev_seen, prev_flagged) = self.message_cache
+                    let (prev_seen, prev_flagged) = self
+                        .message_cache
                         .iter()
                         .find(|h| h.uid == uid)
                         .map(|h| (h.seen, h.flagged))
                         .unwrap_or((false, false));
                     let (add, remove): (&[&str], &[&str]) = match cmd {
-                        "mark-read"   => (&["\\Seen"],    &[]),
-                        "mark-unread" => (&[],            &["\\Seen"]),
-                        "star"        => (&["\\Flagged"], &[]),
-                        _             => (&[],            &["\\Flagged"]), // unstar
+                        "mark-read" => (&["\\Seen"], &[]),
+                        "mark-unread" => (&[], &["\\Seen"]),
+                        "star" => (&["\\Flagged"], &[]),
+                        _ => (&[], &["\\Flagged"]), // unstar
                     };
                     if self.bg_enabled() {
                         // A flag toggle is confirmation-free from the user's
@@ -3444,10 +3676,10 @@ impl Provider for EmailClientProvider {
                     // Update cached header so the list re-renders correctly.
                     if let Some(h) = self.message_cache.iter_mut().find(|h| h.uid == uid) {
                         match cmd {
-                            "mark-read"   => h.seen = true,
+                            "mark-read" => h.seen = true,
                             "mark-unread" => h.seen = false,
-                            "star"        => h.flagged = true,
-                            _             => h.flagged = false,
+                            "star" => h.flagged = true,
+                            _ => h.flagged = false,
                         }
                     }
                     self.envelope_cache = None;
@@ -3490,7 +3722,9 @@ impl Provider for EmailClientProvider {
                     let moved_to_trash = if let Some(ref t) = trash {
                         if real_folder != *t {
                             // Soft delete: capture Message-ID for undo before moving.
-                            let msg_id = self.message_detail.as_ref()
+                            let msg_id = self
+                                .message_detail
+                                .as_ref()
                                 .filter(|m| m.uid == uid)
                                 .map(|m| m.message_id.clone())
                                 .or_else(|| {
@@ -3510,7 +3744,8 @@ impl Provider for EmailClientProvider {
                                 if let Err(e) = block_on(imap.move_message(&real_folder, uid, t)) {
                                     let mut args = localize::Args::new();
                                     args.set("err", e.to_string());
-                                    *error = localize::t_args("emailclient-error-delete-failed", &args);
+                                    *error =
+                                        localize::t_args("emailclient-error-delete-failed", &args);
                                     return None;
                                 }
                             }
@@ -3543,7 +3778,8 @@ impl Provider for EmailClientProvider {
                                 uid,
                             });
                         } else if let Some(ref mut imap) = self.imap {
-                            let _ = block_on(imap.set_flags(&real_folder, uid, &["\\Deleted"], &[]));
+                            let _ =
+                                block_on(imap.set_flags(&real_folder, uid, &["\\Deleted"], &[]));
                             let _ = block_on(imap.expunge_uid(&real_folder, uid));
                         }
                     }
@@ -3563,7 +3799,9 @@ impl Provider for EmailClientProvider {
                         }
                         Some(ref dest) => {
                             // Capture Message-ID for undo before moving.
-                            let msg_id = self.message_detail.as_ref()
+                            let msg_id = self
+                                .message_detail
+                                .as_ref()
                                 .filter(|m| m.uid == uid)
                                 .map(|m| m.message_id.clone())
                                 .or_else(|| {
@@ -3580,10 +3818,12 @@ impl Provider for EmailClientProvider {
                                     dest: dest.clone(),
                                 });
                             } else if let Some(ref mut imap) = self.imap {
-                                if let Err(e) = block_on(imap.move_message(&real_folder, uid, dest)) {
+                                if let Err(e) = block_on(imap.move_message(&real_folder, uid, dest))
+                                {
                                     let mut args = localize::Args::new();
                                     args.set("err", e.to_string());
-                                    *error = localize::t_args("emailclient-error-archive-failed", &args);
+                                    *error =
+                                        localize::t_args("emailclient-error-archive-failed", &args);
                                     return None;
                                 }
                             }
@@ -3638,7 +3878,9 @@ impl Provider for EmailClientProvider {
                     self.config.token_expiry = v;
                 }
             }
-            _ => { changed = false; }
+            _ => {
+                changed = false;
+            }
         }
         if changed {
             // Rebuild backends so they pick up the new config.
@@ -3675,10 +3917,10 @@ mod tests {
         list_messages_calls: usize,
         fetch_by_msg_id_calls: usize,
         // Write-operation tracking
-        stored_flags: Vec<(String, u32, String)>,   // (folder, uid, "+/-FLAGS (flags)")
-        moved: Vec<(String, u32, String)>,           // (from_folder, uid, dest_folder)
-        expunged: Vec<(String, u32)>,                // (folder, uid)
-        appended: Vec<(String, Vec<u8>)>,            // (folder, raw_bytes)
+        stored_flags: Vec<(String, u32, String)>, // (folder, uid, "+/-FLAGS (flags)")
+        moved: Vec<(String, u32, String)>,        // (from_folder, uid, dest_folder)
+        expunged: Vec<(String, u32)>,             // (folder, uid)
+        appended: Vec<(String, Vec<u8>)>,         // (folder, raw_bytes)
         /// Pre-configured thread result for fetch_threads(); None = not supported.
         thread_result: Option<Vec<Vec<u32>>>,
     }
@@ -3719,7 +3961,10 @@ mod tests {
         fn with_folders(mut self, folders: &[&str]) -> Self {
             self.folders = folders
                 .iter()
-                .map(|s| FolderInfo { name: s.to_string(), attributes: vec![] })
+                .map(|s| FolderInfo {
+                    name: s.to_string(),
+                    attributes: vec![],
+                })
                 .collect();
             self
         }
@@ -3749,29 +3994,61 @@ mod tests {
     impl ImapBackend for MockImap {
         async fn list_folders(&mut self) -> Result<Vec<FolderInfo>, String> {
             self.list_folders_calls += 1;
-            if let Some(ref e) = self.error { return Err(e.clone()); }
+            if let Some(ref e) = self.error {
+                return Err(e.clone());
+            }
             Ok(self.folders.clone())
         }
-        async fn list_messages(&mut self, _folder: &str, _limit: usize) -> Result<Vec<MessageHeader>, String> {
+        async fn list_messages(
+            &mut self,
+            _folder: &str,
+            _limit: usize,
+        ) -> Result<Vec<MessageHeader>, String> {
             self.list_messages_calls += 1;
-            if let Some(ref e) = self.error { return Err(e.clone()); }
+            if let Some(ref e) = self.error {
+                return Err(e.clone());
+            }
             Ok(self.messages.clone())
         }
-        async fn fetch_message(&mut self, _folder: &str, _uid: u32) -> Result<Option<EmailMessage>, String> {
-            if let Some(ref e) = self.error { return Err(e.clone()); }
+        async fn fetch_message(
+            &mut self,
+            _folder: &str,
+            _uid: u32,
+        ) -> Result<Option<EmailMessage>, String> {
+            if let Some(ref e) = self.error {
+                return Err(e.clone());
+            }
             Ok(self.detail.clone())
         }
-        async fn fetch_message_by_message_id(&mut self, folder: &str, _msg_id: &str) -> Result<Option<EmailMessage>, String> {
+        async fn fetch_message_by_message_id(
+            &mut self,
+            folder: &str,
+            _msg_id: &str,
+        ) -> Result<Option<EmailMessage>, String> {
             self.fetch_by_msg_id_calls += 1;
-            if let Some(ref e) = self.error { return Err(e.clone()); }
+            if let Some(ref e) = self.error {
+                return Err(e.clone());
+            }
             if let Some(ref req) = self.by_msg_id_folder {
-                if folder != req { return Ok(None); }
+                if folder != req {
+                    return Ok(None);
+                }
             }
             Ok(self.by_msg_id.clone())
         }
-        async fn set_flags(&mut self, folder: &str, uid: u32, add: &[&str], remove: &[&str]) -> Result<(), String> {
-            if let Some(ref e) = self.error { return Err(e.clone()); }
-            if let Some(ref e) = self.set_flags_error { return Err(e.clone()); }
+        async fn set_flags(
+            &mut self,
+            folder: &str,
+            uid: u32,
+            add: &[&str],
+            remove: &[&str],
+        ) -> Result<(), String> {
+            if let Some(ref e) = self.error {
+                return Err(e.clone());
+            }
+            if let Some(ref e) = self.set_flags_error {
+                return Err(e.clone());
+            }
             if !add.is_empty() {
                 self.stored_flags.push((
                     folder.to_owned(),
@@ -3789,27 +4066,37 @@ mod tests {
             Ok(())
         }
         async fn copy_message(&mut self, folder: &str, uid: u32, dest: &str) -> Result<(), String> {
-            if let Some(ref e) = self.error { return Err(e.clone()); }
+            if let Some(ref e) = self.error {
+                return Err(e.clone());
+            }
             self.moved.push((folder.to_owned(), uid, dest.to_owned()));
             Ok(())
         }
         async fn move_message(&mut self, folder: &str, uid: u32, dest: &str) -> Result<(), String> {
-            if let Some(ref e) = self.error { return Err(e.clone()); }
+            if let Some(ref e) = self.error {
+                return Err(e.clone());
+            }
             self.moved.push((folder.to_owned(), uid, dest.to_owned()));
             Ok(())
         }
         async fn expunge_uid(&mut self, folder: &str, uid: u32) -> Result<(), String> {
-            if let Some(ref e) = self.error { return Err(e.clone()); }
+            if let Some(ref e) = self.error {
+                return Err(e.clone());
+            }
             self.expunged.push((folder.to_owned(), uid));
             Ok(())
         }
         async fn append(&mut self, folder: &str, message: &[u8]) -> Result<(), String> {
-            if let Some(ref e) = self.error { return Err(e.clone()); }
+            if let Some(ref e) = self.error {
+                return Err(e.clone());
+            }
             self.appended.push((folder.to_owned(), message.to_vec()));
             Ok(())
         }
         async fn fetch_threads(&mut self, _folder: &str) -> Result<Option<Vec<Vec<u32>>>, String> {
-            if let Some(ref e) = self.error { return Err(e.clone()); }
+            if let Some(ref e) = self.error {
+                return Err(e.clone());
+            }
             Ok(self.thread_result.clone())
         }
     }
@@ -3824,10 +4111,22 @@ mod tests {
 
     impl MockSmtp {
         fn new() -> Self {
-            MockSmtp { sent: Default::default(), cc_sent: vec![], bcc_sent: vec![], attachments_sent: vec![], fail: false }
+            MockSmtp {
+                sent: Default::default(),
+                cc_sent: vec![],
+                bcc_sent: vec![],
+                attachments_sent: vec![],
+                fail: false,
+            }
         }
         fn failing() -> Self {
-            MockSmtp { sent: Default::default(), cc_sent: vec![], bcc_sent: vec![], attachments_sent: vec![], fail: true }
+            MockSmtp {
+                sent: Default::default(),
+                cc_sent: vec![],
+                bcc_sent: vec![],
+                attachments_sent: vec![],
+                fail: true,
+            }
         }
     }
 
@@ -3843,13 +4142,21 @@ mod tests {
             body: &MailBody,
             attachments: &[(&str, &[u8])],
         ) -> Result<Vec<u8>, String> {
-            if self.fail { return Err("SMTP error".to_owned()); }
+            if self.fail {
+                return Err("SMTP error".to_owned());
+            }
             self.sent.lock().unwrap().push((
-                from.to_owned(), to.join(", "), subject.to_owned(), body.clone()
+                from.to_owned(),
+                to.join(", "),
+                subject.to_owned(),
+                body.clone(),
             ));
-            self.cc_sent.push(cc.iter().map(|s| s.to_string()).collect());
-            self.bcc_sent.push(bcc.iter().map(|s| s.to_string()).collect());
-            self.attachments_sent.push(attachments.iter().map(|(n, _)| n.to_string()).collect());
+            self.cc_sent
+                .push(cc.iter().map(|s| s.to_string()).collect());
+            self.bcc_sent
+                .push(bcc.iter().map(|s| s.to_string()).collect());
+            self.attachments_sent
+                .push(attachments.iter().map(|(n, _)| n.to_string()).collect());
             Ok(b"fake-raw-message".to_vec())
         }
     }
@@ -3915,51 +4222,91 @@ mod tests {
         let mut p = EmailClientProvider::new();
         let items = p.fetch();
         assert_eq!(items.len(), 1);
-        assert!(items[0].as_str().map_or(false, |s| s.contains("<button>login</button>")));
+        assert!(
+            items[0]
+                .as_str()
+                .map_or(false, |s| s.contains("<button>login</button>"))
+        );
     }
 
     #[test]
     fn test_fetch_root_no_imap_logged_in_shows_placeholder() {
         let mut p = EmailClientProvider::new().with_oauth_token("fake");
         let items = p.fetch();
-        assert!(items.iter().any(|e| {
-            e.as_str().map_or(false, |s| s.contains("not configured"))
-        }));
+        assert!(
+            items
+                .iter()
+                .any(|e| { e.as_str().map_or(false, |s| s.contains("not configured")) })
+        );
     }
 
     #[test]
     fn test_fetch_root_compose_always_present() {
         let imap = MockImap::new().with_folders(&[]);
-        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new()
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
         let items = p.fetch();
-        assert!(items.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "compose")));
+        assert!(
+            items
+                .iter()
+                .any(|e| e.as_obj().map_or(false, |o| o.key == "compose"))
+        );
     }
 
     #[test]
     fn test_fetch_root_folders_become_objs() {
         let imap = MockImap::new().with_folders(&["INBOX", "Sent", "Drafts"]);
-        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new()
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
         let items = p.fetch();
-        assert!(items.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "INBOX")));
-        assert!(items.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "Sent")));
-        assert!(items.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "Drafts")));
+        assert!(
+            items
+                .iter()
+                .any(|e| e.as_obj().map_or(false, |o| o.key == "INBOX"))
+        );
+        assert!(
+            items
+                .iter()
+                .any(|e| e.as_obj().map_or(false, |o| o.key == "Sent"))
+        );
+        assert!(
+            items
+                .iter()
+                .any(|e| e.as_obj().map_or(false, |o| o.key == "Drafts"))
+        );
     }
 
     #[test]
     fn test_fetch_root_imap_error_shows_message() {
         let imap = MockImap::new().with_error("connection refused");
-        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new()
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
         let items = p.fetch();
-        assert!(items.iter().any(|e| e.as_str().map_or(false, |s| s.contains("IMAP error"))));
+        assert!(
+            items
+                .iter()
+                .any(|e| e.as_str().map_or(false, |s| s.contains("IMAP error")))
+        );
     }
 
     #[test]
     fn test_fetch_root_compose_inserted_after_inbox() {
         let imap = MockImap::new().with_folders(&["INBOX", "Sent"]);
-        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new()
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
         let items = p.fetch();
-        let inbox_pos = items.iter().position(|e| e.as_obj().map_or(false, |o| o.key == "INBOX")).unwrap();
-        let compose_pos = items.iter().position(|e| e.as_obj().map_or(false, |o| o.key == "compose")).unwrap();
+        let inbox_pos = items
+            .iter()
+            .position(|e| e.as_obj().map_or(false, |o| o.key == "INBOX"))
+            .unwrap();
+        let compose_pos = items
+            .iter()
+            .position(|e| e.as_obj().map_or(false, |o| o.key == "compose"))
+            .unwrap();
         assert_eq!(compose_pos, inbox_pos + 1);
     }
 
@@ -3967,10 +4314,20 @@ mod tests {
     fn test_fetch_root_hierarchy_containers_filtered() {
         // "[Gmail]" is a container (has child "[Gmail]/Sent") and should be skipped.
         let imap = MockImap::new().with_folders(&["INBOX", "[Gmail]", "[Gmail]/Sent"]);
-        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new()
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
         let items = p.fetch();
-        assert!(!items.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "[Gmail]")));
-        assert!(items.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "Sent")));
+        assert!(
+            !items
+                .iter()
+                .any(|e| e.as_obj().map_or(false, |o| o.key == "[Gmail]"))
+        );
+        assert!(
+            items
+                .iter()
+                .any(|e| e.as_obj().map_or(false, |o| o.key == "Sent"))
+        );
     }
 
     // ---- Login/logout state ----
@@ -4005,7 +4362,10 @@ mod tests {
 
         let mut error = String::new();
         let result = p.handle_command("logout", "", 0, &mut error);
-        assert!(result.is_none(), "logout must return None to trigger state-toggle refresh");
+        assert!(
+            result.is_none(),
+            "logout must return None to trigger state-toggle refresh"
+        );
         assert!(p.config.oauth_access_token.is_empty());
         assert!(p.folder_cache.is_none());
         assert!(p.envelope_cache.is_none());
@@ -4025,7 +4385,11 @@ mod tests {
         p.handle_command("logout", "", 0, &mut error);
         let items = p.fetch();
         assert_eq!(items.len(), 1);
-        assert!(items[0].as_str().map_or(false, |s| s.contains("<button>login</button>")));
+        assert!(
+            items[0]
+                .as_str()
+                .map_or(false, |s| s.contains("<button>login</button>"))
+        );
     }
 
     #[test]
@@ -4059,7 +4423,10 @@ mod tests {
         p.envelope_cache = Some(vec![FfonElement::new_str("cached".to_owned())]);
         p.bg_completed.store(true, Ordering::Release);
 
-        assert!(p.tick(), "a finished background fetch must ask for a re-render");
+        assert!(
+            p.tick(),
+            "a finished background fetch must ask for a re-render"
+        );
         assert!(
             p.envelope_cache.is_some(),
             "the result was already folded in; dropping the cache here would              re-fetch the folder and flash the list"
@@ -4105,7 +4472,10 @@ mod tests {
         let state = p.resolve_message("INBOX", 8);
         assert!(matches!(state, MessageState::Loading));
         assert_eq!(p.message_fetch_key, Some(("INBOX".to_owned(), 8)));
-        assert!(p.message_fetch_failed.is_none(), "stale failure must be cleared");
+        assert!(
+            p.message_fetch_failed.is_none(),
+            "stale failure must be cleared"
+        );
     }
 
     #[test]
@@ -4146,16 +4516,38 @@ mod tests {
     fn test_bg_op_labels_name_the_failed_action() {
         // These prefixes are what the user sees when a background op fails.
         assert_eq!(
-            BgOp::SetFlags { folder: "INBOX".into(), uid: 1, add: vec![], remove: vec![] }.label(),
+            BgOp::SetFlags {
+                folder: "INBOX".into(),
+                uid: 1,
+                add: vec![],
+                remove: vec![]
+            }
+            .label(),
             "flag update failed"
         );
         assert_eq!(
-            BgOp::Move { folder: "INBOX".into(), uid: 1, dest: "Trash".into() }.label(),
+            BgOp::Move {
+                folder: "INBOX".into(),
+                uid: 1,
+                dest: "Trash".into()
+            }
+            .label(),
             "move failed"
         );
-        assert_eq!(BgOp::Expunge { folder: "INBOX".into(), uid: 1 }.label(), "delete failed");
         assert_eq!(
-            BgOp::Append { folder: "Drafts".into(), message: vec![] }.label(),
+            BgOp::Expunge {
+                folder: "INBOX".into(),
+                uid: 1
+            }
+            .label(),
+            "delete failed"
+        );
+        assert_eq!(
+            BgOp::Append {
+                folder: "Drafts".into(),
+                message: vec![]
+            }
+            .label(),
             "save failed"
         );
     }
@@ -4185,8 +4577,7 @@ mod tests {
             expires_in: 3600,
             ..Default::default()
         };
-        let mut p = EmailClientProvider::new()
-            .with_config_path(dir.path().join("settings.json"));
+        let mut p = EmailClientProvider::new().with_config_path(dir.path().join("settings.json"));
         // Pre-set a stale folder cache and a non-root path.
         p.folder_cache = Some(vec![FfonElement::new_str("IMAP error: stale".to_owned())]);
         p.current_path = "/INBOX/some-message".to_owned();
@@ -4194,7 +4585,10 @@ mod tests {
 
         p.finish_login(result);
 
-        assert!(p.folder_cache.is_none(), "folder_cache must be cleared after login");
+        assert!(
+            p.folder_cache.is_none(),
+            "folder_cache must be cleared after login"
+        );
         assert_eq!(p.current_path, "/", "path must reset to root after login");
         // oauth_access_token must be set from the result.
         assert_eq!(p.config.oauth_access_token, "new_token");
@@ -4206,7 +4600,10 @@ mod tests {
     fn test_folder_display_name_strips_prefix() {
         assert_eq!(folder_display_name("[Gmail]/Sent"), "Sent");
         assert_eq!(folder_display_name("INBOX"), "INBOX");
-        assert_eq!(folder_display_name("[Gmail]/Verzonden berichten"), "Verzonden berichten");
+        assert_eq!(
+            folder_display_name("[Gmail]/Verzonden berichten"),
+            "Verzonden berichten"
+        );
     }
 
     // ---- Folder list fetch ----
@@ -4221,8 +4618,16 @@ mod tests {
         let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
         p.push_path("INBOX");
         let items = p.fetch();
-        assert!(items.iter().any(|e| e.as_obj().map_or(false, |o| o.key.contains("Hello"))));
-        assert!(items.iter().any(|e| e.as_obj().map_or(false, |o| o.key.contains("World"))));
+        assert!(
+            items
+                .iter()
+                .any(|e| e.as_obj().map_or(false, |o| o.key.contains("Hello")))
+        );
+        assert!(
+            items
+                .iter()
+                .any(|e| e.as_obj().map_or(false, |o| o.key.contains("World")))
+        );
     }
 
     #[test]
@@ -4233,7 +4638,8 @@ mod tests {
         p.push_path("INBOX");
         let items = p.fetch();
         assert!(items.iter().any(|e| {
-            e.as_obj().map_or(false, |o| o.key == "[read] Subject — alice@x.com")
+            e.as_obj()
+                .map_or(false, |o| o.key == "[read] Subject — alice@x.com")
         }));
     }
 
@@ -4244,9 +4650,11 @@ mod tests {
         let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
         p.push_path("INBOX");
         let items = p.fetch();
-        assert!(items.iter().any(|e| {
-            e.as_obj().map_or(false, |o| o.key.contains("(no subject)"))
-        }));
+        assert!(
+            items
+                .iter()
+                .any(|e| { e.as_obj().map_or(false, |o| o.key.contains("(no subject)")) })
+        );
     }
 
     // ---- Folder cache ----
@@ -4254,7 +4662,9 @@ mod tests {
     #[test]
     fn test_folder_cache_avoids_refetch() {
         let imap = MockImap::new().with_folders(&["INBOX"]);
-        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new()
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
         // First fetch populates cache.
         p.fetch();
         // Second fetch should use cache (call count stays at 1).
@@ -4263,7 +4673,10 @@ mod tests {
         let mock = backend.as_ref() as *const dyn ImapBackend as *const MockImap;
         // SAFETY: we know it's a MockImap
         let call_count = unsafe { (*mock).list_folders_calls };
-        assert_eq!(call_count, 1, "folder cache should prevent second IMAP call");
+        assert_eq!(
+            call_count, 1,
+            "folder cache should prevent second IMAP call"
+        );
     }
 
     // ---- Envelope cache ----
@@ -4279,7 +4692,10 @@ mod tests {
         let backend = p.imap.as_ref().unwrap();
         let mock = backend.as_ref() as *const dyn ImapBackend as *const MockImap;
         let call_count = unsafe { (*mock).list_messages_calls };
-        assert_eq!(call_count, 1, "envelope cache should prevent second IMAP call");
+        assert_eq!(
+            call_count, 1,
+            "envelope cache should prevent second IMAP call"
+        );
     }
 
     // ---- Message view ----
@@ -4294,10 +4710,26 @@ mod tests {
         p.fetch();
         p.push_path("[read] Hello — alice@example.com");
         let items = p.fetch();
-        assert!(items.iter().any(|e| e.as_str().map_or(false, |s| s.starts_with("From:"))));
-        assert!(items.iter().any(|e| e.as_str().map_or(false, |s| s.starts_with("To:"))));
-        assert!(items.iter().any(|e| e.as_str().map_or(false, |s| s.starts_with("Subject:"))));
-        assert!(items.iter().any(|e| e.as_str().map_or(false, |s| s.starts_with("Date:"))));
+        assert!(
+            items
+                .iter()
+                .any(|e| e.as_str().map_or(false, |s| s.starts_with("From:")))
+        );
+        assert!(
+            items
+                .iter()
+                .any(|e| e.as_str().map_or(false, |s| s.starts_with("To:")))
+        );
+        assert!(
+            items
+                .iter()
+                .any(|e| e.as_str().map_or(false, |s| s.starts_with("Subject:")))
+        );
+        assert!(
+            items
+                .iter()
+                .any(|e| e.as_str().map_or(false, |s| s.starts_with("Date:")))
+        );
     }
 
     #[test]
@@ -4310,7 +4742,11 @@ mod tests {
         p.fetch();
         p.push_path("[read] Hello — alice@example.com");
         let items = p.fetch();
-        assert!(items.iter().any(|e| e.as_str().map_or(false, |s| s == "Hi Bob!")));
+        assert!(
+            items
+                .iter()
+                .any(|e| e.as_str().map_or(false, |s| s == "Hi Bob!"))
+        );
     }
 
     #[test]
@@ -4323,9 +4759,21 @@ mod tests {
         p.fetch();
         p.push_path("[read] Hello — alice@example.com");
         let items = p.fetch();
-        assert!(items.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "reply")));
-        assert!(items.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "reply all")));
-        assert!(items.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "forward")));
+        assert!(
+            items
+                .iter()
+                .any(|e| e.as_obj().map_or(false, |o| o.key == "reply"))
+        );
+        assert!(
+            items
+                .iter()
+                .any(|e| e.as_obj().map_or(false, |o| o.key == "reply all"))
+        );
+        assert!(
+            items
+                .iter()
+                .any(|e| e.as_obj().map_or(false, |o| o.key == "forward"))
+        );
     }
 
     #[test]
@@ -4404,13 +4852,21 @@ mod tests {
         // Message only exists in "[Gmail]/All Mail", not in INBOX.
         let imap = MockImap::new()
             .with_folder_infos(vec![
-                FolderInfo { name: "INBOX".to_owned(), attributes: vec![] },
-                FolderInfo { name: "[Gmail]/All Mail".to_owned(), attributes: vec!["\\All".to_owned()] },
+                FolderInfo {
+                    name: "INBOX".to_owned(),
+                    attributes: vec![],
+                },
+                FolderInfo {
+                    name: "[Gmail]/All Mail".to_owned(),
+                    attributes: vec!["\\All".to_owned()],
+                },
             ])
             .with_messages(msgs)
             .with_detail(msg)
             .with_by_msg_id_only_in_folder("[Gmail]/All Mail", ref_msg);
-        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new()
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
         // Fetch at root so build_root populates special_folders.archive from the \All attribute.
         p.fetch();
         p.push_path("INBOX");
@@ -4420,8 +4876,11 @@ mod tests {
         p.push_path("History");
         let items = p.fetch();
         assert!(
-            items.iter().any(|e| e.as_obj().map_or(false, |o| o.key.contains("Previous"))),
-            "History must find the message via \\All folder; got: {:?}", items
+            items
+                .iter()
+                .any(|e| e.as_obj().map_or(false, |o| o.key.contains("Previous"))),
+            "History must find the message via \\All folder; got: {:?}",
+            items
         );
     }
 
@@ -4448,8 +4907,11 @@ mod tests {
         let items = p.fetch();
         // uid 2 is in message_cache ("Re: Hello" subject) — History must find it.
         assert!(
-            items.iter().any(|e| e.as_obj().map_or(false, |o| o.key.contains("Re: Hello"))),
-            "History must surface thread sibling via thread cache; got: {:?}", items
+            items
+                .iter()
+                .any(|e| e.as_obj().map_or(false, |o| o.key.contains("Re: Hello"))),
+            "History must surface thread sibling via thread cache; got: {:?}",
+            items
         );
     }
 
@@ -4461,7 +4923,12 @@ mod tests {
         p.config.username = "me@example.com".to_owned();
         p.push_path("compose");
         let items = p.fetch();
-        assert!(items.iter().any(|e| e.as_str().map_or(false, |s| s.starts_with("From:") && s.contains("me@example.com"))));
+        assert!(
+            items
+                .iter()
+                .any(|e| e.as_str().map_or(false, |s| s.starts_with("From:")
+                    && s.contains("me@example.com")))
+        );
     }
 
     #[test]
@@ -4473,14 +4940,21 @@ mod tests {
         p.push_path("Body:");
         let children = p.fetch();
         // Empty draft body → no children (no "(message not found)" string).
-        assert!(children.is_empty(), "empty draft body should yield no children; got: {:?}", children);
+        assert!(
+            children.is_empty(),
+            "empty draft body should yield no children; got: {:?}",
+            children
+        );
 
         // After adding a body element, fetch at Body: returns it.
         update_body_leaf(&mut p.compose.draft.body, "", "hello");
         let children2 = p.fetch();
         assert_eq!(children2.len(), 1);
-        assert!(matches!(&children2[0], FfonElement::Str(s) if s.contains("hello")),
-            "expected body child with 'hello'; got: {:?}", children2);
+        assert!(
+            matches!(&children2[0], FfonElement::Str(s) if s.contains("hello")),
+            "expected body child with 'hello'; got: {:?}",
+            children2
+        );
     }
 
     #[test]
@@ -4488,11 +4962,21 @@ mod tests {
         let mut p = EmailClientProvider::new();
         p.push_path("compose");
         let items = p.fetch();
-        assert!(items.iter().any(|e| e.as_str().map_or(false, |s| s.contains("To:") && s.contains("<input>"))));
-        assert!(items.iter().any(|e| e.as_str().map_or(false, |s| s.contains("Subject:") && s.contains("<input>"))));
+        assert!(items.iter().any(|e| {
+            e.as_str()
+                .map_or(false, |s| s.contains("To:") && s.contains("<input>"))
+        }));
+        assert!(items.iter().any(|e| {
+            e.as_str()
+                .map_or(false, |s| s.contains("Subject:") && s.contains("<input>"))
+        }));
         // Body: is an Obj node; an empty draft body has no children yet (user inserts via Ctrl+I).
         assert!(items.iter().any(|e| {
-            if let FfonElement::Obj(obj) = e { obj.key.starts_with("Body:") } else { false }
+            if let FfonElement::Obj(obj) = e {
+                obj.key.starts_with("Body:")
+            } else {
+                false
+            }
         }));
     }
 
@@ -4501,7 +4985,10 @@ mod tests {
         let mut p = EmailClientProvider::new();
         p.push_path("compose");
         let items = p.fetch();
-        assert!(items.iter().any(|e| e.as_str().map_or(false, |s| s.contains("<button>send</button>"))));
+        assert!(items.iter().any(|e| {
+            e.as_str()
+                .map_or(false, |s| s.contains("<button>send</button>"))
+        }));
     }
 
     #[test]
@@ -4512,7 +4999,11 @@ mod tests {
         p.compose.draft.to = "x@y.com".to_owned();
         p.on_button_press("send");
         let items = p.fetch();
-        assert!(items.iter().any(|e| e.as_str().map_or(false, |s| s.contains("message sent"))));
+        assert!(
+            items
+                .iter()
+                .any(|e| e.as_str().map_or(false, |s| s.contains("message sent")))
+        );
     }
 
     // ---- Reply ----
@@ -4560,7 +5051,13 @@ mod tests {
         p.fetch();
         p.push_path("reply");
         p.fetch();
-        assert!(!p.compose.draft.subject.to_lowercase().starts_with("re: re:"));
+        assert!(
+            !p.compose
+                .draft
+                .subject
+                .to_lowercase()
+                .starts_with("re: re:")
+        );
     }
 
     // ---- Reply all ----
@@ -4601,15 +5098,27 @@ mod tests {
         p.fetch();
         p.push_path("reply all");
         p.fetch();
-        assert!(!p.compose.draft.to.contains("bob@example.com,"), "self (bob@example.com) must be filtered");
-        assert!(p.compose.draft.to.contains("bob@example.com.au"), "superset address must be kept");
+        assert!(
+            !p.compose.draft.to.contains("bob@example.com,"),
+            "self (bob@example.com) must be filtered"
+        );
+        assert!(
+            p.compose.draft.to.contains("bob@example.com.au"),
+            "superset address must be kept"
+        );
     }
 
     #[test]
     fn test_extract_email_addr_with_display_name() {
-        assert_eq!(extract_email_addr("Alice <alice@example.com>"), "alice@example.com");
+        assert_eq!(
+            extract_email_addr("Alice <alice@example.com>"),
+            "alice@example.com"
+        );
         assert_eq!(extract_email_addr("alice@example.com"), "alice@example.com");
-        assert_eq!(extract_email_addr("  alice@example.com  "), "alice@example.com");
+        assert_eq!(
+            extract_email_addr("  alice@example.com  "),
+            "alice@example.com"
+        );
     }
 
     // ---- Forward ----
@@ -4658,10 +5167,19 @@ mod tests {
         p.fetch();
         // Text-origin forward: MailBody::Text with the forwarded-header block prepended.
         let MailBody::Text(body) = &p.compose.draft.body else {
-            panic!("expected Text body after forwarding text-origin mail; got: {:?}", p.compose.draft.body);
+            panic!(
+                "expected Text body after forwarding text-origin mail; got: {:?}",
+                p.compose.draft.body
+            );
         };
-        assert!(body.contains("Forwarded message"), "forward body must contain 'Forwarded message'");
-        assert!(body.contains("alice@example.com"), "forward body must contain sender address");
+        assert!(
+            body.contains("Forwarded message"),
+            "forward body must contain 'Forwarded message'"
+        );
+        assert!(
+            body.contains("alice@example.com"),
+            "forward body must contain sender address"
+        );
     }
 
     #[test]
@@ -4678,10 +5196,19 @@ mod tests {
         p.push_path("reply");
         p.fetch();
         let MailBody::Text(body) = &p.compose.draft.body else {
-            panic!("expected Text body after replying to text-origin mail; got: {:?}", p.compose.draft.body);
+            panic!(
+                "expected Text body after replying to text-origin mail; got: {:?}",
+                p.compose.draft.body
+            );
         };
-        assert!(body.contains("wrote:"), "reply body must include attribution line");
-        assert!(body.contains("> Hi Bob!"), "reply body must include \"> \"-quoted original text");
+        assert!(
+            body.contains("wrote:"),
+            "reply body must include attribution line"
+        );
+        assert!(
+            body.contains("> Hi Bob!"),
+            "reply body must include \"> \"-quoted original text"
+        );
     }
 
     #[test]
@@ -4698,10 +5225,19 @@ mod tests {
         p.push_path("forward");
         p.fetch();
         let MailBody::Text(body) = &p.compose.draft.body else {
-            panic!("expected Text body after forwarding text-origin mail; got: {:?}", p.compose.draft.body);
+            panic!(
+                "expected Text body after forwarding text-origin mail; got: {:?}",
+                p.compose.draft.body
+            );
         };
-        assert!(body.contains("Forwarded message"), "forward body must include forwarded-header block");
-        assert!(body.contains("Hi Bob!"), "forward body must include original text");
+        assert!(
+            body.contains("Forwarded message"),
+            "forward body must include forwarded-header block"
+        );
+        assert!(
+            body.contains("Hi Bob!"),
+            "forward body must include original text"
+        );
     }
 
     #[test]
@@ -4709,7 +5245,9 @@ mod tests {
         // Ffon-body message: reply body is flat — [I_PLACEHOLDER, attribution, original elems…].
         let msgs = vec![make_header(1, "alice@example.com", "Hello")];
         let mut msg = make_message(1);
-        msg.body = MailBody::Ffon(vec![FfonElement::new_str("<input>Hi Bob!</input>".to_owned())]);
+        msg.body = MailBody::Ffon(vec![FfonElement::new_str(
+            "<input>Hi Bob!</input>".to_owned(),
+        )]);
         let imap = MockImap::new().with_messages(msgs).with_detail(msg);
         let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
         p.push_path("INBOX");
@@ -4721,9 +5259,16 @@ mod tests {
         let MailBody::Ffon(elems) = &p.compose.draft.body else {
             panic!("expected Ffon body; got: {:?}", p.compose.draft.body);
         };
-        assert_eq!(elems[0], FfonElement::new_str(I_PLACEHOLDER.to_owned()), "top-level i placeholder missing");
+        assert_eq!(
+            elems[0],
+            FfonElement::new_str(I_PLACEHOLDER.to_owned()),
+            "top-level i placeholder missing"
+        );
         let attribution = elems[1].as_str().unwrap_or("");
-        assert!(attribution.contains("wrote:"), "second elem must be attribution line");
+        assert!(
+            attribution.contains("wrote:"),
+            "second elem must be attribution line"
+        );
         // original Ffon elements are appended directly (flat, no nested Obj)
         assert_eq!(
             elems[2],
@@ -4771,8 +5316,14 @@ mod tests {
         assert!(err.is_some(), "expected an error on send failure");
         assert!(err.unwrap().contains("send failed"));
         // Compose state must be preserved so the user doesn't lose their draft.
-        assert!(!p.compose.draft.to.is_empty(), "draft to must be preserved after send failure");
-        assert!(!p.compose_sent, "compose_sent must not be set after send failure");
+        assert!(
+            !p.compose.draft.to.is_empty(),
+            "draft to must be preserved after send failure"
+        );
+        assert!(
+            !p.compose_sent,
+            "compose_sent must not be set after send failure"
+        );
     }
 
     #[test]
@@ -4789,8 +5340,14 @@ mod tests {
         let records = sent.lock().unwrap();
         assert_eq!(records.len(), 1, "expected one send call");
         // MockSmtp joins recipients with ", " — both addresses must appear.
-        assert!(records[0].1.contains("alice@example.com"), "alice must be in recipients");
-        assert!(records[0].1.contains("bob@example.com"), "bob must be in recipients");
+        assert!(
+            records[0].1.contains("alice@example.com"),
+            "alice must be in recipients"
+        );
+        assert!(
+            records[0].1.contains("bob@example.com"),
+            "bob must be in recipients"
+        );
     }
 
     // ---- Path navigation ----
@@ -4960,7 +5517,10 @@ mod tests {
         p.on_setting_change("emailImapUrl", "imaps://imap.gmail.com");
         p.on_setting_change("emailUsername", "user@example.com");
         // password deliberately left empty, no OAuth token set
-        assert!(p.imap.is_none(), "backend should not be created without password");
+        assert!(
+            p.imap.is_none(),
+            "backend should not be created without password"
+        );
     }
 
     #[test]
@@ -4972,7 +5532,10 @@ mod tests {
         p.on_setting_change("emailUsername", "user@example.com");
         p.on_setting_change("emailOAuthAccessToken", "ya29.sometoken");
         // RealImap is created (won't connect until first use); imap.is_some().
-        assert!(p.imap.is_some(), "backend should be created when OAuth token is present");
+        assert!(
+            p.imap.is_some(),
+            "backend should be created when OAuth token is present"
+        );
     }
 
     // ---- commands ----
@@ -5022,7 +5585,9 @@ mod tests {
     #[test]
     fn test_handle_command_refresh_invalidates_caches() {
         let imap = MockImap::new().with_folders(&["INBOX"]);
-        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new()
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
         p.fetch(); // populate caches
         assert!(p.folder_cache.is_some());
         let mut err = String::new();
@@ -5037,7 +5602,10 @@ mod tests {
         let mut err = String::new();
         p.handle_command("login", "", 0, &mut err);
         assert!(!err.is_empty(), "unknown command should set error");
-        assert!(err.contains("unknown command"), "expected 'unknown command' message");
+        assert!(
+            err.contains("unknown command"),
+            "expected 'unknown command' message"
+        );
     }
 
     #[test]
@@ -5045,8 +5613,7 @@ mod tests {
         // When the background refresh fails, the stale access token must be cleared
         // so is_logged_in() returns false and the login button is shown.
         let dir = tempfile::tempdir().unwrap();
-        let mut p = EmailClientProvider::new()
-            .with_config_path(dir.path().join("settings.json"));
+        let mut p = EmailClientProvider::new().with_config_path(dir.path().join("settings.json"));
         p.config.oauth_access_token = "stale_token".to_owned();
         p.config.oauth_refresh_token = "refresh_tok".to_owned();
         p.config.token_expiry = 1; // expired long ago
@@ -5056,9 +5623,15 @@ mod tests {
 
         let unblocked = p.ensure_fresh_token_async();
         assert!(unblocked, "caller must be unblocked even on failure");
-        assert!(p.config.oauth_access_token.is_empty(), "stale token must be cleared");
+        assert!(
+            p.config.oauth_access_token.is_empty(),
+            "stale token must be cleared"
+        );
         assert_eq!(p.config.token_expiry, 0);
-        assert!(!p.is_logged_in(), "is_logged_in must return false so login button appears");
+        assert!(
+            !p.is_logged_in(),
+            "is_logged_in must return false so login button appears"
+        );
     }
 
     #[test]
@@ -5066,8 +5639,7 @@ mod tests {
         // Successful refresh updates the token, rebuilds backends, and clears
         // folder_cache so the next fetch issues a fresh IMAP connection.
         let dir = tempfile::tempdir().unwrap();
-        let mut p = EmailClientProvider::new()
-            .with_config_path(dir.path().join("settings.json"));
+        let mut p = EmailClientProvider::new().with_config_path(dir.path().join("settings.json"));
         p.config.imap_url = "imaps://imap.example.com".to_owned();
         p.config.username = "user@example.com".to_owned();
         p.config.oauth_access_token = "old_token".to_owned();
@@ -5083,14 +5655,16 @@ mod tests {
         assert_eq!(p.config.oauth_access_token, "new_token");
         assert_eq!(p.config.token_expiry, i64::MAX);
         assert!(p.is_logged_in());
-        assert!(p.folder_cache.is_none(), "folder_cache must be cleared so next fetch retries IMAP with new token");
+        assert!(
+            p.folder_cache.is_none(),
+            "folder_cache must be cleared so next fetch retries IMAP with new token"
+        );
     }
 
     #[test]
     fn test_handle_command_logout_clears_tokens() {
         let dir = tempfile::tempdir().unwrap();
-        let mut p = EmailClientProvider::new()
-            .with_config_path(dir.path().join("settings.json"));
+        let mut p = EmailClientProvider::new().with_config_path(dir.path().join("settings.json"));
         p.config.oauth_access_token = "tok".to_owned();
         p.config.oauth_refresh_token = "ref".to_owned();
         p.config.token_expiry = 999;
@@ -5130,7 +5704,10 @@ mod tests {
         p.needs_refresh_flag.store(true, Ordering::Relaxed);
         p.clear_needs_refresh();
         assert!(!p.needs_refresh());
-        assert!(p.envelope_cache.is_none(), "envelope cache cleared on refresh");
+        assert!(
+            p.envelope_cache.is_none(),
+            "envelope cache cleared on refresh"
+        );
     }
 
     // ---- init loads config from settings.json ----
@@ -5153,7 +5730,10 @@ mod tests {
                 "emailTokenExpiry": 12345
             }
         }"#;
-        std::fs::File::create(&path).unwrap().write_all(json.as_bytes()).unwrap();
+        std::fs::File::create(&path)
+            .unwrap()
+            .write_all(json.as_bytes())
+            .unwrap();
 
         // We can't call init() normally because main_config_path() uses the real filesystem.
         // Directly test the JSON loading logic by parsing as init() does.
@@ -5161,9 +5741,15 @@ mod tests {
         let root: serde_json::Value = serde_json::from_str(&content).unwrap();
         let section = root.get("email client").unwrap().as_object().unwrap();
 
-        let imap_url = section.get("emailImapUrl").and_then(|v| v.as_str()).unwrap();
+        let imap_url = section
+            .get("emailImapUrl")
+            .and_then(|v| v.as_str())
+            .unwrap();
         assert_eq!(imap_url, "imaps://imap.example.com");
-        let expiry = section.get("emailTokenExpiry").and_then(|v| v.as_i64()).unwrap();
+        let expiry = section
+            .get("emailTokenExpiry")
+            .and_then(|v| v.as_i64())
+            .unwrap();
         assert_eq!(expiry, 12345);
     }
 
@@ -5174,7 +5760,11 @@ mod tests {
         // Empty body produces no children; the i placeholder is inserted on-demand via ctrl+i/a.
         let body = MailBody::Text(String::new());
         let children = body_to_compose_children(&body);
-        assert!(children.is_empty(), "empty body should produce no children; got: {:?}", children);
+        assert!(
+            children.is_empty(),
+            "empty body should produce no children; got: {:?}",
+            children
+        );
     }
 
     #[test]
@@ -5182,8 +5772,11 @@ mod tests {
         let body = MailBody::Text("hello".to_owned());
         let children = body_to_compose_children(&body);
         assert_eq!(children.len(), 1);
-        assert!(matches!(&children[0], FfonElement::Str(s) if s == "<input>hello</input>"),
-            "non-empty text body should wrap content in <input>; got: {:?}", children[0]);
+        assert!(
+            matches!(&children[0], FfonElement::Str(s) if s == "<input>hello</input>"),
+            "non-empty text body should wrap content in <input>; got: {:?}",
+            children[0]
+        );
     }
 
     #[test]
@@ -5206,7 +5799,9 @@ mod tests {
         match &body {
             MailBody::Ffon(elems) => {
                 let has_obj = elems.iter().any(|e| match e {
-                    FfonElement::Obj(o) => sicompass_sdk::tags::extract_input(&o.key).as_deref() == Some("section"),
+                    FfonElement::Obj(o) => {
+                        sicompass_sdk::tags::extract_input(&o.key).as_deref() == Some("section")
+                    }
                     _ => false,
                 });
                 assert!(has_obj, "expected Obj(section) in Ffon; got: {:?}", elems);
@@ -5221,12 +5816,20 @@ mod tests {
         update_body_leaf(&mut body, "", "header:");
         match &body {
             MailBody::Ffon(elems) => {
-                let has_existing = elems.iter().any(|e| matches!(e, FfonElement::Str(s) if s.contains("existing")));
+                let has_existing = elems
+                    .iter()
+                    .any(|e| matches!(e, FfonElement::Str(s) if s.contains("existing")));
                 let has_obj = elems.iter().any(|e| match e {
-                    FfonElement::Obj(o) => sicompass_sdk::tags::extract_input(&o.key).as_deref() == Some("header"),
+                    FfonElement::Obj(o) => {
+                        sicompass_sdk::tags::extract_input(&o.key).as_deref() == Some("header")
+                    }
                     _ => false,
                 });
-                assert!(has_existing && has_obj, "existing text and new Obj must both be present; got: {:?}", elems);
+                assert!(
+                    has_existing && has_obj,
+                    "existing text and new Obj must both be present; got: {:?}",
+                    elems
+                );
             }
             other => panic!("expected Ffon body, got: {:?}", other),
         }
@@ -5234,13 +5837,17 @@ mod tests {
 
     #[test]
     fn test_update_body_leaf_trailing_colon_appends_obj_to_ffon_body() {
-        let mut body = MailBody::Ffon(vec![FfonElement::new_str("<input>first</input>".to_owned())]);
+        let mut body = MailBody::Ffon(vec![FfonElement::new_str(
+            "<input>first</input>".to_owned(),
+        )]);
         update_body_leaf(&mut body, "", "meta:");
         match &body {
             MailBody::Ffon(elems) => {
                 assert_eq!(elems.len(), 2, "should have 2 elements; got: {:?}", elems);
                 let has_obj = elems.iter().any(|e| match e {
-                    FfonElement::Obj(o) => sicompass_sdk::tags::extract_input(&o.key).as_deref() == Some("meta"),
+                    FfonElement::Obj(o) => {
+                        sicompass_sdk::tags::extract_input(&o.key).as_deref() == Some("meta")
+                    }
                     _ => false,
                 });
                 assert!(has_obj, "expected Obj(meta) appended; got: {:?}", elems);
@@ -5258,7 +5865,9 @@ mod tests {
         match &p.compose.draft.body {
             MailBody::Ffon(elems) => {
                 let has_obj = elems.iter().any(|e| match e {
-                    FfonElement::Obj(o) => sicompass_sdk::tags::extract_input(&o.key).as_deref() == Some("myobj"),
+                    FfonElement::Obj(o) => {
+                        sicompass_sdk::tags::extract_input(&o.key).as_deref() == Some("myobj")
+                    }
                     _ => false,
                 });
                 assert!(has_obj, "expected Obj(myobj) in body; got: {:?}", elems);
@@ -5272,14 +5881,19 @@ mod tests {
     /// Deleting the sole Ffon element leaves a single `i <input></input>` placeholder.
     #[test]
     fn delete_body_element_ffon_last_keeps_i_placeholder() {
-        let mut body = MailBody::Ffon(vec![
-            FfonElement::new_str("<input>hello</input>".to_owned()),
-        ]);
+        let mut body = MailBody::Ffon(vec![FfonElement::new_str(
+            "<input>hello</input>".to_owned(),
+        )]);
         let ok = delete_body_element_at(&mut body, &[0]);
         assert!(ok, "delete should succeed");
         match &body {
             MailBody::Ffon(elems) => {
-                assert_eq!(elems.len(), 1, "should have exactly one placeholder; got: {:?}", elems);
+                assert_eq!(
+                    elems.len(),
+                    1,
+                    "should have exactly one placeholder; got: {:?}",
+                    elems
+                );
                 assert_eq!(
                     elems[0],
                     FfonElement::new_str(I_PLACEHOLDER.to_owned()),
@@ -5298,7 +5912,12 @@ mod tests {
         assert!(ok, "delete should succeed");
         match &body {
             MailBody::Ffon(elems) => {
-                assert_eq!(elems.len(), 1, "should have exactly one placeholder; got: {:?}", elems);
+                assert_eq!(
+                    elems.len(),
+                    1,
+                    "should have exactly one placeholder; got: {:?}",
+                    elems
+                );
                 assert_eq!(
                     elems[0],
                     FfonElement::new_str(I_PLACEHOLDER.to_owned()),
@@ -5319,14 +5938,27 @@ mod tests {
             FfonElement::new_str("<input>def</input>".to_owned()),
         ]);
         // Delete the first Str (index 0).
-        assert!(delete_body_element_at(&mut body, &[0]), "delete index 0 should succeed");
-        let MailBody::Ffon(elems) = &body else { panic!("expected Ffon"); };
+        assert!(
+            delete_body_element_at(&mut body, &[0]),
+            "delete index 0 should succeed"
+        );
+        let MailBody::Ffon(elems) = &body else {
+            panic!("expected Ffon");
+        };
         assert_eq!(elems.len(), 2, "should have 2 remaining elements");
-        assert!(matches!(&elems[0], FfonElement::Obj(_)), "index 0 should now be the Obj");
+        assert!(
+            matches!(&elems[0], FfonElement::Obj(_)),
+            "index 0 should now be the Obj"
+        );
 
         // Delete the last Str (now at index 1).
-        assert!(delete_body_element_at(&mut body, &[1]), "delete index 1 should succeed");
-        let MailBody::Ffon(elems) = &body else { panic!("expected Ffon"); };
+        assert!(
+            delete_body_element_at(&mut body, &[1]),
+            "delete index 1 should succeed"
+        );
+        let MailBody::Ffon(elems) = &body else {
+            panic!("expected Ffon");
+        };
         assert_eq!(elems.len(), 1, "only the Obj should remain");
         assert!(matches!(&elems[0], FfonElement::Obj(_)));
     }
@@ -5338,8 +5970,13 @@ mod tests {
             FfonElement::new_str("<input>line</input>".to_owned()),
             FfonElement::new_obj("myobj:"),
         ]);
-        assert!(delete_body_element_at(&mut body, &[1]), "delete Obj should succeed");
-        let MailBody::Ffon(elems) = &body else { panic!("expected Ffon"); };
+        assert!(
+            delete_body_element_at(&mut body, &[1]),
+            "delete Obj should succeed"
+        );
+        let MailBody::Ffon(elems) = &body else {
+            panic!("expected Ffon");
+        };
         assert_eq!(elems.len(), 1);
         assert!(matches!(&elems[0], FfonElement::Str(_)));
     }
@@ -5348,13 +5985,26 @@ mod tests {
     #[test]
     fn delete_body_element_nested_child() {
         let mut inner = FfonElement::new_obj("myobj:");
-        inner.as_obj_mut().unwrap().push(FfonElement::new_str("<input>x</input>".to_owned()));
-        inner.as_obj_mut().unwrap().push(FfonElement::new_str("<input>y</input>".to_owned()));
+        inner
+            .as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("<input>x</input>".to_owned()));
+        inner
+            .as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("<input>y</input>".to_owned()));
         let mut body = MailBody::Ffon(vec![inner]);
         // Delete the first child of the Obj (path [0, 0]).
-        assert!(delete_body_element_at(&mut body, &[0, 0]), "nested delete should succeed");
-        let MailBody::Ffon(elems) = &body else { panic!("expected Ffon"); };
-        let FfonElement::Obj(o) = &elems[0] else { panic!("expected Obj"); };
+        assert!(
+            delete_body_element_at(&mut body, &[0, 0]),
+            "nested delete should succeed"
+        );
+        let MailBody::Ffon(elems) = &body else {
+            panic!("expected Ffon");
+        };
+        let FfonElement::Obj(o) = &elems[0] else {
+            panic!("expected Obj");
+        };
         assert_eq!(o.children.len(), 1, "one child should remain");
     }
 
@@ -5363,12 +6013,26 @@ mod tests {
     #[test]
     fn delete_body_element_empties_obj_reseeds_placeholder() {
         let mut inner = FfonElement::new_obj("myobj:");
-        inner.as_obj_mut().unwrap().push(FfonElement::new_str("<input>x</input>".to_owned()));
+        inner
+            .as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("<input>x</input>".to_owned()));
         let mut body = MailBody::Ffon(vec![inner]);
-        assert!(delete_body_element_at(&mut body, &[0, 0]), "nested delete should succeed");
-        let MailBody::Ffon(elems) = &body else { panic!("expected Ffon"); };
-        let FfonElement::Obj(o) = &elems[0] else { panic!("expected Obj"); };
-        assert_eq!(o.children.len(), 1, "Obj children should have exactly the i placeholder");
+        assert!(
+            delete_body_element_at(&mut body, &[0, 0]),
+            "nested delete should succeed"
+        );
+        let MailBody::Ffon(elems) = &body else {
+            panic!("expected Ffon");
+        };
+        let FfonElement::Obj(o) = &elems[0] else {
+            panic!("expected Obj");
+        };
+        assert_eq!(
+            o.children.len(),
+            1,
+            "Obj children should have exactly the i placeholder"
+        );
         assert_eq!(
             o.children[0],
             FfonElement::new_str(I_PLACEHOLDER.to_owned()),
@@ -5385,11 +6049,19 @@ mod tests {
         update_body_leaf(&mut body, "", "foo:");
         match &body {
             MailBody::Ffon(elems) => {
-                let FfonElement::Obj(o) = elems.iter().find(|e| e.is_obj()).expect("expected Obj") else {
+                let FfonElement::Obj(o) = elems.iter().find(|e| e.is_obj()).expect("expected Obj")
+                else {
                     panic!("element should be Obj");
                 };
-                assert_eq!(o.children.len(), 1, "new Obj (from Text body) should have one child");
-                assert_eq!(o.children[0], FfonElement::new_str(I_PLACEHOLDER.to_owned()));
+                assert_eq!(
+                    o.children.len(),
+                    1,
+                    "new Obj (from Text body) should have one child"
+                );
+                assert_eq!(
+                    o.children[0],
+                    FfonElement::new_str(I_PLACEHOLDER.to_owned())
+                );
             }
             other => panic!("expected Ffon body, got: {:?}", other),
         }
@@ -5397,58 +6069,83 @@ mod tests {
         // Path 2: Ffon body — replace existing placeholder Str with Obj.
         let mut body = MailBody::Ffon(vec![FfonElement::new_str(I_PLACEHOLDER.to_owned())]);
         update_body_leaf(&mut body, "", "bar:");
-        let MailBody::Ffon(elems) = &body else { panic!("expected Ffon"); };
+        let MailBody::Ffon(elems) = &body else {
+            panic!("expected Ffon");
+        };
         let FfonElement::Obj(o) = elems.iter().find(|e| e.is_obj()).expect("expected Obj") else {
             panic!("element should be Obj");
         };
         assert_eq!(o.children.len(), 1, "replaced Obj should have one child");
-        assert_eq!(o.children[0], FfonElement::new_str(I_PLACEHOLDER.to_owned()));
+        assert_eq!(
+            o.children[0],
+            FfonElement::new_str(I_PLACEHOLDER.to_owned())
+        );
 
         // Path 3: Ffon body — no placeholder match, append new Obj.
-        let mut body = MailBody::Ffon(vec![FfonElement::new_str("<input>hello</input>".to_owned())]);
+        let mut body = MailBody::Ffon(vec![FfonElement::new_str(
+            "<input>hello</input>".to_owned(),
+        )]);
         update_body_leaf(&mut body, "nonexistent", "baz:");
-        let MailBody::Ffon(elems) = &body else { panic!("expected Ffon"); };
+        let MailBody::Ffon(elems) = &body else {
+            panic!("expected Ffon");
+        };
         let FfonElement::Obj(o) = elems.iter().find(|e| e.is_obj()).expect("expected Obj") else {
             panic!("element should be Obj");
         };
         assert_eq!(o.children.len(), 1, "appended Obj should have one child");
-        assert_eq!(o.children[0], FfonElement::new_str(I_PLACEHOLDER.to_owned()));
+        assert_eq!(
+            o.children[0],
+            FfonElement::new_str(I_PLACEHOLDER.to_owned())
+        );
     }
 
     /// Out-of-range path returns false and leaves body unchanged.
     #[test]
     fn delete_body_element_out_of_range() {
-        let mut body = MailBody::Ffon(vec![
-            FfonElement::new_str("<input>only</input>".to_owned()),
-        ]);
-        assert!(!delete_body_element_at(&mut body, &[5]), "out-of-range should return false");
-        let MailBody::Ffon(elems) = &body else { panic!("expected Ffon"); };
+        let mut body = MailBody::Ffon(vec![FfonElement::new_str("<input>only</input>".to_owned())]);
+        assert!(
+            !delete_body_element_at(&mut body, &[5]),
+            "out-of-range should return false"
+        );
+        let MailBody::Ffon(elems) = &body else {
+            panic!("expected Ffon");
+        };
         assert_eq!(elems.len(), 1, "body should be unchanged");
     }
 
     /// Empty path returns false.
     #[test]
     fn delete_body_element_empty_path() {
-        let mut body = MailBody::Ffon(vec![
-            FfonElement::new_str("<input>x</input>".to_owned()),
-        ]);
-        assert!(!delete_body_element_at(&mut body, &[]), "empty path should return false");
+        let mut body = MailBody::Ffon(vec![FfonElement::new_str("<input>x</input>".to_owned())]);
+        assert!(
+            !delete_body_element_at(&mut body, &[]),
+            "empty path should return false"
+        );
     }
 
     // ---- renormalize_body_variant ----
 
     #[test]
     fn renormalize_collapses_single_str_to_text() {
-        let mut body = MailBody::Ffon(vec![FfonElement::new_str("<input>hello</input>".to_owned())]);
+        let mut body = MailBody::Ffon(vec![FfonElement::new_str(
+            "<input>hello</input>".to_owned(),
+        )]);
         renormalize_body_variant(&mut body);
-        assert!(matches!(&body, MailBody::Text(s) if s == "hello"), "expected Text(hello), got: {:?}", body);
+        assert!(
+            matches!(&body, MailBody::Text(s) if s == "hello"),
+            "expected Text(hello), got: {:?}",
+            body
+        );
     }
 
     #[test]
     fn renormalize_preserves_i_placeholder() {
         let mut body = MailBody::Ffon(vec![FfonElement::new_str(I_PLACEHOLDER.to_owned())]);
         renormalize_body_variant(&mut body);
-        assert!(matches!(&body, MailBody::Ffon(elems) if elems.len() == 1), "i placeholder should stay Ffon");
+        assert!(
+            matches!(&body, MailBody::Ffon(elems) if elems.len() == 1),
+            "i placeholder should stay Ffon"
+        );
     }
 
     #[test]
@@ -5458,21 +6155,32 @@ mod tests {
             FfonElement::new_str("<input>b</input>".to_owned()),
         ]);
         renormalize_body_variant(&mut body);
-        assert!(matches!(&body, MailBody::Ffon(elems) if elems.len() == 2), "multi-child Ffon should stay Ffon");
+        assert!(
+            matches!(&body, MailBody::Ffon(elems) if elems.len() == 2),
+            "multi-child Ffon should stay Ffon"
+        );
     }
 
     #[test]
     fn renormalize_preserves_obj_child() {
-        let mut body = MailBody::Ffon(vec![new_obj_with_i_placeholder("<input>key</input>".to_owned())]);
+        let mut body = MailBody::Ffon(vec![new_obj_with_i_placeholder(
+            "<input>key</input>".to_owned(),
+        )]);
         renormalize_body_variant(&mut body);
-        assert!(matches!(&body, MailBody::Ffon(_)), "single Obj child should stay Ffon");
+        assert!(
+            matches!(&body, MailBody::Ffon(_)),
+            "single Obj child should stay Ffon"
+        );
     }
 
     #[test]
     fn renormalize_noop_on_text() {
         let mut body = MailBody::Text("hello".to_owned());
         renormalize_body_variant(&mut body);
-        assert!(matches!(&body, MailBody::Text(s) if s == "hello"), "Text should be unchanged");
+        assert!(
+            matches!(&body, MailBody::Text(s) if s == "hello"),
+            "Text should be unchanged"
+        );
     }
 
     /// sync_ffon_body_children: two-element body → remove second → collapses to Text.
@@ -5528,7 +6236,9 @@ mod tests {
         // Source body contains an Obj with a child string (no I_PLACEHOLDER).
         let nested_obj = {
             let mut o = FfonElement::new_obj("<input>section</input>".to_owned());
-            o.as_obj_mut().unwrap().push(FfonElement::new_str("<input>content</input>".to_owned()));
+            o.as_obj_mut()
+                .unwrap()
+                .push(FfonElement::new_str("<input>content</input>".to_owned()));
             o
         };
         msg.body = MailBody::Ffon(vec![nested_obj]);
@@ -5545,14 +6255,17 @@ mod tests {
             panic!("expected Ffon body; got: {:?}", p.compose.draft.body);
         };
         // Find the inherited nested Obj (third element onward — after I_PLACEHOLDER and attribution).
-        let nested = elems.iter().find_map(|e| {
-            if let FfonElement::Obj(o) = e {
-                if sicompass_sdk::tags::extract_input(&o.key).as_deref() == Some("section") {
-                    return Some(o);
+        let nested = elems
+            .iter()
+            .find_map(|e| {
+                if let FfonElement::Obj(o) = e {
+                    if sicompass_sdk::tags::extract_input(&o.key).as_deref() == Some("section") {
+                        return Some(o);
+                    }
                 }
-            }
-            None
-        }).expect("nested Obj from source body not found in reply draft");
+                None
+            })
+            .expect("nested Obj from source body not found in reply draft");
         assert_eq!(
             nested.children[0],
             FfonElement::new_str(I_PLACEHOLDER.to_owned()),
@@ -5569,7 +6282,9 @@ mod tests {
         let mut msg = make_message(1);
         let nested_obj = {
             let mut o = FfonElement::new_obj("<input>attachment</input>".to_owned());
-            o.as_obj_mut().unwrap().push(FfonElement::new_str("<input>data</input>".to_owned()));
+            o.as_obj_mut()
+                .unwrap()
+                .push(FfonElement::new_str("<input>data</input>".to_owned()));
             o
         };
         msg.body = MailBody::Ffon(vec![nested_obj]);
@@ -5585,14 +6300,17 @@ mod tests {
         let MailBody::Ffon(elems) = &p.compose.draft.body else {
             panic!("expected Ffon body; got: {:?}", p.compose.draft.body);
         };
-        let nested = elems.iter().find_map(|e| {
-            if let FfonElement::Obj(o) = e {
-                if sicompass_sdk::tags::extract_input(&o.key).as_deref() == Some("attachment") {
-                    return Some(o);
+        let nested = elems
+            .iter()
+            .find_map(|e| {
+                if let FfonElement::Obj(o) = e {
+                    if sicompass_sdk::tags::extract_input(&o.key).as_deref() == Some("attachment") {
+                        return Some(o);
+                    }
                 }
-            }
-            None
-        }).expect("nested Obj from source body not found in forward draft");
+                None
+            })
+            .expect("nested Obj from source body not found in forward draft");
         assert_eq!(
             nested.children[0],
             FfonElement::new_str(I_PLACEHOLDER.to_owned()),
@@ -5611,7 +6329,8 @@ mod tests {
         assert_eq!(children.len(), 1);
         assert!(
             matches!(&children[0], FfonElement::Str(s) if s == "<input>hello</input>"),
-            "placeholder should be replaced with '<input>hello</input>'; got: {:?}", children[0]
+            "placeholder should be replaced with '<input>hello</input>'; got: {:?}",
+            children[0]
         );
     }
 
@@ -5626,12 +6345,14 @@ mod tests {
                 assert_eq!(
                     sicompass_sdk::tags::extract_input(&o.key).as_deref(),
                     Some("sub"),
-                    "Obj key should be 'sub'; got: {:?}", o.key
+                    "Obj key should be 'sub'; got: {:?}",
+                    o.key
                 );
                 assert_eq!(
                     o.children[0],
                     FfonElement::new_str(I_PLACEHOLDER.to_owned()),
-                    "newly created nested Obj must have I_PLACEHOLDER child; got: {:?}", o.children
+                    "newly created nested Obj must have I_PLACEHOLDER child; got: {:?}",
+                    o.children
                 );
             }
             other => panic!("expected Obj, got: {:?}", other),
@@ -5646,9 +6367,9 @@ mod tests {
         p.push_path("compose");
 
         // Pre-build a body with a top-level `foo:` Obj containing only I_PLACEHOLDER.
-        p.compose.draft.body = MailBody::Ffon(vec![
-            new_obj_with_i_placeholder("<input>foo</input>".to_owned()),
-        ]);
+        p.compose.draft.body = MailBody::Ffon(vec![new_obj_with_i_placeholder(
+            "<input>foo</input>".to_owned(),
+        )]);
 
         // Simulate being navigated inside `foo:` (path has Body: and then `foo` segment).
         p.push_path("Body: [ffon]");
@@ -5660,13 +6381,20 @@ mod tests {
         let MailBody::Ffon(elems) = &p.compose.draft.body else {
             panic!("expected Ffon body; got: {:?}", p.compose.draft.body);
         };
-        assert_eq!(elems.len(), 1, "top-level body should still have exactly one element");
+        assert_eq!(
+            elems.len(),
+            1,
+            "top-level body should still have exactly one element"
+        );
         let FfonElement::Obj(foo) = &elems[0] else {
             panic!("expected top-level Obj; got: {:?}", elems[0]);
         };
         assert!(
-            foo.children.iter().any(|c| matches!(c, FfonElement::Str(s) if s == "<input>bar</input>")),
-            "bar must be a child of foo, not at top level; foo.children: {:?}", foo.children
+            foo.children
+                .iter()
+                .any(|c| matches!(c, FfonElement::Str(s) if s == "<input>bar</input>")),
+            "bar must be a child of foo, not at top level; foo.children: {:?}",
+            foo.children
         );
     }
 
@@ -5675,9 +6403,9 @@ mod tests {
     fn commit_edit_nested_body_trailing_colon_creates_obj_inside_parent() {
         let mut p = EmailClientProvider::new();
         p.push_path("compose");
-        p.compose.draft.body = MailBody::Ffon(vec![
-            new_obj_with_i_placeholder("<input>foo</input>".to_owned()),
-        ]);
+        p.compose.draft.body = MailBody::Ffon(vec![new_obj_with_i_placeholder(
+            "<input>foo</input>".to_owned(),
+        )]);
         p.push_path("Body: [ffon]");
         p.push_path("foo");
 
@@ -5690,14 +6418,18 @@ mod tests {
             panic!("expected top-level foo Obj");
         };
         // `baz:` Obj should exist inside `foo:`, alongside I_PLACEHOLDER.
-        let baz = foo.children.iter().find_map(|c| {
-            if let FfonElement::Obj(o) = c {
-                if sicompass_sdk::tags::extract_input(&o.key).as_deref() == Some("baz") {
-                    return Some(o);
+        let baz = foo
+            .children
+            .iter()
+            .find_map(|c| {
+                if let FfonElement::Obj(o) = c {
+                    if sicompass_sdk::tags::extract_input(&o.key).as_deref() == Some("baz") {
+                        return Some(o);
+                    }
                 }
-            }
-            None
-        }).expect("baz Obj not found inside foo; foo.children: {:?}");
+                None
+            })
+            .expect("baz Obj not found inside foo; foo.children: {:?}");
         assert_eq!(
             baz.children[0],
             FfonElement::new_str(I_PLACEHOLDER.to_owned()),
@@ -5719,15 +6451,22 @@ mod tests {
         p.push_path("Body: [ffon]");
         p.push_path("foo");
 
-        let children = p.fetch_subtree_children()
+        let children = p
+            .fetch_subtree_children()
             .expect("fetch_subtree_children must return Some when inside a nested body Obj");
 
         // Should return foo's children (the I_PLACEHOLDER), not the top-level body vec.
-        assert_eq!(children.len(), 1, "expected 1 child (I_PLACEHOLDER); got: {:?}", children);
+        assert_eq!(
+            children.len(),
+            1,
+            "expected 1 child (I_PLACEHOLDER); got: {:?}",
+            children
+        );
         assert_eq!(
             children[0],
             FfonElement::new_str(I_PLACEHOLDER.to_owned()),
-            "child should be I_PLACEHOLDER; got: {:?}", children[0]
+            "child should be I_PLACEHOLDER; got: {:?}",
+            children[0]
         );
     }
 
@@ -5737,9 +6476,9 @@ mod tests {
     fn fetch_subtree_parent_key_returns_none_for_nested_body_obj() {
         let mut p = EmailClientProvider::new();
         p.push_path("compose");
-        p.compose.draft.body = MailBody::Ffon(vec![
-            new_obj_with_i_placeholder("<input>foo</input>".to_owned()),
-        ]);
+        p.compose.draft.body = MailBody::Ffon(vec![new_obj_with_i_placeholder(
+            "<input>foo</input>".to_owned(),
+        )]);
         p.push_path("Body: [ffon]");
         p.push_path("foo");
 
@@ -5763,16 +6502,26 @@ mod tests {
         let mut p = EmailClientProvider::new().with_imap(Box::new(imap));
         p.push_path("INBOX");
 
-        let children = p.fetch_subtree_children()
+        let children = p
+            .fetch_subtree_children()
             .expect("fetch_subtree_children must return Some for a folder path");
 
-        assert_eq!(children.len(), 2, "expected 2 message children; got: {:?}", children);
+        assert_eq!(
+            children.len(),
+            2,
+            "expected 2 message children; got: {:?}",
+            children
+        );
         assert!(
-            children.iter().any(|e| e.as_obj().map_or(false, |o| o.key.contains("Alpha"))),
+            children
+                .iter()
+                .any(|e| e.as_obj().map_or(false, |o| o.key.contains("Alpha"))),
             "children must include message with subject Alpha"
         );
         assert!(
-            children.iter().any(|e| e.as_obj().map_or(false, |o| o.key.contains("Beta"))),
+            children
+                .iter()
+                .any(|e| e.as_obj().map_or(false, |o| o.key.contains("Beta"))),
             "children must include message with subject Beta"
         );
     }
@@ -5813,15 +6562,24 @@ mod tests {
     fn test_unread_message_label_has_unread_tag() {
         let h = make_header_unread(1, "alice@x.com", "Hello");
         let label = message_label(&h);
-        assert!(label.starts_with("[unread] "), "unread label must start with [unread]; got: {label}");
-        assert!(label.contains("Hello — alice@x.com"), "label must contain subject and from");
+        assert!(
+            label.starts_with("[unread] "),
+            "unread label must start with [unread]; got: {label}"
+        );
+        assert!(
+            label.contains("Hello — alice@x.com"),
+            "label must contain subject and from"
+        );
     }
 
     #[test]
     fn test_read_message_label_has_read_tag() {
         let h = make_header(1, "alice@x.com", "Hello");
         let label = message_label(&h);
-        assert!(label.starts_with("[read] "), "read label must start with [read]; got: {label}");
+        assert!(
+            label.starts_with("[read] "),
+            "read label must start with [read]; got: {label}"
+        );
         assert_eq!(label, "[read] Hello — alice@x.com");
     }
 
@@ -5830,8 +6588,14 @@ mod tests {
         let mut h = make_header(1, "alice@x.com", "Hello");
         h.flagged = true;
         let label = message_label(&h);
-        assert!(label.contains("[star]"), "starred label must contain [star]; got: {label}");
-        assert!(label.starts_with("[read] [star] "), "starred read label must start with [read] [star]; got: {label}");
+        assert!(
+            label.contains("[star]"),
+            "starred label must contain [star]; got: {label}"
+        );
+        assert!(
+            label.starts_with("[read] [star] "),
+            "starred read label must start with [read] [star]; got: {label}"
+        );
     }
 
     #[test]
@@ -5839,7 +6603,10 @@ mod tests {
         let mut h = make_header_unread(1, "alice@x.com", "Hello");
         h.flagged = true;
         let label = message_label(&h);
-        assert!(label.starts_with("[unread] [star] "), "unread starred label must start with [unread] [star]; got: {label}");
+        assert!(
+            label.starts_with("[unread] [star] "),
+            "unread starred label must start with [unread] [star]; got: {label}"
+        );
     }
 
     #[test]
@@ -5852,14 +6619,27 @@ mod tests {
         p.fetch();
         // Path carries the old [unread] label.
         let uid = p.lookup_uid("[unread] Hello — alice@x.com");
-        assert_eq!(uid, Some(1), "lookup_uid must resolve despite stale [unread] prefix");
+        assert_eq!(
+            uid,
+            Some(1),
+            "lookup_uid must resolve despite stale [unread] prefix"
+        );
     }
 
     #[test]
     fn test_strip_message_tags_removes_prefix() {
-        assert_eq!(strip_message_tags("[read] Hello — alice@x.com"), "Hello — alice@x.com");
-        assert_eq!(strip_message_tags("[unread] [star] Hello — alice@x.com"), "Hello — alice@x.com");
-        assert_eq!(strip_message_tags("Hello — alice@x.com"), "Hello — alice@x.com");
+        assert_eq!(
+            strip_message_tags("[read] Hello — alice@x.com"),
+            "Hello — alice@x.com"
+        );
+        assert_eq!(
+            strip_message_tags("[unread] [star] Hello — alice@x.com"),
+            "Hello — alice@x.com"
+        );
+        assert_eq!(
+            strip_message_tags("Hello — alice@x.com"),
+            "Hello — alice@x.com"
+        );
     }
 
     #[test]
@@ -5870,8 +6650,11 @@ mod tests {
         p.push_path("INBOX");
         let items = p.fetch();
         assert!(
-            items.iter().any(|e| e.as_obj().map_or(false, |o| o.key.starts_with("[unread] "))),
-            "unread message should have [unread] prefix in list; got: {:?}", items
+            items
+                .iter()
+                .any(|e| e.as_obj().map_or(false, |o| o.key.starts_with("[unread] "))),
+            "unread message should have [unread] prefix in list; got: {:?}",
+            items
         );
     }
 
@@ -5883,8 +6666,11 @@ mod tests {
         p.push_path("INBOX");
         let items = p.fetch();
         assert!(
-            !items.iter().any(|e| e.as_obj().map_or(false, |o| o.key.starts_with("[unread] "))),
-            "seen message should not have [unread] prefix; got: {:?}", items
+            !items
+                .iter()
+                .any(|e| e.as_obj().map_or(false, |o| o.key.starts_with("[unread] "))),
+            "seen message should not have [unread] prefix; got: {:?}",
+            items
         );
     }
 
@@ -5905,8 +6691,11 @@ mod tests {
         let mock = p.imap.as_ref().unwrap().as_ref() as *const dyn ImapBackend as *const MockImap;
         let stored = unsafe { &(*mock).stored_flags };
         assert!(
-            stored.iter().any(|(_, uid, flag)| *uid == 1 && flag.contains("\\Seen") && flag.starts_with("+FLAGS")),
-            "opening an unread message must call set_flags +FLAGS (\\Seen); got: {:?}", stored
+            stored.iter().any(|(_, uid, flag)| *uid == 1
+                && flag.contains("\\Seen")
+                && flag.starts_with("+FLAGS")),
+            "opening an unread message must call set_flags +FLAGS (\\Seen); got: {:?}",
+            stored
         );
     }
 
@@ -5924,7 +6713,8 @@ mod tests {
         let stored = unsafe { &(*mock).stored_flags };
         assert!(
             stored.is_empty(),
-            "opening an already-read message must not call set_flags; got: {:?}", stored
+            "opening an already-read message must not call set_flags; got: {:?}",
+            stored
         );
     }
 
@@ -5943,9 +6733,15 @@ mod tests {
         p.fetch();
         // set_flags failed — local cache must still show the message as unread.
         let still_unread = p.message_cache.iter().any(|h| h.uid == 1 && !h.seen);
-        assert!(still_unread, "message must remain unread in cache when set_flags fails");
+        assert!(
+            still_unread,
+            "message must remain unread in cache when set_flags fails"
+        );
         // Envelope cache must NOT have been invalidated (would flip unread→read in the list).
-        assert!(p.envelope_cache.is_some(), "envelope cache must not be invalidated on set_flags failure");
+        assert!(
+            p.envelope_cache.is_some(),
+            "envelope cache must not be invalidated on set_flags failure"
+        );
     }
 
     // ---- mark-read / mark-unread commands ----
@@ -5955,19 +6751,27 @@ mod tests {
         let msgs = vec![make_header(1, "alice@example.com", "Hello")];
         let msg = make_message(1);
         let imap = MockImap::new().with_messages(msgs).with_detail(msg);
-        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new()
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
         p.push_path("INBOX");
         p.fetch();
         p.push_path("[read] Hello — alice@example.com");
         p.fetch();
         let mut err = String::new();
         p.handle_command("mark-unread", "", 0, &mut err);
-        assert!(err.is_empty(), "mark-unread should not set error; got: {err}");
+        assert!(
+            err.is_empty(),
+            "mark-unread should not set error; got: {err}"
+        );
         let mock = p.imap.as_ref().unwrap().as_ref() as *const dyn ImapBackend as *const MockImap;
         let stored = unsafe { &(*mock).stored_flags };
         assert!(
-            stored.iter().any(|(_, uid, flag)| *uid == 1 && flag.contains("\\Seen") && flag.starts_with("-FLAGS")),
-            "mark-unread must call -FLAGS (\\Seen); got: {:?}", stored
+            stored.iter().any(|(_, uid, flag)| *uid == 1
+                && flag.contains("\\Seen")
+                && flag.starts_with("-FLAGS")),
+            "mark-unread must call -FLAGS (\\Seen); got: {:?}",
+            stored
         );
     }
 
@@ -5976,21 +6780,28 @@ mod tests {
         let msgs = vec![make_header_unread(1, "alice@example.com", "Hello")];
         let msg = make_message(1);
         let imap = MockImap::new().with_messages(msgs).with_detail(msg);
-        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new()
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
         p.push_path("INBOX");
         p.fetch();
         p.push_path("[unread] Hello — alice@example.com");
-        p.fetch();  // triggers auto-mark-read
+        p.fetch(); // triggers auto-mark-read
         // Reset stored_flags to isolate the explicit mark-read command
         let mock = p.imap.as_mut().unwrap().as_mut() as *mut dyn ImapBackend as *mut MockImap;
-        unsafe { (*mock).stored_flags.clear(); }
+        unsafe {
+            (*mock).stored_flags.clear();
+        }
         let mut err = String::new();
         p.handle_command("mark-read", "", 0, &mut err);
         assert!(err.is_empty(), "mark-read should not set error; got: {err}");
         let stored = unsafe { &(*mock).stored_flags };
         assert!(
-            stored.iter().any(|(_, uid, flag)| *uid == 1 && flag.contains("\\Seen") && flag.starts_with("+FLAGS")),
-            "mark-read must call +FLAGS (\\Seen); got: {:?}", stored
+            stored.iter().any(|(_, uid, flag)| *uid == 1
+                && flag.contains("\\Seen")
+                && flag.starts_with("+FLAGS")),
+            "mark-read must call +FLAGS (\\Seen); got: {:?}",
+            stored
         );
     }
 
@@ -6001,7 +6812,9 @@ mod tests {
         let msgs = vec![make_header(1, "alice@example.com", "Hello")];
         let msg = make_message(1);
         let imap = MockImap::new().with_messages(msgs).with_detail(msg);
-        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new()
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
         p.push_path("INBOX");
         p.fetch();
         p.push_path("[read] Hello — alice@example.com");
@@ -6012,8 +6825,11 @@ mod tests {
         let mock = p.imap.as_ref().unwrap().as_ref() as *const dyn ImapBackend as *const MockImap;
         let stored = unsafe { &(*mock).stored_flags };
         assert!(
-            stored.iter().any(|(_, uid, flag)| *uid == 1 && flag.contains("\\Flagged") && flag.starts_with("+FLAGS")),
-            "star must call +FLAGS (\\Flagged); got: {:?}", stored
+            stored.iter().any(|(_, uid, flag)| *uid == 1
+                && flag.contains("\\Flagged")
+                && flag.starts_with("+FLAGS")),
+            "star must call +FLAGS (\\Flagged); got: {:?}",
+            stored
         );
     }
 
@@ -6022,7 +6838,9 @@ mod tests {
         let msgs = vec![make_header(1, "alice@example.com", "Hello")];
         let msg = make_message(1);
         let imap = MockImap::new().with_messages(msgs).with_detail(msg);
-        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new()
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
         p.push_path("INBOX");
         p.fetch();
         p.push_path("[read] Hello — alice@example.com");
@@ -6033,8 +6851,11 @@ mod tests {
         let mock = p.imap.as_ref().unwrap().as_ref() as *const dyn ImapBackend as *const MockImap;
         let stored = unsafe { &(*mock).stored_flags };
         assert!(
-            stored.iter().any(|(_, uid, flag)| *uid == 1 && flag.contains("\\Flagged") && flag.starts_with("-FLAGS")),
-            "unstar must call -FLAGS (\\Flagged); got: {:?}", stored
+            stored.iter().any(|(_, uid, flag)| *uid == 1
+                && flag.contains("\\Flagged")
+                && flag.starts_with("-FLAGS")),
+            "unstar must call -FLAGS (\\Flagged); got: {:?}",
+            stored
         );
     }
 
@@ -6050,12 +6871,17 @@ mod tests {
         };
         let imap = MockImap::new()
             .with_folder_infos(vec![
-                FolderInfo { name: "INBOX".to_owned(), attributes: vec![] },
+                FolderInfo {
+                    name: "INBOX".to_owned(),
+                    attributes: vec![],
+                },
                 trash_info,
             ])
             .with_messages(msgs)
             .with_detail(msg);
-        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new()
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
         // Build root to populate special_folders from LIST response.
         p.fetch();
         p.push_path("INBOX");
@@ -6068,8 +6894,11 @@ mod tests {
         let mock = p.imap.as_ref().unwrap().as_ref() as *const dyn ImapBackend as *const MockImap;
         let moved = unsafe { &(*mock).moved };
         assert!(
-            moved.iter().any(|(from, uid, dest)| *uid == 1 && from == "INBOX" && dest == "[Gmail]/Trash"),
-            "delete from INBOX must move to trash; got: {:?}", moved
+            moved
+                .iter()
+                .any(|(from, uid, dest)| *uid == 1 && from == "INBOX" && dest == "[Gmail]/Trash"),
+            "delete from INBOX must move to trash; got: {:?}",
+            moved
         );
         // Navigation back to the folder is handled by the app layer, not the provider.
     }
@@ -6084,26 +6913,36 @@ mod tests {
         };
         let imap = MockImap::new()
             .with_folder_infos(vec![
-                FolderInfo { name: "INBOX".to_owned(), attributes: vec![] },
+                FolderInfo {
+                    name: "INBOX".to_owned(),
+                    attributes: vec![],
+                },
                 trash_info,
             ])
             .with_messages(msgs)
             .with_detail(msg);
-        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new()
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
         p.fetch(); // populate special_folders
         // Manually set path into Trash (simulating navigation)
-        p.folder_mappings.push(("Trash".to_owned(), "[Gmail]/Trash".to_owned()));
+        p.folder_mappings
+            .push(("Trash".to_owned(), "[Gmail]/Trash".to_owned()));
         p.message_cache = vec![make_header(1, "alice@example.com", "Hello")];
         p.push_path("Trash");
         p.push_path("[read] Hello — alice@example.com");
         let mut err = String::new();
         p.handle_command("delete", "", 0, &mut err);
-        assert!(err.is_empty(), "delete from trash should not set error; got: {err}");
+        assert!(
+            err.is_empty(),
+            "delete from trash should not set error; got: {err}"
+        );
         let mock = p.imap.as_ref().unwrap().as_ref() as *const dyn ImapBackend as *const MockImap;
         let expunged = unsafe { &(*mock).expunged };
         assert!(
             expunged.iter().any(|(_, uid)| *uid == 1),
-            "delete from trash must expunge; got: {:?}", expunged
+            "delete from trash must expunge; got: {:?}",
+            expunged
         );
     }
 
@@ -6115,7 +6954,9 @@ mod tests {
             .with_folders(&["INBOX"])
             .with_messages(msgs)
             .with_detail(msg);
-        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new()
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
         p.fetch(); // no trash in folder list
         p.push_path("INBOX");
         p.fetch();
@@ -6123,12 +6964,16 @@ mod tests {
         p.fetch();
         let mut err = String::new();
         p.handle_command("delete", "", 0, &mut err);
-        assert!(err.is_empty(), "delete with no trash should not set error; got: {err}");
+        assert!(
+            err.is_empty(),
+            "delete with no trash should not set error; got: {err}"
+        );
         let mock = p.imap.as_ref().unwrap().as_ref() as *const dyn ImapBackend as *const MockImap;
         let expunged = unsafe { &(*mock).expunged };
         assert!(
             expunged.iter().any(|(_, uid)| *uid == 1),
-            "delete with no trash folder must expunge; got: {:?}", expunged
+            "delete with no trash folder must expunge; got: {:?}",
+            expunged
         );
     }
 
@@ -6144,12 +6989,17 @@ mod tests {
         };
         let imap = MockImap::new()
             .with_folder_infos(vec![
-                FolderInfo { name: "INBOX".to_owned(), attributes: vec![] },
+                FolderInfo {
+                    name: "INBOX".to_owned(),
+                    attributes: vec![],
+                },
                 archive_info,
             ])
             .with_messages(msgs)
             .with_detail(msg);
-        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new()
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
         p.fetch(); // populate special_folders
         p.push_path("INBOX");
         p.fetch();
@@ -6161,8 +7011,11 @@ mod tests {
         let mock = p.imap.as_ref().unwrap().as_ref() as *const dyn ImapBackend as *const MockImap;
         let moved = unsafe { &(*mock).moved };
         assert!(
-            moved.iter().any(|(from, uid, dest)| *uid == 1 && from == "INBOX" && dest == "[Gmail]/All Mail"),
-            "archive must move to archive folder; got: {:?}", moved
+            moved.iter().any(|(from, uid, dest)| *uid == 1
+                && from == "INBOX"
+                && dest == "[Gmail]/All Mail"),
+            "archive must move to archive folder; got: {:?}",
+            moved
         );
     }
 
@@ -6174,7 +7027,9 @@ mod tests {
             .with_folders(&["INBOX"])
             .with_messages(msgs)
             .with_detail(msg);
-        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new()
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
         p.fetch();
         p.push_path("INBOX");
         p.fetch();
@@ -6182,8 +7037,14 @@ mod tests {
         p.fetch();
         let mut err = String::new();
         p.handle_command("archive", "", 0, &mut err);
-        assert!(!err.is_empty(), "archive without archive folder must set error");
-        assert!(err.contains("\\Archive"), "error must mention \\Archive; got: {err}");
+        assert!(
+            !err.is_empty(),
+            "archive without archive folder must set error"
+        );
+        assert!(
+            err.contains("\\Archive"),
+            "error must mention \\Archive; got: {err}"
+        );
     }
 
     // ---- move command (two-phase) ----
@@ -6196,7 +7057,9 @@ mod tests {
             .with_folders(&["INBOX", "Sent"])
             .with_messages(msgs)
             .with_detail(msg);
-        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new()
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
         p.fetch();
         p.push_path("INBOX");
         p.fetch();
@@ -6205,8 +7068,15 @@ mod tests {
         let mut err = String::new();
         p.handle_command("move", "", 0, &mut err);
         assert!(err.is_empty(), "move should not set error; got: {err}");
-        assert_eq!(p.pending_move_uid, Some(1), "pending_move_uid should be set");
-        assert_eq!(p.pending_move_folder, "INBOX", "pending_move_folder should be INBOX");
+        assert_eq!(
+            p.pending_move_uid,
+            Some(1),
+            "pending_move_uid should be set"
+        );
+        assert_eq!(
+            p.pending_move_folder, "INBOX",
+            "pending_move_folder should be INBOX"
+        );
     }
 
     #[test]
@@ -6217,7 +7087,9 @@ mod tests {
             .with_folders(&["INBOX", "Sent", "Drafts"])
             .with_messages(msgs)
             .with_detail(msg);
-        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new()
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
         p.fetch();
         p.push_path("INBOX");
         p.fetch();
@@ -6227,9 +7099,18 @@ mod tests {
         p.handle_command("move", "", 0, &mut err);
         let items = p.command_list_items("move");
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
-        assert!(!labels.contains(&"INBOX"), "INBOX should not appear in move targets");
-        assert!(labels.contains(&"Sent"), "Sent should appear as move target");
-        assert!(labels.contains(&"Drafts"), "Drafts should appear as move target");
+        assert!(
+            !labels.contains(&"INBOX"),
+            "INBOX should not appear in move targets"
+        );
+        assert!(
+            labels.contains(&"Sent"),
+            "Sent should appear as move target"
+        );
+        assert!(
+            labels.contains(&"Drafts"),
+            "Drafts should appear as move target"
+        );
     }
 
     #[test]
@@ -6240,7 +7121,9 @@ mod tests {
             .with_folders(&["INBOX", "Sent"])
             .with_messages(msgs)
             .with_detail(msg);
-        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new()
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
         p.fetch();
         p.push_path("INBOX");
         p.fetch();
@@ -6253,8 +7136,11 @@ mod tests {
         let mock = p.imap.as_ref().unwrap().as_ref() as *const dyn ImapBackend as *const MockImap;
         let moved = unsafe { &(*mock).moved };
         assert!(
-            moved.iter().any(|(from, uid, dest)| *uid == 1 && from == "INBOX" && dest == "Sent"),
-            "execute_command(move) must call move_message; got: {:?}", moved
+            moved
+                .iter()
+                .any(|(from, uid, dest)| *uid == 1 && from == "INBOX" && dest == "Sent"),
+            "execute_command(move) must call move_message; got: {:?}",
+            moved
         );
         // Navigation back to the folder is handled by the app layer, not the provider.
     }
@@ -6264,10 +7150,18 @@ mod tests {
     #[test]
     fn test_special_use_trash_folder_detected() {
         let imap = MockImap::new().with_folder_infos(vec![
-            FolderInfo { name: "INBOX".to_owned(), attributes: vec![] },
-            FolderInfo { name: "[Gmail]/Trash".to_owned(), attributes: vec!["\\Trash".to_owned()] },
+            FolderInfo {
+                name: "INBOX".to_owned(),
+                attributes: vec![],
+            },
+            FolderInfo {
+                name: "[Gmail]/Trash".to_owned(),
+                attributes: vec!["\\Trash".to_owned()],
+            },
         ]);
-        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new()
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
         p.fetch();
         assert_eq!(
             p.special_folders.trash.as_deref(),
@@ -6279,10 +7173,18 @@ mod tests {
     #[test]
     fn test_special_use_archive_folder_detected_via_all() {
         let imap = MockImap::new().with_folder_infos(vec![
-            FolderInfo { name: "INBOX".to_owned(), attributes: vec![] },
-            FolderInfo { name: "[Gmail]/All Mail".to_owned(), attributes: vec!["\\All".to_owned()] },
+            FolderInfo {
+                name: "INBOX".to_owned(),
+                attributes: vec![],
+            },
+            FolderInfo {
+                name: "[Gmail]/All Mail".to_owned(),
+                attributes: vec!["\\All".to_owned()],
+            },
         ]);
-        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new()
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
         p.fetch();
         assert_eq!(
             p.special_folders.archive.as_deref(),
@@ -6296,13 +7198,26 @@ mod tests {
         // Message commands only appear at depth 2 (a specific message is selected).
         let msgs = vec![make_header(1, "alice@example.com", "Hello")];
         let imap = MockImap::new().with_folders(&["INBOX"]).with_messages(msgs);
-        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new()
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
         p.push_path("INBOX");
         p.fetch();
         p.push_path("[read] Hello — alice@example.com");
         let cmds = p.commands();
-        for cmd in &["mark-read", "mark-unread", "star", "unstar", "delete", "archive", "move"] {
-            assert!(cmds.contains(&cmd.to_string()), "commands() must include '{cmd}' when message selected");
+        for cmd in &[
+            "mark-read",
+            "mark-unread",
+            "star",
+            "unstar",
+            "delete",
+            "archive",
+            "move",
+        ] {
+            assert!(
+                cmds.contains(&cmd.to_string()),
+                "commands() must include '{cmd}' when message selected"
+            );
         }
     }
 
@@ -6310,11 +7225,24 @@ mod tests {
     fn test_message_commands_hidden_at_folder_with_no_message_selected() {
         // At /INBOX with no message focused, message-ops must not appear.
         let imap = MockImap::new().with_folders(&["INBOX"]);
-        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new()
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
         p.push_path("INBOX");
         let cmds = p.commands();
-        for cmd in &["mark-read", "mark-unread", "star", "unstar", "delete", "archive", "move"] {
-            assert!(!cmds.contains(&cmd.to_string()), "commands() must not include '{cmd}' at folder without message");
+        for cmd in &[
+            "mark-read",
+            "mark-unread",
+            "star",
+            "unstar",
+            "delete",
+            "archive",
+            "move",
+        ] {
+            assert!(
+                !cmds.contains(&cmd.to_string()),
+                "commands() must not include '{cmd}' at folder without message"
+            );
         }
     }
 
@@ -6322,8 +7250,19 @@ mod tests {
     fn test_message_commands_hidden_at_root() {
         let p = EmailClientProvider::new().with_oauth_token("fake");
         let cmds = p.commands();
-        for cmd in &["mark-read", "mark-unread", "star", "unstar", "delete", "archive", "move"] {
-            assert!(!cmds.contains(&cmd.to_string()), "commands() must not include '{cmd}' at root");
+        for cmd in &[
+            "mark-read",
+            "mark-unread",
+            "star",
+            "unstar",
+            "delete",
+            "archive",
+            "move",
+        ] {
+            assert!(
+                !cmds.contains(&cmd.to_string()),
+                "commands() must not include '{cmd}' at root"
+            );
         }
     }
 
@@ -6335,11 +7274,15 @@ mod tests {
         p.push_path("compose");
         let items = p.fetch();
         assert!(
-            items.iter().any(|e| e.as_str().map_or(false, |s| s.starts_with("Cc:"))),
+            items
+                .iter()
+                .any(|e| e.as_str().map_or(false, |s| s.starts_with("Cc:"))),
             "compose view must include a Cc: field"
         );
         assert!(
-            items.iter().any(|e| e.as_str().map_or(false, |s| s.starts_with("Bcc:"))),
+            items
+                .iter()
+                .any(|e| e.as_str().map_or(false, |s| s.starts_with("Bcc:"))),
             "compose view must include a Bcc: field"
         );
     }
@@ -6373,12 +7316,25 @@ mod tests {
         p.compose.draft.bcc = "bcc@example.com".to_owned();
         p.compose.draft.subject = "Test".to_owned();
         p.on_button_press("send");
-        assert_eq!(sent.lock().unwrap().len(), 1, "SMTP should have been called once");
-        let smtp_ref = p.smtp.as_ref().unwrap().as_ref() as *const dyn SmtpBackend as *const MockSmtp;
+        assert_eq!(
+            sent.lock().unwrap().len(),
+            1,
+            "SMTP should have been called once"
+        );
+        let smtp_ref =
+            p.smtp.as_ref().unwrap().as_ref() as *const dyn SmtpBackend as *const MockSmtp;
         let cc = unsafe { &(*smtp_ref).cc_sent };
         let bcc = unsafe { &(*smtp_ref).bcc_sent };
-        assert!(cc[0].contains(&"cc@example.com".to_owned()), "Cc must be passed to smtp; got: {:?}", cc);
-        assert!(bcc[0].contains(&"bcc@example.com".to_owned()), "Bcc must be passed to smtp; got: {:?}", bcc);
+        assert!(
+            cc[0].contains(&"cc@example.com".to_owned()),
+            "Cc must be passed to smtp; got: {:?}",
+            cc
+        );
+        assert!(
+            bcc[0].contains(&"bcc@example.com".to_owned()),
+            "Bcc must be passed to smtp; got: {:?}",
+            bcc
+        );
     }
 
     // ---- Tier 2: pagination ----
@@ -6394,8 +7350,11 @@ mod tests {
         p.push_path("INBOX");
         let items = p.fetch();
         assert!(
-            items.iter().any(|e| e.as_str().map_or(false, |s| s.contains("load-more"))),
-            "folder at limit must show load-more button; items: {:?}", items
+            items
+                .iter()
+                .any(|e| e.as_str().map_or(false, |s| s.contains("load-more"))),
+            "folder at limit must show load-more button; items: {:?}",
+            items
         );
     }
 
@@ -6411,7 +7370,10 @@ mod tests {
         // Default limit is 50; pressing load-more should raise it to 100.
         p.on_button_press("load-more");
         let limit = *p.folder_limits.get("INBOX").unwrap_or(&50);
-        assert_eq!(limit, 100, "load-more must increment the folder limit by 50");
+        assert_eq!(
+            limit, 100,
+            "load-more must increment the folder limit by 50"
+        );
     }
 
     // ---- Tier 2: receive attachments in message view ----
@@ -6426,14 +7388,20 @@ mod tests {
         let mut msg = make_message(1);
         msg.attachments = vec![attachment];
         let items = build_message_view(&msg);
-        let attach_obj = items.iter().find(|e| {
-            e.as_obj().map_or(false, |o| o.key == "Attachments")
-        });
-        assert!(attach_obj.is_some(), "message view must have Attachments obj when attachments are present");
+        let attach_obj = items
+            .iter()
+            .find(|e| e.as_obj().map_or(false, |o| o.key == "Attachments"));
+        assert!(
+            attach_obj.is_some(),
+            "message view must have Attachments obj when attachments are present"
+        );
         let children = &attach_obj.unwrap().as_obj().unwrap().children;
         assert!(
-            children.iter().any(|c| c.as_str().map_or(false, |s| s.contains("report.pdf"))),
-            "Attachments obj must list the filename; children: {:?}", children
+            children
+                .iter()
+                .any(|c| c.as_str().map_or(false, |s| s.contains("report.pdf"))),
+            "Attachments obj must list the filename; children: {:?}",
+            children
         );
     }
 
@@ -6442,7 +7410,9 @@ mod tests {
         let msg = make_message(1);
         let items = build_message_view(&msg);
         assert!(
-            !items.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "Attachments")),
+            !items
+                .iter()
+                .any(|e| e.as_obj().map_or(false, |o| o.key == "Attachments")),
             "message view must not include Attachments obj when there are none"
         );
     }
@@ -6454,10 +7424,18 @@ mod tests {
         let imap = MockImap::new()
             .with_folders(&["INBOX", "[Gmail]/Drafts"])
             .with_folder_infos(vec![
-                FolderInfo { name: "INBOX".to_owned(), attributes: vec![] },
-                FolderInfo { name: "[Gmail]/Drafts".to_owned(), attributes: vec!["\\Drafts".to_owned()] },
+                FolderInfo {
+                    name: "INBOX".to_owned(),
+                    attributes: vec![],
+                },
+                FolderInfo {
+                    name: "[Gmail]/Drafts".to_owned(),
+                    attributes: vec!["\\Drafts".to_owned()],
+                },
             ]);
-        let mut p = EmailClientProvider::new().with_oauth_token("fake").with_imap(Box::new(imap));
+        let mut p = EmailClientProvider::new()
+            .with_oauth_token("fake")
+            .with_imap(Box::new(imap));
         p.fetch(); // populate special_folders
         p.push_path("compose");
         p.compose.draft.to = "to@example.com".to_owned();
@@ -6468,7 +7446,10 @@ mod tests {
         assert!(
             appended.iter().any(|(folder, _)| folder.contains("Drafts")),
             "pop_path from compose must APPEND draft to \\Drafts; got: {:?}",
-            appended.iter().map(|(f, b)| (f, b.len())).collect::<Vec<_>>()
+            appended
+                .iter()
+                .map(|(f, b)| (f, b.len()))
+                .collect::<Vec<_>>()
         );
     }
 
@@ -6486,12 +7467,18 @@ mod tests {
         p.fetch(); // populates message_cache
         let results = p.collect_deep_search_items().unwrap_or_default();
         assert!(
-            results.iter().any(|r| r.label.to_lowercase().contains("hello")),
-            "search results must include messages matching the query; got: {:?}", results
+            results
+                .iter()
+                .any(|r| r.label.to_lowercase().contains("hello")),
+            "search results must include messages matching the query; got: {:?}",
+            results
         );
         assert!(
-            results.iter().any(|r| r.label.to_lowercase().contains("rust")),
-            "search results must include second message; got: {:?}", results
+            results
+                .iter()
+                .any(|r| r.label.to_lowercase().contains("rust")),
+            "search results must include second message; got: {:?}",
+            results
         );
     }
 
@@ -6500,7 +7487,10 @@ mod tests {
         let p = EmailClientProvider::new();
         // No fetch yet — message_cache is empty so results should be empty.
         let results = p.collect_deep_search_items().unwrap_or_default();
-        assert!(results.is_empty(), "search must return nothing before any message is cached");
+        assert!(
+            results.is_empty(),
+            "search must return nothing before any message is cached"
+        );
     }
 
     // ---- ImapOp emission tests (step 8) ------------------------------------
@@ -6526,7 +7516,13 @@ mod tests {
         assert_eq!(entries.len(), 1);
         match &entries[0] {
             TimelineEntry::ImapOp {
-                op: ImapOpKind::SetSeen { msg_uid, folder, new, .. },
+                op:
+                    ImapOpKind::SetSeen {
+                        msg_uid,
+                        folder,
+                        new,
+                        ..
+                    },
                 ..
             } => {
                 assert_eq!(*msg_uid, 1);
@@ -6557,7 +7553,11 @@ mod tests {
         assert!(matches!(
             &entries[0],
             TimelineEntry::ImapOp {
-                op: ImapOpKind::SetFlagged { msg_uid: 1, new: true, .. },
+                op: ImapOpKind::SetFlagged {
+                    msg_uid: 1,
+                    new: true,
+                    ..
+                },
                 ..
             }
         ));
@@ -6585,15 +7585,18 @@ mod tests {
         let entries = p.take_timeline_entries();
         // mark-unread issued -FLAGS \Seen. Now undo: should issue +FLAGS \Seen.
         let mock = p.imap.as_mut().unwrap().as_mut() as *mut dyn ImapBackend as *mut MockImap;
-        unsafe { (*mock).stored_flags.clear(); }
+        unsafe {
+            (*mock).stored_flags.clear();
+        }
         sicompass_sdk::block_on(p.undo(&entries[0], &mut err));
         assert!(err.is_empty(), "{err}");
         let stored = unsafe { &(*mock).stored_flags };
         assert!(
-            stored.iter().any(|(_, uid, flag)|
-                *uid == 1 && flag.contains("\\Seen") && flag.starts_with("+FLAGS")
-            ),
-            "undo must re-add \\Seen; got: {:?}", stored
+            stored.iter().any(|(_, uid, flag)| *uid == 1
+                && flag.contains("\\Seen")
+                && flag.starts_with("+FLAGS")),
+            "undo must re-add \\Seen; got: {:?}",
+            stored
         );
     }
 }
@@ -6604,17 +7607,38 @@ mod tests {
 
 /// Register the email client with the SDK factory and manifest registries.
 pub fn register() {
-    sicompass_sdk::register_provider_factory("emailclient", || {
-        Box::new(EmailClientProvider::new())
-    });
+    sicompass_sdk::register_provider_factory(
+        "emailclient",
+        || Box::new(EmailClientProvider::new()),
+    );
     sicompass_sdk::register_builtin_manifest(
         sicompass_sdk::BuiltinManifest::new("emailclient", "email client").with_settings(vec![
-            sicompass_sdk::SettingDecl::text("email client", "IMAP URL",              "emailImapUrl",       "imaps://imap.gmail.com"),
-            sicompass_sdk::SettingDecl::text("email client", "SMTP URL",              "emailSmtpUrl",       "smtps://smtp.gmail.com"),
-            sicompass_sdk::SettingDecl::text("email client", "username",              "emailUsername",      ""),
-            sicompass_sdk::SettingDecl::password("email client", "password",              "emailPassword",      ""),
-            sicompass_sdk::SettingDecl::text("email client", "client ID (OAuth)",     "emailClientId",      ""),
-            sicompass_sdk::SettingDecl::password("email client", "client secret (OAuth)", "emailClientSecret",  ""),
+            sicompass_sdk::SettingDecl::text(
+                "email client",
+                "IMAP URL",
+                "emailImapUrl",
+                "imaps://imap.gmail.com",
+            ),
+            sicompass_sdk::SettingDecl::text(
+                "email client",
+                "SMTP URL",
+                "emailSmtpUrl",
+                "smtps://smtp.gmail.com",
+            ),
+            sicompass_sdk::SettingDecl::text("email client", "username", "emailUsername", ""),
+            sicompass_sdk::SettingDecl::password("email client", "password", "emailPassword", ""),
+            sicompass_sdk::SettingDecl::text(
+                "email client",
+                "client ID (OAuth)",
+                "emailClientId",
+                "",
+            ),
+            sicompass_sdk::SettingDecl::password(
+                "email client",
+                "client secret (OAuth)",
+                "emailClientSecret",
+                "",
+            ),
         ]),
     );
 }

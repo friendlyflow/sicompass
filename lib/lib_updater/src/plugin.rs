@@ -11,8 +11,8 @@
 //! intact.
 
 use crate::{
-    github::download_to, parse_version, signature::verify_entry, staging_path,
-    PluginUpdate, PluginUpdateManifest, UpdateEvent,
+    PluginUpdate, PluginUpdateManifest, UpdateEvent, github::download_to, parse_version,
+    signature::verify_entry, staging_path,
 };
 use serde::Deserialize;
 use std::path::Path;
@@ -96,8 +96,8 @@ fn check_one(
     event_tx: Option<&mpsc::Sender<UpdateEvent>>,
 ) -> Result<Option<PluginUpdate>, String> {
     let manifest_path = plugin_dir.join("plugin.json");
-    let data = std::fs::read_to_string(&manifest_path)
-        .map_err(|e| format!("read manifest: {e}"))?;
+    let data =
+        std::fs::read_to_string(&manifest_path).map_err(|e| format!("read manifest: {e}"))?;
     let installed: InstalledManifest =
         serde_json::from_str(&data).map_err(|e| format!("parse manifest: {e}"))?;
 
@@ -117,8 +117,8 @@ fn check_one(
         .map_err(|e| format!("build client: {e}"))?;
 
     let new_manifest = fetch_manifest(&client, &update_url)?;
-    let new_version = parse_version(&new_manifest.version)
-        .map_err(|e| format!("parse new version: {e}"))?;
+    let new_version =
+        parse_version(&new_manifest.version).map_err(|e| format!("parse new version: {e}"))?;
 
     if new_version <= installed_version {
         return Ok(None);
@@ -179,8 +179,8 @@ fn check_one(
     // only touches what an update actually changes. The pubkey is deliberately left
     // as-is: it is the trust root, so the next update verifies against the same key
     // (rotation is a follow-up).
-    let mut new_disk_manifest: serde_json::Value = serde_json::from_str(&data)
-        .map_err(|e| format!("re-parse installed manifest: {e}"))?;
+    let mut new_disk_manifest: serde_json::Value =
+        serde_json::from_str(&data).map_err(|e| format!("re-parse installed manifest: {e}"))?;
     {
         let obj = new_disk_manifest
             .as_object_mut()
@@ -193,10 +193,16 @@ fn check_one(
             "version".to_owned(),
             serde_json::Value::String(new_manifest.version.clone()),
         );
-        obj.insert("updateUrl".to_owned(), serde_json::Value::String(update_url.clone()));
+        obj.insert(
+            "updateUrl".to_owned(),
+            serde_json::Value::String(update_url.clone()),
+        );
         match &new_manifest.min_app_version {
             Some(min) => {
-                obj.insert("minAppVersion".to_owned(), serde_json::Value::String(min.clone()));
+                obj.insert(
+                    "minAppVersion".to_owned(),
+                    serde_json::Value::String(min.clone()),
+                );
             }
             // Absent upstream means the constraint was lifted, so drop it rather
             // than leaving a stale floor in place.
@@ -215,7 +221,6 @@ fn check_one(
         .map_err(|e| format!("serialize staging manifest: {e}"))?;
     std::fs::write(staging.join("plugin.json"), serialized)
         .map_err(|e| format!("write staging manifest: {e}"))?;
-
 
     // Validate the new entry before it replaces anything. Failure leaves the
     // installed plugin completely untouched.
@@ -336,7 +341,6 @@ mod tests {
         dir
     }
 
-
     /// The smallest thing `test_load` will accept: an empty but valid WASM
     /// component — `\0asm`, version, layer. Fixtures have to be real components
     /// now that a staged plugin is genuinely validated before it replaces the
@@ -362,7 +366,11 @@ mod tests {
         assert!(test_load(&empty).unwrap_err().contains("empty"));
 
         let missing = dir.path().join("gone.wasm");
-        assert!(test_load(&missing).unwrap_err().contains("read staged entry"));
+        assert!(
+            test_load(&missing)
+                .unwrap_err()
+                .contains("read staged entry")
+        );
 
         let good = dir.path().join("good.wasm");
         std::fs::write(&good, minimal_component()).unwrap();
@@ -477,15 +485,17 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/manifest"))
-            .respond_with(ResponseTemplate::new(200).set_body_string(
-                serde_json::json!({
-                    "name": "foo",
-                    "version": "1.0.1",
-                    "entryUrl": entry_url,
-                    "signature": { "sha256": sha, "sig": sig_b64 }
-                })
-                .to_string(),
-            ))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string(
+                    serde_json::json!({
+                        "name": "foo",
+                        "version": "1.0.1",
+                        "entryUrl": entry_url,
+                        "signature": { "sha256": sha, "sig": sig_b64 }
+                    })
+                    .to_string(),
+                ),
+            )
             .mount(&server)
             .await;
         Mock::given(method("GET"))
@@ -526,7 +536,10 @@ mod tests {
 
         assert_eq!(updated["version"], "1.0.1", "version should be bumped");
         assert_eq!(updated["entry"], "p.wasm");
-        assert_eq!(updated["type"], "wasm", "the plugin type must survive an update");
+        assert_eq!(
+            updated["type"], "wasm",
+            "the plugin type must survive an update"
+        );
         assert_eq!(
             updated["displayName"], "Foo Display",
             "displayName must not be replaced by name"
@@ -561,15 +574,17 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/manifest"))
-            .respond_with(ResponseTemplate::new(200).set_body_string(
-                serde_json::json!({
-                    "name": "foo",
-                    "version": "1.0.1",
-                    "entryUrl": entry_url,
-                    "signature": { "sha256": "00".repeat(32) }
-                })
-                .to_string(),
-            ))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string(
+                    serde_json::json!({
+                        "name": "foo",
+                        "version": "1.0.1",
+                        "entryUrl": entry_url,
+                        "signature": { "sha256": "00".repeat(32) }
+                    })
+                    .to_string(),
+                ),
+            )
             .mount(&server)
             .await;
         Mock::given(method("GET"))
@@ -607,16 +622,18 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/manifest"))
-            .respond_with(ResponseTemplate::new(200).set_body_string(
-                serde_json::json!({
-                    "name": "foo",
-                    "version": "2.0.0",
-                    "entryUrl": "http://unused/",
-                    "minAppVersion": "99.0.0",
-                    "signature": { "sha256": "00" }
-                })
-                .to_string(),
-            ))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string(
+                    serde_json::json!({
+                        "name": "foo",
+                        "version": "2.0.0",
+                        "entryUrl": "http://unused/",
+                        "minAppVersion": "99.0.0",
+                        "signature": { "sha256": "00" }
+                    })
+                    .to_string(),
+                ),
+            )
             .mount(&server)
             .await;
 

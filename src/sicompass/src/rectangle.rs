@@ -48,132 +48,156 @@ impl RectangleRenderer {
         instance: &ash::Instance,
         physical_device: vk::PhysicalDevice,
         render_pass: vk::RenderPass,
-    ) -> Result<Self, SiError> { unsafe {
-        // ---- Vertex buffer (host-visible, host-coherent) -------------------
-        let vb_size = (std::mem::size_of::<RectVertex>() * MAX_RECT_VERTICES) as vk::DeviceSize;
-        let (vertex_buffer, vertex_buffer_memory) = render::create_buffer(
-            device, instance, physical_device,
-            vb_size,
-            vk::BufferUsageFlags::VERTEX_BUFFER,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        )?;
+    ) -> Result<Self, SiError> {
+        unsafe {
+            // ---- Vertex buffer (host-visible, host-coherent) -------------------
+            let vb_size = (std::mem::size_of::<RectVertex>() * MAX_RECT_VERTICES) as vk::DeviceSize;
+            let (vertex_buffer, vertex_buffer_memory) = render::create_buffer(
+                device,
+                instance,
+                physical_device,
+                vb_size,
+                vk::BufferUsageFlags::VERTEX_BUFFER,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            )?;
 
-        // ---- Pipeline ------------------------------------------------------
-        let vert_module = render::create_shader_module(device, shaders::RECTANGLE_VERT)?;
-        let frag_module = render::create_shader_module(device, shaders::RECTANGLE_FRAG)?;
+            // ---- Pipeline ------------------------------------------------------
+            let vert_module = render::create_shader_module(device, shaders::RECTANGLE_VERT)?;
+            let frag_module = render::create_shader_module(device, shaders::RECTANGLE_FRAG)?;
 
-        let entry = std::ffi::CString::new("main").unwrap();
-        let stages = [
-            vk::PipelineShaderStageCreateInfo::default()
-                .stage(vk::ShaderStageFlags::VERTEX)
-                .module(vert_module)
-                .name(&entry),
-            vk::PipelineShaderStageCreateInfo::default()
-                .stage(vk::ShaderStageFlags::FRAGMENT)
-                .module(frag_module)
-                .name(&entry),
-        ];
+            let entry = std::ffi::CString::new("main").unwrap();
+            let stages = [
+                vk::PipelineShaderStageCreateInfo::default()
+                    .stage(vk::ShaderStageFlags::VERTEX)
+                    .module(vert_module)
+                    .name(&entry),
+                vk::PipelineShaderStageCreateInfo::default()
+                    .stage(vk::ShaderStageFlags::FRAGMENT)
+                    .module(frag_module)
+                    .name(&entry),
+            ];
 
-        let stride = std::mem::size_of::<RectVertex>() as u32;
-        let binding_desc = vk::VertexInputBindingDescription::default()
-            .binding(0).stride(stride).input_rate(vk::VertexInputRate::VERTEX);
-        // Offsets: pos@0(8B), color@8(16B), cornerRadius@24(8B), rectSize@32(8B), rectOrigin@40(8B)
-        let attr_descs = [
-            vk::VertexInputAttributeDescription::default()
-                .location(0).binding(0).format(vk::Format::R32G32_SFLOAT).offset(0),
-            vk::VertexInputAttributeDescription::default()
-                .location(1).binding(0).format(vk::Format::R32G32B32A32_SFLOAT).offset(8),
-            vk::VertexInputAttributeDescription::default()
-                .location(2).binding(0).format(vk::Format::R32G32_SFLOAT).offset(24),
-            vk::VertexInputAttributeDescription::default()
-                .location(3).binding(0).format(vk::Format::R32G32_SFLOAT).offset(32),
-            vk::VertexInputAttributeDescription::default()
-                .location(4).binding(0).format(vk::Format::R32G32_SFLOAT).offset(40),
-        ];
+            let stride = std::mem::size_of::<RectVertex>() as u32;
+            let binding_desc = vk::VertexInputBindingDescription::default()
+                .binding(0)
+                .stride(stride)
+                .input_rate(vk::VertexInputRate::VERTEX);
+            // Offsets: pos@0(8B), color@8(16B), cornerRadius@24(8B), rectSize@32(8B), rectOrigin@40(8B)
+            let attr_descs = [
+                vk::VertexInputAttributeDescription::default()
+                    .location(0)
+                    .binding(0)
+                    .format(vk::Format::R32G32_SFLOAT)
+                    .offset(0),
+                vk::VertexInputAttributeDescription::default()
+                    .location(1)
+                    .binding(0)
+                    .format(vk::Format::R32G32B32A32_SFLOAT)
+                    .offset(8),
+                vk::VertexInputAttributeDescription::default()
+                    .location(2)
+                    .binding(0)
+                    .format(vk::Format::R32G32_SFLOAT)
+                    .offset(24),
+                vk::VertexInputAttributeDescription::default()
+                    .location(3)
+                    .binding(0)
+                    .format(vk::Format::R32G32_SFLOAT)
+                    .offset(32),
+                vk::VertexInputAttributeDescription::default()
+                    .location(4)
+                    .binding(0)
+                    .format(vk::Format::R32G32_SFLOAT)
+                    .offset(40),
+            ];
 
-        let vertex_input = vk::PipelineVertexInputStateCreateInfo::default()
-            .vertex_binding_descriptions(std::slice::from_ref(&binding_desc))
-            .vertex_attribute_descriptions(&attr_descs);
+            let vertex_input = vk::PipelineVertexInputStateCreateInfo::default()
+                .vertex_binding_descriptions(std::slice::from_ref(&binding_desc))
+                .vertex_attribute_descriptions(&attr_descs);
 
-        let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::default()
-            .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
+            let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::default()
+                .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
 
-        let viewport_state = vk::PipelineViewportStateCreateInfo::default()
-            .viewport_count(1).scissor_count(1);
+            let viewport_state = vk::PipelineViewportStateCreateInfo::default()
+                .viewport_count(1)
+                .scissor_count(1);
 
-        let rasterizer = vk::PipelineRasterizationStateCreateInfo::default()
-            .polygon_mode(vk::PolygonMode::FILL)
-            .line_width(1.0)
-            .cull_mode(vk::CullModeFlags::NONE)
-            .front_face(vk::FrontFace::COUNTER_CLOCKWISE);
+            let rasterizer = vk::PipelineRasterizationStateCreateInfo::default()
+                .polygon_mode(vk::PolygonMode::FILL)
+                .line_width(1.0)
+                .cull_mode(vk::CullModeFlags::NONE)
+                .front_face(vk::FrontFace::COUNTER_CLOCKWISE);
 
-        let multisampling = vk::PipelineMultisampleStateCreateInfo::default()
-            .rasterization_samples(vk::SampleCountFlags::TYPE_1);
+            let multisampling = vk::PipelineMultisampleStateCreateInfo::default()
+                .rasterization_samples(vk::SampleCountFlags::TYPE_1);
 
-        let depth_stencil = vk::PipelineDepthStencilStateCreateInfo::default()
-            .depth_test_enable(false)
-            .depth_write_enable(false)
-            .depth_compare_op(vk::CompareOp::ALWAYS);
+            let depth_stencil = vk::PipelineDepthStencilStateCreateInfo::default()
+                .depth_test_enable(false)
+                .depth_write_enable(false)
+                .depth_compare_op(vk::CompareOp::ALWAYS);
 
-        let blend_attachment = vk::PipelineColorBlendAttachmentState::default()
-            .color_write_mask(
-                vk::ColorComponentFlags::R | vk::ColorComponentFlags::G
-                | vk::ColorComponentFlags::B | vk::ColorComponentFlags::A,
-            )
-            .blend_enable(true)
-            .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
-            .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
-            .color_blend_op(vk::BlendOp::ADD)
-            .src_alpha_blend_factor(vk::BlendFactor::ONE)
-            .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
-            .alpha_blend_op(vk::BlendOp::ADD);
+            let blend_attachment = vk::PipelineColorBlendAttachmentState::default()
+                .color_write_mask(
+                    vk::ColorComponentFlags::R
+                        | vk::ColorComponentFlags::G
+                        | vk::ColorComponentFlags::B
+                        | vk::ColorComponentFlags::A,
+                )
+                .blend_enable(true)
+                .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
+                .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
+                .color_blend_op(vk::BlendOp::ADD)
+                .src_alpha_blend_factor(vk::BlendFactor::ONE)
+                .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
+                .alpha_blend_op(vk::BlendOp::ADD);
 
-        let blend_state = vk::PipelineColorBlendStateCreateInfo::default()
-            .attachments(std::slice::from_ref(&blend_attachment));
+            let blend_state = vk::PipelineColorBlendStateCreateInfo::default()
+                .attachments(std::slice::from_ref(&blend_attachment));
 
-        let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
-        let dynamic_state = vk::PipelineDynamicStateCreateInfo::default()
-            .dynamic_states(&dynamic_states);
+            let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
+            let dynamic_state =
+                vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
 
-        // Push constant: screenWidth, screenHeight (vec2 in vertex shader)
-        let push_range = vk::PushConstantRange::default()
-            .stage_flags(vk::ShaderStageFlags::VERTEX)
-            .offset(0)
-            .size(std::mem::size_of::<[f32; 2]>() as u32);
+            // Push constant: screenWidth, screenHeight (vec2 in vertex shader)
+            let push_range = vk::PushConstantRange::default()
+                .stage_flags(vk::ShaderStageFlags::VERTEX)
+                .offset(0)
+                .size(std::mem::size_of::<[f32; 2]>() as u32);
 
-        let pl_info = vk::PipelineLayoutCreateInfo::default()
-            .push_constant_ranges(std::slice::from_ref(&push_range));
-        let pipeline_layout = device.create_pipeline_layout(&pl_info, None)?;
+            let pl_info = vk::PipelineLayoutCreateInfo::default()
+                .push_constant_ranges(std::slice::from_ref(&push_range));
+            let pipeline_layout = device.create_pipeline_layout(&pl_info, None)?;
 
-        let pipeline_info = vk::GraphicsPipelineCreateInfo::default()
-            .stages(&stages)
-            .vertex_input_state(&vertex_input)
-            .input_assembly_state(&input_assembly)
-            .viewport_state(&viewport_state)
-            .rasterization_state(&rasterizer)
-            .multisample_state(&multisampling)
-            .depth_stencil_state(&depth_stencil)
-            .color_blend_state(&blend_state)
-            .dynamic_state(&dynamic_state)
-            .layout(pipeline_layout)
-            .render_pass(render_pass)
-            .subpass(0);
+            let pipeline_info = vk::GraphicsPipelineCreateInfo::default()
+                .stages(&stages)
+                .vertex_input_state(&vertex_input)
+                .input_assembly_state(&input_assembly)
+                .viewport_state(&viewport_state)
+                .rasterization_state(&rasterizer)
+                .multisample_state(&multisampling)
+                .depth_stencil_state(&depth_stencil)
+                .color_blend_state(&blend_state)
+                .dynamic_state(&dynamic_state)
+                .layout(pipeline_layout)
+                .render_pass(render_pass)
+                .subpass(0);
 
-        let pipeline = device
-            .create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None)
-            .map_err(|(_, e)| SiError::Vulkan(e))?[0];
+            let pipeline = device
+                .create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None)
+                .map_err(|(_, e)| SiError::Vulkan(e))?[0];
 
-        device.destroy_shader_module(vert_module, None);
-        device.destroy_shader_module(frag_module, None);
+            device.destroy_shader_module(vert_module, None);
+            device.destroy_shader_module(frag_module, None);
 
-        Ok(RectangleRenderer {
-            vertex_buffer,
-            vertex_buffer_memory,
-            pipeline_layout,
-            pipeline,
-            vertices: Vec::with_capacity(128),
-        })
-    }}
+            Ok(RectangleRenderer {
+                vertex_buffer,
+                vertex_buffer_memory,
+                pipeline_layout,
+                pipeline,
+                vertices: Vec::with_capacity(128),
+            })
+        }
+    }
 
     // ---- Frame helpers -----------------------------------------------------
 
@@ -185,15 +209,21 @@ impl RectangleRenderer {
     /// Append a filled rectangle.
     pub fn prepare_rectangle(
         &mut self,
-        x: f32, y: f32, width: f32, height: f32,
-        color: u32, corner_radius: f32,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        color: u32,
+        corner_radius: f32,
     ) {
-        if self.vertices.len() >= MAX_RECT_VERTICES { return; }
+        if self.vertices.len() >= MAX_RECT_VERTICES {
+            return;
+        }
 
         let r = ((color >> 24) & 0xFF) as f32 / 255.0;
         let g = ((color >> 16) & 0xFF) as f32 / 255.0;
-        let b = ((color >>  8) & 0xFF) as f32 / 255.0;
-        let a = ( color        & 0xFF) as f32 / 255.0;
+        let b = ((color >> 8) & 0xFF) as f32 / 255.0;
+        let a = (color & 0xFF) as f32 / 255.0;
         let col = [r, g, b, a];
 
         let max_r = (width.min(height) * 0.5).min(corner_radius);
@@ -204,49 +234,92 @@ impl RectangleRenderer {
         let (x0, y0, x1, y1) = (x, y, x + width, y + height);
 
         // Triangle 1
-        self.vertices.push(RectVertex { pos: [x0, y0], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
-        self.vertices.push(RectVertex { pos: [x1, y0], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
-        self.vertices.push(RectVertex { pos: [x1, y1], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
+        self.vertices.push(RectVertex {
+            pos: [x0, y0],
+            color: col,
+            corner_radius: cr,
+            rect_size: rs,
+            rect_origin: ro,
+        });
+        self.vertices.push(RectVertex {
+            pos: [x1, y0],
+            color: col,
+            corner_radius: cr,
+            rect_size: rs,
+            rect_origin: ro,
+        });
+        self.vertices.push(RectVertex {
+            pos: [x1, y1],
+            color: col,
+            corner_radius: cr,
+            rect_size: rs,
+            rect_origin: ro,
+        });
         // Triangle 2
-        self.vertices.push(RectVertex { pos: [x0, y0], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
-        self.vertices.push(RectVertex { pos: [x1, y1], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
-        self.vertices.push(RectVertex { pos: [x0, y1], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
+        self.vertices.push(RectVertex {
+            pos: [x0, y0],
+            color: col,
+            corner_radius: cr,
+            rect_size: rs,
+            rect_origin: ro,
+        });
+        self.vertices.push(RectVertex {
+            pos: [x1, y1],
+            color: col,
+            corner_radius: cr,
+            rect_size: rs,
+            rect_origin: ro,
+        });
+        self.vertices.push(RectVertex {
+            pos: [x0, y1],
+            color: col,
+            corner_radius: cr,
+            rect_size: rs,
+            rect_origin: ro,
+        });
     }
 
     /// Append a checkmark (tick) shape — two stroke quads using the Heroicons check path.
     /// `x`, `y` is the top-left corner of the bounding box; `size` is width and height.
     /// Ports `prepareCheckmark()` from `checkmark.c`.
     pub fn prepare_checkmark(&mut self, x: f32, y: f32, size: f32, color: u32) {
-        if self.vertices.len() + 12 > MAX_RECT_VERTICES { return; }
+        if self.vertices.len() + 12 > MAX_RECT_VERTICES {
+            return;
+        }
 
         let r = ((color >> 24) & 0xFF) as f32 / 255.0;
         let g = ((color >> 16) & 0xFF) as f32 / 255.0;
-        let b = ((color >>  8) & 0xFF) as f32 / 255.0;
-        let a = ( color        & 0xFF) as f32 / 255.0;
+        let b = ((color >> 8) & 0xFF) as f32 / 255.0;
+        let a = (color & 0xFF) as f32 / 255.0;
         let col = [r, g, b, a];
 
         // Scale from 24×24 Heroicons viewbox to actual size
         let s = size / 24.0;
 
         // Heroicons check path: M4.5 12.75l6 6 9-13.5
-        let ax = x + 4.5  * s; let ay = y + 12.75 * s;
-        let bx = x + 10.5 * s; let by = y + 18.75 * s;
-        let cx = x + 19.5 * s; let cy = y +  5.25 * s;
+        let ax = x + 4.5 * s;
+        let ay = y + 12.75 * s;
+        let bx = x + 10.5 * s;
+        let by = y + 18.75 * s;
+        let cx = x + 19.5 * s;
+        let cy = y + 5.25 * s;
 
         let thickness = 2.0 * s;
         let half = thickness * 0.5;
 
         // Perpendicular offsets for segment A→B
-        let dx1 = bx - ax; let dy1 = by - ay;
+        let dx1 = bx - ax;
+        let dy1 = by - ay;
         let len1 = (dx1 * dx1 + dy1 * dy1).sqrt();
         let nx1 = -dy1 / len1 * half;
-        let ny1 =  dx1 / len1 * half;
+        let ny1 = dx1 / len1 * half;
 
         // Perpendicular offsets for segment B→C
-        let dx2 = cx - bx; let dy2 = cy - by;
+        let dx2 = cx - bx;
+        let dy2 = cy - by;
         let len2 = (dx2 * dx2 + dy2 * dy2).sqrt();
         let nx2 = -dy2 / len2 * half;
-        let ny2 =  dx2 / len2 * half;
+        let ny2 = dx2 / len2 * half;
 
         // Neutralize SDF — use a huge rect so the fragment shader draws all pixels
         let cr = [0.0_f32, 0.0];
@@ -254,20 +327,92 @@ impl RectangleRenderer {
         let ro = [0.0_f32, 0.0];
 
         // Quad 1: segment A→B (short downstroke)
-        self.vertices.push(RectVertex { pos: [ax + nx1, ay + ny1], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
-        self.vertices.push(RectVertex { pos: [ax - nx1, ay - ny1], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
-        self.vertices.push(RectVertex { pos: [bx - nx1, by - ny1], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
-        self.vertices.push(RectVertex { pos: [ax + nx1, ay + ny1], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
-        self.vertices.push(RectVertex { pos: [bx - nx1, by - ny1], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
-        self.vertices.push(RectVertex { pos: [bx + nx1, by + ny1], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
+        self.vertices.push(RectVertex {
+            pos: [ax + nx1, ay + ny1],
+            color: col,
+            corner_radius: cr,
+            rect_size: rs,
+            rect_origin: ro,
+        });
+        self.vertices.push(RectVertex {
+            pos: [ax - nx1, ay - ny1],
+            color: col,
+            corner_radius: cr,
+            rect_size: rs,
+            rect_origin: ro,
+        });
+        self.vertices.push(RectVertex {
+            pos: [bx - nx1, by - ny1],
+            color: col,
+            corner_radius: cr,
+            rect_size: rs,
+            rect_origin: ro,
+        });
+        self.vertices.push(RectVertex {
+            pos: [ax + nx1, ay + ny1],
+            color: col,
+            corner_radius: cr,
+            rect_size: rs,
+            rect_origin: ro,
+        });
+        self.vertices.push(RectVertex {
+            pos: [bx - nx1, by - ny1],
+            color: col,
+            corner_radius: cr,
+            rect_size: rs,
+            rect_origin: ro,
+        });
+        self.vertices.push(RectVertex {
+            pos: [bx + nx1, by + ny1],
+            color: col,
+            corner_radius: cr,
+            rect_size: rs,
+            rect_origin: ro,
+        });
 
         // Quad 2: segment B→C (long upstroke)
-        self.vertices.push(RectVertex { pos: [bx + nx2, by + ny2], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
-        self.vertices.push(RectVertex { pos: [bx - nx2, by - ny2], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
-        self.vertices.push(RectVertex { pos: [cx - nx2, cy - ny2], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
-        self.vertices.push(RectVertex { pos: [bx + nx2, by + ny2], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
-        self.vertices.push(RectVertex { pos: [cx - nx2, cy - ny2], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
-        self.vertices.push(RectVertex { pos: [cx + nx2, cy + ny2], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
+        self.vertices.push(RectVertex {
+            pos: [bx + nx2, by + ny2],
+            color: col,
+            corner_radius: cr,
+            rect_size: rs,
+            rect_origin: ro,
+        });
+        self.vertices.push(RectVertex {
+            pos: [bx - nx2, by - ny2],
+            color: col,
+            corner_radius: cr,
+            rect_size: rs,
+            rect_origin: ro,
+        });
+        self.vertices.push(RectVertex {
+            pos: [cx - nx2, cy - ny2],
+            color: col,
+            corner_radius: cr,
+            rect_size: rs,
+            rect_origin: ro,
+        });
+        self.vertices.push(RectVertex {
+            pos: [bx + nx2, by + ny2],
+            color: col,
+            corner_radius: cr,
+            rect_size: rs,
+            rect_origin: ro,
+        });
+        self.vertices.push(RectVertex {
+            pos: [cx - nx2, cy - ny2],
+            color: col,
+            corner_radius: cr,
+            rect_size: rs,
+            rect_origin: ro,
+        });
+        self.vertices.push(RectVertex {
+            pos: [cx + nx2, cy + ny2],
+            color: col,
+            corner_radius: cr,
+            rect_size: rs,
+            rect_origin: ro,
+        });
     }
 
     /// Append a straight stroke (thick line segment) from `(x0, y0)` to
@@ -276,34 +421,74 @@ impl RectangleRenderer {
     /// axis-aligned `prepare_rectangle` can't). Used to draw the custom titlebar
     /// control icons as strokes.
     pub fn prepare_line(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, thickness: f32, color: u32) {
-        if self.vertices.len() + 6 > MAX_RECT_VERTICES { return; }
+        if self.vertices.len() + 6 > MAX_RECT_VERTICES {
+            return;
+        }
 
         let dx = x1 - x0;
         let dy = y1 - y0;
         let len = (dx * dx + dy * dy).sqrt();
-        if len <= f32::EPSILON { return; }
+        if len <= f32::EPSILON {
+            return;
+        }
 
         let r = ((color >> 24) & 0xFF) as f32 / 255.0;
         let g = ((color >> 16) & 0xFF) as f32 / 255.0;
-        let b = ((color >>  8) & 0xFF) as f32 / 255.0;
-        let a = ( color        & 0xFF) as f32 / 255.0;
+        let b = ((color >> 8) & 0xFF) as f32 / 255.0;
+        let a = (color & 0xFF) as f32 / 255.0;
         let col = [r, g, b, a];
 
         let half = thickness * 0.5;
         let nx = -dy / len * half;
-        let ny =  dx / len * half;
+        let ny = dx / len * half;
 
         // Neutralize SDF — a huge rect makes the fragment shader fill all pixels.
         let cr = [0.0_f32, 0.0];
         let rs = [10000.0_f32, 10000.0];
         let ro = [0.0_f32, 0.0];
 
-        self.vertices.push(RectVertex { pos: [x0 + nx, y0 + ny], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
-        self.vertices.push(RectVertex { pos: [x0 - nx, y0 - ny], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
-        self.vertices.push(RectVertex { pos: [x1 - nx, y1 - ny], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
-        self.vertices.push(RectVertex { pos: [x0 + nx, y0 + ny], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
-        self.vertices.push(RectVertex { pos: [x1 - nx, y1 - ny], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
-        self.vertices.push(RectVertex { pos: [x1 + nx, y1 + ny], color: col, corner_radius: cr, rect_size: rs, rect_origin: ro });
+        self.vertices.push(RectVertex {
+            pos: [x0 + nx, y0 + ny],
+            color: col,
+            corner_radius: cr,
+            rect_size: rs,
+            rect_origin: ro,
+        });
+        self.vertices.push(RectVertex {
+            pos: [x0 - nx, y0 - ny],
+            color: col,
+            corner_radius: cr,
+            rect_size: rs,
+            rect_origin: ro,
+        });
+        self.vertices.push(RectVertex {
+            pos: [x1 - nx, y1 - ny],
+            color: col,
+            corner_radius: cr,
+            rect_size: rs,
+            rect_origin: ro,
+        });
+        self.vertices.push(RectVertex {
+            pos: [x0 + nx, y0 + ny],
+            color: col,
+            corner_radius: cr,
+            rect_size: rs,
+            rect_origin: ro,
+        });
+        self.vertices.push(RectVertex {
+            pos: [x1 - nx, y1 - ny],
+            color: col,
+            corner_radius: cr,
+            rect_size: rs,
+            rect_origin: ro,
+        });
+        self.vertices.push(RectVertex {
+            pos: [x1 + nx, y1 + ny],
+            color: col,
+            corner_radius: cr,
+            rect_size: rs,
+            rect_origin: ro,
+        });
     }
 
     /// Upload vertices and issue draw command.
@@ -312,37 +497,49 @@ impl RectangleRenderer {
         device: &ash::Device,
         cb: vk::CommandBuffer,
         extent: vk::Extent2D,
-    ) { unsafe {
-        if self.vertices.is_empty() { return; }
+    ) {
+        unsafe {
+            if self.vertices.is_empty() {
+                return;
+            }
 
-        let upload_size = (std::mem::size_of::<RectVertex>() * self.vertices.len()) as vk::DeviceSize;
-        let ptr = device
-            .map_memory(self.vertex_buffer_memory, 0, upload_size, vk::MemoryMapFlags::empty())
-            .unwrap() as *mut RectVertex;
-        std::ptr::copy_nonoverlapping(self.vertices.as_ptr(), ptr, self.vertices.len());
-        device.unmap_memory(self.vertex_buffer_memory);
+            let upload_size =
+                (std::mem::size_of::<RectVertex>() * self.vertices.len()) as vk::DeviceSize;
+            let ptr = device
+                .map_memory(
+                    self.vertex_buffer_memory,
+                    0,
+                    upload_size,
+                    vk::MemoryMapFlags::empty(),
+                )
+                .unwrap() as *mut RectVertex;
+            std::ptr::copy_nonoverlapping(self.vertices.as_ptr(), ptr, self.vertices.len());
+            device.unmap_memory(self.vertex_buffer_memory);
 
-        let screen = [extent.width as f32, extent.height as f32];
-        device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
-        device.cmd_push_constants(
-            cb,
-            self.pipeline_layout,
-            vk::ShaderStageFlags::VERTEX,
-            0,
-            std::slice::from_raw_parts(screen.as_ptr() as *const u8, 8),
-        );
-        let bufs = [self.vertex_buffer];
-        let offs = [0u64];
-        device.cmd_bind_vertex_buffers(cb, 0, &bufs, &offs);
-        device.cmd_draw(cb, self.vertices.len() as u32, 1, 0, 0);
-    }}
+            let screen = [extent.width as f32, extent.height as f32];
+            device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
+            device.cmd_push_constants(
+                cb,
+                self.pipeline_layout,
+                vk::ShaderStageFlags::VERTEX,
+                0,
+                std::slice::from_raw_parts(screen.as_ptr() as *const u8, 8),
+            );
+            let bufs = [self.vertex_buffer];
+            let offs = [0u64];
+            device.cmd_bind_vertex_buffers(cb, 0, &bufs, &offs);
+            device.cmd_draw(cb, self.vertices.len() as u32, 1, 0, 0);
+        }
+    }
 
     // ---- Cleanup -----------------------------------------------------------
 
-    pub unsafe fn cleanup(&self, device: &ash::Device) { unsafe {
-        device.destroy_pipeline(self.pipeline, None);
-        device.destroy_pipeline_layout(self.pipeline_layout, None);
-        device.destroy_buffer(self.vertex_buffer, None);
-        device.free_memory(self.vertex_buffer_memory, None);
-    }}
+    pub unsafe fn cleanup(&self, device: &ash::Device) {
+        unsafe {
+            device.destroy_pipeline(self.pipeline, None);
+            device.destroy_pipeline_layout(self.pipeline_layout, None);
+            device.destroy_buffer(self.vertex_buffer, None);
+            device.free_memory(self.vertex_buffer_memory, None);
+        }
+    }
 }

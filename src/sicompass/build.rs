@@ -51,7 +51,9 @@ fn link_clang_runtime() {
 
     let dir = String::from_utf8_lossy(&out.stdout).trim().to_string();
     if dir.is_empty() || !std::path::Path::new(&dir).is_dir() {
-        println!("cargo::warning=clang runtime dir {dir:?} does not exist; not linking compiler-rt");
+        println!(
+            "cargo::warning=clang runtime dir {dir:?} does not exist; not linking compiler-rt"
+        );
         return;
     }
 

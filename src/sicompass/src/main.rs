@@ -15,7 +15,7 @@ use sicompass::render;
 use sicompass::start_menu;
 use std::process;
 use std::sync::{Arc, Mutex};
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 /// GitHub owner/repo for the self-update check. Derived from the
 /// `repository = "https://github.com/<owner>/<repo>"` URL in
@@ -47,16 +47,15 @@ fn main() {
     let _ = std::env::set_current_dir(sicompass::resources::resource_root());
 
     // Set up dual logging: always write debug to a log file, optionally stderr via RUST_LOG.
-    let log_dir = sicompass_sdk::platform::log_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let log_dir =
+        sicompass_sdk::platform::log_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
     sicompass_sdk::platform::make_dirs(&log_dir);
     let file_appender = tracing_appender::rolling::daily(&log_dir, "sicompass.log");
     let file_layer = fmt::layer()
         .with_writer(file_appender)
         .with_ansi(false)
         .with_filter(EnvFilter::new("debug"));
-    let stderr_layer = fmt::layer()
-        .with_filter(EnvFilter::from_default_env());
+    let stderr_layer = fmt::layer().with_filter(EnvFilter::from_default_env());
     tracing_subscriber::registry()
         .with(file_layer)
         .with(stderr_layer)

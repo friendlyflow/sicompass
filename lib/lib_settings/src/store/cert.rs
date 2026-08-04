@@ -16,8 +16,8 @@
 //! server MUST define a byte-identical `Payload` struct, or signatures will
 //! not verify. Keep the two definitions in sync.
 
-use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -70,9 +70,15 @@ pub(crate) enum LicenseStatus {
     /// No certificate file present.
     None,
     /// Valid signature, not yet expired.
-    Active { licensee: String, renews_in_days: i64 },
+    Active {
+        licensee: String,
+        renews_in_days: i64,
+    },
     /// Valid signature, but past `expires_at`.
-    Expired { licensee: String, expired_days_ago: i64 },
+    Expired {
+        licensee: String,
+        expired_days_ago: i64,
+    },
     /// Signature, key, product, or encoding check failed.
     Invalid(String),
 }
@@ -86,12 +92,14 @@ impl LicenseStatus {
             LicenseStatus::None => {
                 format!("{label} license: none. sicompass is free under GPLv3.")
             }
-            LicenseStatus::Active { licensee, renews_in_days } => format!(
-                "{label} license: active, {licensee}, renews in {renews_in_days} days"
-            ),
-            LicenseStatus::Expired { licensee, expired_days_ago } => format!(
-                "{label} license: expired {expired_days_ago} days ago, {licensee}"
-            ),
+            LicenseStatus::Active {
+                licensee,
+                renews_in_days,
+            } => format!("{label} license: active, {licensee}, renews in {renews_in_days} days"),
+            LicenseStatus::Expired {
+                licensee,
+                expired_days_ago,
+            } => format!("{label} license: expired {expired_days_ago} days ago, {licensee}"),
             LicenseStatus::Invalid(why) => {
                 format!("{label} license: invalid certificate ({why})")
             }
@@ -127,7 +135,9 @@ pub(crate) fn verify_against(cert: &Certificate, public_key_b64: &str) -> Licens
     };
     let verifying_key = match VerifyingKey::from_bytes(&key_arr) {
         Ok(k) => k,
-        Err(_) => return LicenseStatus::Invalid("public key is not a valid Ed25519 key".to_owned()),
+        Err(_) => {
+            return LicenseStatus::Invalid("public key is not a valid Ed25519 key".to_owned());
+        }
     };
 
     let sig_bytes = match STANDARD.decode(&cert.signature) {
@@ -245,7 +255,10 @@ mod tests {
         let (signing, pubkey) = test_keypair();
         let cert = sign(&signing, sample_payload(now_unix() + 200 * 86_400));
         match verify_against(&cert, &pubkey) {
-            LicenseStatus::Active { licensee, renews_in_days } => {
+            LicenseStatus::Active {
+                licensee,
+                renews_in_days,
+            } => {
                 assert_eq!(licensee, "Acme Corp");
                 assert!(renews_in_days > 190 && renews_in_days <= 200);
             }
@@ -258,7 +271,9 @@ mod tests {
         let (signing, pubkey) = test_keypair();
         let cert = sign(&signing, sample_payload(now_unix() - 10 * 86_400));
         match verify_against(&cert, &pubkey) {
-            LicenseStatus::Expired { expired_days_ago, .. } => {
+            LicenseStatus::Expired {
+                expired_days_ago, ..
+            } => {
                 assert!((9..=11).contains(&expired_days_ago));
             }
             other => panic!("expected Expired, got {other:?}"),
@@ -280,7 +295,11 @@ mod tests {
     fn wrong_public_key_is_invalid() {
         let (signing, _) = test_keypair();
         let cert = sign(&signing, sample_payload(now_unix() + 86_400));
-        let other_pubkey = STANDARD.encode(SigningKey::from_bytes(&[9u8; 32]).verifying_key().to_bytes());
+        let other_pubkey = STANDARD.encode(
+            SigningKey::from_bytes(&[9u8; 32])
+                .verifying_key()
+                .to_bytes(),
+        );
         assert!(matches!(
             verify_against(&cert, &other_pubkey),
             LicenseStatus::Invalid(_)
@@ -320,8 +339,14 @@ mod tests {
         // Keep status text plain for screen readers.
         for s in [
             LicenseStatus::None,
-            LicenseStatus::Active { licensee: "X".into(), renews_in_days: 1 },
-            LicenseStatus::Expired { licensee: "X".into(), expired_days_ago: 1 },
+            LicenseStatus::Active {
+                licensee: "X".into(),
+                renews_in_days: 1,
+            },
+            LicenseStatus::Expired {
+                licensee: "X".into(),
+                expired_days_ago: 1,
+            },
             LicenseStatus::Invalid("why".into()),
         ] {
             for label in ["Cloud and store", "Support"] {

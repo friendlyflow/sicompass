@@ -3,7 +3,7 @@
 //! `Timeline` for undo/redo.
 
 use crate::app_state::{
-    AppRenderer, Coordinate, History, Task, TEXT_CHUNK_IDLE_MS, TIMELINE_CAPACITY,
+    AppRenderer, Coordinate, History, TEXT_CHUNK_IDLE_MS, TIMELINE_CAPACITY, Task,
 };
 use crate::list;
 use sicompass_sdk::ffon::{FfonElement, FfonObject, IdArray, next_layer_exists};
@@ -41,13 +41,12 @@ pub fn update_state(r: &mut AppRenderer, task: Task, history: History) {
     let history_id = r.current_id.clone();
 
     // Capture element BEFORE modification (for undo of DELETE / INPUT / PASTE)
-    let prev_element = if history == History::None
-        && matches!(task, Task::Delete | Task::Input | Task::Paste)
-    {
-        get_element_at(&r.ffon, &r.current_id).cloned()
-    } else {
-        None
-    };
+    let prev_element =
+        if history == History::None && matches!(task, Task::Delete | Task::Input | Task::Paste) {
+            get_element_at(&r.ffon, &r.current_id).cloned()
+        } else {
+            None
+        };
 
     // Determine "line" — what we're editing/inserting
     let (line, current_elem_is_obj) = get_current_line(r);
@@ -92,20 +91,20 @@ pub fn update_state(r: &mut AppRenderer, task: Task, history: History) {
                 }),
                 _ => None,
             },
-            Task::Append | Task::AppendAppend => new_element.as_ref().map(|e| {
-                TimelineEntry::Structural {
+            Task::Append | Task::AppendAppend => {
+                new_element.as_ref().map(|e| TimelineEntry::Structural {
                     id: record_id.clone(),
                     op: StructuralOp::Append,
                     payload: StructuralPayload::Inserted(e.clone()),
-                }
-            }),
-            Task::Insert | Task::InsertInsert => new_element.as_ref().map(|e| {
-                TimelineEntry::Structural {
+                })
+            }
+            Task::Insert | Task::InsertInsert => {
+                new_element.as_ref().map(|e| TimelineEntry::Structural {
                     id: record_id.clone(),
                     op: StructuralOp::Insert,
                     payload: StructuralPayload::Inserted(e.clone()),
-                }
-            }),
+                })
+            }
             Task::Delete => prev_element.as_ref().map(|e| TimelineEntry::Structural {
                 id: record_id.clone(),
                 op: StructuralOp::Delete,
@@ -244,14 +243,19 @@ pub fn update_ffon(r: &mut AppRenderer, line: &str, is_key: bool, task: Task, hi
     // Paste: replace current element with clipboard content
     if task == Task::Paste {
         let prev_id = r.previous_id.clone();
-        let prev_idx = match prev_id.last() { Some(i) => i, None => return };
+        let prev_idx = match prev_id.last() {
+            Some(i) => i,
+            None => return,
+        };
         if let Some(elem) = r.clipboard.clone() {
             replace_at(&mut r.ffon, &prev_id, prev_idx, elem);
         }
         return;
     }
 
-    let is_editor = r.current_id.get(0)
+    let is_editor = r
+        .current_id
+        .get(0)
         .and_then(|i| r.providers.get(i))
         .map(|p| p.has_editor_semantics())
         .unwrap_or(false);
@@ -278,7 +282,8 @@ pub fn update_ffon(r: &mut AppRenderer, line: &str, is_key: bool, task: Task, hi
         // Check if element at prev_idx is an Obj
         let is_obj_at_prev = {
             let arr = navigate_to_slice(&r.ffon, &prev_id);
-            arr.and_then(|a| a.get(prev_idx)).map_or(false, |e| e.is_obj())
+            arr.and_then(|a| a.get(prev_idx))
+                .map_or(false, |e| e.is_obj())
         };
 
         if matches!(task, Task::Delete | Task::Cut) {
@@ -299,11 +304,18 @@ pub fn update_ffon(r: &mut AppRenderer, line: &str, is_key: bool, task: Task, hi
             let new_key = strip_trailing_colon(line);
             rekey_obj_at(&mut r.ffon, &prev_id, prev_idx, new_key);
 
-            if matches!(task, Task::Append | Task::AppendAppend | Task::Insert | Task::InsertInsert)
-                && history != History::Redo
+            if matches!(
+                task,
+                Task::Append | Task::AppendAppend | Task::Insert | Task::InsertInsert
+            ) && history != History::Redo
             {
                 // Insert a new empty sibling at cur_idx_last
-                insert_at(&mut r.ffon, &prev_id, cur_idx_last, FfonElement::new_str(""));
+                insert_at(
+                    &mut r.ffon,
+                    &prev_id,
+                    cur_idx_last,
+                    FfonElement::new_str(""),
+                );
             }
         } else {
             // Element is a string — convert it to an Obj
@@ -330,10 +342,17 @@ pub fn update_ffon(r: &mut AppRenderer, line: &str, is_key: bool, task: Task, hi
             };
             replace_at(&mut r.ffon, &prev_id, prev_idx, new_elem);
 
-            if matches!(task, Task::Append | Task::AppendAppend | Task::Insert | Task::InsertInsert)
-                && history != History::Redo
+            if matches!(
+                task,
+                Task::Append | Task::AppendAppend | Task::Insert | Task::InsertInsert
+            ) && history != History::Redo
             {
-                insert_at(&mut r.ffon, &prev_id, cur_idx_last, FfonElement::new_str(""));
+                insert_at(
+                    &mut r.ffon,
+                    &prev_id,
+                    cur_idx_last,
+                    FfonElement::new_str(""),
+                );
             }
         }
     } else if !is_key && is_editor {
@@ -342,7 +361,12 @@ pub fn update_ffon(r: &mut AppRenderer, line: &str, is_key: bool, task: Task, hi
             let new_len = get_parent_len(&r.ffon, &prev_id);
             // If cursor is at 0 and list is now empty at non-root level, insert placeholder
             if cur_id.last().unwrap_or(1) == 0 && new_len == 0 && depth != 1 {
-                insert_at(&mut r.ffon, &prev_id, prev_id.last().unwrap_or(0), FfonElement::new_str(""));
+                insert_at(
+                    &mut r.ffon,
+                    &prev_id,
+                    prev_id.last().unwrap_or(0),
+                    FfonElement::new_str(""),
+                );
             }
             if r.current_id.last().unwrap_or(0) > 0 {
                 let cur = r.current_id.last().unwrap_or(1);
@@ -356,7 +380,12 @@ pub fn update_ffon(r: &mut AppRenderer, line: &str, is_key: bool, task: Task, hi
             replace_at(&mut r.ffon, &prev_id, prev_idx, FfonElement::new_str(line));
             // Insert empty string sibling at cur_idx_last
             if history != History::Redo {
-                insert_at(&mut r.ffon, &prev_id, cur_idx_last, FfonElement::new_str(""));
+                insert_at(
+                    &mut r.ffon,
+                    &prev_id,
+                    cur_idx_last,
+                    FfonElement::new_str(""),
+                );
             }
         } else {
             // TASK_INPUT / navigation — update the value
@@ -377,7 +406,6 @@ pub fn update_ffon(r: &mut AppRenderer, line: &str, is_key: bool, task: Task, hi
         }
     }
 }
-
 
 // ---------------------------------------------------------------------------
 // Unified Timeline dispatcher (new model)
@@ -640,10 +668,7 @@ fn apply_undo(r: &mut AppRenderer, entry: &TimelineEntry) {
                     r.current_id.set_last(cur - 1);
                 }
             }
-            (
-                StructuralOp::Delete | StructuralOp::Cut,
-                StructuralPayload::Removed(elem),
-            ) => {
+            (StructuralOp::Delete | StructuralOp::Cut, StructuralPayload::Removed(elem)) => {
                 clear_sole_i_placeholder_if_body_element(r, id);
                 insert_element_at_id(r, id, elem.clone());
                 r.current_id = id.clone();
@@ -674,8 +699,7 @@ fn apply_undo(r: &mut AppRenderer, entry: &TimelineEntry) {
             // reinsertion arm so the in-memory tree mirrors the file system.
             if matches!(
                 op,
-                sicompass_sdk::timeline::FsOpKind::Delete
-                    | sicompass_sdk::timeline::FsOpKind::Move
+                sicompass_sdk::timeline::FsOpKind::Delete | sicompass_sdk::timeline::FsOpKind::Move
             ) {
                 spawn_provider_op(r, *provider_idx, entry, true);
             }
@@ -691,9 +715,7 @@ fn apply_undo(r: &mut AppRenderer, entry: &TimelineEntry) {
 
 fn apply_redo(r: &mut AppRenderer, entry: &TimelineEntry) {
     match entry {
-        TimelineEntry::Navigate {
-            to_id, to_path, ..
-        } => {
+        TimelineEntry::Navigate { to_id, to_path, .. } => {
             // In-memory navigation (see `apply_undo`) — restore path + cursor.
             if let Some(path) = to_path {
                 crate::provider::set_provider_path(r, path);
@@ -701,7 +723,9 @@ fn apply_redo(r: &mut AppRenderer, entry: &TimelineEntry) {
             r.current_id = to_id.clone();
             // Empty-layer re-fetch runs once in `walk_forward` (see `apply_undo`).
         }
-        TimelineEntry::TextChunk { id, before, after, .. } => {
+        TimelineEntry::TextChunk {
+            id, before, after, ..
+        } => {
             if text_chunk_is_compose_insertion(r, id, before) {
                 // Re-apply the compose-body insertion (see the undo arm).
                 clear_sole_i_placeholder_if_body_element(r, id);
@@ -715,10 +739,7 @@ fn apply_redo(r: &mut AppRenderer, entry: &TimelineEntry) {
             }
         }
         TimelineEntry::Structural { id, op, payload } => match (op, payload) {
-            (
-                StructuralOp::Append | StructuralOp::Insert,
-                StructuralPayload::Inserted(elem),
-            ) => {
+            (StructuralOp::Append | StructuralOp::Insert, StructuralPayload::Inserted(elem)) => {
                 clear_sole_i_placeholder_if_body_element(r, id);
                 insert_element_at_id(r, id, elem.clone());
                 r.current_id = id.clone();
@@ -759,8 +780,7 @@ fn apply_redo(r: &mut AppRenderer, entry: &TimelineEntry) {
             // re-moves a message).
             if matches!(
                 op,
-                sicompass_sdk::timeline::FsOpKind::Delete
-                    | sicompass_sdk::timeline::FsOpKind::Move
+                sicompass_sdk::timeline::FsOpKind::Delete | sicompass_sdk::timeline::FsOpKind::Move
             ) {
                 spawn_provider_op(r, *provider_idx, entry, false);
             }
@@ -825,8 +845,7 @@ fn apply_fs_op_undo(
         }
         FsOpKind::Paste => {
             if let Some(new_elem) = after {
-                let name =
-                    sicompass_sdk::tags::strip_display(&elem_key_str(new_elem)).to_owned();
+                let name = sicompass_sdk::tags::strip_display(&elem_key_str(new_elem)).to_owned();
                 r.current_id = id.clone();
                 crate::provider::delete_item_by_name(r, &name);
                 crate::provider::refresh_current_directory(r);
@@ -947,7 +966,11 @@ fn reposition_on_recreated_item(r: &mut AppRenderer, name: &str, is_dir: bool) {
     // Labels render as "{prefix} {content}" (e.g. "+i dir"); match the content
     // after the first space — mirrors `record_placeholder_fs_create`.
     if let Some(i) = r.total_list.iter().position(|item| {
-        item.label.split_once(' ').map(|(_, c)| c).unwrap_or(&item.label) == name
+        item.label
+            .split_once(' ')
+            .map(|(_, c)| c)
+            .unwrap_or(&item.label)
+            == name
     }) {
         if let Some(id) = r.total_list.get(i).map(|it| it.id.clone()) {
             r.current_id = id;
@@ -1024,19 +1047,31 @@ fn ensure_nav_layer_populated(r: &mut AppRenderer) {
 /// The provider is moved out of `r.providers` and handed to the task, since a
 /// borrow cannot cross an `.await`; a `PlaceholderProvider` holds the slot so
 /// indices stay valid. `drain_pending_provider_ops` puts it back.
-fn spawn_provider_op(r: &mut AppRenderer, provider_idx: usize, entry: &TimelineEntry, is_undo: bool) {
+fn spawn_provider_op(
+    r: &mut AppRenderer,
+    provider_idx: usize,
+    entry: &TimelineEntry,
+    is_undo: bool,
+) {
     use sicompass_sdk::Provider;
 
     // Already running for this provider: ignore the repeat rather than check
     // out a placeholder and lose the real provider.
-    if r.pending_provider_ops.iter().any(|op| op.idx == provider_idx) {
+    if r.pending_provider_ops
+        .iter()
+        .any(|op| op.idx == provider_idx)
+    {
         return;
     }
-    let Some(slot) = r.providers.get_mut(provider_idx) else { return };
+    let Some(slot) = r.providers.get_mut(provider_idx) else {
+        return;
+    };
 
     let provider_name = slot.display_name().to_owned();
-    let stand_in: Box<dyn Provider> =
-        Box::new(crate::app_state::PlaceholderProvider::new(slot.name(), &provider_name));
+    let stand_in: Box<dyn Provider> = Box::new(crate::app_state::PlaceholderProvider::new(
+        slot.name(),
+        &provider_name,
+    ));
     let mut taken = std::mem::replace(slot, stand_in);
 
     let (tx, rx) = std::sync::mpsc::channel();
@@ -1053,12 +1088,13 @@ fn spawn_provider_op(r: &mut AppRenderer, provider_idx: usize, entry: &TimelineE
         let _ = tx.send((taken, error));
     });
 
-    r.pending_provider_ops.push(crate::app_state::PendingProviderOp {
-        idx: provider_idx,
-        is_undo,
-        provider_name,
-        rx,
-    });
+    r.pending_provider_ops
+        .push(crate::app_state::PendingProviderOp {
+            idx: provider_idx,
+            is_undo,
+            provider_name,
+            rx,
+        });
 }
 
 /// Put back any provider whose undo/redo has finished. Returns true if the
@@ -1127,7 +1163,6 @@ pub fn strip_trailing_colon(s: &str) -> String {
     }
 }
 
-
 /// Get the element at `id` (immutable).
 fn get_element_at<'a>(ffon: &'a [FfonElement], id: &IdArray) -> Option<&'a FfonElement> {
     let arr = navigate_to_slice(ffon, id)?;
@@ -1181,9 +1216,7 @@ fn navigate_to_slice_mut<'a>(
 
 /// Get the length of the parent array at `id`.
 fn get_parent_len(ffon: &[FfonElement], id: &IdArray) -> usize {
-    navigate_to_slice(ffon, id)
-        .map(|s| s.len())
-        .unwrap_or(0)
+    navigate_to_slice(ffon, id).map(|s| s.len()).unwrap_or(0)
 }
 
 /// Maximum valid index at the current navigation path.
@@ -1251,9 +1284,11 @@ fn cursor_inside_radio(id: &IdArray, elem: &FfonElement) -> IdArray {
     use sicompass_sdk::tags;
     if let FfonElement::Obj(o) = elem {
         if tags::has_radio(&o.key) {
-            if let Some(checked_idx) = o.children.iter().position(|c| {
-                c.as_str().map_or(false, |s| tags::has_checked(s))
-            }) {
+            if let Some(checked_idx) = o
+                .children
+                .iter()
+                .position(|c| c.as_str().map_or(false, |s| tags::has_checked(s)))
+            {
                 let mut cursor = id.clone();
                 cursor.push(checked_idx);
                 return cursor;
@@ -1316,8 +1351,7 @@ fn id_in_email_compose_body(r: &AppRenderer, id: &IdArray) -> bool {
         .and_then(|arr| arr.get(body_idx))
         .and_then(|e| e.as_obj())
         .map(|o| {
-            let key = sicompass_sdk::tags::extract_input(&o.key)
-                .unwrap_or_else(|| o.key.clone());
+            let key = sicompass_sdk::tags::extract_input(&o.key).unwrap_or_else(|| o.key.clone());
             key.trim_start().starts_with("Body:")
         })
         .unwrap_or(false)
@@ -1327,11 +1361,7 @@ fn id_in_email_compose_body(r: &AppRenderer, id: &IdArray) -> bool {
 /// insertion: its `before` is the I_PLACEHOLDER and `id` sits in an email
 /// compose body. Such a chunk is undone by removing the element (not by
 /// reverting it to the placeholder).
-fn text_chunk_is_compose_insertion(
-    r: &AppRenderer,
-    id: &IdArray,
-    before: &FfonElement,
-) -> bool {
+fn text_chunk_is_compose_insertion(r: &AppRenderer, id: &IdArray, before: &FfonElement) -> bool {
     matches!(before, FfonElement::Str(s) if *s == sicompass_sdk::placeholders::I_PLACEHOLDER)
         && id_in_email_compose_body(r, id)
 }
@@ -1341,13 +1371,23 @@ fn text_chunk_is_compose_insertion(
 ///
 /// Must be called BEFORE `insert_element_at_id` so the placeholder does not end up
 /// sitting alongside the restored element after a redo or undo-of-delete.
-fn clear_sole_i_placeholder_if_body_element(r: &mut AppRenderer, id: &sicompass_sdk::ffon::IdArray) {
-    if id.depth() < 3 { return; }
+fn clear_sole_i_placeholder_if_body_element(
+    r: &mut AppRenderer,
+    id: &sicompass_sdk::ffon::IdArray,
+) {
+    if id.depth() < 3 {
+        return;
+    }
     let is_sole = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, id)
-        .map(|arr| arr.len() == 1 && matches!(&arr[0], sicompass_sdk::ffon::FfonElement::Str(s)
-                   if s == sicompass_sdk::placeholders::I_PLACEHOLDER))
+        .map(|arr| {
+            arr.len() == 1
+                && matches!(&arr[0], sicompass_sdk::ffon::FfonElement::Str(s)
+                   if s == sicompass_sdk::placeholders::I_PLACEHOLDER)
+        })
         .unwrap_or(false);
-    if !is_sole { return; }
+    if !is_sole {
+        return;
+    }
     if let Some(arr) = navigate_to_slice_pub(&mut r.ffon, id) {
         arr.clear();
     }
@@ -1359,11 +1399,15 @@ fn clear_sole_i_placeholder_if_body_element(r: &mut AppRenderer, id: &sicompass_
 /// Must be called BEFORE `sync_compose_body_if_body_element` so the upgraded placeholder
 /// propagates into `compose.draft.body` via the subsequent sync.
 fn upgrade_body_bare_placeholder(r: &mut AppRenderer, id: &sicompass_sdk::ffon::IdArray) {
-    if id.depth() < 3 { return; }
+    if id.depth() < 3 {
+        return;
+    }
     let is_bare = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, id)
         .map(|arr| arr.len() == 1 && matches!(&arr[0], sicompass_sdk::ffon::FfonElement::Str(s) if s == "<input></input>"))
         .unwrap_or(false);
-    if !is_bare { return; }
+    if !is_bare {
+        return;
+    }
     if let Some(arr) = navigate_to_slice_pub(&mut r.ffon, id) {
         arr[0] = sicompass_sdk::ffon::FfonElement::Str(
             sicompass_sdk::placeholders::I_PLACEHOLDER.to_owned(),
@@ -1379,11 +1423,13 @@ pub fn sync_compose_body_if_body_element(r: &mut AppRenderer, id: &sicompass_sdk
     if id.depth() < 3 {
         return;
     }
-    let provider_idx = match id.get(0) { Some(i) => i, None => return };
+    let provider_idx = match id.get(0) {
+        Some(i) => i,
+        None => return,
+    };
     // get_ffon_at_id returns the *parent* array of the element at `id`.
     // For id = [p, body_obj_idx, elem_idx], that is the body Obj's children slice.
-    let body_children = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, id)
-        .map(|arr| arr.to_vec());
+    let body_children = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, id).map(|arr| arr.to_vec());
     if let Some(children) = body_children {
         if let Some(p) = r.providers.get_mut(provider_idx) {
             p.sync_ffon_body_children(&children);
@@ -1399,23 +1445,33 @@ pub fn sync_compose_body_if_body_element(r: &mut AppRenderer, id: &sicompass_sdk
 mod tests {
     use super::*;
     use crate::app_state::{AppRenderer, Coordinate, History, Task};
-    use sicompass_sdk::ffon::{FfonElement, IdArray};
     use sicompass_sdk::Provider;
+    use sicompass_sdk::ffon::{FfonElement, IdArray};
 
     /// Stand-in for the editor provider so `update_ffon` / `update_state`
     /// take the editor-semantics branch in tests that don't wire up a real
     /// provider stack.
     struct MockEditorProvider;
     impl Provider for MockEditorProvider {
-        fn name(&self) -> &str { "mock_editor" }
-        fn fetch(&mut self) -> Vec<FfonElement> { Vec::new() }
-        fn has_editor_semantics(&self) -> bool { true }
+        fn name(&self) -> &str {
+            "mock_editor"
+        }
+        fn fetch(&mut self) -> Vec<FfonElement> {
+            Vec::new()
+        }
+        fn has_editor_semantics(&self) -> bool {
+            true
+        }
     }
 
     fn make_renderer(ffon: Vec<FfonElement>) -> AppRenderer {
         let mut r = AppRenderer::new();
         r.ffon = ffon;
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id
+        };
         r.providers.push(Box::new(MockEditorProvider));
         r
     }
@@ -1453,10 +1509,7 @@ mod tests {
 
     #[test]
     fn update_ids_arrow_up_decrements() {
-        let mut r = make_renderer(vec![
-            FfonElement::new_str("a"),
-            FfonElement::new_str("b"),
-        ]);
+        let mut r = make_renderer(vec![FfonElement::new_str("a"), FfonElement::new_str("b")]);
         r.current_id.set_last(1);
         update_ids(&mut r, false, Task::ArrowUp, History::None);
         assert_eq!(r.current_id.last(), Some(0));
@@ -1464,10 +1517,7 @@ mod tests {
 
     #[test]
     fn update_ids_arrow_down_increments() {
-        let mut r = make_renderer(vec![
-            FfonElement::new_str("a"),
-            FfonElement::new_str("b"),
-        ]);
+        let mut r = make_renderer(vec![FfonElement::new_str("a"), FfonElement::new_str("b")]);
         r.current_id.set_last(0);
         update_ids(&mut r, false, Task::ArrowDown, History::None);
         assert_eq!(r.current_id.last(), Some(1));
@@ -1547,10 +1597,7 @@ mod tests {
         update_state(&mut r, Task::Input, History::None);
         let tl = r.active_timeline();
         assert_eq!(tl.entries.len(), 1);
-        assert!(matches!(
-            tl.entries[0],
-            TimelineEntry::TextChunk { .. }
-        ));
+        assert!(matches!(tl.entries[0], TimelineEntry::TextChunk { .. }));
     }
 
     // --- is_line_key (additional) ---
@@ -1618,10 +1665,7 @@ mod tests {
 
     #[test]
     fn update_ids_move_down_at_bottom_stays() {
-        let mut r = make_renderer(vec![
-            FfonElement::new_str("a"),
-            FfonElement::new_str("b"),
-        ]);
+        let mut r = make_renderer(vec![FfonElement::new_str("a"), FfonElement::new_str("b")]);
         r.current_id.set_last(1);
         update_ids(&mut r, false, Task::ArrowDown, History::None);
         assert_eq!(r.current_id.last(), Some(1));

@@ -61,7 +61,7 @@ impl ChatClientProvider {
                 return AuthResult {
                     error: format!("HTTP client error: {e}"),
                     ..Default::default()
-                }
+                };
             }
         };
         let url = self.api("/_matrix/client/v3/login");
@@ -76,7 +76,7 @@ impl ChatClientProvider {
                 return AuthResult {
                     error: format!("request failed: {e}"),
                     ..Default::default()
-                }
+                };
             }
         };
         match resp.json::<serde_json::Value>() {
@@ -108,7 +108,7 @@ impl ChatClientProvider {
                 return AuthResult {
                     error: format!("HTTP client error: {e}"),
                     ..Default::default()
-                }
+                };
             }
         };
         let url = self.api("/_matrix/client/v3/register");
@@ -124,7 +124,7 @@ impl ChatClientProvider {
                 return AuthResult {
                     error: format!("request failed: {e}"),
                     ..Default::default()
-                }
+                };
             }
         };
         let probe_body: serde_json::Value = match resp.json() {
@@ -133,7 +133,7 @@ impl ChatClientProvider {
                 return AuthResult {
                     error: "failed to parse server response".to_owned(),
                     ..Default::default()
-                }
+                };
             }
         };
         let probe = parse_auth_response(probe_body);
@@ -155,7 +155,7 @@ impl ChatClientProvider {
                     return AuthResult {
                         error: format!("request failed: {e}"),
                         ..Default::default()
-                    }
+                    };
                 }
             };
             return match resp2.json::<serde_json::Value>() {
@@ -188,7 +188,7 @@ impl ChatClientProvider {
                 return AuthResult {
                     error: format!("HTTP client error: {e}"),
                     ..Default::default()
-                }
+                };
             }
         };
         let url = self.api("/_matrix/client/v3/register");
@@ -203,7 +203,7 @@ impl ChatClientProvider {
                 return AuthResult {
                     error: format!("request failed: {e}"),
                     ..Default::default()
-                }
+                };
             }
         };
         match resp.json::<serde_json::Value>() {

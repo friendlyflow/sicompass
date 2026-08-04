@@ -265,7 +265,10 @@ mod tests {
     #[cfg(not(windows))]
     fn multi_param_yields_single_enter() {
         // `CSI ? 1000;1002;1006 h` — three modes, one empty→non-empty cross.
-        assert_eq!(collect(b"\x1b[?1000;1002;1006h"), vec![InteractiveEvent::Enter]);
+        assert_eq!(
+            collect(b"\x1b[?1000;1002;1006h"),
+            vec![InteractiveEvent::Enter]
+        );
     }
 
     #[test]

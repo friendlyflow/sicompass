@@ -87,9 +87,7 @@ impl FilebrowserProvider {
         let mut raw = collect_raw_entries(path);
 
         match self.sort_mode {
-            SortMode::Alpha => raw.sort_by(|a, b| {
-                natord::compare_ignore_case(&a.name, &b.name)
-            }),
+            SortMode::Alpha => raw.sort_by(|a, b| natord::compare_ignore_case(&a.name, &b.name)),
             SortMode::Chrono => raw.sort_by(|a, b| b.mtime.cmp(&a.mtime)),
         }
 
@@ -100,7 +98,8 @@ impl FilebrowserProvider {
             } else {
                 String::new()
             };
-            let label = format!("{}{}<input>{}</input>",
+            let label = format!(
+                "{}{}<input>{}</input>",
                 prop,
                 // no extra prefix beyond property string
                 "",
@@ -125,7 +124,9 @@ impl Default for FilebrowserProvider {
 
 #[async_trait::async_trait]
 impl Provider for FilebrowserProvider {
-    fn name(&self) -> &str { "filebrowser" }
+    fn name(&self) -> &str {
+        "filebrowser"
+    }
     fn display_name(&self) -> String {
         register_translations();
         localize::t("filebrowser-display-name")
@@ -149,7 +150,8 @@ impl Provider for FilebrowserProvider {
                 return;
             }
         }
-        self.current_path.push(segment.trim_end_matches('/').trim_end_matches('\\'));
+        self.current_path
+            .push(segment.trim_end_matches('/').trim_end_matches('\\'));
     }
 
     fn pop_path(&mut self) {
@@ -160,7 +162,9 @@ impl Provider for FilebrowserProvider {
                 self.current_path = PathBuf::from("/");
                 return;
             }
-            if self.current_path == Path::new("/") { return; }
+            if self.current_path == Path::new("/") {
+                return;
+            }
         }
         if self.current_path.parent().is_some() && self.current_path != Path::new("/") {
             self.current_path.pop();
@@ -175,9 +179,13 @@ impl Provider for FilebrowserProvider {
         self.current_path = PathBuf::from(path);
     }
 
-    fn needs_refresh(&self) -> bool { false }
+    fn needs_refresh(&self) -> bool {
+        false
+    }
 
-    fn path_is_filesystem(&self) -> bool { true }
+    fn path_is_filesystem(&self) -> bool {
+        true
+    }
 
     fn on_setting_change(&mut self, key: &str, value: &str) {
         if key == "sortOrder" {
@@ -196,27 +204,42 @@ impl Provider for FilebrowserProvider {
             // Committing an `i` placeholder — treat as a create.
             // The generic handler appends `:` when the user typed `+name` or `name:`.
             if let Some(dir_name) = new_name.strip_suffix(':') {
-                if dir_name.is_empty() { return false; }
+                if dir_name.is_empty() {
+                    return false;
+                }
                 return self.create_directory(dir_name);
             }
-            if new_name.is_empty() { return false; }
+            if new_name.is_empty() {
+                return false;
+            }
             return self.create_file(&new_name);
         }
 
-        if old_name == new_name { return false; }
-        let old_path = self.current_path.join(old_name.trim_end_matches('/').trim_end_matches('\\'));
-        let new_path = self.current_path.join(new_name.trim_end_matches('/').trim_end_matches('\\'));
+        if old_name == new_name {
+            return false;
+        }
+        let old_path = self
+            .current_path
+            .join(old_name.trim_end_matches('/').trim_end_matches('\\'));
+        let new_path = self
+            .current_path
+            .join(new_name.trim_end_matches('/').trim_end_matches('\\'));
         std::fs::rename(&old_path, &new_path).is_ok()
     }
 
     fn delete_item(&mut self, name: &str) -> bool {
         let name_clean = entry_name(name);
-        let name_clean = name_clean.trim_end_matches('/').trim_end_matches('\\').to_owned();
+        let name_clean = name_clean
+            .trim_end_matches('/')
+            .trim_end_matches('\\')
+            .to_owned();
         let full = self.current_path.join(&name_clean);
 
         // Snapshot the target before deletion so an undo can restore even if
         // the OS trash has been emptied (see `sicompass_sdk::fs_trash`).
-        let is_dir = std::fs::metadata(&full).map(|m| m.is_dir()).unwrap_or(false);
+        let is_dir = std::fs::metadata(&full)
+            .map(|m| m.is_dir())
+            .unwrap_or(false);
         let side_effect = sicompass_sdk::fs_trash::snapshot_for_delete(&full);
         if trash::delete(&full).is_ok() {
             let before_elem = if is_dir {
@@ -245,7 +268,9 @@ impl Provider for FilebrowserProvider {
     async fn undo(&mut self, entry: &TimelineEntry, error: &mut String) {
         register_translations();
         let (op, side_effect) = match entry {
-            TimelineEntry::FsOp { op, side_effect, .. } => (op, side_effect),
+            TimelineEntry::FsOp {
+                op, side_effect, ..
+            } => (op, side_effect),
             _ => return,
         };
         if !matches!(op, FsOpKind::Delete) {
@@ -257,7 +282,9 @@ impl Provider for FilebrowserProvider {
     async fn redo(&mut self, entry: &TimelineEntry, error: &mut String) {
         register_translations();
         let (op, side_effect) = match entry {
-            TimelineEntry::FsOp { op, side_effect, .. } => (op, side_effect),
+            TimelineEntry::FsOp {
+                op, side_effect, ..
+            } => (op, side_effect),
             _ => return,
         };
         if !matches!(op, FsOpKind::Delete) {
@@ -285,18 +312,28 @@ impl Provider for FilebrowserProvider {
     }
 
     fn create_directory(&mut self, name: &str) -> bool {
-        if name.is_empty() { return false; }
+        if name.is_empty() {
+            return false;
+        }
         let full = self.current_path.join(name);
         std::fs::create_dir(&full).is_ok()
     }
 
     fn create_file(&mut self, name: &str) -> bool {
-        if name.is_empty() { return false; }
+        if name.is_empty() {
+            return false;
+        }
         let full = self.current_path.join(name);
         std::fs::File::create(&full).is_ok()
     }
 
-    fn copy_item(&mut self, src_dir: &str, src_name: &str, dest_dir: &str, dest_name: &str) -> bool {
+    fn copy_item(
+        &mut self,
+        src_dir: &str,
+        src_name: &str,
+        dest_dir: &str,
+        dest_name: &str,
+    ) -> bool {
         let src = Path::new(src_dir).join(src_name.trim_end_matches('/').trim_end_matches('\\'));
         let dst = Path::new(dest_dir).join(dest_name.trim_end_matches('/').trim_end_matches('\\'));
         copy_recursive(&src, &dst)
@@ -322,12 +359,8 @@ impl Provider for FilebrowserProvider {
     ) -> Option<FfonElement> {
         register_translations();
         match command {
-            "create directory" => {
-                Some(new_obj_with_i_placeholder("<input></input>"))
-            }
-            "create file" => {
-                Some(FfonElement::Str("<input></input>".into()))
-            }
+            "create directory" => Some(new_obj_with_i_placeholder("<input></input>")),
+            "create file" => Some(FfonElement::Str("<input></input>".into())),
             "show/hide properties" => {
                 self.show_properties = !self.show_properties;
                 None
@@ -361,10 +394,15 @@ impl Provider for FilebrowserProvider {
     }
 
     fn command_list_items(&self, command: &str) -> Vec<ListItem> {
-        if command != "open file with" { return Vec::new(); }
+        if command != "open file with" {
+            return Vec::new();
+        }
         sicompass_sdk::platform::get_applications()
             .into_iter()
-            .map(|a| ListItem { label: a.name, data: a.exec })
+            .map(|a| ListItem {
+                label: a.name,
+                data: a.exec,
+            })
             .collect()
     }
 
@@ -390,11 +428,14 @@ impl FilebrowserProvider {
         let root = self.current_path.clone();
 
         // BFS queue: (dir_path, breadcrumb)
-        let mut queue: std::collections::VecDeque<(PathBuf, String)> = std::collections::VecDeque::new();
+        let mut queue: std::collections::VecDeque<(PathBuf, String)> =
+            std::collections::VecDeque::new();
         queue.push_back((root, String::new()));
 
         while let Some((dir, breadcrumb)) = queue.pop_front() {
-            if results.len() >= MAX_ITEMS { break; }
+            if results.len() >= MAX_ITEMS {
+                break;
+            }
 
             let rd = match std::fs::read_dir(&dir) {
                 Ok(r) => r,
@@ -402,7 +443,9 @@ impl FilebrowserProvider {
             };
 
             for entry in rd.flatten() {
-                if results.len() >= MAX_ITEMS { break; }
+                if results.len() >= MAX_ITEMS {
+                    break;
+                }
                 let name = entry.file_name().to_string_lossy().into_owned();
                 // Use symlink_metadata to avoid following symlinks (guards against loops)
                 let meta = match entry.path().symlink_metadata() {
@@ -502,7 +545,12 @@ fn collect_raw_entries(path: &Path) -> Vec<RawEntry> {
             });
         }
         #[cfg(not(unix))]
-        entries.push(RawEntry { name, mtime, is_dir, size: meta.len() });
+        entries.push(RawEntry {
+            name,
+            mtime,
+            is_dir,
+            size: meta.len(),
+        });
     }
     entries
 }
@@ -520,18 +568,58 @@ fn format_properties(e: &RawEntry) -> String {
     // `u16` on macOS but `u32` on Linux, so cast them to match `mode`.
     let mode = e.mode;
     let mut perm = [b'-'; 10];
-    perm[0] = if mode & libc::S_IFMT as u32 == libc::S_IFDIR as u32 { b'd' }
-              else if mode & libc::S_IFMT as u32 == libc::S_IFLNK as u32 { b'l' }
-              else { b'-' };
-    perm[1] = if mode & libc::S_IRUSR as u32 != 0 { b'r' } else { b'-' };
-    perm[2] = if mode & libc::S_IWUSR as u32 != 0 { b'w' } else { b'-' };
-    perm[3] = if mode & libc::S_IXUSR as u32 != 0 { b'x' } else { b'-' };
-    perm[4] = if mode & libc::S_IRGRP as u32 != 0 { b'r' } else { b'-' };
-    perm[5] = if mode & libc::S_IWGRP as u32 != 0 { b'w' } else { b'-' };
-    perm[6] = if mode & libc::S_IXGRP as u32 != 0 { b'x' } else { b'-' };
-    perm[7] = if mode & libc::S_IROTH as u32 != 0 { b'r' } else { b'-' };
-    perm[8] = if mode & libc::S_IWOTH as u32 != 0 { b'w' } else { b'-' };
-    perm[9] = if mode & libc::S_IXOTH as u32 != 0 { b'x' } else { b'-' };
+    perm[0] = if mode & libc::S_IFMT as u32 == libc::S_IFDIR as u32 {
+        b'd'
+    } else if mode & libc::S_IFMT as u32 == libc::S_IFLNK as u32 {
+        b'l'
+    } else {
+        b'-'
+    };
+    perm[1] = if mode & libc::S_IRUSR as u32 != 0 {
+        b'r'
+    } else {
+        b'-'
+    };
+    perm[2] = if mode & libc::S_IWUSR as u32 != 0 {
+        b'w'
+    } else {
+        b'-'
+    };
+    perm[3] = if mode & libc::S_IXUSR as u32 != 0 {
+        b'x'
+    } else {
+        b'-'
+    };
+    perm[4] = if mode & libc::S_IRGRP as u32 != 0 {
+        b'r'
+    } else {
+        b'-'
+    };
+    perm[5] = if mode & libc::S_IWGRP as u32 != 0 {
+        b'w'
+    } else {
+        b'-'
+    };
+    perm[6] = if mode & libc::S_IXGRP as u32 != 0 {
+        b'x'
+    } else {
+        b'-'
+    };
+    perm[7] = if mode & libc::S_IROTH as u32 != 0 {
+        b'r'
+    } else {
+        b'-'
+    };
+    perm[8] = if mode & libc::S_IWOTH as u32 != 0 {
+        b'w'
+    } else {
+        b'-'
+    };
+    perm[9] = if mode & libc::S_IXOTH as u32 != 0 {
+        b'x'
+    } else {
+        b'-'
+    };
     let perm_str = std::str::from_utf8(&perm).unwrap_or("----------");
 
     // Owner and group names (fall back to numeric ids)
@@ -553,7 +641,8 @@ fn format_properties(e: &RawEntry) -> String {
     };
 
     // Date formatted like ls -l: "Mon DD HH:MM" (recent) or "Mon DD  YYYY" (older)
-    let mtime_secs = e.mtime
+    let mtime_secs = e
+        .mtime
         .duration_since(SystemTime::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0) as libc::time_t;
@@ -571,13 +660,16 @@ fn format_properties(e: &RawEntry) -> String {
         CStr::from_ptr(buf.as_ptr()).to_string_lossy().into_owned()
     };
 
-    format!("{} {:2} {:<8} {:<8} {:5} {} ",
-        perm_str, e.nlink, owner, group, e.size, date_str)
+    format!(
+        "{} {:2} {:<8} {:<8} {:5} {} ",
+        perm_str, e.nlink, owner, group, e.size, date_str
+    )
 }
 
 #[cfg(not(unix))]
 fn format_properties(e: &RawEntry) -> String {
-    let secs = e.mtime
+    let secs = e
+        .mtime
         .duration_since(SystemTime::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
@@ -585,8 +677,10 @@ fn format_properties(e: &RawEntry) -> String {
     let (y, mo, d) = civil_from_days(days);
     let h = (secs % 86400) / 3600;
     let mi = (secs % 3600) / 60;
-    format!("{:>9} {:04}-{:02}-{:02} {:02}:{:02} ",
-        e.size, y, mo, d, h, mi)
+    format!(
+        "{:>9} {:04}-{:02}-{:02} {:02}:{:02} ",
+        e.size, y, mo, d, h, mi
+    )
 }
 
 // Howard Hinnant's civil_from_days: converts days-since-1970-01-01 to (year,
@@ -602,7 +696,11 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
     let mp = (5 * doy + 2) / 153;
     let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let m = if mp < 10 { (mp + 3) as u32 } else { (mp - 9) as u32 };
+    let m = if mp < 10 {
+        (mp + 3) as u32
+    } else {
+        (mp - 9) as u32
+    };
     let y = if m <= 2 { y + 1 } else { y };
     (y, m, d)
 }
@@ -613,14 +711,18 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 
 fn copy_recursive(src: &Path, dst: &Path) -> bool {
     if src.is_dir() {
-        if std::fs::create_dir_all(dst).is_err() { return false; }
+        if std::fs::create_dir_all(dst).is_err() {
+            return false;
+        }
         let rd = match std::fs::read_dir(src) {
             Ok(r) => r,
             Err(_) => return false,
         };
         for entry in rd.flatten() {
             let child_dst = dst.join(entry.file_name());
-            if !copy_recursive(&entry.path(), &child_dst) { return false; }
+            if !copy_recursive(&entry.path(), &child_dst) {
+                return false;
+            }
         }
         true
     } else {
@@ -733,10 +835,20 @@ mod tests {
         std::fs::write(dir.path().join("apple.txt"), b"").unwrap();
         p.sort_mode = SortMode::Alpha;
         let items = p.fetch();
-        let names: Vec<_> = items.iter()
-            .map(|e| tags::strip_display(e.as_str().or_else(|| e.as_obj().map(|o| o.key.as_str())).unwrap_or("")))
+        let names: Vec<_> = items
+            .iter()
+            .map(|e| {
+                tags::strip_display(
+                    e.as_str()
+                        .or_else(|| e.as_obj().map(|o| o.key.as_str()))
+                        .unwrap_or(""),
+                )
+            })
             .collect();
-        assert_eq!(names, vec!["apple.txt".to_string(), "zebra.txt".to_string()]);
+        assert_eq!(
+            names,
+            vec!["apple.txt".to_string(), "zebra.txt".to_string()]
+        );
     }
 
     // ---- rename (commit_edit) ---------------------------------------------
@@ -883,10 +995,15 @@ mod tests {
         let result = p.handle_command("create directory", "", 0, &mut err);
         let elem = result.unwrap();
         let obj = elem.as_obj().expect("create directory must return an Obj");
-        assert_eq!(obj.children.len(), 1, "new directory Obj must have exactly one child");
+        assert_eq!(
+            obj.children.len(),
+            1,
+            "new directory Obj must have exactly one child"
+        );
         assert!(
             matches!(&obj.children[0], FfonElement::Str(s) if s == sicompass_sdk::placeholders::I_PLACEHOLDER),
-            "child must be I_PLACEHOLDER, got: {:?}", obj.children[0]
+            "child must be I_PLACEHOLDER, got: {:?}",
+            obj.children[0]
         );
     }
 
@@ -897,22 +1014,37 @@ mod tests {
         let (mut p, dir) = make_provider();
         let ok = p.commit_edit("", "notes.txt");
         assert!(ok, "commit_edit with empty old should create the file");
-        assert!(dir.path().join("notes.txt").exists(), "notes.txt should exist on disk");
+        assert!(
+            dir.path().join("notes.txt").exists(),
+            "notes.txt should exist on disk"
+        );
     }
 
     #[test]
     fn test_commit_edit_empty_old_creates_directory() {
         let (mut p, dir) = make_provider();
         let ok = p.commit_edit("", "subdir:");
-        assert!(ok, "commit_edit with empty old and trailing colon should create a directory");
-        assert!(dir.path().join("subdir").is_dir(), "subdir should exist as a directory");
+        assert!(
+            ok,
+            "commit_edit with empty old and trailing colon should create a directory"
+        );
+        assert!(
+            dir.path().join("subdir").is_dir(),
+            "subdir should exist as a directory"
+        );
     }
 
     #[test]
     fn test_commit_edit_empty_old_empty_new_returns_false() {
         let (mut p, _dir) = make_provider();
-        assert!(!p.commit_edit("", ""), "empty old + empty new must return false");
-        assert!(!p.commit_edit("", ":"), "empty old + colon-only new must return false");
+        assert!(
+            !p.commit_edit("", ""),
+            "empty old + empty new must return false"
+        );
+        assert!(
+            !p.commit_edit("", ":"),
+            "empty old + colon-only new must return false"
+        );
     }
 
     #[test]
@@ -921,8 +1053,14 @@ mod tests {
         std::fs::File::create(dir.path().join("alpha.txt")).unwrap();
         let ok = p.commit_edit("alpha.txt", "beta.txt");
         assert!(ok, "rename should succeed");
-        assert!(!dir.path().join("alpha.txt").exists(), "alpha.txt should be gone");
-        assert!(dir.path().join("beta.txt").exists(), "beta.txt should exist");
+        assert!(
+            !dir.path().join("alpha.txt").exists(),
+            "alpha.txt should be gone"
+        );
+        assert!(
+            dir.path().join("beta.txt").exists(),
+            "beta.txt should exist"
+        );
     }
 
     #[test]
@@ -985,7 +1123,8 @@ mod tests {
         p.handle_command("sort alphanumerically", "", 0, &mut err);
         assert_eq!(p.sort_mode, SortMode::Alpha);
         let items = p.fetch();
-        let file_labels: Vec<_> = items.iter()
+        let file_labels: Vec<_> = items
+            .iter()
             .filter_map(|e| e.as_str())
             .map(|s| sicompass_sdk::tags::strip_display(s).to_string())
             .collect();
@@ -1001,12 +1140,16 @@ mod tests {
         let mut err = String::new();
         p.handle_command("sort alphanumerically", "", 0, &mut err);
         let items = p.fetch();
-        let file_labels: Vec<_> = items.iter()
+        let file_labels: Vec<_> = items
+            .iter()
             .filter_map(|e| e.as_str())
             .map(|s| sicompass_sdk::tags::strip_display(s).to_string())
             .collect();
-        assert_eq!(file_labels, vec!["file1.txt", "file2.txt", "file10.txt"],
-            "natural sort should order file2 before file10");
+        assert_eq!(
+            file_labels,
+            vec!["file1.txt", "file2.txt", "file10.txt"],
+            "natural sort should order file2 before file10"
+        );
     }
 
     #[test]
@@ -1045,8 +1188,14 @@ mod tests {
         let results = p.collect_deep_search_items().unwrap_or_default();
         assert_eq!(results.len(), 3);
         for item in &results {
-            assert!(item.label.starts_with("- "), "flat files should have '- ' prefix");
-            assert_eq!(item.breadcrumb, "", "flat files should have empty breadcrumb");
+            assert!(
+                item.label.starts_with("- "),
+                "flat files should have '- ' prefix"
+            );
+            assert_eq!(
+                item.breadcrumb, "",
+                "flat files should have empty breadcrumb"
+            );
             assert!(item.nav_path.contains(dir.path().to_str().unwrap()));
         }
     }
@@ -1079,7 +1228,10 @@ mod tests {
         assert_eq!(results.len(), 2, "symlink should not be traversed as dir");
         let loop_item = results.iter().find(|r| r.label.contains("loop"));
         assert!(loop_item.is_some(), "loop symlink should appear in results");
-        assert!(loop_item.unwrap().label.starts_with("- "), "symlink should show as file, not dir");
+        assert!(
+            loop_item.unwrap().label.starts_with("- "),
+            "symlink should show as file, not dir"
+        );
     }
 
     // ---- additional coverage to match C test suite -------------------------
@@ -1216,11 +1368,16 @@ mod tests {
 
         p.sort_mode = SortMode::Chrono;
         let items = p.fetch();
-        let names: Vec<String> = items.iter()
+        let names: Vec<String> = items
+            .iter()
             .filter_map(|e| e.as_str())
             .map(|s| tags::strip_display(s).to_string())
             .collect();
-        assert_eq!(names[0], "newest.txt", "newest should come first in chrono sort, got: {:?}", names);
+        assert_eq!(
+            names[0], "newest.txt",
+            "newest should come first in chrono sort, got: {:?}",
+            names
+        );
         assert_eq!(names[1], "middle.txt");
         assert_eq!(names[2], "oldest.txt");
     }
@@ -1236,7 +1393,8 @@ mod tests {
         std::fs::set_permissions(
             dir.path().join("script.sh"),
             std::fs::Permissions::from_mode(0o755),
-        ).unwrap();
+        )
+        .unwrap();
         std::fs::write(dir.path().join("data.txt"), b"").unwrap();
 
         // Rust filebrowser always shows executables — no separate "commands mode"
@@ -1252,7 +1410,10 @@ mod tests {
         // Without first calling handle_command to set the path, execute should return false.
         let (mut p, _dir) = make_provider();
         let result = p.execute_command("open file with", "firefox");
-        assert!(!result, "execute_command should return false when no path is set");
+        assert!(
+            !result,
+            "execute_command should return false when no path is set"
+        );
     }
 
     #[test]
@@ -1265,7 +1426,10 @@ mod tests {
         let mut err = String::new();
         p.handle_command("open file with", "<input>test.txt</input>", 0, &mut err);
         // open_with_path should now be set
-        assert!(p.open_with_path.is_some(), "open_with_path should be set after handle_command");
+        assert!(
+            p.open_with_path.is_some(),
+            "open_with_path should be set after handle_command"
+        );
         // execute_command will call platform::open_with — result depends on platform
         let _ = p.execute_command("open file with", "xdg-open");
         // No panic = pass
@@ -1282,7 +1446,8 @@ mod tests {
         let items = p.fetch();
         // Should have real.txt + link.txt = 2 entries
         assert_eq!(items.len(), 2);
-        let names: Vec<_> = items.iter()
+        let names: Vec<_> = items
+            .iter()
             .filter_map(|e| e.as_str())
             .map(|s| tags::strip_display(s).to_string())
             .collect();
@@ -1304,11 +1469,18 @@ mod tests {
         let entries = p.take_timeline_entries();
         assert_eq!(entries.len(), 1);
         match &entries[0] {
-            TimelineEntry::FsOp { op, side_effect, before, .. } => {
+            TimelineEntry::FsOp {
+                op,
+                side_effect,
+                before,
+                ..
+            } => {
                 assert_eq!(*op, FsOpKind::Delete);
                 assert!(matches!(before, Some(FfonElement::Str(_))));
                 match side_effect {
-                    FsSideEffect::TrashedFile { content_snapshot, .. } => {
+                    FsSideEffect::TrashedFile {
+                        content_snapshot, ..
+                    } => {
                         assert_eq!(content_snapshot, b"important content");
                     }
                     other => panic!("expected TrashedFile, got {:?}", other),
@@ -1389,7 +1561,10 @@ mod tests {
 
         let mut err = String::new();
         sicompass_sdk::block_on(p.undo(&entries[0], &mut err));
-        assert!(err.is_empty(), "undo should auto-restore from OS trash: {err}");
+        assert!(
+            err.is_empty(),
+            "undo should auto-restore from OS trash: {err}"
+        );
         assert!(target.exists(), "oversized file restored from OS trash");
         assert_eq!(std::fs::read(&target).unwrap(), big);
     }
@@ -1449,9 +1624,10 @@ mod tests {
 /// The manifest marks the provider as `always_enabled` — the app registers it
 /// unconditionally without listing it in "Available programs:".
 pub fn register() {
-    sicompass_sdk::register_provider_factory("filebrowser", || {
-        Box::new(FilebrowserProvider::new())
-    });
+    sicompass_sdk::register_provider_factory(
+        "filebrowser",
+        || Box::new(FilebrowserProvider::new()),
+    );
     sicompass_sdk::register_builtin_manifest(
         sicompass_sdk::BuiltinManifest::new("filebrowser", "file browser").always_enabled(),
     );

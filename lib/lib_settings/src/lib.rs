@@ -213,14 +213,14 @@ impl SettingsProvider {
         kind: &str,
         label: &str,
     ) {
-        let payload =
-            Self::build_provider_op_payload(section, config_key, prev, new, kind);
-        self.pending_timeline_entries.push(TimelineEntry::ProviderOp {
-            provider_idx: 0, // patched by app on drain
-            command: command.to_owned(),
-            payload,
-            label: label.to_owned(),
-        });
+        let payload = Self::build_provider_op_payload(section, config_key, prev, new, kind);
+        self.pending_timeline_entries
+            .push(TimelineEntry::ProviderOp {
+                provider_idx: 0, // patched by app on drain
+                command: command.to_owned(),
+                payload,
+                label: label.to_owned(),
+            });
         let _ = IdArray::new(); // suppress unused-import lint if IdArray ends up unused
     }
 
@@ -231,7 +231,9 @@ impl SettingsProvider {
     }
 
     fn config_path(&self) -> Option<PathBuf> {
-        self.config_path_override.clone().or_else(|| platform::main_config_path())
+        self.config_path_override
+            .clone()
+            .or_else(|| platform::main_config_path())
     }
 
     /// True when `init()` ran against a missing settings.json (first launch).
@@ -333,7 +335,11 @@ impl SettingsProvider {
 
     /// Programmatically set a checkbox state (without firing the apply callback).
     pub fn set_checkbox_state(&mut self, config_key: &str, checked: bool) {
-        let write = if let Some(e) = self.checkbox_entries.iter_mut().find(|e| e.config_key == config_key) {
+        let write = if let Some(e) = self
+            .checkbox_entries
+            .iter_mut()
+            .find(|e| e.config_key == config_key)
+        {
             if e.checked != checked {
                 e.checked = checked;
                 Some((e.section.clone(), e.config_key.clone()))
@@ -351,8 +357,12 @@ impl SettingsProvider {
     // ---- Load / save -------------------------------------------------------
 
     fn load_config(&mut self, path: &Path) {
-        let Ok(data) = std::fs::read_to_string(path) else { return };
-        let Ok(Value::Object(root)) = serde_json::from_str::<Value>(&data) else { return };
+        let Ok(data) = std::fs::read_to_string(path) else {
+            return;
+        };
+        let Ok(Value::Object(root)) = serde_json::from_str::<Value>(&data) else {
+            return;
+        };
 
         // color scheme
         if let Some(Value::Object(sc)) = root.get("sicompass") {
@@ -418,15 +428,21 @@ impl SettingsProvider {
     // priority section's currently-checked entries (i.e. the default programs).
     // Nothing else is written — no colorScheme, no maximized, no other sections.
     fn seed_priority_section_on_disk(&self, path: &Path) {
-        let Some(section_name) = self.priority_section.clone() else { return };
-        if let Some(parent) = path.parent() { platform::make_dirs(parent); }
+        let Some(section_name) = self.priority_section.clone() else {
+            return;
+        };
+        if let Some(parent) = path.parent() {
+            platform::make_dirs(parent);
+        }
         let mut section_map = Map::new();
         for e in &self.checkbox_entries {
             if e.section == section_name && e.checked {
                 section_map.insert(e.config_key.clone(), Value::Bool(true));
             }
         }
-        if section_map.is_empty() { return; }
+        if section_map.is_empty() {
+            return;
+        }
         let mut root = Map::new();
         root.insert(section_name, Value::Object(section_map));
         if let Ok(json) = serde_json::to_string_pretty(&Value::Object(root)) {
@@ -456,8 +472,12 @@ impl SettingsProvider {
 
     // Write a single string key into section, preserving everything else in the file.
     fn write_key_string(&self, section: &str, key: &str, value: &str) {
-        let Some(path) = self.config_path() else { return };
-        if let Some(parent) = path.parent() { platform::make_dirs(parent); }
+        let Some(path) = self.config_path() else {
+            return;
+        };
+        if let Some(parent) = path.parent() {
+            platform::make_dirs(parent);
+        }
         // Abort rather than clobber: if the file exists but won't parse,
         // another process is likely mid-write — rebuilding from an empty map
         // here would drop every other section.
@@ -469,7 +489,9 @@ impl SettingsProvider {
             );
             return;
         };
-        let sec = root.entry(section.to_owned()).or_insert_with(|| Value::Object(Map::new()));
+        let sec = root
+            .entry(section.to_owned())
+            .or_insert_with(|| Value::Object(Map::new()));
         if let Value::Object(m) = sec {
             m.insert(key.to_owned(), Value::String(value.to_owned()));
         }
@@ -480,8 +502,12 @@ impl SettingsProvider {
 
     // Write a single boolean key into section, preserving everything else in the file.
     fn write_key_bool(&self, section: &str, key: &str, value: bool) {
-        let Some(path) = self.config_path() else { return };
-        if let Some(parent) = path.parent() { platform::make_dirs(parent); }
+        let Some(path) = self.config_path() else {
+            return;
+        };
+        if let Some(parent) = path.parent() {
+            platform::make_dirs(parent);
+        }
         // See `write_key_string` — abort on an unparseable file to avoid
         // clobbering a settings file another process is mid-write on.
         let Some(mut root) = Self::load_root_for_write(&path) else {
@@ -492,7 +518,9 @@ impl SettingsProvider {
             );
             return;
         };
-        let sec = root.entry(section.to_owned()).or_insert_with(|| Value::Object(Map::new()));
+        let sec = root
+            .entry(section.to_owned())
+            .or_insert_with(|| Value::Object(Map::new()));
         if let Value::Object(m) = sec {
             m.insert(key.to_owned(), Value::Bool(value));
         }
@@ -607,8 +635,13 @@ impl SettingsProvider {
                 self.write_key_string("Store", "storeUrl", value);
                 self.fire_apply("storeUrl", value);
                 self.push_settings_op(
-                    "settings-text", "Store", "storeUrl",
-                    &prev, value, "text", "edit server URL",
+                    "settings-text",
+                    "Store",
+                    "storeUrl",
+                    &prev,
+                    value,
+                    "text",
+                    "edit server URL",
                 );
             }
             return true;
@@ -618,14 +651,18 @@ impl SettingsProvider {
         // against its own certificate slug.
         if label == "License redeem token" {
             self.commit_redeem_token(
-                value, "store-license", "licenseRedeemToken",
+                value,
+                "store-license",
+                "licenseRedeemToken",
                 "edit license redeem token",
             );
             return true;
         }
         if label == "Support redeem token" {
             self.commit_redeem_token(
-                value, "support-license", "supportRedeemToken",
+                value,
+                "support-license",
+                "supportRedeemToken",
                 "edit support redeem token",
             );
             return true;
@@ -672,7 +709,13 @@ impl SettingsProvider {
         self.write_key_string("Store", config_key, token);
         self.fire_apply(config_key, token);
         self.push_settings_op(
-            "settings-text", "Store", config_key, &prev, token, "text", label,
+            "settings-text",
+            "Store",
+            config_key,
+            &prev,
+            token,
+            "text",
+            label,
         );
     }
 
@@ -720,13 +763,19 @@ impl SettingsProvider {
         // Checkboxes (sorted alphabetically by displayed label, so the order
         // matches what the user reads on screen — even when labels are
         // language-specific).
-        let mut checkboxes: Vec<(&CheckboxEntry, String)> = self.checkbox_entries.iter()
+        let mut checkboxes: Vec<(&CheckboxEntry, String)> = self
+            .checkbox_entries
+            .iter()
             .filter(|e| e.section == section_name)
             .map(|e| (e, localize::t(&e.label)))
             .collect();
         checkboxes.sort_by(|(_, a), (_, b)| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()));
         for (e, displayed) in checkboxes {
-            let tag = if e.checked { "<checkbox checked>" } else { "<checkbox>" };
+            let tag = if e.checked {
+                "<checkbox checked>"
+            } else {
+                "<checkbox>"
+            };
             o.push(FfonElement::Str(format!("{}{}", tag, displayed)));
         }
 
@@ -736,10 +785,8 @@ impl SettingsProvider {
         // render identically).
         for e in &self.radio_entries {
             if e.section == section_name {
-                let mut radio = FfonElement::new_obj(format!(
-                    "<radio>{}",
-                    localize::t(&e.radio_key)
-                ));
+                let mut radio =
+                    FfonElement::new_obj(format!("<radio>{}", localize::t(&e.radio_key)));
                 let ro = radio.as_obj_mut().unwrap();
                 for opt in &e.options {
                     let label = Self::localize_option_label(&e.config_key, opt);
@@ -775,7 +822,9 @@ impl SettingsProvider {
 
 #[async_trait::async_trait]
 impl Provider for SettingsProvider {
-    fn name(&self) -> &str { "settings" }
+    fn name(&self) -> &str {
+        "settings"
+    }
 
     fn fetch(&mut self) -> Vec<FfonElement> {
         let mut result = Vec::new();
@@ -834,7 +883,11 @@ impl Provider for SettingsProvider {
         }
         for e in &self.checkbox_entries {
             if e.section == "sicompass" {
-                let tag = if e.checked { "<checkbox checked>" } else { "<checkbox>" };
+                let tag = if e.checked {
+                    "<checkbox checked>"
+                } else {
+                    "<checkbox>"
+                };
                 let displayed = localize::t(&e.label);
                 entries.push((
                     displayed.clone(),
@@ -872,9 +925,7 @@ impl Provider for SettingsProvider {
             }
         }
 
-        entries.sort_by(|(a, _), (b, _)| {
-            a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase())
-        });
+        entries.sort_by(|(a, _), (b, _)| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()));
         for (_, el) in entries {
             sc_obj.as_obj_mut().unwrap().push(el);
         }
@@ -886,7 +937,9 @@ impl Provider for SettingsProvider {
         }
 
         // Other sections (skip sicompass and priority — already rendered), sorted alphabetically
-        let mut other_sections: Vec<String> = self.sections.iter()
+        let mut other_sections: Vec<String> = self
+            .sections
+            .iter()
             .filter(|s| s.as_str() != "sicompass" && prio.as_deref() != Some(s.as_str()))
             .cloned()
             .collect();
@@ -924,7 +977,9 @@ impl Provider for SettingsProvider {
     }
 
     fn pop_path(&mut self) {
-        if self.current_path.len() <= 1 { return; }
+        if self.current_path.len() <= 1 {
+            return;
+        }
         if let Some(slash) = self.current_path.rfind('/') {
             if slash == 0 {
                 self.current_path = "/".to_owned();
@@ -934,7 +989,9 @@ impl Provider for SettingsProvider {
         }
     }
 
-    fn current_path(&self) -> &str { &self.current_path }
+    fn current_path(&self) -> &str {
+        &self.current_path
+    }
 
     fn set_current_path(&mut self, path: &str) {
         self.current_path = path.to_owned();
@@ -950,10 +1007,7 @@ impl Provider for SettingsProvider {
         // match that first, falling back to the language-neutral storage id.
         // commit_tier_input matches the last path segment, so the depth of the
         // nested tier content does not matter.
-        let prog_prefix = format!(
-            "/{}/",
-            Self::localize_section_name("Available programs:")
-        );
+        let prog_prefix = format!("/{}/", Self::localize_section_name("Available programs:"));
         let tier_rest = path
             .strip_prefix(prog_prefix.as_str())
             .or_else(|| path.strip_prefix("/Available programs:/"));
@@ -962,18 +1016,23 @@ impl Provider for SettingsProvider {
         }
 
         let parts: Vec<&str> = path.trim_start_matches('/').splitn(2, '/').collect();
-        if parts.len() < 2 { return false; }
+        if parts.len() < 2 {
+            return false;
+        }
         let (section, label) = (parts[0], parts[1]);
 
         // `label` comes from the current_path, which tracks the *displayed*
         // FFON Obj key the user descended through. Under a translated UI
         // this is the localized label, so match against both the raw stored
         // label and its translated form.
-        if let Some(e) = self.text_entries.iter_mut()
-            .find(|e| e.section == section
-                && (e.label == label || localize::t(&e.label) == label))
+        if let Some(e) = self
+            .text_entries
+            .iter_mut()
+            .find(|e| e.section == section && (e.label == label || localize::t(&e.label) == label))
         {
-            if e.current_value == new_content { return true; }
+            if e.current_value == new_content {
+                return true;
+            }
             let prev = e.current_value.clone();
             e.current_value = new_content.to_owned();
             let (sec, config_key, lbl) = (e.section.clone(), e.config_key.clone(), e.label.clone());
@@ -1006,13 +1065,11 @@ impl Provider for SettingsProvider {
         // Hardcoded color-scheme radio.
         let color_scheme_label = localize::t("settings-radio-color-scheme");
         if group_key == "color scheme" || group_key == color_scheme_label {
-            let stored = if selected_value
-                == Self::localize_option_label("colorScheme", "dark")
+            let stored = if selected_value == Self::localize_option_label("colorScheme", "dark")
                 || selected_value == "dark"
             {
                 "dark"
-            } else if selected_value
-                == Self::localize_option_label("colorScheme", "light")
+            } else if selected_value == Self::localize_option_label("colorScheme", "light")
                 || selected_value == "light"
             {
                 "light"
@@ -1020,7 +1077,9 @@ impl Provider for SettingsProvider {
                 // Unrecognized: store as-is for backward-compat / debugging.
                 selected_value
             };
-            if self.color_scheme == stored { return; }
+            if self.color_scheme == stored {
+                return;
+            }
             let prev = self.color_scheme.clone();
             self.color_scheme = stored.to_owned();
             self.write_key_string("sicompass", "colorScheme", stored);
@@ -1039,9 +1098,10 @@ impl Provider for SettingsProvider {
 
         // Dynamic radio entries: match group_key against either the raw
         // radio_key or its translated form.
-        let entry_idx = self.radio_entries.iter().position(|e| {
-            e.radio_key == group_key || localize::t(&e.radio_key) == group_key
-        });
+        let entry_idx = self
+            .radio_entries
+            .iter()
+            .position(|e| e.radio_key == group_key || localize::t(&e.radio_key) == group_key);
         if let Some(idx) = entry_idx {
             // Reverse-map the option label to the stored value. Match against
             // both the raw option string (legacy English-literal callers) and
@@ -1059,7 +1119,9 @@ impl Provider for SettingsProvider {
             };
 
             let e = &mut self.radio_entries[idx];
-            if e.current_value == stored { return; }
+            if e.current_value == stored {
+                return;
+            }
             let prev = e.current_value.clone();
             e.current_value = stored.clone();
             let (section, config_key, rkey) =
@@ -1088,10 +1150,14 @@ impl Provider for SettingsProvider {
         // labels are translated, the stored `e.label` (a Fluent message ID
         // like "settings-checkbox-maximized") won't directly match. Match
         // against either the raw stored label or its translated form.
-        if let Some(e) = self.checkbox_entries.iter_mut().find(|e| {
-            e.label == label || localize::t(&e.label) == label
-        }) {
-            if e.checked == checked { return; }
+        if let Some(e) = self
+            .checkbox_entries
+            .iter_mut()
+            .find(|e| e.label == label || localize::t(&e.label) == label)
+        {
+            if e.checked == checked {
+                return;
+            }
             let prev = e.checked;
             e.checked = checked;
             let (section, config_key, lbl) =
@@ -1136,12 +1202,19 @@ impl Provider for SettingsProvider {
                     .get("monthly or yearly")
                     .map(|v| v.contains("month"))
                     .unwrap_or(false);
-                let id = if monthly { "cloud-monthly" } else { "cloud-yearly" };
+                let id = if monthly {
+                    "cloud-monthly"
+                } else {
+                    "cloud-yearly"
+                };
                 (id.to_owned(), String::new(), String::new())
             }
             "sponsor-donation" => (
                 "sponsor-donation".to_owned(),
-                self.server_form_state.get("amount").cloned().unwrap_or_default(),
+                self.server_form_state
+                    .get("amount")
+                    .cloned()
+                    .unwrap_or_default(),
                 self.server_form_state
                     .get("one-time or recurring")
                     .cloned()
@@ -1162,11 +1235,9 @@ impl Provider for SettingsProvider {
     async fn undo(&mut self, entry: &TimelineEntry, error: &mut String) {
         register_translations();
         let payload = match entry {
-            TimelineEntry::ProviderOp { command, payload, .. }
-                if command.starts_with("settings-") =>
-            {
-                payload
-            }
+            TimelineEntry::ProviderOp {
+                command, payload, ..
+            } if command.starts_with("settings-") => payload,
             _ => return,
         };
         let (section, key, prev, new, kind) = match Self::parse_provider_op_payload(payload) {
@@ -1223,11 +1294,9 @@ impl Provider for SettingsProvider {
     async fn redo(&mut self, entry: &TimelineEntry, error: &mut String) {
         register_translations();
         let payload = match entry {
-            TimelineEntry::ProviderOp { command, payload, .. }
-                if command.starts_with("settings-") =>
-            {
-                payload
-            }
+            TimelineEntry::ProviderOp {
+                command, payload, ..
+            } if command.starts_with("settings-") => payload,
             _ => return,
         };
         let (section, key, _prev, new, kind) = match Self::parse_provider_op_payload(payload) {
@@ -1293,23 +1362,38 @@ impl Provider for SettingsProvider {
             .insert(section.to_owned(), version.to_owned());
     }
 
-    fn add_text_setting(&mut self, section: &str, label: &str,
-                        config_key: &str, default: &str) {
+    fn add_text_setting(&mut self, section: &str, label: &str, config_key: &str, default: &str) {
         self.add_text(section, label, config_key, default);
     }
 
-    fn add_password_setting(&mut self, section: &str, label: &str,
-                            config_key: &str, default: &str) {
+    fn add_password_setting(
+        &mut self,
+        section: &str,
+        label: &str,
+        config_key: &str,
+        default: &str,
+    ) {
         self.add_password(section, label, config_key, default);
     }
 
-    fn add_checkbox_setting(&mut self, section: &str, label: &str,
-                            config_key: &str, default_checked: bool) {
+    fn add_checkbox_setting(
+        &mut self,
+        section: &str,
+        label: &str,
+        config_key: &str,
+        default_checked: bool,
+    ) {
         self.add_checkbox(section, label, config_key, default_checked);
     }
 
-    fn add_radio_setting(&mut self, section: &str, label: &str,
-                         config_key: &str, options: &[&str], default: &str) {
+    fn add_radio_setting(
+        &mut self,
+        section: &str,
+        label: &str,
+        config_key: &str,
+        options: &[&str],
+        default: &str,
+    ) {
         self.add_radio(section, label, config_key, options, default);
     }
 
@@ -1348,8 +1432,7 @@ mod tests {
     }
 
     fn headless() -> SettingsProvider {
-        SettingsProvider::new_headless()
-            .with_config_path(test_config_path())
+        SettingsProvider::new_headless().with_config_path(test_config_path())
     }
 
     fn with_callback() -> (SettingsProvider, Arc<Mutex<Vec<(String, String)>>>) {
@@ -1357,7 +1440,8 @@ mod tests {
         let log2 = Arc::clone(&log);
         let p = SettingsProvider::new(move |k, v| {
             log2.lock().unwrap().push((k.to_owned(), v.to_owned()));
-        }).with_config_path(test_config_path());
+        })
+        .with_config_path(test_config_path());
         (p, log)
     }
 
@@ -1367,7 +1451,9 @@ mod tests {
     fn test_fetch_has_sicompass_section() {
         let mut p = headless();
         let elems = p.fetch();
-        let has_sc = elems.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "sicompass"));
+        let has_sc = elems
+            .iter()
+            .any(|e| e.as_obj().map_or(false, |o| o.key == "sicompass"));
         assert!(has_sc);
     }
 
@@ -1375,10 +1461,16 @@ mod tests {
     fn test_fetch_sicompass_has_color_scheme_radio() {
         let mut p = headless();
         let elems = p.fetch();
-        let sc = elems.iter().find(|e| e.as_obj().map_or(false, |o| o.key == "sicompass")).unwrap();
-        let radio = sc.as_obj().unwrap().children.iter().find(|c| {
-            c.as_obj().map_or(false, |o| o.key.contains("<radio>"))
-        });
+        let sc = elems
+            .iter()
+            .find(|e| e.as_obj().map_or(false, |o| o.key == "sicompass"))
+            .unwrap();
+        let radio = sc
+            .as_obj()
+            .unwrap()
+            .children
+            .iter()
+            .find(|c| c.as_obj().map_or(false, |o| o.key.contains("<radio>")));
         assert!(radio.is_some());
     }
 
@@ -1391,12 +1483,20 @@ mod tests {
         sicompass_sdk::localize::set_locale("en-US");
         let mut p = headless(); // default is dark
         let elems = p.fetch();
-        let sc = elems.iter().find(|e| e.as_obj().map_or(false, |o| o.key == "sicompass")).unwrap();
-        let radio = sc.as_obj().unwrap().children.iter()
+        let sc = elems
+            .iter()
+            .find(|e| e.as_obj().map_or(false, |o| o.key == "sicompass"))
+            .unwrap();
+        let radio = sc
+            .as_obj()
+            .unwrap()
+            .children
+            .iter()
             .find(|c| c.as_obj().map_or(false, |o| o.key.contains("<radio>")))
             .unwrap();
         let dark_checked = radio.as_obj().unwrap().children.iter().any(|c| {
-            c.as_str().map_or(false, |s| s.contains("<checked>") && s.contains("dark"))
+            c.as_str()
+                .map_or(false, |s| s.contains("<checked>") && s.contains("dark"))
         });
         assert!(dark_checked);
     }
@@ -1406,10 +1506,14 @@ mod tests {
     /// Helper: the children of the rendered "sicompass" section.
     fn sicompass_children(p: &mut SettingsProvider) -> Vec<FfonElement> {
         let elems = p.fetch();
-        elems.into_iter()
+        elems
+            .into_iter()
             .find(|e| e.as_obj().map_or(false, |o| o.key == "sicompass"))
             .unwrap()
-            .as_obj().unwrap().children.clone()
+            .as_obj()
+            .unwrap()
+            .children
+            .clone()
     }
 
     #[test]
@@ -1429,8 +1533,12 @@ mod tests {
 
         let body = localize::t("settings-onboarding-body");
         let mut p = headless();
-        assert!(sicompass_children(&mut p).iter().any(|c| c.as_str() == Some(body.as_str())),
-            "onboarding guide should always render in the sicompass section");
+        assert!(
+            sicompass_children(&mut p)
+                .iter()
+                .any(|c| c.as_str() == Some(body.as_str())),
+            "onboarding guide should always render in the sicompass section"
+        );
     }
 
     #[test]
@@ -1450,7 +1558,8 @@ mod tests {
 
         assert!(p.was_first_run(), "missing settings.json is a first run");
         let body = localize::t("settings-onboarding-body");
-        let shown = sicompass_children(&mut p).iter()
+        let shown = sicompass_children(&mut p)
+            .iter()
             .any(|c| c.as_str() == Some(body.as_str()));
         assert!(shown, "onboarding guide should render on first run");
     }
@@ -1464,7 +1573,10 @@ mod tests {
 
         p.init();
 
-        assert!(!p.was_first_run(), "an existing settings.json is not a first run");
+        assert!(
+            !p.was_first_run(),
+            "an existing settings.json is not a first run"
+        );
     }
 
     #[test]
@@ -1473,23 +1585,42 @@ mod tests {
         sicompass_sdk::localize::set_locale("en-US");
         let mut p = headless();
         // Registration order deliberately not alphabetical.
-        p.add_radio("sicompass", "settings-radio-font-scale", "fontScale",
-            &["1.00", "1.25"], "1.00");
-        p.add_checkbox("sicompass", "settings-checkbox-auto-update-check", "autoUpdateCheck", true);
+        p.add_radio(
+            "sicompass",
+            "settings-radio-font-scale",
+            "fontScale",
+            &["1.00", "1.25"],
+            "1.00",
+        );
+        p.add_checkbox(
+            "sicompass",
+            "settings-checkbox-auto-update-check",
+            "autoUpdateCheck",
+            true,
+        );
 
         let children = sicompass_children(&mut p);
         // Skip the leading passive lines (version, onboarding); collect the
         // displayed label of every interactive entry that follows.
-        let labels: Vec<String> = children.iter().filter_map(|c| match c {
-            FfonElement::Obj(o) => Some(o.key.replace("<radio>", "")),
-            FfonElement::Str(s) if s.starts_with("<checkbox") =>
-                Some(s.trim_start_matches("<checkbox checked>").trim_start_matches("<checkbox>").to_owned()),
-            _ => None,
-        }).collect();
+        let labels: Vec<String> = children
+            .iter()
+            .filter_map(|c| match c {
+                FfonElement::Obj(o) => Some(o.key.replace("<radio>", "")),
+                FfonElement::Str(s) if s.starts_with("<checkbox") => Some(
+                    s.trim_start_matches("<checkbox checked>")
+                        .trim_start_matches("<checkbox>")
+                        .to_owned(),
+                ),
+                _ => None,
+            })
+            .collect();
 
         let mut sorted = labels.clone();
         sorted.sort_by(|a, b| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()));
-        assert_eq!(labels, sorted, "sicompass entries must render in alphanumeric label order");
+        assert_eq!(
+            labels, sorted,
+            "sicompass entries must render in alphanumeric label order"
+        );
         sicompass_sdk::localize::set_locale("en-US");
     }
 
@@ -1508,10 +1639,15 @@ mod tests {
 
     fn color_scheme_radio_key(p: &mut SettingsProvider) -> String {
         let elems = p.fetch();
-        let sc = elems.iter()
+        let sc = elems
+            .iter()
             .find(|e| e.as_obj().map_or(false, |o| o.key == "sicompass"))
             .expect("sicompass section");
-        let radio = sc.as_obj().unwrap().children.iter()
+        let radio = sc
+            .as_obj()
+            .unwrap()
+            .children
+            .iter()
             .find(|c| c.as_obj().map_or(false, |o| o.key.contains("<radio>")))
             .expect("color scheme radio");
         radio.as_obj().unwrap().key.clone()
@@ -1527,13 +1663,22 @@ mod tests {
 
         fn radio_option_strings(p: &mut SettingsProvider) -> Vec<String> {
             let elems = p.fetch();
-            let sc = elems.iter()
+            let sc = elems
+                .iter()
                 .find(|e| e.as_obj().map_or(false, |o| o.key == "sicompass"))
                 .expect("sicompass section");
-            let radio = sc.as_obj().unwrap().children.iter()
+            let radio = sc
+                .as_obj()
+                .unwrap()
+                .children
+                .iter()
                 .find(|c| c.as_obj().map_or(false, |o| o.key.contains("<radio>")))
                 .expect("color scheme radio");
-            radio.as_obj().unwrap().children.iter()
+            radio
+                .as_obj()
+                .unwrap()
+                .children
+                .iter()
                 .filter_map(|c| c.as_str().map(|s| s.to_owned()))
                 .collect()
         }
@@ -1541,7 +1686,7 @@ mod tests {
         sicompass_sdk::localize::set_locale("nl-BE");
         let nl = radio_option_strings(&mut p);
         assert!(nl.iter().any(|s| s.contains("donker")), "nl-BE: {nl:?}");
-        assert!(nl.iter().any(|s| s.contains("licht")),  "nl-BE: {nl:?}");
+        assert!(nl.iter().any(|s| s.contains("licht")), "nl-BE: {nl:?}");
 
         sicompass_sdk::localize::set_locale("fr-BE");
         let fr = radio_option_strings(&mut p);
@@ -1551,7 +1696,7 @@ mod tests {
         sicompass_sdk::localize::set_locale("de-BE");
         let de = radio_option_strings(&mut p);
         assert!(de.iter().any(|s| s.contains("dunkel")), "de-BE: {de:?}");
-        assert!(de.iter().any(|s| s.contains("hell")),   "de-BE: {de:?}");
+        assert!(de.iter().any(|s| s.contains("hell")), "de-BE: {de:?}");
 
         sicompass_sdk::localize::set_locale("en-US");
     }
@@ -1595,28 +1740,40 @@ mod tests {
         let _ = headless();
 
         sicompass_sdk::localize::set_locale("en-US");
-        assert_eq!(SettingsProvider::localize_section_name("file browser"), "file browser");
+        assert_eq!(
+            SettingsProvider::localize_section_name("file browser"),
+            "file browser"
+        );
         assert_eq!(
             SettingsProvider::localize_section_name("Available programs:"),
             "Available programs and Store (sponsoring, cloud, cloud + proprietary license, and support):"
         );
 
         sicompass_sdk::localize::set_locale("nl-BE");
-        assert_eq!(SettingsProvider::localize_section_name("file browser"), "bestandsverkenner");
+        assert_eq!(
+            SettingsProvider::localize_section_name("file browser"),
+            "bestandsverkenner"
+        );
         assert_eq!(
             SettingsProvider::localize_section_name("Available programs:"),
             "Beschikbare programma's en Winkel (sponsoring, cloud, cloud + commerciële licentie en ondersteuning):"
         );
 
         sicompass_sdk::localize::set_locale("fr-BE");
-        assert_eq!(SettingsProvider::localize_section_name("file browser"), "navigateur de fichiers");
+        assert_eq!(
+            SettingsProvider::localize_section_name("file browser"),
+            "navigateur de fichiers"
+        );
         assert_eq!(
             SettingsProvider::localize_section_name("Available programs:"),
             "Programmes disponibles et Magasin (sponsoring, cloud, cloud + licence propriétaire, et support) :"
         );
 
         sicompass_sdk::localize::set_locale("de-BE");
-        assert_eq!(SettingsProvider::localize_section_name("file browser"), "Dateimanager");
+        assert_eq!(
+            SettingsProvider::localize_section_name("file browser"),
+            "Dateimanager"
+        );
         assert_eq!(
             SettingsProvider::localize_section_name("Available programs:"),
             "Verfügbare Programme und Geschäft (Sponsoring, Cloud, Cloud + proprietäre Lizenz und Support):"
@@ -1624,7 +1781,10 @@ mod tests {
 
         // Unknown section name falls back to its literal.
         sicompass_sdk::localize::set_locale("nl-BE");
-        assert_eq!(SettingsProvider::localize_section_name("mystery"), "mystery");
+        assert_eq!(
+            SettingsProvider::localize_section_name("mystery"),
+            "mystery"
+        );
 
         sicompass_sdk::localize::set_locale("en-US");
     }
@@ -1648,17 +1808,28 @@ mod tests {
         // Default locale (en-US): all option Strs should show native names.
         sicompass_sdk::localize::set_locale("en-US");
         let elems = p.fetch();
-        let sicompass_obj = elems.iter()
+        let sicompass_obj = elems
+            .iter()
             .find(|e| e.as_obj().map_or(false, |o| o.key == "sicompass"))
             .expect("sicompass section");
-        let lang_radio = sicompass_obj.as_obj().unwrap().children.iter()
-            .find(|c| c.as_obj().map_or(false, |o| {
-                // The radio_key string is "settings-radio-language"; under en-US
-                // it resolves to "language".
-                o.key.contains("language") || o.key.contains("settings-radio-language")
-            }))
+        let lang_radio = sicompass_obj
+            .as_obj()
+            .unwrap()
+            .children
+            .iter()
+            .find(|c| {
+                c.as_obj().map_or(false, |o| {
+                    // The radio_key string is "settings-radio-language"; under en-US
+                    // it resolves to "language".
+                    o.key.contains("language") || o.key.contains("settings-radio-language")
+                })
+            })
             .expect("language radio");
-        let option_strs: Vec<String> = lang_radio.as_obj().unwrap().children.iter()
+        let option_strs: Vec<String> = lang_radio
+            .as_obj()
+            .unwrap()
+            .children
+            .iter()
             .filter_map(|c| c.as_str().map(|s| s.to_owned()))
             .collect();
 
@@ -1691,20 +1862,28 @@ mod tests {
         let mut p = headless();
 
         sicompass_sdk::localize::set_locale("en-US");
-        assert!(color_scheme_radio_key(&mut p).contains("color scheme"),
-            "en-US should show English label");
+        assert!(
+            color_scheme_radio_key(&mut p).contains("color scheme"),
+            "en-US should show English label"
+        );
 
         sicompass_sdk::localize::set_locale("nl-BE");
-        assert!(color_scheme_radio_key(&mut p).contains("kleurenschema"),
-            "nl-BE should show Flemish label");
+        assert!(
+            color_scheme_radio_key(&mut p).contains("kleurenschema"),
+            "nl-BE should show Flemish label"
+        );
 
         sicompass_sdk::localize::set_locale("fr-BE");
-        assert!(color_scheme_radio_key(&mut p).contains("jeu de couleurs"),
-            "fr-BE should show Belgian French label");
+        assert!(
+            color_scheme_radio_key(&mut p).contains("jeu de couleurs"),
+            "fr-BE should show Belgian French label"
+        );
 
         sicompass_sdk::localize::set_locale("de-BE");
-        assert!(color_scheme_radio_key(&mut p).contains("Farbschema"),
-            "de-BE should show Belgian German label");
+        assert!(
+            color_scheme_radio_key(&mut p).contains("Farbschema"),
+            "de-BE should show Belgian German label"
+        );
 
         // Reset so other tests start from a known state.
         sicompass_sdk::localize::set_locale("en-US");
@@ -1713,17 +1892,35 @@ mod tests {
     #[test]
     fn test_fetch_sicompass_includes_extra_radio() {
         let mut p = headless();
-        p.add_radio("sicompass", "font scale", "fontScale",
-            &["0.500", "1.000", "2.000"], "1.000");
+        p.add_radio(
+            "sicompass",
+            "font scale",
+            "fontScale",
+            &["0.500", "1.000", "2.000"],
+            "1.000",
+        );
         let elems = p.fetch();
-        let sc = elems.iter().find(|e| e.as_obj().map_or(false, |o| o.key == "sicompass")).unwrap();
-        let font_scale_radio = sc.as_obj().unwrap().children.iter().find(|c| {
-            c.as_obj().map_or(false, |o| o.key == "<radio>font scale")
-        });
-        assert!(font_scale_radio.is_some(), "font scale radio missing from sicompass section");
-        let selected = font_scale_radio.unwrap().as_obj().unwrap().children.iter().any(|c| {
-            c.as_str().map_or(false, |s| s == "<checked>1.000")
-        });
+        let sc = elems
+            .iter()
+            .find(|e| e.as_obj().map_or(false, |o| o.key == "sicompass"))
+            .unwrap();
+        let font_scale_radio = sc
+            .as_obj()
+            .unwrap()
+            .children
+            .iter()
+            .find(|c| c.as_obj().map_or(false, |o| o.key == "<radio>font scale"));
+        assert!(
+            font_scale_radio.is_some(),
+            "font scale radio missing from sicompass section"
+        );
+        let selected = font_scale_radio
+            .unwrap()
+            .as_obj()
+            .unwrap()
+            .children
+            .iter()
+            .any(|c| c.as_str().map_or(false, |s| s == "<checked>1.000"));
         assert!(selected, "default value 1.000 not marked as checked");
     }
 
@@ -1734,7 +1931,9 @@ mod tests {
         let mut p = headless();
         p.add_section("my section");
         let elems = p.fetch();
-        let has = elems.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "my section"));
+        let has = elems
+            .iter()
+            .any(|e| e.as_obj().map_or(false, |o| o.key == "my section"));
         assert!(has);
     }
 
@@ -1752,7 +1951,9 @@ mod tests {
         p.add_section("removable");
         p.remove_section("removable");
         let elems = p.fetch();
-        let has = elems.iter().any(|e| e.as_obj().map_or(false, |o| o.key == "removable"));
+        let has = elems
+            .iter()
+            .any(|e| e.as_obj().map_or(false, |o| o.key == "removable"));
         assert!(!has);
     }
 
@@ -1769,7 +1970,13 @@ mod tests {
     #[test]
     fn test_add_radio_creates_section() {
         let mut p = headless();
-        p.add_radio("my_sec", "sort order", "sortOrder", &["name", "date"], "name");
+        p.add_radio(
+            "my_sec",
+            "sort order",
+            "sortOrder",
+            &["name", "date"],
+            "name",
+        );
         assert!(p.sections.contains(&"my_sec".to_owned()));
     }
 
@@ -1779,10 +1986,16 @@ mod tests {
         p.add_radio("test_sec", "sort", "sortOrder", &["name", "date"], "date");
         p.add_section("test_sec");
         let elems = p.fetch();
-        let sec = elems.iter().find(|e| e.as_obj().map_or(false, |o| o.key == "test_sec")).unwrap();
-        let radio = sec.as_obj().unwrap().children.iter().find(|c| {
-            c.as_obj().map_or(false, |o| o.key.contains("<radio>"))
-        });
+        let sec = elems
+            .iter()
+            .find(|e| e.as_obj().map_or(false, |o| o.key == "test_sec"))
+            .unwrap();
+        let radio = sec
+            .as_obj()
+            .unwrap()
+            .children
+            .iter()
+            .find(|c| c.as_obj().map_or(false, |o| o.key.contains("<radio>")));
         assert!(radio.is_some());
     }
 
@@ -1792,12 +2005,20 @@ mod tests {
         p.add_radio("s", "sort", "sortOrder", &["name", "date"], "date");
         p.add_section("s");
         let elems = p.fetch();
-        let sec = elems.iter().find(|e| e.as_obj().map_or(false, |o| o.key == "s")).unwrap();
-        let radio = sec.as_obj().unwrap().children.iter()
+        let sec = elems
+            .iter()
+            .find(|e| e.as_obj().map_or(false, |o| o.key == "s"))
+            .unwrap();
+        let radio = sec
+            .as_obj()
+            .unwrap()
+            .children
+            .iter()
             .find(|c| c.as_obj().map_or(false, |o| o.key.contains("<radio>")))
             .unwrap();
         let date_checked = radio.as_obj().unwrap().children.iter().any(|c| {
-            c.as_str().map_or(false, |s| s.contains("<checked>") && s.contains("date"))
+            c.as_str()
+                .map_or(false, |s| s.contains("<checked>") && s.contains("date"))
         });
         assert!(date_checked);
     }
@@ -1810,9 +2031,13 @@ mod tests {
         p.add_text("s", "Server URL", "serverUrl", "https://example.com");
         p.add_section("s");
         let elems = p.fetch();
-        let sec = elems.iter().find(|e| e.as_obj().map_or(false, |o| o.key == "s")).unwrap();
+        let sec = elems
+            .iter()
+            .find(|e| e.as_obj().map_or(false, |o| o.key == "s"))
+            .unwrap();
         let has_text = sec.as_obj().unwrap().children.iter().any(|c| {
-            c.as_str().map_or(false, |s| s.contains("Server URL") && s.contains("<input>"))
+            c.as_str()
+                .map_or(false, |s| s.contains("Server URL") && s.contains("<input>"))
         });
         assert!(has_text);
     }
@@ -1823,9 +2048,13 @@ mod tests {
         p.add_text("s", "Host", "host", "localhost");
         p.add_section("s");
         let elems = p.fetch();
-        let sec = elems.iter().find(|e| e.as_obj().map_or(false, |o| o.key == "s")).unwrap();
+        let sec = elems
+            .iter()
+            .find(|e| e.as_obj().map_or(false, |o| o.key == "s"))
+            .unwrap();
         let has = sec.as_obj().unwrap().children.iter().any(|c| {
-            c.as_str().map_or(false, |s| s.contains("<input>localhost</input>"))
+            c.as_str()
+                .map_or(false, |s| s.contains("<input>localhost</input>"))
         });
         assert!(has);
     }
@@ -1838,9 +2067,13 @@ mod tests {
         p.add_checkbox("s", "Enable feature", "enableFeature", false);
         p.add_section("s");
         let elems = p.fetch();
-        let sec = elems.iter().find(|e| e.as_obj().map_or(false, |o| o.key == "s")).unwrap();
+        let sec = elems
+            .iter()
+            .find(|e| e.as_obj().map_or(false, |o| o.key == "s"))
+            .unwrap();
         let has = sec.as_obj().unwrap().children.iter().any(|c| {
-            c.as_str().map_or(false, |s| s == "<checkbox>Enable feature")
+            c.as_str()
+                .map_or(false, |s| s == "<checkbox>Enable feature")
         });
         assert!(has);
     }
@@ -1851,9 +2084,13 @@ mod tests {
         p.add_checkbox("s", "Feature", "feature", true);
         p.add_section("s");
         let elems = p.fetch();
-        let sec = elems.iter().find(|e| e.as_obj().map_or(false, |o| o.key == "s")).unwrap();
+        let sec = elems
+            .iter()
+            .find(|e| e.as_obj().map_or(false, |o| o.key == "s"))
+            .unwrap();
         let has = sec.as_obj().unwrap().children.iter().any(|c| {
-            c.as_str().map_or(false, |s| s.starts_with("<checkbox checked>"))
+            c.as_str()
+                .map_or(false, |s| s.starts_with("<checkbox checked>"))
         });
         assert!(has);
     }
@@ -1879,7 +2116,11 @@ mod tests {
         p.on_radio_change("color scheme", "light");
         assert_eq!(p.color_scheme, "light");
         let entries = log.lock().unwrap();
-        assert!(entries.iter().any(|(k, v)| k == "colorScheme" && v == "light"));
+        assert!(
+            entries
+                .iter()
+                .any(|(k, v)| k == "colorScheme" && v == "light")
+        );
     }
 
     #[test]
@@ -1926,8 +2167,11 @@ mod tests {
         // The STORED value must still be "light", regardless of the
         // language-displayed label that triggered the change.
         assert!(
-            entries.iter().any(|(k, v)| k == "colorScheme" && v == "light"),
-            "expected stored value 'light', got: {:?}", *entries
+            entries
+                .iter()
+                .any(|(k, v)| k == "colorScheme" && v == "light"),
+            "expected stored value 'light', got: {:?}",
+            *entries
         );
         drop(entries);
         assert_eq!(p.color_scheme, "light");
@@ -1944,7 +2188,12 @@ mod tests {
         let _g = locale_test_lock();
         let (mut p, log) = with_callback();
         // Register using a Fluent message ID as the stored label.
-        p.add_checkbox("sicompass", "settings-checkbox-maximized", "maximized", false);
+        p.add_checkbox(
+            "sicompass",
+            "settings-checkbox-maximized",
+            "maximized",
+            false,
+        );
 
         sicompass_sdk::localize::set_locale("nl-BE");
         // The dispatcher would pass the translated display string here.
@@ -1953,7 +2202,8 @@ mod tests {
         let entries = log.lock().unwrap();
         assert!(
             entries.iter().any(|(k, v)| k == "maximized" && v == "true"),
-            "expected config 'maximized=true' to fire, got: {:?}", *entries
+            "expected config 'maximized=true' to fire, got: {:?}",
+            *entries
         );
 
         sicompass_sdk::localize::set_locale("en-US");
@@ -1965,8 +2215,13 @@ mod tests {
         let (mut p, log) = with_callback();
         // Register a synthetic radio + matching FTL entries so localize() can
         // round-trip. The radio_key doubles as the Fluent message ID.
-        p.add_radio("sec", "test-sort-radio", "testSortOrder",
-                    &["asc", "desc"], "asc");
+        p.add_radio(
+            "sec",
+            "test-sort-radio",
+            "testSortOrder",
+            &["asc", "desc"],
+            "asc",
+        );
         let _ = sicompass_sdk::localize::register_bundle(
             "en-US",
             "test-sort-radio = sort order\n\
@@ -1986,8 +2241,11 @@ mod tests {
 
         let entries = log.lock().unwrap();
         assert!(
-            entries.iter().any(|(k, v)| k == "testSortOrder" && v == "desc"),
-            "expected stored value 'desc', got: {:?}", *entries
+            entries
+                .iter()
+                .any(|(k, v)| k == "testSortOrder" && v == "desc"),
+            "expected stored value 'desc', got: {:?}",
+            *entries
         );
 
         sicompass_sdk::localize::set_locale("en-US");
@@ -2023,7 +2281,11 @@ mod tests {
         assert!(ok);
         assert_eq!(p.text_entries[0].current_value, "new_value");
         let entries = log.lock().unwrap();
-        assert!(entries.iter().any(|(k, v)| k == "serverKey" && v == "new_value"));
+        assert!(
+            entries
+                .iter()
+                .any(|(k, v)| k == "serverKey" && v == "new_value")
+        );
     }
 
     #[test]
@@ -2035,11 +2297,16 @@ mod tests {
         let found = p.fetch().iter().any(|sec| {
             sec.as_obj().map_or(false, |o| {
                 o.children.iter().any(|c| {
-                    c.as_str().map_or(false, |s| s.contains("<password>s3cr3t</password>"))
+                    c.as_str()
+                        .map_or(false, |s| s.contains("<password>s3cr3t</password>"))
                 })
             })
         });
-        assert!(found, "expected a <password>s3cr3t</password> entry in: {:?}", p.fetch());
+        assert!(
+            found,
+            "expected a <password>s3cr3t</password> entry in: {:?}",
+            p.fetch()
+        );
     }
 
     #[test]
@@ -2052,7 +2319,11 @@ mod tests {
         assert!(ok);
         assert_eq!(p.text_entries[0].current_value, "new_secret");
         let entries = log.lock().unwrap();
-        assert!(entries.iter().any(|(k, v)| k == "apiKey" && v == "new_secret"));
+        assert!(
+            entries
+                .iter()
+                .any(|(k, v)| k == "apiKey" && v == "new_secret")
+        );
     }
 
     #[test]
@@ -2092,11 +2363,23 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
         let mut p = SettingsProvider::new_headless().with_config_path(path.clone());
-        p.add_radio("file browser", "sort", "sortOrder", &["name", "date"], "name");
+        p.add_radio(
+            "file browser",
+            "sort",
+            "sortOrder",
+            &["name", "date"],
+            "name",
+        );
         p.on_radio_change("sort", "date");
 
         let mut p2 = SettingsProvider::new_headless().with_config_path(path.clone());
-        p2.add_radio("file browser", "sort", "sortOrder", &["name", "date"], "name");
+        p2.add_radio(
+            "file browser",
+            "sort",
+            "sortOrder",
+            &["name", "date"],
+            "name",
+        );
         p2.init();
         assert_eq!(p2.radio_entries[0].current_value, "date");
     }
@@ -2139,7 +2422,8 @@ mod tests {
         std::fs::write(
             &path,
             r#"{"other": {"untouched": "value"}, "sicompass": {}}"#,
-        ).unwrap();
+        )
+        .unwrap();
 
         let mut p = SettingsProvider::new_headless().with_config_path(path.clone());
         p.on_radio_change("color scheme", "light");
@@ -2217,10 +2501,16 @@ mod tests {
         let mut p = headless();
         p.add_section("empty_sec");
         let elems = p.fetch();
-        let sec = elems.iter().find(|e| e.as_obj().map_or(false, |o| o.key == "empty_sec")).unwrap();
-        let has_placeholder = sec.as_obj().unwrap().children.iter().any(|c| {
-            c.as_str().map_or(false, |s| s == "no settings")
-        });
+        let sec = elems
+            .iter()
+            .find(|e| e.as_obj().map_or(false, |o| o.key == "empty_sec"))
+            .unwrap();
+        let has_placeholder = sec
+            .as_obj()
+            .unwrap()
+            .children
+            .iter()
+            .any(|c| c.as_str().map_or(false, |s| s == "no settings"));
         assert!(has_placeholder);
     }
 
@@ -2234,7 +2524,8 @@ mod tests {
         let log2 = Arc::clone(&log);
         let mut p = SettingsProvider::new(move |k, v| {
             log2.lock().unwrap().push((k.to_owned(), v.to_owned()));
-        }).with_config_path(path);
+        })
+        .with_config_path(path);
         p.init();
         let entries = log.lock().unwrap();
         assert!(entries.iter().any(|(k, _)| k == "colorScheme"));
@@ -2251,7 +2542,11 @@ mod tests {
         p.init();
         let entries = log.lock().unwrap();
         assert!(entries.iter().any(|(k, _)| k == "colorScheme"));
-        assert!(entries.iter().any(|(k, v)| k == "saveFolder" && v == "Downloads"));
+        assert!(
+            entries
+                .iter()
+                .any(|(k, v)| k == "saveFolder" && v == "Downloads")
+        );
     }
 
     #[test]
@@ -2266,8 +2561,16 @@ mod tests {
         p.init();
         let entries = log.lock().unwrap();
         assert!(entries.iter().any(|(k, _)| k == "colorScheme"));
-        assert!(entries.iter().any(|(k, v)| k == "enable_tutorial" && v == "true"));
-        assert!(entries.iter().any(|(k, v)| k == "enable_file browser" && v == "false"));
+        assert!(
+            entries
+                .iter()
+                .any(|(k, v)| k == "enable_tutorial" && v == "true")
+        );
+        assert!(
+            entries
+                .iter()
+                .any(|(k, v)| k == "enable_file browser" && v == "false")
+        );
     }
 
     #[test]
@@ -2317,7 +2620,9 @@ mod tests {
         // Re-add empty section to verify text entries are gone
         p.add_section("sales demo");
         let items = p.fetch();
-        let sd = items.iter().find(|e| e.as_obj().map(|o| o.key == "sales demo").unwrap_or(false));
+        let sd = items
+            .iter()
+            .find(|e| e.as_obj().map(|o| o.key == "sales demo").unwrap_or(false));
         assert!(sd.is_some());
         let children = &sd.unwrap().as_obj().unwrap().children;
         assert_eq!(children.len(), 1);
@@ -2331,7 +2636,9 @@ mod tests {
         p.remove_section("programs");
         p.add_section("programs");
         let items = p.fetch();
-        let prog = items.iter().find(|e| e.as_obj().map(|o| o.key == "programs").unwrap_or(false));
+        let prog = items
+            .iter()
+            .find(|e| e.as_obj().map(|o| o.key == "programs").unwrap_or(false));
         assert!(prog.is_some());
         let children = &prog.unwrap().as_obj().unwrap().children;
         assert_eq!(children.len(), 1);
@@ -2357,8 +2664,14 @@ mod tests {
         let items = p.fetch();
         // sicompass + section B
         assert_eq!(items.len(), 2);
-        assert!(!items.iter().any(|e| e.as_obj().map(|o| o.key == "section A").unwrap_or(false)));
-        let sb = items.iter().find(|e| e.as_obj().map(|o| o.key == "section B").unwrap_or(false));
+        assert!(
+            !items
+                .iter()
+                .any(|e| e.as_obj().map(|o| o.key == "section A").unwrap_or(false))
+        );
+        let sb = items
+            .iter()
+            .find(|e| e.as_obj().map(|o| o.key == "section B").unwrap_or(false));
         assert!(sb.is_some());
         // section B still has its text entry
         assert_eq!(sb.unwrap().as_obj().unwrap().children.len(), 1);
@@ -2383,7 +2696,8 @@ mod tests {
         // The priority section's displayed key depends on the active locale,
         // so resolve it dynamically rather than asserting a literal.
         let priority_key = SettingsProvider::localize_section_name("Available programs:");
-        let keys: Vec<&str> = items.iter()
+        let keys: Vec<&str> = items
+            .iter()
             .filter_map(|e| e.as_obj().map(|o| o.key.as_str()))
             .collect();
         assert_eq!(keys[0], "sicompass");
@@ -2402,14 +2716,35 @@ mod tests {
         let path = dir.path().join("settings.json");
         let mut p = SettingsProvider::new_headless().with_config_path(path.clone());
         p.add_priority_section("Available programs:");
-        p.add_checkbox("Available programs:", "tutorial",     "enable_tutorial",     true);
-        p.add_checkbox("Available programs:", "sales demo",   "enable_sales demo",   false);
-        p.add_checkbox("Available programs:", "chat client",  "enable_chat client",  false);
+        p.add_checkbox("Available programs:", "tutorial", "enable_tutorial", true);
+        p.add_checkbox(
+            "Available programs:",
+            "sales demo",
+            "enable_sales demo",
+            false,
+        );
+        p.add_checkbox(
+            "Available programs:",
+            "chat client",
+            "enable_chat client",
+            false,
+        );
         // Unrelated settings that must NOT appear in the seeded file:
-        p.add_radio("sicompass", "color scheme", "colorScheme", &["dark", "light"], "dark");
+        p.add_radio(
+            "sicompass",
+            "color scheme",
+            "colorScheme",
+            &["dark", "light"],
+            "dark",
+        );
         p.add_checkbox("sicompass", "maximized", "maximized", false);
-        p.add_radio("file browser", "sort order", "sortOrder",
-            &["alphanumerically", "chronologically"], "alphanumerically");
+        p.add_radio(
+            "file browser",
+            "sort order",
+            "sortOrder",
+            &["alphanumerically", "chronologically"],
+            "alphanumerically",
+        );
 
         p.init();
 
@@ -2417,14 +2752,31 @@ mod tests {
         let root: serde_json::Value = serde_json::from_str(&data).unwrap();
 
         // Only the enabled-by-default entry is written.
-        let available = root.get("Available programs:").expect("Available programs: section missing");
-        assert_eq!(available.get("enable_tutorial").and_then(|v| v.as_bool()), Some(true));
-        assert!(available.get("enable_sales demo").is_none(), "disabled-by-default entries must not be written");
-        assert!(available.get("enable_chat client").is_none(), "disabled-by-default entries must not be written");
+        let available = root
+            .get("Available programs:")
+            .expect("Available programs: section missing");
+        assert_eq!(
+            available.get("enable_tutorial").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert!(
+            available.get("enable_sales demo").is_none(),
+            "disabled-by-default entries must not be written"
+        );
+        assert!(
+            available.get("enable_chat client").is_none(),
+            "disabled-by-default entries must not be written"
+        );
 
         // No other sections.
-        assert!(root.get("sicompass").is_none(), "sicompass section must not appear in seed");
-        assert!(root.get("file browser").is_none(), "file browser section must not appear in seed");
+        assert!(
+            root.get("sicompass").is_none(),
+            "sicompass section must not appear in seed"
+        );
+        assert!(
+            root.get("file browser").is_none(),
+            "file browser section must not appear in seed"
+        );
     }
 
     #[test]
@@ -2451,8 +2803,7 @@ mod tests {
         use std::sync::{Arc, Mutex};
         let fired: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
         let fired2 = Arc::clone(&fired);
-        let mut p = SettingsProvider::new_headless()
-            .with_config_path(test_config_path());
+        let mut p = SettingsProvider::new_headless().with_config_path(test_config_path());
         p.set_apply_callback(Box::new(move |k, _v| {
             fired2.lock().unwrap().push(k.to_owned());
         }));
@@ -2471,9 +2822,15 @@ mod tests {
         p.add_checkbox("sicompass", "flag", "testFlag", false);
         // on_checkbox_change should write to the override path, not the real config
         p.on_checkbox_change("flag", true);
-        assert!(path.exists(), "on_checkbox_change should write to the override path");
+        assert!(
+            path.exists(),
+            "on_checkbox_change should write to the override path"
+        );
         let data = std::fs::read_to_string(&path).unwrap();
-        assert!(data.contains("testFlag"), "written config should contain the key");
+        assert!(
+            data.contains("testFlag"),
+            "written config should contain the key"
+        );
     }
 
     #[test]
@@ -2486,8 +2843,7 @@ mod tests {
         let _g = locale_test_lock();
         register_translations();
         use sicompass_sdk::provider::Provider;
-        let mut p = SettingsProvider::new_headless()
-            .with_config_path(test_config_path());
+        let mut p = SettingsProvider::new_headless().with_config_path(test_config_path());
         p.add_section("file browser");
         p.add_checkbox("file browser", "show hidden", "showHidden", false);
         Provider::set_section_version(&mut p, "file browser", "1.2.3");
@@ -2503,7 +2859,10 @@ mod tests {
             FfonElement::Str(s) => s.contains("1.2.3"),
             _ => false,
         });
-        assert!(has_version, "version line should appear in section children");
+        assert!(
+            has_version,
+            "version line should appear in section children"
+        );
     }
 
     #[test]
@@ -2516,8 +2875,7 @@ mod tests {
         let _g = locale_test_lock();
         register_translations();
         use sicompass_sdk::provider::Provider;
-        let mut p = SettingsProvider::new_headless()
-            .with_config_path(test_config_path());
+        let mut p = SettingsProvider::new_headless().with_config_path(test_config_path());
         Provider::set_section_version(&mut p, "sicompass", "9.9.9");
 
         let items = p.fetch();
@@ -2534,7 +2892,10 @@ mod tests {
             FfonElement::Str(s) => *s == expected,
             _ => false,
         });
-        assert!(has_version, "expected app version line {expected:?} under sicompass section");
+        assert!(
+            has_version,
+            "expected app version line {expected:?} under sicompass section"
+        );
     }
 
     #[test]
@@ -2543,8 +2904,7 @@ mod tests {
         // against `fetch()` output.
         let _g = locale_test_lock();
         register_translations();
-        let mut p = SettingsProvider::new_headless()
-            .with_config_path(test_config_path());
+        let mut p = SettingsProvider::new_headless().with_config_path(test_config_path());
 
         // No `set_section_version` call — the SDK version is a build fact, so it
         // renders whether or not the app injected an app version.
@@ -2555,13 +2915,23 @@ mod tests {
             .find(|e| e.as_obj().map(|o| o.key == sc_key).unwrap_or(false))
             .and_then(|e| e.as_obj())
             .expect("sicompass section");
-        assert!(!SDK_VERSION.is_empty(), "build.rs must resolve a non-empty SDK version");
-        let expected = format!("{}: {}", localize::t("settings-label-version-sdk"), SDK_VERSION);
+        assert!(
+            !SDK_VERSION.is_empty(),
+            "build.rs must resolve a non-empty SDK version"
+        );
+        let expected = format!(
+            "{}: {}",
+            localize::t("settings-label-version-sdk"),
+            SDK_VERSION
+        );
         let has_sdk = sc.children.iter().any(|c| match c {
             FfonElement::Str(s) => *s == expected,
             _ => false,
         });
-        assert!(has_sdk, "expected SDK version line {expected:?} under sicompass section");
+        assert!(
+            has_sdk,
+            "expected SDK version line {expected:?} under sicompass section"
+        );
     }
 
     #[test]
@@ -2575,8 +2945,14 @@ mod tests {
             assert_ne!(app, sdk, "version labels must differ in {locale}");
             // A missing Fluent message falls back to the message id, which would
             // otherwise leak a raw key into the settings panel.
-            assert_ne!(app, "settings-label-version-app", "missing app label in {locale}");
-            assert_ne!(sdk, "settings-label-version-sdk", "missing SDK label in {locale}");
+            assert_ne!(
+                app, "settings-label-version-app",
+                "missing app label in {locale}"
+            );
+            assert_ne!(
+                sdk, "settings-label-version-sdk",
+                "missing SDK label in {locale}"
+            );
         }
         localize::set_locale("en-US");
     }
@@ -2591,7 +2967,9 @@ mod tests {
             if candidate.is_file() {
                 break candidate;
             }
-            dir = dir.parent().expect("Cargo.lock in some ancestor of the crate dir");
+            dir = dir
+                .parent()
+                .expect("Cargo.lock in some ancestor of the crate dir");
         };
         let text = std::fs::read_to_string(&lock).expect("read Cargo.lock");
         let expected = text
@@ -2611,8 +2989,7 @@ mod tests {
         // where this test runs alone and no bundle has been loaded at all.
         let _g = locale_test_lock();
         register_translations();
-        let mut p = SettingsProvider::new_headless()
-            .with_config_path(test_config_path());
+        let mut p = SettingsProvider::new_headless().with_config_path(test_config_path());
         p.add_section("file browser");
         let items = p.fetch();
         let section_key = SettingsProvider::localize_section_name("file browser");
@@ -2634,22 +3011,27 @@ mod tests {
                 FfonElement::Str(s) => s.starts_with(&format!("{}: ", label)),
                 _ => false,
             });
-            assert!(!leak, "no {key} line should appear when set_section_version was not called");
+            assert!(
+                !leak,
+                "no {key} line should appear when set_section_version was not called"
+            );
         }
     }
 
     #[test]
     fn add_priority_section_trait_method_registers_section() {
         use sicompass_sdk::provider::Provider;
-        let mut p = SettingsProvider::new_headless()
-            .with_config_path(test_config_path());
+        let mut p = SettingsProvider::new_headless().with_config_path(test_config_path());
         Provider::add_priority_section(&mut p, "My Priority");
         p.add_checkbox("My Priority", "flag", "myFlag", false);
         let items = p.fetch();
-        let has_section = items.iter().any(|e| {
-            e.as_obj().map(|o| o.key == "My Priority").unwrap_or(false)
-        });
-        assert!(has_section, "priority section should appear in fetch output");
+        let has_section = items
+            .iter()
+            .any(|e| e.as_obj().map(|o| o.key == "My Priority").unwrap_or(false));
+        assert!(
+            has_section,
+            "priority section should appear in fetch output"
+        );
     }
 
     // ----- Sponsor / cloud / support tier tests -----------------------------
@@ -2703,12 +3085,35 @@ mod tests {
 
         let items = p.fetch();
         let children = available_programs_children(&items);
-        let key = |i: usize| children[i].as_obj().expect("tier link is an Obj").key.clone();
-        assert!(key(0).contains("<link>https://srv.example/sponsor</link>"), "{}", key(0));
-        assert!(key(1).contains("<link>https://srv.example/cloud</link>"), "{}", key(1));
-        assert!(key(2).contains("<link>https://srv.example/support</link>"), "{}", key(2));
+        let key = |i: usize| {
+            children[i]
+                .as_obj()
+                .expect("tier link is an Obj")
+                .key
+                .clone()
+        };
+        assert!(
+            key(0).contains("<link>https://srv.example/sponsor</link>"),
+            "{}",
+            key(0)
+        );
+        assert!(
+            key(1).contains("<link>https://srv.example/cloud</link>"),
+            "{}",
+            key(1)
+        );
+        assert!(
+            key(2).contains("<link>https://srv.example/support</link>"),
+            "{}",
+            key(2)
+        );
         // The server URL input follows the three tier links.
-        assert!(children[3].as_str().map(|s| s.contains("<input>")).unwrap_or(false));
+        assert!(
+            children[3]
+                .as_str()
+                .map(|s| s.contains("<input>"))
+                .unwrap_or(false)
+        );
     }
 
     #[test]
@@ -2716,9 +3121,21 @@ mod tests {
         let p = SettingsProvider::new_headless().with_config_path(test_config_path());
         let nodes = p.build_tier_subnodes();
         let key = |i: usize| nodes[i].as_obj().unwrap().key.clone();
-        assert!(!key(0).contains("license:"), "sponsor has no status: {}", key(0));
-        assert!(key(1).contains("license:"), "cloud needs a status: {}", key(1));
-        assert!(key(2).contains("license:"), "support needs a status: {}", key(2));
+        assert!(
+            !key(0).contains("license:"),
+            "sponsor has no status: {}",
+            key(0)
+        );
+        assert!(
+            key(1).contains("license:"),
+            "cloud needs a status: {}",
+            key(1)
+        );
+        assert!(
+            key(2).contains("license:"),
+            "support needs a status: {}",
+            key(2)
+        );
     }
 
     #[test]
@@ -2737,7 +3154,10 @@ mod tests {
         sicompass_sdk::localize::set_locale("en-US");
         let mut p = SettingsProvider::new_headless().with_config_path(test_config_path());
         let localized = SettingsProvider::localize_section_name("Available programs:");
-        assert_ne!(localized, "Available programs:", "test needs a localized name");
+        assert_ne!(
+            localized, "Available programs:",
+            "test needs a localized name"
+        );
         p.set_current_path(&format!("/{localized}/Store server URL"));
         let ok = p.commit_edit("", "http://localhost:8787");
         assert!(ok, "edit under the localized section name must route");
@@ -2769,7 +3189,9 @@ mod tests {
         let mut p = SettingsProvider::new_headless().with_config_path(test_config_path());
         p.on_radio_change("monthly or yearly", "20\u{20ac} per month");
         assert_eq!(
-            p.server_form_state.get("monthly or yearly").map(String::as_str),
+            p.server_form_state
+                .get("monthly or yearly")
+                .map(String::as_str),
             Some("20\u{20ac} per month"),
         );
     }
@@ -2780,7 +3202,10 @@ mod tests {
         let mut p = SettingsProvider::new_headless().with_config_path(test_config_path());
         p.store_url = "http://127.0.0.1:1".to_owned(); // refused immediately
         p.on_button_press("checkout:support-annual");
-        assert!(p.take_error().is_some(), "an unreachable server must set an error");
+        assert!(
+            p.take_error().is_some(),
+            "an unreachable server must set an error"
+        );
         assert!(p.take_error().is_none(), "the error is consumed once");
     }
 
@@ -2788,23 +3213,39 @@ mod tests {
     fn redeem_tokens_route_to_their_own_certificate_slug() {
         use sicompass_sdk::provider::Provider;
         let (rt, server) = start_mock_server();
-        mount(&rt, &server, Mock::given(method("GET"))
-            .and(wm_path("/license/tok-c"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(sample_cert_json())));
-        mount(&rt, &server, Mock::given(method("GET"))
-            .and(wm_path("/license/tok-s"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(sample_cert_json())));
+        mount(
+            &rt,
+            &server,
+            Mock::given(method("GET"))
+                .and(wm_path("/license/tok-c"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(sample_cert_json())),
+        );
+        mount(
+            &rt,
+            &server,
+            Mock::given(method("GET"))
+                .and(wm_path("/license/tok-s"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(sample_cert_json())),
+        );
 
         let mut p = SettingsProvider::new_headless().with_config_path(test_config_path());
         p.store_url = server.uri();
 
         assert!(p.commit_tier_input("ENABLE CLOUD AND STORE/License redeem token", "tok-c"));
         assert_eq!(p.license_redeem_token, "tok-c");
-        assert!(p.take_error().expect("cloud redeem error").contains("rejected"));
+        assert!(
+            p.take_error()
+                .expect("cloud redeem error")
+                .contains("rejected")
+        );
 
         assert!(p.commit_tier_input("ENABLE SUPPORT/Support redeem token", "tok-s"));
         assert_eq!(p.support_redeem_token, "tok-s");
-        assert!(p.take_error().expect("support redeem error").contains("rejected"));
+        assert!(
+            p.take_error()
+                .expect("support redeem error")
+                .contains("rejected")
+        );
     }
 }
 
@@ -2827,8 +3268,5 @@ impl Default for SettingsProvider {
 /// The factory creates a headless `SettingsProvider`; the app configures it
 /// afterwards via `Provider::set_apply_callback` and `Provider::set_config_path`.
 pub fn register() {
-    sicompass_sdk::register_provider_factory("settings", || {
-        Box::new(SettingsProvider::default())
-    });
+    sicompass_sdk::register_provider_factory("settings", || Box::new(SettingsProvider::default()));
 }
-

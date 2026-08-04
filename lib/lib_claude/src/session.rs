@@ -244,7 +244,10 @@ fn new_command(program: &str) -> std::io::Result<Command> {
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
     let resolved = resolve_windows_program(program).ok_or_else(|| {
-        tracing::error!(program, "claude: resolve_windows_program found nothing on PATH/PATHEXT");
+        tracing::error!(
+            program,
+            "claude: resolve_windows_program found nothing on PATH/PATHEXT"
+        );
         std::io::Error::new(
             std::io::ErrorKind::NotFound,
             format!("`{program}` not found on PATH"),
@@ -311,7 +314,11 @@ fn resolve_windows_program(program: &str) -> Option<PathBuf> {
     let path_dirs: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|v| std::env::split_paths(&v).collect())
         .unwrap_or_default();
-    resolve_bare_in_dirs(program, &exts, path_dirs.iter().chain(windows_fallback_dirs().iter()))
+    resolve_bare_in_dirs(
+        program,
+        &exts,
+        path_dirs.iter().chain(windows_fallback_dirs().iter()),
+    )
 }
 
 /// Search `dirs` (in order) for a bare `program`, honoring `exts` when the name
@@ -338,7 +345,8 @@ where
         }
         None
     };
-    dirs.into_iter().find_map(|dir| try_with_exts(&dir.join(program)))
+    dirs.into_iter()
+        .find_map(|dir| try_with_exts(&dir.join(program)))
 }
 
 /// Well-known per-user directories claude's Windows installers place shims in,
@@ -369,10 +377,7 @@ mod tests {
         };
         let result = Session::spawn(&cfg);
         assert!(result.is_err(), "missing binary should fail");
-        assert_eq!(
-            result.err().unwrap().kind(),
-            std::io::ErrorKind::NotFound
-        );
+        assert_eq!(result.err().unwrap().kind(), std::io::ErrorKind::NotFound);
     }
 
     // On Windows npm ships the CLI as `claude.cmd`, which a bare
@@ -382,10 +387,7 @@ mod tests {
     #[test]
     #[cfg(windows)]
     fn resolve_finds_cmd_shim_by_pathext() {
-        let dir = std::env::temp_dir().join(format!(
-            "lib-claude-resolve-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("lib-claude-resolve-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let shim = dir.join("claude.cmd");
         std::fs::write(&shim, b"@echo off\r\n").unwrap();
@@ -395,8 +397,7 @@ mod tests {
         // uppercase `.CMD`), which the case-insensitive filesystem still opens,
         // so compare case-insensitively rather than byte-for-byte.
         let extless = dir.join("claude");
-        let got = resolve_windows_program(extless.to_str().unwrap())
-            .expect("shim should resolve");
+        let got = resolve_windows_program(extless.to_str().unwrap()).expect("shim should resolve");
         assert!(got.is_file(), "resolved path must exist");
         assert_eq!(
             got.to_string_lossy().to_lowercase(),
@@ -417,15 +418,14 @@ mod tests {
     #[test]
     #[cfg(windows)]
     fn resolve_bare_falls_back_to_known_dir() {
-        let dir = std::env::temp_dir().join(format!(
-            "lib-claude-fallback-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("lib-claude-fallback-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("claude.exe"), b"MZ").unwrap();
 
-        let exts: Vec<String> =
-            [".COM", ".EXE", ".CMD"].iter().map(|s| s.to_string()).collect();
+        let exts: Vec<String> = [".COM", ".EXE", ".CMD"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
 
         // PATH-only dirs (no match) → None.
         let empty: Vec<PathBuf> = vec![std::env::temp_dir()];

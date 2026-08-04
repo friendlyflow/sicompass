@@ -5,8 +5,8 @@
 
 use crate::app_state::{AppRenderer, CommandPhase, Coordinate, History, Task, WindowAction};
 use crate::list;
-use sicompass_sdk::ffon::{get_ffon_at_id, next_layer_exists, FfonElement, IdArray};
-use sicompass_sdk::placeholders::{is_i_placeholder, I_PLACEHOLDER};
+use sicompass_sdk::ffon::{FfonElement, IdArray, get_ffon_at_id, next_layer_exists};
+use sicompass_sdk::placeholders::{I_PLACEHOLDER, is_i_placeholder};
 use sicompass_sdk::tags;
 
 // ---------------------------------------------------------------------------
@@ -33,11 +33,22 @@ pub fn handle_up(r: &mut AppRenderer) {
             r.text_scroll_offset = (r.text_scroll_offset - step).max(0);
             r.needs_redraw = true;
         }
-        Coordinate::SimpleSearch | Coordinate::Command | Coordinate::ExtendedSearch | Coordinate::Meta | Coordinate::TimelineView | Coordinate::ConfirmCloseTab | Coordinate::TabSwitcher => {
+        Coordinate::SimpleSearch
+        | Coordinate::Command
+        | Coordinate::ExtendedSearch
+        | Coordinate::Meta
+        | Coordinate::TimelineView
+        | Coordinate::ConfirmCloseTab
+        | Coordinate::TabSwitcher => {
             r.error_message.clear();
             if r.list_index > 0 {
                 r.list_index -= 1;
-                if r.coordinate != Coordinate::Command && r.coordinate != Coordinate::Meta && r.coordinate != Coordinate::TimelineView && r.coordinate != Coordinate::ConfirmCloseTab && r.coordinate != Coordinate::TabSwitcher {
+                if r.coordinate != Coordinate::Command
+                    && r.coordinate != Coordinate::Meta
+                    && r.coordinate != Coordinate::TimelineView
+                    && r.coordinate != Coordinate::ConfirmCloseTab
+                    && r.coordinate != Coordinate::TabSwitcher
+                {
                     r.sync_current_id_from_list();
                 }
                 r.speak_current_element();
@@ -75,7 +86,13 @@ pub fn handle_down(r: &mut AppRenderer) {
             r.text_scroll_offset = (r.text_scroll_offset + step).min(max_offset);
             r.needs_redraw = true;
         }
-        Coordinate::SimpleSearch | Coordinate::Command | Coordinate::ExtendedSearch | Coordinate::Meta | Coordinate::TimelineView | Coordinate::ConfirmCloseTab | Coordinate::TabSwitcher => {
+        Coordinate::SimpleSearch
+        | Coordinate::Command
+        | Coordinate::ExtendedSearch
+        | Coordinate::Meta
+        | Coordinate::TimelineView
+        | Coordinate::ConfirmCloseTab
+        | Coordinate::TabSwitcher => {
             r.error_message.clear();
             let max_index = if r.filtered_list_indices.is_empty() {
                 r.total_list.len().saturating_sub(1)
@@ -84,7 +101,12 @@ pub fn handle_down(r: &mut AppRenderer) {
             };
             if r.list_index < max_index {
                 r.list_index += 1;
-                if r.coordinate != Coordinate::Command && r.coordinate != Coordinate::Meta && r.coordinate != Coordinate::TimelineView && r.coordinate != Coordinate::ConfirmCloseTab && r.coordinate != Coordinate::TabSwitcher {
+                if r.coordinate != Coordinate::Command
+                    && r.coordinate != Coordinate::Meta
+                    && r.coordinate != Coordinate::TimelineView
+                    && r.coordinate != Coordinate::ConfirmCloseTab
+                    && r.coordinate != Coordinate::TabSwitcher
+                {
                     r.sync_current_id_from_list();
                 }
                 r.speak_current_element();
@@ -174,7 +196,9 @@ fn record_placeholder_fs_create(
     undo_elem: FfonElement,
     session_start: Option<usize>,
 ) -> bool {
-    let is_fs = r.current_id.get(0)
+    let is_fs = r
+        .current_id
+        .get(0)
         .and_then(|i| r.providers.get(i))
         .map(|p| p.path_is_filesystem())
         .unwrap_or(false);
@@ -183,7 +207,13 @@ fn record_placeholder_fs_create(
     }
     collapse_typed_name_chunks(r, session_start);
     pop_last_placeholder_structural(r);
-    record_fs_op(r, undo_id, sicompass_sdk::timeline::FsOpKind::Create, None, Some(undo_elem));
+    record_fs_op(
+        r,
+        undo_id,
+        sicompass_sdk::timeline::FsOpKind::Create,
+        None,
+        Some(undo_elem),
+    );
     reposition_after_placeholder_commit(r, name);
     true
 }
@@ -198,7 +228,11 @@ fn reposition_after_placeholder_commit(r: &mut AppRenderer, name: &str) {
     // Labels render as "{prefix} {content}" (e.g. "-i file.txt"); match the
     // content after the first space.
     if let Some(i) = r.total_list.iter().position(|item| {
-        item.label.split_once(' ').map(|(_, c)| c).unwrap_or(&item.label) == name
+        item.label
+            .split_once(' ')
+            .map(|(_, c)| c)
+            .unwrap_or(&item.label)
+            == name
     }) {
         if let Some(id) = r.total_list.get(i).map(|it| it.id.clone()) {
             r.current_id = id;
@@ -293,7 +327,9 @@ pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
     // is `drwxr-xr-x … <input>Downloads</input>`, and `strip_display` would keep
     // the permissions prefix and corrupt the path. `element_nav_name` prefers the
     // input content so navigation stays correct as properties persist.
-    let use_input_name = r.current_id.get(0)
+    let use_input_name = r
+        .current_id
+        .get(0)
         .and_then(|i| r.providers.get(i))
         .map(|p| p.path_is_filesystem())
         .unwrap_or(false);
@@ -303,7 +339,11 @@ pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
         let elem = get_ffon_at_id(&r.ffon, &item_id).and_then(|s| s.get(last_idx));
         match elem {
             Some(FfonElement::Obj(o)) => {
-                let link = if tags::has_link(&o.key) { tags::extract_link(&o.key) } else { None };
+                let link = if tags::has_link(&o.key) {
+                    tags::extract_link(&o.key)
+                } else {
+                    None
+                };
                 let segment = if use_input_name {
                     crate::provider::element_nav_name(&o.key)
                 } else {
@@ -416,7 +456,6 @@ pub fn navigate_right_raw(r: &mut AppRenderer) -> bool {
         new_id.push(0);
         r.current_id = new_id;
     }
-
 
     true
 }
@@ -602,15 +641,21 @@ pub fn handle_left(r: &mut AppRenderer) {
 /// Walk back from `cur` consuming up to `budget` visual lines.
 /// Always retreats at least one index when `cur > 0`.
 fn step_back_by_lines(line_counts: &[usize], cur: usize, budget: usize) -> usize {
-    if cur == 0 { return 0; }
+    if cur == 0 {
+        return 0;
+    }
     let mut i = cur;
     let mut consumed = 0usize;
     while i > 0 {
         let lines = line_counts.get(i - 1).copied().unwrap_or(1).max(1);
-        if consumed > 0 && consumed + lines > budget { break; }
+        if consumed > 0 && consumed + lines > budget {
+            break;
+        }
         consumed += lines;
         i -= 1;
-        if consumed >= budget { break; }
+        if consumed >= budget {
+            break;
+        }
     }
     i
 }
@@ -618,15 +663,21 @@ fn step_back_by_lines(line_counts: &[usize], cur: usize, budget: usize) -> usize
 /// Walk forward from `cur` consuming up to `budget` visual lines.
 /// Always advances at least one index when `cur < max_id`.
 fn step_forward_by_lines(line_counts: &[usize], cur: usize, max_id: usize, budget: usize) -> usize {
-    if cur >= max_id { return max_id; }
+    if cur >= max_id {
+        return max_id;
+    }
     let mut i = cur;
     let mut consumed = 0usize;
     while i < max_id {
         let lines = line_counts.get(i).copied().unwrap_or(1).max(1);
-        if consumed > 0 && consumed + lines > budget { break; }
+        if consumed > 0 && consumed + lines > budget {
+            break;
+        }
         consumed += lines;
         i += 1;
-        if consumed >= budget { break; }
+        if consumed >= budget {
+            break;
+        }
     }
     i
 }
@@ -915,7 +966,8 @@ pub fn handle_tab(r: &mut AppRenderer) {
             r.search_string.clear();
             r.cursor_position = 0;
             list::create_list_current_layer(r);
-            let ctx = r.current_list_item()
+            let ctx = r
+                .current_list_item()
                 .map(|it| crate::accesskit_sdl::label_to_speech(&it.label));
             r.speak_mode_change(ctx);
             r.needs_redraw = true;
@@ -943,7 +995,8 @@ pub fn handle_colon(r: &mut AppRenderer) {
     r.input_buffer.clear();
     r.cursor_position = 0;
     list::create_list_current_layer(r);
-    let ctx = r.current_list_item()
+    let ctx = r
+        .current_list_item()
         .map(|it| crate::accesskit_sdl::label_to_speech(&it.label));
     r.speak_mode_change(ctx);
     r.needs_redraw = true;
@@ -1091,7 +1144,8 @@ pub fn handle_controls(r: &mut AppRenderer) {
     r.input_buffer.clear();
     r.cursor_position = 0;
     list::create_list_current_layer(r);
-    let ctx = r.current_list_item()
+    let ctx = r
+        .current_list_item()
         .map(|it| crate::accesskit_sdl::label_to_speech(&it.label));
     r.speak_mode_change(ctx);
     r.needs_redraw = true;
@@ -1109,7 +1163,8 @@ pub fn handle_enter_command(r: &mut AppRenderer) {
             // Window-controls palette: map the selected button's action key
             // (stashed in `nav_path`) to a `WindowAction` and hand it to the
             // main loop, which owns the SDL window. Then leave the palette.
-            let action = r.current_list_item()
+            let action = r
+                .current_list_item()
                 .and_then(|item| item.nav_path.as_deref())
                 .and_then(WindowAction::from_key);
             if let Some(action) = action {
@@ -1126,7 +1181,10 @@ pub fn handle_enter_command(r: &mut AppRenderer) {
             // robustness.
             let cmd = match r.current_list_item() {
                 Some(item) => item.nav_path.clone().unwrap_or_else(|| item.label.clone()),
-                None => { handle_escape(r); return; }
+                None => {
+                    handle_escape(r);
+                    return;
+                }
             };
 
             // Get the current element key for the provider
@@ -1136,7 +1194,10 @@ pub fn handle_enter_command(r: &mut AppRenderer) {
                 match arr.and_then(|a| a.get(idx)) {
                     Some(sicompass_sdk::ffon::FfonElement::Str(s)) => (s.clone(), 0),
                     Some(sicompass_sdk::ffon::FfonElement::Obj(o)) => (o.key.clone(), 1),
-                    None => { handle_escape(r); return; }
+                    None => {
+                        handle_escape(r);
+                        return;
+                    }
                 }
             };
 
@@ -1240,10 +1301,15 @@ pub fn handle_enter_command(r: &mut AppRenderer) {
         CommandPhase::Provider => {
             // Phase 2: user chose a secondary item (e.g. an application to open with)
             let selection = match r.current_list_item() {
-                Some(item) => item.nav_path.clone()
+                Some(item) => item
+                    .nav_path
+                    .clone()
                     .or_else(|| item.data.clone())
                     .unwrap_or_else(|| item.label.clone()),
-                None => { handle_escape(r); return; }
+                None => {
+                    handle_escape(r);
+                    return;
+                }
             };
             let cmd = r.provider_command_name.clone();
             crate::provider::execute_command(r, &cmd, &selection);
@@ -1279,12 +1345,18 @@ pub fn handle_enter_general(r: &mut AppRenderer) {
     let elem_clone = {
         let arr = match get_ffon_at_id(&r.ffon, &r.current_id) {
             Some(a) => a,
-            None => { r.needs_redraw = true; return; }
+            None => {
+                r.needs_redraw = true;
+                return;
+            }
         };
         let idx = r.current_id.last().unwrap_or(0);
         match arr.get(idx) {
             Some(e) => e.clone(),
-            None => { r.needs_redraw = true; return; }
+            None => {
+                r.needs_redraw = true;
+                return;
+            }
         }
     };
 
@@ -1297,7 +1369,9 @@ pub fn handle_enter_general(r: &mut AppRenderer) {
                     FfonElement::Str(_) => FfonElement::new_str(new_text.clone()),
                     FfonElement::Obj(o) => {
                         let mut new_obj = FfonElement::new_obj(new_text.clone());
-                        for c in &o.children { new_obj.as_obj_mut().unwrap().push(c.clone()); }
+                        for c in &o.children {
+                            new_obj.as_obj_mut().unwrap().push(c.clone());
+                        }
                         new_obj
                     }
                 };
@@ -1323,8 +1397,7 @@ pub fn handle_enter_general(r: &mut AppRenderer) {
                     .and_then(|e| e.as_obj())
                     .map(|o| o.key.clone());
                 if parent_key.map_or(false, |k| is_live_input_slot(r, &k)) {
-                    let value = tags::extract_button_function_name(child_text)
-                        .unwrap_or_default();
+                    let value = tags::extract_button_function_name(child_text).unwrap_or_default();
                     fill_live_input(r, &parent_id, &value);
                     return;
                 }
@@ -1346,7 +1419,10 @@ pub fn handle_enter_general(r: &mut AppRenderer) {
     }
 
     // Button press
-    if tags::has_button(&match &elem_clone { FfonElement::Str(s) => s.clone(), FfonElement::Obj(o) => o.key.clone() }) {
+    if tags::has_button(&match &elem_clone {
+        FfonElement::Str(s) => s.clone(),
+        FfonElement::Obj(o) => o.key.clone(),
+    }) {
         crate::provider::notify_button_pressed(r);
         // Preserve any error set by the button handler — create_list_current_layer clears it.
         let button_error = std::mem::take(&mut r.error_message);
@@ -1420,11 +1496,17 @@ pub fn handle_enter_general(r: &mut AppRenderer) {
 
             // Reset filebrowser to root
             let fb_idx = r.current_id.get(0).unwrap_or(0);
-            if let Some(p) = r.providers.get_mut(fb_idx) { p.set_current_path("/"); }
-            if let Some(FfonElement::Obj(obj)) = r.ffon.get_mut(fb_idx) { obj.children.clear(); }
+            if let Some(p) = r.providers.get_mut(fb_idx) {
+                p.set_current_path("/");
+            }
+            if let Some(FfonElement::Obj(obj)) = r.ffon.get_mut(fb_idx) {
+                obj.children.clear();
+            }
             if let Some(p) = r.providers.get_mut(fb_idx) {
                 let children = p.fetch();
-                if let Some(FfonElement::Obj(obj)) = r.ffon.get_mut(fb_idx) { obj.children = children; }
+                if let Some(FfonElement::Obj(obj)) = r.ffon.get_mut(fb_idx) {
+                    obj.children = children;
+                }
             }
 
             // Load the JSON file into the source provider
@@ -1434,7 +1516,9 @@ pub fn handle_enter_general(r: &mut AppRenderer) {
                         if let Some(FfonElement::Obj(root_obj)) = r.ffon.get_mut(src_idx) {
                             root_obj.children = new_children;
                         }
-                        if let Some(p) = r.providers.get_mut(src_idx) { p.set_current_path("/"); }
+                        if let Some(p) = r.providers.get_mut(src_idx) {
+                            p.set_current_path("/");
+                        }
                         for tl in r.tab_timelines.iter_mut() {
                             tl.entries.clear();
                             tl.position = 0;
@@ -1543,7 +1627,11 @@ pub fn handle_enter_search(r: &mut AppRenderer) {
     r.speak_mode_change(None);
     r.search_string.clear();
     list::create_list_current_layer(r);
-    r.list_index = r.current_id.last().unwrap_or(0).min(r.active_list_len().saturating_sub(1));
+    r.list_index = r
+        .current_id
+        .last()
+        .unwrap_or(0)
+        .min(r.active_list_len().saturating_sub(1));
     record_search_exit_navigation(
         r,
         search_from_id,
@@ -1605,7 +1693,9 @@ fn handle_enter_extended_search(r: &mut AppRenderer) {
         'outer: for d in 1..depth.saturating_sub(1) {
             let mut ancestor_id = sicompass_sdk::ffon::IdArray::new();
             for i in 0..=d {
-                if let Some(v) = selected_id.get(i) { ancestor_id.push(v); }
+                if let Some(v) = selected_id.get(i) {
+                    ancestor_id.push(v);
+                }
             }
             let ancestor_idx = ancestor_id.last().unwrap_or(0);
 
@@ -1630,7 +1720,9 @@ fn handle_enter_extended_search(r: &mut AppRenderer) {
                         break 'outer;
                     }
                     if let Some(s) = child.as_str() {
-                        if tags::has_checked(s) { checked_count += 1; }
+                        if tags::has_checked(s) {
+                            checked_count += 1;
+                        }
                     }
                 }
                 if checked_count > 1 {
@@ -1692,7 +1784,11 @@ fn handle_enter_extended_search(r: &mut AppRenderer) {
     r.input_buffer.clear();
     r.cursor_position = 0;
     list::create_list_current_layer(r);
-    r.list_index = r.current_id.last().unwrap_or(0).min(r.active_list_len().saturating_sub(1));
+    r.list_index = r
+        .current_id
+        .last()
+        .unwrap_or(0)
+        .min(r.active_list_len().saturating_sub(1));
     r.scroll_offset = -1;
     record_search_exit_navigation(
         r,
@@ -1725,7 +1821,10 @@ pub fn split_nav_path(nav_path: &str) -> (&str, &str) {
 /// lookup fails.
 fn snapshot_radio_parent(
     r: &AppRenderer,
-) -> Option<(sicompass_sdk::ffon::FfonElement, sicompass_sdk::ffon::IdArray)> {
+) -> Option<(
+    sicompass_sdk::ffon::FfonElement,
+    sicompass_sdk::ffon::IdArray,
+)> {
     use sicompass_sdk::ffon::get_ffon_at_id;
     if r.current_id.depth() < 2 {
         return None;
@@ -1733,8 +1832,7 @@ fn snapshot_radio_parent(
     let mut parent_id = r.current_id.clone();
     let _ = parent_id.pop();
     let idx = parent_id.last().unwrap_or(0);
-    let before = get_ffon_at_id(&r.ffon, &parent_id)
-        .and_then(|a| a.get(idx).cloned())?;
+    let before = get_ffon_at_id(&r.ffon, &parent_id).and_then(|a| a.get(idx).cloned())?;
     Some((before, parent_id))
 }
 
@@ -1816,7 +1914,9 @@ fn toggle_radio(r: &mut AppRenderer) -> bool {
     // Add <checked> to selected
     let target_text = {
         let arr = get_ffon_at_id(&r.ffon, &parent_id_for_children).unwrap();
-        arr.get(child_idx).and_then(|e| e.as_str()).map(|s| s.to_owned())
+        arr.get(child_idx)
+            .and_then(|e| e.as_str())
+            .map(|s| s.to_owned())
     };
     if let Some(text) = target_text {
         let new_text = tags::format_checked(&tags::strip_display(&text));
@@ -1844,11 +1944,7 @@ fn is_live_input_slot(r: &AppRenderer, key: &str) -> bool {
 /// Obj, and notify the provider so the value survives the next `tick()`-driven
 /// re-fetch. Stays in General mode (the user presses `i` to edit, or Enter to
 /// run).
-fn fill_live_input(
-    r: &mut AppRenderer,
-    parent_id: &sicompass_sdk::ffon::IdArray,
-    value: &str,
-) {
+fn fill_live_input(r: &mut AppRenderer, parent_id: &sicompass_sdk::ffon::IdArray, value: &str) {
     use sicompass_sdk::ffon::{FfonElement, get_ffon_at_id};
     use sicompass_sdk::tags;
 
@@ -1923,8 +2019,8 @@ fn try_handle_live_input_search_enter(
         None
     };
     let parent_is_slot = parent_key.map_or(false, |k| is_live_input_slot(r, &k));
-    let child_of_slot = parent_is_slot
-        && matches!(&elem, Some(FfonElement::Str(s)) if tags::has_button(s));
+    let child_of_slot =
+        parent_is_slot && matches!(&elem, Some(FfonElement::Str(s)) if tags::has_button(s));
 
     if !elem_is_slot && !child_of_slot {
         return false;
@@ -1973,13 +2069,19 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
     } else {
         let arr = match get_ffon_at_id(&r.ffon, &r.current_id) {
             Some(a) => a,
-            None => { handle_escape(r); return; }
+            None => {
+                handle_escape(r);
+                return;
+            }
         };
         let idx = r.current_id.last().unwrap_or(0);
         match arr.get(idx) {
             Some(FfonElement::Str(s)) => (s.clone(), false),
             Some(FfonElement::Obj(o)) => (o.key.clone(), true),
-            None => { handle_escape(r); return; }
+            None => {
+                handle_escape(r);
+                return;
+            }
         }
     };
 
@@ -2000,7 +2102,11 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
     // *live* input. Commit with old="" so the provider's `commit_edit` (which
     // rejects a non-empty `old`) accepts it.
     let is_live_slot = is_obj && is_live_input_slot(r, &elem_text);
-    let old_content = if is_live_slot { String::new() } else { old_content };
+    let old_content = if is_live_slot {
+        String::new()
+    } else {
+        old_content
+    };
     let new_content = r.input_buffer.clone();
 
     // `*` placeholder mode: resolve to Str or Obj at commit time.
@@ -2009,7 +2115,8 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
         match parse_placeholder_prefix(&new_content) {
             PlaceholderKind::Empty => {
                 r.error_message =
-                    "Enter text: '- name' or plain text → string; '+ name' or 'name:' → object".to_owned();
+                    "Enter text: '- name' or plain text → string; '+ name' or 'name:' → object"
+                        .to_owned();
                 r.needs_redraw = true;
                 return; // stay in insert mode
             }
@@ -2037,41 +2144,54 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                     if provider_recorded {
                         reposition_after_placeholder_commit(r, &name);
                     } else if record_placeholder_fs_create(
-                        r, undo_id, &name, FfonElement::new_str(name.clone()), session_start,
+                        r,
+                        undo_id,
+                        &name,
+                        FfonElement::new_str(name.clone()),
+                        session_start,
                     ) {
                         // handled by the filesystem path
                     } else {
-                    // After refresh the `*` placeholder may have shifted position — repoint.
-                    let new_star_idx = {
-                        let arr = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id);
-                        arr.and_then(|a| a.iter().position(|e| matches!(e, FfonElement::Str(s) if is_i_placeholder(s))))
-                    };
-                    if let Some(star_idx) = new_star_idx {
-                        r.current_id.set_last(star_idx);
-                    }
-                    // Retarget the per-keystroke TextChunks onto the committed
-                    // Str. The I_PLACEHOLDER seeded for this edit collapses away
-                    // when the body Obj is re-fetched, so the keystroke ids are
-                    // stale; the chunk whose `before` is the I_PLACEHOLDER then
-                    // carries insert/delete undo semantics (see the TextChunk
-                    // arms in `state::apply_undo`) — no separate Structural.
-                    if crate::provider::is_in_email_compose_body(r) {
-                        let target = format!("<input>{name}</input>");
-                        let found = {
-                            let arr = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id);
+                        // After refresh the `*` placeholder may have shifted position — repoint.
+                        let new_star_idx = {
+                            let arr =
+                                crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id);
                             arr.and_then(|a| {
-                                a.iter().rposition(|e| matches!(e, FfonElement::Str(s) if *s == target))
-                                    .map(|pos| {
-                                        let mut cid = r.current_id.clone();
-                                        cid.set_last(pos);
-                                        (cid, a[pos].clone())
-                                    })
+                                a.iter().position(
+                                    |e| matches!(e, FfonElement::Str(s) if is_i_placeholder(s)),
+                                )
                             })
                         };
-                        if let (Some((cid, elem)), Some(start)) = (found, session_start) {
-                            retarget_insert_session_chunks(r, start, &cid, &elem);
+                        if let Some(star_idx) = new_star_idx {
+                            r.current_id.set_last(star_idx);
                         }
-                    }
+                        // Retarget the per-keystroke TextChunks onto the committed
+                        // Str. The I_PLACEHOLDER seeded for this edit collapses away
+                        // when the body Obj is re-fetched, so the keystroke ids are
+                        // stale; the chunk whose `before` is the I_PLACEHOLDER then
+                        // carries insert/delete undo semantics (see the TextChunk
+                        // arms in `state::apply_undo`) — no separate Structural.
+                        if crate::provider::is_in_email_compose_body(r) {
+                            let target = format!("<input>{name}</input>");
+                            let found = {
+                                let arr =
+                                    crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id);
+                                arr.and_then(|a| {
+                                    a.iter()
+                                        .rposition(
+                                            |e| matches!(e, FfonElement::Str(s) if *s == target),
+                                        )
+                                        .map(|pos| {
+                                            let mut cid = r.current_id.clone();
+                                            cid.set_last(pos);
+                                            (cid, a[pos].clone())
+                                        })
+                                })
+                            };
+                            if let (Some((cid, elem)), Some(start)) = (found, session_start) {
+                                retarget_insert_session_chunks(r, start, &cid, &elem);
+                            }
+                        }
                     }
                 } else {
                     // No provider — update the FFON element in-place with <input> wrapping.
@@ -2082,7 +2202,9 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                     // not on the unhelpful "i <input>name</input>" preview.
                     let idx = r.current_id.last().unwrap_or(0);
                     let after = FfonElement::new_str(format!("<input>{name}</input>"));
-                    if let Some(arr) = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id) {
+                    if let Some(arr) =
+                        crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id)
+                    {
                         if let Some(e) = arr.get_mut(idx) {
                             *e = after.clone();
                         }
@@ -2121,44 +2243,55 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                     if provider_recorded {
                         reposition_after_placeholder_commit(r, &key);
                     } else if record_placeholder_fs_create(
-                        r, undo_id, &key, FfonElement::new_obj(&key), session_start,
+                        r,
+                        undo_id,
+                        &key,
+                        FfonElement::new_obj(&key),
+                        session_start,
                     ) {
                         // handled by the filesystem path
                     } else {
-                    let new_star_idx = {
-                        let arr = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id);
-                        arr.and_then(|a| a.iter().position(|e| matches!(e, FfonElement::Str(s) if is_i_placeholder(s))))
-                    };
-                    if let Some(star_idx) = new_star_idx {
-                        r.current_id.set_last(star_idx);
-                    }
-                    // Retarget the per-keystroke TextChunks onto the committed
-                    // Obj (see the PlaceholderKind::Str arm above).
-                    if crate::provider::is_in_email_compose_body(r) {
-                        let key_trimmed = key.trim().to_owned();
-                        let found = {
-                            let arr = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id);
+                        let new_star_idx = {
+                            let arr =
+                                crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id);
                             arr.and_then(|a| {
-                                a.iter().rposition(|e| {
-                                    if let FfonElement::Obj(o) = e {
-                                        let k = sicompass_sdk::tags::extract_input(&o.key)
-                                            .unwrap_or_else(|| o.key.clone());
-                                        k.trim() == key_trimmed
-                                    } else {
-                                        false
-                                    }
-                                })
-                                .map(|pos| {
-                                    let mut cid = r.current_id.clone();
-                                    cid.set_last(pos);
-                                    (cid, a[pos].clone())
-                                })
+                                a.iter().position(
+                                    |e| matches!(e, FfonElement::Str(s) if is_i_placeholder(s)),
+                                )
                             })
                         };
-                        if let (Some((cid, elem)), Some(start)) = (found, session_start) {
-                            retarget_insert_session_chunks(r, start, &cid, &elem);
+                        if let Some(star_idx) = new_star_idx {
+                            r.current_id.set_last(star_idx);
                         }
-                    }
+                        // Retarget the per-keystroke TextChunks onto the committed
+                        // Obj (see the PlaceholderKind::Str arm above).
+                        if crate::provider::is_in_email_compose_body(r) {
+                            let key_trimmed = key.trim().to_owned();
+                            let found = {
+                                let arr =
+                                    crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id);
+                                arr.and_then(|a| {
+                                    a.iter()
+                                        .rposition(|e| {
+                                            if let FfonElement::Obj(o) = e {
+                                                let k = sicompass_sdk::tags::extract_input(&o.key)
+                                                    .unwrap_or_else(|| o.key.clone());
+                                                k.trim() == key_trimmed
+                                            } else {
+                                                false
+                                            }
+                                        })
+                                        .map(|pos| {
+                                            let mut cid = r.current_id.clone();
+                                            cid.set_last(pos);
+                                            (cid, a[pos].clone())
+                                        })
+                                })
+                            };
+                            if let (Some((cid, elem)), Some(start)) = (found, session_start) {
+                                retarget_insert_session_chunks(r, start, &cid, &elem);
+                            }
+                        }
                     }
                 } else {
                     // No provider — mutate the FFON element directly. Rewrite the
@@ -2167,10 +2300,14 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                     let idx = r.current_id.last().unwrap_or(0);
                     let after = {
                         let mut obj = FfonElement::new_obj(&key);
-                        obj.as_obj_mut().unwrap().push(FfonElement::new_str(String::new()));
+                        obj.as_obj_mut()
+                            .unwrap()
+                            .push(FfonElement::new_str(String::new()));
                         obj
                     };
-                    if let Some(arr) = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id) {
+                    if let Some(arr) =
+                        crate::state::navigate_to_slice_pub(&mut r.ffon, &r.current_id)
+                    {
                         if let Some(e) = arr.get_mut(idx) {
                             *e = after.clone();
                         }
@@ -2200,7 +2337,9 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
         r.cursor_position = 0;
         let saved_error = r.error_message.clone();
         list::create_list_current_layer(r);
-        if !saved_error.is_empty() { r.error_message = saved_error; }
+        if !saved_error.is_empty() {
+            r.error_message = saved_error;
+        }
         r.list_index = r.current_id.last().unwrap_or(0);
         r.scroll_offset = 0;
         return;
@@ -2221,7 +2360,9 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
         let mut n = 0u32;
         loop {
             let full = std::path::Path::new(&save_dir).join(&dest_name);
-            if !full.exists() { break; }
+            if !full.exists() {
+                break;
+            }
             n += 1;
             dest_name = format!("{base} (copy {n}).json");
         }
@@ -2232,11 +2373,18 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
 
         // Save source provider FFON children to file (matching C: saves children, not root wrapper)
         let src_idx = r.save_as_source_root_idx;
-        let save_result = if let Some(sicompass_sdk::ffon::FfonElement::Obj(root_obj)) = r.ffon.get(src_idx) {
-            sicompass_sdk::ffon::save_json_file(&root_obj.children, std::path::Path::new(&dest_full))
-        } else {
-            Err(std::io::Error::new(std::io::ErrorKind::NotFound, "source provider not found"))
-        };
+        let save_result =
+            if let Some(sicompass_sdk::ffon::FfonElement::Obj(root_obj)) = r.ffon.get(src_idx) {
+                sicompass_sdk::ffon::save_json_file(
+                    &root_obj.children,
+                    std::path::Path::new(&dest_full),
+                )
+            } else {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "source provider not found",
+                ))
+            };
 
         // Remove the placeholder element from the filebrowser
         let remove_idx = r.current_id.last().unwrap_or(0);
@@ -2253,7 +2401,9 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
 
         // Reset filebrowser to root
         let fb_idx = r.current_id.get(0).unwrap_or(0);
-        if let Some(p) = r.providers.get_mut(fb_idx) { p.set_current_path("/"); }
+        if let Some(p) = r.providers.get_mut(fb_idx) {
+            p.set_current_path("/");
+        }
         if let Some(FfonElement::Obj(obj)) = r.ffon.get_mut(fb_idx) {
             obj.children.clear();
         }
@@ -2298,14 +2448,24 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
             collapse_typed_name_chunks(r, session_start);
             pop_last_placeholder_structural(r);
             let dir_elem = FfonElement::new_obj(&new_content);
-            record_fs_op(r, undo_id.clone(), sicompass_sdk::timeline::FsOpKind::Create, None, Some(dir_elem));
+            record_fs_op(
+                r,
+                undo_id.clone(),
+                sicompass_sdk::timeline::FsOpKind::Create,
+                None,
+                Some(dir_elem),
+            );
             r.placeholder_cancel = None;
             crate::provider::refresh_current_directory(r);
             list::create_list_current_layer(r);
             {
                 let name = new_content.as_str();
                 let found = r.total_list.iter().position(|item| {
-                    let content = item.label.split_once(' ').map(|(_, c)| c).unwrap_or(&item.label);
+                    let content = item
+                        .label
+                        .split_once(' ')
+                        .map(|(_, c)| c)
+                        .unwrap_or(&item.label);
                     content == name
                 });
                 if let Some(i) = found {
@@ -2334,13 +2494,23 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
             collapse_typed_name_chunks(r, session_start);
             pop_last_placeholder_structural(r);
             let file_elem = FfonElement::new_str(new_content.clone());
-            record_fs_op(r, undo_id.clone(), sicompass_sdk::timeline::FsOpKind::Create, None, Some(file_elem));
+            record_fs_op(
+                r,
+                undo_id.clone(),
+                sicompass_sdk::timeline::FsOpKind::Create,
+                None,
+                Some(file_elem),
+            );
             crate::provider::refresh_current_directory(r);
             list::create_list_current_layer(r);
             {
                 let name = new_content.as_str();
                 let found = r.total_list.iter().position(|item| {
-                    let content = item.label.split_once(' ').map(|(_, c)| c).unwrap_or(&item.label);
+                    let content = item
+                        .label
+                        .split_once(' ')
+                        .map(|(_, c)| c)
+                        .unwrap_or(&item.label);
                     content == name
                 });
                 if let Some(i) = found {
@@ -2378,7 +2548,9 @@ pub fn handle_enter_insert(r: &mut AppRenderer) {
                     r.scroll_offset = 0;
                 }
                 list::create_list_current_layer(r);
-                if !saved_error.is_empty() { r.error_message = saved_error; }
+                if !saved_error.is_empty() {
+                    r.error_message = saved_error;
+                }
                 r.list_index = r.current_id.last().unwrap_or(0);
                 return;
             }
@@ -2631,15 +2803,27 @@ fn parse_placeholder_prefix(input: &str) -> PlaceholderKind {
     }
     if let Some(rest) = t.strip_prefix('+') {
         let name = rest.trim_start().to_owned();
-        return if name.is_empty() { PlaceholderKind::Empty } else { PlaceholderKind::Obj(name) };
+        return if name.is_empty() {
+            PlaceholderKind::Empty
+        } else {
+            PlaceholderKind::Obj(name)
+        };
     }
     if let Some(rest) = t.strip_prefix('-') {
         let name = rest.trim_start().to_owned();
-        return if name.is_empty() { PlaceholderKind::Empty } else { PlaceholderKind::Str(name) };
+        return if name.is_empty() {
+            PlaceholderKind::Empty
+        } else {
+            PlaceholderKind::Str(name)
+        };
     }
     if let Some(name) = t.strip_suffix(':') {
         let name = name.trim().to_owned();
-        return if name.is_empty() { PlaceholderKind::Empty } else { PlaceholderKind::Obj(name) };
+        return if name.is_empty() {
+            PlaceholderKind::Empty
+        } else {
+            PlaceholderKind::Obj(name)
+        };
     }
     PlaceholderKind::Str(t.to_owned())
 }
@@ -2681,7 +2865,9 @@ fn try_cancel_inserted_placeholder(r: &mut AppRenderer, target_general: Coordina
         match cancel.replaced_element {
             Some(orig) if idx < r.ffon.len() => r.ffon[idx] = orig,
             Some(_) => {}
-            None if idx < r.ffon.len() => { r.ffon.remove(idx); }
+            None if idx < r.ffon.len() => {
+                r.ffon.remove(idx);
+            }
             None => {}
         }
     } else if let Some(slice) = crate::state::navigate_to_slice_pub(&mut r.ffon, &parent_id) {
@@ -2690,7 +2876,9 @@ fn try_cancel_inserted_placeholder(r: &mut AppRenderer, target_general: Coordina
             match cancel.replaced_element {
                 Some(orig) if idx < obj.children.len() => obj.children[idx] = orig,
                 Some(_) => {}
-                None if idx < obj.children.len() => { obj.children.remove(idx); }
+                None if idx < obj.children.len() => {
+                    obj.children.remove(idx);
+                }
                 None => {}
             }
         }
@@ -2737,7 +2925,9 @@ pub fn handle_escape(r: &mut AppRenderer) {
                 let mut parent_id = r.current_id.clone();
                 parent_id.pop();
                 let parent_idx = parent_id.last().unwrap_or(0);
-                if let Some(parent_slice) = crate::state::navigate_to_slice_pub(&mut r.ffon, &parent_id) {
+                if let Some(parent_slice) =
+                    crate::state::navigate_to_slice_pub(&mut r.ffon, &parent_id)
+                {
                     if let Some(FfonElement::Obj(obj)) = parent_slice.get_mut(parent_idx) {
                         if remove_idx < obj.children.len() {
                             obj.children.remove(remove_idx);
@@ -2746,11 +2936,17 @@ pub fn handle_escape(r: &mut AppRenderer) {
                 }
                 // Reset filebrowser to root
                 let fb_idx = r.current_id.get(0).unwrap_or(0);
-                if let Some(p) = r.providers.get_mut(fb_idx) { p.set_current_path("/"); }
-                if let Some(FfonElement::Obj(obj)) = r.ffon.get_mut(fb_idx) { obj.children.clear(); }
+                if let Some(p) = r.providers.get_mut(fb_idx) {
+                    p.set_current_path("/");
+                }
+                if let Some(FfonElement::Obj(obj)) = r.ffon.get_mut(fb_idx) {
+                    obj.children.clear();
+                }
                 if let Some(p) = r.providers.get_mut(fb_idx) {
                     let children = p.fetch();
-                    if let Some(FfonElement::Obj(obj)) = r.ffon.get_mut(fb_idx) { obj.children = children; }
+                    if let Some(FfonElement::Obj(obj)) = r.ffon.get_mut(fb_idx) {
+                        obj.children = children;
+                    }
                 }
                 let return_id = r.save_as_return_id.clone();
                 r.current_id = return_id;
@@ -2767,7 +2963,9 @@ pub fn handle_escape(r: &mut AppRenderer) {
                 r.needs_redraw = true;
                 return;
             }
-            if try_cancel_inserted_placeholder(r, Coordinate::General) { return; }
+            if try_cancel_inserted_placeholder(r, Coordinate::General) {
+                return;
+            }
             // Discard the input buffer (Esc cancels) and return to General.
             r.placeholder_insert_mode = false;
             r.input_buffer.clear();
@@ -2896,11 +3094,17 @@ pub fn handle_escape(r: &mut AppRenderer) {
             if r.pending_file_browser_open {
                 use sicompass_sdk::ffon::FfonElement;
                 let fb_idx = r.current_id.get(0).unwrap_or(0);
-                if let Some(p) = r.providers.get_mut(fb_idx) { p.set_current_path("/"); }
-                if let Some(FfonElement::Obj(obj)) = r.ffon.get_mut(fb_idx) { obj.children.clear(); }
+                if let Some(p) = r.providers.get_mut(fb_idx) {
+                    p.set_current_path("/");
+                }
+                if let Some(FfonElement::Obj(obj)) = r.ffon.get_mut(fb_idx) {
+                    obj.children.clear();
+                }
                 if let Some(p) = r.providers.get_mut(fb_idx) {
                     let children = p.fetch();
-                    if let Some(FfonElement::Obj(obj)) = r.ffon.get_mut(fb_idx) { obj.children = children; }
+                    if let Some(FfonElement::Obj(obj)) = r.ffon.get_mut(fb_idx) {
+                        obj.children = children;
+                    }
                 }
                 let return_id = r.save_as_return_id.clone();
                 r.current_id = return_id;
@@ -2929,7 +3133,9 @@ pub fn handle_escape(r: &mut AppRenderer) {
 
 /// Handle a printable text input event.
 pub fn handle_input(r: &mut AppRenderer, text: &str) {
-    if text.is_empty() { return; }
+    if text.is_empty() {
+        return;
+    }
 
     // Interactive-dashboard fast-path: hand the typed text to the active
     // provider verbatim. The provider also receives a separate `dashboard_key`
@@ -2969,7 +3175,9 @@ pub fn handle_input(r: &mut AppRenderer, text: &str) {
             r.needs_redraw = true;
         }
         Coordinate::Command => {
-            if has_selection(r) { delete_selection(r); }
+            if has_selection(r) {
+                delete_selection(r);
+            }
             let pos = r.cursor_position.min(r.input_buffer.len());
             r.input_buffer.insert_str(pos, text);
             r.cursor_position = pos + text.len();
@@ -2997,7 +3205,9 @@ pub fn handle_input(r: &mut AppRenderer, text: &str) {
         }
         Coordinate::Insert => {
             // Replace selection if active
-            if has_selection(r) { delete_selection(r); }
+            if has_selection(r) {
+                delete_selection(r);
+            }
             // Insert text at cursor position (byte offset)
             let pos = r.cursor_position.min(r.input_buffer.len());
             r.input_buffer.insert_str(pos, text);
@@ -3012,7 +3222,9 @@ pub fn handle_input(r: &mut AppRenderer, text: &str) {
             r.needs_redraw = true;
         }
         Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch => {
-            if has_selection(r) { delete_selection(r); }
+            if has_selection(r) {
+                delete_selection(r);
+            }
             let pos = r.cursor_position.min(r.input_buffer.len());
             r.input_buffer.insert_str(pos, text);
             r.cursor_position = pos + text.len();
@@ -3023,7 +3235,9 @@ pub fn handle_input(r: &mut AppRenderer, text: &str) {
         Coordinate::InputSearch => {
             // The query goes into `search_string`; `input_buffer` holds the
             // element text being searched and is never modified here.
-            if has_selection(r) { delete_selection(r); }
+            if has_selection(r) {
+                delete_selection(r);
+            }
             let pos = r.cursor_position.min(r.search_string.len());
             r.search_string.insert_str(pos, text);
             r.cursor_position = pos + text.len();
@@ -3056,7 +3270,12 @@ pub fn handle_backspace(r: &mut AppRenderer) {
                 // Remove char before cursor_position (UTF-8 aware)
                 let pos = r.cursor_position.min(r.search_string.len());
                 let before = &r.search_string[..pos];
-                let new_pos = before.char_indices().rev().next().map(|(i, _)| i).unwrap_or(0);
+                let new_pos = before
+                    .char_indices()
+                    .rev()
+                    .next()
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
                 r.search_string.replace_range(new_pos..pos, "");
                 r.cursor_position = new_pos;
                 let search = r.search_string.clone();
@@ -3078,7 +3297,11 @@ pub fn handle_backspace(r: &mut AppRenderer) {
             } else if r.cursor_position > 0 {
                 let pos = r.cursor_position.min(r.search_string.len());
                 let before = &r.search_string[..pos];
-                let new_pos = before.char_indices().next_back().map(|(i, _)| i).unwrap_or(0);
+                let new_pos = before
+                    .char_indices()
+                    .next_back()
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
                 let ch = r.search_string[new_pos..pos].chars().next();
                 r.search_string.replace_range(new_pos..pos, "");
                 r.cursor_position = new_pos;
@@ -3093,12 +3316,20 @@ pub fn handle_backspace(r: &mut AppRenderer) {
             }
             r.needs_redraw = true;
         }
-        Coordinate::Command | Coordinate::Insert | Coordinate::ScrollSearch | Coordinate::ScrollPrefixSearch | Coordinate::ExtendedSearch | Coordinate::TabSwitcher => {
+        Coordinate::Command
+        | Coordinate::Insert
+        | Coordinate::ScrollSearch
+        | Coordinate::ScrollPrefixSearch
+        | Coordinate::ExtendedSearch
+        | Coordinate::TabSwitcher => {
             let buffer_changed = if has_selection(r) {
                 delete_selection(r);
                 r.caret.reset(sdl_ticks());
                 maybe_update_search(r);
-                if matches!(r.coordinate, Coordinate::Command | Coordinate::ExtendedSearch | Coordinate::TabSwitcher) {
+                if matches!(
+                    r.coordinate,
+                    Coordinate::Command | Coordinate::ExtendedSearch | Coordinate::TabSwitcher
+                ) {
                     r.speak_current_element();
                 }
                 r.needs_redraw = true;
@@ -3106,7 +3337,10 @@ pub fn handle_backspace(r: &mut AppRenderer) {
             } else if r.cursor_position > 0 {
                 // Find the char boundary before cursor
                 let before = &r.input_buffer[..r.cursor_position];
-                let new_end = before.char_indices().rev().next()
+                let new_end = before
+                    .char_indices()
+                    .rev()
+                    .next()
                     .map(|(i, _)| i)
                     .unwrap_or(0);
                 let deleted = r.input_buffer[new_end..r.cursor_position].chars().next();
@@ -3114,7 +3348,10 @@ pub fn handle_backspace(r: &mut AppRenderer) {
                 r.cursor_position = new_end;
                 r.caret.reset(sdl_ticks());
                 maybe_update_search(r);
-                if matches!(r.coordinate, Coordinate::Command | Coordinate::ExtendedSearch | Coordinate::TabSwitcher) {
+                if matches!(
+                    r.coordinate,
+                    Coordinate::Command | Coordinate::ExtendedSearch | Coordinate::TabSwitcher
+                ) {
                     r.speak_current_element();
                 } else if let Some(ch) = deleted {
                     // Insert / scroll-search have no list selection to speak —
@@ -3153,7 +3390,8 @@ pub fn handle_file_delete(r: &mut AppRenderer) {
         if let Some(root) = r.ffon.get_mut(provider_idx) {
             if let Some(obj) = root.as_obj_mut() {
                 if obj.children.is_empty() {
-                    obj.children.push(FfonElement::Str(I_PLACEHOLDER.to_owned()));
+                    obj.children
+                        .push(FfonElement::Str(I_PLACEHOLDER.to_owned()));
                     r.current_id.set_last(0);
                 }
             }
@@ -3176,14 +3414,20 @@ pub fn handle_file_delete(r: &mut AppRenderer) {
 /// Uses the standard FFON Task::Delete path (so undo/redo work) then notifies the
 /// provider about the updated body children via `sync_ffon_body_children`.
 pub fn handle_delete_body_element(r: &mut AppRenderer) {
-    crate::state::update_state(r, crate::app_state::Task::Delete, crate::app_state::History::None);
+    crate::state::update_state(
+        r,
+        crate::app_state::Task::Delete,
+        crate::app_state::History::None,
+    );
 
     // update_ffon's non-editor empty-list fallback inserts a bare "<input></input>".
     // Compose body needs the typed I_PLACEHOLDER ("i <input></input>") so the user
     // sees "i" (inviting insertion) rather than "-i " (a plain input field).
     {
         let is_bare = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.previous_id)
-            .map(|arr| arr.len() == 1 && matches!(&arr[0], FfonElement::Str(s) if s == "<input></input>"))
+            .map(|arr| {
+                arr.len() == 1 && matches!(&arr[0], FfonElement::Str(s) if s == "<input></input>")
+            })
             .unwrap_or(false);
         if is_bare {
             if let Some(arr) = crate::state::navigate_to_slice_pub(&mut r.ffon, &r.previous_id) {
@@ -3194,8 +3438,8 @@ pub fn handle_delete_body_element(r: &mut AppRenderer) {
 
     // Sync provider's compose.draft.body with the updated FFON body children.
     // r.previous_id is the id of the deleted element (set by update_ids inside update_state).
-    let body_children = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.previous_id)
-        .map(|arr| arr.to_vec());
+    let body_children =
+        sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.previous_id).map(|arr| arr.to_vec());
     if let (Some(children), Some(provider_idx)) = (body_children, r.previous_id.get(0)) {
         if let Some(p) = r.providers.get_mut(provider_idx) {
             p.sync_ffon_body_children(&children);
@@ -3298,15 +3542,23 @@ pub fn invoke_provider_delete(r: &mut AppRenderer) {
 /// Mirrors C `handleFileCopy`.
 pub fn handle_file_copy(r: &mut AppRenderer) {
     let current_path = crate::provider::current_path(r).to_owned();
-    let arr = match get_ffon_at_id(&r.ffon, &r.current_id) { Some(a) => a, None => return };
+    let arr = match get_ffon_at_id(&r.ffon, &r.current_id) {
+        Some(a) => a,
+        None => return,
+    };
     let idx = r.current_id.last().unwrap_or(0);
-    let elem = match arr.get(idx) { Some(e) => e, None => return };
+    let elem = match arr.get(idx) {
+        Some(e) => e,
+        None => return,
+    };
     let key = match elem {
         sicompass_sdk::ffon::FfonElement::Str(s) => s.as_str(),
         sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.as_str(),
     };
     let name = tags::strip_display(key);
-    if name.is_empty() { return; }
+    if name.is_empty() {
+        return;
+    }
     r.file_clipboard_path = format!("{current_path}/{name}");
     r.file_clipboard_is_cut = false;
     r.needs_redraw = true;
@@ -3318,15 +3570,23 @@ pub fn handle_file_copy(r: &mut AppRenderer) {
 /// Mirrors C `handleFileCut`.
 pub fn handle_file_cut(r: &mut AppRenderer) {
     let current_path = crate::provider::current_path(r).to_owned();
-    let arr = match get_ffon_at_id(&r.ffon, &r.current_id) { Some(a) => a, None => return };
+    let arr = match get_ffon_at_id(&r.ffon, &r.current_id) {
+        Some(a) => a,
+        None => return,
+    };
     let idx = r.current_id.last().unwrap_or(0);
-    let elem = match arr.get(idx) { Some(e) => e, None => return };
+    let elem = match arr.get(idx) {
+        Some(e) => e,
+        None => return,
+    };
     let key = match elem {
         sicompass_sdk::ffon::FfonElement::Str(s) => s.as_str(),
         sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.as_str(),
     };
     let name = tags::strip_display(key).to_owned();
-    if name.is_empty() { return; }
+    if name.is_empty() {
+        return;
+    }
 
     // Resolve clipboard cache dir
     let cache_dir = {
@@ -3358,13 +3618,20 @@ pub fn handle_file_cut(r: &mut AppRenderer) {
 ///
 /// Resolves name collisions by appending " (copy N)". Mirrors C `handleFilePaste`.
 pub fn handle_file_paste(r: &mut AppRenderer) {
-    if r.file_clipboard_path.is_empty() { return; }
+    if r.file_clipboard_path.is_empty() {
+        return;
+    }
 
     let src_path = r.file_clipboard_path.clone();
-    let slash = match src_path.rfind('/') { Some(p) => p, None => return };
+    let slash = match src_path.rfind('/') {
+        Some(p) => p,
+        None => return,
+    };
     let src_dir = &src_path[..slash];
     let src_name = &src_path[slash + 1..];
-    if src_name.is_empty() { return; }
+    if src_name.is_empty() {
+        return;
+    }
 
     let dest_dir = crate::provider::current_path(r).to_owned();
 
@@ -3374,7 +3641,9 @@ pub fn handle_file_paste(r: &mut AppRenderer) {
         let mut n = 0u32;
         loop {
             let full = format!("{dest_dir}/{candidate}");
-            if !std::path::Path::new(&full).exists() { break; }
+            if !std::path::Path::new(&full).exists() {
+                break;
+            }
             n += 1;
             candidate = format!("{src_name} (copy {n})");
         }
@@ -3459,10 +3728,7 @@ pub fn handle_ctrl_i(r: &mut AppRenderer, history: crate::app_state::History) {
 ///
 /// Mirrors C `handleCtrlEnter`.
 pub fn handle_ctrl_enter(r: &mut AppRenderer) {
-    if matches!(
-        r.coordinate,
-        Coordinate::Insert
-    ) {
+    if matches!(r.coordinate, Coordinate::Insert) {
         handle_input(r, "\n");
     }
 }
@@ -3476,13 +3742,13 @@ pub fn handle_save_provider_config(r: &mut AppRenderer) {
         handle_save_as_provider_config(r);
         return;
     }
-    let idx = match r.current_id.get(0) { Some(i) => i, None => return };
+    let idx = match r.current_id.get(0) {
+        Some(i) => i,
+        None => return,
+    };
     let path = r.current_save_path.clone();
     if let Some(sicompass_sdk::ffon::FfonElement::Obj(root_obj)) = r.ffon.get(idx) {
-        match sicompass_sdk::ffon::save_json_file(
-            &root_obj.children,
-            std::path::Path::new(&path),
-        ) {
+        match sicompass_sdk::ffon::save_json_file(&root_obj.children, std::path::Path::new(&path)) {
             Ok(()) => {
                 r.error_message = format!("Saved to {path}");
             }
@@ -3506,7 +3772,10 @@ pub fn handle_save_provider_config(r: &mut AppRenderer) {
 /// Mirrors C `handleSaveAsProviderConfig` → `handleFileBrowserSaveAs`.
 pub fn handle_save_as_provider_config(r: &mut AppRenderer) {
     // Record which provider we're saving from, and where to return
-    let src_idx = match r.current_id.get(0) { Some(i) => i, None => return };
+    let src_idx = match r.current_id.get(0) {
+        Some(i) => i,
+        None => return,
+    };
     r.save_as_source_root_idx = src_idx;
     r.save_as_return_id = r.current_id.clone();
 
@@ -3538,7 +3807,8 @@ pub fn handle_save_as_provider_config(r: &mut AppRenderer) {
         let parent_idx = parent_id.last().unwrap_or(0);
         if let Some(parent_slice) = crate::state::navigate_to_slice_pub(&mut r.ffon, &parent_id) {
             if let Some(FfonElement::Obj(obj)) = parent_slice.get_mut(parent_idx) {
-                obj.children.insert(0, FfonElement::Str("<input></input>".to_owned()));
+                obj.children
+                    .insert(0, FfonElement::Str("<input></input>".to_owned()));
             }
         }
     }
@@ -3562,7 +3832,10 @@ pub fn handle_save_as_provider_config(r: &mut AppRenderer) {
 /// Mirrors C `handleFileBrowserOpen`.
 pub fn handle_file_browser_open(r: &mut AppRenderer) {
     // Record which provider we're loading into, and where to return
-    let src_idx = match r.current_id.get(0) { Some(i) => i, None => return };
+    let src_idx = match r.current_id.get(0) {
+        Some(i) => i,
+        None => return,
+    };
     r.save_as_source_root_idx = src_idx;
     r.save_as_return_id = r.current_id.clone();
 
@@ -3618,8 +3891,13 @@ fn resolve_save_folder(r: &AppRenderer) -> String {
 ///
 /// Mirrors C `handleLoadProviderConfig` → `handleFileBrowserOpen` → `loadProviderConfigFromFile`.
 pub fn handle_load_provider_config(r: &mut AppRenderer, path: &str) {
-    if path.is_empty() { return; }
-    let idx = match r.current_id.get(0) { Some(i) => i, None => return };
+    if path.is_empty() {
+        return;
+    }
+    let idx = match r.current_id.get(0) {
+        Some(i) => i,
+        None => return,
+    };
 
     match sicompass_sdk::ffon::load_json_file(std::path::Path::new(path)) {
         Ok(new_children) => {
@@ -3690,9 +3968,19 @@ fn populate_input_buffer(r: &mut AppRenderer) {
     // real value), but it carries `input_is_password` so the renderer masks
     // the typed value and the commit re-wraps it as `<password>`.
     let (extracted, open_tag, close_tag, is_password) = if tags::has_password(element_key) {
-        (tags::extract_password(element_key), "<password>", "</password>", true)
+        (
+            tags::extract_password(element_key),
+            "<password>",
+            "</password>",
+            true,
+        )
     } else {
-        (tags::extract_input(element_key), "<input>", "</input>", false)
+        (
+            tags::extract_input(element_key),
+            "<input>",
+            "</input>",
+            false,
+        )
     };
 
     if let Some(content) = extracted {
@@ -3736,9 +4024,9 @@ fn populate_input_buffer(r: &mut AppRenderer) {
 /// Called from `handle_i` / `handle_a` after `populate_input_buffer` so
 /// `input_prefix` / `input_suffix` reflect the current element.
 pub(crate) fn begin_insert_session(r: &mut AppRenderer) {
+    use crate::app_state::InsertSession;
     use sicompass_sdk::ffon::{FfonElement, get_ffon_at_id};
     use sicompass_sdk::tags;
-    use crate::app_state::InsertSession;
 
     let idx = r.current_id.last().unwrap_or(0);
     let elem = match get_ffon_at_id(&r.ffon, &r.current_id).and_then(|a| a.get(idx)) {
@@ -3793,13 +4081,23 @@ pub(crate) fn apply_insert_session_chunk(r: &mut AppRenderer) {
     // navigation. The original "i " lives on in `session.original_element` and
     // the very first chunk's `before` (the I_PLACEHOLDER itself), so Escape
     // and the final undo step still restore the marker.
-    let effective_prefix: &str = if r.placeholder_insert_mode { "" } else { &r.input_prefix };
+    let effective_prefix: &str = if r.placeholder_insert_mode {
+        ""
+    } else {
+        &r.input_prefix
+    };
     // Preserve the tag type so the live FFON (and the list label rebuilt from
     // it) keeps masking a password while it is being typed.
     let new_key = if r.input_is_password {
-        format!("{}<password>{}</password>{}", effective_prefix, r.input_buffer, r.input_suffix)
+        format!(
+            "{}<password>{}</password>{}",
+            effective_prefix, r.input_buffer, r.input_suffix
+        )
     } else {
-        format!("{}<input>{}</input>{}", effective_prefix, r.input_buffer, r.input_suffix)
+        format!(
+            "{}<input>{}</input>{}",
+            effective_prefix, r.input_buffer, r.input_suffix
+        )
     };
     let after = match &before {
         FfonElement::Str(_) => FfonElement::new_str(new_key),
@@ -3939,7 +4237,9 @@ fn delete_selection(r: &mut AppRenderer) {
 fn find_line_start(buf: &str, pos: usize) -> usize {
     let bytes = buf.as_bytes();
     for i in (0..pos).rev() {
-        if bytes[i] == b'\n' { return i + 1; }
+        if bytes[i] == b'\n' {
+            return i + 1;
+        }
     }
     0
 }
@@ -3947,7 +4247,9 @@ fn find_line_start(buf: &str, pos: usize) -> usize {
 fn find_line_end(buf: &str, pos: usize) -> usize {
     let bytes = buf.as_bytes();
     for i in pos..bytes.len() {
-        if bytes[i] == b'\n' { return i; }
+        if bytes[i] == b'\n' {
+            return i;
+        }
     }
     buf.len()
 }
@@ -3961,7 +4263,9 @@ fn utf8_count_chars(buf: &str, from: usize, to: usize) -> usize {
 fn utf8_advance_n(buf: &str, from: usize, n: usize, limit: usize) -> usize {
     let mut pos = from;
     for _ in 0..n {
-        if pos >= limit { break; }
+        if pos >= limit {
+            break;
+        }
         let ch = buf[pos..].chars().next().unwrap();
         pos += ch.len_utf8();
     }
@@ -3977,7 +4281,10 @@ fn utf8_advance_n(buf: &str, from: usize, n: usize, limit: usize) -> usize {
 /// `input_buffer` holds the element text being searched, not the query); all
 /// other text-edit modes use `input_buffer`.
 fn active_text_buf(r: &AppRenderer) -> &str {
-    if matches!(r.coordinate, Coordinate::SimpleSearch | Coordinate::InputSearch) {
+    if matches!(
+        r.coordinate,
+        Coordinate::SimpleSearch | Coordinate::InputSearch
+    ) {
         &r.search_string
     } else {
         &r.input_buffer
@@ -3986,7 +4293,10 @@ fn active_text_buf(r: &AppRenderer) -> &str {
 
 /// Mutable counterpart of [`active_text_buf`].
 fn active_text_buf_mut(r: &mut AppRenderer) -> &mut String {
-    if matches!(r.coordinate, Coordinate::SimpleSearch | Coordinate::InputSearch) {
+    if matches!(
+        r.coordinate,
+        Coordinate::SimpleSearch | Coordinate::InputSearch
+    ) {
         &mut r.search_string
     } else {
         &mut r.input_buffer
@@ -3996,7 +4306,9 @@ fn active_text_buf_mut(r: &mut AppRenderer) -> &mut String {
 /// Ctrl+A in text-input modes — select all.
 pub fn handle_select_all(r: &mut AppRenderer) {
     let len = active_text_buf(r).len();
-    if len == 0 { return; }
+    if len == 0 {
+        return;
+    }
     r.selection_anchor = Some(0);
     r.cursor_position = len;
     r.caret.reset(sdl_ticks());
@@ -4016,7 +4328,11 @@ pub(crate) fn announce_char(r: &mut AppRenderer, ch: char) {
     // While editing a password field, echo every character (typed or
     // cursored-over) as a masking `*` so the screen reader never speaks the
     // secret. Newlines pass through (passwords are single-line anyway).
-    let ch = if r.input_is_password && ch != '\n' { '*' } else { ch };
+    let ch = if r.input_is_password && ch != '\n' {
+        '*'
+    } else {
+        ch
+    };
     announce_text(r, &ch.to_string());
 }
 
@@ -4028,7 +4344,11 @@ pub(crate) fn announce_char(r: &mut AppRenderer, ch: char) {
 /// AccessKit tree diff; screen readers ignore U+200B in speech output.
 pub(crate) fn announce_text(r: &mut AppRenderer, text: &str) {
     r.announcement_parity = !r.announcement_parity;
-    let sentinel = if r.announcement_parity { "\u{200B}" } else { "" };
+    let sentinel = if r.announcement_parity {
+        "\u{200B}"
+    } else {
+        ""
+    };
     r.pending_announcement = Some(format!("{text}{sentinel}"));
 }
 
@@ -4038,7 +4358,9 @@ pub(crate) fn announce_text(r: &mut AppRenderer, text: &str) {
 /// to `*` per character in password fields. No-op on empty text.
 pub(crate) fn announce_typed_text(r: &mut AppRenderer, text: &str) {
     let mut chars = text.chars();
-    let Some(first) = chars.next() else { return; };
+    let Some(first) = chars.next() else {
+        return;
+    };
     if chars.next().is_none() {
         announce_char(r, first);
         return;
@@ -4053,7 +4375,9 @@ pub(crate) fn announce_typed_text(r: &mut AppRenderer, text: &str) {
 
 /// Shift+Left — extend selection one character to the left.
 pub fn handle_shift_left(r: &mut AppRenderer) {
-    if r.cursor_position == 0 { return; }
+    if r.cursor_position == 0 {
+        return;
+    }
     if r.selection_anchor.is_none() {
         r.selection_anchor = Some(r.cursor_position);
     }
@@ -4071,11 +4395,16 @@ pub fn handle_shift_left(r: &mut AppRenderer) {
 
 /// Shift+Right — extend selection one character to the right.
 pub fn handle_shift_right(r: &mut AppRenderer) {
-    if r.cursor_position >= active_text_buf(r).len() { return; }
+    if r.cursor_position >= active_text_buf(r).len() {
+        return;
+    }
     if r.selection_anchor.is_none() {
         r.selection_anchor = Some(r.cursor_position);
     }
-    let ch = active_text_buf(r)[r.cursor_position..].chars().next().unwrap();
+    let ch = active_text_buf(r)[r.cursor_position..]
+        .chars()
+        .next()
+        .unwrap();
     r.cursor_position += ch.len_utf8();
     announce_char(r, ch);
     r.caret.reset(sdl_ticks());
@@ -4183,7 +4512,9 @@ pub fn handle_shift_end(r: &mut AppRenderer) {
 pub fn handle_up_insert(r: &mut AppRenderer) {
     let pos = r.cursor_position;
     let cur_line_start = find_line_start(&r.input_buffer, pos);
-    if cur_line_start == 0 { return; }
+    if cur_line_start == 0 {
+        return;
+    }
     let col = utf8_count_chars(&r.input_buffer, cur_line_start, pos);
     let prev_line_end = cur_line_start - 1; // the '\n'
     let prev_line_start = find_line_start(&r.input_buffer, prev_line_end);
@@ -4198,7 +4529,9 @@ pub fn handle_down_insert(r: &mut AppRenderer) {
     let pos = r.cursor_position;
     let buf_len = r.input_buffer.len();
     let cur_line_end = find_line_end(&r.input_buffer, pos);
-    if cur_line_end >= buf_len { return; }
+    if cur_line_end >= buf_len {
+        return;
+    }
     let cur_line_start = find_line_start(&r.input_buffer, pos);
     let col = utf8_count_chars(&r.input_buffer, cur_line_start, pos);
     let next_line_start = cur_line_end + 1;
@@ -4213,8 +4546,12 @@ pub fn handle_down_insert(r: &mut AppRenderer) {
 pub fn handle_shift_up_insert(r: &mut AppRenderer) {
     let pos = r.cursor_position;
     let cur_line_start = find_line_start(&r.input_buffer, pos);
-    if cur_line_start == 0 { return; }
-    if r.selection_anchor.is_none() { r.selection_anchor = Some(pos); }
+    if cur_line_start == 0 {
+        return;
+    }
+    if r.selection_anchor.is_none() {
+        r.selection_anchor = Some(pos);
+    }
     let col = utf8_count_chars(&r.input_buffer, cur_line_start, pos);
     let prev_line_end = cur_line_start - 1;
     let prev_line_start = find_line_start(&r.input_buffer, prev_line_end);
@@ -4228,8 +4565,12 @@ pub fn handle_shift_down_insert(r: &mut AppRenderer) {
     let pos = r.cursor_position;
     let buf_len = r.input_buffer.len();
     let cur_line_end = find_line_end(&r.input_buffer, pos);
-    if cur_line_end >= buf_len { return; }
-    if r.selection_anchor.is_none() { r.selection_anchor = Some(pos); }
+    if cur_line_end >= buf_len {
+        return;
+    }
+    if r.selection_anchor.is_none() {
+        r.selection_anchor = Some(pos);
+    }
     let cur_line_start = find_line_start(&r.input_buffer, pos);
     let col = utf8_count_chars(&r.input_buffer, cur_line_start, pos);
     let next_line_start = cur_line_end + 1;
@@ -4296,15 +4637,21 @@ fn maybe_update_search(r: &mut AppRenderer) {
 fn sdl_set_clipboard(text: &str) {
     use std::ffi::CString;
     if let Ok(c) = CString::new(text) {
-        unsafe { sdl3::sys::clipboard::SDL_SetClipboardText(c.as_ptr()); }
+        unsafe {
+            sdl3::sys::clipboard::SDL_SetClipboardText(c.as_ptr());
+        }
     }
 }
 
 pub(crate) fn sdl_get_clipboard() -> Option<String> {
     unsafe {
-        if !sdl3::sys::clipboard::SDL_HasClipboardText() { return None; }
+        if !sdl3::sys::clipboard::SDL_HasClipboardText() {
+            return None;
+        }
         let ptr = sdl3::sys::clipboard::SDL_GetClipboardText();
-        if ptr.is_null() { return None; }
+        if ptr.is_null() {
+            return None;
+        }
         let s = std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned();
         sdl3::sys::stdinc::SDL_free(ptr as *mut _);
         if s.is_empty() { None } else { Some(s) }
@@ -4356,7 +4703,11 @@ unsafe extern "C" fn clipboard_image_cb(
     } else {
         &payload.text
     };
-    if !size.is_null() { unsafe { *size = data.len(); } }
+    if !size.is_null() {
+        unsafe {
+            *size = data.len();
+        }
+    }
     data.as_ptr() as *const std::ffi::c_void
 }
 
@@ -4382,7 +4733,12 @@ fn sdl_set_clipboard_image(html: Vec<u8>, image: Option<(Vec<u8>, Vec<u8>)>, tex
     use std::ffi::CString;
     let include_image = image.is_some();
     let (png, bmp) = image.unwrap_or_default();
-    let payload = Box::new(ClipboardImagePayload { html, png, bmp, text: text.into_bytes() });
+    let payload = Box::new(ClipboardImagePayload {
+        html,
+        png,
+        bmp,
+        text: text.into_bytes(),
+    });
     let userdata = Box::into_raw(payload) as *mut std::ffi::c_void;
     // SDL copies the mime list during the call, so these CStrings need only live
     // until SDL_SetClipboardData returns. text/plain is listed last so it wins
@@ -4430,7 +4786,9 @@ fn image_prefix_suffix(raw: &str) -> (String, String) {
 
 /// HTML-escape `&`, `<`, `>` for safe interpolation into clipboard HTML.
 fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// Build the `text/html` clipboard fragment: prefix text, the image embedded as
@@ -4492,14 +4850,16 @@ pub(crate) fn is_text_edit_mode(r: &AppRenderer) -> bool {
 ///
 /// Used to route Ctrl+C/X/V to filesystem clipboard ops in General.
 pub(crate) fn active_provider_is_filebrowser(r: &AppRenderer) -> bool {
-    r.current_id.get(0)
+    r.current_id
+        .get(0)
         .and_then(|i| r.providers.get(i))
         .map(|p| p.name() == "filebrowser")
         .unwrap_or(false)
 }
 
 pub(crate) fn active_provider_is_editor(r: &AppRenderer) -> bool {
-    r.current_id.get(0)
+    r.current_id
+        .get(0)
         .and_then(|i| r.providers.get(i))
         .map(|p| p.has_editor_semantics())
         .unwrap_or(false)
@@ -4510,20 +4870,24 @@ pub(crate) fn active_provider_is_editor(r: &AppRenderer) -> bool {
 fn editor_slice_has_src(r: &AppRenderer) -> bool {
     use sicompass_sdk::ffon::get_ffon_at_id;
     get_ffon_at_id(&r.ffon, &r.current_id)
-        .map(|slice| slice.iter().any(|e| {
-            let k = match e {
-                sicompass_sdk::ffon::FfonElement::Str(s) => s.as_str(),
-                sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.as_str(),
-            };
-            sicompass_sdk::tags::has_src(k)
-        }))
+        .map(|slice| {
+            slice.iter().any(|e| {
+                let k = match e {
+                    sicompass_sdk::ffon::FfonElement::Str(s) => s.as_str(),
+                    sicompass_sdk::ffon::FfonElement::Obj(o) => o.key.as_str(),
+                };
+                sicompass_sdk::tags::has_src(k)
+            })
+        })
         .unwrap_or(false)
 }
 
 /// Press `i` in the editor provider — enter Insert so Enter calls
 /// `commit_edit`, which writes changes to disk.
 pub fn handle_editor_provider_i(r: &mut AppRenderer) {
-    if !matches!(r.coordinate, Coordinate::General) { return; }
+    if !matches!(r.coordinate, Coordinate::General) {
+        return;
+    }
     r.previous_coordinate = r.coordinate;
     r.coordinate = Coordinate::Insert;
     populate_input_buffer(r);
@@ -4540,7 +4904,9 @@ pub fn handle_editor_provider_i(r: &mut AppRenderer) {
 
 /// Press `a` in the editor provider — enter Insert with cursor at end.
 pub fn handle_editor_provider_a(r: &mut AppRenderer) {
-    if !matches!(r.coordinate, Coordinate::General) { return; }
+    if !matches!(r.coordinate, Coordinate::General) {
+        return;
+    }
     r.previous_coordinate = r.coordinate;
     r.coordinate = Coordinate::Insert;
     populate_input_buffer(r);
@@ -4559,13 +4925,22 @@ pub fn handle_editor_provider_a(r: &mut AppRenderer) {
 pub fn handle_editor_ctrl_i(r: &mut AppRenderer) {
     let in_file_view = editor_slice_has_src(r);
     let slice_len = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)
-        .map(|s| s.len()).unwrap_or(0);
+        .map(|s| s.len())
+        .unwrap_or(0);
     if in_file_view {
         insert_editor_file_line(r, false);
     } else {
-        if slice_len == 0 && r.current_id.depth() <= 1 { return; }
-        let insert_idx = if slice_len == 0 { 0 }
-            else { r.current_id.last().unwrap_or(0).min(slice_len.saturating_sub(1)) };
+        if slice_len == 0 && r.current_id.depth() <= 1 {
+            return;
+        }
+        let insert_idx = if slice_len == 0 {
+            0
+        } else {
+            r.current_id
+                .last()
+                .unwrap_or(0)
+                .min(slice_len.saturating_sub(1))
+        };
         insert_editor_dir_placeholder(r, insert_idx);
     }
 }
@@ -4574,13 +4949,23 @@ pub fn handle_editor_ctrl_i(r: &mut AppRenderer) {
 pub fn handle_editor_ctrl_a(r: &mut AppRenderer) {
     let in_file_view = editor_slice_has_src(r);
     let slice_len = sicompass_sdk::ffon::get_ffon_at_id(&r.ffon, &r.current_id)
-        .map(|s| s.len()).unwrap_or(0);
+        .map(|s| s.len())
+        .unwrap_or(0);
     if in_file_view {
         insert_editor_file_line(r, true);
     } else {
-        if slice_len == 0 && r.current_id.depth() <= 1 { return; }
-        let insert_idx = if slice_len == 0 { 0 }
-            else { r.current_id.last().unwrap_or(0).min(slice_len.saturating_sub(1)) + 1 };
+        if slice_len == 0 && r.current_id.depth() <= 1 {
+            return;
+        }
+        let insert_idx = if slice_len == 0 {
+            0
+        } else {
+            r.current_id
+                .last()
+                .unwrap_or(0)
+                .min(slice_len.saturating_sub(1))
+                + 1
+        };
         insert_editor_dir_placeholder(r, insert_idx);
     }
 }
@@ -4589,8 +4974,8 @@ pub fn handle_editor_ctrl_a(r: &mut AppRenderer) {
 /// Enters Insert on the typed `i` placeholder — the unified insert flow; the
 /// editor's `commit_edit` performs the on-disk file/dir creation.
 fn insert_editor_dir_placeholder(r: &mut AppRenderer, insert_idx: usize) {
-    use sicompass_sdk::ffon::FfonElement;
     use crate::app_state::PlaceholderCancel;
+    use sicompass_sdk::ffon::FfonElement;
 
     let depth = r.current_id.depth();
     let placeholder = FfonElement::Str(I_PLACEHOLDER.to_owned());
@@ -4636,9 +5021,9 @@ fn insert_editor_dir_placeholder(r: &mut AppRenderer, insert_idx: usize) {
 /// Encodes the target source-line index as `<srcins=N>` inside the placeholder.
 /// `after = false` → insert before current element; `after = true` → insert after.
 fn insert_editor_file_line(r: &mut AppRenderer, after: bool) {
+    use crate::app_state::PlaceholderCancel;
     use sicompass_sdk::ffon::{FfonElement, get_ffon_at_id};
     use sicompass_sdk::tags;
-    use crate::app_state::PlaceholderCancel;
 
     let (elem_key, _is_obj) = {
         let arr = match get_ffon_at_id(&r.ffon, &r.current_id) {
@@ -4662,10 +5047,17 @@ fn insert_editor_file_line(r: &mut AppRenderer, after: bool) {
     let insert_src_line = if after { src_line + 1 } else { src_line };
     // "ci " prefix sits outside <input> (parallel to I_PLACEHOLDER's "i ") so the
     // list-label builder can render this placeholder as the bare label "ci".
-    let placeholder_key = format!("ci <input>{}</input>", tags::format_src_insert(insert_src_line));
+    let placeholder_key = format!(
+        "ci <input>{}</input>",
+        tags::format_src_insert(insert_src_line)
+    );
 
     let current_ffon_idx = r.current_id.last().unwrap_or(0);
-    let insert_ffon_idx = if after { current_ffon_idx + 1 } else { current_ffon_idx };
+    let insert_ffon_idx = if after {
+        current_ffon_idx + 1
+    } else {
+        current_ffon_idx
+    };
     let return_id = r.current_id.clone();
     let placeholder = FfonElement::new_str(placeholder_key);
     let depth = r.current_id.depth();
@@ -4708,7 +5100,9 @@ fn insert_editor_file_line(r: &mut AppRenderer, after: bool) {
 /// Ctrl+X — cut selected text (insert modes) or cut FFON element (general mode).
 pub fn handle_ctrl_x(r: &mut AppRenderer) {
     if is_text_edit_mode(r) {
-        if !has_selection(r) { return; }
+        if !has_selection(r) {
+            return;
+        }
         if let Some((start, end)) = selection_range(r) {
             sdl_set_clipboard(&active_text_buf(r)[start..end].to_owned());
         }
@@ -4796,14 +5190,18 @@ pub(crate) fn copy_underlying_value(raw: &str) -> String {
 /// the filebrowser file-copy and compose/structural internal-clipboard behaviors.
 pub fn handle_ctrl_c(r: &mut AppRenderer) {
     if is_text_edit_mode(r) {
-        if !has_selection(r) { return; }
+        if !has_selection(r) {
+            return;
+        }
         if let Some((start, end)) = selection_range(r) {
             sdl_set_clipboard(&active_text_buf(r)[start..end].to_owned());
         }
         r.needs_redraw = true;
         return;
     }
-    if !matches!(r.coordinate, Coordinate::General) { return; }
+    if !matches!(r.coordinate, Coordinate::General) {
+        return;
+    }
 
     let focused = focused_list_element(r);
 
@@ -4846,7 +5244,9 @@ pub fn handle_ctrl_c(r: &mut AppRenderer) {
         if !copied_image {
             // Plain text (also the fallback when an image fails to load).
             let display = copy_display_text(raw);
-            if !display.is_empty() { sdl_set_clipboard(&display); }
+            if !display.is_empty() {
+                sdl_set_clipboard(&display);
+            }
         }
     }
 
@@ -4866,18 +5266,29 @@ pub fn handle_ctrl_c(r: &mut AppRenderer) {
 /// Ctrl+Shift+C — copy the focused element's underlying value (link URL, image
 /// path, input value) to the system clipboard; falls back to display text.
 pub fn handle_ctrl_shift_c(r: &mut AppRenderer) {
-    if !matches!(r.coordinate, Coordinate::General) { return; }
-    let Some(raw) = focused_element_raw(r) else { return; };
+    if !matches!(r.coordinate, Coordinate::General) {
+        return;
+    }
+    let Some(raw) = focused_element_raw(r) else {
+        return;
+    };
     let value = copy_underlying_value(&raw);
-    if !value.is_empty() { sdl_set_clipboard(&value); }
+    if !value.is_empty() {
+        sdl_set_clipboard(&value);
+    }
     r.needs_redraw = true;
 }
 
 /// Ctrl+V — paste from system clipboard (insert modes), file paste (filebrowser), or FFON paste.
 pub fn handle_ctrl_v(r: &mut AppRenderer) {
     if is_text_edit_mode(r) {
-        let text = match sdl_get_clipboard() { Some(t) => t, None => return };
-        if has_selection(r) { delete_selection(r); }
+        let text = match sdl_get_clipboard() {
+            Some(t) => t,
+            None => return,
+        };
+        if has_selection(r) {
+            delete_selection(r);
+        }
         let pos = r.cursor_position.min(active_text_buf(r).len());
         active_text_buf_mut(r).insert_str(pos, &text);
         r.cursor_position = pos + text.len();
@@ -4901,7 +5312,9 @@ pub fn handle_ctrl_v(r: &mut AppRenderer) {
             Some(FfonElement::Obj(o)) => format!("{}:", o.key),
             None => return,
         };
-        if new_content.is_empty() { return; }
+        if new_content.is_empty() {
+            return;
+        }
         let committed = crate::provider::commit_edit(r, "", &new_content);
         if committed {
             if !crate::provider::refresh_subtree_parent(r) {
@@ -4945,10 +5358,19 @@ pub(crate) fn find_matches_ci(text: &str, query: &str) -> Vec<(usize, usize)> {
         while !q.is_empty() {
             match chars.get(ci) {
                 Some((_, _, lc)) => match q.strip_prefix(lc.as_str()) {
-                    Some(rest) => { q = rest; ci += 1; }
-                    None => { ok = false; break; }
+                    Some(rest) => {
+                        q = rest;
+                        ci += 1;
+                    }
+                    None => {
+                        ok = false;
+                        break;
+                    }
                 },
-                None => { ok = false; break; }
+                None => {
+                    ok = false;
+                    break;
+                }
             }
         }
         if ok && ci > start {
@@ -4993,7 +5415,9 @@ fn recompute_input_search_matches(r: &mut AppRenderer) {
 /// screen-reader user needs to judge the hit, and it adds no locale strings.
 fn announce_input_search_match(r: &mut AppRenderer) {
     let matches = input_search_matches(r);
-    let Some(&(off, _)) = matches.get(r.input_search_current_match) else { return };
+    let Some(&(off, _)) = matches.get(r.input_search_current_match) else {
+        return;
+    };
     let buf = &r.input_buffer;
     let off = off.min(buf.len());
     let start = buf[..off].rfind('\n').map(|i| i + 1).unwrap_or(0);
@@ -5084,7 +5508,8 @@ pub fn handle_ctrl_f(r: &mut AppRenderer) {
                 r.scroll_offset = 0;
                 list::create_list_extended_search(r);
                 r.list_index = 0;
-                let ctx = r.current_list_item()
+                let ctx = r
+                    .current_list_item()
                     .map(|it| crate::accesskit_sdl::label_to_speech(&it.label));
                 r.speak_mode_change(ctx);
             }
@@ -5107,10 +5532,13 @@ pub fn handle_ctrl_f(r: &mut AppRenderer) {
             // so `current_id.last()` (an index into the immediate layer) does
             // not address it. Select the flattened-list item whose id matches
             // the focused element so search opens on it, not the first row.
-            r.list_index = r.total_list.iter()
+            r.list_index = r
+                .total_list
+                .iter()
                 .position(|it| it.id == r.current_id)
                 .unwrap_or(0);
-            let ctx = r.current_list_item()
+            let ctx = r
+                .current_list_item()
                 .map(|it| crate::accesskit_sdl::label_to_speech(&it.label));
             r.speak_mode_change(ctx);
             r.last_keypress_time = sdl_ticks();
@@ -5133,7 +5561,9 @@ pub(crate) fn active_dashboard_is_interactive(r: &AppRenderer) -> bool {
 /// terminal (which can only be cleanly exited via the program emitting
 /// `ESC[?1049l`) can refuse manual entry while still being auto-launched.
 pub fn handle_dashboard(r: &mut AppRenderer) {
-    let allowed = r.current_id.get(0)
+    let allowed = r
+        .current_id
+        .get(0)
         .and_then(|i| r.providers.get(i))
         .map(|p| p.manual_dashboard_entry_allowed())
         .unwrap_or(false);
@@ -5221,10 +5651,15 @@ pub fn handle_ctrl_i_general(r: &mut AppRenderer) {
         None => return,
     };
     let insert_idx = if slice.is_empty() {
-        if r.current_id.depth() <= 1 { return; }
+        if r.current_id.depth() <= 1 {
+            return;
+        }
         0
     } else {
-        r.current_id.last().unwrap_or(0).min(slice.len().saturating_sub(1))
+        r.current_id
+            .last()
+            .unwrap_or(0)
+            .min(slice.len().saturating_sub(1))
     };
     if crate::provider::is_in_email_compose_body(r) {
         insert_placeholder_typed(r, insert_idx);
@@ -5243,10 +5678,16 @@ pub fn handle_ctrl_a_general(r: &mut AppRenderer) {
         None => return,
     };
     let insert_idx = if slice.is_empty() {
-        if r.current_id.depth() <= 1 { return; }
+        if r.current_id.depth() <= 1 {
+            return;
+        }
         0
     } else {
-        r.current_id.last().unwrap_or(0).min(slice.len().saturating_sub(1)) + 1
+        r.current_id
+            .last()
+            .unwrap_or(0)
+            .min(slice.len().saturating_sub(1))
+            + 1
     };
     if crate::provider::is_in_email_compose_body(r) {
         insert_placeholder_typed(r, insert_idx);
@@ -5264,10 +5705,15 @@ pub fn handle_ctrl_shift_i_placeholder(r: &mut AppRenderer) {
         None => return,
     };
     let insert_idx = if slice.is_empty() {
-        if r.current_id.depth() <= 1 { return; }
+        if r.current_id.depth() <= 1 {
+            return;
+        }
         0
     } else {
-        r.current_id.last().unwrap_or(0).min(slice.len().saturating_sub(1))
+        r.current_id
+            .last()
+            .unwrap_or(0)
+            .min(slice.len().saturating_sub(1))
     };
     insert_placeholder_typed(r, insert_idx);
 }
@@ -5280,10 +5726,16 @@ pub fn handle_ctrl_shift_a_placeholder(r: &mut AppRenderer) {
         None => return,
     };
     let insert_idx = if slice.is_empty() {
-        if r.current_id.depth() <= 1 { return; }
+        if r.current_id.depth() <= 1 {
+            return;
+        }
         0
     } else {
-        r.current_id.last().unwrap_or(0).min(slice.len().saturating_sub(1)) + 1
+        r.current_id
+            .last()
+            .unwrap_or(0)
+            .min(slice.len().saturating_sub(1))
+            + 1
     };
     insert_placeholder_typed(r, insert_idx);
 }
@@ -5358,7 +5810,11 @@ fn insert_general_placeholder(r: &mut AppRenderer, insert_idx: usize) {
                 .unwrap_or_default()
         };
         siblings.into_iter().find(|e| {
-            if let FfonElement::Obj(obj) = e { obj.key == "Add element:" } else { false }
+            if let FfonElement::Obj(obj) = e {
+                obj.key == "Add element:"
+            } else {
+                false
+            }
         })
     };
 
@@ -5369,7 +5825,8 @@ fn insert_general_placeholder(r: &mut AppRenderer, insert_idx: usize) {
         } else {
             let mut parent_id = r.current_id.clone();
             parent_id.pop();
-            if let Some(parent_slice) = crate::state::navigate_to_slice_pub(&mut r.ffon, &parent_id) {
+            if let Some(parent_slice) = crate::state::navigate_to_slice_pub(&mut r.ffon, &parent_id)
+            {
                 let parent_idx = parent_id.last().unwrap_or(0);
                 if let Some(FfonElement::Obj(obj)) = parent_slice.get_mut(parent_idx) {
                     obj.children.insert(insert_idx, clone);
@@ -5543,8 +6000,11 @@ pub fn handle_search_left(r: &mut AppRenderer) {
         r.caret.reset(sdl_ticks());
         r.needs_redraw = true;
     } else {
-        let path_before = if active_provider_is_filebrowser(r)
-            { Some(crate::provider::current_path(r).to_owned()) } else { None };
+        let path_before = if active_provider_is_filebrowser(r) {
+            Some(crate::provider::current_path(r).to_owned())
+        } else {
+            None
+        };
         let search_from_id = r.search_origin_id.clone();
         if navigate_left_raw(r) {
             if r.coordinate == Coordinate::ExtendedSearch {
@@ -5556,7 +6016,10 @@ pub fn handle_search_left(r: &mut AppRenderer) {
                 r.cursor_position = 0;
                 list::create_list_current_layer(r);
             }
-            r.list_index = r.current_id.last().unwrap_or(0)
+            r.list_index = r
+                .current_id
+                .last()
+                .unwrap_or(0)
                 .min(r.active_list_len().saturating_sub(1));
             record_search_exit_navigation(
                 r,
@@ -5595,8 +6058,11 @@ pub fn handle_search_right(r: &mut AppRenderer) {
         r.needs_redraw = true;
     } else if r.coordinate == Coordinate::ExtendedSearch {
         let search_from_id = r.search_origin_id.clone();
-        let path_before = if active_provider_is_filebrowser(r) && search_from_id.depth() >= 2
-            { Some(crate::provider::current_path(r).to_owned()) } else { None };
+        let path_before = if active_provider_is_filebrowser(r) && search_from_id.depth() >= 2 {
+            Some(crate::provider::current_path(r).to_owned())
+        } else {
+            None
+        };
         if let Some(item) = r.current_list_item().cloned() {
             if let Some(ref nav_path) = item.nav_path {
                 let root_idx = item.id.get(0).unwrap_or(0);
@@ -5616,7 +6082,10 @@ pub fn handle_search_right(r: &mut AppRenderer) {
                 );
                 r.search_origin_id = r.current_id.clone();
                 list::create_list_extended_search(r);
-                r.list_index = r.current_id.last().unwrap_or(0)
+                r.list_index = r
+                    .current_id
+                    .last()
+                    .unwrap_or(0)
                     .min(r.active_list_len().saturating_sub(1));
                 r.scroll_offset = r.list_index as i32;
                 r.needs_redraw = true;
@@ -5625,8 +6094,11 @@ pub fn handle_search_right(r: &mut AppRenderer) {
     } else {
         // SimpleSearch at cursor end — navigate into selected item.
         let search_from_id = r.search_origin_id.clone();
-        let path_before = if active_provider_is_filebrowser(r) && search_from_id.depth() >= 2
-            { Some(crate::provider::current_path(r).to_owned()) } else { None };
+        let path_before = if active_provider_is_filebrowser(r) && search_from_id.depth() >= 2 {
+            Some(crate::provider::current_path(r).to_owned())
+        } else {
+            None
+        };
         r.search_string.clear();
         r.cursor_position = 0;
         if let Some(item_id) = r.current_list_item_id() {
@@ -5641,7 +6113,10 @@ pub fn handle_search_right(r: &mut AppRenderer) {
             );
             r.search_origin_id = r.current_id.clone();
             list::create_list_current_layer(r);
-            r.list_index = r.current_id.last().unwrap_or(0)
+            r.list_index = r
+                .current_id
+                .last()
+                .unwrap_or(0)
                 .min(r.active_list_len().saturating_sub(1));
             r.scroll_offset = r.list_index as i32;
             r.needs_redraw = true;
@@ -5716,7 +6191,11 @@ fn is_empty_placeholder(key: &str) -> bool {
 }
 
 /// Replace the element at `replace_idx` in the FFON tree at the current navigation depth.
-fn replace_ffon_element(r: &mut AppRenderer, replace_idx: usize, elem: sicompass_sdk::ffon::FfonElement) {
+fn replace_ffon_element(
+    r: &mut AppRenderer,
+    replace_idx: usize,
+    elem: sicompass_sdk::ffon::FfonElement,
+) {
     if r.current_id.depth() <= 1 {
         if replace_idx < r.ffon.len() {
             r.ffon[replace_idx] = elem;
@@ -5728,7 +6207,10 @@ fn replace_ffon_element(r: &mut AppRenderer, replace_idx: usize, elem: sicompass
     parent_id.pop();
 
     let parent_idx = parent_id.last().unwrap_or(0);
-    if get_ffon_at_id(&r.ffon, &parent_id).and_then(|s| s.get(parent_idx)).is_none() {
+    if get_ffon_at_id(&r.ffon, &parent_id)
+        .and_then(|s| s.get(parent_idx))
+        .is_none()
+    {
         return;
     }
 
@@ -5757,7 +6239,11 @@ fn replace_ffon_element(r: &mut AppRenderer, replace_idx: usize, elem: sicompass
 ///
 /// - Depth 1 (root level): inserts directly into `r.ffon`.
 /// - Depth > 1: finds the parent object and inserts into its children.
-fn insert_ffon_element(r: &mut AppRenderer, insert_idx: usize, elem: sicompass_sdk::ffon::FfonElement) {
+fn insert_ffon_element(
+    r: &mut AppRenderer,
+    insert_idx: usize,
+    elem: sicompass_sdk::ffon::FfonElement,
+) {
     if r.current_id.depth() <= 1 {
         r.ffon.insert(insert_idx, elem);
         return;
@@ -5769,7 +6255,10 @@ fn insert_ffon_element(r: &mut AppRenderer, insert_idx: usize, elem: sicompass_s
 
     // Bounds-check the parent exists before walking mutably
     let parent_idx = parent_id.last().unwrap_or(0);
-    if get_ffon_at_id(&r.ffon, &parent_id).and_then(|s| s.get(parent_idx)).is_none() {
+    if get_ffon_at_id(&r.ffon, &parent_id)
+        .and_then(|s| s.get(parent_idx))
+        .is_none()
+    {
         return;
     }
 
@@ -5851,25 +6340,36 @@ pub fn restorable_nav(
 }
 
 pub(crate) fn persist_tabs(r: &mut AppRenderer) {
-    let arr: Vec<serde_json::Value> = r.tabs.iter().enumerate().map(|(i, t)| {
-        // The active tab's providers are the live set; the rest are parked in
-        // their own slot.
-        let providers: &[Box<dyn sicompass_sdk::provider::Provider>] =
-            if i == r.active_tab { &r.providers } else { &t.providers };
-        let nav = restorable_nav(providers, &t.current_id, &t.provider_path);
-        let ids: Vec<serde_json::Value> = nav.current_id.as_slice().iter()
-            .map(|&n| serde_json::Value::from(n as u64))
-            .collect();
-        let mut obj = serde_json::Map::new();
-        obj.insert("id".to_string(), serde_json::Value::Array(ids));
-        obj.insert("path".to_string(), serde_json::Value::String(nav.path));
-        if nav.on_path {
-            // Absent in configs written by older builds, which is exactly the
-            // `false` default the reader applies.
-            obj.insert("onPath".to_string(), serde_json::Value::Bool(true));
-        }
-        serde_json::Value::Object(obj)
-    }).collect();
+    let arr: Vec<serde_json::Value> = r
+        .tabs
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            // The active tab's providers are the live set; the rest are parked in
+            // their own slot.
+            let providers: &[Box<dyn sicompass_sdk::provider::Provider>] = if i == r.active_tab {
+                &r.providers
+            } else {
+                &t.providers
+            };
+            let nav = restorable_nav(providers, &t.current_id, &t.provider_path);
+            let ids: Vec<serde_json::Value> = nav
+                .current_id
+                .as_slice()
+                .iter()
+                .map(|&n| serde_json::Value::from(n as u64))
+                .collect();
+            let mut obj = serde_json::Map::new();
+            obj.insert("id".to_string(), serde_json::Value::Array(ids));
+            obj.insert("path".to_string(), serde_json::Value::String(nav.path));
+            if nav.on_path {
+                // Absent in configs written by older builds, which is exactly the
+                // `false` default the reader applies.
+                obj.insert("onPath".to_string(), serde_json::Value::Bool(true));
+            }
+            serde_json::Value::Object(obj)
+        })
+        .collect();
     let serialized = serde_json::to_string(&serde_json::Value::Array(arr))
         .unwrap_or_else(|_| String::from("[]"));
     let active = r.active_tab.to_string();
@@ -5884,7 +6384,8 @@ pub(crate) fn persist_tabs(r: &mut AppRenderer) {
 
 /// Provider display_name for the active tab, truncated to 10 chars; "—" if none.
 fn active_tab_label(r: &AppRenderer) -> String {
-    r.current_id.get(0)
+    r.current_id
+        .get(0)
         .and_then(|i| r.providers.get(i))
         .map(|p| p.display_name().chars().take(20).collect::<String>())
         .unwrap_or_else(|| "—".to_string())
@@ -5936,7 +6437,10 @@ pub fn handle_tab_new(r: &mut AppRenderer) {
     let new_path = crate::app_state::active_provider_path(r);
 
     let insert_at = active + 1;
-    r.tabs.insert(insert_at, crate::app_state::TabSnapshot::nav_only(new_id, new_path));
+    r.tabs.insert(
+        insert_at,
+        crate::app_state::TabSnapshot::nav_only(new_id, new_path),
+    );
     // Keep `tab_timelines` parallel to `tabs`. New tabs start with an empty
     // timeline — a fresh tab carries no history.
     r.tab_timelines
@@ -5944,7 +6448,9 @@ pub fn handle_tab_new(r: &mut AppRenderer) {
     // Keep `tab_mru` parallel and consistent: existing indices at or past the
     // insertion point shift up by one, then the new tab becomes most-recent.
     for idx in r.tab_mru.iter_mut() {
-        if *idx >= insert_at { *idx += 1; }
+        if *idx >= insert_at {
+            *idx += 1;
+        }
     }
     r.tab_mru.insert(0, insert_at);
     r.active_tab = insert_at;
@@ -5956,7 +6462,9 @@ pub fn handle_tab_new(r: &mut AppRenderer) {
 /// foreground command or a full-screen interactive program.
 fn active_tab_busy(r: &AppRenderer) -> bool {
     let n = r.providers.len();
-    if n <= 1 { return false; }
+    if n <= 1 {
+        return false;
+    }
     r.providers[..n - 1].iter().any(|p| p.is_busy())
 }
 
@@ -5964,7 +6472,9 @@ fn active_tab_busy(r: &AppRenderer) -> bool {
 /// process). No-op when only one tab remains. If the tab is busy, first show a
 /// confirmation prompt instead of closing immediately.
 pub fn handle_tab_close(r: &mut AppRenderer) {
-    if r.tabs.len() <= 1 { return; }
+    if r.tabs.len() <= 1 {
+        return;
+    }
     if active_tab_busy(r) {
         enter_confirm_close_tab(r);
         return;
@@ -6010,13 +6520,17 @@ fn close_active_tab(r: &mut AppRenderer) {
     let closed = r.active_tab;
     r.tabs.remove(closed);
     r.tab_timelines.remove(closed);
-    if r.active_tab > 0 { r.active_tab -= 1; }
+    if r.active_tab > 0 {
+        r.active_tab -= 1;
+    }
 
     // Keep `tab_mru` parallel: drop the closed index and shift indices past it
     // down by one, then make the new active tab most-recent.
     r.tab_mru.retain(|&x| x != closed);
     for idx in r.tab_mru.iter_mut() {
-        if *idx > closed { *idx -= 1; }
+        if *idx > closed {
+            *idx -= 1;
+        }
     }
     r.touch_mru(r.active_tab);
 
@@ -6055,7 +6569,9 @@ fn open_tab_switcher(r: &mut AppRenderer, held: bool, start_index: usize) {
 /// `t` (general mode) — open the sticky MRU tab switcher. Highlight starts on
 /// the current tab (`tab_mru[0]`); Enter confirms, Escape cancels.
 pub fn handle_t_tab_switcher(r: &mut AppRenderer) {
-    if r.coordinate != Coordinate::General || r.tabs.len() < 2 { return; }
+    if r.coordinate != Coordinate::General || r.tabs.len() < 2 {
+        return;
+    }
     open_tab_switcher(r, false, 0);
 }
 
@@ -6063,13 +6579,17 @@ pub fn handle_t_tab_switcher(r: &mut AppRenderer) {
 /// highlight down one (wrapping). Releasing Ctrl commits (see
 /// `handle_tab_switcher_commit`).
 pub fn handle_ctrl_tab(r: &mut AppRenderer) {
-    if r.tabs.len() < 2 { return; }
+    if r.tabs.len() < 2 {
+        return;
+    }
     if r.coordinate != Coordinate::TabSwitcher {
         open_tab_switcher(r, true, 1);
         return;
     }
     let len = r.active_list_len();
-    if len == 0 { return; }
+    if len == 0 {
+        return;
+    }
     r.list_index = (r.list_index + 1) % len;
     r.speak_current_element();
     r.needs_redraw = true;
@@ -6079,14 +6599,18 @@ pub fn handle_ctrl_tab(r: &mut AppRenderer) {
 /// highlight up one (wrapping). Opening highlights the last (least-recently-used)
 /// tab, i.e. one step up from the active tab with wraparound.
 pub fn handle_ctrl_shift_tab(r: &mut AppRenderer) {
-    if r.tabs.len() < 2 { return; }
+    if r.tabs.len() < 2 {
+        return;
+    }
     if r.coordinate != Coordinate::TabSwitcher {
         // `usize::MAX` clamps to the last item in `open_tab_switcher`.
         open_tab_switcher(r, true, usize::MAX);
         return;
     }
     let len = r.active_list_len();
-    if len == 0 { return; }
+    if len == 0 {
+        return;
+    }
     r.list_index = (r.list_index + len - 1) % len;
     r.speak_current_element();
     r.needs_redraw = true;
@@ -6130,21 +6654,41 @@ pub fn handle_tab_switcher_commit(r: &mut AppRenderer) {
 }
 
 fn handle_tab_select_n(r: &mut AppRenderer, n: usize) {
-    if n >= r.tabs.len() || n == r.active_tab { return; }
+    if n >= r.tabs.len() || n == r.active_tab {
+        return;
+    }
     r.switch_to_tab(n);
     r.touch_mru(n);
     after_tab_change(r);
 }
 
-pub fn handle_tab_select_1(r: &mut AppRenderer) { handle_tab_select_n(r, 0); }
-pub fn handle_tab_select_2(r: &mut AppRenderer) { handle_tab_select_n(r, 1); }
-pub fn handle_tab_select_3(r: &mut AppRenderer) { handle_tab_select_n(r, 2); }
-pub fn handle_tab_select_4(r: &mut AppRenderer) { handle_tab_select_n(r, 3); }
-pub fn handle_tab_select_5(r: &mut AppRenderer) { handle_tab_select_n(r, 4); }
-pub fn handle_tab_select_6(r: &mut AppRenderer) { handle_tab_select_n(r, 5); }
-pub fn handle_tab_select_7(r: &mut AppRenderer) { handle_tab_select_n(r, 6); }
-pub fn handle_tab_select_8(r: &mut AppRenderer) { handle_tab_select_n(r, 7); }
-pub fn handle_tab_select_9(r: &mut AppRenderer) { handle_tab_select_n(r, 8); }
+pub fn handle_tab_select_1(r: &mut AppRenderer) {
+    handle_tab_select_n(r, 0);
+}
+pub fn handle_tab_select_2(r: &mut AppRenderer) {
+    handle_tab_select_n(r, 1);
+}
+pub fn handle_tab_select_3(r: &mut AppRenderer) {
+    handle_tab_select_n(r, 2);
+}
+pub fn handle_tab_select_4(r: &mut AppRenderer) {
+    handle_tab_select_n(r, 3);
+}
+pub fn handle_tab_select_5(r: &mut AppRenderer) {
+    handle_tab_select_n(r, 4);
+}
+pub fn handle_tab_select_6(r: &mut AppRenderer) {
+    handle_tab_select_n(r, 5);
+}
+pub fn handle_tab_select_7(r: &mut AppRenderer) {
+    handle_tab_select_n(r, 6);
+}
+pub fn handle_tab_select_8(r: &mut AppRenderer) {
+    handle_tab_select_n(r, 7);
+}
+pub fn handle_tab_select_9(r: &mut AppRenderer) {
+    handle_tab_select_n(r, 8);
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -6158,17 +6702,31 @@ mod tests {
 
     fn make_renderer() -> AppRenderer {
         let mut root = FfonElement::new_obj("provider");
-        root.as_obj_mut().unwrap().push(FfonElement::new_str("item 0"));
-        root.as_obj_mut().unwrap().push(FfonElement::new_str("item 1"));
-        root.as_obj_mut().unwrap().push(FfonElement::new_str("item 2"));
+        root.as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("item 0"));
+        root.as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("item 1"));
+        root.as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("item 2"));
 
         let mut section = FfonElement::new_obj("section");
-        section.as_obj_mut().unwrap().push(FfonElement::new_str("child 0"));
+        section
+            .as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("child 0"));
         root.as_obj_mut().unwrap().push(section);
 
         let mut r = AppRenderer::new();
         r.ffon = vec![root];
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id.push(0);
+            id
+        };
         list::create_list_current_layer(&mut r);
         r
     }
@@ -6248,7 +6806,11 @@ mod tests {
     fn left_at_depth1_does_nothing() {
         let mut r = AppRenderer::new();
         r.ffon = vec![FfonElement::new_obj("p")];
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id
+        };
         handle_left(&mut r);
         assert_eq!(r.current_id.depth(), 1);
     }
@@ -6489,8 +7051,14 @@ mod tests {
         r.selection_anchor = Some(1);
         r.cursor_position = 4;
         delete_selection(&mut r);
-        assert_eq!(r.search_string, "ho", "search_string should have selection removed");
-        assert_eq!(r.input_buffer, "unrelated", "input_buffer must not be modified");
+        assert_eq!(
+            r.search_string, "ho",
+            "search_string should have selection removed"
+        );
+        assert_eq!(
+            r.input_buffer, "unrelated",
+            "input_buffer must not be modified"
+        );
         assert_eq!(r.cursor_position, 1);
         assert_eq!(r.selection_anchor, None);
     }
@@ -6650,7 +7218,12 @@ mod tests {
     fn ctrl_end_empty_list_no_change() {
         let mut r = AppRenderer::new();
         r.ffon = vec![FfonElement::new_obj("p")];
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id.push(0);
+            id
+        };
         // Empty: no children pushed
         r.list_index = 0;
         handle_ctrl_end(&mut r);
@@ -6714,18 +7287,33 @@ mod tests {
         in_shell: bool,
     }
     impl sicompass_sdk::provider::Provider for TermProvider {
-        fn name(&self) -> &str { "terminal" }
+        fn name(&self) -> &str {
+            "terminal"
+        }
         fn fetch(&mut self) -> Vec<FfonElement> {
             if self.in_shell {
                 vec![FfonElement::new_obj("host:/tmp$ <input></input>")]
             } else {
-                vec![FfonElement::new_obj("workspace"), FfonElement::new_obj("docs")]
+                vec![
+                    FfonElement::new_obj("workspace"),
+                    FfonElement::new_obj("docs"),
+                ]
             }
         }
         fn commands(&self) -> Vec<String> {
-            vec![if self.in_shell { "browse".to_owned() } else { "shell".to_owned() }]
+            vec![if self.in_shell {
+                "browse".to_owned()
+            } else {
+                "shell".to_owned()
+            }]
         }
-        fn handle_command(&mut self, cmd: &str, _k: &str, _t: i32, _e: &mut String) -> Option<FfonElement> {
+        fn handle_command(
+            &mut self,
+            cmd: &str,
+            _k: &str,
+            _t: i32,
+            _e: &mut String,
+        ) -> Option<FfonElement> {
             match cmd {
                 "shell" => self.in_shell = true,
                 "browse" => self.in_shell = false,
@@ -6744,7 +7332,12 @@ mod tests {
             root.as_obj_mut().unwrap().push(child);
         }
         r.ffon = vec![root];
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id.push(0);
+            id
+        };
         r.providers.push(Box::new(prov));
         list::create_list_current_layer(&mut r);
         r
@@ -6762,7 +7355,11 @@ mod tests {
         assert!(terminal_is_in_shell(&r));
         // The list swapped in place, and the cursor landed on the input slot.
         assert_eq!(r.total_list.len(), 1);
-        assert!(r.total_list[0].label.starts_with("+i "), "got {:?}", r.total_list[0].label);
+        assert!(
+            r.total_list[0].label.starts_with("+i "),
+            "got {:?}",
+            r.total_list[0].label
+        );
         assert_eq!(r.list_index, 0);
     }
 
@@ -6773,13 +7370,20 @@ mod tests {
         let mut r = make_renderer_with_terminal();
         handle_colon(&mut r);
         assert!(terminal_is_in_shell(&r));
-        let before = r.total_list.iter().map(|i| i.label.clone()).collect::<Vec<_>>();
+        let before = r
+            .total_list
+            .iter()
+            .map(|i| i.label.clone())
+            .collect::<Vec<_>>();
 
         handle_colon(&mut r);
 
         assert!(terminal_is_in_shell(&r), "still in the shell");
         assert_eq!(
-            r.total_list.iter().map(|i| i.label.clone()).collect::<Vec<_>>(),
+            r.total_list
+                .iter()
+                .map(|i| i.label.clone())
+                .collect::<Vec<_>>(),
             before,
         );
     }
@@ -6793,7 +7397,10 @@ mod tests {
 
         let nav = restorable_nav(&r.providers, &r.current_id, "/var/log");
 
-        assert!(nav.on_path, "restore must land on the folder, not inside it");
+        assert!(
+            nav.on_path,
+            "restore must land on the folder, not inside it"
+        );
         assert_eq!(nav.path, "/var/log", "saved verbatim, wherever the cd went");
         assert_eq!(nav.current_id, r.current_id);
     }
@@ -6857,7 +7464,11 @@ mod tests {
     #[test]
     fn colon_at_root_is_still_a_no_op_in_the_terminal() {
         let mut r = make_renderer_with_terminal();
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id
+        };
         handle_colon(&mut r);
         assert!(!terminal_is_in_shell(&r), "`:` needs a provider to act on");
     }
@@ -6874,11 +7485,25 @@ mod tests {
         secondary_items: Vec<sicompass_sdk::provider::ListItem>,
     }
     impl sicompass_sdk::provider::Provider for CmdProvider {
-        fn name(&self) -> &str { "cmdprov" }
-        fn fetch(&mut self) -> Vec<FfonElement> { vec![] }
-        fn commands(&self) -> Vec<String> { self.cmds.clone() }
-        fn execute_command(&mut self, _cmd: &str, _sel: &str) -> bool { self.execute_ok }
-        fn handle_command(&mut self, _cmd: &str, _key: &str, _ty: i32, _err: &mut String) -> Option<FfonElement> {
+        fn name(&self) -> &str {
+            "cmdprov"
+        }
+        fn fetch(&mut self) -> Vec<FfonElement> {
+            vec![]
+        }
+        fn commands(&self) -> Vec<String> {
+            self.cmds.clone()
+        }
+        fn execute_command(&mut self, _cmd: &str, _sel: &str) -> bool {
+            self.execute_ok
+        }
+        fn handle_command(
+            &mut self,
+            _cmd: &str,
+            _key: &str,
+            _ty: i32,
+            _err: &mut String,
+        ) -> Option<FfonElement> {
             self.handle_result.clone()
         }
         fn command_list_items(&self, _cmd: &str) -> Vec<sicompass_sdk::provider::ListItem> {
@@ -6892,11 +7517,18 @@ mod tests {
         secondary_items: Vec<sicompass_sdk::provider::ListItem>,
     ) -> AppRenderer {
         let mut root = FfonElement::new_obj("cmdprov");
-        root.as_obj_mut().unwrap().push(FfonElement::new_str("- item0"));
+        root.as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("- item0"));
 
         let mut r = AppRenderer::new();
         r.ffon = vec![root];
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id.push(0);
+            id
+        };
         r.providers.push(Box::new(CmdProvider {
             cmds: commands.iter().map(|s| s.to_string()).collect(),
             execute_ok: true,
@@ -6920,7 +7552,10 @@ mod tests {
     #[test]
     fn enter_command_phase_none_with_secondary_list_stays_in_command() {
         // Provider returns None + no error + has secondary items
-        let items = vec![sicompass_sdk::provider::ListItem { label: "App A".to_string(), data: "/usr/bin/a".to_string() }];
+        let items = vec![sicompass_sdk::provider::ListItem {
+            label: "App A".to_string(),
+            data: "/usr/bin/a".to_string(),
+        }];
         let mut r = make_renderer_with_cmd_provider(&["open"], None, items);
         r.coordinate = Coordinate::Command;
         r.previous_coordinate = Coordinate::General;
@@ -6932,7 +7567,11 @@ mod tests {
 
         // The command renders as a button: `-b ` prefix in the display label,
         // bare name carried in `nav_path` for dispatch.
-        assert!(r.total_list[0].label.starts_with("-b "), "label = {:?}", r.total_list[0].label);
+        assert!(
+            r.total_list[0].label.starts_with("-b "),
+            "label = {:?}",
+            r.total_list[0].label
+        );
         assert_eq!(r.total_list[0].nav_path.as_deref(), Some("open"));
 
         handle_enter_command(&mut r);
@@ -6970,7 +7609,11 @@ mod tests {
         r.provider_command_name = "open".to_string();
         // Build a secondary list manually
         r.total_list = vec![crate::app_state::RenderListItem {
-            id: { let mut id = IdArray::new(); id.push(0); id },
+            id: {
+                let mut id = IdArray::new();
+                id.push(0);
+                id
+            },
             label: "App A".to_string(),
             data: Some("/usr/bin/a".to_string()),
             nav_path: None,
@@ -7010,7 +7653,10 @@ mod tests {
         assert!(r.search_string.is_empty());
         // handle_tab passes the current item label as context ("minus item 0"
         // because make_renderer starts at list index 0 with label "- item 0").
-        assert_eq!(announced_text(&r).as_deref(), Some("search mode - minus item 0"));
+        assert_eq!(
+            announced_text(&r).as_deref(),
+            Some("search mode - minus item 0")
+        );
     }
 
     #[test]
@@ -7223,7 +7869,10 @@ mod tests {
                 r.scroll_search_snap = false;
                 nav(&mut r);
                 assert!(r.scroll_search_snap, "{mode:?} should request a snap");
-                assert!(!r.scroll_search_needs_position, "{mode:?} nav takes control");
+                assert!(
+                    !r.scroll_search_needs_position,
+                    "{mode:?} nav takes control"
+                );
             }
         }
     }
@@ -7497,7 +8146,10 @@ mod tests {
 
     #[test]
     fn find_matches_ci_basic_and_case_insensitive() {
-        assert_eq!(find_matches_ci("Hello hello", "hello"), vec![(0, 5), (6, 5)]);
+        assert_eq!(
+            find_matches_ci("Hello hello", "hello"),
+            vec![(0, 5), (6, 5)]
+        );
         assert_eq!(find_matches_ci("abc", "xyz"), vec![]);
         assert_eq!(find_matches_ci("abc", ""), vec![]);
     }
@@ -7578,7 +8230,10 @@ mod tests {
         handle_input(&mut r, "12"); // "item 1" and "item 2" match; top is 0
         r.list_index = 1; // manually move down
         handle_backspace(&mut r); // back to "1"; re-filters
-        assert_eq!(r.list_index, 0, "list_index should snap to 0 after backspace");
+        assert_eq!(
+            r.list_index, 0,
+            "list_index should snap to 0 after backspace"
+        );
     }
 
     #[test]
@@ -7596,8 +8251,11 @@ mod tests {
         r.previous_coordinate = Coordinate::General;
         handle_escape(&mut r);
         assert_eq!(r.coordinate, Coordinate::General);
-        assert_eq!(r.current_id.last().unwrap_or(99), origin_last,
-            "current_id.last() should be restored to item index before search");
+        assert_eq!(
+            r.current_id.last().unwrap_or(99),
+            origin_last,
+            "current_id.last() should be restored to item index before search"
+        );
     }
 
     #[test]
@@ -7616,8 +8274,11 @@ mod tests {
         r.previous_coordinate = Coordinate::General;
         handle_escape(&mut r);
         assert_eq!(r.coordinate, Coordinate::General);
-        assert_eq!(r.current_id.last().unwrap_or(99), origin_last,
-            "current_id.last() should be restored to item index before search");
+        assert_eq!(
+            r.current_id.last().unwrap_or(99),
+            origin_last,
+            "current_id.last() should be restored to item index before search"
+        );
     }
 
     #[test]
@@ -7649,24 +8310,38 @@ mod tests {
         // though its layer index (current_id.last()) is 1.
         let mut root = FfonElement::new_obj("provider");
         let mut section = FfonElement::new_obj("section");
-        section.as_obj_mut().unwrap().push(FfonElement::new_str("child 0"));
+        section
+            .as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("child 0"));
         root.as_obj_mut().unwrap().push(section);
-        root.as_obj_mut().unwrap().push(FfonElement::new_str("item A"));
+        root.as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("item A"));
 
         let mut r = AppRenderer::new();
         r.ffon = vec![root];
         // Focus "item A" — layer index 1.
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(1); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id.push(1);
+            id
+        };
         list::create_list_current_layer(&mut r);
         r.coordinate = Coordinate::General;
 
         handle_ctrl_f(&mut r);
         assert_eq!(r.coordinate, Coordinate::ExtendedSearch);
-        assert_eq!(r.list_index, 2,
-            "extended search should open on the focused element's flattened index");
+        assert_eq!(
+            r.list_index, 2,
+            "extended search should open on the focused element's flattened index"
+        );
         let item = r.current_list_item().expect("a list item is selected");
-        assert_eq!(item.label, "- item A",
-            "extended search should open on the focused element, not an earlier row");
+        assert_eq!(
+            item.label, "- item A",
+            "extended search should open on the focused element, not an earlier row"
+        );
     }
 
     #[test]
@@ -7680,8 +8355,10 @@ mod tests {
         handle_down(&mut r);
         // Now enter ExtendedSearch via Ctrl+F from SimpleSearch
         handle_ctrl_f(&mut r);
-        assert_eq!(r.search_origin_id, saved,
-            "search_origin_id must not be overwritten when chaining Simple→Extended search");
+        assert_eq!(
+            r.search_origin_id, saved,
+            "search_origin_id must not be overwritten when chaining Simple→Extended search"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -7733,14 +8410,20 @@ mod tests {
         use sicompass_sdk::ffon::IdArray;
         let mut root = FfonElement::new_obj("test");
         let mut section = FfonElement::new_obj("mykey");
-        section.as_obj_mut().unwrap().push(FfonElement::new_str("child"));
-        root.as_obj_mut().unwrap().push(FfonElement::new_str("first"));
+        section
+            .as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("child"));
+        root.as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("first"));
         root.as_obj_mut().unwrap().push(section);
         let mut r = AppRenderer::new();
         r.ffon = vec![root];
         r.coordinate = Coordinate::General;
         let mut id = IdArray::new();
-        id.push(0); id.push(0);
+        id.push(0);
+        id.push(0);
         r.current_id = id;
         crate::list::create_list_current_layer(&mut r);
         r.list_index = 1; // second child = "mykey" object
@@ -7978,7 +8661,12 @@ mod tests {
         }
         let mut r = AppRenderer::new();
         r.ffon = vec![root];
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id.push(0);
+            id
+        };
         list::create_list_current_layer(&mut r);
         r
     }
@@ -7998,7 +8686,12 @@ mod tests {
     fn ctrl_home_empty_list_no_change() {
         let mut r = AppRenderer::new();
         r.ffon = vec![FfonElement::new_obj("empty")];
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id.push(0);
+            id
+        };
         r.list_index = 0;
         handle_ctrl_home(&mut r);
         assert_eq!(r.list_index, 0);
@@ -8058,7 +8751,10 @@ mod tests {
         assert_eq!(r.coordinate, Coordinate::SimpleSearch);
         assert_eq!(r.previous_coordinate, Coordinate::General);
         // handle_tab passes the current item label as context.
-        assert_eq!(announced_text(&r).as_deref(), Some("search mode - minus item 0"));
+        assert_eq!(
+            announced_text(&r).as_deref(),
+            Some("search mode - minus item 0")
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -8079,7 +8775,11 @@ mod tests {
         r.coordinate = Coordinate::SimpleSearch;
         r.previous_coordinate = Coordinate::General;
         // Simulate the origin id saved when search was entered (item at index 3)
-        r.search_origin_id = { let mut id = r.current_id.clone(); id.set_last(3); id };
+        r.search_origin_id = {
+            let mut id = r.current_id.clone();
+            id.set_last(3);
+            id
+        };
         // Simulate search having moved current_id to a different position
         r.current_id.set_last(1);
         handle_escape(&mut r);
@@ -8127,12 +8827,21 @@ mod tests {
         leave_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     }
     impl sicompass_sdk::provider::Provider for DashboardProv {
-        fn name(&self) -> &str { "dashboardprov" }
-        fn display_name(&self) -> String { "dashboardprov".to_owned() }
-        fn fetch(&mut self) -> Vec<sicompass_sdk::ffon::FfonElement> { vec![] }
-        fn dashboard_kind(&self) -> sicompass_sdk::DashboardKind { self.kind }
+        fn name(&self) -> &str {
+            "dashboardprov"
+        }
+        fn display_name(&self) -> String {
+            "dashboardprov".to_owned()
+        }
+        fn fetch(&mut self) -> Vec<sicompass_sdk::ffon::FfonElement> {
+            vec![]
+        }
+        fn dashboard_kind(&self) -> sicompass_sdk::DashboardKind {
+            self.kind
+        }
         fn leave_dashboard(&mut self) {
-            self.leave_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.leave_count
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
     }
 
@@ -8145,7 +8854,11 @@ mod tests {
             kind: sicompass_sdk::DashboardKind::Interactive,
             leave_count: std::sync::Arc::clone(&leave_count),
         }));
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id
+        };
         r.coordinate = Coordinate::Dashboard;
         r.previous_coordinate = Coordinate::General;
         r.dashboard_cell_size = (80, 24);
@@ -8153,10 +8866,16 @@ mod tests {
         handle_escape(&mut r);
 
         assert_eq!(r.coordinate, Coordinate::General);
-        assert_eq!(leave_count.load(std::sync::atomic::Ordering::Relaxed), 1,
-            "leave_dashboard should be called exactly once for interactive providers");
-        assert_eq!(r.dashboard_cell_size, (0, 0),
-            "dashboard_cell_size should be reset on interactive leave");
+        assert_eq!(
+            leave_count.load(std::sync::atomic::Ordering::Relaxed),
+            1,
+            "leave_dashboard should be called exactly once for interactive providers"
+        );
+        assert_eq!(
+            r.dashboard_cell_size,
+            (0, 0),
+            "dashboard_cell_size should be reset on interactive leave"
+        );
     }
 
     #[test]
@@ -8168,15 +8887,22 @@ mod tests {
             kind: sicompass_sdk::DashboardKind::Image,
             leave_count: std::sync::Arc::clone(&leave_count),
         }));
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id
+        };
         r.coordinate = Coordinate::Dashboard;
         r.previous_coordinate = Coordinate::General;
 
         handle_escape(&mut r);
 
         assert_eq!(r.coordinate, Coordinate::General);
-        assert_eq!(leave_count.load(std::sync::atomic::Ordering::Relaxed), 0,
-            "leave_dashboard should NOT be called for image providers");
+        assert_eq!(
+            leave_count.load(std::sync::atomic::Ordering::Relaxed),
+            0,
+            "leave_dashboard should NOT be called for image providers"
+        );
     }
 
     #[test]
@@ -8486,19 +9212,36 @@ mod tests {
         use sicompass_sdk::provider::Provider;
         struct FbProv;
         impl Provider for FbProv {
-            fn name(&self) -> &str { "filebrowser" }
-            fn fetch(&mut self) -> Vec<FfonElement> { vec![] }
-            fn current_path(&self) -> &str { "/" }
+            fn name(&self) -> &str {
+                "filebrowser"
+            }
+            fn fetch(&mut self) -> Vec<FfonElement> {
+                vec![]
+            }
+            fn current_path(&self) -> &str {
+                "/"
+            }
             fn set_current_path(&mut self, _: &str) {}
         }
 
-        let fb_root = FfonElement::Obj(FfonObject { key: "file browser".to_string(), children: vec![] });
-        let src_root = FfonElement::Obj(FfonObject { key: "myprov".to_string(), children: vec![] });
+        let fb_root = FfonElement::Obj(FfonObject {
+            key: "file browser".to_string(),
+            children: vec![],
+        });
+        let src_root = FfonElement::Obj(FfonObject {
+            key: "myprov".to_string(),
+            children: vec![],
+        });
         let mut r = AppRenderer::new();
         r.ffon = vec![fb_root, src_root];
         r.providers.push(Box::new(FbProv));
         // Navigate to provider 1 (source)
-        r.current_id = { let mut id = IdArray::new(); id.push(1); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(1);
+            id.push(0);
+            id
+        };
         // Set save_folder_path to the platform temp dir (guaranteed to exist)
         r.save_folder_path = std::env::temp_dir().to_string_lossy().into_owned();
 
@@ -8680,19 +9423,37 @@ mod tests {
     fn make_renderer_with_file_elem(dir: &str, filename: &str) -> AppRenderer {
         use sicompass_sdk::ffon::{FfonElement, FfonObject};
         use sicompass_sdk::provider::Provider;
-        struct FbProv { path: String }
+        struct FbProv {
+            path: String,
+        }
         impl Provider for FbProv {
-            fn name(&self) -> &str { "filebrowser" }
-            fn fetch(&mut self) -> Vec<FfonElement> { vec![] }
-            fn current_path(&self) -> &str { &self.path }
+            fn name(&self) -> &str {
+                "filebrowser"
+            }
+            fn fetch(&mut self) -> Vec<FfonElement> {
+                vec![]
+            }
+            fn current_path(&self) -> &str {
+                &self.path
+            }
         }
         let entry = FfonElement::new_str(filename);
-        let root_obj = FfonObject { key: "file browser".to_string(), children: vec![entry] };
+        let root_obj = FfonObject {
+            key: "file browser".to_string(),
+            children: vec![entry],
+        };
         let root = FfonElement::Obj(root_obj);
         let mut r = AppRenderer::new();
         r.ffon = vec![root];
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
-        r.providers.push(Box::new(FbProv { path: dir.to_owned() }));
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id.push(0);
+            id
+        };
+        r.providers.push(Box::new(FbProv {
+            path: dir.to_owned(),
+        }));
         r
     }
 
@@ -8761,20 +9522,31 @@ mod tests {
 
     #[test]
     fn save_config_with_path_writes_file() {
-        use tempfile::NamedTempFile;
         use sicompass_sdk::ffon::{FfonElement, FfonObject};
+        use tempfile::NamedTempFile;
         let tmp = NamedTempFile::new().unwrap();
         let path = tmp.path().to_str().unwrap().to_owned();
 
-        let root = FfonElement::Obj(FfonObject { key: "myprov".to_string(), children: vec![] });
+        let root = FfonElement::Obj(FfonObject {
+            key: "myprov".to_string(),
+            children: vec![],
+        });
         let mut r = AppRenderer::new();
         r.ffon = vec![root];
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id
+        };
         r.current_save_path = path.clone();
 
         handle_save_provider_config(&mut r);
 
-        assert!(r.error_message.contains(&path), "expected path in message, got: {}", r.error_message);
+        assert!(
+            r.error_message.contains(&path),
+            "expected path in message, got: {}",
+            r.error_message
+        );
         assert!(tmp.path().exists());
     }
 
@@ -8792,17 +9564,24 @@ mod tests {
 
     #[test]
     fn load_config_sets_save_path_and_clears_undo() {
-        use tempfile::NamedTempFile;
         use std::io::Write;
+        use tempfile::NamedTempFile;
         let mut tmp = NamedTempFile::new().unwrap();
         tmp.write_all(b"[\"- item1\", \"- item2\"]\n").unwrap();
         let path = tmp.path().to_str().unwrap().to_owned();
 
         use sicompass_sdk::ffon::{FfonElement, FfonObject};
-        let root = FfonElement::Obj(FfonObject { key: "myprov".to_string(), children: vec![] });
+        let root = FfonElement::Obj(FfonObject {
+            key: "myprov".to_string(),
+            children: vec![],
+        });
         let mut r = AppRenderer::new();
         r.ffon = vec![root];
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id
+        };
         // Pretend the user has done some work — undo cursor is mid-history.
         r.active_timeline_mut().position = 3;
 
@@ -8982,11 +9761,18 @@ mod tests {
         // Build a flat list large enough to match counts.len().
         let mut root = FfonElement::new_obj("provider");
         for i in 0..counts.len() {
-            root.as_obj_mut().unwrap().push(FfonElement::new_str(&format!("item {i}")));
+            root.as_obj_mut()
+                .unwrap()
+                .push(FfonElement::new_str(&format!("item {i}")));
         }
         let mut r = AppRenderer::new();
         r.ffon = vec![root];
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id.push(0);
+            id
+        };
         r.window_height = 130;
         r.cached_line_height = 10;
         r.cached_line_counts = counts;
@@ -9053,7 +9839,11 @@ mod tests {
         r.current_id.set_last(0);
         list::create_list_current_layer(&mut r);
         handle_page_down(&mut r);
-        assert_eq!(r.current_id.last(), Some(4), "should land on the image, not skip past it");
+        assert_eq!(
+            r.current_id.last(),
+            Some(4),
+            "should land on the image, not skip past it"
+        );
     }
 
     #[test]
@@ -9066,7 +9856,11 @@ mod tests {
         r.current_id.set_last(11);
         list::create_list_current_layer(&mut r);
         handle_page_up(&mut r);
-        assert_eq!(r.current_id.last(), Some(5), "should stop near the image, not skip past it");
+        assert_eq!(
+            r.current_id.last(),
+            Some(5),
+            "should stop near the image, not skip past it"
+        );
     }
 
     #[test]
@@ -9077,7 +9871,11 @@ mod tests {
         r.current_id.set_last(0);
         list::create_list_current_layer(&mut r);
         handle_page_down(&mut r);
-        assert_eq!(r.current_id.last(), Some(1), "must advance at least one index onto the image");
+        assert_eq!(
+            r.current_id.last(),
+            Some(1),
+            "must advance at least one index onto the image"
+        );
     }
 
     #[test]
@@ -9236,7 +10034,10 @@ mod tests {
     fn find_id_path_nested() {
         // provider → section (obj) → "<id>deep</id>Deep heading"
         let mut section = FfonElement::new_obj("section");
-        section.as_obj_mut().unwrap().push(FfonElement::new_str("<id>deep</id>Deep heading"));
+        section
+            .as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("<id>deep</id>Deep heading"));
         let arr = vec![FfonElement::new_str("before"), section];
         let mut base = IdArray::new();
         base.push(0);
@@ -9277,16 +10078,26 @@ mod tests {
         r.current_id = id;
 
         let navigated = navigate_right_raw(&mut r);
-        assert!(navigated, "navigate_right_raw should return true for a fragment link");
+        assert!(
+            navigated,
+            "navigate_right_raw should return true for a fragment link"
+        );
         // Cursor should now be on the target row [0, 1]
-        assert_eq!(r.current_id.last(), Some(1), "cursor should point to target at index 1");
+        assert_eq!(
+            r.current_id.last(),
+            Some(1),
+            "cursor should point to target at index 1"
+        );
     }
 
     #[test]
     fn navigate_right_raw_unresolved_fragment_returns_false() {
         // Fragment link pointing to a non-existent id → cursor stays, returns false
         let mut provider = FfonElement::new_obj("web");
-        provider.as_obj_mut().unwrap().push(FfonElement::new_obj("go <link>#nowhere</link>"));
+        provider
+            .as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_obj("go <link>#nowhere</link>"));
 
         let mut r = AppRenderer::new();
         r.ffon = vec![provider];
@@ -9336,37 +10147,57 @@ mod tests {
 
     #[test]
     fn placeholder_trailing_colon_with_spaces_is_obj() {
-        assert!(matches!(parse_placeholder_prefix("  foo :"), PlaceholderKind::Obj(s) if s == "foo"));
+        assert!(
+            matches!(parse_placeholder_prefix("  foo :"), PlaceholderKind::Obj(s) if s == "foo")
+        );
     }
 
     #[test]
     fn placeholder_empty_is_empty() {
-        assert!(matches!(parse_placeholder_prefix(""), PlaceholderKind::Empty));
+        assert!(matches!(
+            parse_placeholder_prefix(""),
+            PlaceholderKind::Empty
+        ));
     }
 
     #[test]
     fn placeholder_whitespace_only_is_empty() {
-        assert!(matches!(parse_placeholder_prefix("   "), PlaceholderKind::Empty));
+        assert!(matches!(
+            parse_placeholder_prefix("   "),
+            PlaceholderKind::Empty
+        ));
     }
 
     #[test]
     fn placeholder_lone_plus_is_empty() {
-        assert!(matches!(parse_placeholder_prefix("+"), PlaceholderKind::Empty));
+        assert!(matches!(
+            parse_placeholder_prefix("+"),
+            PlaceholderKind::Empty
+        ));
     }
 
     #[test]
     fn placeholder_lone_minus_is_empty() {
-        assert!(matches!(parse_placeholder_prefix("-"), PlaceholderKind::Empty));
+        assert!(matches!(
+            parse_placeholder_prefix("-"),
+            PlaceholderKind::Empty
+        ));
     }
 
     #[test]
     fn placeholder_plus_whitespace_only_is_empty() {
-        assert!(matches!(parse_placeholder_prefix("+   "), PlaceholderKind::Empty));
+        assert!(matches!(
+            parse_placeholder_prefix("+   "),
+            PlaceholderKind::Empty
+        ));
     }
 
     #[test]
     fn placeholder_lone_colon_is_empty() {
-        assert!(matches!(parse_placeholder_prefix(":"), PlaceholderKind::Empty));
+        assert!(matches!(
+            parse_placeholder_prefix(":"),
+            PlaceholderKind::Empty
+        ));
     }
 
     // ---------------------------------------------------------------------------
@@ -9377,10 +10208,17 @@ mod tests {
     /// positioned on an `<input></input>` placeholder, and `placeholder_insert_mode = true`.
     fn make_placeholder_renderer() -> AppRenderer {
         let mut root = FfonElement::new_obj("provider");
-        root.as_obj_mut().unwrap().push(FfonElement::new_str("<input></input>"));
+        root.as_obj_mut()
+            .unwrap()
+            .push(FfonElement::new_str("<input></input>"));
         let mut r = AppRenderer::new();
         r.ffon = vec![root];
-        r.current_id = { let mut id = IdArray::new(); id.push(0); id.push(0); id };
+        r.current_id = {
+            let mut id = IdArray::new();
+            id.push(0);
+            id.push(0);
+            id
+        };
         r.coordinate = Coordinate::Insert;
         r.previous_coordinate = Coordinate::General;
         r.placeholder_insert_mode = true;
@@ -9420,8 +10258,11 @@ mod tests {
         if let Some(FfonElement::Obj(provider)) = arr.get(0) {
             // The first child should be an Obj with key "mydir"
             let child = provider.children.get(0);
-            assert!(matches!(child, Some(FfonElement::Obj(o)) if o.key == "mydir"),
-                "expected Obj(mydir), got {:?}", child);
+            assert!(
+                matches!(child, Some(FfonElement::Obj(o)) if o.key == "mydir"),
+                "expected Obj(mydir), got {:?}",
+                child
+            );
         } else {
             panic!("root element should be an Obj provider");
         }
@@ -9436,8 +10277,11 @@ mod tests {
         let arr = &r.ffon;
         if let Some(FfonElement::Obj(provider)) = arr.get(0) {
             let child = provider.children.get(0);
-            assert!(matches!(child, Some(FfonElement::Obj(o)) if o.key == "section"),
-                "expected Obj(section), got {:?}", child);
+            assert!(
+                matches!(child, Some(FfonElement::Obj(o)) if o.key == "section"),
+                "expected Obj(section), got {:?}",
+                child
+            );
         } else {
             panic!("root element should be an Obj provider");
         }
@@ -9464,9 +10308,18 @@ mod tests {
         // Ctrl+C copies the visible display form regardless of tag type — exactly
         // what the rendered list label shows (sans prefix). Webbrowser links are
         // formatted "anchor text <link>url</link>", so the display keeps both.
-        assert_eq!(copy_display_text("Visit us <link>https://x.test</link>"), "Visit us https://x.test");
-        assert_eq!(copy_display_text("<button>do_thing</button>Click me"), "Click me");
-        assert_eq!(copy_display_text("<input>typed value</input>"), "typed value");
+        assert_eq!(
+            copy_display_text("Visit us <link>https://x.test</link>"),
+            "Visit us https://x.test"
+        );
+        assert_eq!(
+            copy_display_text("<button>do_thing</button>Click me"),
+            "Click me"
+        );
+        assert_eq!(
+            copy_display_text("<input>typed value</input>"),
+            "typed value"
+        );
         assert_eq!(copy_display_text("plain item"), "plain item");
     }
 
@@ -9474,30 +10327,51 @@ mod tests {
     fn copy_display_text_password_is_masked_not_real() {
         // The masked display must never leak the real secret onto the clipboard.
         let display = copy_display_text("API key: <password>hunter2</password>");
-        assert!(!display.contains("hunter2"), "real password must not be in display text");
-        assert_eq!(display, "API key: *******", "value masked one asterisk per char, label kept");
+        assert!(
+            !display.contains("hunter2"),
+            "real password must not be in display text"
+        );
+        assert_eq!(
+            display, "API key: *******",
+            "value masked one asterisk per char, label kept"
+        );
     }
 
     #[test]
     fn copy_underlying_value_prefers_link_image_input() {
         // Ctrl+Shift+C copies the underlying value where it differs.
-        assert_eq!(copy_underlying_value("Visit us <link>https://x.test</link>"), "https://x.test");
-        assert_eq!(copy_underlying_value("<image>/tmp/pic.png</image>alt"), "/tmp/pic.png");
-        assert_eq!(copy_underlying_value("<input>typed value</input>"), "typed value");
+        assert_eq!(
+            copy_underlying_value("Visit us <link>https://x.test</link>"),
+            "https://x.test"
+        );
+        assert_eq!(
+            copy_underlying_value("<image>/tmp/pic.png</image>alt"),
+            "/tmp/pic.png"
+        );
+        assert_eq!(
+            copy_underlying_value("<input>typed value</input>"),
+            "typed value"
+        );
     }
 
     #[test]
     fn copy_underlying_value_falls_back_to_display_text() {
         // No special tag -> behaves like Ctrl+C.
         assert_eq!(copy_underlying_value("plain item"), "plain item");
-        assert_eq!(copy_underlying_value("<button>do_thing</button>Click me"), "Click me");
+        assert_eq!(
+            copy_underlying_value("<button>do_thing</button>Click me"),
+            "Click me"
+        );
     }
 
     #[test]
     fn copy_underlying_value_never_extracts_password() {
         // A password field must not yield the real secret.
         let value = copy_underlying_value("<password>hunter2</password>");
-        assert!(!value.contains("hunter2"), "real password must not be copied");
+        assert!(
+            !value.contains("hunter2"),
+            "real password must not be copied"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -9516,7 +10390,11 @@ mod tests {
             .expect("write test jpeg");
 
         let png = image_path_to_png(path.to_str().unwrap()).expect("should encode png");
-        assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n", "output must be PNG-encoded");
+        assert_eq!(
+            &png[..8],
+            b"\x89PNG\r\n\x1a\n",
+            "output must be PNG-encoded"
+        );
         let decoded = ::image::load_from_memory(&png).expect("png decodes");
         assert_eq!(decoded.width(), 3);
         assert_eq!(decoded.height(), 2);
@@ -9566,9 +10444,11 @@ mod tests {
     #[test]
     fn clipboard_image_encodes_both_png_and_bmp() {
         // Windows needs BMP (-> CF_DIB); Linux/macOS use PNG. Confirm both encode.
-        let img = ::image::DynamicImage::ImageRgba8(
-            ::image::RgbaImage::from_pixel(4, 4, ::image::Rgba([200, 100, 50, 255])),
-        );
+        let img = ::image::DynamicImage::ImageRgba8(::image::RgbaImage::from_pixel(
+            4,
+            4,
+            ::image::Rgba([200, 100, 50, 255]),
+        ));
         let png = encode_image(&img, ::image::ImageFormat::Png).expect("png");
         let bmp = encode_image(&img, ::image::ImageFormat::Bmp).expect("bmp");
         assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n", "png magic");

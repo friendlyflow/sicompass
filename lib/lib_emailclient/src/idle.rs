@@ -11,8 +11,8 @@
 //! immediately instead, and the 30 s poll is gone: the keepalive interval is
 //! now the RFC 2177 29 minutes it should always have been.
 
-use crate::connection::{connect_imap, runtime, ImapSession};
 use crate::EmailClientConfig;
+use crate::connection::{ImapSession, connect_imap, runtime};
 use async_imap::extensions::idle::IdleResponse;
 use async_imap::imap_proto::{MailboxDatum, Response};
 use std::sync::atomic::{AtomicBool, Ordering};

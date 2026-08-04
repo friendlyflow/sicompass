@@ -253,7 +253,9 @@ mod tests {
         match parse_line(line) {
             Some(StreamEvent::User(u)) => {
                 let blocks = u.message.content.blocks();
-                assert!(matches!(&blocks[0], ContentBlock::ToolResult { tool_use_id, .. } if tool_use_id == "tu_1"));
+                assert!(
+                    matches!(&blocks[0], ContentBlock::ToolResult { tool_use_id, .. } if tool_use_id == "tu_1")
+                );
             }
             other => panic!("expected User, got {other:?}"),
         }
@@ -350,7 +352,10 @@ mod tests {
         let line = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"..."}]}}"#;
         match parse_line(line) {
             Some(StreamEvent::Assistant(a)) => {
-                assert!(matches!(&a.message.content.blocks()[0], ContentBlock::Other));
+                assert!(matches!(
+                    &a.message.content.blocks()[0],
+                    ContentBlock::Other
+                ));
             }
             other => panic!("expected Assistant, got {other:?}"),
         }

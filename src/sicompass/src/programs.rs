@@ -79,7 +79,10 @@ fn init_provider_root(
     provider.init();
     let children = provider.fetch();
     if let Some(err) = provider.take_error() {
-        eprintln!("provider '{}' fetch error on register: {err}", provider.display_name());
+        eprintln!(
+            "provider '{}' fetch error on register: {err}",
+            provider.display_name()
+        );
         *err_sink = err;
     }
     let display_name = provider.display_name().to_owned();
@@ -100,7 +103,8 @@ fn reinstantiate_provider(name: &str) -> Option<Box<dyn Provider>> {
     }
     let cached: Option<DiscoveredPlugin> = {
         let guard = user_plugin_cache().lock().unwrap();
-        guard.iter()
+        guard
+            .iter()
             .find(|p| p.manifest.name == name || p.manifest.display_name == name)
             .cloned()
     };
@@ -127,7 +131,9 @@ fn reinstantiate_provider(name: &str) -> Option<Box<dyn Provider>> {
 /// Call this after modifying the settings provider's sections at runtime so the
 /// displayed tree reflects the new state. Mirrors C's `refreshSettingsFfon`.
 fn rebuild_settings_ffon(renderer: &mut AppRenderer) {
-    if renderer.ffon.is_empty() { return; }
+    if renderer.ffon.is_empty() {
+        return;
+    }
     let settings_idx = renderer.ffon.len() - 1;
     if let Some(settings_provider) = renderer.providers.last_mut() {
         let children = settings_provider.fetch();
@@ -171,9 +177,14 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
 
     // ---- Build the settings provider via factory registry -------------------
     let mut settings: Box<dyn Provider> = sicompass_sdk::create_provider_by_name("settings")
-        .expect("settings factory must be registered — call sicompass_builtins::register_all() first");
+        .expect(
+            "settings factory must be registered — call sicompass_builtins::register_all() first",
+        );
     settings.set_apply_callback(Box::new(move |k, v| {
-        queue_clone.lock().unwrap().push((k.to_owned(), v.to_owned()));
+        queue_clone
+            .lock()
+            .unwrap()
+            .push((k.to_owned(), v.to_owned()));
     }));
     if let Some(path) = sicompass_sdk::platform::main_config_path() {
         settings.set_config_path(path);
@@ -187,34 +198,55 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
     // the translation when the user clicks a toggle so settings.json stays
     // language-neutral.
     settings.add_radio_setting(
-        "sicompass", "color scheme", "colorScheme",
-        &["dark", "light"], "dark",
+        "sicompass",
+        "color scheme",
+        "colorScheme",
+        &["dark", "light"],
+        "dark",
     );
     // Window maximize/restore is driven by the custom titlebar controls (the
     // `c` palette and corner buttons), so there is no settings checkbox for it.
     // The window still restores its last maximized state via `read_maximized`.
-    settings.add_checkbox_setting("sicompass", "settings-checkbox-shoulder-surfing-protection", "shoulderSurfingProtection", false);
+    settings.add_checkbox_setting(
+        "sicompass",
+        "settings-checkbox-shoulder-surfing-protection",
+        "shoulderSurfingProtection",
+        false,
+    );
     // Checked at startup by `read_auto_update_check_setting` in main.rs.
     // Toggling at runtime only affects the next launch — we don't spawn /
     // cancel the updater thread on the fly.
-    settings.add_checkbox_setting("sicompass", "settings-checkbox-auto-update-check", "autoUpdateCheck", true);
+    settings.add_checkbox_setting(
+        "sicompass",
+        "settings-checkbox-auto-update-check",
+        "autoUpdateCheck",
+        true,
+    );
     // Default coupled to read_font_scale's fallback so the radio selection and
     // the actual on-screen scale always agree — change DEFAULT_FONT_SCALE alone.
     let default_font_scale = format!("{DEFAULT_FONT_SCALE:.2}");
     settings.add_radio_setting(
-        "sicompass", "settings-radio-font-scale", "fontScale",
+        "sicompass",
+        "settings-radio-font-scale",
+        "fontScale",
         &["1.00", "1.25", "1.50", "1.75", "2.00", "2.25", "2.50"],
         &default_font_scale,
     );
     settings.add_radio_setting(
-        "sicompass", "settings-radio-language", "language",
-        &["en-US", "nl-BE", "fr-BE", "de-BE"], "en-US",
+        "sicompass",
+        "settings-radio-language",
+        "language",
+        &["en-US", "nl-BE", "fr-BE", "de-BE"],
+        "en-US",
     );
 
     // File-browser settings
     settings.add_radio_setting(
-        "file browser", "settings-radio-sort-order", "sortOrder",
-        &["alphanumerically", "chronologically"], "alphanumerically",
+        "file browser",
+        "settings-radio-sort-order",
+        "sortOrder",
+        &["alphanumerically", "chronologically"],
+        "alphanumerically",
     );
 
     // "Available programs:" priority section.
@@ -224,7 +256,12 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
     for m in sicompass_sdk::builtin_manifests() {
         if !m.always_enabled {
             let config_key = format!("enable_{}", m.display_name);
-            settings.add_checkbox_setting("Available programs:", &m.display_name, &config_key, m.enable_default);
+            settings.add_checkbox_setting(
+                "Available programs:",
+                &m.display_name,
+                &config_key,
+                m.enable_default,
+            );
         }
     }
 
@@ -256,10 +293,16 @@ pub fn load_programs(renderer: &mut AppRenderer) -> SettingsQueue {
 /// before any provider is built. The SDK boundary forbids importing
 /// `lib_settings`, and this degrades to the default focus if no match is found.
 pub fn focus_onboarding(renderer: &mut AppRenderer) {
-    let Some(settings_idx) = renderer.ffon.len().checked_sub(1) else { return };
-    let Some(root) = renderer.ffon.get(settings_idx).and_then(|e| e.as_obj()) else { return };
+    let Some(settings_idx) = renderer.ffon.len().checked_sub(1) else {
+        return;
+    };
+    let Some(root) = renderer.ffon.get(settings_idx).and_then(|e| e.as_obj()) else {
+        return;
+    };
     // sicompass section is the first child of the settings root.
-    let Some(section) = root.children.first().and_then(|e| e.as_obj()) else { return };
+    let Some(section) = root.children.first().and_then(|e| e.as_obj()) else {
+        return;
+    };
     let body = sicompass_sdk::localize::t("settings-onboarding-body");
     let body_idx = section.children.iter().position(|c| match c {
         FfonElement::Str(s) => *s == body,
@@ -286,10 +329,7 @@ pub fn focus_onboarding(renderer: &mut AppRenderer) {
 /// only need fresh provider instances, so they must NOT mutate settings (which
 /// would duplicate sections/checkboxes). The registered provider set is
 /// identical either way, so provider indices stay stable across tabs.
-pub fn load_content_providers(
-    renderer: &mut AppRenderer,
-    mut settings: Option<&mut dyn Provider>,
-) {
+pub fn load_content_providers(renderer: &mut AppRenderer, mut settings: Option<&mut dyn Provider>) {
     // Always-enabled providers first (e.g. file browser).
     for m in sicompass_sdk::builtin_manifests() {
         if m.always_enabled {
@@ -363,9 +403,13 @@ pub fn build_content_set_from_names(
     let mut fresh_f: Vec<FfonElement> = Vec::with_capacity(names.len());
     for name in names {
         let provider = reinstantiate_provider(name).unwrap_or_else(|| {
-            eprintln!("sicompass: cannot re-instantiate provider '{name}' for new tab — using placeholder");
+            eprintln!(
+                "sicompass: cannot re-instantiate provider '{name}' for new tab — using placeholder"
+            );
             Box::new(sicompass_sdk::provider::GenericProvider::new(
-                name.clone(), name.clone(), |_| Vec::new(),
+                name.clone(),
+                name.clone(),
+                |_| Vec::new(),
             ))
         });
         let (provider, root) = init_provider_root(provider, &mut renderer.error_message);
@@ -378,7 +422,10 @@ pub fn build_content_set_from_names(
 /// Inject setting entries from a `BuiltinManifest` into the settings provider.
 /// Called from both the startup load loop and `enable_provider` so hot-enable
 /// registers identical settings to startup-enable.
-fn inject_builtin_manifest_settings(settings: &mut dyn Provider, manifest: &sicompass_sdk::BuiltinManifest) {
+fn inject_builtin_manifest_settings(
+    settings: &mut dyn Provider,
+    manifest: &sicompass_sdk::BuiltinManifest,
+) {
     use sicompass_sdk::SettingKind;
     for s in &manifest.settings {
         match s.kind {
@@ -426,8 +473,10 @@ fn instantiate_user_plugin(plugin: &DiscoveredPlugin) -> Option<Box<dyn Provider
 
     if let Some(min) = m.min_app_version.as_deref() {
         let current = env!("CARGO_PKG_VERSION");
-        match (semver::Version::parse(min.trim_start_matches('v')),
-               semver::Version::parse(current)) {
+        match (
+            semver::Version::parse(min.trim_start_matches('v')),
+            semver::Version::parse(current),
+        ) {
             (Ok(min_v), Ok(cur_v)) if min_v > cur_v => {
                 eprintln!(
                     "sicompass: skipping plugin '{}' — needs app >= {min} but running {current}",
@@ -483,13 +532,20 @@ fn inject_plugin_settings(settings: &mut dyn Provider, manifest: &PluginManifest
             }
             SettingKind::Checkbox => {
                 settings.add_checkbox_setting(
-                    &manifest.display_name, &s.label, &s.key, s.default_checked,
+                    &manifest.display_name,
+                    &s.label,
+                    &s.key,
+                    s.default_checked,
                 );
             }
             SettingKind::Radio => {
                 let opts: Vec<&str> = s.options.iter().map(String::as_str).collect();
                 settings.add_radio_setting(
-                    &manifest.display_name, &s.label, &s.key, &opts, &s.default,
+                    &manifest.display_name,
+                    &s.label,
+                    &s.key,
+                    &opts,
+                    &s.default,
                 );
             }
         }
@@ -521,7 +577,12 @@ fn load_user_plugins(renderer: &mut AppRenderer, mut settings: Option<&mut dyn P
         let config_key = format!("enable_{}", m.name);
         let currently_enabled = is_plugin_enabled_in_config(&m.name);
         if let Some(s) = settings.as_deref_mut() {
-            s.add_checkbox_setting("Available programs:", &m.display_name, &config_key, currently_enabled);
+            s.add_checkbox_setting(
+                "Available programs:",
+                &m.display_name,
+                &config_key,
+                currently_enabled,
+            );
         }
 
         // Skip disabled plugins (mirrors C's isEnabledInConfig check in programsLoad).
@@ -623,12 +684,20 @@ fn read_language_from_config(path: &Path) -> Option<String> {
 /// Mirrors `programs.c:422-448`. Runs once at startup; if the key is absent
 /// the function is a no-op.
 fn migrate_programs_to_load(path: &Path) {
-    let Ok(data) = std::fs::read_to_string(path) else { return; };
-    let Ok(mut root) = serde_json::from_str::<serde_json::Value>(&data) else { return; };
+    let Ok(data) = std::fs::read_to_string(path) else {
+        return;
+    };
+    let Ok(mut root) = serde_json::from_str::<serde_json::Value>(&data) else {
+        return;
+    };
 
     let programs_to_load: Vec<String> = {
-        let Some(sc) = root.get("sicompass").and_then(|v| v.as_object()) else { return; };
-        let Some(ptl) = sc.get("programsToLoad").and_then(|v| v.as_array()) else { return; };
+        let Some(sc) = root.get("sicompass").and_then(|v| v.as_object()) else {
+            return;
+        };
+        let Some(ptl) = sc.get("programsToLoad").and_then(|v| v.as_array()) else {
+            return;
+        };
         ptl.iter()
             .filter_map(|v| v.as_str().map(|s| s.to_owned()))
             .filter(|s| !s.is_empty())
@@ -638,7 +707,8 @@ fn migrate_programs_to_load(path: &Path) {
     // Insert enable_<name> = true into "Available programs:"
     {
         let available = root
-            .as_object_mut().unwrap()
+            .as_object_mut()
+            .unwrap()
             .entry("Available programs:")
             .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
         let map = available.as_object_mut().unwrap();
@@ -667,9 +737,15 @@ fn migrate_programs_to_load(path: &Path) {
 /// `Available programs:.enable_editor` toggle to `enable_text editor`. Runs
 /// once at startup; if no old keys are present the function is a no-op.
 fn migrate_editor_to_text_editor(path: &Path) {
-    let Ok(data) = std::fs::read_to_string(path) else { return; };
-    let Ok(mut root) = serde_json::from_str::<serde_json::Value>(&data) else { return; };
-    let Some(obj) = root.as_object_mut() else { return; };
+    let Ok(data) = std::fs::read_to_string(path) else {
+        return;
+    };
+    let Ok(mut root) = serde_json::from_str::<serde_json::Value>(&data) else {
+        return;
+    };
+    let Some(obj) = root.as_object_mut() else {
+        return;
+    };
 
     let mut changed = false;
 
@@ -697,9 +773,14 @@ fn migrate_editor_to_text_editor(path: &Path) {
     }
 
     // Rename the "Available programs:" enable toggle.
-    if let Some(available) = obj.get_mut("Available programs:").and_then(|v| v.as_object_mut()) {
+    if let Some(available) = obj
+        .get_mut("Available programs:")
+        .and_then(|v| v.as_object_mut())
+    {
         if let Some(v) = available.remove("enable_editor") {
-            available.entry("enable_text editor".to_owned()).or_insert(v);
+            available
+                .entry("enable_text editor".to_owned())
+                .or_insert(v);
             changed = true;
         }
     }
@@ -717,10 +798,17 @@ fn migrate_editor_to_text_editor(path: &Path) {
 /// Read `sicompass.maximized` from settings.json.
 /// Returns `false` if absent, unparseable, or file missing.
 pub fn read_maximized() -> bool {
-    let Some(path) = sicompass_sdk::platform::main_config_path() else { return false };
-    let Ok(data) = std::fs::read_to_string(&path) else { return false };
-    let Ok(root) = serde_json::from_str::<serde_json::Value>(&data) else { return false };
-    let val = root.get("sicompass")
+    let Some(path) = sicompass_sdk::platform::main_config_path() else {
+        return false;
+    };
+    let Ok(data) = std::fs::read_to_string(&path) else {
+        return false;
+    };
+    let Ok(root) = serde_json::from_str::<serde_json::Value>(&data) else {
+        return false;
+    };
+    let val = root
+        .get("sicompass")
         .and_then(|v| v.as_object())
         .and_then(|s| s.get("maximized"));
     match val {
@@ -744,7 +832,9 @@ pub fn write_maximized(value: bool) {
     if read_maximized() == value {
         return;
     }
-    let Some(path) = sicompass_sdk::platform::main_config_path() else { return };
+    let Some(path) = sicompass_sdk::platform::main_config_path() else {
+        return;
+    };
     if let Some(parent) = path.parent() {
         sicompass_sdk::platform::make_dirs(parent);
     }
@@ -779,10 +869,18 @@ pub fn write_maximized(value: bool) {
 /// (e.g. the program was disabled) are dropped; if everything is filtered out,
 /// the existing default is preserved.
 pub fn load_tabs_state(r: &mut crate::app_state::AppRenderer) {
-    let Some(path) = sicompass_sdk::platform::main_config_path() else { return };
-    let Ok(data) = std::fs::read_to_string(&path) else { return };
-    let Ok(root) = serde_json::from_str::<serde_json::Value>(&data) else { return };
-    let Some(sec) = root.get("sicompass").and_then(|v| v.as_object()) else { return };
+    let Some(path) = sicompass_sdk::platform::main_config_path() else {
+        return;
+    };
+    let Ok(data) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    let Ok(root) = serde_json::from_str::<serde_json::Value>(&data) else {
+        return;
+    };
+    let Some(sec) = root.get("sicompass").and_then(|v| v.as_object()) else {
+        return;
+    };
     apply_tabs_section(r, sec);
 }
 
@@ -793,8 +891,8 @@ pub fn apply_tabs_section(
     r: &mut crate::app_state::AppRenderer,
     sec: &serde_json::Map<String, serde_json::Value>,
 ) {
-    use sicompass_sdk::ffon::IdArray;
     use crate::app_state::TabSnapshot;
+    use sicompass_sdk::ffon::IdArray;
 
     // The bootstrap live set is `[content…, settings]`; every tab shares the
     // same provider ordering, so this count gates persisted `current_id[0]`
@@ -803,25 +901,36 @@ pub fn apply_tabs_section(
 
     // Parse the persisted nav entries (id + active provider path) per tab,
     // dropping any whose provider index no longer exists.
-    let parsed: Vec<(IdArray, String, bool)> = sec.get("tabs").and_then(|v| v.as_str())
+    let parsed: Vec<(IdArray, String, bool)> = sec
+        .get("tabs")
+        .and_then(|v| v.as_str())
         .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-        .and_then(|v| match v { serde_json::Value::Array(a) => Some(a), _ => None })
-        .map(|arr| arr.into_iter().filter_map(|v| {
-            let obj = v.as_object()?;
-            let ids = obj.get("id")?.as_array()?;
-            let path = obj.get("path")?.as_str()?.to_owned();
-            // Absent in configs written by older builds — the `false` default is
-            // the ordinary "descend into the saved path" restore.
-            let on_path = obj.get("onPath").and_then(|v| v.as_bool()).unwrap_or(false);
-            let mut id = IdArray::new();
-            for n in ids {
-                id.push(n.as_u64()? as usize);
-            }
-            match id.get(0) {
-                Some(pi) if pi < provider_count && id.depth() > 0 => Some((id, path, on_path)),
-                _ => None,
-            }
-        }).collect())
+        .and_then(|v| match v {
+            serde_json::Value::Array(a) => Some(a),
+            _ => None,
+        })
+        .map(|arr| {
+            arr.into_iter()
+                .filter_map(|v| {
+                    let obj = v.as_object()?;
+                    let ids = obj.get("id")?.as_array()?;
+                    let path = obj.get("path")?.as_str()?.to_owned();
+                    // Absent in configs written by older builds — the `false` default is
+                    // the ordinary "descend into the saved path" restore.
+                    let on_path = obj.get("onPath").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let mut id = IdArray::new();
+                    for n in ids {
+                        id.push(n.as_u64()? as usize);
+                    }
+                    match id.get(0) {
+                        Some(pi) if pi < provider_count && id.depth() > 0 => {
+                            Some((id, path, on_path))
+                        }
+                        _ => None,
+                    }
+                })
+                .collect()
+        })
         .unwrap_or_default();
 
     if !parsed.is_empty() {
@@ -855,18 +964,26 @@ pub fn apply_tabs_section(
             // read the live value back rather than re-storing what was saved.
             let provider_path = crate::app_state::active_provider_path(r);
             let (cp, cf) = r.detach_content();
-            tabs.push(TabSnapshot { current_id, provider_path, providers: cp, ffon: cf });
+            tabs.push(TabSnapshot {
+                current_id,
+                provider_path,
+                providers: cp,
+                ffon: cf,
+            });
         }
         r.tabs = tabs;
         // Keep `tab_timelines` parallel to `tabs` (invariant relied on by
         // `active_timeline_mut()`).
-        r.tab_timelines.resize_with(r.tabs.len(), crate::app_state::Timeline::new);
+        r.tab_timelines
+            .resize_with(r.tabs.len(), crate::app_state::Timeline::new);
 
         // Resolve the active tab and make its parked content the live set.
         let mut active = 0;
         if let Some(active_str) = sec.get("activeTab").and_then(|v| v.as_str()) {
             if let Ok(n) = active_str.parse::<usize>() {
-                if n < r.tabs.len() { active = n; }
+                if n < r.tabs.len() {
+                    active = n;
+                }
             }
         }
         r.active_tab = active;
@@ -883,8 +1000,11 @@ pub fn apply_tabs_section(
 
     // No persisted tabs: keep the single bootstrap tab. Keep timelines parallel
     // and apply the active tab's saved nav (path is empty by default → no-op).
-    r.tab_timelines.resize_with(r.tabs.len(), crate::app_state::Timeline::new);
-    if r.active_tab >= r.tabs.len() { r.active_tab = 0; }
+    r.tab_timelines
+        .resize_with(r.tabs.len(), crate::app_state::Timeline::new);
+    if r.active_tab >= r.tabs.len() {
+        r.active_tab = 0;
+    }
     r.reset_mru_default(r.active_tab);
     r.load_active_tab();
 }
@@ -896,14 +1016,22 @@ pub const DEFAULT_FONT_SCALE: f32 = 1.75;
 /// Read `sicompass.fontScale` from settings.json.
 /// Returns [`DEFAULT_FONT_SCALE`] if absent or unparseable. Clamped to [1.0, 2.5].
 pub fn read_font_scale() -> f32 {
-    let Some(path) = sicompass_sdk::platform::main_config_path() else { return DEFAULT_FONT_SCALE };
-    let Ok(data) = std::fs::read_to_string(&path) else { return DEFAULT_FONT_SCALE };
-    let Ok(root) = serde_json::from_str::<serde_json::Value>(&data) else { return DEFAULT_FONT_SCALE };
-    let raw = root.get("sicompass")
+    let Some(path) = sicompass_sdk::platform::main_config_path() else {
+        return DEFAULT_FONT_SCALE;
+    };
+    let Ok(data) = std::fs::read_to_string(&path) else {
+        return DEFAULT_FONT_SCALE;
+    };
+    let Ok(root) = serde_json::from_str::<serde_json::Value>(&data) else {
+        return DEFAULT_FONT_SCALE;
+    };
+    let raw = root
+        .get("sicompass")
         .and_then(|v| v.as_object())
         .and_then(|s| s.get("fontScale"))
         .and_then(|v| {
-            v.as_str().map(|s| s.to_owned())
+            v.as_str()
+                .map(|s| s.to_owned())
                 .or_else(|| v.as_f64().map(|f| f.to_string()))
         });
     raw.and_then(|s| s.parse::<f32>().ok())
@@ -919,8 +1047,14 @@ fn read_remote_config(section: &str) -> Option<(String, String)> {
     let root = serde_json::from_str::<serde_json::Value>(&data).ok()?;
     let sec = root.get(section)?.as_object()?;
     let remote_url = sec.get("remoteUrl")?.as_str()?.to_owned();
-    if remote_url.is_empty() { return None; }
-    let api_key = sec.get("apiKey").and_then(|v| v.as_str()).unwrap_or("").to_owned();
+    if remote_url.is_empty() {
+        return None;
+    }
+    let api_key = sec
+        .get("apiKey")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_owned();
     Some((remote_url, api_key))
 }
 
@@ -954,11 +1088,24 @@ fn load_remote_programs(renderer: &mut AppRenderer, mut settings: Option<&mut dy
             Some(n) => n,
             None => continue,
         };
-        if val.as_bool() != Some(true) { continue; }
+        if val.as_bool() != Some(true) {
+            continue;
+        }
 
         // Skip known builtins and already-registered providers.
-        if builtin_manifests.iter().any(|m| m.display_name == name || m.name == name) { continue; }
-        if renderer.providers.iter().any(|p| name_matches_provider(name, p.name())) { continue; }
+        if builtin_manifests
+            .iter()
+            .any(|m| m.display_name == name || m.name == name)
+        {
+            continue;
+        }
+        if renderer
+            .providers
+            .iter()
+            .any(|p| name_matches_provider(name, p.name()))
+        {
+            continue;
+        }
 
         // Read remoteUrl; skip if absent.
         let (remote_url, api_key) = match read_remote_config(name) {
@@ -996,7 +1143,13 @@ fn load_remote_programs(renderer: &mut AppRenderer, mut settings: Option<&mut dy
 /// selection stays on the same provider.
 pub fn enable_provider(renderer: &mut AppRenderer, name: &str) {
     // Never double-load an already-registered provider.
-    if renderer.providers.iter().any(|p| name_matches_provider(name, p.name())) { return; }
+    if renderer
+        .providers
+        .iter()
+        .any(|p| name_matches_provider(name, p.name()))
+    {
+        return;
+    }
 
     // Try built-ins first.
     if let Some(provider) = instantiate_builtin(name) {
@@ -1019,7 +1172,10 @@ pub fn enable_provider(renderer: &mut AppRenderer, name: &str) {
     // Try user-plugin cache (clone to avoid holding the lock across provider init).
     let cached: Option<DiscoveredPlugin> = {
         let guard = user_plugin_cache().lock().unwrap();
-        guard.iter().find(|p| p.manifest.name == name || p.manifest.display_name == name).cloned()
+        guard
+            .iter()
+            .find(|p| p.manifest.name == name || p.manifest.display_name == name)
+            .cloned()
     };
     if let Some(plugin) = cached {
         if let Some(provider) = instantiate_user_plugin(&plugin) {
@@ -1042,10 +1198,15 @@ pub fn enable_provider(renderer: &mut AppRenderer, name: &str) {
         let provider: Box<dyn Provider> =
             sicompass_builtins::create_remote(name, remote_url, api_key);
         let section_name = name.to_owned();
-        insert_provider_alphabetically(renderer, provider, Some(Box::new(move |settings: &mut dyn Provider| {
-            settings.add_text_setting(&section_name, "remote URL", "remoteUrl", "");
-            settings.add_password_setting(&section_name, "API key", "apiKey", "");
-        })), None);
+        insert_provider_alphabetically(
+            renderer,
+            provider,
+            Some(Box::new(move |settings: &mut dyn Provider| {
+                settings.add_text_setting(&section_name, "remote URL", "remoteUrl", "");
+                settings.add_password_setting(&section_name, "API key", "apiKey", "");
+            })),
+            None,
+        );
         return;
     }
 
@@ -1060,12 +1221,15 @@ fn sort_providers_alphabetically(renderer: &mut AppRenderer) {
     if len <= 1 {
         return;
     }
-    let mut pairs: Vec<(Box<dyn Provider>, FfonElement)> = renderer.providers
+    let mut pairs: Vec<(Box<dyn Provider>, FfonElement)> = renderer
+        .providers
         .drain(..)
         .zip(renderer.ffon.drain(..))
         .collect();
     pairs.sort_by(|(a, _), (b, _)| {
-        a.name().to_ascii_lowercase().cmp(&b.name().to_ascii_lowercase())
+        a.name()
+            .to_ascii_lowercase()
+            .cmp(&b.name().to_ascii_lowercase())
     });
     let (providers, ffon): (Vec<_>, Vec<_>) = pairs.into_iter().unzip();
     renderer.providers = providers;
@@ -1115,8 +1279,8 @@ fn insert_provider_alphabetically(
         }
     }
 
-    let provider_version: Option<String> = manifest_version
-        .or_else(|| provider.version().map(|s| s.to_owned()));
+    let provider_version: Option<String> =
+        manifest_version.or_else(|| provider.version().map(|s| s.to_owned()));
 
     renderer.ffon.insert(insert_idx, root);
     renderer.providers.insert(insert_idx, provider);
@@ -1158,7 +1322,10 @@ pub fn process_update_events(renderer: &mut AppRenderer) {
 
     for evt in events {
         match evt {
-            UpdateEvent::HotReload { plugin_name, new_entry_path } => {
+            UpdateEvent::HotReload {
+                plugin_name,
+                new_entry_path,
+            } => {
                 match hot_reload_plugin(renderer, &plugin_name, &new_entry_path) {
                     Ok(()) => {
                         tracing::info!("hot-reloaded plugin '{plugin_name}'");
@@ -1167,8 +1334,7 @@ pub fn process_update_events(renderer: &mut AppRenderer) {
                     }
                     Err(e) => {
                         tracing::warn!("hot reload '{plugin_name}': {e}");
-                        renderer.error_message =
-                            format!("plugin '{plugin_name}': {e}");
+                        renderer.error_message = format!("plugin '{plugin_name}': {e}");
                     }
                 }
             }
@@ -1198,8 +1364,7 @@ pub fn process_update_events(renderer: &mut AppRenderer) {
         return;
     }
 
-    let can_write =
-        renderer.error_message.is_empty() || renderer.update_message_active;
+    let can_write = renderer.error_message.is_empty() || renderer.update_message_active;
     if !can_write {
         return;
     }
@@ -1217,7 +1382,10 @@ pub fn process_update_events(renderer: &mut AppRenderer) {
         }
         if plugin_applied.len() == 1 {
             let p = plugin_applied[0];
-            msg.push_str(&format!("Plugin updated: {} v{}", p.plugin_name, p.new_version));
+            msg.push_str(&format!(
+                "Plugin updated: {} v{}",
+                p.plugin_name, p.new_version
+            ));
         } else {
             msg.push_str(&format!("{} plugin updates applied", plugin_applied.len()));
         }
@@ -1271,8 +1439,12 @@ pub fn handle_apply_app_update(renderer: &mut AppRenderer) {
 /// the cached old library and the update has no effect.
 struct HotReloadPlaceholder;
 impl Provider for HotReloadPlaceholder {
-    fn name(&self) -> &str { "" }
-    fn fetch(&mut self) -> Vec<FfonElement> { Vec::new() }
+    fn name(&self) -> &str {
+        ""
+    }
+    fn fetch(&mut self) -> Vec<FfonElement> {
+        Vec::new()
+    }
 }
 
 /// Tear down a running user plugin and re-instantiate it from the
@@ -1355,7 +1527,11 @@ pub fn hot_reload_plugin(
 
 /// Disable and remove a provider by name.
 pub fn disable_provider(renderer: &mut AppRenderer, name: &str) {
-    let Some(idx) = renderer.providers.iter().position(|p| name_matches_provider(name, p.name())) else {
+    let Some(idx) = renderer
+        .providers
+        .iter()
+        .position(|p| name_matches_provider(name, p.name()))
+    else {
         return;
     };
 
@@ -1369,8 +1545,12 @@ pub fn disable_provider(renderer: &mut AppRenderer, name: &str) {
         .unwrap_or_else(|| {
             // Check user plugin cache for display_name
             let guard = user_plugin_cache().lock().unwrap();
-            guard.iter()
-                .find(|p| p.manifest.name == removed_provider_name || p.manifest.display_name == removed_provider_name)
+            guard
+                .iter()
+                .find(|p| {
+                    p.manifest.name == removed_provider_name
+                        || p.manifest.display_name == removed_provider_name
+                })
                 .map(|p| p.manifest.display_name.clone())
                 .unwrap_or(removed_provider_name.clone())
         });
@@ -1400,12 +1580,20 @@ pub fn disable_provider(renderer: &mut AppRenderer, name: &str) {
 fn propagate_enable_to_parked_tabs(renderer: &mut AppRenderer, name: &str) {
     let active = renderer.active_tab;
     for i in 0..renderer.tabs.len() {
-        if i == active { continue; }
-        // Skip tabs that somehow already have it (idempotent).
-        if renderer.tabs[i].providers.iter().any(|p| name_matches_provider(name, p.name())) {
+        if i == active {
             continue;
         }
-        let Some(provider) = reinstantiate_provider(name) else { continue; };
+        // Skip tabs that somehow already have it (idempotent).
+        if renderer.tabs[i]
+            .providers
+            .iter()
+            .any(|p| name_matches_provider(name, p.name()))
+        {
+            continue;
+        }
+        let Some(provider) = reinstantiate_provider(name) else {
+            continue;
+        };
         let (provider, root) = init_provider_root(provider, &mut renderer.error_message);
         let new_name_lower = provider.name().to_ascii_lowercase();
 
@@ -1434,10 +1622,17 @@ fn propagate_enable_to_parked_tabs(renderer: &mut AppRenderer, name: &str) {
 fn propagate_disable_to_parked_tabs(renderer: &mut AppRenderer, name: &str) {
     let active = renderer.active_tab;
     for i in 0..renderer.tabs.len() {
-        if i == active { continue; }
+        if i == active {
+            continue;
+        }
         let tab = &mut renderer.tabs[i];
-        let Some(idx) = tab.providers.iter().position(|p| name_matches_provider(name, p.name()))
-        else { continue; };
+        let Some(idx) = tab
+            .providers
+            .iter()
+            .position(|p| name_matches_provider(name, p.name()))
+        else {
+            continue;
+        };
         tab.ffon.remove(idx);
         tab.providers.remove(idx);
         // Fix the parked cursor's provider index.
@@ -1480,15 +1675,14 @@ pub fn apply_pending_settings(
     }
 }
 
-fn apply_setting(
-    renderer: &mut AppRenderer,
-    key: &str,
-    value: &str,
-    skip_enable: bool,
-) {
+fn apply_setting(renderer: &mut AppRenderer, key: &str, value: &str, skip_enable: bool) {
     if let Some(name) = key.strip_prefix("enable_") {
-        if skip_enable { return; }
-        if name == "file browser" { return; } // always present
+        if skip_enable {
+            return;
+        }
+        if name == "file browser" {
+            return;
+        } // always present
         if value == "true" {
             enable_provider(renderer, name);
             propagate_enable_to_parked_tabs(renderer, name);
@@ -1580,7 +1774,9 @@ fn apply_setting(
 /// Return true if `display_name` matches `provider_name` when spaces are ignored.
 /// e.g., "chat client" matches "chatclient".
 pub fn name_matches_provider(display_name: &str, provider_name: &str) -> bool {
-    if display_name == provider_name { return true; }
+    if display_name == provider_name {
+        return true;
+    }
     let stripped: String = display_name.chars().filter(|&c| c != ' ').collect();
     stripped == provider_name
 }
@@ -1637,7 +1833,10 @@ mod tests {
     #[test]
     fn read_language_returns_allowed_locale() {
         let f = write_config(r#"{"sicompass":{"language":"nl-BE"}}"#);
-        assert_eq!(read_language_from_config(f.path()), Some("nl-BE".to_owned()));
+        assert_eq!(
+            read_language_from_config(f.path()),
+            Some("nl-BE".to_owned())
+        );
     }
 
     #[test]
@@ -1667,11 +1866,21 @@ mod tests {
         assert_eq!(read_language_from_config(f.path()), None);
     }
 
-    struct MockProv { name: String }
-    impl MockProv { fn new(n: &str) -> Self { MockProv { name: n.to_owned() } } }
+    struct MockProv {
+        name: String,
+    }
+    impl MockProv {
+        fn new(n: &str) -> Self {
+            MockProv { name: n.to_owned() }
+        }
+    }
     impl Provider for MockProv {
-        fn name(&self) -> &str { &self.name }
-        fn fetch(&mut self) -> Vec<FfonElement> { vec![] }
+        fn name(&self) -> &str {
+            &self.name
+        }
+        fn fetch(&mut self) -> Vec<FfonElement> {
+            vec![]
+        }
     }
 
     // --- name_matches_provider ---
@@ -1752,10 +1961,10 @@ mod tests {
         let mut sicompass = FfonElement::new_obj("sicompass");
         let sc = sicompass.as_obj_mut().unwrap();
         sc.push(FfonElement::Str("<checkbox>auto update".to_owned())); // #0 tagged
-        sc.push(FfonElement::Str(app_line));                           // #1 app version
-        sc.push(FfonElement::Str(sdk_line));                           // #2 SDK version
+        sc.push(FfonElement::Str(app_line)); // #1 app version
+        sc.push(FfonElement::Str(sdk_line)); // #2 SDK version
         sc.push(FfonElement::Str(
-            sicompass_sdk::localize::t("settings-onboarding-body"),    // #3 = body
+            sicompass_sdk::localize::t("settings-onboarding-body"), // #3 = body
         ));
 
         let mut settings = FfonElement::new_obj("settings");
@@ -1787,8 +1996,11 @@ mod tests {
         r.ffon.push(settings);
         let before = r.current_id.as_slice().to_vec();
         focus_onboarding(&mut r);
-        assert_eq!(r.current_id.as_slice(), before.as_slice(),
-            "focus is left untouched when there is no onboarding line");
+        assert_eq!(
+            r.current_id.as_slice(),
+            before.as_slice(),
+            "focus is left untouched when there is no onboarding line"
+        );
     }
 
     #[test]
@@ -1952,7 +2164,7 @@ mod tests {
 
     #[test]
     fn palette_accessor_returns_dark_by_default() {
-        use crate::app_state::{PaletteTheme, PALETTE_DARK};
+        use crate::app_state::{PALETTE_DARK, PaletteTheme};
         let r = AppRenderer::new();
         assert_eq!(r.palette_theme, PaletteTheme::Dark);
         assert_eq!(r.palette().background, PALETTE_DARK.background);
@@ -2004,12 +2216,16 @@ mod tests {
     fn migrate_programs_to_load_creates_enable_keys() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
-        std::fs::write(&path, r#"{
+        std::fs::write(
+            &path,
+            r#"{
             "sicompass": {
                 "programsToLoad": ["tutorial", "web browser"],
                 "colorScheme": "dark"
             }
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
 
         migrate_programs_to_load(&path);
 
@@ -2018,8 +2234,14 @@ mod tests {
 
         // enable keys should be set
         let available = root.get("Available programs:").unwrap();
-        assert_eq!(available.get("enable_tutorial").unwrap().as_bool(), Some(true));
-        assert_eq!(available.get("enable_web browser").unwrap().as_bool(), Some(true));
+        assert_eq!(
+            available.get("enable_tutorial").unwrap().as_bool(),
+            Some(true)
+        );
+        assert_eq!(
+            available.get("enable_web browser").unwrap().as_bool(),
+            Some(true)
+        );
 
         // programsToLoad should be removed
         assert!(root["sicompass"].get("programsToLoad").is_none());
@@ -2048,10 +2270,14 @@ mod tests {
     fn migrate_editor_to_text_editor_renames_section_and_toggle() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
-        std::fs::write(&path, r#"{
+        std::fs::write(
+            &path,
+            r#"{
             "editor": { "editorPath": "/home/nico/Dropbox" },
             "Available programs:": { "enable_editor": true }
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
 
         migrate_editor_to_text_editor(&path);
 
@@ -2126,7 +2352,10 @@ mod tests {
         manifest.plugin_type = PluginType::Wasm;
         manifest.entry = fixture.to_owned();
         manifest.allowed_hosts = allowed_hosts;
-        DiscoveredPlugin { manifest, entry_path: wasm_fixture(fixture) }
+        DiscoveredPlugin {
+            manifest,
+            entry_path: wasm_fixture(fixture),
+        }
     }
 
     #[test]
@@ -2154,8 +2383,7 @@ mod tests {
     fn the_same_wasm_plugin_loads_once_its_hosts_are_declared() {
         // Confirms the refusal above is about the missing declaration rather than
         // the fixture being unloadable.
-        let plugin =
-            make_wasm_plugin("net-demo", "net.wasm", vec!["example.com".to_owned()]);
+        let plugin = make_wasm_plugin("net-demo", "net.wasm", vec!["example.com".to_owned()]);
         assert!(instantiate_user_plugin(&plugin).is_some());
     }
 
@@ -2183,7 +2411,9 @@ mod tests {
 
     #[test]
     fn enable_provider_unknown_name_logs_and_returns() {
-        let _cache_guard = PLUGIN_CACHE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _cache_guard = PLUGIN_CACHE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let mut r = AppRenderer::new();
         // Seed empty cache so we don't accidentally pick up real plugins
         _reset_user_plugin_cache(vec![]);
@@ -2202,7 +2432,9 @@ mod tests {
         // because a WASM plugin either loads or does not — unlike the old
         // ScriptProvider, which was constructed even when its script was missing and
         // only failed later, when something called it.
-        let _cache_guard = PLUGIN_CACHE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _cache_guard = PLUGIN_CACHE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let mut r = AppRenderer::new();
         let plugin = make_wasm_plugin("hello", "hello.wasm", vec![]);
         _reset_user_plugin_cache(vec![plugin]);
@@ -2220,7 +2452,9 @@ mod tests {
     fn enabling_a_plugin_whose_file_is_missing_adds_nothing() {
         // The behaviour that changed with WASM: a provider that cannot load is not
         // registered at all, rather than registered as a shell that fails on use.
-        let _cache_guard = PLUGIN_CACHE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _cache_guard = PLUGIN_CACHE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let mut r = AppRenderer::new();
         let mut plugin = make_wasm_plugin("ghost", "hello.wasm", vec![]);
         plugin.entry_path = PathBuf::from("/nonexistent/plugin.wasm");
@@ -2230,7 +2464,11 @@ mod tests {
         let before = r.providers.len();
 
         enable_provider(&mut r, "ghost");
-        assert_eq!(r.providers.len(), before, "a broken plugin must not be registered");
+        assert_eq!(
+            r.providers.len(),
+            before,
+            "a broken plugin must not be registered"
+        );
     }
 
     // --- inject_builtin_settings registers text entries on hot-enable ---
@@ -2239,7 +2477,9 @@ mod tests {
     /// `name`, then return the FFON fetch output from the settings provider.
     fn settings_ffon_after_enable(name: &str) -> Vec<FfonElement> {
         use sicompass_settings::SettingsProvider;
-        let _cache_guard = PLUGIN_CACHE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _cache_guard = PLUGIN_CACHE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         // Ensure the factory registry is populated (normally done in main()).
         sicompass_builtins::register_all();
         let mut r = AppRenderer::new();
@@ -2249,7 +2489,10 @@ mod tests {
         r.providers.last_mut().unwrap().fetch()
     }
 
-    fn section_children<'a>(ffon: &'a [FfonElement], section_name: &str) -> Option<&'a Vec<FfonElement>> {
+    fn section_children<'a>(
+        ffon: &'a [FfonElement],
+        section_name: &str,
+    ) -> Option<&'a Vec<FfonElement>> {
         ffon.iter()
             .find_map(|e| e.as_obj().filter(|o| o.key == section_name))
             .map(|o| &o.children)
@@ -2267,48 +2510,85 @@ mod tests {
             !children.iter().any(|e| e.as_str() == Some("no settings")),
             "email client section should not show 'no settings'"
         );
-        let editable: Vec<_> = children.iter()
+        let editable: Vec<_> = children
+            .iter()
             .filter_map(|e| e.as_str())
             .filter(|s| s.contains("<input>") || s.contains("<password>"))
             .collect();
-        assert_eq!(editable.len(), 6, "expected 6 editable settings, got {}: {:?}", editable.len(), editable);
-        let masked: Vec<_> = editable.iter().filter(|s| s.contains("<password>")).collect();
-        assert_eq!(masked.len(), 2, "expected 2 masked (password) settings, got {:?}", masked);
+        assert_eq!(
+            editable.len(),
+            6,
+            "expected 6 editable settings, got {}: {:?}",
+            editable.len(),
+            editable
+        );
+        let masked: Vec<_> = editable
+            .iter()
+            .filter(|s| s.contains("<password>"))
+            .collect();
+        assert_eq!(
+            masked.len(),
+            2,
+            "expected 2 masked (password) settings, got {:?}",
+            masked
+        );
     }
 
     #[test]
     fn hot_enable_chat_client_registers_settings() {
         let ffon = settings_ffon_after_enable("chat client");
-        let children = section_children(&ffon, "chat client")
-            .expect("chat client section should be present");
+        let children =
+            section_children(&ffon, "chat client").expect("chat client section should be present");
         assert!(
             !children.iter().any(|e| e.as_str() == Some("no settings")),
             "chat client section should not show 'no settings'"
         );
         // 5 editable entries; two (access token, password) are masked.
-        let editable: Vec<_> = children.iter()
+        let editable: Vec<_> = children
+            .iter()
             .filter_map(|e| e.as_str())
             .filter(|s| s.contains("<input>") || s.contains("<password>"))
             .collect();
-        assert_eq!(editable.len(), 5, "expected 5 editable settings, got {}: {:?}", editable.len(), editable);
-        let masked: Vec<_> = editable.iter().filter(|s| s.contains("<password>")).collect();
-        assert_eq!(masked.len(), 2, "expected 2 masked (password) settings, got {:?}", masked);
+        assert_eq!(
+            editable.len(),
+            5,
+            "expected 5 editable settings, got {}: {:?}",
+            editable.len(),
+            editable
+        );
+        let masked: Vec<_> = editable
+            .iter()
+            .filter(|s| s.contains("<password>"))
+            .collect();
+        assert_eq!(
+            masked.len(),
+            2,
+            "expected 2 masked (password) settings, got {:?}",
+            masked
+        );
     }
 
     #[test]
     fn hot_enable_sales_demo_registers_settings() {
         let ffon = settings_ffon_after_enable("sales demo");
-        let children = section_children(&ffon, "sales demo")
-            .expect("sales demo section should be present");
+        let children =
+            section_children(&ffon, "sales demo").expect("sales demo section should be present");
         assert!(
             !children.iter().any(|e| e.as_str() == Some("no settings")),
             "sales demo section should not show 'no settings'"
         );
-        let inputs: Vec<_> = children.iter()
+        let inputs: Vec<_> = children
+            .iter()
             .filter_map(|e| e.as_str())
             .filter(|s| s.contains("<input>"))
             .collect();
-        assert_eq!(inputs.len(), 1, "expected 1 text setting, got {}: {:?}", inputs.len(), inputs);
+        assert_eq!(
+            inputs.len(),
+            1,
+            "expected 1 text setting, got {}: {:?}",
+            inputs.len(),
+            inputs
+        );
     }
 
     #[test]
@@ -2320,14 +2600,22 @@ mod tests {
             !children.iter().any(|e| e.as_str() == Some("no settings")),
             "text editor section should not show 'no settings'"
         );
-        let inputs: Vec<_> = children.iter()
+        let inputs: Vec<_> = children
+            .iter()
             .filter_map(|e| e.as_str())
             .filter(|s| s.contains("<input>"))
             .collect();
-        assert_eq!(inputs.len(), 1, "expected 1 text setting (text editor path), got {}: {:?}", inputs.len(), inputs);
+        assert_eq!(
+            inputs.len(),
+            1,
+            "expected 1 text setting (text editor path), got {}: {:?}",
+            inputs.len(),
+            inputs
+        );
         assert!(
             inputs[0].contains("text editor path"),
-            "the single input should be 'text editor path', got: {}", inputs[0]
+            "the single input should be 'text editor path', got: {}",
+            inputs[0]
         );
     }
 }

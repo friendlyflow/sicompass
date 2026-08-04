@@ -22,7 +22,7 @@
 //! }
 //! ```
 
-use sicompass_sdk::ffon::{parse_json_value, FfonElement};
+use sicompass_sdk::ffon::{FfonElement, parse_json_value};
 use sicompass_sdk::provider::Provider;
 
 // ---------------------------------------------------------------------------
@@ -73,7 +73,7 @@ impl RemoteProvider {
             Err(e) => {
                 return vec![FfonElement::new_str(format!(
                     "Error building HTTP client: {e}"
-                ))]
+                ))];
             }
         };
 
@@ -88,7 +88,7 @@ impl RemoteProvider {
                 return vec![FfonElement::new_str(format!(
                     "Error connecting to {}: {}",
                     self.remote_url, e
-                ))]
+                ))];
             }
         };
 
@@ -107,7 +107,7 @@ impl RemoteProvider {
                 return vec![FfonElement::new_str(format!(
                     "Error reading response from {}: {e}",
                     self.remote_url
-                ))]
+                ))];
             }
         };
 
@@ -117,13 +117,13 @@ impl RemoteProvider {
                 return vec![FfonElement::new_str(format!(
                     "Invalid response from {}",
                     self.remote_url
-                ))]
+                ))];
             }
             Err(e) => {
                 return vec![FfonElement::new_str(format!(
                     "Invalid JSON from {}: {e}",
                     self.remote_url
-                ))]
+                ))];
             }
         };
 
@@ -164,14 +164,32 @@ fn url_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9'
-            | b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')' => {
+            b'A'..=b'Z'
+            | b'a'..=b'z'
+            | b'0'..=b'9'
+            | b'-'
+            | b'_'
+            | b'.'
+            | b'!'
+            | b'~'
+            | b'*'
+            | b'\''
+            | b'('
+            | b')' => {
                 out.push(b as char);
             }
             _ => {
                 out.push('%');
-                out.push(char::from_digit((b >> 4) as u32, 16).unwrap().to_ascii_uppercase());
-                out.push(char::from_digit((b & 0xf) as u32, 16).unwrap().to_ascii_uppercase());
+                out.push(
+                    char::from_digit((b >> 4) as u32, 16)
+                        .unwrap()
+                        .to_ascii_uppercase(),
+                );
+                out.push(
+                    char::from_digit((b & 0xf) as u32, 16)
+                        .unwrap()
+                        .to_ascii_uppercase(),
+                );
             }
         }
     }
@@ -274,14 +292,12 @@ mod tests {
         mount(
             &rt,
             &server,
-            Mock::given(method("GET"))
-                .and(path("/root"))
-                .respond_with(ResponseTemplate::new(200).set_body_json(
-                    serde_json::json!([
-                        { "Products": [] },
-                        "plain string item",
-                    ]),
-                )),
+            Mock::given(method("GET")).and(path("/root")).respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!([
+                    { "Products": [] },
+                    "plain string item",
+                ])),
+            ),
         );
 
         let base_url = server.uri();
@@ -306,10 +322,7 @@ mod tests {
         );
 
         // Second item: plain string passes through
-        assert_eq!(
-            items[1],
-            FfonElement::Str("plain string item".to_owned())
-        );
+        assert_eq!(items[1], FfonElement::Str("plain string item".to_owned()));
     }
 
     #[test]
@@ -321,16 +334,12 @@ mod tests {
             Mock::given(method("GET"))
                 .and(path("/root"))
                 .and(header("Authorization", "Bearer secret123"))
-                .respond_with(ResponseTemplate::new(200).set_body_json(
-                    serde_json::json!(["item"]),
-                )),
+                .respond_with(
+                    ResponseTemplate::new(200).set_body_json(serde_json::json!(["item"])),
+                ),
         );
 
-        let mut p = RemoteProvider::new(
-            "mysvc",
-            server.uri(),
-            "secret123".to_owned(),
-        );
+        let mut p = RemoteProvider::new("mysvc", server.uri(), "secret123".to_owned());
         let items = p.fetch();
         assert_eq!(items, vec![FfonElement::Str("item".to_owned())]);
     }
@@ -378,11 +387,9 @@ mod tests {
         mount(
             &rt,
             &server,
-            Mock::given(method("GET"))
-                .and(path("/root"))
-                .respond_with(ResponseTemplate::new(200).set_body_json(
-                    serde_json::json!(["item"]),
-                )),
+            Mock::given(method("GET")).and(path("/root")).respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!(["item"])),
+            ),
         );
 
         let mut p = RemoteProvider::new("mysvc", server.uri(), String::new());
@@ -390,7 +397,10 @@ mod tests {
         assert!(p.cached_root.is_some());
 
         p.on_setting_change("remoteUrl", "https://other.example.com");
-        assert!(p.cached_root.is_none(), "cache should be cleared after remoteUrl change");
+        assert!(
+            p.cached_root.is_none(),
+            "cache should be cleared after remoteUrl change"
+        );
         assert_eq!(p.remote_url, "https://other.example.com");
     }
 

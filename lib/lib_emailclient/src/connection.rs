@@ -119,7 +119,11 @@ pub fn parse_imap_url(url: &str) -> Option<(String, u16)> {
         let port: u16 = rest[colon + 1..].parse().ok()?;
         Some((host, port))
     } else {
-        let default_port = if url.starts_with("imaps://") { 993 } else { 143 };
+        let default_port = if url.starts_with("imaps://") {
+            993
+        } else {
+            143
+        };
         Some((rest.to_owned(), default_port))
     }
 }
@@ -315,7 +319,8 @@ impl RawImap {
 
     async fn authenticate_xoauth2(&mut self, user: &str, token: &str) -> Result<(), String> {
         let tag = self.next_tag();
-        self.write(&format!("{tag} AUTHENTICATE XOAUTH2\r\n")).await?;
+        self.write(&format!("{tag} AUTHENTICATE XOAUTH2\r\n"))
+            .await?;
 
         let cont = self.read_line().await?;
         if !cont.starts_with('+') {

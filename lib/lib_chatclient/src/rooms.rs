@@ -27,7 +27,10 @@ impl ChatClientProvider {
             Ok(room_id)
         } else {
             let body: serde_json::Value = resp.json().unwrap_or_default();
-            let err = body.get("error").and_then(|v| v.as_str()).unwrap_or("join failed");
+            let err = body
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("join failed");
             Err(err.to_owned())
         }
     }
@@ -46,7 +49,10 @@ impl ChatClientProvider {
             Ok(())
         } else {
             let body: serde_json::Value = resp.json().unwrap_or_default();
-            let err = body.get("error").and_then(|v| v.as_str()).unwrap_or("leave failed");
+            let err = body
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("leave failed");
             Err(err.to_owned())
         }
     }
@@ -77,7 +83,11 @@ impl ChatClientProvider {
     ) -> Result<String, String> {
         let client = self.client().map_err(|e| e.to_string())?;
         let url = self.api("/_matrix/client/v3/createRoom");
-        let preset = if is_public { "public_chat" } else { "private_chat" };
+        let preset = if is_public {
+            "public_chat"
+        } else {
+            "private_chat"
+        };
         let mut body = serde_json::json!({
             "name": name,
             "preset": preset,
@@ -100,7 +110,11 @@ impl ChatClientProvider {
             .map_err(|e| e.to_string())?;
         if resp.status().is_success() {
             let b: serde_json::Value = resp.json().map_err(|e| e.to_string())?;
-            let room_id = b.get("room_id").and_then(|v| v.as_str()).unwrap_or("").to_owned();
+            let room_id = b
+                .get("room_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_owned();
             // Publish to the room directory so it's discoverable.
             if is_public && !room_id.is_empty() {
                 let encoded = encode_room_id(&room_id);
@@ -115,8 +129,10 @@ impl ChatClientProvider {
                     Ok(r) if r.status().is_success() => {}
                     Ok(r) => {
                         let b: serde_json::Value = r.json().unwrap_or_default();
-                        let err =
-                            b.get("error").and_then(|v| v.as_str()).unwrap_or("unknown error");
+                        let err = b
+                            .get("error")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown error");
                         return Err(format!(
                             "room created ({room_id}) but failed to publish to directory: {err}"
                         ));
@@ -131,7 +147,10 @@ impl ChatClientProvider {
             Ok(room_id)
         } else {
             let b: serde_json::Value = resp.json().unwrap_or_default();
-            let err = b.get("error").and_then(|v| v.as_str()).unwrap_or("createRoom failed");
+            let err = b
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("createRoom failed");
             Err(err.to_owned())
         }
     }
@@ -152,12 +171,18 @@ impl ChatClientProvider {
             .map_err(|e| e.to_string())?;
         if resp.status().is_success() {
             let b: serde_json::Value = resp.json().map_err(|e| e.to_string())?;
-            let room_id = b.get("room_id").and_then(|v| v.as_str()).unwrap_or("").to_owned();
+            let room_id = b
+                .get("room_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_owned();
             Ok(room_id)
         } else {
             let b: serde_json::Value = resp.json().unwrap_or_default();
-            let err =
-                b.get("error").and_then(|v| v.as_str()).unwrap_or("createRoom (DM) failed");
+            let err = b
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("createRoom (DM) failed");
             Err(err.to_owned())
         }
     }
@@ -177,7 +202,11 @@ impl ChatClientProvider {
             .send()
             .map_err(|e| e.to_string())?;
         let b: serde_json::Value = resp.json().map_err(|e| e.to_string())?;
-        let chunk = b.get("chunk").and_then(|c| c.as_array()).cloned().unwrap_or_default();
+        let chunk = b
+            .get("chunk")
+            .and_then(|c| c.as_array())
+            .cloned()
+            .unwrap_or_default();
         let items: Vec<(String, String)> = chunk
             .iter()
             .map(|room| {
@@ -192,8 +221,10 @@ impl ChatClientProvider {
                     .or_else(|| room.get("room_id").and_then(|v| v.as_str()))
                     .unwrap_or("?");
                 let name = room.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                let members =
-                    room.get("num_joined_members").and_then(|v| v.as_u64()).unwrap_or(0);
+                let members = room
+                    .get("num_joined_members")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
                 let display = format!("{alias} — {name} ({members} members)");
                 (display, room_id)
             })
