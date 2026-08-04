@@ -1,4 +1,4 @@
-# Silicon's Compass
+# Sicompass
 
 *A keyboard-first, accessibility-first way to use your entire computer.*
 

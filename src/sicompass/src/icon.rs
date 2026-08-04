@@ -52,7 +52,7 @@ use sdl3::surface::Surface;
 pub const APP_ID: &str = "sicompass";
 
 /// Human-readable name, shown by some compositors next to the icon.
-const APP_NAME: &str = "Silicon's Compass";
+const APP_NAME: &str = "Sicompass";
 
 /// Source PNG for the window icon.
 ///

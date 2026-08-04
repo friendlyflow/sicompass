@@ -69,7 +69,7 @@ fn embed_windows_resources() {
     let mut res = winresource::WindowsResource::new();
     res.set_icon(icon.to_str().expect("icon path is not valid UTF-8"));
     res.set("ProductName", "sicompass");
-    res.set("FileDescription", "Silicon's Compass");
+    res.set("FileDescription", "Sicompass");
     res.set("CompanyName", "friendlyflow");
     res.set("LegalCopyright", "GPL-3.0-only");
 
