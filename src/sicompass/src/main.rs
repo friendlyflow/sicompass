@@ -12,6 +12,7 @@
 // All modules are declared in lib.rs; the binary just re-uses them.
 use sicompass::app_state;
 use sicompass::render;
+use sicompass::start_menu;
 use std::process;
 use std::sync::{Arc, Mutex};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
@@ -64,6 +65,11 @@ fn main() {
     if std::env::args().any(|a| a == "--check") {
         process::exit(render::check_runtime_files());
     }
+
+    // Make sure this install has a Start Menu entry (Windows, non-MSI installs
+    // only). Runs on its own thread and never blocks startup. Placed after the
+    // `--check` exit above so the diagnostic stays a pure read.
+    start_menu::spawn_registration();
 
     // ---- Background self-update check ------------------------------------
     // Spawn before AppState::new() so the check runs concurrently with

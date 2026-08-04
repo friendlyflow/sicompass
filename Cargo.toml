@@ -85,7 +85,14 @@ accesskit = "0.24"
 accesskit_unix = "0.22"
 accesskit_windows = "0.34"
 accesskit_macos = "0.26"
-windows = { version = "0.62", features = ["Win32_Foundation"] }
+# `Win32_System_Com` + `Win32_UI_Shell` are for `start_menu.rs`, which builds
+# the Start Menu `.lnk` through IShellLink. Every installer except the MSI
+# leaves the app with no Start Menu entry, so the app makes its own.
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_UI_Shell",
+] }
 
 # Language detection — tags each spoken AccessKit node with a BCP-47 language
 # so the screen reader speaks each item in its own language.
