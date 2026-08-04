@@ -151,6 +151,15 @@ before, so check the real thing:
   run the AppImage on a *different* distribution: linuxdeploy bundling a
   `libvulkan.so.1` that shadows the host's ICDs is the classic failure, which
   is what `excluded-libs` guards against.
+- **Linux, icons**: on a real desktop, confirm the app menu entry has an icon
+  *and* that the running window has one in the taskbar and in alt-tab. These
+  are two different mechanisms and each has failed on its own. The menu entry
+  needs the icon cache refreshed on install, which is
+  `src/sicompass/deb/postinst` for the `.deb` and `post_install_script` in
+  `src/sicompass/Cargo.toml` for the `.rpm`. The window icon comes from
+  `icon.rs`, which embeds the PNG and pins the `app_id`, and is the only thing
+  covering installs that ship no `.desktop` file at all: the archives, the
+  `curl | sh` installer, `nix run`, and an un-integrated AppImage.
 - **macOS**: mount the `.dmg`, drag to Applications, clear the quarantine flag,
   and confirm it renders and that VoiceOver reads the tree.
 - **Windows**: run the `.msi`, confirm the Start Menu entry and the icon, and

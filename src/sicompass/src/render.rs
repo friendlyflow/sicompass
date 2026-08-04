@@ -771,6 +771,11 @@ unsafe fn create_framebuffers(
 /// Build the complete `AppState`.  Called by `AppState::new()`.
 pub fn build_app() -> Result<AppState, SiError> {
     // ---- SDL init -----------------------------------------------------------
+    // Before `init`, not after: the video backends read the app id when they
+    // start, and it is what the desktop matches against `sicompass.desktop` to
+    // find the window's icon. See `icon::set_app_metadata`.
+    crate::icon::set_app_metadata();
+
     let sdl = sdl3::init().map_err(|e| SiError::Sdl(e.to_string()))?;
     let video = sdl.video().map_err(|e| SiError::Sdl(e.to_string()))?;
 
@@ -788,6 +793,24 @@ pub fn build_app() -> Result<AppState, SiError> {
     // real factor rather than always 1.0.
     wb.high_pixel_density();
     let mut window = wb.build().map_err(|e| SiError::Sdl(e.to_string()))?;
+
+    // ---- Window icon --------------------------------------------------------
+    // Gives the window a real icon of its own, so the taskbar, alt-tab and dock
+    // have something to show even where no `.desktop` file was ever installed:
+    // `nix run`, the release archives, the `curl | sh` installer, and an
+    // AppImage the user has not integrated. A failure here is cosmetic, so it
+    // is logged and stepped over rather than taking the app down with it.
+    match crate::icon::window_icon() {
+        Ok((mut pixels, w, h)) => match crate::icon::icon_surface(&mut pixels, w, h) {
+            Ok(surface) => {
+                if !window.set_icon(&*surface) {
+                    eprintln!("warning: could not set the window icon: {}", sdl3::get_error());
+                }
+            }
+            Err(e) => eprintln!("warning: could not build the window icon surface: {e}"),
+        },
+        Err(e) => eprintln!("warning: could not decode the embedded window icon: {e}"),
+    }
 
     // ---- Custom-titlebar hit-test ------------------------------------------
     // With no OS border the window can't be moved or resized by default. Define

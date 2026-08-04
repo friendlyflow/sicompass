@@ -110,6 +110,18 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN: "1"
         run: cargo packager --release --formats deb,appimage -p sicompass --verbose
 
+      - name: Add the .deb maintainer scripts
+        # cargo-packager cannot emit postinst/postrm, so the icon cache and the
+        # application database were never refreshed on install and the menu
+        # entry appeared without an icon. See the script header. The .rpm gets
+        # the same treatment from `post_install_script` in Cargo.toml, which
+        # cargo-generate-rpm does support.
+        run: |
+          set -euo pipefail
+          for deb in target/packages/*.deb; do
+            ./scripts/deb-add-maintainer-scripts.sh "$deb"
+          done
+
       - name: Build .rpm
         # Run from the workspace root: the `assets` source paths in
         # [package.metadata.generate-rpm] are relative to the working
